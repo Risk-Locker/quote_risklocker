@@ -2,34 +2,7 @@
 
 BEGIN;
 
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1
-        FROM users
-        WHERE email <> lower(btrim(email))
-           OR email !~ '^[a-z0-9][a-z0-9._%+\-]*@risklocker\.com$'
-           OR split_part(email, '@', 1) IN (
-               'accounts', 'admin', 'billing', 'claims', 'contact', 'finance', 'hello', 'help', 'hr', 'info',
-               'inbox', 'marketing', 'notifications', 'noreply', 'no-reply', 'operations', 'quotes', 'sales',
-               'support', 'team'
-           )
-    ) THEN
-        RAISE EXCEPTION 'All existing users must have normalized named @risklocker.com email addresses before migration 008 can run.';
-    END IF;
-END $$;
-
-ALTER TABLE users DROP COLUMN IF EXISTS password_hash;
-ALTER TABLE users DROP CONSTRAINT IF EXISTS ck_users_risklocker_email;
-ALTER TABLE users ADD CONSTRAINT ck_users_risklocker_email CHECK (
-    email = lower(btrim(email))
-    AND email ~ '^[a-z0-9][a-z0-9._%+\-]*@risklocker\.com$'
-    AND split_part(email, '@', 1) NOT IN (
-        'accounts', 'admin', 'billing', 'claims', 'contact', 'finance', 'hello', 'help', 'hr', 'info',
-        'inbox', 'marketing', 'notifications', 'noreply', 'no-reply', 'operations', 'quotes', 'sales',
-        'support', 'team'
-    )
-);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255) NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS auth_login_codes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

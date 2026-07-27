@@ -15,5 +15,6 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("email")
+    parser.add_argument("password")
     args = parser.parse_args()
-    create_admin(args.email)
+    create_admin(args.email, args.password)

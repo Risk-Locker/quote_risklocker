@@ -27,7 +27,7 @@ def load_pdf_bytes(record, settings: Settings) -> bytes:
     )
     if supabase_available:
         try:
-            data = SupabaseStorage(settings).download_pdf(record.storage_path)
+            data = SupabaseStorage(settings).download_bytes(record.storage_path)
         except StorageNotFound:
             raise AppError("PDF Expired", 410) from None
         except StorageError as exc:

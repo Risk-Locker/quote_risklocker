@@ -272,10 +272,10 @@ def default_canvas_elements() -> list[dict[str, Any]]:
 
 def _default_assets() -> dict[str, str]:
     return {
-        "risklocker_logo": find_asset_by_hint(["risklocker logo"]),
-        "bank_logo": find_asset_by_hint(["hongleong", "bank"]),
-        "all_driver_icon": find_asset_by_hint(["all driver"]),
-        "background": find_asset_by_hint(["template_bg"]),
+        "risklocker_logo": find_asset_by_hint(None, ["risklocker logo"]),
+        "bank_logo": find_asset_by_hint(None, ["hongleong", "bank"]),
+        "all_driver_icon": find_asset_by_hint(None, ["all driver"]),
+        "background": find_asset_by_hint(None, ["template_bg"]),
     }
 
 

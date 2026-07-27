@@ -9,7 +9,7 @@ from urllib.parse import quote
 
 import httpx
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 
 
 class StorageError(RuntimeError):
@@ -27,22 +27,26 @@ class StoredPdf:
     size_bytes: int
     sha256: str
     etag: str | None
-
-
-def validate_object_key(object_key: str) -> str:
-    normalized = str(PurePosixPath(object_key.replace("\\", "/")))
-    if normalized in {"", "."} or normalized.startswith("/") or ".." in PurePosixPath(normalized).parts:
-        raise StorageError("Invalid object key.")
-    if any(part in {"", "."} for part in PurePosixPath(normalized).parts):
-        raise StorageError("Invalid object key.")
-    return normalized
+    provider: str = "supabase"
 
 
 class SupabaseStorage:
-    def __init__(self, settings: Settings, client: httpx.Client | None = None):
-        self.settings = settings
-        self.bucket = settings.supabase_storage_bucket
+    def __init__(self, settings: Settings | None = None, client: httpx.Client | None = None):
+        self._settings = settings
         self._client = client
+        self._bucket: str | None = None
+
+    @property
+    def settings(self) -> Settings:
+        if self._settings is None:
+            self._settings = get_settings()
+        return self._settings
+
+    @property
+    def bucket(self) -> str:
+        if self._bucket is None:
+            self._bucket = self.settings.supabase_storage_bucket
+        return self._bucket
 
     @property
     def headers(self) -> dict[str, str]:
@@ -104,7 +108,7 @@ class SupabaseStorage:
             raise StorageError(f"Supabase private bucket creation failed ({created.status_code}): {self._error_message(created)}")
 
     def upload_pdf(self, object_key: str, data: bytes) -> StoredPdf:
-        key = validate_object_key(object_key)
+        key = self._validate_object_key(object_key)
         if len(data) > self.settings.max_upload_bytes:
             raise StorageError("PDF exceeds the configured upload limit.")
         encoded_key = quote(key, safe="/")
@@ -125,20 +129,40 @@ class SupabaseStorage:
             etag=response.headers.get("etag"),
         )
 
-    def download_pdf(self, object_key: str) -> bytes:
-        key = validate_object_key(object_key)
+    def upload_asset(self, object_key: str, data: bytes, content_type: str) -> StoredPdf:
+        key = self._validate_object_key(object_key)
+        encoded_key = quote(key, safe="/")
+        response = self._request(
+            "POST",
+            f"/storage/v1/object/{quote(self.bucket, safe='')}/{encoded_key}",
+            files={"file": (PurePosixPath(key).name, data, content_type)},
+        )
+        if response.status_code not in {200, 201}:
+            if response.status_code == 409:
+                raise StorageError("An asset already exists at the generated object key.")
+            raise StorageError(f"Supabase asset upload failed ({response.status_code}): {self._error_message(response)}")
+        return StoredPdf(
+            object_key=key,
+            bucket=self.bucket,
+            size_bytes=len(data),
+            sha256=sha256(data).hexdigest(),
+            etag=response.headers.get("etag"),
+        )
+
+    def download_bytes(self, object_key: str) -> bytes:
+        key = self._validate_object_key(object_key)
         response = self._request(
             "GET",
             f"/storage/v1/object/{quote(self.bucket, safe='')}/{quote(key, safe='/')}",
         )
         if self._not_found(response):
-            raise StorageNotFound("PDF object not found.")
+            raise StorageNotFound("Object not found.")
         if response.status_code != 200:
-            raise StorageError(f"Supabase PDF download failed ({response.status_code}): {self._error_message(response)}")
+            raise StorageError(f"Supabase download failed ({response.status_code}): {self._error_message(response)}")
         return response.content
 
     def delete_pdf(self, object_key: str) -> None:
-        key = validate_object_key(object_key)
+        key = self._validate_object_key(object_key)
         response = self._request(
             "DELETE",
             f"/storage/v1/object/{quote(self.bucket, safe='')}",
@@ -153,3 +177,12 @@ class SupabaseStorage:
             return True, f"Private bucket '{self.bucket}' is ready."
         except StorageError as exc:
             return False, str(exc)
+
+    @staticmethod
+    def _validate_object_key(object_key: str) -> str:
+        normalized = str(PurePosixPath(object_key.replace("\\", "/")))
+        if normalized in {"", "."} or normalized.startswith("/") or ".." in PurePosixPath(normalized).parts:
+            raise StorageError("Invalid object key.")
+        if any(part in {"", "."} for part in PurePosixPath(normalized).parts):
+            raise StorageError("Invalid object key.")
+        return normalized

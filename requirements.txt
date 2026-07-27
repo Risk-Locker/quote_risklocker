@@ -9,6 +9,7 @@ email-validator==2.2.0
 PyMuPDF==1.25.1
 pdfplumber==0.11.5
 pikepdf==9.5.2
+bcrypt==5.0.0
 
 # Testing
 pytest==7.4.3

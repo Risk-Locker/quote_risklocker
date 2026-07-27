@@ -44,18 +44,16 @@ def get_notifications(db: Session, user_id: str) -> list[Notification]:
 
 
 def get_unread_count(db: Session, user_id: str) -> int:
-    count = db.scalar(
-        select(Notification).where(
-            Notification.recipient_id == user_id,
-            Notification.read_at.is_(None),
+    return len(
+        list(
+            db.scalars(
+                select(Notification).where(
+                    Notification.recipient_id == user_id,
+                    Notification.read_at.is_(None),
+                )
+            ).all()
         )
     )
-    return len(list(db.scalars(
-        select(Notification).where(
-            Notification.recipient_id == user_id,
-            Notification.read_at.is_(None),
-        )
-    ).all()))
 
 
 def mark_read(db: Session, notification_id: str, user_id: str) -> Notification:

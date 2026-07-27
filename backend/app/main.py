@@ -46,7 +46,7 @@ def create_app() -> FastAPI:
         SupabaseStorage(settings).ensure_bucket()
         if settings.app_env != "production":
             with SessionLocal() as db:
-                seed_defaults(db)
+                seed_defaults(db, settings)
         await asyncio.to_thread(retention_cycle)
         app.state.storage_retention_task = asyncio.create_task(retention_loop())
 

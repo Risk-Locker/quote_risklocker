@@ -13,7 +13,7 @@ if str(BACKEND) not in sys.path:
 
 from app.services.file_validation import display_filename, validate_upload_bytes
 from app.services.document_security import quarantined_pdf
-from app.storage.supabase import StorageError, SupabaseStorage, validate_object_key
+from app.storage.supabase import StorageError, SupabaseStorage
 
 
 def storage_settings():
@@ -44,9 +44,9 @@ def test_upload_limit_is_enforced():
 
 
 def test_supabase_object_key_blocks_traversal():
-    assert validate_object_key("source/2026/07/batch/file.pdf") == "source/2026/07/batch/file.pdf"
+    assert SupabaseStorage._validate_object_key("source/2026/07/batch/file.pdf") == "source/2026/07/batch/file.pdf"
     with pytest.raises(StorageError, match="Invalid object key"):
-        validate_object_key("../outside.pdf")
+        SupabaseStorage._validate_object_key("../outside.pdf")
 
 
 def test_supabase_storage_uses_private_backend_requests():
@@ -72,7 +72,7 @@ def test_supabase_storage_uses_private_backend_requests():
     stored = storage.upload_pdf("source/2026/07/batch/file.pdf", uploaded)
     assert stored.sha256
     assert stored.etag == "test-etag"
-    assert storage.download_pdf(stored.object_key) == uploaded
+    assert storage.download_bytes(stored.object_key) == uploaded
     storage.delete_pdf(stored.object_key)
     client.close()
 

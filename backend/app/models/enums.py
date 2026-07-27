@@ -6,9 +6,10 @@ from enum import StrEnum
 
 
 class Role(StrEnum):
-    STAFF = "Staff"
-    MANAGER = "Manager"
-    ADMIN = "Admin"
+    SUPER_ADMIN = "super_admin"
+    ADMIN = "admin"
+    STAFF = "staff"
+    DEV = "dev"
 
 
 class AccountStatus(StrEnum):

@@ -25,25 +25,14 @@ class Settings:
     require_malware_scanner: bool
     max_upload_bytes: int
     auth_hash_secret: str
-    auth_code_expire_minutes: int
-    auth_code_max_attempts: int
-    auth_code_resend_seconds: int
     session_idle_hours: int
     session_max_days: int
     session_cookie_name: str
     session_cookie_secure: bool
-    smtp_host: str
-    smtp_port: int
-    smtp_username: str
-    smtp_password: str
-    smtp_from_email: str
-    smtp_starttls: bool
-    smtp_use_ssl: bool
     trash_retention_days: int
-    enhanced_reading_enabled: bool
-    strict_no_guessing: bool
-    auto_download_generated_pdf: bool
     cors_origins: tuple[str, ...]
+    super_admin_email: str | None
+    super_admin_password: str | None
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -120,30 +109,17 @@ def get_settings() -> Settings:
     origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
     retention_days = _int("PDF_RETENTION_DAYS", 30)
     max_upload_bytes = _int("MAX_UPLOAD_BYTES", 1024 * 1024)
-    auth_code_expire_minutes = _int("AUTH_CODE_EXPIRE_MINUTES", 10)
-    auth_code_max_attempts = _int("AUTH_CODE_MAX_ATTEMPTS", 5)
-    auth_code_resend_seconds = _int("AUTH_CODE_RESEND_SECONDS", 60)
     session_idle_hours = _int("SESSION_IDLE_HOURS", 8)
     session_max_days = _int("SESSION_MAX_DAYS", 30)
-    smtp_host = os.getenv("SMTP_HOST", "").strip()
-    smtp_from_email = os.getenv("SMTP_FROM_EMAIL", "").strip()
     session_cookie_secure = _bool("SESSION_COOKIE_SECURE", app_env == "production")
     if retention_days < 1 or retention_days > 365:
         raise RuntimeError("PDF_RETENTION_DAYS must be between 1 and 365.")
     if max_upload_bytes < 1024 or max_upload_bytes > 10 * 1024 * 1024:
         raise RuntimeError("MAX_UPLOAD_BYTES must be between 1KB and 10MB.")
-    if auth_code_expire_minutes < 1 or auth_code_expire_minutes > 30:
-        raise RuntimeError("AUTH_CODE_EXPIRE_MINUTES must be between 1 and 30.")
-    if auth_code_max_attempts < 1 or auth_code_max_attempts > 10:
-        raise RuntimeError("AUTH_CODE_MAX_ATTEMPTS must be between 1 and 10.")
-    if auth_code_resend_seconds < 30 or auth_code_resend_seconds > 3600:
-        raise RuntimeError("AUTH_CODE_RESEND_SECONDS must be between 30 and 3600.")
     if session_idle_hours != 8 or session_max_days != 30:
         raise RuntimeError("Risklocker sessions require SESSION_IDLE_HOURS=8 and SESSION_MAX_DAYS=30.")
     if app_env == "production" and not session_cookie_secure:
         raise RuntimeError("SESSION_COOKIE_SECURE must be enabled in production.")
-    if app_env == "production" and (not smtp_host or not smtp_from_email):
-        raise RuntimeError("SMTP_HOST and SMTP_FROM_EMAIL are required in production.")
     return Settings(
         app_name=os.getenv("APP_NAME", "Risklocker Quotation Converter"),
         app_env=app_env,
@@ -157,23 +133,12 @@ def get_settings() -> Settings:
         require_malware_scanner=_bool("REQUIRE_MALWARE_SCANNER", app_env == "production"),
         max_upload_bytes=max_upload_bytes,
         auth_hash_secret=_auth_hash_secret(app_env),
-        auth_code_expire_minutes=auth_code_expire_minutes,
-        auth_code_max_attempts=auth_code_max_attempts,
-        auth_code_resend_seconds=auth_code_resend_seconds,
         session_idle_hours=session_idle_hours,
         session_max_days=session_max_days,
         session_cookie_name=os.getenv("SESSION_COOKIE_NAME", "risklocker_session").strip() or "risklocker_session",
         session_cookie_secure=session_cookie_secure,
-        smtp_host=smtp_host,
-        smtp_port=_int("SMTP_PORT", 587),
-        smtp_username=os.getenv("SMTP_USERNAME", "").strip(),
-        smtp_password=os.getenv("SMTP_PASSWORD", ""),
-        smtp_from_email=smtp_from_email,
-        smtp_starttls=_bool("SMTP_STARTTLS", True),
-        smtp_use_ssl=_bool("SMTP_USE_SSL", False),
         trash_retention_days=_int("TRASH_RETENTION_DAYS", 14),
-        enhanced_reading_enabled=_bool("ENHANCED_READING_ENABLED", True),
-        strict_no_guessing=_bool("STRICT_NO_GUESSING", True),
-        auto_download_generated_pdf=_bool("AUTO_DOWNLOAD_GENERATED_PDF", True),
         cors_origins=tuple(origin.strip().rstrip("/") for origin in origins.split(",") if origin.strip()),
+        super_admin_email=os.getenv("SUPER_ADMIN_EMAIL", "").strip() or None,
+        super_admin_password=os.getenv("SUPER_ADMIN_PASSWORD", "").strip() or None,
     )

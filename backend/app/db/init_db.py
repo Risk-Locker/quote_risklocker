@@ -7,6 +7,7 @@ import os
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import Settings
 from app.models.enums import AccountStatus, InsuranceType, Role
 from app.models.tables import (
     AppSetting,
@@ -21,7 +22,7 @@ from app.models.tables import (
     VehicleModel,
 )
 from app.services.template_config import default_template_config
-from app.services.auth_service import normalize_employee_email
+from app.services.auth_service import ensure_super_admin
 
 
 DEFAULT_COMPANIES = [
@@ -84,7 +85,7 @@ def create_schema(engine) -> None:
     Base.metadata.create_all(bind=engine)
 
 
-def seed_defaults(db: Session) -> None:
+def seed_defaults(db: Session, settings: Settings) -> None:
     for category in [InsuranceType.MOTOR.value, InsuranceType.PROPERTY.value, InsuranceType.CONSTRUCTION.value, InsuranceType.FIRE.value]:
         if not db.scalar(select(InsuranceCategory).where(InsuranceCategory.name == category)):
             db.add(InsuranceCategory(name=category))
@@ -167,18 +168,4 @@ def seed_defaults(db: Session) -> None:
             )
         )
 
-    admin_email = os.getenv("INITIAL_ADMIN_EMAIL")
-    if admin_email:
-        normalized_admin_email = normalize_employee_email(admin_email)
-    else:
-        normalized_admin_email = ""
-    if normalized_admin_email and not db.scalar(select(User).where(User.email == normalized_admin_email)):
-        db.add(
-            User(
-                email=normalized_admin_email,
-                role=Role.ADMIN.value,
-                status=AccountStatus.ACTIVE.value,
-            )
-        )
-
-    db.commit()
+    ensure_super_admin(db, settings)

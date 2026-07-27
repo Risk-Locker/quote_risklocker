@@ -112,6 +112,32 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
     load().catch((err) => setError(err instanceof Error ? err.message : "Could not load draft."));
   }, [id]);
 
+  function selectTemplate(templateId: string) {
+    const template = draft?.available_templates.find((item) => item.id === templateId);
+    if (!template) return;
+    const packageName = template.packages[0]?.name || "";
+    const nextSpecials = template.packages[0]?.included_cards || [];
+    setSelectedTemplateId(templateId);
+    setSelectedPackage(packageName);
+    setSelectedSpecials(nextSpecials);
+    setSelectedAddOns([]);
+    setFields((current) => ({
+      ...current,
+      benefits_selected: { ...(current.benefits_selected || {}), value: JSON.stringify(nextSpecials) },
+      add_ons_selected: { ...(current.add_ons_selected || {}), value: "[]" },
+      selected_package: { ...(current.selected_package || {}), value: packageName },
+      selected_template_id: { ...(current.selected_template_id || {}), value: templateId }
+    }));
+  }
+
+  useEffect(() => {
+    if (!draft || selectedTemplateId) return;
+    const firstTemplate = draft.available_templates[0];
+    if (firstTemplate) {
+      selectTemplate(firstTemplate.id);
+    }
+  }, [draft, selectedTemplateId]);
+
   const selectedTemplate = draft?.available_templates.find((template) => template.id === selectedTemplateId);
   const packages = selectedTemplate?.packages || [];
   const selectedPackageConfig = packages.find((item) => item.name === selectedPackage);
@@ -189,10 +215,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
               <select
                 className="rl-input"
                 value={selectedTemplateId}
-                onChange={(event) => {
-                  setSelectedTemplateId(event.target.value);
-                  setSelectedPackage("");
-                }}
+                onChange={(event) => selectTemplate(event.target.value)}
               >
                 <option value="">Choose template</option>
                 {draft?.available_templates.map((template) => (

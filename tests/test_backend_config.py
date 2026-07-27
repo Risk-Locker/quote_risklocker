@@ -91,15 +91,13 @@ def test_backend_production_rejects_placeholder_auth_hash_secret():
         "APP_ENV": "production",
         "DATABASE_URL": "postgresql://postgres:password@db.project-ref.supabase.co:5432/postgres?sslmode=require",
         "AUTH_HASH_SECRET": "replace_me_with_a_long_random_string",
-        "SMTP_HOST": "smtp.example.test",
-        "SMTP_FROM_EMAIL": "risklocker@example.test",
     }
     with patch.dict(os.environ, env, clear=True):
         with pytest.raises(RuntimeError, match="AUTH_HASH_SECRET must be changed"):
             get_settings()
 
 
-def test_backend_production_requires_smtp_and_secure_cookie():
+def test_backend_production_requires_secure_cookie():
     base = {
         **BASE_ENV,
         "APP_ENV": "production",
@@ -107,15 +105,10 @@ def test_backend_production_requires_smtp_and_secure_cookie():
         "AUTH_HASH_SECRET": "a-production-auth-hash-secret-that-is-long-enough",
     }
     with patch.dict(os.environ, base, clear=True):
-        with pytest.raises(RuntimeError, match="SMTP_HOST and SMTP_FROM_EMAIL"):
-            get_settings()
+        settings = get_settings()
+    assert settings.session_cookie_secure is True
 
-    insecure = {
-        **base,
-        "SMTP_HOST": "smtp.example.test",
-        "SMTP_FROM_EMAIL": "risklocker@example.test",
-        "SESSION_COOKIE_SECURE": "false",
-    }
+    insecure = {**base, "SESSION_COOKIE_SECURE": "false"}
     with patch.dict(os.environ, insecure, clear=True):
         with pytest.raises(RuntimeError, match="SESSION_COOKIE_SECURE"):
             get_settings()

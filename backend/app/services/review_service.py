@@ -281,3 +281,4 @@ def purge_expired_trash(db: Session, user) -> int:
         db.delete(record)
     db.commit()
     return count
+

@@ -4,18 +4,15 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const items = [
-  { href: "/admin", label: "Users" },
-  { href: "/admin/companies", label: "Companies" },
-  { href: "/admin/templates", label: "Templates" },
-  { href: "/admin/benefits", label: "Benefits" },
-  { href: "/admin/storage", label: "Storage" },
-  { href: "/admin/checks", label: "System Checks" }
+  { href: "/builder/companies", label: "Companies" },
+  { href: "/builder/our-specials", label: "Our Specials" },
+  { href: "/builder/templates", label: "Templates" }
 ] as const;
 
-export function AdminNav() {
+export function BuilderNav() {
   const pathname = usePathname();
   return (
-    <nav className="flex flex-wrap gap-2" aria-label="Admin sections">
+    <nav className="flex flex-wrap gap-2" aria-label="Builder sections">
       {items.map((item) => {
         const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
         return (

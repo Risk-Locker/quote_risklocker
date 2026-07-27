@@ -1,4 +1,4 @@
-"""Cryptographic helpers for passwordless login codes and opaque sessions."""
+"""Cryptographic helpers for opaque sessions and password hashing."""
 
 from __future__ import annotations
 
@@ -6,10 +6,7 @@ import hashlib
 import hmac
 import secrets
 
-
-def generate_login_code() -> str:
-    """Return a fixed-width code suitable for delivery through the SMTP relay."""
-    return f"{secrets.randbelow(1_000_000):06d}"
+import bcrypt
 
 
 def generate_session_token() -> str:
@@ -21,14 +18,15 @@ def hash_session_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def hash_password(password: str) -> str:
+    """Hash a plain password with bcrypt."""
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    """Verify a plain password against a bcrypt hash."""
+    return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+
+
 def keyed_hash(value: str, secret: str) -> str:
     return hmac.new(secret.encode("utf-8"), value.encode("utf-8"), hashlib.sha256).hexdigest()
-
-
-def hash_login_code(challenge_id: str, code: str, secret: str) -> str:
-    return keyed_hash(f"login-code:{challenge_id}:{code}", secret)
-
-
-def verify_login_code_hash(challenge_id: str, code: str, stored_hash: str, secret: str) -> bool:
-    expected = hash_login_code(challenge_id, code, secret)
-    return hmac.compare_digest(expected, stored_hash)

@@ -61,3 +61,31 @@ def current_auth(
 
 def current_user(auth: AuthContext = Depends(current_auth)) -> User:
     return auth.user
+
+
+def current_auth_optional(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+) -> AuthContext | None:
+    """Return the current session if one exists, otherwise None."""
+    ensure_trusted_origin(request, settings)
+    raw_token = request.cookies.get(settings.session_cookie_name, "")
+    if not raw_token:
+        return None
+    try:
+        user, session = authenticate_session(db, settings, raw_token)
+    except AppError:
+        return None
+    remaining_seconds = max(0, int((session.absolute_expires_at - session.last_activity_at).total_seconds()))
+    response.set_cookie(
+        key=settings.session_cookie_name,
+        value=raw_token,
+        max_age=remaining_seconds,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+    return AuthContext(user=user, session=session, raw_token=raw_token)

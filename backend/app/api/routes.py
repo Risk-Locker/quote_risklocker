@@ -7,8 +7,8 @@ from fastapi.responses import FileResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import AuthContext, current_auth, current_user, ensure_trusted_origin, settings_dep
-from app.api.schemas import LoginCodeRequest, LoginCodeVerify, UserCreateRequest, UserUpdateRequest
+from app.api.deps import AuthContext, current_auth, current_auth_optional, current_user, ensure_trusted_origin, settings_dep
+from app.api.schemas import LoginRequest, UserCreateRequest, UserUpdateRequest, UserPasswordChangeRequest
 from app.auth.rbac import can_view_owner_record, require_role
 from app.core.config import Settings
 from app.core.errors import AppError
@@ -40,18 +40,14 @@ from app.services.admin_service import (
     upsert_vehicle_model,
 )
 from app.services.auth_service import (
-    LOGIN_REQUEST_MESSAGE,
-    invite_user,
-    notify_role_change,
-    notify_status_change,
-    request_login_code,
+    change_password,
+    create_user,
+    login_with_password,
     revoke_session,
     revoke_user_sessions,
     serialize_user,
     update_user,
-    verify_code_and_create_session,
 )
-from app.services.email_service import send_test_email, validate_smtp_connection
 from app.services.notification_service import (
     get_notifications,
     get_unread_count,
@@ -73,7 +69,7 @@ from app.services.review_service import (
 )
 from app.services.system_checks import get_system_checks
 from app.services.storage_retention import purge_expired_pdfs
-from app.services.template_assets import list_template_assets, resolve_template_asset
+from app.services.template_assets import delete_template_asset, list_template_assets, resolve_template_asset, upload_template_asset
 from app.services.upload_service import create_batch_from_uploads, serialize_batch, serialize_file
 from app.storage.supabase import SupabaseStorage
 
@@ -114,32 +110,20 @@ def health(settings: Settings = Depends(settings_dep)) -> dict:
     return {"status": "Ready", "app": settings.app_name}
 
 
-@router.post("/auth/request-code", status_code=202)
-def auth_request_code(
-    payload: LoginCodeRequest,
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(settings_dep),
-) -> dict:
-    ensure_trusted_origin(request, settings)
-    request_login_code(db, settings, payload.email)
-    return {"message": LOGIN_REQUEST_MESSAGE}
-
-
-@router.post("/auth/verify-code")
-def auth_verify_code(
-    payload: LoginCodeVerify,
+@router.post("/auth/login")
+def auth_login(
+    payload: LoginRequest,
     request: Request,
     response: FastAPIResponse,
     db: Session = Depends(get_db),
     settings: Settings = Depends(settings_dep),
 ) -> dict:
     ensure_trusted_origin(request, settings)
-    user, session, raw_token = verify_code_and_create_session(
+    user, session, raw_token = login_with_password(
         db,
         settings,
         payload.email,
-        payload.code,
+        payload.password,
         user_agent=request.headers.get("user-agent"),
         ip_address=request.client.host if request.client else None,
     )
@@ -151,11 +135,12 @@ def auth_verify_code(
 @router.post("/auth/logout")
 def auth_logout(
     response: FastAPIResponse,
-    auth: AuthContext = Depends(current_auth),
+    auth: AuthContext | None = Depends(current_auth_optional),
     db: Session = Depends(get_db),
     settings: Settings = Depends(settings_dep),
 ) -> dict:
-    revoke_session(db, auth.session, auth.user.id)
+    if auth is not None:
+        revoke_session(db, auth.session, auth.user.id)
     response.delete_cookie(
         settings.session_cookie_name,
         path="/",
@@ -173,48 +158,60 @@ def me(user: User = Depends(current_user)) -> dict:
 
 @router.get("/system/checks")
 def system_checks(db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
-    require_role(user, Role.ADMIN)
+    if user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value, Role.DEV.value}:
+        raise AppError("You do not have permission to view system checks.", 403)
     return {"checks": get_system_checks(settings, db)}
 
 
 @router.post("/users")
-def user_create(payload: UserCreateRequest, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
-    created = invite_user(db, settings, user, payload.email, payload.role)
+def user_create(payload: UserCreateRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    created = create_user(db, user, payload.email, payload.role, password=payload.password)
     return serialize_user(created)
 
 
 @router.get("/users")
 def users_list(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    require_role(user, Role.ADMIN, Role.MANAGER)
+    if user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value}:
+        raise AppError("You do not have permission to view users.", 403)
     query = select(User).order_by(User.created_at.desc())
-    if user.role == Role.MANAGER.value:
-        query = query.where(User.role == Role.STAFF.value)
+    if user.role == Role.ADMIN.value:
+        query = query.where(User.role != Role.SUPER_ADMIN.value)
     return {"users": [serialize_user(item) for item in db.scalars(query).all()]}
 
 
 @router.patch("/users/{user_id}")
-def users_update(user_id: str, payload: UserUpdateRequest, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
+def users_update(user_id: str, payload: UserUpdateRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     target = db.get(User, user_id)
     if not target:
         raise AppError("User not found.", 404)
-    require_role(user, Role.ADMIN, Role.MANAGER)
-    previous_role = target.role
-    previous_status = target.status
-    updated = update_user(db, user, target, email=payload.email, role=payload.role, status=payload.status)
-    if payload.role is not None and payload.role != previous_role:
-        notify_role_change(db, settings, user, updated, payload.role)
-    if payload.status is not None and payload.status != previous_status:
-        notify_status_change(db, settings, user, updated, payload.status)
+    updated = update_user(
+        db,
+        user,
+        target,
+        email=payload.email,
+        role=payload.role,
+        status=payload.status,
+        password=payload.password,
+    )
     return serialize_user(updated)
 
 
 @router.post("/users/{user_id}/sessions/revoke")
 def user_sessions_revoke(user_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    require_role(user, Role.ADMIN)
+    if user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value}:
+        raise AppError("You do not have permission to revoke sessions.", 403)
     target = db.get(User, user_id)
     if not target:
         raise AppError("User not found.", 404)
+    if user.role == Role.ADMIN.value and target.role == Role.SUPER_ADMIN.value:
+        raise AppError("You do not have permission to revoke the super administrator's sessions.", 403)
     return {"revoked_sessions": revoke_user_sessions(db, target.id, user.id)}
+
+
+@router.post("/auth/change-password")
+def auth_change_password(payload: UserPasswordChangeRequest, auth: AuthContext = Depends(current_auth), db: Session = Depends(get_db)) -> dict:
+    updated = change_password(db, auth.user, payload.current_password, payload.new_password)
+    return {"user": serialize_user(updated)}
 
 
 @router.get("/notifications")
@@ -236,19 +233,6 @@ def notification_mark_read(notification_id: str, db: Session = Depends(get_db), 
 @router.patch("/notifications/read")
 def notification_mark_all_read(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     return {"updated": mark_all_read(db, user.id)}
-
-
-@router.post("/admin/mail/test")
-def admin_mail_test(db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
-    require_role(user, Role.ADMIN)
-    valid, message = validate_smtp_connection(settings)
-    if not valid:
-        return {"ok": False, "message": message}
-    try:
-        send_test_email(settings, user.email)
-    except Exception as exc:
-        return {"ok": False, "message": f"SMTP connected but test delivery failed: {exc}."}
-    return {"ok": True, "message": f"Test email sent to {user.email}. Check your inbox."}
 
 
 @router.post("/batches/upload")
@@ -349,7 +333,7 @@ def trash_purge(db: Session = Depends(get_db), user: User = Depends(current_user
 
 @router.get("/extractions/{uploaded_file_id}")
 def extraction_detail(uploaded_file_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    require_role(user, Role.ADMIN, Role.MANAGER)
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
     uploaded = db.scalar(select(UploadedFile).where(UploadedFile.id == uploaded_file_id).options(selectinload(UploadedFile.extraction_record)))
     if not uploaded or not uploaded.extraction_record:
         raise AppError("Extraction details not found.", 404)
@@ -373,7 +357,7 @@ def extraction_detail(uploaded_file_id: str, db: Session = Depends(get_db), user
 
 @router.get("/admin/companies")
 def admin_companies(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    require_role(user, Role.ADMIN, Role.MANAGER)
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
     return {
         "companies": [
             {
@@ -397,19 +381,49 @@ def admin_company_save(payload: dict, db: Session = Depends(get_db), user: User 
 
 @router.get("/admin/templates")
 def admin_templates(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    require_role(user, Role.ADMIN, Role.MANAGER)
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
     return {"templates": [serialize_template(item) for item in db.scalars(select(OutputTemplateConfig).order_by(OutputTemplateConfig.name)).all()]}
 
 
 @router.get("/admin/template-assets")
-def admin_template_assets(user: User = Depends(current_user)) -> dict:
-    require_role(user, Role.ADMIN, Role.MANAGER)
-    return {"assets": list_template_assets()}
+def admin_template_assets(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    return {"assets": list_template_assets(db)}
+
+
+@router.post("/admin/template-assets")
+async def admin_template_asset_upload(
+    file: UploadFile = File(...),
+    label: str | None = Form(None),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    data = await file.read()
+    record = upload_template_asset(db, settings, user, file.filename, file.content_type, data, label=label)
+    return {
+        "asset": {
+            "id": record.id,
+            "label": record.label,
+            "filename": record.filename,
+            "url": f"/template-assets/{record.id}",
+            "size_bytes": record.size_bytes,
+            "source": "uploaded",
+        }
+    }
+
+
+@router.delete("/admin/template-assets/{asset_id}")
+def admin_template_asset_delete(asset_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    delete_template_asset(db, user, asset_id)
+    return {"status": "Deleted"}
 
 
 @router.get("/admin/templates/{template_id}")
 def admin_template_detail(template_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    require_role(user, Role.ADMIN, Role.MANAGER)
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
     template = db.get(OutputTemplateConfig, template_id)
     if not template:
         raise AppError("Template not found.", 404)
@@ -437,20 +451,24 @@ def admin_template_save(payload: dict, db: Session = Depends(get_db), user: User
 @router.get("/template-assets/{asset_id}")
 def template_asset_file(
     asset_id: str,
+    db: Session = Depends(get_db),
     user: User = Depends(current_user),
-) -> FileResponse:
-    if not user or user.role not in {Role.ADMIN.value, Role.MANAGER.value}:
+) -> Response:
+    if not user or user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value, Role.DEV.value}:
         raise AppError("File not found.", 404)
     try:
-        path = resolve_template_asset(asset_id)
+        resolved = resolve_template_asset(db, asset_id)
     except FileNotFoundError:
         raise AppError("File not found.", 404) from None
-    return FileResponse(path)
+    if isinstance(resolved, Path):
+        return FileResponse(resolved)
+    mime = "image/svg+xml" if asset_id.lower().endswith(".svg") else "image/png"
+    return Response(resolved, media_type=mime)
 
 
 @router.get("/admin/benefits")
 def admin_benefits(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    require_role(user, Role.ADMIN, Role.MANAGER)
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
     return {"benefits": [{"id": item.id, "label": item.label, "section": item.section, "default_selected": item.default_selected, "status": item.status} for item in db.scalars(select(BenefitOption)).all()]}
 
 
@@ -462,7 +480,7 @@ def admin_benefit_save(payload: dict, db: Session = Depends(get_db), user: User 
 
 @router.get("/admin/dictionaries")
 def admin_dictionaries(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    require_role(user, Role.ADMIN, Role.MANAGER)
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
     return {
         "field_aliases": [{"id": item.id, "field_name": item.field_name, "aliases": item.aliases} for item in db.scalars(select(FieldAlias)).all()],
         "vehicle_brands": [{"id": item.id, "name": item.name, "aliases": item.aliases} for item in db.scalars(select(VehicleBrand)).all()],
@@ -500,7 +518,7 @@ def admin_storage_status(
     settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
 ) -> dict:
-    require_role(user, Role.ADMIN)
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN)
     storage_ready, storage_message = SupabaseStorage(settings).check()
     source_bytes = db.scalar(
         select(func.coalesce(func.sum(UploadedFile.size_bytes), 0)).where(
@@ -541,13 +559,13 @@ def admin_storage_purge(
     settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
 ) -> dict:
-    require_role(user, Role.ADMIN)
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN)
     return purge_expired_pdfs(db, SupabaseStorage(settings))
 
 
 @router.post("/admin/storage/microsoft/connect")
 def admin_storage_microsoft_connect(user: User = Depends(current_user)) -> dict:
-    require_role(user, Role.ADMIN)
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN)
     raise AppError("Microsoft 365 archive requires Entra application credentials before it can be connected.", 503)
 
 

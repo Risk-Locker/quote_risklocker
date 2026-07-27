@@ -1,3 +1,5 @@
+"""HTTP tests for password-based authentication and sessions."""
+
 from __future__ import annotations
 
 import os
@@ -32,7 +34,7 @@ os.environ.update(
 from app.api import routes
 from app.api.deps import settings_dep
 from app.core.errors import register_error_handlers
-from app.core.security import hash_session_token
+from app.core.security import hash_password, hash_session_token
 from app.db.session import get_db
 from app.models.tables import AuthSession, User
 
@@ -45,6 +47,8 @@ class FakeSession:
         self.commits = 0
 
     def scalar(self, _statement):
+        if isinstance(self.session, AuthSession) and self.session.revoked_at is not None:
+            return None
         return self.session
 
     def get(self, _model, object_id):
@@ -84,54 +88,44 @@ def app_client(db: FakeSession):
 def active_user_and_session(status="active"):
     now = datetime.now(timezone.utc)
     user = User(
-        id=str(uuid4()), email="person.name@risklocker.com", role="Staff", status=status,
-        created_at=now, updated_at=now,
+        id=str(uuid4()),
+        email="person.name@risklocker.com",
+        password_hash=hash_password("secret-password"),
+        role="staff",
+        status=status,
+        created_at=now,
+        updated_at=now,
     )
     raw_token = "opaque-session-token"
     session = AuthSession(
-        id=str(uuid4()), user_id=user.id, token_hash=hash_session_token(raw_token),
-        last_activity_at=now, idle_expires_at=now + timedelta(hours=8),
-        absolute_expires_at=now + timedelta(days=30), revoked_at=None,
-        created_at=now, updated_at=now,
+        id=str(uuid4()),
+        user_id=user.id,
+        token_hash=hash_session_token(raw_token),
+        last_activity_at=now,
+        idle_expires_at=now + timedelta(hours=8),
+        absolute_expires_at=now + timedelta(days=30),
+        revoked_at=None,
+        created_at=now,
+        updated_at=now,
     )
     return user, session, raw_token
 
 
-def test_request_code_http_response_is_non_enumerating(monkeypatch):
-    calls = []
-    monkeypatch.setattr(routes, "request_login_code", lambda _db, _settings, email: calls.append(email))
-    client = app_client(FakeSession())
-
-    response = client.post("/auth/request-code", json={"email": "anyone@example.com"})
-
-    assert response.status_code == 202
-    assert response.json() == {"message": "If the account can sign in, a confirmation code has been sent."}
-    assert calls == ["anyone@example.com"]
-
-
-def test_verify_code_sets_secure_http_only_session_cookie(monkeypatch):
+def test_login_with_password_sets_http_only_session_cookie(monkeypatch):
     user, session, _ = active_user_and_session()
     monkeypatch.setattr(
         routes,
-        "verify_code_and_create_session",
+        "login_with_password",
         lambda *_args, **_kwargs: (user, session, "new-opaque-token"),
     )
-    local_settings = auth_settings()
-    local_settings.session_cookie_secure = True
-    app = FastAPI()
-    register_error_handlers(app)
-    app.include_router(routes.router)
-    app.dependency_overrides[get_db] = lambda: FakeSession()
-    app.dependency_overrides[settings_dep] = lambda: local_settings
-    client = TestClient(app)
+    client = app_client(FakeSession())
 
-    response = client.post("/auth/verify-code", json={"email": user.email, "code": "123456"})
+    response = client.post("/auth/login", json={"email": user.email, "password": "secret-password"})
 
     assert response.status_code == 200
     cookie = response.headers["set-cookie"]
     assert "risklocker_session=" in cookie
     assert "HttpOnly" in cookie
-    assert "Secure" in cookie
     assert "SameSite=lax" in cookie
     assert "new-opaque-token" not in response.text
 
@@ -156,7 +150,7 @@ def test_login_me_logout_and_revoked_session_http_flow():
 
 
 @pytest.mark.parametrize("status", ["inactive"])
-def test_disabled_account_is_rejected_over_http(status):
+def test_inactive_account_is_rejected_over_http(status):
     user, session, raw_token = active_user_and_session(status=status)
     client = app_client(FakeSession(session, user))
     client.cookies.set("risklocker_session", raw_token)

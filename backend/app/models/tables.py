@@ -48,6 +48,7 @@ class User(Base, TimestampMixin):
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     role: Mapped[str] = mapped_column(String(50), nullable=False, default=Role.STAFF.value, index=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default=AccountStatus.ACTIVE.value, index=True)
 
@@ -55,20 +56,6 @@ class User(Base, TimestampMixin):
     auth_sessions: Mapped[list["AuthSession"]] = relationship(
         back_populates="user", cascade="all, delete-orphan", foreign_keys="AuthSession.user_id"
     )
-
-
-class LoginCode(Base, TimestampMixin):
-    __tablename__ = "auth_login_codes"
-
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    email_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
-    resend_available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AuthSession(Base, TimestampMixin):
@@ -330,6 +317,22 @@ class CorrectionMemory(Base, TimestampMixin):
     corrected_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     insurance_company_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_companies.id"), nullable=True)
     corrected_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+
+class TemplateAsset(Base, TimestampMixin):
+    __tablename__ = "template_assets"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    uploaded_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    storage_provider: Mapped[str] = mapped_column(String(50), nullable=False, default="supabase")
+    storage_bucket: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    storage_path: Mapped[str] = mapped_column(String(800), nullable=False)
+    storage_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default=AccountStatus.ACTIVE.value, index=True)
 
 
 class AdminSuggestion(Base, TimestampMixin):

@@ -1,393 +1,44 @@
-"""Passwordless authentication, revocable sessions, and employee accounts."""
+"""Authentication and authorization services for password-based sessions."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-import re
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth.rbac import can_manage_target
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.security import (
-    generate_login_code,
     generate_session_token,
-    hash_login_code,
+    hash_password,
     hash_session_token,
     keyed_hash,
-    verify_login_code_hash,
+    verify_password,
 )
-from app.models.enums import AccountStatus, NotificationEventType, Role
-from app.models.tables import AuditEvent, AuthSession, LoginCode, User
-from app.services.email_service import (
-    send_invitation_email,
-    send_login_code,
-    send_role_notification,
-    send_status_notification,
-)
-from app.services.notification_service import create_notification
+from app.models.enums import AccountStatus, Role
+from app.models.tables import AuthSession, User
 
 
-LOGIN_REQUEST_MESSAGE = "If the account can sign in, a confirmation code has been sent."
-LOGIN_ERROR_MESSAGE = "The confirmation code is invalid or has expired."
-SHARED_EMAIL_LOCAL_PARTS = frozenset(
-    {
-        "accounts", "admin", "billing", "claims", "contact", "finance", "hello", "help", "hr", "info",
-        "inbox", "marketing", "notifications", "noreply", "no-reply", "operations", "quotes", "sales",
-        "support", "team",
-    }
-)
-
-_SIGNABLE_STATUSES = frozenset({AccountStatus.ACTIVE.value, AccountStatus.INVITED.value})
+# Token collision retry limit
+MAX_SESSION_RETRIES = 3
 
 
-def utcnow() -> datetime:
+def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def normalize_employee_email(email: str) -> str:
-    normalized = email.strip().lower()
-    if normalized.count("@") != 1:
-        raise AppError("Enter a valid named employee email address.")
-    local_part, domain = normalized.split("@", 1)
-    if (
-        domain != "risklocker.com"
-        or not re.fullmatch(r"[a-z0-9][a-z0-9._%+\-]*", local_part)
-        or local_part in SHARED_EMAIL_LOCAL_PARTS
-    ):
-        raise AppError("Only named Risklocker employee email addresses are allowed.")
-    if any(character.isspace() for character in normalized):
-        raise AppError("Enter a valid named employee email address.")
-    return normalized
+def _audit(db: Session, actor_id: str | None, action: str, entity_type: str, entity_id: str | None, details: dict) -> None:
+    from app.models.tables import AuditEvent
 
-
-def _audit(db: Session, action: str, user_id: str | None, entity_id: str | None = None, details: dict | None = None) -> None:
-    db.add(AuditEvent(actor_id=user_id, action=action, entity_type="authentication", entity_id=entity_id, details=details or {}))
-
-
-def _email_hash(email: str, settings: Settings) -> str:
-    return keyed_hash(f"login-email:{email}", settings.auth_hash_secret)
-
-
-def request_login_code(
-    db: Session,
-    settings: Settings,
-    email: str,
-    sender: Callable[[Settings, str, str], None] = send_login_code,
-) -> str:
-    try:
-        normalized = normalize_employee_email(email)
-    except AppError:
-        return LOGIN_REQUEST_MESSAGE
-
-    user = db.scalar(select(User).where(User.email == normalized))
-    if not user or user.status not in _SIGNABLE_STATUSES:
-        return LOGIN_REQUEST_MESSAGE
-
-    now = utcnow()
-    email_hash = _email_hash(normalized, settings)
-    latest = db.scalar(
-        select(LoginCode).where(LoginCode.email_hash == email_hash).order_by(LoginCode.created_at.desc()).with_for_update()
-    )
-    if latest and latest.consumed_at is None and latest.resend_available_at > now:
-        _audit(db, "auth.code.throttled", user.id, user.id)
-        db.commit()
-        return LOGIN_REQUEST_MESSAGE
-
-    if latest and latest.consumed_at is None:
-        latest.consumed_at = now
-
-    code = generate_login_code()
-    challenge = LoginCode(
-        user_id=user.id,
-        email_hash=email_hash,
-        code_hash="pending",
-        max_attempts=settings.auth_code_max_attempts,
-        expires_at=now + timedelta(minutes=settings.auth_code_expire_minutes),
-        resend_available_at=now + timedelta(seconds=settings.auth_code_resend_seconds),
-    )
-    db.add(challenge)
-    db.flush()
-    challenge.code_hash = hash_login_code(challenge.id, code, settings.auth_hash_secret)
-    try:
-        sender(settings, normalized, code)
-    except Exception:
-        challenge.consumed_at = now
-        _audit(db, "auth.code.delivery_failed", user.id, user.id)
-        db.commit()
-        return LOGIN_REQUEST_MESSAGE
-    _audit(db, "auth.code.sent", user.id, user.id, {"expires_at": challenge.expires_at.isoformat()})
-    db.commit()
-    return LOGIN_REQUEST_MESSAGE
-
-
-def create_session(
-    db: Session,
-    settings: Settings,
-    user: User,
-    *,
-    user_agent: str | None = None,
-    ip_address: str | None = None,
-    now: datetime | None = None,
-) -> tuple[AuthSession, str]:
-    issued_at = now or utcnow()
-    raw_token = generate_session_token()
-    session = AuthSession(
-        user_id=user.id,
-        token_hash=hash_session_token(raw_token),
-        last_activity_at=issued_at,
-        idle_expires_at=issued_at + timedelta(hours=settings.session_idle_hours),
-        absolute_expires_at=issued_at + timedelta(days=settings.session_max_days),
-        user_agent=(user_agent or "")[:500] or None,
-        ip_address=(ip_address or "")[:64] or None,
-    )
-    db.add(session)
-    db.flush()
-    return session, raw_token
-
-
-def verify_code_and_create_session(
-    db: Session,
-    settings: Settings,
-    email: str,
-    code: str,
-    *,
-    user_agent: str | None = None,
-    ip_address: str | None = None,
-) -> tuple[User, AuthSession, str]:
-    try:
-        normalized = normalize_employee_email(email)
-    except AppError:
-        raise AppError(LOGIN_ERROR_MESSAGE, 401) from None
-    email_hash = _email_hash(normalized, settings)
-    challenge = db.scalar(
-        select(LoginCode).where(LoginCode.email_hash == email_hash).order_by(LoginCode.created_at.desc()).with_for_update()
-    )
-    now = utcnow()
-    if not challenge or challenge.consumed_at is not None:
-        raise AppError(LOGIN_ERROR_MESSAGE, 401)
-    if challenge.expires_at <= now or challenge.attempt_count >= challenge.max_attempts:
-        challenge.consumed_at = now
-        _audit(db, "auth.code.expired", challenge.user_id, challenge.user_id)
-        db.commit()
-        raise AppError(LOGIN_ERROR_MESSAGE, 401)
-    if not verify_login_code_hash(challenge.id, code, challenge.code_hash, settings.auth_hash_secret):
-        challenge.attempt_count += 1
-        if challenge.attempt_count >= challenge.max_attempts:
-            challenge.consumed_at = now
-        _audit(db, "auth.code.rejected", challenge.user_id, challenge.user_id, {"attempt": challenge.attempt_count})
-        db.commit()
-        raise AppError(LOGIN_ERROR_MESSAGE, 401)
-
-    user = db.get(User, challenge.user_id)
-    if not user or user.email != normalized or user.status not in _SIGNABLE_STATUSES:
-        challenge.consumed_at = now
-        db.commit()
-        raise AppError(LOGIN_ERROR_MESSAGE, 401)
-    challenge.consumed_at = now
-    was_invited = user.status == AccountStatus.INVITED.value
-    if was_invited:
-        user.status = AccountStatus.ACTIVE.value
-    session, raw_token = create_session(
-        db, settings, user, user_agent=user_agent, ip_address=ip_address, now=now
-    )
-    _audit(db, "auth.session.created", user.id, session.id, {"promoted_from_invited": was_invited})
-    db.commit()
-    db.refresh(session)
-    return user, session, raw_token
-
-
-def authenticate_session(
-    db: Session,
-    settings: Settings,
-    raw_token: str,
-    *,
-    now: datetime | None = None,
-    touch: bool = True,
-) -> tuple[User, AuthSession]:
-    checked_at = now or utcnow()
-    session = db.scalar(select(AuthSession).where(AuthSession.token_hash == hash_session_token(raw_token)))
-    if not session or session.revoked_at is not None:
-        raise AppError("Please log in again.", 401)
-    if session.idle_expires_at <= checked_at or session.absolute_expires_at <= checked_at:
-        session.revoked_at = checked_at
-        _audit(db, "auth.session.expired", session.user_id, session.id)
-        db.commit()
-        raise AppError("Your session has expired. Please log in again.", 401)
-    user = db.get(User, session.user_id)
-    if not user or user.status not in _SIGNABLE_STATUSES:
-        session.revoked_at = checked_at
-        db.commit()
-        raise AppError("Your account is not active. Please contact an Admin.", 401)
-    try:
-        normalized = normalize_employee_email(user.email)
-    except AppError:
-        session.revoked_at = checked_at
-        db.commit()
-        raise AppError("Please log in again.", 401) from None
-    if normalized != user.email:
-        session.revoked_at = checked_at
-        db.commit()
-        raise AppError("Please log in again.", 401)
-    if touch:
-        session.last_activity_at = checked_at
-        session.idle_expires_at = min(
-            checked_at + timedelta(hours=settings.session_idle_hours), session.absolute_expires_at
+    db.add(
+        AuditEvent(
+            actor_id=actor_id,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            details=details,
         )
-        db.commit()
-    return user, session
-
-
-def revoke_session(db: Session, session: AuthSession, actor_id: str | None) -> None:
-    if session.revoked_at is None:
-        session.revoked_at = utcnow()
-        session.revoked_by = actor_id
-        _audit(db, "auth.session.revoked", actor_id, session.id, {"user_id": session.user_id})
-        db.commit()
-
-
-def revoke_user_sessions(db: Session, user_id: str, actor_id: str | None) -> int:
-    sessions = list(
-        db.scalars(select(AuthSession).where(AuthSession.user_id == user_id, AuthSession.revoked_at.is_(None))).all()
-    )
-    now = utcnow()
-    for session in sessions:
-        session.revoked_at = now
-        session.revoked_by = actor_id
-    _audit(db, "auth.sessions.revoked", actor_id, user_id, {"user_id": user_id, "count": len(sessions)})
-    db.commit()
-    return len(sessions)
-
-
-def create_user(db: Session, actor: User, email: str, role: str) -> User:
-    normalized = normalize_employee_email(email)
-    if role not in {Role.STAFF.value, Role.MANAGER.value, Role.ADMIN.value}:
-        raise AppError("Choose a valid role.")
-    if not can_manage_target(actor, role):
-        raise AppError("You do not have permission to manage this role.", 403)
-    if db.scalar(select(User).where(User.email == normalized)):
-        raise AppError("A user with this email already exists.")
-    user = User(email=normalized, role=role, status=AccountStatus.INVITED.value)
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
-
-
-def invite_user(
-    db: Session,
-    settings: Settings,
-    actor: User,
-    email: str,
-    role: str,
-    sender: Callable[[Settings, str, str], None] = send_invitation_email,
-) -> User:
-    user = create_user(db, actor, email, role)
-    now = utcnow()
-    code = generate_login_code()
-    email_hash = _email_hash(user.email, settings)
-    challenge = LoginCode(
-        user_id=user.id,
-        email_hash=email_hash,
-        code_hash="pending",
-        max_attempts=settings.auth_code_max_attempts,
-        expires_at=now + timedelta(minutes=settings.auth_code_expire_minutes),
-        resend_available_at=now + timedelta(seconds=settings.auth_code_resend_seconds),
-    )
-    db.add(challenge)
-    db.flush()
-    challenge.code_hash = hash_login_code(challenge.id, code, settings.auth_hash_secret)
-    delivery_state = "sent"
-    delivery_error = None
-    try:
-        sender(settings, user.email, code)
-    except Exception as exc:
-        delivery_state = "failed"
-        delivery_error = str(exc)
-        challenge.consumed_at = now
-    _audit(db, "auth.invitation.sent" if delivery_state == "sent" else "auth.invitation.failed", actor.id, user.id)
-    create_notification(
-        db,
-        recipient_id=user.id,
-        event_type=NotificationEventType.INVITATION.value,
-        title="Account Invitation",
-        body=f"Your Risklocker account has been created with the {role} role. Check your email for your sign-in code.",
-        delivery_state=delivery_state,
-        delivery_error=delivery_error,
-    )
-    db.commit()
-    db.refresh(user)
-    return user
-
-
-def update_user(db: Session, actor: User, target: User, *, email: str | None, role: str | None, status: str | None) -> User:
-    if actor.role == Role.MANAGER.value and target.role != Role.STAFF.value:
-        raise AppError("Managers can manage Staff only.", 403)
-    email_changed = False
-    role_changed = False
-    status_changed = False
-    if email is not None:
-        normalized = normalize_employee_email(email)
-        duplicate = db.scalar(select(User).where(User.email == normalized, User.id != target.id))
-        if duplicate:
-            raise AppError("A user with this email already exists.")
-        email_changed = normalized != target.email
-        target.email = normalized
-    if role is not None:
-        if role not in {item.value for item in Role} or not can_manage_target(actor, role):
-            raise AppError("You do not have permission to manage this role.", 403)
-        role_changed = role != target.role
-        target.role = role
-    if status is not None:
-        if status not in {AccountStatus.ACTIVE.value, AccountStatus.INACTIVE.value}:
-            raise AppError("Choose a valid account status.")
-        status_changed = status != target.status
-        target.status = status
-    db.commit()
-    db.refresh(target)
-    if status == AccountStatus.INACTIVE.value or email_changed:
-        revoke_user_sessions(db, target.id, actor.id)
-    return target
-
-
-def notify_role_change(db: Session, settings: Settings, actor: User, target: User, new_role: str) -> None:
-    try:
-        send_role_notification(settings, target.email, new_role)
-        delivery_state = "sent"
-        delivery_error = None
-    except Exception as exc:
-        delivery_state = "failed"
-        delivery_error = str(exc)
-    create_notification(
-        db,
-        recipient_id=target.id,
-        event_type=NotificationEventType.ROLE_CHANGE.value,
-        title="Role Updated",
-        body=f"Your account role has been changed to {new_role}.",
-        delivery_state=delivery_state,
-        delivery_error=delivery_error,
-    )
-
-
-def notify_status_change(db: Session, settings: Settings, actor: User, target: User, new_status: str) -> None:
-    try:
-        send_status_notification(settings, target.email, new_status)
-        delivery_state = "sent"
-        delivery_error = None
-    except Exception as exc:
-        delivery_state = "failed"
-        delivery_error = str(exc)
-    create_notification(
-        db,
-        recipient_id=target.id,
-        event_type=NotificationEventType.STATUS_CHANGE.value,
-        title="Account Status Changed",
-        body=f"Your account is now {new_status}." if new_status == "active" else "Your account has been deactivated.",
-        delivery_state=delivery_state,
-        delivery_error=delivery_error,
     )
 
 
@@ -397,5 +48,262 @@ def serialize_user(user: User) -> dict:
         "email": user.email,
         "role": user.role,
         "status": user.status,
-        "created_at": user.created_at.isoformat(),
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "updated_at": user.updated_at.isoformat() if user.updated_at else None,
     }
+
+
+def _create_session(
+    db: Session,
+    settings: Settings,
+    user_id: str,
+    user_agent: str | None,
+    ip_address: str | None,
+) -> tuple[AuthSession, str]:
+    now = _utcnow()
+    idle = now + timedelta(hours=settings.session_idle_hours)
+    absolute = now + timedelta(days=settings.session_max_days)
+    raw_token = generate_session_token()
+    token_hash = hash_session_token(raw_token)
+
+    for _ in range(MAX_SESSION_RETRIES - 1):
+        existing = db.scalar(select(AuthSession).where(AuthSession.token_hash == token_hash))
+        if not existing:
+            break
+        raw_token = generate_session_token()
+        token_hash = hash_session_token(raw_token)
+
+    session = AuthSession(
+        user_id=user_id,
+        token_hash=token_hash,
+        last_activity_at=now,
+        idle_expires_at=idle,
+        absolute_expires_at=absolute,
+        user_agent=user_agent,
+        ip_address=ip_address,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return session, raw_token
+
+
+def authenticate_session(db: Session, settings: Settings, raw_token: str) -> tuple[User, AuthSession]:
+    token_hash = hash_session_token(raw_token)
+    session = db.scalar(
+        select(AuthSession)
+        .where(
+            AuthSession.token_hash == token_hash,
+            AuthSession.revoked_at.is_(None),
+        )
+        .order_by(AuthSession.created_at.desc())
+    )
+    if not session:
+        raise AppError("Please log in.", 401)
+
+    now = _utcnow()
+    if now > session.absolute_expires_at or now > session.idle_expires_at:
+        raise AppError("Your session has expired. Please log in again.", 401)
+
+    user = session.user
+    if user is None:
+        user = db.get(User, session.user_id)
+    if user is None or user.status != AccountStatus.ACTIVE.value:
+        if session.revoked_at is None:
+            session.revoked_at = now
+            db.commit()
+        raise AppError("This account is not active.", 401)
+
+    session.last_activity_at = now
+    session.idle_expires_at = now + timedelta(hours=settings.session_idle_hours)
+    db.commit()
+    return user, session
+
+
+def revoke_session(db: Session, session: AuthSession, revoked_by: str | None = None) -> None:
+    if session.revoked_at:
+        return
+    session.revoked_at = _utcnow()
+    if revoked_by:
+        session.revoked_by = revoked_by
+    db.commit()
+
+
+def revoke_user_sessions(db: Session, user_id: str, revoked_by: str | None = None) -> int:
+    count = 0
+    now = _utcnow()
+    for session in db.scalars(
+        select(AuthSession).where(
+            AuthSession.user_id == user_id,
+            AuthSession.revoked_at.is_(None),
+        )
+    ):
+        session.revoked_at = now
+        if revoked_by:
+            session.revoked_by = revoked_by
+        count += 1
+    db.commit()
+    return count
+
+
+def _require_user_management_permission(actor: User, target: User | None = None) -> None:
+    """Only super_admin and admin may manage users. super_admin can manage anyone.
+    admin cannot delete themselves or the super_admin."""
+    if actor.role == Role.SUPER_ADMIN.value:
+        return
+    if actor.role != Role.ADMIN.value:
+        raise AppError("You do not have permission to manage users.", 403)
+    if target is None:
+        return
+    if target.role == Role.SUPER_ADMIN.value:
+        raise AppError("You do not have permission to manage the super administrator.", 403)
+    if target.id == actor.id:
+        raise AppError("You cannot modify your own account this way.", 403)
+
+
+def _normalize_email(email: str | None) -> str:
+    if not email:
+        raise AppError("Email is required.", 400)
+    normalized = email.strip().lower()
+    if "@" not in normalized or "." not in normalized.split("@")[-1]:
+        raise AppError("Please provide a valid email address.", 400)
+    return normalized
+
+
+def login_with_password(
+    db: Session,
+    settings: Settings,
+    email: str,
+    password: str,
+    user_agent: str | None,
+    ip_address: str | None,
+) -> tuple[User, AuthSession, str]:
+    normalized = _normalize_email(email)
+    user = db.scalar(select(User).where(User.email == normalized))
+    if not user or not user.password_hash or not verify_password(password, user.password_hash):
+        raise AppError("Invalid email or password.", 401)
+    if user.status != AccountStatus.ACTIVE.value:
+        raise AppError("This account is not active.", 401)
+
+    session, raw_token = _create_session(db, settings, user.id, user_agent, ip_address)
+    _audit(db, user.id, "login", "user", user.id, {"ip": ip_address, "ua": user_agent})
+    db.commit()
+    return user, session, raw_token
+
+
+def change_password(db: Session, user: User, current_password: str, new_password: str) -> User:
+    if not verify_password(current_password, user.password_hash):
+        raise AppError("Current password is incorrect.", 400)
+    if len(new_password) < 8:
+        raise AppError("Password must be at least 8 characters.", 400)
+    user.password_hash = hash_password(new_password)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def create_user(
+    db: Session,
+    actor: User,
+    email: str,
+    role: str,
+    password: str | None = None,
+    status: str = AccountStatus.ACTIVE.value,
+) -> User:
+    _require_user_management_permission(actor)
+    normalized = _normalize_email(email)
+    if role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value, Role.STAFF.value, Role.DEV.value}:
+        raise AppError("Invalid role.", 400)
+    if role == Role.SUPER_ADMIN.value and actor.role != Role.SUPER_ADMIN.value:
+        raise AppError("Only the super administrator can assign the super administrator role.", 403)
+    if db.scalar(select(User).where(User.email == normalized)):
+        raise AppError("A user with this email already exists.", 409)
+
+    user = User(
+        email=normalized,
+        password_hash=hash_password(password) if password else "",
+        role=role,
+        status=status,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    _audit(db, actor.id, "create_user", "user", user.id, {"email": normalized, "role": role})
+    db.commit()
+    return user
+
+
+def update_user(
+    db: Session,
+    actor: User,
+    target: User,
+    email: str | None = None,
+    role: str | None = None,
+    status: str | None = None,
+    password: str | None = None,
+) -> User:
+    _require_user_management_permission(actor, target)
+    if email is not None:
+        normalized = _normalize_email(email)
+        existing = db.scalar(select(User).where(User.email == normalized, User.id != target.id))
+        if existing:
+            raise AppError("A user with this email already exists.", 409)
+        target.email = normalized
+    if role is not None:
+        if role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value, Role.STAFF.value, Role.DEV.value}:
+            raise AppError("Invalid role.", 400)
+        # Only super_admin can create/promote another super_admin.
+        if role == Role.SUPER_ADMIN.value and actor.role != Role.SUPER_ADMIN.value:
+            raise AppError("Only the super administrator can assign the super administrator role.", 403)
+        target.role = role
+    if status is not None:
+        if status not in {AccountStatus.ACTIVE.value, AccountStatus.INACTIVE.value}:
+            raise AppError("Invalid status.", 400)
+        target.status = status
+    if password is not None:
+        if len(password) < 8:
+            raise AppError("Password must be at least 8 characters.", 400)
+        target.password_hash = hash_password(password)
+    db.commit()
+    db.refresh(target)
+    _audit(db, actor.id, "update_user", "user", target.id, {"email": target.email, "role": target.role, "status": target.status})
+    db.commit()
+    return target
+
+
+def ensure_super_admin(db: Session, settings: Settings) -> User | None:
+    """Create or update the super admin from environment variables on startup.
+    Returns None if no super admin credentials are configured."""
+    email = settings.super_admin_email
+    password = settings.super_admin_password
+    if not email or not password:
+        return None
+
+    normalized = _normalize_email(email)
+    user = db.scalar(select(User).where(User.email == normalized))
+    if not user:
+        user = User(
+            email=normalized,
+            password_hash=hash_password(password),
+            role=Role.SUPER_ADMIN.value,
+            status=AccountStatus.ACTIVE.value,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return user
+
+    # Keep super admin credentials in sync with .env on every startup.
+    if user.role != Role.SUPER_ADMIN.value:
+        user.role = Role.SUPER_ADMIN.value
+    if user.status != AccountStatus.ACTIVE.value:
+        user.status = AccountStatus.ACTIVE.value
+    user.password_hash = hash_password(password)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def initial_super_admin_from_env(db: Session, settings: Settings) -> User | None:
+    """Legacy alias for startup seeding."""
+    return ensure_super_admin(db, settings)

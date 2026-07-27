@@ -4,13 +4,16 @@ import Link from "next/link";
 import type { Route } from "next";
 import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { FileClock, Inbox, LogOut, Settings, Upload, Rows3, Trash2, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { FileClock, Inbox, LogOut, Settings, Upload, Rows3, Trash2, PanelLeftClose, PanelLeftOpen, Users } from "lucide-react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 const nav: Array<{ href: Route; label: string; icon: typeof Upload; badge?: boolean }> = [
   { href: "/upload", label: "Upload Quotation PDFs", icon: Upload },
   { href: "/history", label: "History", icon: FileClock },
-  { href: "/admin", label: "Admin", icon: Settings },
+  { href: "/builder/templates", label: "Builder", icon: Settings },
+  { href: "/settings/system-checks", label: "Settings", icon: Settings },
+  { href: "/client-records", label: "Client Records", icon: Users },
   { href: "/inbox", label: "Inbox", icon: Inbox, badge: true },
   { href: "/trash", label: "Trash", icon: Trash2 },
 ];
@@ -18,10 +21,16 @@ const nav: Array<{ href: Route; label: string; icon: typeof Upload; badge?: bool
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
   const [collapsed, setCollapsed] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
-  const [signOutError, setSignOutError] = useState("");
   const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    if (!authLoading && user === null) {
+      router.replace("/login");
+    }
+  }, [authLoading, user, router]);
 
   useEffect(() => {
     setCollapsed(localStorage.getItem("rl-sidebar-collapsed") !== "false");
@@ -37,8 +46,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    loadUnread();
-  }, [loadUnread, pathname]);
+    if (!authLoading && user) {
+      loadUnread();
+    }
+  }, [loadUnread, pathname, authLoading, user]);
 
   function toggleSidebar() {
     setCollapsed((current) => {
@@ -50,15 +61,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   async function signOut() {
     setSigningOut(true);
-    setSignOutError("");
     try {
       await api<void>("/auth/logout", { method: "POST" });
-      router.replace("/login");
-    } catch (error) {
-      setSignOutError(error instanceof Error ? error.message : "Could not sign out. Please try again.");
+    } catch {
+      // If the session was already invalid, the cookie will still be cleared by the backend.
+      // We still want the user back on the login page.
     } finally {
       setSigningOut(false);
+      router.replace("/login");
     }
+  }
+
+  if (authLoading || user === null) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-rl-soft">
+        <p className="text-sm text-rl-text">Checking session…</p>
+      </div>
+    );
   }
 
   return (
@@ -119,10 +138,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             })}
           </div>
         </nav>
-        <main>
-          {signOutError ? <p role="alert" className="mb-4 rounded-md border border-rl-red bg-red-50 p-3 font-bold text-rl-red">{signOutError}</p> : null}
-          {children}
-        </main>
+        <main>{children}</main>
       </div>
     </div>
   );

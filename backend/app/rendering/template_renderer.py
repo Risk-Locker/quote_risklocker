@@ -88,20 +88,20 @@ def _asset_id_for_slot(config: dict[str, Any], slot: str | None, fields: dict) -
         if "etiqa" in company:
             return find_asset_by_hint(["etiqa"])
         if "lonpac" in company:
-            return find_asset_by_hint(["lonpac"])
+            return find_asset_by_hint(None, ["lonpac"])
         if "qbe" in company:
-            return find_asset_by_hint(["qbe"])
+            return find_asset_by_hint(None, ["qbe"])
         if "liberty" in company:
-            return find_asset_by_hint(["liberty"])
+            return find_asset_by_hint(None, ["liberty"])
         if "amgen" in company or "amassurance" in company or "kurnia" in company:
-            return find_asset_by_hint(["amgen", "amassurance"])
+            return find_asset_by_hint(None, ["amgen", "amassurance"])
     hints = config.get("asset_slots", {}).get(slot) or [slot]
-    return find_asset_by_hint([str(item) for item in hints])
+    return find_asset_by_hint(None, [str(item) for item in hints])
 
 
 def _image_html(element: dict[str, Any], config: dict[str, Any], fields: dict) -> str:
     asset_id = str(element.get("assetId") or _asset_id_for_slot(config, element.get("assetSlot"), fields))
-    src = asset_data_uri(asset_id)
+    src = asset_data_uri(None, asset_id)
     if not src:
         return ""
     return f'<img alt="" src="{src}" style="{_style(element)};object-fit:contain" />'
@@ -126,8 +126,8 @@ def _card_html(card: dict[str, Any], config: dict[str, Any]) -> str:
     lines = "".join(f"<div>{escape(str(line))}</div>" for line in card.get("lines", []))
     asset_id = str(card.get("asset_id") or "")
     if not asset_id:
-        asset_id = find_asset_by_hint([str(card.get("asset_hint") or ""), str(card.get("title") or ""), str(card.get("icon") or "")])
-    img = asset_data_uri(asset_id)
+        asset_id = find_asset_by_hint(None, [str(card.get("asset_hint") or ""), str(card.get("title") or ""), str(card.get("icon") or "")])
+    img = asset_data_uri(None, asset_id)
     icon_html = f'<img alt="" src="{img}" />' if img else f"<span>{escape(str(card.get('icon', 'IC'))[:2].upper())}</span>"
     return (
         '<div class="benefit-card">'

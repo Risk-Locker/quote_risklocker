@@ -66,7 +66,7 @@ def migrate(cleanup_verified: bool) -> int:
                 with quarantined_pdf(data, settings) as (_, scan):
                     key = source_key(record, now) if kind == "source" else generated_key(record, now)
                     stored = storage.upload_pdf(key, data)
-                downloaded = storage.download_pdf(stored.object_key)
+                downloaded = storage.download_bytes(stored.object_key)
                 if len(downloaded) != len(data) or sha256(downloaded).hexdigest() != stored.sha256:
                     storage.delete_pdf(stored.object_key)
                     raise ValueError("Supabase checksum verification failed")
