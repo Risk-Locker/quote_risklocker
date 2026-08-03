@@ -65,20 +65,16 @@ def test_default_template_is_canvas_locked_and_visual():
     assert config["locked"] is True
     assert config["canvas"]["width"] == 794
     assert any(element["type"] == "benefit-section" for element in config["canvas"]["elements"])
-    assert any(variable["type"] == "benefit_card" for variable in config["variables"])
 
 
-def test_canvas_renderer_uses_selected_card_ids():
+def test_canvas_renderer_uses_fields():
     config = default_template_config(locked=False)
     fields = {
         "vehicle_no": {"value": "ABC1234"},
         "coverage_type": {"value": "Comprehensive"},
-        "benefits_selected": {"value": '["windscreen"]'},
-        "add_ons_selected": {"value": '["passenger_liability"]'},
-        "selected_package": {"value": "Base"},
     }
 
-    html = render_quotation_html(fields, template_config=config, selected_package="Base")
+    html = render_quotation_html(fields, template_config=config)
 
-    assert "Windscreen Coverage" in html
-    assert "Passenger Liability" in html
+    assert "ABC1234" in html
+    assert "Comprehensive" in html

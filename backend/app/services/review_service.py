@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 
@@ -15,6 +16,9 @@ from app.core.errors import AppError
 from app.models.enums import RecordStatus, Role, StorageStatus
 from app.models.tables import Batch, CorrectionMemory, OutputTemplateConfig, QuotationDraft, TrashRecord, UploadedFile
 from app.services.template_config import normalize_template_config, review_schema_for
+
+
+logger = logging.getLogger(__name__)
 
 
 def get_accessible_draft(db: Session, user, draft_id: str) -> QuotationDraft:
@@ -48,8 +52,6 @@ def _available_templates(db: Session | None) -> list[dict]:
                 "status": template.status,
                 "locked": bool(config.get("locked")),
                 "is_default": bool(config.get("is_default")),
-                "packages": config.get("packages") or [{"name": "Base", "included": [], "add_ons": []}],
-                "cards": config.get("cards") or {},
                 "review_schema": review_schema_for(config, None),
             }
         )
@@ -77,11 +79,29 @@ def _field_hints(draft: QuotationDraft) -> dict[str, str]:
         "total_amount": "Found under total payable.",
         "ncd_percent": "Found under NCD.",
         "optional_covers": "Found under optional cover list.",
-        "benefits_selected": "Found under optional cover list.",
-        "add_ons_selected": "Selected from template package.",
         "insurance_company": "Found from file name or document heading.",
     }
     return {field: friendly.get(field, "Found in the uploaded quotation.") for field, candidates in record.candidates.items() if candidates}
+
+
+def _field_evidence(draft: QuotationDraft) -> dict[str, list[dict]]:
+    record = draft.uploaded_file.extraction_record if draft.uploaded_file and draft.uploaded_file.extraction_record else None
+    if not record or not record.candidates:
+        return {}
+    return {
+        field: [
+            {
+                "value": c.get("value", ""),
+                "score": c.get("score", 0),
+                "source_method": c.get("source_method", ""),
+                "page": c.get("page"),
+                "evidence": c.get("evidence", ""),
+            }
+            for c in candidates
+        ]
+        for field, candidates in record.candidates.items()
+        if candidates
+    }
 
 
 def _draft_template_config(draft: QuotationDraft, db: Session | None) -> dict:
@@ -104,7 +124,6 @@ def serialize_draft(draft: QuotationDraft, db: Session | None = None) -> dict:
     source_archived = bool(uploaded and uploaded.archive_status == StorageStatus.ARCHIVED.value)
     source_pdf_url = f"/uploaded-files/{uploaded.id}/content" if uploaded and (source_available or source_archived) else ""
     selected_template_id = draft.uploaded_file.template_id if draft.uploaded_file else None
-    selected_package = (draft.fields.get("selected_package") or {}).get("value")
     config = _draft_template_config(draft, db)
     return {
         "id": draft.id,
@@ -118,12 +137,11 @@ def serialize_draft(draft: QuotationDraft, db: Session | None = None) -> dict:
         "source_pdf_expires_at": uploaded.storage_expires_at.isoformat() if uploaded and uploaded.storage_expires_at else None,
         "extracted_text": "\n\n".join(str(page.get("text", "")) for page in page_text),
         "page_text": page_text,
-        "field_evidence": {},
+        "field_evidence": _field_evidence(draft),
         "field_hints": _field_hints(draft),
         "available_templates": _available_templates(db),
         "selected_template_id": selected_template_id,
-        "selected_package": selected_package,
-        "review_schema": review_schema_for(config, selected_package),
+        "review_schema": review_schema_for(config, None),
         "versions": [
             {
                 "id": version.id,
@@ -149,9 +167,6 @@ def update_draft_fields(
     draft_id: str,
     field_updates: dict[str, str | None],
     template_id: str | None = None,
-    selected_package: str | None = None,
-    benefits_selected: str | None = None,
-    add_ons_selected: str | None = None,
 ) -> QuotationDraft:
     draft = get_accessible_draft(db, user, draft_id)
     fields = deepcopy(draft.fields or {})
@@ -161,14 +176,6 @@ def update_draft_fields(
             raise AppError("Choose a valid Risklocker template.")
         if draft.uploaded_file:
             draft.uploaded_file.template_id = template.id
-    extra_updates = {
-        "selected_package": selected_package,
-        "benefits_selected": benefits_selected,
-        "add_ons_selected": add_ons_selected,
-    }
-    for key, value in extra_updates.items():
-        if value is not None:
-            field_updates[key] = value
     for field_name, new_value in field_updates.items():
         current = fields.get(field_name, {"value": None, "status": "ready", "message": ""})
         original_value = current.get("value")
@@ -204,10 +211,6 @@ def list_history(db: Session, user, status_filter: str | None = None, search: st
     query = select(UploadedFile).options(selectinload(UploadedFile.draft)).where(UploadedFile.deleted_at.is_(None))
     if user.role == Role.STAFF.value:
         query = query.where(UploadedFile.owner_id == user.id)
-    elif user.role == Role.MANAGER.value:
-        from app.models.tables import User
-
-        query = query.join(User, UploadedFile.owner_id == User.id).where(User.role == Role.STAFF.value)
     if status_filter:
         query = query.where(UploadedFile.status == status_filter)
     if search:
@@ -249,10 +252,6 @@ def list_trash(db: Session, user) -> list[UploadedFile]:
     query = select(UploadedFile).where(UploadedFile.deleted_at.is_not(None)).options(selectinload(UploadedFile.draft))
     if user.role == Role.STAFF.value:
         query = query.where(UploadedFile.owner_id == user.id)
-    elif user.role == Role.MANAGER.value:
-        from app.models.tables import User
-
-        query = query.join(User, UploadedFile.owner_id == User.id).where(User.role == Role.STAFF.value)
     return list(db.scalars(query.order_by(UploadedFile.deleted_at.desc())).all())
 
 
@@ -271,14 +270,29 @@ def restore_from_trash(db: Session, user, uploaded_file_id: str) -> None:
     db.commit()
 
 
-def purge_expired_trash(db: Session, user) -> int:
+def purge_expired_trash(db: Session, user, storage) -> int:
     if user.role != Role.ADMIN.value:
         raise AppError("Only Admin can permanently delete records.", 403)
+    from app.models.tables import GeneratedPdfVersion
+
     now = datetime.now(timezone.utc)
     records = list(db.scalars(select(UploadedFile).where(and_(UploadedFile.deleted_at.is_not(None), UploadedFile.purge_after <= now))).all())
-    count = len(records)
+    count = 0
     for record in records:
+        if record.storage_path:
+            try:
+                storage.delete_pdf(record.storage_path)
+            except Exception as exc:
+                logger.warning("Could not delete source PDF %s during trash purge: %s", record.storage_path, exc)
+        versions = db.scalars(select(GeneratedPdfVersion).where(GeneratedPdfVersion.uploaded_file_id == record.id)).all()
+        for v in versions:
+            if v.storage_path:
+                try:
+                    storage.delete_pdf(v.storage_path)
+                except Exception as exc:
+                    logger.warning("Could not delete generated PDF %s during trash purge: %s", v.storage_path, exc)
         db.delete(record)
+        count += 1
     db.commit()
     return count
 

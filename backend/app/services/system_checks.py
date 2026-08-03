@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
 import shutil
 from pathlib import Path
 
@@ -12,6 +13,9 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.services.document_security import scanner_status
 from app.storage.supabase import SupabaseStorage
+
+
+logger = logging.getLogger(__name__)
 
 
 def package_available(name: str) -> bool:
@@ -28,8 +32,8 @@ def playwright_ready() -> tuple[bool, str]:
             executable = Path(playwright.chromium.executable_path)
         if executable.exists():
             return True, "Ready"
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Playwright readiness check failed: %s", exc)
     return False, "Install Chromium for PDF rendering: python -m playwright install chromium"
 
 
@@ -101,6 +105,7 @@ def get_system_checks(settings: Settings, db: Session) -> list[dict]:
     try:
         db.execute(text("select 1"))
         checks.append({"name": "Database", "status": "Ready", "message": "Database connection is working.", "group": "Required Setup"})
-    except Exception:
+    except Exception as exc:
+        logger.warning("Database health check failed: %s", exc)
         checks.append({"name": "Database", "status": "Needs Setup", "message": "Database connection failed.", "group": "Required Setup"})
     return checks

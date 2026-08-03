@@ -2,23 +2,47 @@
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, Response as FastAPIResponse, UploadFile
 from fastapi.responses import FileResponse, Response
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import AuthContext, current_auth, current_auth_optional, current_user, ensure_trusted_origin, settings_dep
-from app.api.schemas import LoginRequest, UserCreateRequest, UserUpdateRequest, UserPasswordChangeRequest
+from app.api.schemas import (
+    ClientRecordUpdateRequest,
+    CompanySaveRequest,
+    DraftGenerateRequest,
+    DraftUpdateRequest,
+    ExtractionSettingsRequest,
+    FieldAliasSaveRequest,
+    GenerateSelectedRequest,
+    LoginRequest,
+    OurSpecialSaveRequest,
+    OurSpecialVariantSaveRequest,
+    RoadTaxRuleSaveRequest,
+    TemplateSaveRequest,
+    TemplateUpdateRequest,
+    UserCreateRequest,
+    UserPasswordChangeRequest,
+    UserUpdateRequest,
+    VehicleBrandSaveRequest,
+    VehicleModelSaveRequest,
+)
 from app.auth.rbac import can_view_owner_record, require_role
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.db.session import get_db
 from app.models.enums import Role, StorageStatus
 from app.models.tables import (
-    BenefitOption,
     FieldAlias,
     GeneratedPdfVersion,
     InsuranceCompany,
+    OurSpecial,
+    OurSpecialVariant,
     OutputTemplateConfig,
     QuotationDraft,
     StorageConnection,
@@ -29,13 +53,20 @@ from app.models.tables import (
 )
 from app.services.admin_service import (
     copy_template,
+    delete_special,
+    delete_variant,
+    delete_field_alias,
+    delete_vehicle_brand,
+    delete_vehicle_model,
     save_strategy_settings,
+    serialize_special,
     serialize_template,
     update_template,
-    upsert_benefit,
     upsert_company,
     upsert_field_alias,
+    upsert_special,
     upsert_template,
+    upsert_variant,
     upsert_vehicle_brand,
     upsert_vehicle_model,
 )
@@ -71,8 +102,13 @@ from app.services.system_checks import get_system_checks
 from app.services.storage_retention import purge_expired_pdfs
 from app.services.template_assets import delete_template_asset, list_template_assets, resolve_template_asset, upload_template_asset
 from app.services.upload_service import create_batch_from_uploads, serialize_batch, serialize_file
+from app.services.session_service import get_session, list_sessions, serialize_session
+from app.services.client_record_service import export_csv_bytes, get_record, list_records, serialize_record, update_record
+from app.services.road_tax_service import delete_rule as delete_road_tax_rule, list_rules, serialize_rule, upsert_rule as upsert_road_tax_rule
 from app.storage.supabase import SupabaseStorage
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -244,7 +280,17 @@ async def upload_batch(
     user: User = Depends(current_user),
 ) -> dict:
     batch = await create_batch_from_uploads(db, settings, user.id, files, enhanced_reading)
-    return {"batch": serialize_batch(batch)}
+    from app.models.tables import Session as SessionModel
+    from app.services.session_service import serialize_session
+    sessions = [
+        serialize_session(s)
+        for s in db.scalars(
+            select(SessionModel).where(
+                SessionModel.uploaded_file_id.in_([f.id for f in batch.files if not f.deleted_at])
+            )
+        ).all()
+    ]
+    return {"batch": serialize_batch(batch), "sessions": sessions}
 
 
 @router.get("/batches/{batch_id}")
@@ -266,24 +312,21 @@ def draft_detail(draft_id: str, db: Session = Depends(get_db), user: User = Depe
 
 
 @router.patch("/drafts/{draft_id}")
-def draft_update(draft_id: str, payload: dict, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+def draft_update(draft_id: str, payload: DraftUpdateRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     draft = update_draft_fields(
         db,
         user,
         draft_id,
-        payload.get("fields", {}),
-        template_id=payload.get("template_id"),
-        selected_package=payload.get("selected_package"),
-        benefits_selected=payload.get("benefits_selected"),
-        add_ons_selected=payload.get("add_ons_selected"),
+        payload.fields,
+        template_id=payload.template_id,
     )
     return {"draft": serialize_draft(draft, db)}
 
 
 @router.post("/drafts/{draft_id}/generate")
-def draft_generate(draft_id: str, payload: dict | None = None, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
+def draft_generate(draft_id: str, payload: DraftGenerateRequest | None = None, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
     draft = get_accessible_draft(db, user, draft_id)
-    version = generate_pdf(db, settings, user, draft, acknowledge_check_needed=bool((payload or {}).get("acknowledge_check_needed")))
+    version = generate_pdf(db, settings, user, draft, acknowledge_check_needed=bool((payload or DraftGenerateRequest()).acknowledge_check_needed))
     return {
         "version": {
             "id": version.id,
@@ -294,19 +337,113 @@ def draft_generate(draft_id: str, payload: dict | None = None, db: Session = Dep
     }
 
 
+@router.post("/drafts/{draft_id}/preview-png")
+def draft_preview_png(draft_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> Response:
+    from app.rendering.template_renderer import render_quotation_html
+    from app.models.tables import OutputTemplateConfig
+    from app.services.template_config import normalize_template_config
+    from app.core.errors import AppError
+    import tempfile
+    from pathlib import Path
+
+    draft = get_accessible_draft(db, user, draft_id)
+    if not draft.uploaded_file or not draft.uploaded_file.template_id:
+        raise AppError("No template assigned.", 400)
+    template = db.get(OutputTemplateConfig, draft.uploaded_file.template_id)
+    if not template:
+        raise AppError("Template not found.", 404)
+    config = normalize_template_config(template.fixed_fields, template.name)
+    html = render_quotation_html(
+        draft.fields, template_name=template.name,
+        template_config=config,
+        insurer_name=(draft.fields.get("insurance_company") or {}).get("value"),
+    )
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch()
+            page = browser.new_page(viewport={"width": 794, "height": 1123})
+            page.set_content(html, wait_until="networkidle")
+            png = page.screenshot(type="png", full_page=False)
+            browser.close()
+        return Response(png, media_type="image/png")
+    except Exception as exc:
+        raise AppError(f"Preview generation failed: {exc.__class__.__name__}", 500) from exc
+
+
 @router.post("/drafts/generate-selected")
-def generate_selected(payload: dict, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
+def generate_selected(payload: GenerateSelectedRequest, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
     versions = []
-    for draft_id in payload.get("draft_ids", []):
+    for draft_id in payload.draft_ids:
         draft = get_accessible_draft(db, user, draft_id)
-        version = generate_pdf(db, settings, user, draft, acknowledge_check_needed=bool(payload.get("acknowledge_check_needed")))
+        version = generate_pdf(db, settings, user, draft, acknowledge_check_needed=payload.acknowledge_check_needed)
         versions.append({"id": version.id, "filename": version.filename, "download_url": f"/generated-versions/{version.id}/content?download=true"})
     return {"versions": versions}
 
 
+@router.get("/sessions")
+def sessions_list(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    sessions = list_sessions(db, user.id)
+    return {"sessions": [serialize_session(s) for s in sessions]}
+
+
+@router.get("/sessions/{session_id}")
+def session_detail(session_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    session = get_session(db, session_id)
+    return {"session": serialize_session(session)}
+
+
+@router.get("/client-records")
+def client_records_list(
+    search: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    sort_by: str = "created_at",
+    sort_dir: str = "desc",
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    records = list_records(db, search=search, date_from=date_from, date_to=date_to, sort_by=sort_by, sort_dir=sort_dir)
+    return {"records": [serialize_record(r) for r in records]}
+
+
+@router.get("/client-records/export")
+def client_records_export(
+    search: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    from fastapi.responses import Response as FastAPIResponse
+    csv_data = export_csv_bytes(db, search=search)
+    return FastAPIResponse(csv_data, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=client_records.csv"})
+
+
+@router.get("/client-records/{record_id}")
+def client_record_detail(record_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    return {"record": serialize_record(get_record(db, record_id))}
+
+
+@router.patch("/client-records/{record_id}")
+def client_record_update(record_id: str, payload: ClientRecordUpdateRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    record = update_record(db, record_id, payload.model_dump(exclude_none=True))
+    return {"record": serialize_record(record)}
+
+
 @router.get("/history")
 def history(status: str | None = None, search: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    return {"records": [serialize_file(file) for file in list_history(db, user, status, search)]}
+    from app.models.tables import Session as SessionModel
+    files = list_history(db, user, status, search)
+    file_ids = [f.id for f in files]
+    session_map = {}
+    if file_ids:
+        for s in db.scalars(select(SessionModel).where(SessionModel.uploaded_file_id.in_(file_ids))).all():
+            session_map[s.uploaded_file_id] = s.id
+    return {
+        "records": [
+            {**serialize_file(file), "session_id": session_map.get(file.id)}
+            for file in files
+        ]
+    }
 
 
 @router.delete("/records/{uploaded_file_id}")
@@ -316,8 +453,8 @@ def delete_record(uploaded_file_id: str, db: Session = Depends(get_db), settings
 
 
 @router.get("/trash")
-def trash(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    return {"records": [serialize_file(file) for file in list_trash(db, user)]}
+def trash(db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
+    return {"records": [serialize_file(file) for file in list_trash(db, user)], "retention_days": settings.trash_retention_days}
 
 
 @router.post("/trash/{uploaded_file_id}/restore")
@@ -327,8 +464,8 @@ def trash_restore(uploaded_file_id: str, db: Session = Depends(get_db), user: Us
 
 
 @router.post("/trash/purge-expired")
-def trash_purge(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    return {"purged": purge_expired_trash(db, user)}
+def trash_purge(db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
+    return {"purged": purge_expired_trash(db, user, SupabaseStorage(settings))}
 
 
 @router.get("/extractions/{uploaded_file_id}")
@@ -374,15 +511,23 @@ def admin_companies(db: Session = Depends(get_db), user: User = Depends(current_
 
 
 @router.post("/admin/companies")
-def admin_company_save(payload: dict, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    company = upsert_company(db, user, payload)
+def admin_company_save(payload: CompanySaveRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    company = upsert_company(db, user, payload.model_dump(exclude_none=True))
     return {"company": {"id": company.id, "name": company.name, "category": company.category, "status": company.status, "detection_phrases": company.detection_phrases}}
+
+
+@router.delete("/admin/companies/{company_id}")
+def admin_company_delete(company_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    from app.services.admin_service import delete_company
+    delete_company(db, user, company_id)
+    return {"deleted": True}
 
 
 @router.get("/admin/templates")
 def admin_templates(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
-    return {"templates": [serialize_template(item) for item in db.scalars(select(OutputTemplateConfig).order_by(OutputTemplateConfig.name)).all()]}
+    return {"templates": [serialize_template(item, db) for item in db.scalars(select(OutputTemplateConfig).order_by(OutputTemplateConfig.name)).all()]}
 
 
 @router.get("/admin/template-assets")
@@ -427,25 +572,25 @@ def admin_template_detail(template_id: str, db: Session = Depends(get_db), user:
     template = db.get(OutputTemplateConfig, template_id)
     if not template:
         raise AppError("Template not found.", 404)
-    return {"template": serialize_template(template)}
+    return {"template": serialize_template(template, db)}
 
 
 @router.post("/admin/templates/{template_id}/copy")
 def admin_template_copy(template_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     template = copy_template(db, user, template_id)
-    return {"template": serialize_template(template)}
+    return {"template": serialize_template(template, db)}
 
 
 @router.patch("/admin/templates/{template_id}")
-def admin_template_update(template_id: str, payload: dict, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    template = update_template(db, user, template_id, payload)
+def admin_template_update(template_id: str, payload: TemplateUpdateRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    template = update_template(db, user, template_id, payload.model_dump(exclude_none=True))
     return {"template": serialize_template(template)}
 
 
 @router.post("/admin/templates")
-def admin_template_save(payload: dict, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    template = upsert_template(db, user, payload)
-    return {"template": serialize_template(template)}
+def admin_template_save(payload: TemplateSaveRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    template = upsert_template(db, user, payload.model_dump(exclude_none=True))
+    return {"template": serialize_template(template, db)}
 
 
 @router.get("/template-assets/{asset_id}")
@@ -466,16 +611,43 @@ def template_asset_file(
     return Response(resolved, media_type=mime)
 
 
-@router.get("/admin/benefits")
-def admin_benefits(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+@router.get("/admin/our-specials")
+def admin_our_specials(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
-    return {"benefits": [{"id": item.id, "label": item.label, "section": item.section, "default_selected": item.default_selected, "status": item.status} for item in db.scalars(select(BenefitOption)).all()]}
+    return {
+        "our_specials": [
+            serialize_special(item)
+            for item in db.scalars(select(OurSpecial).options(selectinload(OurSpecial.variants))).all()
+        ]
+    }
 
 
-@router.post("/admin/benefits")
-def admin_benefit_save(payload: dict, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    benefit = upsert_benefit(db, user, payload)
-    return {"benefit": {"id": benefit.id, "label": benefit.label, "section": benefit.section, "status": benefit.status}}
+@router.post("/admin/our-specials")
+def admin_our_special_save(payload: OurSpecialSaveRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    special = upsert_special(db, user, payload.model_dump(exclude_none=True))
+    return {"our_special": serialize_special(special)}
+
+
+@router.delete("/admin/our-specials/{special_id}")
+def admin_our_special_delete(special_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    from app.services.admin_service import delete_special as _delete_special
+    _delete_special(db, user, special_id)
+    return {"deleted": True}
+
+
+@router.post("/admin/our-special-variants")
+def admin_our_special_variant_save(payload: OurSpecialVariantSaveRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    variant = upsert_variant(db, user, payload.model_dump(exclude_none=True))
+    return {"variant": {"id": variant.id, "special_id": variant.special_id, "label": variant.label, "secondary_label": variant.secondary_label, "value_text": variant.value_text, "icon_asset_id": variant.icon_asset_id, "shape": variant.shape, "bg_color": variant.bg_color, "text_color": variant.text_color, "border_width": variant.border_width, "border_color": variant.border_color, "shadow": variant.shadow, "status": variant.status}}
+
+
+@router.delete("/admin/our-special-variants/{variant_id}")
+def admin_our_special_variant_delete(variant_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    from app.services.admin_service import delete_variant as _delete_variant
+    _delete_variant(db, user, variant_id)
+    return {"deleted": True}
 
 
 @router.get("/admin/dictionaries")
@@ -489,27 +661,146 @@ def admin_dictionaries(db: Session = Depends(get_db), user: User = Depends(curre
 
 
 @router.post("/admin/dictionaries/field-aliases")
-def admin_field_alias_save(payload: dict, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    item = upsert_field_alias(db, user, payload)
+def admin_field_alias_save(payload: FieldAliasSaveRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    item = upsert_field_alias(db, user, payload.model_dump(exclude_none=True))
     return {"field_alias": {"id": item.id, "field_name": item.field_name, "aliases": item.aliases}}
 
 
+@router.delete("/admin/dictionaries/field-aliases/{field_name}")
+def admin_field_alias_delete(field_name: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    delete_field_alias(db, user, field_name)
+    return {"deleted": True}
+
+
+@router.get("/admin/dictionaries/field-aliases/export")
+def admin_field_alias_export(db: Session = Depends(get_db), user: User = Depends(current_user)) -> Response:
+    import csv, io
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    items = db.scalars(select(FieldAlias)).all()
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["accepted_variant", "canonical_field"])
+    for item in items:
+        for alias in item.aliases:
+            writer.writerow([alias, item.field_name])
+    data = buf.getvalue().encode("utf-8-sig")
+    return Response(data, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=field_aliases.csv"})
+
+
+@router.post("/admin/dictionaries/field-aliases/import")
+async def admin_field_alias_import(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    import csv, io
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    data = await file.read()
+    content = data.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(content))
+    created = 0
+    updated = 0
+    errors: list[str] = []
+    for row in reader:
+        variant = (row.get("accepted_variant") or "").strip()
+        field_name = (row.get("canonical_field") or "").strip()
+        if not variant or not field_name:
+            errors.append(f"Missing values in row: {row}")
+            continue
+        try:
+            existing = db.scalar(select(FieldAlias).where(FieldAlias.field_name == field_name))
+            if existing:
+                if variant not in existing.aliases:
+                    existing.aliases = [*existing.aliases, variant]
+                    updated += 1
+            else:
+                db.add(FieldAlias(field_name=field_name, aliases=[variant]))
+                created += 1
+        except (SQLAlchemyError, ValueError, TypeError) as exc:
+            logger.warning("Field-alias import row failed for %s/%s: %s", field_name, variant, exc)
+            errors.append(f"{field_name}/{variant}: {exc}")
+    db.commit()
+    return {"created": created, "updated": updated, "errors": errors}
+
+
 @router.post("/admin/dictionaries/vehicle-brands")
-def admin_vehicle_brand_save(payload: dict, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    item = upsert_vehicle_brand(db, user, payload)
+def admin_vehicle_brand_save(payload: VehicleBrandSaveRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    item = upsert_vehicle_brand(db, user, payload.model_dump(exclude_none=True))
     return {"vehicle_brand": {"id": item.id, "name": item.name, "aliases": item.aliases}}
 
 
 @router.post("/admin/dictionaries/vehicle-models")
-def admin_vehicle_model_save(payload: dict, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    item = upsert_vehicle_model(db, user, payload)
+def admin_vehicle_model_save(payload: VehicleModelSaveRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    item = upsert_vehicle_model(db, user, payload.model_dump(exclude_none=True))
     return {"vehicle_model": {"id": item.id, "name": item.name, "aliases": item.aliases}}
 
 
+@router.delete("/admin/dictionaries/vehicle-brands/{brand_id}")
+def admin_vehicle_brand_delete(brand_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    delete_vehicle_brand(db, user, brand_id)
+    return {"deleted": True}
+
+
+@router.delete("/admin/dictionaries/vehicle-models/{model_id}")
+def admin_vehicle_model_delete(model_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    delete_vehicle_model(db, user, model_id)
+    return {"deleted": True}
+
+
+@router.get("/admin/dictionaries/vehicles/export")
+def admin_vehicles_export(db: Session = Depends(get_db), user: User = Depends(current_user)) -> Response:
+    import csv, io
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["type", "name", "brand", "aliases"])
+    for b in db.scalars(select(VehicleBrand)).all():
+        writer.writerow(["brand", b.name, "", ", ".join(b.aliases)])
+    for m in db.scalars(select(VehicleModel)).all():
+        brand = db.get(VehicleBrand, m.brand_id) if m.brand_id else None
+        brand_name = brand.name if brand else ""
+        writer.writerow(["model", m.name, brand_name, ", ".join(m.aliases)])
+    return Response(buf.getvalue().encode("utf-8-sig"), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=vehicles.csv"})
+
+
 @router.post("/admin/extraction-settings")
-def admin_extraction_settings_save(payload: dict, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    setting = save_strategy_settings(db, user, payload)
+def admin_extraction_settings_save(payload: ExtractionSettingsRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    setting = save_strategy_settings(db, user, payload.model_dump())
     return {"setting": {"key": setting.key, "value": setting.value}}
+
+
+@router.get("/admin/road-tax-rules")
+def road_tax_rules_list(vehicle_type: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    return {"rules": [serialize_rule(r) for r in list_rules(db, vehicle_type=vehicle_type)]}
+
+
+@router.post("/admin/road-tax-rules")
+def road_tax_rule_save(payload: RoadTaxRuleSaveRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    rule = upsert_road_tax_rule(db, payload.model_dump(exclude_none=True))
+    return {"rule": serialize_rule(rule)}
+
+
+@router.delete("/admin/road-tax-rules/{rule_id}")
+def road_tax_rule_delete(rule_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    delete_road_tax_rule(db, rule_id)
+    return {"deleted": True}
+
+
+@router.get("/settings/limits")
+def settings_limits(
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    return {
+        "max_upload_files": settings.max_upload_files,
+        "max_upload_bytes": settings.max_upload_bytes,
+    }
 
 
 @router.get("/admin/storage")

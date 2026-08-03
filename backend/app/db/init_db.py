@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -12,7 +12,6 @@ from app.models.enums import AccountStatus, InsuranceType, Role
 from app.models.tables import (
     AppSetting,
     Base,
-    BenefitOption,
     FieldAlias,
     InsuranceCategory,
     InsuranceCompany,
@@ -26,18 +25,7 @@ from app.services.auth_service import ensure_super_admin
 
 
 DEFAULT_COMPANIES = [
-    ("AmGen", "Amgen / AmAssurance / Kurnia-style", ["amgen", "amgeneral"]),
-    ("AmAssurance", "Amgen / AmAssurance / Kurnia-style", ["amassurance", "am assurance"]),
-    ("Kurnia", "Amgen / AmAssurance / Kurnia-style", ["kurnia insurans", "kurnia"]),
-    ("QBE-DPP", "QBE-DPP", ["qbe", "driver passenger protection", "dpp"]),
     ("QBE", "QBE", ["qbe"]),
-    ("STMB", "STMB", ["sumbangan tenaga", "stmb"]),
-    ("Liberty", "Liberty", ["liberty insurance", "liberty general"]),
-    ("Etiqa Takaful", "Etiqa Takaful", ["etiqa", "etiqa takaful"]),
-    ("AIG", "AIG", ["aig malaysia", "aig"]),
-    ("Lonpac", "Other / Unknown", ["lonpac"]),
-    ("MMIP", "MMIP", ["mmip", "malaysia motor insurance pool"]),
-    ("Other / Unknown", "Other / Unknown", ["motor quotation", "insurance quotation"]),
 ]
 
 DEFAULT_FIELD_ALIASES = {
@@ -101,6 +89,15 @@ def seed_defaults(db: Session, settings: Settings) -> None:
             )
             db.add(company)
             db.flush()
+    # Purge old companies/templates: clear ALL FK references with raw SQL first
+    default_names = [name for name, _, _ in DEFAULT_COMPANIES]
+    db.execute(text("UPDATE output_template_configs SET insurance_company_id = NULL"))
+    db.execute(text("UPDATE uploaded_files SET template_id = NULL, insurance_company_id = NULL"))
+    db.execute(text("UPDATE benefit_options SET insurance_company_id = NULL, template_id = NULL"))
+    db.flush()
+    for c in db.scalars(select(InsuranceCompany).where(InsuranceCompany.name.notin_(default_names))).all():
+        db.delete(c)
+    db.flush()
 
     default_template = db.scalar(select(OutputTemplateConfig).where(OutputTemplateConfig.name == "Risklocker Motor Template"))
     if not default_template:
@@ -116,21 +113,8 @@ def seed_defaults(db: Session, settings: Settings) -> None:
     default_template.fixed_fields = default_template_config("Motor", locked=True)
     default_template.static_notes = "Generated from reviewed Risklocker draft data."
 
-    old_template_names = [
-        "Risklocker Amgen / AmAssurance / Kurnia-style Motor",
-        "Risklocker QBE-DPP Motor",
-        "Risklocker QBE Motor",
-        "Risklocker STMB Motor",
-        "Risklocker Liberty Motor",
-        "Risklocker Etiqa Takaful Motor",
-        "Risklocker AIG Motor",
-        "Risklocker MMIP Motor",
-        "Risklocker Other / Unknown Motor",
-        "Risklocker Generic Motor",
-    ]
-    for template in db.scalars(select(OutputTemplateConfig).where(OutputTemplateConfig.name.in_(old_template_names))).all():
-        if template.name != "Risklocker Motor Template":
-            template.status = AccountStatus.INACTIVE.value
+    for template in db.scalars(select(OutputTemplateConfig).where(OutputTemplateConfig.name != "Risklocker Motor Template")).all():
+        db.delete(template)
 
     for field, aliases in DEFAULT_FIELD_ALIASES.items():
         if not db.scalar(select(FieldAlias).where(FieldAlias.field_name == field)):
@@ -148,10 +132,6 @@ def seed_defaults(db: Session, settings: Settings) -> None:
     for brand, model, aliases in DEFAULT_MODELS:
         if not db.scalar(select(VehicleModel).where(VehicleModel.name == model)):
             db.add(VehicleModel(brand_id=brand_by_name.get(brand).id if brand_by_name.get(brand) else None, name=model, aliases=aliases))
-
-    for label in ["Windscreen", "Towing", "All Drivers", "Flood", "Special Perils"]:
-        if not db.scalar(select(BenefitOption).where(BenefitOption.label == label)):
-            db.add(BenefitOption(label=label, section="Motor Benefits", default_selected=False))
 
     if not db.get(AppSetting, "extraction_strategies"):
         db.add(

@@ -23,6 +23,7 @@ class Settings:
     supabase_storage_bucket: str
     pdf_retention_days: int
     require_malware_scanner: bool
+    max_upload_files: int
     max_upload_bytes: int
     auth_hash_secret: str
     session_idle_hours: int
@@ -108,12 +109,15 @@ def get_settings() -> Settings:
     storage_driver, supabase_url, service_key, storage_bucket = _storage_settings()
     origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
     retention_days = _int("PDF_RETENTION_DAYS", 30)
+    max_upload_files = _int("MAX_UPLOAD_FILES", 50)
     max_upload_bytes = _int("MAX_UPLOAD_BYTES", 1024 * 1024)
     session_idle_hours = _int("SESSION_IDLE_HOURS", 8)
     session_max_days = _int("SESSION_MAX_DAYS", 30)
     session_cookie_secure = _bool("SESSION_COOKIE_SECURE", app_env == "production")
     if retention_days < 1 or retention_days > 365:
         raise RuntimeError("PDF_RETENTION_DAYS must be between 1 and 365.")
+    if max_upload_files < 1 or max_upload_files > 100:
+        raise RuntimeError("MAX_UPLOAD_FILES must be between 1 and 100.")
     if max_upload_bytes < 1024 or max_upload_bytes > 10 * 1024 * 1024:
         raise RuntimeError("MAX_UPLOAD_BYTES must be between 1KB and 10MB.")
     if session_idle_hours != 8 or session_max_days != 30:
@@ -131,6 +135,7 @@ def get_settings() -> Settings:
         supabase_storage_bucket=storage_bucket,
         pdf_retention_days=retention_days,
         require_malware_scanner=_bool("REQUIRE_MALWARE_SCANNER", app_env == "production"),
+        max_upload_files=max_upload_files,
         max_upload_bytes=max_upload_bytes,
         auth_hash_secret=_auth_hash_secret(app_env),
         session_idle_hours=session_idle_hours,

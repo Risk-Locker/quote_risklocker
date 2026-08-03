@@ -13,7 +13,6 @@ DRAFT_FIELDS = [
     "insurance_type",
     "insurance_company",
     "source_template_category",
-    "selected_package",
     "product_name",
     "customer_name",
     "issue_date",
@@ -565,10 +564,18 @@ def _add_company_detection(source_filename: str, text: str, page_text: list[dict
             break
 
 
-def find_candidates(raw_text: str, page_text: list[dict], words: list[dict] | None = None, aliases: dict[str, list[str]] | None = None, source_filename: str = "") -> dict[str, list[CandidateValue]]:
+def find_candidates(raw_text: str, page_text: list[dict], words: list[dict] | None = None, aliases: dict[str, list[str]] | None = None, source_filename: str = "", db_brands: list[str] | None = None, db_models: list[str] | None = None) -> dict[str, list[CandidateValue]]:
+    global BRANDS, MODELS
     text = raw_text or ""
     active_aliases = {**DEFAULT_ALIASES, **(aliases or {})}
     results: dict[str, list[CandidateValue]] = defaultdict(list)
+
+    if db_brands:
+        BRANDS = list(dict.fromkeys(db_brands + list(BRANDS)))
+    if db_models:
+        extra = [" ".join(m.upper().split()) for m in db_models if m]
+        seen = set(MODELS)
+        MODELS = [m for m in extra if m not in seen] + list(MODELS)
 
     _add_company_detection(source_filename, text, page_text, results)
     _add_amgen_profile(text, page_text, results)

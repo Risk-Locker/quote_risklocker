@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Lock, Mail, ShieldCheck } from "lucide-react";
+import { Lock, Envelope, ShieldCheck } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,9 +17,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (user) {
-      router.replace("/upload");
-    }
+    if (user) router.replace("/upload");
   }, [user, router]);
 
   async function submit(event: React.FormEvent) {
@@ -25,10 +25,7 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
     try {
-      await api("/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ email, password }),
-      });
+      await api("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
       router.replace("/upload");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not sign in.");
@@ -39,75 +36,88 @@ export default function LoginPage() {
 
   if (authLoading || user) {
     return (
-      <main className="grid min-h-screen place-items-center bg-rl-soft px-5 py-10">
-        <p className="text-sm text-rl-text">Checking session…</p>
+      <main className="grid min-h-screen place-items-center bg-[var(--rl-bg)] px-5">
+        <p className="text-sm text-[var(--rl-text-muted)]">Checking session…</p>
       </main>
     );
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-rl-soft px-5 py-10">
-      <section className="w-full max-w-md" aria-labelledby="login-title">
-        <div className="mb-5 flex items-center gap-3 px-1">
-          <div className="grid size-11 place-items-center rounded-md bg-rl-black text-white" aria-hidden="true">
-            <ShieldCheck size={24} />
-          </div>
-          <div>
-            <p className="text-sm font-bold uppercase tracking-wide text-rl-red">Risklocker</p>
-            <h1 id="login-title" className="text-2xl font-bold text-rl-textStrong">Quotation Converter</h1>
-          </div>
+    <main className="grid min-h-screen place-items-center bg-[var(--rl-bg)] px-5 py-10">
+      <div className="w-full max-w-[400px]">
+        <div className="mb-8 text-center">
+          <img
+            src="/assets/brand/logo-black.png"
+            alt="Risklocker"
+            className="mx-auto h-10 w-auto"
+          />
+          <h1 className="mt-4 text-[24px] font-bold text-[var(--rl-text-strong)] font-[var(--font-manrope)]">
+            Quotation System
+          </h1>
+          <p className="mt-1 text-[14px] text-[var(--rl-text-muted)]">Sign in to your account</p>
         </div>
 
-        <form className="rl-panel p-6 shadow-sm" onSubmit={submit}>
-          <div>
-            <h2 className="text-xl font-bold text-rl-textStrong">Sign in</h2>
-            <p className="mt-1 text-sm">Enter your account email and password.</p>
-          </div>
-
-          <div className="mt-6 grid gap-4">
-            <label className="grid gap-2 font-bold text-rl-textStrong">
-              Email
-              <span className="relative">
-                <Mail className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-rl-text" aria-hidden="true" size={18} />
-                <input
-                  className="rl-input pl-10"
+        <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-6 shadow-card">
+          <form onSubmit={submit} className="grid gap-5">
+            <label className="grid gap-1.5">
+              <span className="text-[13px] font-semibold text-[var(--rl-text-strong)]">Email</span>
+              <div className="relative">
+                <Envelope
+                  aria-hidden="true"
+                  size={16}
+                  weight="regular"
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--rl-text-muted)]"
+                />
+                <Input
                   type="email"
                   autoComplete="email"
                   value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  aria-invalid={Boolean(error)}
+                  onChange={(e) => setEmail(e.target.value)}
+                  error={!!error}
                   required
                   autoFocus
+                  className="pl-9"
                 />
-              </span>
+              </div>
             </label>
 
-            <label className="grid gap-2 font-bold text-rl-textStrong">
-              Password
-              <span className="relative">
-                <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-rl-text" aria-hidden="true" size={18} />
-                <input
-                  className="rl-input pl-10"
+            <label className="grid gap-1.5">
+              <span className="text-[13px] font-semibold text-[var(--rl-text-strong)]">Password</span>
+              <div className="relative">
+                <Lock
+                  aria-hidden="true"
+                  size={16}
+                  weight="regular"
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--rl-text-muted)]"
+                />
+                <Input
                   type="password"
                   autoComplete="current-password"
                   value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  aria-invalid={Boolean(error)}
+                  onChange={(e) => setPassword(e.target.value)}
+                  error={!!error}
                   required
+                  className="pl-9"
                 />
-              </span>
+              </div>
             </label>
 
-            {error ? <p role="alert" className="rounded-md border border-rl-red bg-red-50 p-3 font-bold text-rl-red">{error}</p> : null}
+            {error ? (
+              <div className="flex items-center gap-2 rounded-[var(--rl-radius-sm)] bg-[var(--rl-red-light)] px-3 py-2.5 text-[13px] font-semibold text-[var(--rl-red)]">
+                <ShieldCheck aria-hidden="true" size={16} weight="fill" />
+                {error}
+              </div>
+            ) : null}
 
-            <button className="rl-button w-full" disabled={loading} type="submit">
-              <Lock aria-hidden="true" size={18} />
-              {loading ? "Signing in" : "Sign in"}
-            </button>
-          </div>
-        </form>
-        <p className="mt-4 px-2 text-center text-sm">Private staff access. There is no public registration.</p>
-      </section>
+            <Button type="submit" loading={loading} size="md" className="w-full">
+              Sign in
+            </Button>
+          </form>
+        </div>
+        <p className="mt-5 text-center text-[13px] text-[var(--rl-text-muted)]">
+          Private staff access. There is no public registration.
+        </p>
+      </div>
     </main>
   );
 }

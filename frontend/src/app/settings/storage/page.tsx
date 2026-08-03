@@ -1,10 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Archive, Cloud, RefreshCw } from "lucide-react";
+import { Cloud, Archive, ArrowsClockwise, HardDrives } from "@phosphor-icons/react";
 import { SettingsNav } from "@/components/settings-nav";
 import { AppShell } from "@/components/app-shell";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/errors";
 
 type StorageStatus = {
   supabase: {
@@ -28,8 +33,8 @@ function formatBytes(value: number) {
 
 export default function SettingsStoragePage() {
   const [status, setStatus] = useState<StorageStatus | null>(null);
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const { toast } = useToast();
 
   async function load() {
     setError("");
@@ -42,15 +47,20 @@ export default function SettingsStoragePage() {
 
   async function purge() {
     setError("");
-    const result = await api<{ deleted: number }>("/admin/storage/purge-expired", { method: "POST" });
-    setMessage(`${result.deleted} expired PDF${result.deleted === 1 ? "" : "s"} removed.`);
-    await load();
+    try {
+      const result = await api<{ deleted: number }>("/admin/storage/purge-expired", { method: "POST" });
+      toast(`${result.deleted} expired PDF${result.deleted === 1 ? "" : "s"} removed.`, "success");
+      await load();
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    }
   }
 
   async function connectMicrosoft() {
     setError("");
     try {
       await api("/admin/storage/microsoft/connect", { method: "POST" });
+      toast("Microsoft 365 connection initiated.", "success");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Microsoft 365 connection could not be started.");
     }
@@ -58,50 +68,65 @@ export default function SettingsStoragePage() {
 
   return (
     <AppShell>
-      <section className="grid gap-5">
+      <section className="grid gap-6">
         <div>
-          <h1 className="text-3xl font-bold text-rl-textStrong">Storage</h1>
-          <p className="mt-2">Private PDF storage, retention, and permanent archive status.</p>
+          <h1 className="text-[30px] font-bold text-[var(--rl-text-strong)] font-[var(--font-manrope)]">Storage</h1>
+          <p className="text-[14px] text-[var(--rl-text-muted)]">Private PDF storage, retention, and permanent archive status.</p>
         </div>
         <SettingsNav />
-        {error ? <p className="rounded-md border border-rl-red bg-red-50 p-3 font-bold text-rl-red">{error}</p> : null}
-        {message ? <p className="rounded-md border border-rl-success bg-green-50 p-3 font-bold text-rl-success">{message}</p> : null}
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <section className="rl-panel p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <Cloud aria-hidden="true" size={22} />
-                <h2 className="text-xl font-bold text-rl-textStrong">Supabase Storage</h2>
-              </div>
-              <strong>{status?.supabase.status || "Checking"}</strong>
-            </div>
-            <dl className="mt-5 grid grid-cols-[1fr_auto] gap-x-4 gap-y-3 text-sm">
-              <dt>Private bucket</dt><dd className="font-bold text-rl-textStrong">{status?.supabase.bucket || "-"}</dd>
-              <dt>Rolling retention</dt><dd className="font-bold text-rl-textStrong">{status?.supabase.retention_days ?? 30} days</dd>
-              <dt>Tracked source PDFs</dt><dd className="font-bold text-rl-textStrong">{formatBytes(status?.supabase.tracked_source_bytes || 0)}</dd>
-            </dl>
-            <p className="mt-4 text-sm">{status?.supabase.message}</p>
-            <button className="rl-button rl-button-secondary mt-5" type="button" onClick={purge}>
-              <RefreshCw aria-hidden="true" size={18} />
-              Purge expired PDFs
-            </button>
-          </section>
+        {error ? (
+          <div className="rounded-[var(--rl-radius-sm)] bg-[var(--rl-red-light)] px-3 py-2.5 text-[13px] font-semibold text-[var(--rl-red)]">{error}</div>
+        ) : null}
 
-          <section className="rl-panel p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <Archive aria-hidden="true" size={22} />
-                <h2 className="text-xl font-bold text-rl-textStrong">Microsoft 365 Archive</h2>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card>
+            <div className="p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <Cloud size={22} weight="bold" className="text-[var(--rl-text-strong)]" />
+                  <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">Supabase Storage</h2>
+                </div>
+                <Badge variant={status?.supabase.status === "ok" ? "success" : "warning"}>
+                  {status?.supabase.status || "Checking"}
+                </Badge>
               </div>
-              <strong>{status?.microsoft.status || "Not Connected"}</strong>
+              <dl className="mt-5 grid grid-cols-[1fr_auto] gap-x-4 gap-y-3 text-[14px]">
+                <dt className="text-[var(--rl-text-muted)]">Private bucket</dt>
+                <dd className="font-bold text-[var(--rl-text-strong)]">{status?.supabase.bucket || "-"}</dd>
+                <dt className="text-[var(--rl-text-muted)]">Rolling retention</dt>
+                <dd className="font-bold text-[var(--rl-text-strong)]">{status?.supabase.retention_days ?? "-"} days</dd>
+                <dt className="text-[var(--rl-text-muted)]">Tracked source PDFs</dt>
+                <dd className="font-bold text-[var(--rl-text-strong)]">{formatBytes(status?.supabase.tracked_source_bytes || 0)}</dd>
+              </dl>
+              <p className="mt-4 text-[14px] text-[var(--rl-text-muted)]">{status?.supabase.message}</p>
+              <div className="mt-5">
+                <Button variant="secondary" icon={<ArrowsClockwise size={16} weight="bold" />} onClick={purge}>
+                  Purge expired PDFs
+                </Button>
+              </div>
             </div>
-            <p className="mt-5 text-sm">{status?.microsoft.message}</p>
-            <button className="rl-button mt-5" type="button" onClick={connectMicrosoft}>
-              <Archive aria-hidden="true" size={18} />
-              Connect Microsoft 365
-            </button>
-          </section>
+          </Card>
+
+          <Card>
+            <div className="p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <Archive size={22} weight="bold" className="text-[var(--rl-text-strong)]" />
+                  <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">Microsoft 365 Archive</h2>
+                </div>
+                <Badge variant={status?.microsoft.status === "Connected" ? "success" : "default"}>
+                  {status?.microsoft.status || "Not Connected"}
+                </Badge>
+              </div>
+              <p className="mt-5 text-[14px] text-[var(--rl-text-muted)]">{status?.microsoft.message}</p>
+              <div className="mt-5">
+                <Button icon={<Archive size={16} weight="bold" />} onClick={connectMicrosoft}>
+                  Connect Microsoft 365
+                </Button>
+              </div>
+            </div>
+          </Card>
         </div>
       </section>
     </AppShell>

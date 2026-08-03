@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -110,16 +110,35 @@ class OutputTemplateConfig(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(50), nullable=False, default=AccountStatus.ACTIVE.value)
 
 
-class BenefitOption(Base, TimestampMixin):
-    __tablename__ = "benefit_options"
+class OurSpecial(Base, TimestampMixin):
+    __tablename__ = "our_specials"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
-    insurance_company_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_companies.id"), nullable=True)
-    template_id: Mapped[str | None] = mapped_column(ForeignKey("output_template_configs.id"), nullable=True)
     label: Mapped[str] = mapped_column(String(255), nullable=False)
-    section: Mapped[str] = mapped_column(String(120), nullable=False, default="Benefits")
-    default_selected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    category: Mapped[str] = mapped_column(String(10), nullable=False, default="FOC")
     status: Mapped[str] = mapped_column(String(50), nullable=False, default=AccountStatus.ACTIVE.value)
+
+    variants: Mapped[list["OurSpecialVariant"]] = relationship(back_populates="special", cascade="all, delete-orphan")
+
+
+class OurSpecialVariant(Base, TimestampMixin):
+    __tablename__ = "our_special_variants"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    special_id: Mapped[str] = mapped_column(ForeignKey("our_specials.id", ondelete="CASCADE"), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    secondary_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    value_text: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    icon_asset_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    shape: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    bg_color: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    text_color: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    border_width: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    border_color: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    shadow: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default=AccountStatus.ACTIVE.value)
+
+    special: Mapped[OurSpecial] = relationship(back_populates="variants")
 
 
 class FieldAlias(Base, TimestampMixin):
@@ -161,6 +180,82 @@ class Batch(Base, TimestampMixin, SoftDeleteMixin):
 
     owner: Mapped[User] = relationship(back_populates="batches")
     files: Mapped[list["UploadedFile"]] = relationship(back_populates="batch", cascade="all, delete-orphan")
+
+
+class Session(Base, TimestampMixin):
+    __tablename__ = "sessions"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    uploaded_file_id: Mapped[str] = mapped_column(ForeignKey("uploaded_files.id"), nullable=False, unique=True)
+    draft_id: Mapped[str] = mapped_column(ForeignKey("quotation_drafts.id"), nullable=False, unique=True)
+    insurance_type: Mapped[str] = mapped_column(String(100), nullable=False, default=InsuranceType.MOTOR.value)
+    detected_company: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default=AccountStatus.ACTIVE.value)
+
+    owner: Mapped[User] = relationship()
+    uploaded_file: Mapped[UploadedFile] = relationship()
+    draft: Mapped[QuotationDraft] = relationship()
+
+
+class ClientRecord(Base, TimestampMixin):
+    __tablename__ = "client_records"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    insurer_no: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    session_id: Mapped[str | None] = mapped_column(ForeignKey("sessions.id"), nullable=True)
+    draft_id: Mapped[str | None] = mapped_column(ForeignKey("quotation_drafts.id"), nullable=True)
+    uploaded_file_id: Mapped[str | None] = mapped_column(ForeignKey("uploaded_files.id"), nullable=True)
+    insurance_company: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    vehicle_no: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    customer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    coverage_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    cover_period: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    car_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ncd_percent: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    ncd: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    coverage_amount: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    premium: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    roadtax: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    service_fee: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    total_premium: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    issue_date: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    valid_until: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    vehicle_year: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    capacity: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    engine_no: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    chassis_no: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    market_value: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    agreed_value: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    excess_amount: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    basic_premium: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    ncd_amount: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    service_tax: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    stamp_duty: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    gross_premium: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    optional_covers: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_values: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    extracted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class RoadTaxRule(Base, TimestampMixin):
+    __tablename__ = "road_tax_rules"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    vehicle_type: Mapped[str] = mapped_column(String(50), nullable=False, default="Car")
+    owner_type: Mapped[str] = mapped_column(String(50), nullable=False, default="Individual")
+    jurisdiction: Mapped[str] = mapped_column(String(100), nullable=False, default="West Malaysia")
+    min_cc: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_cc: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    base_rate: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    formula: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False, default=date.today)
+    effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=AccountStatus.ACTIVE.value)
 
 
 class DocumentGroup(Base, TimestampMixin, SoftDeleteMixin):

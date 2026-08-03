@@ -1,9 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Mail, MailOpen, Shield, UserCheck } from "lucide-react";
+import { Bell, ShieldCheck, UserCheck, EnvelopeOpen } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/errors";
+import { useToast } from "@/components/ui/toast";
 
 type NotificationItem = {
   id: string;
@@ -15,15 +20,15 @@ type NotificationItem = {
   created_at: string;
 };
 
-const EVENT_ICONS: Record<string, typeof Mail> = {
-  invitation: Mail,
-  role_change: Shield,
+const EVENT_ICONS: Record<string, typeof Bell> = {
+  invitation: Bell,
+  role_change: ShieldCheck,
   status_change: UserCheck,
 };
 
 function iconFor(event_type: string) {
-  const Icon = EVENT_ICONS[event_type] || Mail;
-  return <Icon aria-hidden="true" size={18} />;
+  const Icon = EVENT_ICONS[event_type] || Bell;
+  return <Icon size={18} weight="bold" />;
 }
 
 export default function InboxPage() {
@@ -32,6 +37,7 @@ export default function InboxPage() {
   const [error, setError] = useState("");
   const [markingAll, setMarkingAll] = useState(false);
   const [marking, setMarking] = useState<Set<string>>(new Set());
+  const { toast } = useToast();
 
   async function load() {
     setLoading(true);
@@ -48,11 +54,15 @@ export default function InboxPage() {
 
   async function markOneRead(id: string) {
     setMarking((prev) => new Set(prev).add(id));
+    setError("");
     try {
       await api(`/notifications/${id}/read`, { method: "PATCH" });
       setNotifications((prev) =>
         prev.map((n) => (n.id === id ? { ...n, read_at: new Date().toISOString() } : n)),
       );
+      toast("Marked as read.", "success");
+    } catch (err) {
+      setError(apiErrorMessage(err));
     } finally {
       setMarking((prev) => {
         const next = new Set(prev);
@@ -64,12 +74,17 @@ export default function InboxPage() {
 
   async function markAllRead() {
     setMarkingAll(true);
+    setError("");
     try {
       await api("/notifications/read", { method: "PATCH" });
       const now = new Date().toISOString();
       setNotifications((prev) =>
         prev.map((n) => (n.read_at ? n : { ...n, read_at: now })),
       );
+      const unreadCount = notifications.filter((n) => !n.read_at).length;
+      toast(`${unreadCount} notification${unreadCount !== 1 ? "s" : ""} marked as read.`, "success");
+    } catch (err) {
+      setError(apiErrorMessage(err));
     } finally {
       setMarkingAll(false);
     }
@@ -83,89 +98,84 @@ export default function InboxPage() {
 
   return (
     <AppShell>
-      <section className="grid gap-5">
+      <section className="grid gap-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-rl-textStrong">Inbox</h1>
-            <p className="mt-2">Account notifications, invitations, and role updates.</p>
+            <h1 className="text-[30px] font-bold text-[var(--rl-text-strong)] font-[var(--font-manrope)]">Inbox</h1>
+            <p className="mt-2 text-[14px] text-[var(--rl-text-muted)]">Account notifications, invitations, and role updates.</p>
           </div>
           {unreadCount > 0 && (
-            <button
-              className="rl-button rl-button-secondary"
-              type="button"
+            <Button
+              variant="secondary"
+              loading={markingAll}
+              icon={<EnvelopeOpen aria-hidden="true" size={18} weight="bold" />}
               onClick={markAllRead}
-              disabled={markingAll}
             >
-              <Check aria-hidden="true" size={18} />
-              {markingAll ? "Marking read..." : "Mark all read"}
-            </button>
+              Mark all read
+            </Button>
           )}
         </div>
 
         {error ? (
-          <p role="alert" className="rounded-md border border-rl-red bg-red-50 p-3 font-bold text-rl-red">
+          <div className="rounded-[var(--rl-radius-sm)] bg-[var(--rl-red-light)] px-3 py-2.5 text-[13px] font-semibold text-[var(--rl-red)]">
             {error}
-          </p>
+          </div>
         ) : null}
 
         {loading ? (
-          <p className="font-bold text-rl-textStrong">Loading notifications...</p>
+          <p className="text-[14px] font-semibold text-[var(--rl-text-strong)]">Loading notifications...</p>
         ) : notifications.length === 0 ? (
-          <div className="rl-panel p-8 text-center">
-            <p className="font-bold text-rl-textStrong">No notifications yet.</p>
-            <p className="mt-1">Invitations and account updates will appear here.</p>
+          <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-10 text-center">
+            <p className="font-semibold text-[var(--rl-text-strong)]">No notifications yet.</p>
+            <p className="mt-1 text-[14px] text-[var(--rl-text-muted)]">Invitations and account updates will appear here.</p>
           </div>
         ) : (
           <div className="grid gap-3">
             {notifications.map((item) => {
               const read = Boolean(item.read_at);
               return (
-                <div
+                <Card
                   key={item.id}
-                  className={`rl-panel flex items-start gap-4 p-4 ${read ? "" : "border-l-4 border-l-rl-black"}`}
+                  className={`flex items-start gap-4 p-4 ${read ? "" : "border-l-4 border-l-[var(--rl-black)]"}`}
                 >
                   <span
-                    className={`mt-0.5 flex-none rounded-md p-2 ${
-                      read ? "text-rl-text bg-rl-soft" : "text-rl-inverse bg-rl-black"
+                    className={`mt-0.5 flex-none rounded-[var(--rl-radius-sm)] p-2 ${
+                      read ? "text-[var(--rl-text)] bg-[var(--rl-bg)]" : "text-white bg-[var(--rl-black)]"
                     }`}
                   >
                     {iconFor(item.event_type)}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-rl-textStrong">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-[var(--rl-text-strong)]">
                         {item.title}
                       </span>
                       {item.delivery_state === "failed" && (
-                        <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-bold text-rl-red">
-                          Email delivery failed
-                        </span>
+                        <Badge variant="danger">Email delivery failed</Badge>
                       )}
                     </div>
-                    <p className="mt-1">{item.body}</p>
-                    <p className="mt-1 text-sm text-rl-text">
+                    <p className="mt-1 text-[14px] text-[var(--rl-text)]">{item.body}</p>
+                    <p className="mt-1 text-[14px] text-[var(--rl-text-muted)]">
                       {new Date(item.created_at).toLocaleString()}
                     </p>
                   </div>
                   {!read ? (
-                    <button
-                      className="rl-button rl-button-secondary flex-none"
-                      type="button"
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon={<EnvelopeOpen aria-hidden="true" size={16} weight="bold" />}
                       onClick={() => markOneRead(item.id)}
-                      disabled={marking.has(item.id)}
+                      loading={marking.has(item.id)}
                       aria-label="Mark as read"
                     >
-                      <MailOpen aria-hidden="true" size={18} />
-                      <span className="hidden sm:inline">
-                        {marking.has(item.id) ? "Marking..." : "Read"}
-                      </span>
-                    </button>
+                      <span className="hidden sm:inline">Read</span>
+                    </Button>
                   ) : (
-                    <span className="flex-none p-2 text-rl-text" aria-label="Read">
-                      <MailOpen aria-hidden="true" size={18} />
+                    <span className="flex-none p-2 text-[var(--rl-text-muted)]" aria-label="Read">
+                      <EnvelopeOpen aria-hidden="true" size={18} weight="regular" />
                     </span>
                   )}
-                </div>
+                </Card>
               );
             })}
           </div>

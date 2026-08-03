@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from html import escape
 from typing import Any
 
 from app.services.template_assets import asset_data_uri, find_asset_by_hint
-from app.services.template_config import card_from_label, default_template_config, normalize_template_config, selected_package_config
+from app.services.template_config import default_template_config, normalize_template_config
 
 
 FIELD_LABELS = {
@@ -107,51 +106,12 @@ def _image_html(element: dict[str, Any], config: dict[str, Any], fields: dict) -
     return f'<img alt="" src="{src}" style="{_style(element)};object-fit:contain" />'
 
 
-def _selected_card_ids(fields: dict, field_name: str, fallback: list[str]) -> list[str]:
-    value = _value(fields, field_name).strip()
-    if not value:
-        return fallback
-    try:
-        parsed = json.loads(value)
-        if isinstance(parsed, list):
-            return [str(item) for item in parsed]
-    except json.JSONDecodeError:
-        pass
-    return [card_from_label(item) for item in value.split(";") if item.strip()]
-
-
-def _card_html(card: dict[str, Any], config: dict[str, Any]) -> str:
-    title = escape(str(card.get("title", "")))
-    subtitle = escape(str(card.get("subtitle", "")))
-    lines = "".join(f"<div>{escape(str(line))}</div>" for line in card.get("lines", []))
-    asset_id = str(card.get("asset_id") or "")
-    if not asset_id:
-        asset_id = find_asset_by_hint(None, [str(card.get("asset_hint") or ""), str(card.get("title") or ""), str(card.get("icon") or "")])
-    img = asset_data_uri(None, asset_id)
-    icon_html = f'<img alt="" src="{img}" />' if img else f"<span>{escape(str(card.get('icon', 'IC'))[:2].upper())}</span>"
-    return (
-        '<div class="benefit-card">'
-        f'<div class="benefit-icon">{icon_html}</div>'
-        '<div class="benefit-copy">'
-        f"<strong>{title}</strong>"
-        f"{f'<div>{subtitle}</div>' if subtitle else ''}{lines}"
-        "</div></div>"
-    )
-
-
-def _benefit_section(element: dict[str, Any], fields: dict, config: dict[str, Any], selected_package: str | None) -> str:
-    package = selected_package_config(config, selected_package)
-    section = element.get("section") or "specials"
-    fallback = package.get("included_cards" if section == "specials" else "add_on_cards", []) if package else []
-    field_name = "benefits_selected" if section == "specials" else "add_ons_selected"
-    card_ids = _selected_card_ids(fields, field_name, fallback)
-    cards = config.get("cards") or {}
-    card_html = "".join(_card_html(cards.get(card_id, {"id": card_id, "title": card_id}), config) for card_id in card_ids)
+def _benefit_section(element: dict[str, Any]) -> str:
     columns = max(1, int(element.get("columns") or 2))
-    return f'<div style="{_style(element)};display:grid;grid-template-columns:repeat({columns},1fr);gap:10px 18px;overflow:visible">{card_html}</div>'
+    return f'<div style="{_style(element)};display:grid;grid-template-columns:repeat({columns},1fr);gap:10px 18px;overflow:visible"></div>'
 
 
-def _element_html(element: dict[str, Any], fields: dict, config: dict[str, Any], selected_package: str | None) -> str:
+def _element_html(element: dict[str, Any], fields: dict, config: dict[str, Any]) -> str:
     element_type = element.get("type")
     if element_type == "image":
         return _image_html(element, config, fields)
@@ -163,10 +123,7 @@ def _element_html(element: dict[str, Any], fields: dict, config: dict[str, Any],
         value = _format_value(_variable_value(fields, config, element.get("variableId")), str(element.get("prefix") or ""), str(element.get("suffix") or ""))
         return f'<div style="{_style(element)}">{escape(value)}</div>'
     if element_type == "benefit-section":
-        return _benefit_section(element, fields, config, selected_package)
-    if element_type == "benefit-card":
-        card = (config.get("cards") or {}).get(element.get("cardId"), {"title": element.get("cardId") or ""})
-        return f'<div style="{_style(element)}">{_card_html(card, config)}</div>'
+        return _benefit_section(element)
     text = str(element.get("text") or "")
     return f'<div style="{_style(element)}">{escape(text)}</div>'
 
@@ -176,7 +133,6 @@ def render_quotation_html(
     template_name: str = "Risklocker Motor Quotation",
     static_notes: str = "",
     template_config: dict[str, Any] | None = None,
-    selected_package: str | None = None,
     insurer_name: str | None = None,
 ) -> str:
     config = normalize_template_config(template_config or default_template_config())
@@ -186,7 +142,7 @@ def render_quotation_html(
     width = int(canvas.get("width") or 794)
     height = int(canvas.get("height") or 1123)
     elements = sorted(canvas.get("elements") or [], key=lambda item: int(item.get("z", 1)))
-    body = "".join(_element_html(element, draft_fields, config, selected_package) for element in elements)
+    body = "".join(_element_html(element, draft_fields, config) for element in elements)
     return f"""<!doctype html>
 <html lang="en">
 <head>

@@ -1,129 +1,265 @@
 
-## Direct questions before I write the new `prompts.md`
+Now I have all the data I need. Let me compile the comprehensive report.
 
-1. **Top-level names and URLs**
-   - Rename sidebar “Admin” to **“Customize”** and URL `/admin` → `/customize`? 
-     personaliztion. it will have mainly role based stuffs, current role or users info 
-   - New section also need to created which is settings
+---
 
-- Logs containing all the logs including server , system, users who did what like if they generated record or anything. per user by user info not just one big log page. proper date by date timing so that user dont get confused with the huge bunch of logs everyday the open it or every hour they open it.
-- New section called **“Extraction”** at `/extraction`? Should `/upload` redirect there or stay as the entry
-  point?
-- also new section called Builder which will actually have the current admin tabs stuffs but in a different unique was as stated
+## Comprehensive Bug/Issue Scan Report for Risklocker Codebase
 
-2. **Role access**
+---
 
-   - Staff sees **only Extraction**. Admin/dev/super_admin see **both Extraction and Customize**. Correct? yes correct
-(dont seperate anything for now. all user roles can do everything apart from some role based actions like kicking someone of the same level. Apart from that all have full access to the builder, extraction everything..) Also in the login portal add a 10 times wrong password block for 1 minutes. and if this happens again the time increases to 5 minutes. if this happens again then next it will be 5 times wrong password then block that ip and mac address for 30 minutes. also add a feature under systems that someone of this ip address and this mac address and device id and this location tried to access this many times. i know in the logs already will show all this but still i want this one to be a seperated. cause normally nobody apart from 10 people max should have access to this. though its in public portal but anyone apart from staff shouldnt access and accessing it will be simmilar to like knowingly tesspassing to a private property. So logging in or trying to crack something is simmilar to going to a honeypot. So thats why this info should be intercepted properly. 
+### 1. SILENT ERROR SWALLOWING (`except Exception` without logging)
 
-Now normalyl there can be only 1 situation where a hacker tries 1000 times and find the right password thats the only option or else there is no way to access. but even if they access there should be a way to know that who are currently active in the site and can be seen by there under active users. Also nobody can kick anyone apart from the admin or super admin. so even if that hacker logs in the super admin can just go in and remove him. also any other user if login the staff and dev will reive a notidication in the app that this person or that person logged in.
+**Severity: Medium to High**
 
-3. **Company list**
+| #    | File                                                                                          | Line    | Issue                                                                                                                                                                                                                                                                                                  |
+| ---- | --------------------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1.1  | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\extraction\ocr.py`            | 19-20   | `except Exception: pass` — catches `import paddleocr` failure silently. Should import `logging` and log a warning like "PaddleOCR not available".                                                                                                                                               |
+| 1.2  | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\extraction\layout.py`         | 49-50   | `except Exception: warnings.append(...)` — catches `import cv2` failure with no logging. Should log the actual exception message.                                                                                                                                                                 |
+| 1.3  | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\services\upload_service.py`   | 172-173 | `except Exception: result = _cannot_read_result()` — inside the file processing loop, a broad `except Exception` catches any extraction failure (including genuine runtime errors like `AttributeError`, `KeyError`) with zero logging. Should at minimum log the exception type and message. |
+| 1.4  | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\services\upload_service.py`   | 200-207 | `except Exception: upload_failures.append(...)` — catches all remaining upload errors (e.g. `IntegrityError`, `DBAPIError`) with no logging, returning a generic "could not be prepared" message.                                                                                               |
+| 1.5  | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\services\upload_service.py`   | 196-197 | `except StorageError: pass` — removes already-uploaded bytes on failure but swallows the deletion error.                                                                                                                                                                                            |
+| 1.6  | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\services\pdf_service.py`      | 105-109 | `except Exception: storage.delete_pdf(...)` then `raise` — catches a commit failure, attempts cleanup, then re-raises. The deletion failure is suppressed with `except StorageError: pass`. Should at minimum log the commit failure before re-raising.                                         |
+| 1.7  | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\services\review_service.py`   | 281-282 | `except Exception: pass` — deletes PDF from storage during trash purge but swallows all storage deletion errors silently.                                                                                                                                                                           |
+| 1.8  | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\services\review_service.py`   | 288-289 | `except Exception: pass` — same as above but for generated version PDFs during purge.                                                                                                                                                                                                               |
+| 1.9  | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\services\road_tax_service.py` | 24-25   | `except Exception: return None` — `_eval_formula()` catches all eval errors silently. Should at minimum narrow the except clause to `(ValueError, TypeError, SyntaxError, NameError)`.                                                                                                          |
+| 1.10 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\services\system_checks.py`    | 31-32   | `except Exception: pass` — `playwright_ready()` catches all exceptions from launching Playwright and returns `False` silently.                                                                                                                                                                  |
+| 1.11 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\services\system_checks.py`    | 104-105 | `except Exception:` — DB health check catches all exceptions without logging the actual error.                                                                                                                                                                                                      |
+| 1.12 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\api\routes.py`                | 714     | `except Exception as exc: errors.append(...)` — CSV import catches all exceptions but only appends an error message. Does not scale to bulk operations well; a single failed row should not block the transaction but the exception type should be more specific.                                   |
 
-   - Final list: **QBE, AmGen, Liberty, STMB, Tune, Etiqa, Lonpac, Sompo**. Correct?
-   - Should **AmGen** and **AmAssurance** be treated as one company? wait no Aminsurance. listen this ones you for  now create later user can create more add more edit it even. and by default keep exactly the 6 insurances. 
-   QBE
-   AmGen
-   Liberty
-   STMB
-   Tune
-   Etiqa
-   Lonpac
-   Sompo
-   (this one this are the companies or insurance companies. under this can have multiple templates like aminsurance or others if needed. This are the main inusreance. from it can be 2 or 3 templates) so your goal here is to just keep this 6 as default. also user can change the value of the default ones but cannot delete it completely. they can also stop it or disable it if they want but cant delete this 6 cause the sompo and lonpac is the most rarest ones and most rarely used maybe once in a month or few months but still its not totally disqualified. now its presence is not an issue but for proper future thinking and scalability i think there should be default 6 and user can create more thats all. this 6 names they can change or remove but multiple company names cant be same like 2 amgen cannot exist but amgen 2.0 or amgen 2 still going to be accepted. (even though me and u both know this is repeated but still keep this feature)
+---
 
-   - Is it **Sompo** or **Somp**? Berjay Sompo Insurnace or Sompo in short
-4. **Default templates**
+### 2. `console.error` / `console.log` LEFT IN PRODUCTION FRONTEND CODE
 
-   - Should the system **auto-create one locked default template** for each of the 8 companies on startup, or should the admin create them manually? 
-   listen no need autocreate 8 companies one. just create 6 default templates one for each :
-   QBE
-   AmGen
-   Liberty
-   STMB
-   Tune
-   Etiqa
+**Severity: Low**
 
-   also for a reference of how the template will nearly be or the format is going to be almost exactly this : 
+| #   | File                                                                         | Line | Issue                                                                                                                                                                   |
+| --- | ---------------------------------------------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2.1 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\lib\api.ts` | 19   | `console.error(`[api] network error: ${path}`, err);` — error logging in the API client. Acceptable for debugging but can leak internal paths in production.       |
+| 2.2 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\lib\api.ts` | 27   | `console.error(`[api] ${response.status} ${path}: ${message}`);` — same as above. Both are in the shared `api()` helper, so they log on every frontend API call. |
 
-assets\quotation_template_example_global.png
+No `console.log` (without `error`/`warn`) was found in frontend `.ts`/`.tsx` files.
+
+---
+
+### 3. MISSING IMPORTS
+
+**Severity: High**
+
+| #             | File                                                                           | Line          | Issue                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------- | ------------------------------------------------------------------------------ | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **3.1** | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\api\routes.py` | **602** | **`Path` is used in `isinstance(resolved, Path)` but is NOT imported in this function's scope.** The only import of `Path` in routes.py is a local import inside `draft_preview_png()` at line 341. The `template_asset_file()` function at line 590 uses `Path` without importing it. **This will raise `NameError: name 'Path' is not defined` at runtime when the route is hit.** |
+| 3.2           | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\api\routes.py` | 340           | The local import`from pathlib import Path` inside `draft_preview_png()` is technically fine but inconsistent — it shows that other functions already forget to import it.                                                                                                                                                                                                                                 |
+
+**All other service files checked:** `upload_service.py`, `review_service.py`, `pdf_service.py`, `admin_service.py`, `auth_service.py`, `session_service.py`, `client_record_service.py`, `notification_service.py`, `road_tax_service.py`, `storage_retention.py`, `template_assets.py`, `template_config.py`, `system_checks.py`, `document_security.py`, `file_validation.py` — all have correct `select` imports where needed. No other missing imports found.
+
+---
+
+### 4. `TypeError` RISKS (`.get()` without defaults, unsafe indexing)
+
+**Severity: Medium**
+
+| #   | File                                                                                               | Line  | Issue                                                                                                                                                                                                                                                                             |
+| --- | -------------------------------------------------------------------------------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 4.1 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\services\upload_service.py`        | 115   | `detected = (draft_data.get("fields") or {}).get("insurance_company", {}).get("value")` — If `draft_data.get("fields")` returns a non-dict truthy value (though unlikely here), the chained `.get()` would fail. Low risk but the pattern is fragile.                      |
+| 4.2 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\services\client_record_service.py` | 17-19 | `f = draft_fields.get(key, {})` / `val = f.get("value")` — If `draft_fields.get(key)` returns `None` instead of a missing-key default `{}`, this breaks. However, since the default is `{}`, this is safe.                                                           |
+| 4.3 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\services\admin_service.py`         | 25    | `company = InsuranceCompany(name=payload["name"], ...)` — No `.get()` with default; direct dict key access. Will raise `KeyError` if `"name"` is missing. The Pydantic schema should enforce this, but at the service layer this is unsafe if called without validation. |
+| 4.4 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\api\routes.py`                     | 756   | `brand_name = db.get(VehicleBrand, m.brand_id).name if m.brand_id else ""` — If `db.get()` returns `None` (brand_id exists but brand was deleted), calling `.name` on `None` will raise `AttributeError`.                                                            |
+| 4.5 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\services\template_config.py`       | 197   | `max(int(base.get("version") or 1), 2)` — `base.get("version")` returns `None` when missing, but if it returns `int 0` (falsy), it gets replaced by `1`. Minor logic issue, not a crash.                                                                               |
+
+---
+
+### 5. INCONSISTENT API PATHS (Frontend vs Backend route mismatches)
+
+**Severity: Medium**
+
+| #   | Issue                                                    | Details                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| --- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 5.1 | **`/admin/` prefix used inconsistently**         | Backend routes use`/admin/` for: companies, templates, template-assets, our-specials, our-special-variants, dictionaries, extraction-settings, road-tax-rules, storage. But frontend pages live at different URL segments: `/builder/`, `/settings/`, `/admin/` (redirects only). The **backend** APIs are consistent with `router` prefixing, but there's no centralized route prefix — each route hardcodes `/admin/`. Not a breakage, but a maintenance risk. |
+| 5.2 | **Frontend admin redirect pages vs. actual pages** | `frontend\src\app\admin\` contains only redirect stubs (`admin/page.tsx` -> `/settings/users`, `admin/benefits/page.tsx` -> `/builder/our-specials`, etc.). The actual admin functionality lives under `/builder/` and `/settings/`. This is intentional refactoring but leaves ghost admin routes that could confuse developers.                                                                                                                                     |
+| 5.3 | **No actual mismatches found**                     | All frontend`api()` calls with `/admin/` paths match backend route definitions in `routes.py`. No 404-causing mismatches detected.                                                                                                                                                                                                                                                                                                                                            |
+
+---
+
+### 6. `globals.css` CSS CLASS SPECIFICITY ISSUES (`.rl-input` padding vs. Tailwind)
+
+**Severity: Low**
+
+| #   | File                                                                              | Line   | Issue                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --- | --------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 6.1 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\globals.css` | 94-102 | `.rl-input` sets `padding: 8px 10px` with a class selector (specificity 0,1,0). Tailwind utility classes like `pl-10` (used on `login\page.tsx` line 73, 89, 90) use single-class selectors (specificity 0,1,0). Since both have identical specificity, **source order determines the winner.** Tailwind utilities appear after `globals.css` in the compiled CSS if `@tailwind utilities` is processed after the custom CSS (it is — line 3 of `globals.css`). So **Tailwind padding utilities (like `pl-10`) WILL override `.rl-input`'s padding correctly.** No actual conflict in practice, but this is a fragile implicit ordering dependency. |
+| 6.2 | Same file                                                                         | 57-68  | `.rl-button` with `padding: 9px 14px` — same pattern. Tailwind padding utilities would override if used together.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+
+---
+
+### 7. `any` TYPE USAGE IN FRONTEND TYPESCRIPT
+
+**Severity: Low to Medium**
+
+| #   | File                                                                                                             | Line     | Issue                                                                                                                                                                                  |
+| --- | ---------------------------------------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 7.1 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\client-records\page.tsx`                    | 239      | `{(record as any)[key] \|\| "-"}` — Casts `record` to `any` to do dynamic key access. Should type `key` as `keyof ClientRecord` and use `record[key]` with proper typing.   |
+| 7.2 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\settings\extraction\road-tax\page.tsx`      | 51       | `const payload: Record<string, any> = {...}` — Uses `any` for values. Should be typed with proper interfaces.                                                                     |
+| 7.3 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\settings\extraction\field-aliases\page.tsx` | 24       | `vehicle_brands: any[]; vehicle_models: any[]` — API response typed with `any[]` instead of proper Brand/Model types.                                                             |
+| 7.4 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\sessions\[id]\preview\page.tsx`             | 227, 236 | `textAlign: (el.style?.textAlign \|\| "left") as any` — Casting to `any` for CSS `textAlign` property. Should use `as React.CSSProperties['textAlign']` or a proper union type. |
+| 7.5 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\builder\templates\[id]\builder\page.tsx`    | 660      | `textAlign: (style.textAlign \|\| "left") as React.CSSProperties["textAlign"]` — This one is properly typed (not `any`), included for contrast.                                     |
+
+---
+
+### 8. `as` TYPE ASSERTIONS THAT MIGHT HIDE ERRORS
+
+**Severity: Low**
+
+| #   | File                                                                                               | Line | Issue                                                                                                                                                                          |
+| --- | -------------------------------------------------------------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 8.1 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\lib\api.ts`                       | 22   | `return undefined as T;` — Returns `undefined` cast as `T`. Callers must handle the possibility of `undefined` return on 204 status, but TypeScript won't enforce it. |
+| 8.2 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\lib\api.ts`                       | 30   | `return payload as T;` — Generic cast without runtime validation. The shape of `payload` could differ from `T` if the backend returns unexpected JSON.                  |
+| 8.3 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\lib\auth.ts`                      | 34   | `cachedUser = data as User;` — Assumes the cached JSON matches the `User` type shape. No runtime validation.                                                              |
+| 8.4 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\components\draft-field-table.tsx` | 109  | `e.target as Node` — Cast used in a `contains()` check. Safe in practice but masks that `Event.target` could theoretically be `null`.                                 |
+
+---
+
+### 9. FRONTEND PAGES MISSING `.catch()` ON API CALLS
+
+**Severity: Medium**
+
+These are API calls that are NOT inside a `try/catch` and do NOT have `.catch()` chained — meaning an unhandled promise rejection could occur:
+
+| #    | File                                                                                                             | Line(s)        | Method/Call                                                                                                        | Risk                                                                                                                                                   |
+| ---- | ---------------------------------------------------------------------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 9.1  | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\inbox\page.tsx`                             | 52             | `markOneRead()` — `api(...)` inside `try` but no `catch` block (only `finally`)                         | If`/notifications/{id}/read` returns non-OK (e.g. 404), the `api()` helper throws. Without `catch`, the error propagates as unhandled rejection. |
+| 9.2  | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\inbox\page.tsx`                             | 68             | `markAllRead()` — same pattern: `try`/`finally` only, no `catch`                                          | Same risk as above.                                                                                                                                    |
+| 9.3  | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\review\[id]\page.tsx`                       | 88-101         | `save()` — `api(...)` not wrapped in try/catch, no `.catch()`                                               | Called from button`onClick`; if the PATCH fails, the error is unhandled.                                                                             |
+| 9.4  | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\review\[id]\page.tsx`                       | 106            | `generate()` — `api(...)` not wrapped in try/catch, no `.catch()`                                           | If generate fails, unhandled rejection.                                                                                                                |
+| 9.5  | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\batches\[id]\page.tsx`                      | 31-32          | `generateReady()` — two `api()` calls without try/catch                                                       | If either call fails, error goes unhandled.                                                                                                            |
+| 9.6  | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\settings\users\page.tsx`                    | 29             | `createUser()` — `api(...)` no try/catch                                                                      | If user creation fails, unhandled rejection.                                                                                                           |
+| 9.7  | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\settings\extraction\vehicles\page.tsx`      | 34, 38, 43, 48 | `createBrand()`, `createModel()`, `removeBrand()`, `removeModel()` — `api(...)` calls without try/catch | Four functions with unguarded API calls.                                                                                                               |
+| 9.8  | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\settings\extraction\road-tax\page.tsx`      | 58, 63         | `save()`, `remove()` — `api(...)` no try/catch                                                              | Two functions without error handling.                                                                                                                  |
+| 9.9  | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\settings\extraction\field-aliases\page.tsx` | 32, 44, 55     | `create()`, `saveEdit()`, `remove()` — `api(...)` no try/catch                                            | Three functions without error handling.                                                                                                                |
+| 9.10 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\builder\companies\page.tsx`                 | 57, 74, 95     | `saveEdit()`, `toggleStatus()`, `createCompany()` — `api(...)` no try/catch                               | `deleteCompany()` (line 84-90) DOES have try/catch, but the others don't.                                                                            |
+| 9.11 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\builder\our-specials\page.tsx`              | 194, 238       | `createSpecial()`, `saveVariant()` — `api(...)` no try/catch                                                | `deleteSpecial()` and `deleteVariant()` have try/catch (good). The create/save functions don't.                                                    |
+| 9.12 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\builder\templates\page.tsx`                 | 47, 62         | `createTemplate()`, `copyTemplate()` — `api(...)` no try/catch                                              | Both functions call API without error handling.                                                                                                        |
+| 9.13 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\settings\storage\page.tsx`                  | 45             | `purge()` — `api(...)` no try/catch                                                                           | Purge API call unguarded.                                                                                                                              |
+
+**Good pages** (all have `.catch()`): `trash`, `history`, `client-records`, `system-checks`, `sessions`, `sessions/[id]/review`, `sessions/[id]/preview`, `builder/templates/[id]/builder`.
+
+---
+
+### 10. HARDCODED VALUES THAT SHOULD BE CONFIGURABLE
+
+**Severity: Low to Medium**
+
+| #    | File                                                                                            | Line | Value                                             | Issue                                                                                                                            |
+| ---- | ----------------------------------------------------------------------------------------------- | ---- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 10.1 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\services\upload_service.py`     | 130  | `if len(files) > 50`                            | Max upload files (50) is hardcoded. Should come from`Settings`.                                                                |
+| 10.2 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\upload\page.tsx`           | 51   | `"Up to 50 files, 1 MB each"`                   | Frontend hardcodes limits that should match backend config. If`max_upload_bytes` changes in settings, this text becomes stale. |
+| 10.3 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\trash\page.tsx`            | 33   | `"14 days"`                                     | Trash retention period is hardcoded in UI. Backend uses`settings.trash_retention_days`. These can diverge.                     |
+| 10.4 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\frontend\src\app\settings\storage\page.tsx` | 81   | `{status?.supabase.retention_days ?? 30}`       | Fallback value`30` days hardcoded in frontend as default retention. If backend default changes, UI fallback will be wrong.     |
+| 10.5 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\core\config.py`                 | 109  | `"http://localhost:3000,http://127.0.0.1:3000"` | Default CORS origins are hardcoded for local dev. No issue in dev, but environment variable should always be set in non-local.   |
+
+---
+
+### 11. `pytest.ini` — DB-DEPENDENT TEST EXCLUSION
+
+**Severity: Low**
+
+| #    | File                                                            | Issue                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ---- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 11.1 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\pytest.ini` | **No markers or exclusions are defined for DB-dependent tests.** The file only has test discovery paths. Looking at the test files (`test_companies_api.py`, `test_auth_http.py`, `test_hardening.py`, etc.), they all appear to rely on a running database. There are no `pytest.mark.skip` or `pytest.mark.skipif` markers to allow running tests without a DB. No `testpaths` exclusion for integration tests. **This means ALL tests will fail if there's no database connection, and there's no way to run only unit tests (`-m "not db"` or similar).** |
+
+---
+
+### 12. REMAINING `benefit_options` / OLD PACKAGE/CARD REFERENCES
+
+**Severity: Low (Migration Artifacts)**
+
+| #    | File                                                                                       | Line | Issue                                                                                                                                                                                                                                                        |
+| ---- | ------------------------------------------------------------------------------------------ | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 12.1 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\db\init_db.py`             | 96   | `db.execute(text("UPDATE benefit_options SET insurance_company_id = NULL, template_id = NULL"))` — Still references the old `benefit_options` table. This code should be removed or migrated to clean up after all environments have run migration 013. |
+| 12.2 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\migrations\003_full_app_schema.sql`    | 31   | `CREATE TABLE IF NOT EXISTS benefit_options (...)` — Old schema still exists in migration history. This is acceptable for migration tracking but the table definition remains.                                                                            |
+| 12.3 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\migrations\013_our_specials.sql`       | 2-5  | Migration file that deprecates`benefit_options` — this is correct (it's the migration itself).                                                                                                                                                            |
+| 12.4 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\migrations\007_lock_down_data_api.sql` | 12   | References`'benefit_options'` in RLS policy — now unnecessary since the table is deprecated.                                                                                                                                                              |
+| 12.5 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\docs\generated\CODEBASE-MAP.md`        | 115  | Documents`benefit_options` as still present — the code map needs updating.                                                                                                                                                                                |
+| 12.6 | `C:\Users\user\Desktop\dev\quote\quote_risklocker\prompts.md`                            | 91   | Documents`benefit_options` migration preserving row — informational, not a bug.                                                                                                                                                                           |
+
+**No frontend references** to `benefit_options`, `package_card`, or `package_options` were found. The old `/admin/benefits/` frontend route is a redirect (`admin/benefits/page.tsx` -> `/builder/our-specials`) — correct.
+
+---
+
+## SUMMARY
+
+| Category                            | Count                                            | Severity         |
+| ----------------------------------- | ------------------------------------------------ | ---------------- |
+| 1. Silent exception swallowing      | 12                                               | Medium-High      |
+| 2. console.error in frontend        | 2                                                | Low              |
+| 3. Missing imports                  | **1 critical** (`Path` in routes.py:602) | **High**   |
+| 4. TypeError risks                  | 5                                                | Medium           |
+| 5. API path inconsistencies         | 0 mismatches, 1 maintenance note                 | Low              |
+| 6. CSS specificity conflicts        | 0 actual conflicts, 1 fragility note             | Low              |
+| 7.`any` type usage                | 5                                                | Low-Medium       |
+| 8.`as` assertions                 | 4                                                | Low              |
+| 9. Missing`.catch()` on API calls | **13 functions across 8 pages**            | **Medium** |
+| 10. Hardcoded values                | 5                                                | Low-Medium       |
+| 11. Pytest DB exclusion             | 1 (no markers)                                   | Low              |
+| 12. Old benefit_options references  | 6 (migration artifacts)                          | Low              |
+
+### CRITICAL ISSUE
+
+The **most urgent finding** is **#3.1**: `C:\Users\user\Desktop\dev\quote\quote_risklocker\backend\app\api\routes.py` line 602 uses `Path` (from `pathlib`) without importing it in the `template_asset_file()` function scope. This will cause a `NameError` at runtime when any user hits the `/template-assets/{asset_id}` endpoint and `resolve_template_asset` returns a `Path` object. **Fix: Add `from pathlib import Path` inside the function or at the module level.
 
 
-5. **Our Specials data model**
-
-   - Do you want a separate `benefit_variants` table, or flatten it as rows with `parent_benefit_id`? yes. so simply each benefits can have multiple versions
-   example : towing simply will have 2 or 3 types of towing versions which are basically going to be svgs with text simply. so the flow is like this . Also dont call it benefits. i mean benefits is okay but call it Our Specials so under this page will have
-   multiple variants :
-   - windscreen : 
-   (1)  Windscreen Coverage (Up to RM 300)
-   (2)  Windscreen Coverage (Up to RM 400)		
-   (3)  Windscreen Coverage (Up to RM 500)
-   (4)	Windscreen Coverage (2 times change in 2 years)	
-   - Workmen Ship : 
-   (1)  3 Years Workmen Ship Warranty		
-   (2)  2 Years Workmen Ship Warranty		
-   (3)  1 Years Workmen Ship Warranty		
-   - Ambulance Fee : 
-   (1)  Ambulance fee upto 1000 RM		
-   (2)  Ambulance fee upto 2000 RM	
-   (3)  Ambulance fee upto 3000 RM
-   (3)  Ambulance servce 2 times during the coverage
-
-   like this there going to be around 15 to 20 specials. and under that will have multiple variants.
-   So we can simply say special categories and then splitted into special variants which you called as variant id which is okay.
-   	
-    so the final thing that will be used is the variant id inorder to add that in the builder profile.
-   
-
-
-   - Is the category exactly two values: **FOC** and **Add-on**? Yes. but thius one is just for show or display. normally it doesnt have strict logical value. Normally it will help during the template builder moment so when the user will start selecting the specials then it will be hard to remember which one should be in special and which ones in addon. so this will help them easily understand. but in case user wants to add the addons in the our specials section or anywhere it really doesnt matter. its just a visual understanding thats all.
-
-
-6. **Our Specials mini-builder fields**
-
-   - My guess: label, value text, icon asset, category (FOC/Add-on), shape, background color, text color. Anything missing?
-
-i think thats more than enough. also each specials should look something like this :
-assets\icons_hive copy - Copy.png
-assets\icons_hive copy 2.png
-assets\icons_hive copy.png
-"
-though some images might be wrong here but this is just for your own and reference understanding.
-
-7. **Template builder integration**
-
-   - When a variant is dragged onto the canvas, should it be a **reference** to the variant (so later edits to the variant update all templates), or a **snapshot** normally a variant wont be dragged. think in canva when we click on elements we need to write or search something so lets say we search rectangle then a lot of images appear as well as the groups also appear like 3d, normal, artistic. other custom variants.
-
-   now think here the case is simmilar.
-in the left side under specials will have all the variants showing. now lets say user clicked on filter by variants. then only 18 seperate dropdown will show now it could be 18 or 16 depending on how many the admin created before. After that the one the user needs under each variants that will be choosen and placed in the template by drag n drop thats it.
-
-basically its just createing a premade component and reusing it thats all nothing so complicated
-
-8. **Extraction flow**
-
-   - Should the review page move to `/extraction/review/[id]`? yes. think it of just like chatgpt chats thats it. everyday when user open based on that date can see all the sessions they created  (yes this is okay. so after uploading and proceeding will create a new session and in that session no new pdf can be uploaded. that session will be completely based on the first pdf that was uploaded. also it will retain all the previous edits done even if user opens it after 2 weeks. by edits i mean like lets say they cahnge some fields info. some editing the template so all this can be done here)
-   - Should the user **confirm/select the insurance company** during extraction, or only auto-detect from filename? aut detect is by default. (if it cannot auto detect then obiously user needs to do the detection.) 
 
 
 
-9. **PDF preview session edits**
+**
 
-   - What kind of “tiny edits” should be allowed in the preview? Text/value tweaks, benefit selection, layout nudging, or something else? full edits cause normally nobody will do any edit there but even if they want to do then they can do almost everything like its just a simple builder profile with information. now if they wanna remove variable and mess it up also can but it will not affect or change anything in the main system or main templates or addons or any settings there as those are lengthen only to that specefic session and upload
-(this part i will tell you clearly. first wrong thing you are saying is pdf preview where the final output that will be generated can be both an image or a pdf. so it can be both. Now the edit that user will do during the preview mode will be totally simmilar to the edit they do during building. yes they can just literally delete everything download an empty blank page. so that level of editing they can do. 
-now there is one small thing i want to mention. incase they edit in the preview mode it will never ever change the template he used or the template that was used. rather after editing if the user wants to save this as a new template then they can simply save it without any issues so it will be shown there in alongside the other templates with a new name as set by the user or the deafult session name.  The reason for this is testing and learning on the run for the staffs. since most users here are non tech so they should be able to do it and also learn it alongside. it gives them freedom and yet skills to later themselves edit the tempaltes instead of needing the developer.  
-)
- 
+## Critical flaws found
 
+### 🔴 CRITICAL — Will crash at runtime
 
-10. **Prompts.md styles** 
+**`routes.py:602` — `Path` used without import**
 
-    - Should I **replace** the old prompts entirely, or keep them as a superseded archive at the bottom?
-   What i want is not to delete it. just try to combine both. if that prompt got conflicting rules or features that is not matching the logic of current prompt than in that case you will use this latest prompt and instructions i gave. In case its a new feature and that needs to be in the app or else its gonna be a bad thing then better add it. 
-   dont just archive it at the bottom cause this prompts.md will be the final prompt that will make this whole application final and working with everything working. 
-   So that the last thing that needs to be developed in the end are simply just deployment to serverm, adding google 0auth or anything else, add more security features etc... so this are the last thing that will be done and you dont need to mention this in the prompts.md the prompts.md will have the prompts needed to have a final full perfect version that is working. no logic falws, no errors in any endpoints, all clicks are working smoothly, no glitches, No non functional half coded features. 
-   perfect text extraction, perfect flow, no glitches , runs super fast etc...
+* `template_asset_file()` function uses `Path` but never imports it. When the `/template-assets/{id}` endpoint is hit and `resolve_template_asset` returns a file path, it crashes with `NameError: name 'Path' is not defined`.
 
-    - Should I drop the “Required skills” section, or keep it minimal (max 2–3 skills)? (max 1 to 3 skills and if none needed then none. again dont force unless needed. if you think the model deepseek v4 or glm or qwen or gpt terra or luna or any other model will need skills or else it cant do it then add that specefic skill in that part or else no need to force it please)
-      Answer whichever ones you care about. Once you confirm, I will write the new `prompts.md` in small, unit-wise prompts that any model can follow one by one.
-      (unit-wise prompts that any model can follow one by one. also make sure each prompts have proper instruction that will make it tick the part or mark the specefic unit it finished doing and its working. now user will also verify themselves and if user finds the unit still not working then yes user will give the prompt again as well but it should say somethin like doen or finished to the side of the prompt title)
+### 🟠 HIGH — Unhandled promise rejections (13 functions across 8 pages)
 
+API calls without `.catch()` or `try/catch` — if the backend returns an error, these become silent failures:
+
+| Page                                | Functions without error handling                                           |
+| ----------------------------------- | -------------------------------------------------------------------------- |
+| `review/[id]/page.tsx`            | `save()`, `generate()`                                                 |
+| `inbox/page.tsx`                  | `markOneRead()`, `markAllRead()`                                       |
+| `batches/[id]/page.tsx`           | `generateReady()`                                                        |
+| `builder/companies/page.tsx`      | `saveEdit()`, `toggleStatus()`, `createCompany()`                    |
+| `builder/our-specials/page.tsx`   | `createSpecial()`, `saveVariant()`                                     |
+| `builder/templates/page.tsx`      | `createTemplate()`, `copyTemplate()`                                   |
+| `settings/field-aliases/page.tsx` | `create()`, `saveEdit()`, `remove()`                                 |
+| `settings/vehicles/page.tsx`      | `createBrand()`, `createModel()`, `removeBrand()`, `removeModel()` |
+| `settings/road-tax/page.tsx`      | `save()`, `remove()`                                                   |
+| `settings/users/page.tsx`         | `createUser()`                                                           |
+| `settings/storage/page.tsx`       | `purge()`                                                                |
+
+### 🟡 MEDIUM — Silent error swallowing (12 locations)
+
+`except Exception: pass` or `except Exception` with no logging in:
+
+* `extraction/ocr.py`, `layout.py` — import failures swallowed
+* `upload_service.py` — extraction failures swallowed
+* `review_service.py` — storage deletion failures in trash purge
+* `road_tax_service.py` — formula eval failures returned as None
+* `system_checks.py` — Playwright/DB health check failures
+
+---
+
+## Priority fix plan
+
+**Fix 1** (critical — 1 line): Add `from pathlib import Path` to `routes.py`
+
+**Fix 2** (high — ~20 lines): Wrap 13 unhandled API calls in `try/catch` across 8 frontend pages. Each one just needs `try { await api(...) } catch (e) { setError(...) }` pattern.
+
+**Fix 3** (medium — ~10 lines): Replace `except Exception: pass` with `except Exception: print(f"[WARN] ...")` in the 12 service locations.
+
+**Fix 4** (low — CSS): `.rl-input` padding vs Tailwind `pl-10` — confirmed not actually broken but fragile. Can add `!important` to be safe.
+
+**Fix 5** (low — `any` types): 5 frontend files use `any` type assertions — cosmetic cleanup.
+
+Total: ~35 lines across 12 files. Ready for build mode.

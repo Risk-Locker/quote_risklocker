@@ -23,7 +23,7 @@ def _apply_process_limits() -> None:
         return
 
 
-def _worker(connection, path: str, enhanced_reading: bool, source_filename: str) -> None:
+def _worker(connection, path: str, enhanced_reading: bool, source_filename: str, db_aliases: dict | None = None, db_brands: list | None = None, db_models: list | None = None) -> None:
     try:
         _apply_process_limits()
         from app.extraction.orchestrator import ExtractionOrchestrator
@@ -32,6 +32,9 @@ def _worker(connection, path: str, enhanced_reading: bool, source_filename: str)
             Path(path),
             enhanced_reading=enhanced_reading,
             source_filename=source_filename,
+            db_aliases=db_aliases,
+            db_brands=db_brands,
+            db_models=db_models,
         )
         connection.send(("ok", result))
     except Exception as exc:
@@ -46,12 +49,15 @@ def extract_with_limits(
     enhanced_reading: bool,
     source_filename: str,
     timeout_seconds: int = EXTRACTION_TIMEOUT_SECONDS,
+    db_aliases: dict | None = None,
+    db_brands: list | None = None,
+    db_models: list | None = None,
 ) -> dict[str, Any]:
     context = multiprocessing.get_context("spawn")
     parent, child = context.Pipe(duplex=False)
     process = context.Process(
         target=_worker,
-        args=(child, str(path), enhanced_reading, source_filename),
+        args=(child, str(path), enhanced_reading, source_filename, db_aliases, db_brands, db_models),
         name="risklocker-pdf-extraction",
         daemon=True,
     )

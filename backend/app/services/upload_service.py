@@ -2,19 +2,25 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import UploadFile
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.extraction.sandbox import extract_with_limits
 from app.models.enums import RecordStatus, StorageStatus
-from app.models.tables import Batch, ExtractionRecord, QuotationDraft, UploadedFile, new_id
+from app.models.tables import Batch, ExtractionRecord, FieldAlias, QuotationDraft, UploadedFile, new_id, VehicleBrand, VehicleModel
 from app.services.document_security import quarantined_pdf
 from app.services.file_validation import display_filename, validate_upload_bytes
+from app.services.session_service import create_session
 from app.storage.supabase import StorageError, SupabaseStorage
+
+
+logger = logging.getLogger(__name__)
 
 
 def _source_key(now: datetime, batch_id: str, uploaded_file_id: str) -> str:
@@ -110,6 +116,10 @@ def _persist_upload(
         )
     )
     db.flush()
+    detected = (draft_data.get("fields") or {}).get("insurance_company", {}).get("value")
+    draft = db.scalar(select(QuotationDraft).where(QuotationDraft.uploaded_file_id == uploaded.id))
+    if draft:
+        create_session(db, owner_id, uploaded.id, draft.id, detected)
 
 
 async def create_batch_from_uploads(
@@ -121,8 +131,8 @@ async def create_batch_from_uploads(
 ) -> Batch:
     if not files:
         raise AppError("Choose at least one file to upload.")
-    if len(files) > 50:
-        raise AppError("Upload up to 50 files at a time.")
+    if len(files) > settings.max_upload_files:
+        raise AppError(f"Upload up to {settings.max_upload_files} files at a time.")
 
     storage = SupabaseStorage(settings)
     batch = Batch(
@@ -133,6 +143,16 @@ async def create_batch_from_uploads(
     )
     db.add(batch)
     db.flush()
+
+    db_aliases = {f.field_name: f.aliases for f in db.scalars(select(FieldAlias)).all()} if db else None
+    db_brands: list[str] = []
+    db_models: list[str] = []
+    for b in db.scalars(select(VehicleBrand)).all():
+        db_brands.append(b.name)
+        db_brands.extend(b.aliases or [])
+    for m in db.scalars(select(VehicleModel)).all():
+        db_models.append(m.name)
+        db_models.extend(m.aliases or [])
 
     upload_failures: list[dict] = []
     for file in files:
@@ -149,8 +169,12 @@ async def create_batch_from_uploads(
                         quarantine_path,
                         enhanced_reading=enhanced_reading,
                         source_filename=filename,
+                        db_aliases=db_aliases,
+                        db_brands=db_brands,
+                        db_models=db_models,
                     )
-                except Exception:
+                except Exception as exc:
+                    logger.warning("Extraction failed for %s: %s", filename, exc)
                     result = _cannot_read_result()
                 object_key = _source_key(now, batch.id, uploaded_id)
                 stored = storage.upload_pdf(object_key, data)
@@ -174,16 +198,17 @@ async def create_batch_from_uploads(
             if stored_key:
                 try:
                     storage.delete_pdf(stored_key)
-                except StorageError:
-                    pass
+                except StorageError as cleanup_exc:
+                    logger.warning("Could not clean up uploaded file %s: %s", stored_key, cleanup_exc)
             upload_failures.append({"filename": filename, "message": str(exc)})
             continue
-        except Exception:
+        except Exception as exc:
+            logger.exception("Upload preparation failed for %s", filename)
             if stored_key:
                 try:
                     storage.delete_pdf(stored_key)
-                except StorageError:
-                    pass
+                except StorageError as cleanup_exc:
+                    logger.warning("Could not clean up uploaded file %s: %s", stored_key, cleanup_exc)
             upload_failures.append({"filename": filename, "message": "This PDF could not be prepared."})
             continue
 

@@ -6,6 +6,7 @@ import { Download, FilePenLine, RefreshCw } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/errors";
 
 type Batch = {
   id: string;
@@ -27,10 +28,15 @@ export default function BatchPage({ params }: { params: Promise<{ id: string }> 
 
   async function generateReady() {
     if (!batch) return;
-    const draftIds = batch.files.filter((file) => file.status === "Ready" && file.draft_id).map((file) => file.draft_id);
-    await api("/drafts/generate-selected", { method: "POST", body: JSON.stringify({ draft_ids: draftIds }) });
-    const refreshed = await api<{ batch: Batch }>(`/batches/${id}`);
-    setBatch(refreshed.batch);
+    setError("");
+    try {
+      const draftIds = batch.files.filter((file) => file.status === "Ready" && file.draft_id).map((file) => file.draft_id);
+      await api("/drafts/generate-selected", { method: "POST", body: JSON.stringify({ draft_ids: draftIds }) });
+      const refreshed = await api<{ batch: Batch }>(`/batches/${id}`);
+      setBatch(refreshed.batch);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    }
   }
 
   return (

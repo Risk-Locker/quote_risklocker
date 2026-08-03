@@ -14,7 +14,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.models.enums import AccountStatus
 from app.models.tables import TemplateAsset, User
@@ -102,7 +102,8 @@ def resolve_template_asset(db: Session | None, asset_id: str) -> Path | bytes:
         record = db.get(TemplateAsset, asset_id)
         if record and record.status == AccountStatus.ACTIVE.value:
             try:
-                return SupabaseStorage().download_bytes(record.storage_path)
+                settings = get_settings()
+                return SupabaseStorage(settings).download_bytes(record.storage_path)
             except Exception as exc:
                 raise FileNotFoundError(asset_id) from exc
 

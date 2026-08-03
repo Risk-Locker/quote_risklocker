@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import tempfile
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -18,8 +19,12 @@ from app.models.tables import GeneratedPdfVersion, OutputTemplateConfig, Quotati
 from app.rendering.pdf_generator import html_to_pdf
 from app.rendering.template_renderer import render_quotation_html
 from app.services.document_security import quarantined_pdf
+from app.services.client_record_service import upsert_from_draft
 from app.services.template_config import normalize_template_config
 from app.storage.supabase import StorageError, SupabaseStorage
+
+
+logger = logging.getLogger(__name__)
 
 
 def _version_filename(original_filename: str, version_number: int) -> str:
@@ -36,9 +41,6 @@ def generate_pdf(db: Session, settings: Settings, user, draft: QuotationDraft, a
         raise AppError("Save the reviewed draft before generating.")
     if not draft.uploaded_file or not draft.uploaded_file.template_id:
         raise AppError("Choose a Risklocker template before generating.")
-    selected_package = (draft.fields.get("selected_package") or {}).get("value")
-    if not selected_package:
-        raise AppError("Choose a package before generating.")
     template = db.get(OutputTemplateConfig, draft.uploaded_file.template_id)
     if not template:
         raise AppError("Choose a valid Risklocker template before generating.")
@@ -49,7 +51,6 @@ def generate_pdf(db: Session, settings: Settings, user, draft: QuotationDraft, a
         template_name=template.name,
         static_notes=template.static_notes,
         template_config=template_config,
-        selected_package=selected_package,
         insurer_name=(draft.fields.get("insurance_company") or {}).get("value"),
     )
     next_number = (db.scalar(select(func.max(GeneratedPdfVersion.version_number)).where(GeneratedPdfVersion.draft_id == draft.id)) or 0) + 1
@@ -94,13 +95,23 @@ def generate_pdf(db: Session, settings: Settings, user, draft: QuotationDraft, a
     db.add(version)
     draft.status = RecordStatus.GENERATED.value
     draft.uploaded_file.status = RecordStatus.GENERATED.value
+    from app.models.tables import Session as SessionModel
+    session = db.scalar(select(SessionModel).where(SessionModel.uploaded_file_id == draft.uploaded_file_id))
+    upsert_from_draft(
+        db,
+        draft.fields,
+        session_id=session.id if session else None,
+        draft_id=draft.id,
+        uploaded_file_id=draft.uploaded_file_id,
+    )
     try:
         db.commit()
-    except Exception:
+    except Exception as exc:
+        logger.exception("Failed to commit generated PDF for draft %s: %s", draft.id, exc)
         try:
             storage.delete_pdf(stored.object_key)
-        except StorageError:
-            pass
+        except StorageError as cleanup_exc:
+            logger.warning("Could not clean up generated PDF %s after commit failure: %s", stored.object_key, cleanup_exc)
         raise
     db.refresh(version)
     return version

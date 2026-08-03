@@ -51,5 +51,8 @@ def html_to_pdf(html: str, output_path: Path) -> tuple[Path, list[str]]:
         return output_path, warnings
     except Exception as exc:
         warnings.append(f"Playwright PDF rendering unavailable: {exc.__class__.__name__}")
-        output_path.write_bytes(_minimal_pdf_from_text(re.sub(r"<[^>]+>", " ", html)))
+        text = re.sub(r"<style[^>]*>.*?</style>", " ", html, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<[^>]+>", " ", text)
+        output_path.write_bytes(_minimal_pdf_from_text(text))
         return output_path, warnings

@@ -17,3 +17,7 @@ node_modules/
 *.xlsx
 *.log
 .opencode
+.token-counter
+copy.md
+.agents
+.skill-sources

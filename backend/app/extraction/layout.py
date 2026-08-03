@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
+
+logger = logging.getLogger(__name__)
+
 
 def words_to_lines(words: list[dict], tolerance: float = 2.5) -> list[dict]:
     lines: list[dict] = []
@@ -46,6 +51,7 @@ def detect_layout(words: list[dict] | None = None) -> tuple[list[dict], list[str
         import cv2  # type: ignore  # noqa: F401
 
         warnings.append("OpenCV available for visual checks")
-    except Exception:
+    except Exception as exc:
+        logger.warning("OpenCV is not available: %s", exc)
         warnings.append("Visual checks unavailable on this machine.")
     return regions, warnings

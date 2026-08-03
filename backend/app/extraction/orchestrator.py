@@ -13,7 +13,7 @@ from app.extraction.types import CandidateValue
 
 
 class ExtractionOrchestrator:
-    def extract_file(self, file_path: Path, enhanced_reading: bool = False, source_filename: str | None = None) -> dict:
+    def extract_file(self, file_path: Path, enhanced_reading: bool = False, source_filename: str | None = None, db_aliases: dict | None = None, db_brands: list[str] | None = None, db_models: list[str] | None = None) -> dict:
         native = extract_native(file_path)
         ocr_text = ""
         method_summary = list(native.method_summary)
@@ -29,7 +29,7 @@ class ExtractionOrchestrator:
         warnings.extend(layout_warnings)
 
         combined_text = "\n".join(part for part in [native.raw_text, ocr_text] if part)
-        candidates = find_candidates(combined_text, native.page_text, native.words, source_filename=source_filename or file_path.name)
+        candidates = find_candidates(combined_text, native.page_text, native.words, aliases=db_aliases, source_filename=source_filename or file_path.name, db_brands=db_brands, db_models=db_models)
         fields, draft_warnings, draft_status = build_draft(candidates)
         warnings.extend(draft_warnings)
 

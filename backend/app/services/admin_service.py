@@ -4,17 +4,17 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.models.enums import AccountStatus, Role
-from app.models.tables import AppSetting, BenefitOption, FieldAlias, InsuranceCompany, OutputTemplateConfig, VehicleBrand, VehicleModel
+from app.models.tables import AppSetting, FieldAlias, InsuranceCompany, OurSpecial, OurSpecialVariant, OutputTemplateConfig, VehicleBrand, VehicleModel
 from app.services.template_config import normalize_template_config, review_schema_for
 
 
 def require_admin(user) -> None:
-    if user.role != Role.ADMIN.value:
+    if user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value}:
         raise AppError("Only Admin can change this setting.", 403)
 
 
@@ -22,7 +22,10 @@ def upsert_company(db: Session, user, payload: dict) -> InsuranceCompany:
     require_admin(user)
     company = db.get(InsuranceCompany, payload.get("id")) if payload.get("id") else None
     if not company:
-        company = InsuranceCompany(name=payload["name"], category=payload.get("category", "Motor"))
+        name = payload.get("name")
+        if not name:
+            raise AppError("Company name is required.", 400)
+        company = InsuranceCompany(name=name, category=payload.get("category", "Motor"))
         db.add(company)
     company.name = payload.get("name", company.name)
     company.category = payload.get("category", company.category)
@@ -33,6 +36,18 @@ def upsert_company(db: Session, user, payload: dict) -> InsuranceCompany:
     db.commit()
     db.refresh(company)
     return company
+
+
+def delete_company(db: Session, user, company_id: str) -> None:
+    require_admin(user)
+    company = db.get(InsuranceCompany, company_id)
+    if not company:
+        raise AppError("Company not found.", 404)
+    remaining = db.scalar(select(func.count()).select_from(InsuranceCompany))
+    if remaining is None or remaining <= 1:
+        raise AppError("At least one company must remain.", 400)
+    db.delete(company)
+    db.commit()
 
 
 def upsert_template(db: Session, user, payload: dict) -> OutputTemplateConfig:
@@ -51,13 +66,18 @@ def upsert_template(db: Session, user, payload: dict) -> OutputTemplateConfig:
     return template
 
 
-def serialize_template(template: OutputTemplateConfig) -> dict:
+def serialize_template(template: OutputTemplateConfig, db: Session | None = None) -> dict:
     config = normalize_template_config(template.fixed_fields, template.name)
+    company_name = None
+    if db is not None and template.insurance_company_id:
+        company = db.get(InsuranceCompany, template.insurance_company_id)
+        company_name = company.name if company else None
     return {
         "id": template.id,
         "name": template.name,
         "insurance_type": template.insurance_type,
         "insurance_company_id": template.insurance_company_id,
+        "insurance_company_name": company_name,
         "status": template.status,
         "static_notes": template.static_notes,
         "editable_fields": template.editable_fields,
@@ -115,18 +135,80 @@ def update_template(db: Session, user, template_id: str, payload: dict) -> Outpu
     return template
 
 
-def upsert_benefit(db: Session, user, payload: dict) -> BenefitOption:
+def upsert_special(db: Session, user, payload: dict) -> OurSpecial:
     require_admin(user)
-    benefit = db.get(BenefitOption, payload.get("id")) if payload.get("id") else None
-    if not benefit:
-        benefit = BenefitOption(label=payload["label"])
-        db.add(benefit)
-    for key in ["insurance_company_id", "template_id", "label", "section", "default_selected", "status"]:
+    special = db.get(OurSpecial, payload.get("id")) if payload.get("id") else None
+    if not special:
+        special = OurSpecial(label=payload["label"], category=payload.get("category", "FOC"))
+        db.add(special)
+    for key in ["label", "category", "status"]:
         if key in payload:
-            setattr(benefit, key, payload[key])
+            setattr(special, key, payload[key])
     db.commit()
-    db.refresh(benefit)
-    return benefit
+    db.refresh(special)
+    return special
+
+
+def delete_special(db: Session, user, special_id: str) -> None:
+    require_admin(user)
+    special = db.get(OurSpecial, special_id)
+    if not special:
+        raise AppError("Special not found.", 404)
+    db.delete(special)
+    db.commit()
+
+
+def upsert_variant(db: Session, user, payload: dict) -> OurSpecialVariant:
+    require_admin(user)
+    variant = db.get(OurSpecialVariant, payload.get("id")) if payload.get("id") else None
+    if not variant:
+        special = db.get(OurSpecial, payload["special_id"])
+        if not special:
+            raise AppError("Parent special not found.", 404)
+        variant = OurSpecialVariant(special_id=payload["special_id"], label=payload["label"])
+        db.add(variant)
+    for key in ["label", "secondary_label", "value_text", "icon_asset_id", "shape", "bg_color", "text_color", "border_width", "border_color", "shadow", "status"]:
+        if key in payload:
+            setattr(variant, key, payload[key])
+    db.commit()
+    db.refresh(variant)
+    return variant
+
+
+def delete_variant(db: Session, user, variant_id: str) -> None:
+    require_admin(user)
+    variant = db.get(OurSpecialVariant, variant_id)
+    if not variant:
+        raise AppError("Variant not found.", 404)
+    db.delete(variant)
+    db.commit()
+
+
+def serialize_special(special: OurSpecial) -> dict:
+    return {
+        "id": special.id,
+        "label": special.label,
+        "category": special.category,
+        "status": special.status,
+        "variants": [
+            {
+                "id": v.id,
+                "special_id": v.special_id,
+                "label": v.label,
+                "secondary_label": v.secondary_label,
+                "value_text": v.value_text,
+                "icon_asset_id": v.icon_asset_id,
+                "shape": v.shape,
+                "bg_color": v.bg_color,
+                "text_color": v.text_color,
+                "border_width": v.border_width,
+                "border_color": v.border_color,
+                "shadow": v.shadow,
+                "status": v.status,
+            }
+            for v in (special.variants or [])
+        ],
+    }
 
 
 def upsert_field_alias(db: Session, user, payload: dict) -> FieldAlias:
@@ -140,6 +222,15 @@ def upsert_field_alias(db: Session, user, payload: dict) -> FieldAlias:
     db.commit()
     db.refresh(alias)
     return alias
+
+
+def delete_field_alias(db: Session, user, field_name: str) -> None:
+    require_admin(user)
+    alias = db.scalar(select(FieldAlias).where(FieldAlias.field_name == field_name))
+    if not alias:
+        raise AppError("Field alias not found.", 404)
+    db.delete(alias)
+    db.commit()
 
 
 def upsert_vehicle_brand(db: Session, user, payload: dict) -> VehicleBrand:
@@ -168,6 +259,24 @@ def upsert_vehicle_model(db: Session, user, payload: dict) -> VehicleModel:
     db.commit()
     db.refresh(model)
     return model
+
+
+def delete_vehicle_brand(db: Session, user, brand_id: str) -> None:
+    require_admin(user)
+    brand = db.get(VehicleBrand, brand_id)
+    if not brand:
+        raise AppError("Vehicle brand not found.", 404)
+    db.delete(brand)
+    db.commit()
+
+
+def delete_vehicle_model(db: Session, user, model_id: str) -> None:
+    require_admin(user)
+    model = db.get(VehicleModel, model_id)
+    if not model:
+        raise AppError("Vehicle model not found.", 404)
+    db.delete(model)
+    db.commit()
 
 
 def save_strategy_settings(db: Session, user, payload: dict) -> AppSetting:

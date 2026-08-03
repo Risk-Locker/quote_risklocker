@@ -53,6 +53,21 @@ def test_storage_retention_and_upload_limit_are_loaded():
         settings = get_settings()
     assert settings.pdf_retention_days == 30
     assert settings.max_upload_bytes == 1024 * 1024
+    assert settings.max_upload_files == 50
+
+
+def test_max_upload_files_can_be_overridden():
+    env = {**VALID_ENV, "MAX_UPLOAD_FILES": "10"}
+    with patch.dict(os.environ, env, clear=True):
+        settings = get_settings()
+    assert settings.max_upload_files == 10
+
+
+def test_invalid_max_upload_files_is_rejected():
+    env = {**VALID_ENV, "MAX_UPLOAD_FILES": "200"}
+    with patch.dict(os.environ, env, clear=True):
+        with pytest.raises(RuntimeError, match="MAX_UPLOAD_FILES"):
+            get_settings()
 
 
 def test_invalid_storage_retention_is_rejected():

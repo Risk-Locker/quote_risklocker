@@ -11,27 +11,39 @@ export type User = {
   status?: string;
 };
 
+let cachedUser: User | null | undefined;
+let cacheTime = 0;
+const CACHE_MS = 300_000;
+
 export function useAuth() {
-  const [user, setUser] = useState<User | null | undefined>(undefined);
+  const [user, setUser] = useState<User | null | undefined>(
+    cacheTime && Date.now() - cacheTime < CACHE_MS ? cachedUser : undefined
+  );
 
   useEffect(() => {
+    if (cacheTime && Date.now() - cacheTime < CACHE_MS) {
+      setUser(cachedUser);
+      return;
+    }
     let cancelled = false;
     fetch(`${API_BASE}/auth/me`, { credentials: "include", cache: "no-store" })
       .then(async (response) => {
         if (cancelled) return;
         if (response.ok) {
           const data = await response.json();
-          setUser(data as User);
+          cachedUser = data as User;
+          cacheTime = Date.now();
+          setUser(cachedUser);
         } else {
+          cachedUser = null;
+          cacheTime = Date.now();
           setUser(null);
         }
       })
       .catch(() => {
         if (!cancelled) setUser(null);
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   return { user, loading: user === undefined };

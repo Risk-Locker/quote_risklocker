@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { ArrowsClockwise, Circle, CheckCircle, WarningCircle, ShieldCheck } from "@phosphor-icons/react";
 import { SettingsNav } from "@/components/settings-nav";
 import { AppShell } from "@/components/app-shell";
 import { StatusBadge } from "@/components/status-badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
 
 type Check = { name: string; status: string; message: string; group?: string };
@@ -27,40 +30,53 @@ export default function SettingsSystemChecksPage() {
 
   return (
     <AppShell>
-      <section className="grid gap-5">
+      <section className="grid gap-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold text-rl-textStrong">System Checks</h1>
-            <p className="mt-2">Required setup is shown first. Enhanced reading engines are optional.</p>
+            <h1 className="text-[30px] font-bold text-[var(--rl-text-strong)] font-[var(--font-manrope)]">System Checks</h1>
+            <p className="text-[14px] text-[var(--rl-text-muted)]">Required setup is shown first. Enhanced reading engines are optional.</p>
           </div>
-          <button className="rl-button rl-button-secondary" type="button" onClick={load}>
-            <RefreshCw aria-hidden="true" size={18} />
+          <Button variant="secondary" icon={<ArrowsClockwise size={16} weight="bold" />} onClick={load}>
             Refresh
-          </button>
+          </Button>
         </div>
         <SettingsNav />
-        {error ? <p className="rounded-md border border-rl-red bg-red-50 p-3 font-bold text-rl-red">{error}</p> : null}
+
+        {error ? (
+          <div className="rounded-[var(--rl-radius-sm)] bg-[var(--rl-red-light)] px-3 py-2.5 text-[13px] font-semibold text-[var(--rl-red)]">{error}</div>
+        ) : null}
+
         <CheckGroup title="Required Setup" checks={required} />
-        <details className="rl-panel p-5">
-          <summary className="cursor-pointer text-xl font-bold text-rl-textStrong">Advanced Enhanced Reading</summary>
-          <p className="mt-2 text-sm">These tools improve difficult scanned documents, but normal PDF extraction can run without them.</p>
-          <div className="mt-3">
-            <CheckRows checks={advanced} />
-          </div>
-        </details>
+        <Card>
+          <details className="p-5">
+            <summary className="cursor-pointer text-lg font-bold text-[var(--rl-text-strong)]">Advanced Enhanced Reading</summary>
+            <p className="mt-2 text-[14px] text-[var(--rl-text-muted)]">These tools improve difficult scanned documents, but normal PDF extraction can run without them.</p>
+            <div className="mt-3">
+              <CheckRows checks={advanced} />
+            </div>
+          </details>
+        </Card>
       </section>
     </AppShell>
   );
 }
 
 function CheckGroup({ title, checks }: { title: string; checks: Check[] }) {
+  const okCount = checks.filter((c) => c.status === "ok" || c.status === "available").length;
   return (
-    <section className="rl-panel p-5">
-      <h2 className="text-xl font-bold text-rl-textStrong">{title}</h2>
-      <div className="mt-3">
-        <CheckRows checks={checks} />
+    <Card>
+      <div className="p-5">
+        <div className="flex items-center gap-2.5">
+          <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">{title}</h2>
+          <Badge variant={okCount === checks.length ? "success" : "warning"}>
+            {okCount}/{checks.length}
+          </Badge>
+        </div>
+        <div className="mt-3">
+          <CheckRows checks={checks} />
+        </div>
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -68,10 +84,10 @@ function CheckRows({ checks }: { checks: Check[] }) {
   return (
     <div className="grid gap-2">
       {checks.map((check) => (
-        <div key={check.name} className="grid gap-2 border-b border-rl-line py-3 sm:grid-cols-[1fr_auto]">
+        <div key={check.name} className="grid gap-2 border-b border-[var(--rl-border)] py-3 sm:grid-cols-[1fr_auto]">
           <div>
-            <div className="font-bold text-rl-textStrong">{check.name}</div>
-            <div className="text-sm">{check.message}</div>
+            <div className="font-bold text-[var(--rl-text-strong)]">{check.name}</div>
+            <div className="text-[14px] text-[var(--rl-text-muted)]">{check.message}</div>
           </div>
           <StatusBadge status={check.status} />
         </div>

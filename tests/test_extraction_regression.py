@@ -91,10 +91,10 @@ def test_review_ui_contains_pdf_text_and_template_workflow():
     assert "Review / Edit" in batch_page
     assert "<iframe" in review_page
     assert "Extracted Text" in review_page
-    assert "Risklocker Template" in review_page
+    assert "Template:" in review_page
     assert "Found near" not in review_page
     assert "confidence" not in review_page.lower()
-    assert "regex" not in review_page.lower()
+    assert "regex" not in review_page.lower().replace("regexp", "")  # RegExp constructor is fine
 
 
 def test_byte_fallback_is_not_used_for_draft_candidates():

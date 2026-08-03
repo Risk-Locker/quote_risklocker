@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.errors import register_error_handlers
 from app.db.init_db import seed_defaults
 from app.db.session import SessionLocal, verify_database_connection
+from app.models.tables import Base
 from app.services.storage_retention import purge_expired_pdfs
 from app.storage.supabase import SupabaseStorage
 
@@ -43,6 +44,7 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     async def startup() -> None:
         verify_database_connection()
+        Base.metadata.create_all(bind=SessionLocal().get_bind())
         SupabaseStorage(settings).ensure_bucket()
         if settings.app_env != "production":
             with SessionLocal() as db:

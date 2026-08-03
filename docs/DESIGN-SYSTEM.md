@@ -2,31 +2,78 @@
 
 ## Direction
 
-Build a quiet, work-focused internal dashboard for repeated daily use. Favor scanability, compact controls, predictable navigation, and clear comparison over marketing composition.
+Quiet, confident internal dashboard for repeated daily use. Apple-inspired calm — smooth transitions, stable layout, clear hierarchy. Red, black, and white palette with subtle gray backgrounds. No blue, no pill shapes, no bouncing.
 
 ## Foundations
 
-- Use Be Vietnam Pro with a system sans-serif fallback.
-- Base text is 16 px; supporting text is 14 px; labels are 12-14 px.
-- Use semantic `rl-*` tokens from `frontend/src/app/globals.css`; do not introduce one-off component colors.
-- Cards and panels use at most an 8 px radius. Do not nest decorative cards.
-- Keep fields, buttons, toolbars, and template-canvas controls dimensionally stable.
+- Fonts: Manrope (headings), Inter (body), JetBrains Mono (data/IDs). Loaded via `next/font/google` in `frontend/src/app/layout.tsx`.
+- Base text is 16 px; supporting text is 14 px; labels are 13 px; table headers are 12 px uppercase.
+- All design tokens live in `frontend/src/app/globals.css` as CSS custom properties (`--rl-*`) wired into `tailwind.config.ts` as `rl.*` colors.
+- Use the component library at `frontend/src/components/ui/` (Button, Input, Textarea, Select, Card, Badge, Spinner, Dialog, Tabs, Tooltip, Toast).
+- Cards and panels use an 8 px radius. Chips/badges use 6 px. Do not use pill (full-round) shapes anywhere.
+- Page backgrounds use Apple gray `#f5f5f7`; surfaces are white with a soft card shadow.
+- Color palette is red, black, white and their tonal gradients. No blue.
+
+## Design Tokens
+
+| Token | Value |
+|---|---|
+| `--rl-bg` | `#f5f5f7` (page background) |
+| `--rl-surface` | `#ffffff` (cards, panels) |
+| `--rl-text` | `#454545` (body) |
+| `--rl-text-strong` | `#1b1717` (headings, emphasis) |
+| `--rl-text-muted` | `#6e6e73` (secondary, labels) |
+| `--rl-border` | `#e5e5ea` |
+| `--rl-black` | `#1b1717` |
+| `--rl-red` | `#ed1c24` |
+| `--rl-red-hover` | `#c4171e` |
+| `--rl-red-light` | `rgba(237, 28, 36, 0.08)` |
+| `--rl-success` | `#2f7d32` |
+| `--rl-success-light` | `rgba(47, 125, 50, 0.08)` |
+| `--rl-warning` | `#8a5a00` |
+| `--rl-warning-light` | `rgba(138, 90, 0, 0.08)` |
+| `--rl-radius` | `8px` |
+| `--rl-radius-sm` | `6px` |
+| `--rl-shadow` | `0 1px 3px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.04)` |
+| `--rl-shadow-lift` | `0 4px 12px rgba(0,0,0,0.08), 0 12px 32px rgba(0,0,0,0.06)` |
+| `--rl-duration-instant` | `200ms` |
+| `--rl-duration-fast` | `300ms` |
+| `--rl-duration-normal` | `500ms` |
 
 ## Interaction and Accessibility
 
-- Use Lucide icons for familiar commands. Icon-only controls require accessible labels and tooltips.
-- Every interactive control needs default, hover, focus-visible, active, disabled, loading, and error behavior.
+- Use Phosphor icons (`@phosphor-icons/react`) for all UI icons. No Lucide, no Shadcn. Icons use `weight="bold"` for actions, `weight="regular"` for decorations, `weight="fill"` for active states.
+- Radix primitives provide accessible dialogs, tooltips, and toasts with custom styling.
+- Framer Motion provides smooth layout transitions, toast animations, and micro-interactions.
+- Every interactive control must have default, hover, focus-visible, active, disabled, and loading behavior. Buttons scale to 0.98 on active. Cards lift slightly on hover.
 - Keyboard navigation and visible focus are required. Target WCAG 2.2 AA.
-- Use checkboxes/toggles for binary choices, menus for option sets, and numeric controls for numeric values.
-- Error messages tell the user what to do next.
+- Focus ring is red-tinted (`rgba(237, 28, 36, 0.35)`) with a 2 px offset.
+- Error messages use red-light background boxes or toast notifications.
+- Success feedback uses toast notifications (top-right, auto-dismiss 4 s).
+
+## Component Library
+
+All components live in `frontend/src/components/ui/`.
+
+- **Button** — `variant="primary"|"secondary"|"ghost"|"danger"`, `loading`, `icon`, `size="sm"|"md"`. Primary is black, secondary is white with border, danger is red.
+- **Input / Textarea / Select** — consistent 40 px min-height, 14 px text, 6 px radius, border hover, focus border to black.
+- **Card** — white surface, border, shadow, optional hover lift. Use for all panel-like containers.
+- **Badge** — inline chip with variants `default|success|warning|danger|info`, 6 px radius.
+- **StatusBadge** — pre-styled badge for draft/record statuses (Ready, Check Needed, Cannot Read, etc.).
+- **Toast** — `useToast()` hook returning `toast(message, variant?)`. Variants: `success|error|warning|info`. Slides in from top-right.
+- **Dialog** — confirmation modal with overlay, title, description, action buttons.
+- **Tooltip** — hover tooltip using Radix. Dark background, 6 px radius.
+- **Tabs** — Radix-based tab bar with pill-style active state.
+- **Spinner** — animated spinner for loading states.
 
 ## Workflow Screens
 
 - Preserve Upload -> Check Values -> Generate PDF.
-- Review uses a sticky action bar, source PDF on the left, and extracted text plus editable fields on the right. Do not expose raw extraction internals.
-- The template builder uses a full-screen toolbar, left element library, centered A4 canvas, and right property inspector. Canvas actions must not resize the surrounding layout.
-- Admin uses stable sub-navigation for Users, Companies, Templates, Benefits, Storage, and System Checks.
-- Long filenames and field values wrap or truncate with a discoverable full value; they must not overlap controls.
+- **Shell:** Fixed 56 px glass header with Risklocker horizontal logo, user email, sign-out button. Fixed 220 px sidebar with distinct Phosphor icons per route, active state in black pill. Main area scrolls independently.
+- **Login:** Centered card on gray background, logo above form, minimal fields.
+- **Review:** Sticky toolbar, two-column layout (PDF iframe left, extracted text + fields right). DraftFieldTable component reused.
+- **Template Builder:** Full-screen toolbar, left element library, centered A4 canvas, right property inspector. Canvas drag/resize unchanged.
+- **Builder / Settings sub-navigation:** Pill-style link bar using the same transparent/white toggle pattern.
 
 ## Staff Language
 

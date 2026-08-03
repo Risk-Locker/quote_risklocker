@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 from pathlib import Path
+
+
+logger = logging.getLogger(__name__)
 
 
 def available_engines() -> dict[str, bool]:
@@ -16,8 +20,8 @@ def available_engines() -> dict[str, bool]:
         import paddleocr  # type: ignore  # noqa: F401
 
         engines["paddleocr"] = True
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("PaddleOCR is not available: %s", exc)
     return engines
 
 
