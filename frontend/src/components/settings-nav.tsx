@@ -15,7 +15,7 @@ const items = [
 export function SettingsNav() {
   const pathname = usePathname();
   return (
-    <nav className="flex gap-1 p-1 rounded-[var(--rl-radius)] bg-[var(--rl-bg)] w-fit flex-wrap" aria-label="Settings sections">
+    <nav className="flex flex-wrap gap-1 p-1 rounded-[var(--rl-radius)] bg-[var(--rl-bg)] w-fit max-w-full overflow-x-auto" aria-label="Settings sections">
       {items.map((item) => {
         const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
         return (

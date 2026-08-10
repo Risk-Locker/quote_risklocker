@@ -56,7 +56,14 @@ def test_supabase_storage_uses_private_backend_requests():
         assert request.headers["authorization"] == "Bearer backend-only-key"
         assert "backend-only-key" not in str(request.url)
         if request.method == "GET" and "/bucket/" in request.url.path:
-            return httpx.Response(200, json={"id": "risklocker-pdfs", "public": False})
+            return httpx.Response(
+                200,
+                json={
+                    "id": "risklocker-pdfs",
+                    "public": False,
+                    "allowed_mime_types": ["application/pdf", "image/png", "image/jpeg", "image/svg+xml"],
+                },
+            )
         if request.method == "POST":
             assert request.url.path.endswith("/source/2026/07/batch/file.pdf")
             return httpx.Response(200, json={"Key": "source/2026/07/batch/file.pdf"}, headers={"etag": "test-etag"})
@@ -74,6 +81,24 @@ def test_supabase_storage_uses_private_backend_requests():
     assert stored.etag == "test-etag"
     assert storage.download_bytes(stored.object_key) == uploaded
     storage.delete_pdf(stored.object_key)
+    client.close()
+
+
+def test_supabase_bucket_reconciles_asset_mime_types():
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and "/bucket/" in request.url.path:
+            return httpx.Response(200, json={"id": "risklocker-pdfs", "public": False, "allowed_mime_types": ["application/pdf"]})
+        if request.method == "PUT" and "/bucket/" in request.url.path:
+            seen.append(request.url.path)
+            return httpx.Response(200, json={"id": "risklocker-pdfs"})
+        return httpx.Response(500)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    storage = SupabaseStorage(storage_settings(), client=client)
+    storage.ensure_bucket()
+    assert seen == ["/storage/v1/bucket/risklocker-pdfs"]
     client.close()
 
 

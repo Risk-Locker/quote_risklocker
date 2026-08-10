@@ -8,12 +8,13 @@ import {
   ArrowArcRight,
   ArrowLeft,
   BracketsCurly,
-  Cards,
   CaretDoubleDown,
   CaretDoubleUp,
   CaretDown,
   CaretUp,
+  Circle,
   CopySimple,
+  Diamond,
   FloppyDisk,
   GridFour,
   Image,
@@ -21,8 +22,11 @@ import {
   MagnifyingGlass,
   Plus,
   Square,
+  TextIndent,
+  TextOutdent,
   TextT,
   Trash,
+  Triangle,
   UploadSimple,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
@@ -34,15 +38,15 @@ import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
 import { api, fileUrl } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { CanvasElementView, type CanvasElement, type CanvasStyle, SNAP, snapValue, computeGuides } from "@/components/template-canvas/shared";
+import { CanvasElementView, FONT_LIBRARY, type CanvasElement, type CanvasStyle, SNAP, snapValue, computeGuides } from "@/components/template-canvas/shared";
 
 type TemplateVariable = { id: string; label: string; type: string; source: string; field?: string; fixed_value?: string };
 type BenefitCard = { icon?: string; title?: string; subtitle?: string; lines?: string[]; asset_id?: string };
 type PackageConfig = { name: string; included_cards?: string[]; add_on_cards?: string[]; included?: string[]; add_ons?: string[] };
 type TemplateConfig = { variables: TemplateVariable[]; cards: Record<string, BenefitCard>; packages: PackageConfig[]; assets: Record<string, string>; canvas: { width: number; height: number; elements: CanvasElement[] } };
 type TemplateRecord = { id: string; name: string; insurance_type: string; status: string; locked: boolean; fixed_fields: TemplateConfig };
-type AssetRecord = { id: string; label: string; filename: string; url: string; source?: string };
-type DragState = { id: string; mode: "move" | "resize"; startX: number; startY: number; start: CanvasElement; handle?: string };
+type AssetRecord = { id: string; label: string; filename: string; url: string; source?: string; folder?: string };
+type DragState = { id: string; mode: "move" | "resize"; startX: number; startY: number; start: CanvasElement; handle?: string; members: Set<string>; memberStart: Map<string, { x: number; y: number }> };
 type VariantItem = { id: string; special_id: string; label: string; secondary_label?: string | null; value_text?: string | null; icon_asset_id?: string | null; shape?: string | null; bg_color?: string | null; text_color?: string | null; border_width?: string | null; border_color?: string | null; shadow?: string | null; status: string };
 type SpecialItem = { id: string; label: string; category: string; status: string; variants: VariantItem[] };
 
@@ -53,6 +57,21 @@ const sourceFields = ["customer_name", "vehicle_no", "insurance_company", "cover
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)); }
 function makeId(prefix: string) { return `${prefix}_${Math.random().toString(36).slice(2, 9)}`; }
 function slug(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || makeId("var"); }
+
+function layerLabel(element: CanvasElement): string {
+  switch (element.type) {
+    case "text": return element.text ? (element.text.replace(/\s+/g, " ").slice(0, 24) || "Text") : "Text";
+    case "variable": return `Var: ${element.variableId || "?"}`;
+    case "image": return element.assetSlot ? `Image: ${element.assetSlot}` : "Image";
+    case "line": return "Line";
+    case "group": return "Box";
+    case "shape": return "Shape";
+    case "benefit-section": return element.section === "add_ons" ? "Add-on section" : "Specials section";
+    case "special": return element.variant_label ? `Special: ${element.variant_label}` : "Special";
+    case "benefit-card": return "Benefit card";
+    default: return element.type;
+  }
+}
 function defaultStyle(type: string): CanvasStyle {
   if (type === "special") return { fontSize: 12, fontWeight: "600", color: "#111111", textAlign: "center", background: "#F6F8FB", borderWidth: 1, borderColor: "#D8DDE6" };
   return {
@@ -74,7 +93,17 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
 
   const [template, setTemplate] = useState<TemplateRecord | null>(null);
   const [assets, setAssets] = useState<AssetRecord[]>([]);
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [primaryId, setPrimaryId] = useState("");
+  const [rightTab, setRightTab] = useState<"layers" | "properties">("layers");
+  const [showLeft, setShowLeft] = useState(true);
+  const [showRight, setShowRight] = useState(true);
+  const [editingTextId, setEditingTextId] = useState<string | null>(null);
+  const [rulerGuides, setRulerGuides] = useState<{ x: number[]; y: number[] }>({ x: [], y: [] });
+  const [rulerDrag, setRulerDrag] = useState<{ axis: "x" | "y"; pos: number; active: boolean } | null>(null);
+  const [marquee, setMarquee] = useState<{ startX: number; startY: number; curX: number; curY: number } | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const suppressClickRef = useRef(false);
   const [zoom, setZoom] = useState(0.72);
   const [error, setError] = useState("");
   const [history, setHistory] = useState<TemplateConfig[]>([]);
@@ -84,6 +113,7 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
   const [previewMode, setPreviewMode] = useState(false);
   const [guides, setGuides] = useState<{ x: number; y: number }[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [assetFolder, setAssetFolder] = useState("Uncategorized");
   const [specials, setSpecials] = useState<SpecialItem[]>([]);
   const [specialSearch, setSpecialSearch] = useState("");
   const dragRef = useRef<DragState | null>(null);
@@ -99,7 +129,7 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
     setTemplate(templateResult.template);
     setAssets(assetResult.assets);
     setSpecials(specialsResult.our_specials);
-    setSelectedId(templateResult.template.fixed_fields.canvas.elements[0]?.id || "");
+    selectOnly(templateResult.template.fixed_fields.canvas.elements[0]?.id || "");
   }
 
   useEffect(() => {
@@ -109,10 +139,37 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
 
   const config = template?.fixed_fields;
   const elements = config?.canvas?.elements || [];
-  const selected = elements.find((item) => item.id === selectedId) || null;
+  const selected = elements.find((item) => item.id === primaryId) || null;
+  const selection = elements.filter((item) => selectedIds.has(item.id));
   const readOnly = Boolean(template?.locked) || previewMode;
   const selectedCard = selected?.cardId && config?.cards ? config.cards[selected.cardId] : null;
   const sortedElements = useMemo(() => [...elements].sort((a, b) => (a.z || 1) - (b.z || 1)), [elements]);
+
+  function selectOnly(id: string) {
+    setSelectedIds(new Set([id]));
+    setPrimaryId(id);
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    setPrimaryId(id);
+  }
+
+  function addToSelection(ids: string[]) {
+    if (!ids.length) return;
+    setSelectedIds((prev) => new Set([...prev, ...ids]));
+    setPrimaryId(ids[ids.length - 1]);
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+    setPrimaryId("");
+  }
 
   function commit(updater: (current: TemplateConfig) => TemplateConfig) {
     if (!template || readOnly) return;
@@ -129,6 +186,10 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
       current.canvas.elements = current.canvas.elements.map((item) => item.id === elementId ? { ...item, ...patch, style: { ...(item.style || {}), ...(patch.style || {}) } } : item);
       return current;
     });
+  }
+
+  function updateStyle(elementId: string, patch: Partial<CanvasStyle>) {
+    updateElement(elementId, { style: patch });
   }
 
   function addSpecialElement(variant: VariantItem) {
@@ -151,7 +212,7 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
       variant_shadow: variant.shadow || undefined,
     };
     commit((current) => { current.canvas.elements.push(element); return current; });
-    setSelectedId(element.id);
+    selectOnly(element.id);
   }
 
   function handleCanvasDragOver(event: React.DragEvent) { event.preventDefault(); }
@@ -183,7 +244,7 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
         variant_shadow: variant.shadow || undefined,
       };
       commit((current) => { current.canvas.elements.push(element); return current; });
-      setSelectedId(element.id);
+      selectOnly(element.id);
     } catch { /* ignore invalid drop data */ }
   }
 
@@ -200,20 +261,93 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
       ...patch
     };
     commit((current) => { current.canvas.elements.push(element); return current; });
-    setSelectedId(element.id);
+    selectOnly(element.id);
   }
 
-  function deleteSelected() {
-    if (!selected || readOnly) return;
-    commit((current) => { current.canvas.elements = current.canvas.elements.filter((item) => item.id !== selected.id); return current; });
-    setSelectedId("");
+  function updateElements(ids: Set<string>, patch: (el: CanvasElement) => Partial<CanvasElement>) {
+    commit((current) => {
+      current.canvas.elements = current.canvas.elements.map((item) => ids.has(item.id) ? { ...item, ...patch(item) } : item);
+      return current;
+    });
   }
 
-  function duplicateSelected() {
-    if (!selected || readOnly) return;
-    const copy = { ...clone(selected), id: makeId(selected.type), x: selected.x + 18, y: selected.y + 18, z: (selected.z || 1) + 1 };
-    commit((current) => { current.canvas.elements.push(copy); return current; });
-    setSelectedId(copy.id);
+  function moveSelectionIds(): Set<string> {
+    const ids = new Set(selection.map((e) => e.id));
+    const groupIds = new Set(selection.filter((e) => e.type === "group").map((e) => e.id));
+    for (const el of elements) {
+      if (el.groupId && groupIds.has(el.groupId)) ids.add(el.id);
+    }
+    return ids;
+  }
+
+  function deleteSelection() {
+    if (!selectedIds.size || readOnly) return;
+    const groupIds = new Set(selection.filter((e) => e.type === "group").map((e) => e.id));
+    commit((current) => {
+      current.canvas.elements = current.canvas.elements
+        .filter((item) => !selectedIds.has(item.id))
+        .filter((item) => !(item.groupId && groupIds.has(item.groupId)));
+      return current;
+    });
+    clearSelection();
+  }
+
+  function duplicateSelection() {
+    if (!selectedIds.size || readOnly) return;
+    const idMap = new Map<string, string>();
+    const copies = selection.map((el) => {
+      const copy = { ...clone(el), id: makeId(el.type), x: el.x + 18, y: el.y + 18, z: (el.z || 1) + 1 };
+      if (el.type === "group") idMap.set(el.id, copy.id);
+      return copy;
+    }).map((el) => {
+      if (el.groupId && idMap.has(el.groupId)) return { ...el, groupId: idMap.get(el.groupId) };
+      if (el.groupId) {
+        const copy = { ...el };
+        delete copy.groupId;
+        return copy;
+      }
+      return el;
+    });
+    commit((current) => { current.canvas.elements.push(...copies); return current; });
+    selectOnly(copies[copies.length - 1].id);
+  }
+
+  function groupSelection() {
+    const members = selection.filter((e) => e.type !== "group");
+    if (members.length < 2 || readOnly) return;
+    const minX = Math.min(...members.map((m) => m.x));
+    const minY = Math.min(...members.map((m) => m.y));
+    const maxX = Math.max(...members.map((m) => m.x + m.w));
+    const maxY = Math.max(...members.map((m) => m.y + m.h));
+    const gid = makeId("group");
+    const count = elements.filter((e) => e.type === "group").length;
+    const groupEl: CanvasElement = {
+      id: gid,
+      type: "group",
+      groupName: `Group ${count + 1}`,
+      x: Math.floor(minX - 8), y: Math.floor(minY - 8),
+      w: Math.ceil(maxX - minX + 16), h: Math.ceil(maxY - minY + 16),
+      z: Math.max(1, Math.min(...members.map((m) => m.z || 1)) - 1),
+      style: { background: "transparent", borderWidth: 1, borderColor: "#94a3b8" },
+    };
+    commit((current) => {
+      current.canvas.elements = current.canvas.elements.map((e) => selectedIds.has(e.id) && e.type !== "group" ? { ...e, groupId: gid } : e);
+      current.canvas.elements.push(groupEl);
+      return current;
+    });
+    selectOnly(gid);
+  }
+
+  function ungroup() {
+    const groupIds = new Set(selection.filter((e) => e.type === "group").map((e) => e.id));
+    if (!groupIds.size || readOnly) return;
+    commit((current) => {
+      current.canvas.elements = current.canvas.elements
+        .filter((e) => !groupIds.has(e.id))
+        .map((e) => (e.groupId && groupIds.has(e.groupId)) ? { ...e, groupId: undefined } : e);
+      return current;
+    });
+    clearSelection();
   }
 
   function undo() {
@@ -233,35 +367,81 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
   }
 
   function bringForward() {
-    if (!selected || readOnly) return;
+    if (!selection.length || readOnly) return;
     const maxZ = Math.max(0, ...elements.map((item) => item.z || 1));
-    if ((selected.z || 1) >= maxZ) return;
-    updateElement(selected.id, { z: (selected.z || 1) + 1 });
+    if (!selection.some((e) => (e.z || 1) < maxZ)) return;
+    updateElements(moveSelectionIds(), (e) => ({ z: (e.z || 1) + 1 }));
   }
 
   function bringToFront() {
-    if (!selected || readOnly) return;
+    if (!selection.length || readOnly) return;
     const maxZ = Math.max(0, ...elements.map((item) => item.z || 1));
-    updateElement(selected.id, { z: maxZ + 1 });
+    updateElements(moveSelectionIds(), () => ({ z: maxZ + 1 }));
   }
 
   function sendBackward() {
-    if (!selected || readOnly) return;
-    if ((selected.z || 1) <= 1) return;
-    updateElement(selected.id, { z: (selected.z || 1) - 1 });
+    if (!selection.length || readOnly) return;
+    if (!selection.some((e) => (e.z || 1) > 1)) return;
+    updateElements(moveSelectionIds(), (e) => ({ z: Math.max(1, (e.z || 1) - 1) }));
   }
 
   function sendToBack() {
-    if (!selected || readOnly) return;
-    updateElement(selected.id, { z: 1 });
+    if (!selection.length || readOnly) return;
+    updateElements(moveSelectionIds(), () => ({ z: 1 }));
+  }
+
+  function clampPos(pos: number, axis: "x" | "y") {
+    const max = axis === "x" ? (config?.canvas.width || 794) : (config?.canvas.height || 1123);
+    return Math.max(0, Math.min(max, pos));
+  }
+
+  function startRulerDrag(event: React.PointerEvent, axis: "x" | "y") {
+    if (readOnly) return;
+    event.preventDefault();
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const pos = axis === "x" ? (event.clientX - rect.left) / zoom : (event.clientY - rect.top) / zoom;
+    setRulerDrag({ axis, pos: clampPos(pos, axis), active: true });
+  }
+
+  function moveRulerDrag(event: React.PointerEvent) {
+    if (!rulerDrag?.active) return;
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const pos = rulerDrag.axis === "x" ? (event.clientX - rect.left) / zoom : (event.clientY - rect.top) / zoom;
+    setRulerDrag((current) => (current ? { ...current, pos: clampPos(pos, current.axis) } : current));
+  }
+
+  function endRulerDrag() {
+    if (!rulerDrag?.active) return;
+    const axis = rulerDrag.axis;
+    const pos = Math.round(rulerDrag.pos);
+    setRulerGuides((current) => {
+      const list = current[axis];
+      const existing = list.find((p) => Math.abs(p - pos) <= 3);
+      const next = existing ? list : [...list, pos].sort((a, b) => a - b);
+      return { ...current, [axis]: next };
+    });
+    setRulerDrag(null);
   }
 
   function pointerDown(event: React.PointerEvent, element: CanvasElement, mode: "move" | "resize", handle?: string) {
     if (readOnly) return;
+    if (element.type === "image" && element.assetSlot === "background" && mode === "move") return;
     event.preventDefault();
     event.stopPropagation();
-    setSelectedId(element.id);
-    dragRef.current = { id: element.id, mode, startX: event.clientX, startY: event.clientY, start: clone(element), handle };
+    if (event.shiftKey && mode === "move") {
+      toggleSelect(element.id);
+    } else if (!selectedIds.has(element.id)) {
+      selectOnly(element.id);
+    }
+    const members = mode === "move" ? moveSelectionIds() : new Set([element.id]);
+    const memberStart = new Map<string, { x: number; y: number }>();
+    for (const el of elements) {
+      if (members.has(el.id)) memberStart.set(el.id, { x: el.x, y: el.y });
+    }
+    dragRef.current = { id: element.id, mode, startX: event.clientX, startY: event.clientY, start: clone(element), handle, members, memberStart };
   }
 
   function pointerMove(event: React.PointerEvent) {
@@ -279,10 +459,16 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
       ny = gy ?? sy;
       const guides = computeGuides(drag.start, { x: nx, y: ny }, elements, config?.canvas.width || 794, (config?.canvas.width || 794) / 2);
       setGuides(guides);
+      const ddx = nx - drag.start.x;
+      const ddy = ny - drag.start.y;
       setTemplate((current) => {
         if (!current) return current;
         const next = clone(current);
-        next.fixed_fields.canvas.elements = next.fixed_fields.canvas.elements.map((item: CanvasElement) => item.id === drag.id ? { ...item, x: nx, y: ny } : item);
+        next.fixed_fields.canvas.elements = next.fixed_fields.canvas.elements.map((item: CanvasElement) => {
+          if (!drag.members.has(item.id)) return item;
+          const start = drag.memberStart.get(item.id);
+          return start ? { ...item, x: Math.round(start.x + ddx), y: Math.round(start.y + ddy) } : item;
+        });
         return { ...current, fixed_fields: next.fixed_fields };
       });
     } else {
@@ -310,10 +496,55 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
     }
   }
 
+  function canvasPointerDown(event: React.PointerEvent) {
+    if (readOnly || previewMode) return;
+    suppressClickRef.current = false;
+    const target = event.target as HTMLElement;
+    const isBackgroundImage = !!target.closest("[data-bg='1']");
+    if (target !== event.currentTarget && !isBackgroundImage) return;
+    event.preventDefault();
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setMarquee({
+      startX: (event.clientX - rect.left) / zoom,
+      startY: (event.clientY - rect.top) / zoom,
+      curX: (event.clientX - rect.left) / zoom,
+      curY: (event.clientY - rect.top) / zoom,
+    });
+  }
+
+  function canvasPointerMove(event: React.PointerEvent) {
+    if (!marquee) return;
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setMarquee((m) => m ? {
+      ...m,
+      curX: Math.max(0, Math.min((config?.canvas.width || 794), (event.clientX - rect.left) / zoom)),
+      curY: Math.max(0, Math.min((config?.canvas.height || 1123), (event.clientY - rect.top) / zoom)),
+    } : m);
+  }
+
+  function canvasPointerUp() {
+    if (!marquee) return;
+    const x0 = Math.min(marquee.startX, marquee.curX);
+    const y0 = Math.min(marquee.startY, marquee.curY);
+    const x1 = Math.max(marquee.startX, marquee.curX);
+    const y1 = Math.max(marquee.startY, marquee.curY);
+    setMarquee(null);
+    if (x1 - x0 < 4 && y1 - y0 < 4) return;
+    const hits = elements.filter((el) => el.x < x1 && el.x + el.w > x0 && el.y < y1 && el.y + el.h > y0).map((el) => el.id);
+    if (!hits.length) return;
+    setSelectedIds(new Set(hits));
+    setPrimaryId(hits[hits.length - 1]);
+    suppressClickRef.current = true;
+  }
+
   function pointerUp() {
     const drag = dragRef.current;
     dragRef.current = null;
     setGuides([]);
+    if (drag) suppressClickRef.current = true;
     if (drag && template) {
       const element = template.fixed_fields.canvas.elements.find((item) => item.id === drag.id);
       if (element) {
@@ -345,8 +576,10 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
       const form = new FormData();
       form.append("file", file);
       form.append("label", file.name.replace(/\.[^.]+$/, ""));
+      form.append("folder", assetFolder.trim() || "Uncategorized");
       const result = await api<{ asset: AssetRecord }>("/admin/template-assets", { method: "POST", body: form });
       setAssets((current) => [result.asset, ...current]);
+      toast(`Asset uploaded to "${result.asset.folder || "Uncategorized"}" folder.`, "success");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed.");
     } finally {
@@ -364,21 +597,25 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (readOnly) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) {
+        return;
+      }
       const meta = event.ctrlKey || event.metaKey;
       if (meta && event.key.toLowerCase() === "z") { event.preventDefault(); if (event.shiftKey) redo(); else undo(); return; }
       if (meta && event.key.toLowerCase() === "y") { event.preventDefault(); redo(); return; }
-      if (meta && event.key.toLowerCase() === "d") { event.preventDefault(); duplicateSelected(); return; }
-      if (!selected) return;
-      if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); deleteSelected(); return; }
+      if (meta && event.key.toLowerCase() === "d") { event.preventDefault(); duplicateSelection(); return; }
+      if (!selectedIds.size) return;
+      if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); deleteSelection(); return; }
       const step = event.shiftKey ? 10 : 1;
-      if (event.key === "ArrowUp") { event.preventDefault(); updateElement(selected.id, { y: selected.y - step }); }
-      else if (event.key === "ArrowDown") { event.preventDefault(); updateElement(selected.id, { y: selected.y + step }); }
-      else if (event.key === "ArrowLeft") { event.preventDefault(); updateElement(selected.id, { x: selected.x - step }); }
-      else if (event.key === "ArrowRight") { event.preventDefault(); updateElement(selected.id, { x: selected.x + step }); }
+      if (event.key === "ArrowUp") { event.preventDefault(); updateElements(moveSelectionIds(), (e) => ({ y: (e.y || 0) - step })); }
+      else if (event.key === "ArrowDown") { event.preventDefault(); updateElements(moveSelectionIds(), (e) => ({ y: (e.y || 0) + step })); }
+      else if (event.key === "ArrowLeft") { event.preventDefault(); updateElements(moveSelectionIds(), (e) => ({ x: (e.x || 0) - step })); }
+      else if (event.key === "ArrowRight") { event.preventDefault(); updateElements(moveSelectionIds(), (e) => ({ x: (e.x || 0) + step })); }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selected, readOnly, history, future, elements]);
+  }, [selectedIds, readOnly, history, future, elements]);
 
   useEffect(() => {
     if (!authLoading && user === null) {
@@ -398,8 +635,8 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
   }
 
   return (
-    <main className="min-h-screen bg-[var(--rl-bg)] text-[var(--rl-text)]">
-      <div className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--rl-border)] bg-[var(--rl-surface)]/95 px-4 py-3 backdrop-blur-md">
+    <main className="flex h-dvh flex-col overflow-hidden bg-[var(--rl-bg)] text-[var(--rl-text)]">
+      <div className="z-30 flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--rl-border)] bg-[var(--rl-surface)]/95 px-4 py-3 backdrop-blur-md">
         <div className="flex flex-wrap items-center gap-3">
           <Button
             variant="ghost"
@@ -417,6 +654,24 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
           {template?.locked ? <Badge variant="warning">Locked default</Badge> : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<TextOutdent weight="bold" size={14} />}
+            onClick={() => setShowLeft((v) => !v)}
+            title={showLeft ? "Hide left panel" : "Show left panel"}
+          >
+            Panels
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<TextIndent weight="bold" size={14} />}
+            onClick={() => setShowRight((v) => !v)}
+            title={showRight ? "Hide right panel" : "Show right panel"}
+          >
+            Inspector
+          </Button>
           <Button
             variant={showGrid ? "primary" : "secondary"}
             size="sm"
@@ -483,16 +738,16 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
       </div>
 
       {error ? (
-        <div className="m-4 rounded-[var(--rl-radius-sm)] bg-[var(--rl-red-light)] px-3 py-2.5 text-[13px] font-semibold text-[var(--rl-red)]">
+        <div className="m-4 shrink-0 rounded-[var(--rl-radius-sm)] bg-[var(--rl-red-light)] px-3 py-2.5 text-[13px] font-semibold text-[var(--rl-red)]">
           {error}
         </div>
       ) : null}
 
-      <div className="grid min-h-[calc(100vh-73px)] grid-cols-[280px_minmax(0,1fr)_320px]">
-        {!previewMode ? (
-          <aside className="overflow-auto border-r border-[var(--rl-border)] bg-[var(--rl-surface)] p-4">
-            <h2 className="font-bold text-[var(--rl-text-strong)]">Elements</h2>
-            <div className="mt-3 grid grid-cols-2 gap-2">
+      <div className={`grid min-h-0 flex-1 ${showLeft && showRight ? "grid-cols-[280px_minmax(0,1fr)_320px]" : showLeft ? "grid-cols-[280px_minmax(0,1fr)]" : showRight ? "grid-cols-[minmax(0,1fr)_320px]" : "grid-cols-1"}`}>
+        {!previewMode && showLeft ? (
+          <aside className="min-h-0 overflow-y-auto border-r border-[var(--rl-border)] bg-[var(--rl-surface)] p-4">
+            <PanelSection title="Elements">
+              <div className="grid grid-cols-2 gap-2">
               <Button
                 variant="secondary"
                 size="sm"
@@ -546,27 +801,38 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
               <Button
                 variant="secondary"
                 size="sm"
-                icon={<Cards weight="bold" size={16} />}
+                icon={<Circle weight="bold" size={16} />}
                 disabled={readOnly}
-                onClick={() => addElement("benefit-section", { section: "specials", w: 520, h: 180 })}
+                onClick={() => addElement("shape", { shapeKind: "circle", w: 100, h: 100, style: { background: "#F6F8FB", borderWidth: 1, borderColor: "#D8DDE6" } })}
                 className="justify-start"
               >
-                Specials
+                Circle
               </Button>
               <Button
                 variant="secondary"
                 size="sm"
-                icon={<Plus weight="bold" size={16} />}
+                icon={<Triangle weight="bold" size={16} />}
                 disabled={readOnly}
-                onClick={() => addElement("benefit-section", { section: "add_ons", w: 520, h: 180 })}
+                onClick={() => addElement("shape", { shapeKind: "triangle", w: 100, h: 90, style: { background: "#F6F8FB" } })}
                 className="justify-start"
               >
-                Add-ons
+                Triangle
               </Button>
-            </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<Diamond weight="bold" size={16} />}
+                disabled={readOnly}
+                onClick={() => addElement("shape", { shapeKind: "diamond", w: 100, h: 100, style: { background: "#F6F8FB", borderWidth: 1, borderColor: "#D8DDE6" } })}
+                className="justify-start"
+              >
+                Diamond
+              </Button>
+              </div>
+            </PanelSection>
 
-            <h2 className="mt-6 font-bold text-[var(--rl-text-strong)]">Variables</h2>
-            <div className="mt-3 grid gap-2">
+            <PanelSection title="Variables">
+              <div className="grid gap-2">
               <Input
                 placeholder="Variable label"
                 value={newVariable.label}
@@ -603,10 +869,28 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                   </button>
                 ))}
               </div>
-            </div>
+              </div>
+            </PanelSection>
 
-            <h2 className="mt-6 font-bold text-[var(--rl-text-strong)]">Assets</h2>
-            <div className="mt-3 grid gap-2">
+            <PanelSection title="Assets">
+              <div className="grid gap-2">
+              <div className="grid gap-1.5">
+                <label className="text-xs font-semibold text-[var(--rl-text-muted)]">Upload to folder</label>
+                <Input
+                  className="text-sm"
+                  value={assetFolder}
+                  disabled={readOnly}
+                  list="asset-folders"
+                  placeholder="Uncategorized"
+                  onChange={(e) => setAssetFolder(e.target.value)}
+                />
+                <datalist id="asset-folders">
+                  {[...new Set(assets.map((a) => a.folder || "Uncategorized"))].sort().map((folder) => (
+                    <option key={folder} value={folder} />
+                  ))}
+                </datalist>
+                <p className="text-[11px] text-[var(--rl-text-muted)]">Leave empty or pick an existing folder; a new folder name is created on upload.</p>
+              </div>
               <input ref={fileInputRef} className="sr-only" type="file" accept=".png,.jpg,.jpeg,.svg" onChange={(event) => event.target.files?.[0] && uploadAsset(event.target.files[0])} />
               <Button
                 variant="secondary"
@@ -619,23 +903,35 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                 {uploading ? "Uploading" : "Upload asset"}
               </Button>
               <div className="grid max-h-64 gap-2 overflow-auto">
-                {assets.map((asset) => (
-                  <button
-                    key={asset.id}
-                    className="grid grid-cols-[44px_1fr] items-center gap-2 rounded border border-[var(--rl-border)] p-2 text-left text-xs hover:bg-[var(--rl-bg)]"
-                    type="button"
-                    disabled={readOnly}
-                    onClick={() => addElement("image", { assetId: asset.id, w: 120, h: 70 })}
-                  >
-                    <img className="h-10 w-10 object-contain" src={fileUrl(asset.url)} alt="" />
-                    <span>{asset.label}</span>
-                  </button>
+                {Object.entries(
+                  assets.reduce<Record<string, AssetRecord[]>>((groups, asset) => {
+                    const folder = asset.folder || "Uncategorized";
+                    (groups[folder] ||= []).push(asset);
+                    return groups;
+                  }, {})
+                ).sort(([a], [b]) => a.localeCompare(b)).map(([folder, items]) => (
+                  <div key={folder} className="grid gap-1">
+                    <div className="text-[10px] font-bold uppercase text-[var(--rl-text-muted)]">{folder} ({items.length})</div>
+                    {items.map((asset) => (
+                      <button
+                        key={asset.id}
+                        className="grid grid-cols-[44px_1fr] items-center gap-2 rounded border border-[var(--rl-border)] p-2 text-left text-xs hover:bg-[var(--rl-bg)]"
+                        type="button"
+                        disabled={readOnly}
+                        onClick={() => addElement("image", { assetId: asset.id, w: 120, h: 70 })}
+                      >
+                        <img className="h-10 w-10 object-contain" src={fileUrl(asset.url)} alt="" />
+                        <span>{asset.label}</span>
+                      </button>
+                    ))}
+                  </div>
                 ))}
               </div>
-            </div>
+              </div>
+            </PanelSection>
 
-            <h2 className="mt-6 font-bold text-[var(--rl-text-strong)]">Our Specials</h2>
-            <div className="mt-3 grid gap-2">
+            <PanelSection title="Our Specials">
+              <div className="grid gap-2">
               <Input
                 className="text-sm"
                 placeholder="Search variants..."
@@ -681,7 +977,8 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                 })}
                 {!specials.length ? <p className="text-xs text-[var(--rl-text-muted)]">No specials yet. Create them in Our Specials.</p> : null}
               </div>
-            </div>
+              </div>
+            </PanelSection>
           </aside>
         ) : <div />}
 
@@ -694,51 +991,279 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
             </label>
           </div>
           <div className="mx-auto w-fit rounded-md bg-neutral-300 p-6 shadow-inner" style={{ minHeight: ((config?.canvas.height || 1123) * zoom) + 60 }}>
-            <div
-              ref={canvasRef}
-              className="relative origin-top-left overflow-hidden bg-white shadow-xl"
-              style={{ width: config?.canvas.width || 794, height: config?.canvas.height || 1123, transform: `scale(${zoom})` }}
-              onPointerMove={pointerMove}
-              onPointerUp={pointerUp}
-              onPointerLeave={pointerUp}
-              onDragOver={handleCanvasDragOver}
-              onDrop={handleCanvasDrop}
-              onClick={() => setSelectedId("")}
-            >
-              {showGrid && !previewMode && (
-                <div className="pointer-events-none absolute inset-0 opacity-10" style={{ backgroundImage: `linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)`, backgroundSize: `${SNAP * zoom}px ${SNAP * zoom}px` }} />
-              )}
-              {guides.map((guide, index) => (
-                guide.x > 0 ? (
-                  <div key={`v${index}`} className="pointer-events-none absolute top-0 bottom-0 border-l border-dashed" style={{ left: guide.x, zIndex: 9999, borderColor: "var(--rl-red)" }} />
-                ) : (
-                  <div key={`h${index}`} className="pointer-events-none absolute left-0 right-0 border-t border-dashed" style={{ top: guide.y, zIndex: 9999, borderColor: "var(--rl-red)" }} />
-                )
-              ))}
-              {sortedElements.map((element) => (
-                <CanvasElementView key={element.id} element={element} selected={!previewMode && element.id === selectedId} assets={assets} config={config} readOnly={readOnly} onPointerDown={(event) => pointerDown(event, element, "move")} onResizePointerDown={(event, handle) => pointerDown(event, element, "resize", handle)} />
-              ))}
+            <div className="relative" style={{ width: (config?.canvas.width || 794) * zoom, height: (config?.canvas.height || 1123) * zoom }}>
+              {!previewMode ? (
+                <>
+                  <div className="absolute -top-6 left-0 h-5 w-full select-none overflow-hidden border-b border-[var(--rl-border)] bg-[var(--rl-surface)]"
+                    onPointerDown={(event) => startRulerDrag(event, "x")}
+                    onPointerMove={(event) => moveRulerDrag(event)}
+                    onPointerUp={endRulerDrag}
+                  >
+                    {Array.from({ length: Math.ceil((config?.canvas.width || 794) / 25) + 1 }, (_, i) => {
+                      const px = i * 25 * zoom;
+                      const major = i % 4 === 0;
+                      return <span key={i} className={`absolute top-0 ${major ? "h-3 w-px" : "h-1.5 w-px"} bg-[var(--rl-text-muted)]`} style={{ left: px }} />;
+                    })}
+                    {Array.from({ length: Math.ceil((config?.canvas.width || 794) / 100) + 1 }, (_, i) => (
+                      <span key={`l${i}`} className="absolute top-1 text-[8px] leading-none text-[var(--rl-text-muted)]" style={{ left: i * 100 * zoom + 2 }}>{i * 100}</span>
+                    ))}
+                    {rulerDrag?.axis === "x" && rulerDrag.active ? (
+                      <span className="absolute top-0 h-full w-px bg-[var(--rl-red)]" style={{ left: rulerDrag.pos * zoom }} />
+                    ) : null}
+                  </div>
+                  <div className="absolute -left-6 top-0 w-5 select-none overflow-hidden border-r border-[var(--rl-border)] bg-[var(--rl-surface)]"
+                    onPointerDown={(event) => startRulerDrag(event, "y")}
+                    onPointerMove={(event) => moveRulerDrag(event)}
+                    onPointerUp={endRulerDrag}
+                  >
+                    {Array.from({ length: Math.ceil((config?.canvas.height || 1123) / 25) + 1 }, (_, i) => {
+                      const py = i * 25 * zoom;
+                      const major = i % 4 === 0;
+                      return <span key={i} className={`absolute left-0 ${major ? "w-3 h-px" : "w-1.5 h-px"} bg-[var(--rl-text-muted)]`} style={{ top: py }} />;
+                    })}
+                    {Array.from({ length: Math.ceil((config?.canvas.height || 1123) / 100) + 1 }, (_, i) => (
+                      <span key={`l${i}`} className="absolute left-1 text-[8px] leading-none text-[var(--rl-text-muted)]" style={{ top: i * 100 * zoom + 2 }}>{i * 100}</span>
+                    ))}
+                    {rulerDrag?.axis === "y" && rulerDrag.active ? (
+                      <span className="absolute left-0 h-px w-full bg-[var(--rl-red)]" style={{ top: rulerDrag.pos * zoom }} />
+                    ) : null}
+                  </div>
+                  <div className="absolute -top-6 -left-6 h-6 w-6 border-b border-r border-[var(--rl-border)] bg-[var(--rl-surface)]" />
+                </>
+              ) : null}
+              <div
+                ref={canvasRef}
+                className="relative origin-top-left overflow-hidden bg-white shadow-xl"
+                style={{ width: config?.canvas.width || 794, height: config?.canvas.height || 1123, transform: `scale(${zoom})` }}
+                onPointerDown={canvasPointerDown}
+                onPointerMove={(event) => { pointerMove(event); canvasPointerMove(event); }}
+                onPointerUp={(event) => { pointerUp(); canvasPointerUp(); }}
+                onPointerLeave={pointerUp}
+                onDragOver={handleCanvasDragOver}
+                onDrop={handleCanvasDrop}
+                onClick={() => { if (suppressClickRef.current) { suppressClickRef.current = false; return; } clearSelection(); setEditingTextId(null); }}
+              >
+                {showGrid && !previewMode && (
+                  <div className="pointer-events-none absolute inset-0 opacity-10" style={{ backgroundImage: `linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)`, backgroundSize: `${SNAP * zoom}px ${SNAP * zoom}px` }} />
+                )}
+                {guides.map((guide, index) => (
+                  guide.x > 0 ? (
+                    <div key={`v${index}`} className="pointer-events-none absolute top-0 bottom-0 border-l border-dashed" style={{ left: guide.x, zIndex: 9999, borderColor: "var(--rl-red)" }} />
+                  ) : (
+                    <div key={`h${index}`} className="pointer-events-none absolute left-0 right-0 border-t border-dashed" style={{ top: guide.y, zIndex: 9999, borderColor: "var(--rl-red)" }} />
+                  )
+                ))}
+                {!previewMode && rulerGuides.x.map((x) => (
+                  <div key={`gx${x}`} className="pointer-events-none absolute top-0 bottom-0 border-l border-dashed" style={{ left: x, zIndex: 9998, borderColor: "#3b82f6" }} />
+                ))}
+                {!previewMode && rulerGuides.y.map((y) => (
+                  <div key={`gy${y}`} className="pointer-events-none absolute left-0 right-0 border-t border-dashed" style={{ top: y, zIndex: 9998, borderColor: "#3b82f6" }} />
+                ))}
+                {marquee ? (
+                  <div
+                    className="pointer-events-none absolute border border-[#3b82f6] bg-[#3b82f6]/10"
+                    style={{
+                      left: Math.min(marquee.startX, marquee.curX),
+                      top: Math.min(marquee.startY, marquee.curY),
+                      width: Math.abs(marquee.curX - marquee.startX),
+                      height: Math.abs(marquee.curY - marquee.startY),
+                      zIndex: 9997,
+                    }}
+                  />
+                ) : null}
+                {sortedElements.map((element) => (
+                  <CanvasElementView
+                    key={element.id}
+                    element={element}
+                    selected={!previewMode && selectedIds.has(element.id)}
+                    assets={assets}
+                    config={config}
+                    readOnly={readOnly}
+                    onPointerDown={(event) => pointerDown(event, element, "move")}
+                    onResizePointerDown={(event, handle) => pointerDown(event, element, "resize", handle)}
+                    onDoubleClick={(event) => {
+                      if (element.type !== "text" || readOnly) return;
+                      event.stopPropagation();
+                      selectOnly(element.id);
+                      setEditingTextId(element.id);
+                    }}
+                    editingText={element.type === "text" && editingTextId === element.id}
+                    onTextCommit={(text) => {
+                      updateElement(element.id, { text });
+                      setEditingTextId(null);
+                    }}
+                  />
+                ))}
+              </div>
             </div>
           </div>
         </section>
 
-        {!previewMode ? (
-          <aside className="overflow-auto border-l border-[var(--rl-border)] bg-[var(--rl-surface)] p-4">
+        {!previewMode && showRight ? (
+          <aside className="flex min-h-0 flex-col overflow-hidden border-l border-[var(--rl-border)] bg-[var(--rl-surface)]">
+            <div className="flex shrink-0 gap-1 border-b border-[var(--rl-border)] p-2">
+              <button
+                type="button"
+                onClick={() => setRightTab("layers")}
+                className={`flex-1 rounded-[var(--rl-radius-sm)] px-3 py-2 text-[13px] font-bold transition-all ${rightTab === "layers" ? "bg-[var(--rl-black)] text-white" : "text-[var(--rl-text-muted)] hover:bg-[var(--rl-bg)]"}`}
+              >
+                Layers
+              </button>
+              <button
+                type="button"
+                onClick={() => setRightTab("properties")}
+                className={`flex-1 rounded-[var(--rl-radius-sm)] px-3 py-2 text-[13px] font-bold transition-all ${rightTab === "properties" ? "bg-[var(--rl-black)] text-white" : "text-[var(--rl-text-muted)] hover:bg-[var(--rl-bg)]"}`}
+              >
+                Properties
+              </button>
+            </div>
+
+            {rightTab === "layers" ? (
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                <h2 className="font-bold text-[var(--rl-text-strong)]">Layers</h2>
+                <p className="mt-1 text-[12px] text-[var(--rl-text-muted)]">Top of the list sits on top of the canvas.</p>
+                <div className="mt-3 grid gap-1">
+                  {elements.length === 0 ? (
+                    <p className="text-xs text-[var(--rl-text-muted)]">No elements yet. Add one from the left sidebar.</p>
+                  ) : (
+                    <>
+                      {selection.length > 1 ? (
+                        <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded border border-[#3b82f6] bg-[#eff6ff] p-1.5">
+                          <span className="px-1 text-[11px] font-bold text-[#3b82f6]">{selection.length} selected</span>
+                          <button type="button" className="rounded bg-[#3b82f6] px-2 py-0.5 text-[11px] font-bold text-white disabled:opacity-40" disabled={readOnly} onClick={groupSelection}>Group</button>
+                          <button type="button" className="rounded border border-[var(--rl-border)] bg-white px-2 py-0.5 text-[11px] font-bold" disabled={readOnly} onClick={duplicateSelection}>Duplicate</button>
+                          <button type="button" className="rounded border border-[var(--rl-red)] bg-white px-2 py-0.5 text-[11px] font-bold text-[var(--rl-red)]" disabled={readOnly} onClick={deleteSelection}>Delete</button>
+                        </div>
+                      ) : null}
+                      {selection.some((e) => e.type === "group") ? (
+                        <button type="button" className="mb-1 w-full rounded border border-[var(--rl-border)] bg-[var(--rl-surface)] px-2 py-1 text-[11px] font-bold text-[var(--rl-text-strong)] hover:bg-[var(--rl-bg)] disabled:opacity-40" disabled={readOnly} onClick={ungroup}>
+                          Ungroup selected
+                        </button>
+                      ) : null}
+                      {(() => {
+                        const groups = elements.filter((e) => e.type === "group").sort((a, b) => (b.z || 1) - (a.z || 1));
+                        const members = (gid: string) => elements.filter((e) => e.groupId === gid).sort((a, b) => (b.z || 1) - (a.z || 1));
+                        const ungrouped = elements.filter((e) => !e.groupId && e.type !== "group").sort((a, b) => (b.z || 1) - (a.z || 1));
+                        const rowClass = (id: string) => `flex items-center gap-1 rounded border px-1.5 py-1 text-xs transition-colors ${selectedIds.has(id) ? "border-[#3b82f6] bg-[#eff6ff]" : "border-[var(--rl-border)] bg-[var(--rl-surface)] hover:bg-[var(--rl-bg)]"}`;
+                        const labelButton = (el: CanvasElement, indent: boolean) => (
+                          <button
+                            type="button"
+                            className={`min-w-0 flex-1 truncate text-left font-medium text-[var(--rl-text-strong)] ${indent ? "pl-4" : ""}`}
+                            onClick={(e) => { if (e.shiftKey) toggleSelect(el.id); else selectOnly(el.id); }}
+                            title={layerLabel(el)}
+                          >
+                            <span className="mr-1.5 text-[var(--rl-text-muted)]">z{el.z || 1}</span>
+                            {layerLabel(el)}
+                          </button>
+                        );
+                        const zButtons = (el: CanvasElement) => (
+                          <>
+                            <button
+                              type="button"
+                              className="rounded p-0.5 text-[var(--rl-text-muted)] hover:bg-[var(--rl-bg)] hover:text-[var(--rl-text-strong)] disabled:opacity-30"
+                              disabled={readOnly || (el.z || 1) >= Math.max(1, ...elements.map((e) => e.z || 1))}
+                              title="Bring forward"
+                              onClick={() => { selectOnly(el.id); bringForward(); }}
+                            >
+                              <CaretUp size={13} weight="bold" />
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded p-0.5 text-[var(--rl-text-muted)] hover:bg-[var(--rl-bg)] hover:text-[var(--rl-text-strong)] disabled:opacity-30"
+                              disabled={readOnly || (el.z || 1) <= 1}
+                              title="Send backward"
+                              onClick={() => { selectOnly(el.id); sendBackward(); }}
+                            >
+                              <CaretDown size={13} weight="bold" />
+                            </button>
+                          </>
+                        );
+                        return (
+                          <>
+                            {groups.map((group) => {
+                              const kids = members(group.id);
+                              const open = !collapsedGroups.has(group.id);
+                              return (
+                                <div key={group.id} className="grid gap-1">
+                                  <div className={rowClass(group.id)}>
+                                    <button
+                                      type="button"
+                                      className="rounded p-0.5 text-[var(--rl-text-muted)] hover:bg-[var(--rl-bg)]"
+                                      onClick={() => setCollapsedGroups((prev) => { const n = new Set(prev); if (n.has(group.id)) n.delete(group.id); else n.add(group.id); return n; })}
+                                      title={open ? "Collapse group" : "Expand group"}
+                                    >
+                                      <CaretDown size={13} weight="bold" className={`transition-transform ${open ? "" : "-rotate-90"}`} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="min-w-0 flex-1 truncate text-left font-bold text-[var(--rl-text-strong)]"
+                                      onClick={(e) => { if (e.shiftKey) toggleSelect(group.id); else selectOnly(group.id); }}
+                                      title={`${group.groupName || layerLabel(group)} (${kids.length})`}
+                                    >
+                                      <span className="mr-1.5 text-[var(--rl-text-muted)]">z{group.z || 1}</span>
+                                      {group.groupName || layerLabel(group)} ({kids.length})
+                                    </button>
+                                    {zButtons(group)}
+                                  </div>
+                                  {open ? kids.map((kid) => (
+                                    <div key={kid.id} className={`${rowClass(kid.id)} ml-4`}>
+                                      {labelButton(kid, true)}
+                                      {zButtons(kid)}
+                                    </div>
+                                  )) : null}
+                                </div>
+                              );
+                            })}
+                            {ungrouped.map((el) => (
+                              <div key={el.id} className={rowClass(el.id)}>
+                                {labelButton(el, false)}
+                                {zButtons(el)}
+                              </div>
+                            ))}
+                          </>
+                        );
+                      })()}
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
             <h2 className="font-bold text-[var(--rl-text-strong)]">Properties</h2>
+            {selection.length > 1 ? (
+              <p className="mt-1 rounded-[var(--rl-radius-sm)] border border-[#3b82f6] bg-[#eff6ff] px-2 py-1.5 text-[12px] font-semibold text-[#3b82f6]">
+                Editing 1 of {selection.length} selected — edits apply to the last-clicked element.
+              </p>
+            ) : null}
             {selected ? (
               <div className="mt-3 grid gap-3">
+                {selected.type === "group" ? (
+                  <label className="grid gap-1 font-bold">
+                    Group name
+                    <Input value={selected.groupName || ""} disabled={readOnly} onChange={(event) => updateElement(selected.id, { groupName: event.target.value })} />
+                  </label>
+                ) : null}
                 <div className="grid grid-cols-2 gap-2">
-                  {(["x", "y", "w", "h", "z"] as const).map((key) => (
+                  {(["x", "y", "w", "h", "z", "opacity"] as const).map((key) => (
                     <label key={key} className="grid gap-1 text-xs font-bold uppercase">
                       {key}
                       <Input
                         type="number"
-                        value={selected[key] || 0}
+                        value={key === "opacity" ? (selected.opacity ?? 1) : selected[key] || 0}
                         disabled={readOnly}
                         onChange={(event) => updateElement(selected.id, { [key]: Number(event.target.value) })}
                       />
                     </label>
                   ))}
+                  <label className="grid gap-1 text-xs font-bold uppercase">
+                    rotate°
+                    <Input
+                      type="number"
+                      value={selected.style?.rotation || 0}
+                      disabled={readOnly}
+                      onChange={(event) => updateStyle(selected.id, { rotation: Number(event.target.value) })}
+                    />
+                  </label>
                 </div>
                 {selected.type === "text" ? (
                   <label className="grid gap-1 font-bold">
@@ -853,9 +1378,21 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                     <p className="text-sm font-bold text-[var(--rl-text-strong)]">{selected.variant_label || "Unnamed"}</p>
                     {selected.variant_value_text ? <p className="text-xs text-[var(--rl-text-muted)]">{selected.variant_value_text}</p> : null}
                     {selected.variant_secondary_label ? <p className="text-xs text-[var(--rl-text-muted)]">{selected.variant_secondary_label}</p> : null}
+                    <p className="text-[11px] text-[var(--rl-text-muted)]">Card style (colors, border, shape, shadow) is managed in Our Specials.</p>
                   </div>
                 ) : null}
-                <StyleEditor selected={selected} readOnly={readOnly} onChange={(style) => updateElement(selected.id, { style })} />
+                {["text", "variable"].includes(selected.type) ? (
+                  <TextStyleEditor style={selected.style} readOnly={readOnly} onChange={(patch) => updateStyle(selected.id, patch)} />
+                ) : null}
+                {["group", "shape", "box"].includes(selected.type) ? (
+                  <BoxStyleEditor style={selected.style} readOnly={readOnly} onChange={(patch) => updateStyle(selected.id, patch)} />
+                ) : null}
+                {selected.type === "line" ? (
+                  <LineStyleEditor style={selected.style} readOnly={readOnly} onChange={(patch) => updateStyle(selected.id, patch)} />
+                ) : null}
+                {selected.type === "image" ? (
+                  <ImageStyleEditor style={selected.style} readOnly={readOnly} onChange={(patch) => updateStyle(selected.id, patch)} />
+                ) : null}
                 <div className="grid gap-2 rounded-md border border-[var(--rl-border)] p-3">
                   <h3 className="font-bold text-[var(--rl-text-strong)]">Layer</h3>
                   <div className="grid grid-cols-2 gap-2">
@@ -866,11 +1403,13 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="secondary" size="sm" icon={<CopySimple weight="bold" size={14} />} disabled={readOnly} onClick={duplicateSelected}>Duplicate</Button>
-                  <Button variant="danger" size="sm" icon={<Trash weight="bold" size={14} />} disabled={readOnly} onClick={deleteSelected}>Delete</Button>
+                  <Button variant="secondary" size="sm" icon={<CopySimple weight="bold" size={14} />} disabled={readOnly} onClick={duplicateSelection}>Duplicate</Button>
+                  <Button variant="danger" size="sm" icon={<Trash weight="bold" size={14} />} disabled={readOnly} onClick={deleteSelection}>Delete</Button>
                 </div>
               </div>
             ) : <p className="mt-3 text-sm text-[var(--rl-text-muted)]">Select an element on the canvas.</p>}
+              </div>
+            )}
           </aside>
         ) : <div />}
       </div>
@@ -878,32 +1417,178 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
   );
 }
 
-function StyleEditor({ selected, readOnly, onChange }: { selected: CanvasElement; readOnly: boolean; onChange: (style: CanvasStyle) => void }) {
-  const style = selected.style || {};
+type StylePatch = Partial<CanvasStyle>;
+
+function PanelSection({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="mt-5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between font-bold text-[var(--rl-text-strong)]"
+      >
+        {title}
+        <CaretDown size={14} weight="bold" className={`text-[var(--rl-text-muted)] transition-transform ${open ? "" : "-rotate-90"}`} />
+      </button>
+      {open ? <div className="mt-3">{children}</div> : null}
+    </section>
+  );
+}
+
+function EditorShell({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="grid gap-2 rounded-md border border-[var(--rl-border)] p-3">
-      <h3 className="font-bold text-[var(--rl-text-strong)]">Style</h3>
-      <label className="grid gap-1 text-xs font-bold uppercase">
-        Font size
-        <Input type="number" value={style.fontSize || 14} disabled={readOnly} onChange={(event) => onChange({ fontSize: Number(event.target.value) })} />
-      </label>
-      <label className="grid gap-1 text-xs font-bold uppercase">
-        Weight
-        <Input value={style.fontWeight || "400"} disabled={readOnly} onChange={(event) => onChange({ fontWeight: event.target.value })} />
-      </label>
-      <label className="grid gap-1 text-xs font-bold uppercase">
-        Text color
-        <Input className="h-11" type="color" value={style.color || "#111111"} disabled={readOnly} onChange={(event) => onChange({ color: event.target.value })} />
-      </label>
-      <label className="grid gap-1 text-xs font-bold uppercase">
-        Background
-        <Input className="h-11" type="color" value={style.background && style.background !== "transparent" ? style.background : "#ffffff"} disabled={readOnly} onChange={(event) => onChange({ background: event.target.value })} />
-      </label>
-      <label className="grid gap-1 text-xs font-bold uppercase">
-        Border
-        <Input type="number" value={style.borderWidth || 0} disabled={readOnly} onChange={(event) => onChange({ borderWidth: Number(event.target.value) })} />
-      </label>
+      <h3 className="font-bold text-[var(--rl-text-strong)]">{title}</h3>
+      {children}
     </div>
+  );
+}
+
+function NumField({ label, value, disabled, onChange }: { label: string; value: number; disabled: boolean; onChange: (value: number) => void }) {
+  return (
+    <label className="grid gap-1 text-xs font-bold uppercase">
+      {label}
+      <Input type="number" value={value} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} />
+    </label>
+  );
+}
+
+function ColorField({ label, value, disabled, onChange }: { label: string; value: string; disabled: boolean; onChange: (value: string) => void }) {
+  return (
+    <label className="grid gap-1 text-xs font-bold uppercase">
+      {label}
+      <Input className="h-11" type="color" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
+}
+
+function BorderStyleField({ value, disabled, onChange }: { value?: string; disabled: boolean; onChange: (value: string) => void }) {
+  return (
+    <label className="grid gap-1 text-xs font-bold uppercase">
+      Border style
+      <Select value={value || "solid"} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
+        <option value="solid">Solid</option>
+        <option value="dashed">Dashed</option>
+        <option value="dotted">Dotted</option>
+      </Select>
+    </label>
+  );
+}
+
+function ShadowField({ value, disabled, onChange }: { value?: string; disabled: boolean; onChange: (value: string) => void }) {
+  return (
+    <label className="grid gap-1 text-xs font-bold uppercase">
+      Shadow
+      <Select value={value || "none"} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
+        <option value="none">None</option>
+        <option value="0 1px 3px rgba(0,0,0,0.12)">Small</option>
+        <option value="0 4px 12px rgba(0,0,0,0.15)">Medium</option>
+        <option value="0 8px 24px rgba(0,0,0,0.18)">Large</option>
+      </Select>
+    </label>
+  );
+}
+
+function BorderFields({ style, readOnly, onChange }: { style?: CanvasStyle; readOnly: boolean; onChange: (patch: StylePatch) => void }) {
+  const s = style || {};
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-2">
+        <NumField label="Border w" value={s.borderWidth || 0} disabled={readOnly} onChange={(v) => onChange({ borderWidth: v })} />
+        <NumField label="Radius" value={s.borderRadius || 0} disabled={readOnly} onChange={(v) => onChange({ borderRadius: v })} />
+      </div>
+      <BorderStyleField value={s.borderStyle} disabled={readOnly} onChange={(v) => onChange({ borderStyle: v })} />
+      <ColorField label="Border color" value={s.borderColor || "#111111"} disabled={readOnly} onChange={(v) => onChange({ borderColor: v })} />
+    </>
+  );
+}
+
+function TextStyleEditor({ style, readOnly, onChange }: { style?: CanvasStyle; readOnly: boolean; onChange: (patch: StylePatch) => void }) {
+  const s = style || {};
+  return (
+    <EditorShell title="Text style">
+      <div className="grid grid-cols-2 gap-2">
+        <NumField label="Font size" value={s.fontSize || 14} disabled={readOnly} onChange={(v) => onChange({ fontSize: v })} />
+        <NumField label="Weight" value={Number(s.fontWeight) || 400} disabled={readOnly} onChange={(v) => onChange({ fontWeight: String(v) })} />
+      </div>
+      <label className="grid gap-1 text-xs font-bold uppercase">
+        Font family
+        <Select value={s.fontFamily || ""} disabled={readOnly} onChange={(event) => onChange({ fontFamily: event.target.value || undefined })}>
+          <option value="">Default (Inter)</option>
+          {FONT_LIBRARY.map((font) => <option key={font} value={font}>{font}</option>)}
+        </Select>
+      </label>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="grid gap-1 text-xs font-bold uppercase">
+          Style
+          <Select value={s.fontStyle || "normal"} disabled={readOnly} onChange={(event) => onChange({ fontStyle: event.target.value as CanvasStyle["fontStyle"] })}>
+            <option value="normal">Normal</option>
+            <option value="italic">Italic</option>
+          </Select>
+        </label>
+        <label className="grid gap-1 text-xs font-bold uppercase">
+          Case
+          <Select value={s.textTransform || "none"} disabled={readOnly} onChange={(event) => onChange({ textTransform: event.target.value as CanvasStyle["textTransform"] })}>
+            <option value="none">Normal</option>
+            <option value="uppercase">UPPERCASE</option>
+            <option value="lowercase">lowercase</option>
+            <option value="capitalize">Capitalize</option>
+          </Select>
+        </label>
+      </div>
+      <ColorField label="Text color" value={s.color || "#111111"} disabled={readOnly} onChange={(v) => onChange({ color: v })} />
+      <label className="grid gap-1 text-xs font-bold uppercase">
+        Align
+        <Select value={s.textAlign || "left"} disabled={readOnly} onChange={(event) => onChange({ textAlign: event.target.value as CanvasStyle["textAlign"] })}>
+          <option value="left">Left</option>
+          <option value="center">Center</option>
+          <option value="right">Right</option>
+        </Select>
+      </label>
+      <div className="grid grid-cols-2 gap-2">
+        <NumField label="Letter space" value={s.letterSpacing || 0} disabled={readOnly} onChange={(v) => onChange({ letterSpacing: v })} />
+        <NumField label="Line height" value={s.lineHeight || 1.3} disabled={readOnly} onChange={(v) => onChange({ lineHeight: v })} />
+      </div>
+      <NumField label="Padding" value={s.padding || 0} disabled={readOnly} onChange={(v) => onChange({ padding: v })} />
+      <ColorField label="Background" value={s.background && s.background !== "transparent" ? s.background : "#ffffff"} disabled={readOnly} onChange={(v) => onChange({ background: v })} />
+      <BorderFields style={s} readOnly={readOnly} onChange={onChange} />
+      <ShadowField value={s.boxShadow} disabled={readOnly} onChange={(v) => onChange({ boxShadow: v })} />
+    </EditorShell>
+  );
+}
+
+function BoxStyleEditor({ style, readOnly, onChange }: { style?: CanvasStyle; readOnly: boolean; onChange: (patch: StylePatch) => void }) {
+  const s = style || {};
+  return (
+    <EditorShell title="Box style">
+      <ColorField label="Background" value={s.background && s.background !== "transparent" ? s.background : "#ffffff"} disabled={readOnly} onChange={(v) => onChange({ background: v })} />
+      <BorderFields style={s} readOnly={readOnly} onChange={onChange} />
+      <ShadowField value={s.boxShadow} disabled={readOnly} onChange={(v) => onChange({ boxShadow: v })} />
+      <NumField label="Padding" value={s.padding || 0} disabled={readOnly} onChange={(v) => onChange({ padding: v })} />
+    </EditorShell>
+  );
+}
+
+function LineStyleEditor({ style, readOnly, onChange }: { style?: CanvasStyle; readOnly: boolean; onChange: (patch: StylePatch) => void }) {
+  const s = style || {};
+  return (
+    <EditorShell title="Line style">
+      <ColorField label="Color" value={s.color || "#111111"} disabled={readOnly} onChange={(v) => onChange({ color: v })} />
+      <BorderStyleField value={s.borderStyle} disabled={readOnly} onChange={(v) => onChange({ borderStyle: v })} />
+      <p className="text-[11px] text-[var(--rl-text-muted)]">Thickness is the element height (drag the bottom handle).</p>
+    </EditorShell>
+  );
+}
+
+function ImageStyleEditor({ style, readOnly, onChange }: { style?: CanvasStyle; readOnly: boolean; onChange: (patch: StylePatch) => void }) {
+  const s = style || {};
+  return (
+    <EditorShell title="Image style">
+      <BorderFields style={s} readOnly={readOnly} onChange={onChange} />
+      <ShadowField value={s.boxShadow} disabled={readOnly} onChange={(v) => onChange({ boxShadow: v })} />
+      <p className="text-[11px] text-[var(--rl-text-muted)]">Rotation and opacity are in the common fields above.</p>
+    </EditorShell>
   );
 }
 

@@ -1,0 +1,79 @@
+{
+  "skills": [
+    {
+      "source": "anthropics/skills",
+      "skills": [
+        "webapp-testing"
+      ]
+    },
+    {
+      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\anthropic-skills",
+      "skills": [
+        "frontend-design"
+      ]
+    },
+    {
+      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\fastapi",
+      "skills": [
+        "fastapi"
+      ]
+    },
+    {
+      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\python-skills",
+      "skills": [
+        "python-testing"
+      ]
+    },
+    {
+      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\shadcn-ui",
+      "skills": [
+        "shadcn"
+      ]
+    },
+    {
+      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\superpowers",
+      "skills": [
+        "brainstorming",
+        "systematic-debugging",
+        "test-driven-development",
+        "using-superpowers",
+        "writing-plans"
+      ]
+    },
+    {
+      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\vercel-agent-skills",
+      "skills": [
+        "vercel-composition-patterns",
+        "vercel-react-best-practices",
+        "web-design-guidelines"
+      ]
+    },
+    {
+      "source": "github/awesome-copilot",
+      "skills": [
+        "playwright-automation-fill-in-form"
+      ]
+    },
+    {
+      "source": "vercel-labs/agent-browser",
+      "skills": [
+        "agent-browser"
+      ]
+    },
+    {
+      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.agents\\skills",
+      "skills": [
+        "playwright-best-practices",
+        "playwright-cli",
+        "playwright-explore-website",
+        "security-best-practices"
+      ]
+    },
+    {
+      "source": "vercel-labs/skills",
+      "skills": [
+        "find-skills"
+      ]
+    }
+  ]
+}

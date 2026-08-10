@@ -92,7 +92,7 @@ def serialize_template(template: OutputTemplateConfig, db: Session | None = None
 def copy_template(db: Session, user, template_id: str) -> OutputTemplateConfig:
     require_admin(user)
     source = db.get(OutputTemplateConfig, template_id)
-    if not source:
+    if not source or source.deleted_at:
         raise AppError("Template not found.", 404)
     config = normalize_template_config(source.fixed_fields, source.name)
     config["is_default"] = False
@@ -117,7 +117,7 @@ def copy_template(db: Session, user, template_id: str) -> OutputTemplateConfig:
 def update_template(db: Session, user, template_id: str, payload: dict) -> OutputTemplateConfig:
     require_admin(user)
     template = db.get(OutputTemplateConfig, template_id)
-    if not template:
+    if not template or template.deleted_at:
         raise AppError("Template not found.", 404)
     current_config = normalize_template_config(template.fixed_fields, template.name)
     if current_config.get("locked"):
@@ -184,6 +184,20 @@ def delete_variant(db: Session, user, variant_id: str) -> None:
     db.commit()
 
 
+def move_variant(db: Session, user, variant_id: str, special_id: str) -> OurSpecialVariant:
+    require_admin(user)
+    variant = db.get(OurSpecialVariant, variant_id)
+    if not variant or variant.deleted_at:
+        raise AppError("Variant not found.", 404)
+    target = db.get(OurSpecial, special_id)
+    if not target or target.deleted_at:
+        raise AppError("Target special not found.", 404)
+    variant.special_id = target.id
+    db.commit()
+    db.refresh(variant)
+    return variant
+
+
 def serialize_special(special: OurSpecial) -> dict:
     return {
         "id": special.id,
@@ -207,6 +221,7 @@ def serialize_special(special: OurSpecial) -> dict:
                 "status": v.status,
             }
             for v in (special.variants or [])
+            if not v.deleted_at
         ],
     }
 

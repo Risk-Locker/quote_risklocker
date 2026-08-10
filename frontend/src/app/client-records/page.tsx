@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CaretDown, CaretUp, DownloadSimple, FloppyDisk, MagnifyingGlass, NotePencil, X } from "@phosphor-icons/react";
+import { CaretDown, CaretUp, DownloadSimple, FloppyDisk, MagnifyingGlass, NotePencil, Trash, X } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { PageLoading } from "@/components/ui/page-loading";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
+import { useToast } from "@/components/ui/toast";
 
 type ClientRecord = {
   id: string;
@@ -72,6 +75,7 @@ function formatDate(iso: string) {
 }
 
 export default function ClientRecordsPage() {
+  const { toast } = useToast();
   const [records, setRecords] = useState<ClientRecord[]>([]);
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState("created_at");
@@ -82,14 +86,24 @@ export default function ClientRecordsPage() {
   const [editInsurerNo, setEditInsurerNo] = useState("");
   const [editNotes, setEditNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<ClientRecord | null>(null);
+  const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
 
   async function load() {
-    const params = new URLSearchParams();
-    if (search) params.set("search", search);
-    params.set("sort_by", sortBy);
-    params.set("sort_dir", sortDir);
-    const result = await api<{ records: ClientRecord[] }>(`/client-records?${params}`);
-    setRecords(result.records);
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (search) params.set("search", search);
+      params.set("sort_by", sortBy);
+      params.set("sort_dir", sortDir);
+      const result = await api<{ records: ClientRecord[] }>(`/client-records?${params}`);
+      setRecords(result.records);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -129,6 +143,48 @@ export default function ClientRecordsPage() {
     window.location.href = `${window.location.origin}/api/client-records/export${params}`;
   }
 
+  async function removeRecord(record: ClientRecord) {
+    setError("");
+    setDeletingId(record.id);
+    try {
+      await api(`/client-records/${record.id}`, { method: "DELETE" });
+      toast("Client record moved to Trash.", "success");
+      setPendingDelete(null);
+      await load();
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  async function removeSelected() {
+    const ids = [...selected];
+    if (!ids.length) return;
+    setError("");
+    setDeletingId("bulk");
+    try {
+      await api("/client-records/bulk-delete", { method: "POST", body: JSON.stringify({ record_ids: ids }) });
+      toast(`${ids.length} record${ids.length > 1 ? "s" : ""} moved to Trash.`, "success");
+      setSelected(new Set());
+      setPendingBulkDelete(false);
+      await load();
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   return (
     <AppShell>
       <section className="grid gap-6">
@@ -141,13 +197,25 @@ export default function ClientRecordsPage() {
               {records.length} record{records.length !== 1 ? "s" : ""} &mdash; dashboard for confirmed quotations.
             </p>
           </div>
-          <Button
-            variant="secondary"
-            icon={<DownloadSimple aria-hidden="true" size={18} weight="bold" />}
-            onClick={exportCsv}
-          >
-            Export CSV
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {selected.size > 0 ? (
+              <Button
+                variant="danger"
+                loading={deletingId === "bulk"}
+                icon={<Trash aria-hidden="true" size={16} weight="bold" />}
+                onClick={() => setPendingBulkDelete(true)}
+              >
+                Delete selected ({selected.size})
+              </Button>
+            ) : null}
+            <Button
+              variant="secondary"
+              icon={<DownloadSimple aria-hidden="true" size={18} weight="bold" />}
+              onClick={exportCsv}
+            >
+              Export CSV
+            </Button>
+          </div>
         </div>
 
         {error ? (
@@ -180,10 +248,25 @@ export default function ClientRecordsPage() {
           ) : null}
         </div>
 
+        {loading ? (
+          <PageLoading />
+        ) : (
         <Card className="overflow-x-auto">
           <table className="min-w-[700px] w-full">
             <thead>
               <tr className="border-b border-[var(--rl-border)]">
+                <th className="w-10 px-4 py-2.5">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all records"
+                    className="h-4 w-4 accent-[var(--rl-red)]"
+                    checked={records.length > 0 && records.every((r) => selected.has(r.id))}
+                    onChange={() => {
+                      if (records.every((r) => selected.has(r.id))) setSelected(new Set());
+                      else setSelected(new Set(records.map((r) => r.id)));
+                    }}
+                  />
+                </th>
                 <th className="w-10 px-4 py-2.5" />
                 {SORTABLE.map((col) => (
                   <th
@@ -207,7 +290,7 @@ export default function ClientRecordsPage() {
             <tbody>
               {records.length === 0 ? (
                 <tr>
-                  <td colSpan={SORTABLE.length + 2} className="px-4 py-10 text-center text-[13px] text-[var(--rl-text-muted)]">
+                  <td colSpan={SORTABLE.length + 3} className="px-4 py-10 text-center text-[13px] text-[var(--rl-text-muted)]">
                     No records found. Generate a PDF to create a client record automatically.
                   </td>
                 </tr>
@@ -217,6 +300,15 @@ export default function ClientRecordsPage() {
                   const editing = editingId === r.id;
                   return (
                     <tr key={r.id} className={`border-b border-[var(--rl-border)] last:border-0 ${editing ? "bg-[var(--rl-bg)]" : ""}`}>
+                      <td className="px-4 py-2.5">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${r.insurer_no}`}
+                          className="h-4 w-4 accent-[var(--rl-red)]"
+                          checked={selected.has(r.id)}
+                          onChange={() => toggleSelect(r.id)}
+                        />
+                      </td>
                       <td className="px-4 py-2.5">
                         <button
                           type="button"
@@ -270,6 +362,16 @@ export default function ClientRecordsPage() {
                               Edit
                             </Button>
                           )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            loading={deletingId === r.id}
+                            icon={<Trash size={14} weight="bold" />}
+                            onClick={() => setPendingDelete(r)}
+                            className="text-[var(--rl-red)] hover:bg-[var(--rl-red-light)]"
+                          >
+                            Delete
+                          </Button>
                         </div>
                       </td>
                     </tr>
@@ -279,6 +381,7 @@ export default function ClientRecordsPage() {
             </tbody>
           </table>
         </Card>
+        )}
 
         {expandedId ? (
           <Card className="p-5">
@@ -304,6 +407,28 @@ export default function ClientRecordsPage() {
           </Card>
         ) : null}
       </section>
+
+      {pendingDelete ? (
+        <ConfirmDialog
+          open
+          onOpenChange={(open) => { if (!open) setPendingDelete(null); }}
+          title={`Delete record "${pendingDelete.insurer_no}"?`}
+          message="This client record moves to Trash and can be restored later."
+          loading={deletingId === pendingDelete.id}
+          onConfirm={() => removeRecord(pendingDelete)}
+        />
+      ) : null}
+
+      {pendingBulkDelete ? (
+        <ConfirmDialog
+          open
+          onOpenChange={(open) => { if (!open) setPendingBulkDelete(false); }}
+          title={`Delete ${selected.size} selected record${selected.size > 1 ? "s" : ""}?`}
+          message="They move to Trash and can be restored later."
+          loading={deletingId === "bulk"}
+          onConfirm={removeSelected}
+        />
+      ) : null}
     </AppShell>
   );
 }

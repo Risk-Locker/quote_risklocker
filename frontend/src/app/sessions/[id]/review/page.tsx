@@ -2,13 +2,15 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { DownloadSimple, FloppyDisk, Eye, EyeSlash, Highlighter, X } from "@phosphor-icons/react";
+import { DownloadSimple, FloppyDisk, Eye, X } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
+import { SessionPhaseBar } from "@/components/session-phase-bar";
 import { DraftFieldTable } from "@/components/draft-field-table";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Toggle } from "@/components/ui/toggle";
 import { api, fileUrl } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 import { useToast } from "@/components/ui/toast";
@@ -33,20 +35,23 @@ type Draft = {
 
 function highlightText(text: string, terms: string[]) {
   if (!terms.length) return <span>{text}</span>;
-  const escaped = terms.filter(Boolean).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const escaped = terms
+    .map((t) => t.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   if (!escaped.length) return <span>{text}</span>;
   const pattern = new RegExp(`(${escaped.join("|")})`, "gi");
-  const parts = text.split(pattern);
-  const seen = new Set<string>();
+  const normalized = text.replace(/\s+/g, " ");
+  const parts = normalized.split(pattern);
   return (
     <span>
-      {parts.map((part, i) => {
-        if (!pattern.test(part)) return <span key={i}>{part}</span>;
-        const key = `${part}-${i}`;
-        if (seen.has(part.toLowerCase())) return <span key={key}>{part}</span>;
-        seen.add(part.toLowerCase());
-        return <mark key={key} className="bg-yellow-200 text-[var(--rl-black)]">{part}</mark>;
-      })}
+      {parts.map((part, i) => (
+        i % 2 === 1 ? (
+          <mark key={`${part}-${i}`} className="bg-yellow-200 text-[var(--rl-black)]">{part}</mark>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      ))}
     </span>
   );
 }
@@ -74,6 +79,7 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
   const [activeField, setActiveField] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
 
   const load = useCallback(async () => {
     const session = await api<{ session: { draft_id: string; detected_company?: string | null } }>(`/sessions/${id}`);
@@ -130,13 +136,21 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
   }
 
   const matchedTemplate = draft?.available_templates.find((t) => t.id === selectedTemplateId);
-  const evidenceTerms = showHighlights && activeField && draft?.field_evidence?.[activeField]
-    ? draft.field_evidence[activeField].map((c) => c.evidence).filter(Boolean)
+  const hasCheckNeeded = Object.values(fields).some((f) => f.status === "check_needed" || f.status === "check needed");
+  const evidenceTerms = showHighlights
+    ? Object.values(draft?.field_evidence || {}).flatMap((entries) => entries.map((c) => c.evidence).filter(Boolean))
     : [];
+
+  useEffect(() => {
+    if (!showHighlights) return;
+    const panel = document.getElementById("extracted-text-panel");
+    panel?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [showHighlights]);
 
   return (
     <AppShell>
       <section className="grid gap-4">
+        <SessionPhaseBar sessionId={id} current="extraction" />
         <div className="sticky top-0 z-20 bg-[var(--rl-surface)]/95 backdrop-blur-md border-b border-[var(--rl-border)] p-4 rounded-[var(--rl-radius)]">
           <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
             <div>
@@ -163,36 +177,32 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
               ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" icon={<Eye weight="bold" />} onClick={() => router.push(`/sessions/${id}/preview`)}>
+              <Button variant="secondary" loading={previewing} icon={<Eye weight="bold" />} onClick={() => { setPreviewing(true); router.push(`/sessions/${id}/preview`); }}>
                 Preview
               </Button>
               <Button variant="secondary" onClick={save} loading={saving} icon={<FloppyDisk weight="bold" />}>
                 Save
               </Button>
-              <Button onClick={generate} loading={generating} icon={<DownloadSimple weight="bold" />}>
+              <Button onClick={generate} loading={generating} disabled={hasCheckNeeded} icon={<DownloadSimple weight="bold" />}>
                 Generate PDF
               </Button>
             </div>
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[var(--rl-border)] pt-3">
+          <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2.5 border-t border-[var(--rl-border)] pt-3">
             <span className="text-xs font-medium text-[var(--rl-text-muted)]">Review tools:</span>
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={showEvidence ? <Eye weight="bold" /> : <EyeSlash weight="bold" />}
-              onClick={() => setShowEvidence((v) => !v)}
-            >
-              Show source
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={<Highlighter weight="bold" />}
-              onClick={() => setShowHighlights((v) => !v)}
-            >
-              Highlight matches
-            </Button>
+            <Toggle
+              checked={showEvidence}
+              onChange={setShowEvidence}
+              label="Show source"
+              description="Show extracted source evidence per field"
+            />
+            <Toggle
+              checked={showHighlights}
+              onChange={setShowHighlights}
+              label="Highlight matches"
+              description="Highlight matching text in the extracted text panel"
+            />
             {activeField ? (
               <Button
                 variant="secondary"
@@ -227,12 +237,17 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
           </div>
 
           <div className="grid gap-4 xl:max-h-[calc(100vh-8rem)] xl:overflow-y-auto xl:pr-1">
-            <Card className="p-4">
+            <Card className="p-4" >
               <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">Extracted Text</h2>
-              <div className="mt-3 grid max-h-64 gap-3 overflow-auto rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3 text-sm leading-relaxed text-[var(--rl-text)]">
+              {showHighlights ? (
+                <p className="mt-1 text-[11px] text-[var(--rl-text-muted)]">
+                  Highlights apply to the extracted text below. The embedded PDF viewer on the left cannot be highlighted.
+                </p>
+              ) : null}
+              <div id="extracted-text-panel" className="mt-3 grid max-h-64 gap-3 overflow-auto rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3 text-sm leading-relaxed text-[var(--rl-text)]">
                 {draft?.page_text?.length ? draft.page_text.map((page) => (
                   <pre key={page.page} className="whitespace-pre-wrap font-sans">
-                    {showHighlights && activeField ? highlightText(page.text, evidenceTerms) : page.text}
+                    {showHighlights && evidenceTerms.length ? highlightText(page.text, evidenceTerms) : page.text}
                   </pre>
                 )) : <p>No extracted text available.</p>}
               </div>

@@ -95,7 +95,7 @@ class InsuranceCompany(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(50), nullable=False, default=AccountStatus.ACTIVE.value, index=True)
 
 
-class OutputTemplateConfig(Base, TimestampMixin):
+class OutputTemplateConfig(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "output_template_configs"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
@@ -110,7 +110,7 @@ class OutputTemplateConfig(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(50), nullable=False, default=AccountStatus.ACTIVE.value)
 
 
-class OurSpecial(Base, TimestampMixin):
+class OurSpecial(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "our_specials"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
@@ -121,7 +121,7 @@ class OurSpecial(Base, TimestampMixin):
     variants: Mapped[list["OurSpecialVariant"]] = relationship(back_populates="special", cascade="all, delete-orphan")
 
 
-class OurSpecialVariant(Base, TimestampMixin):
+class OurSpecialVariant(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "our_special_variants"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
@@ -198,7 +198,7 @@ class Session(Base, TimestampMixin):
     draft: Mapped[QuotationDraft] = relationship()
 
 
-class ClientRecord(Base, TimestampMixin):
+class ClientRecord(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "client_records"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
@@ -414,7 +414,7 @@ class CorrectionMemory(Base, TimestampMixin):
     corrected_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
 
 
-class TemplateAsset(Base, TimestampMixin):
+class TemplateAsset(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "template_assets"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
@@ -422,6 +422,7 @@ class TemplateAsset(Base, TimestampMixin):
     label: Mapped[str] = mapped_column(String(255), nullable=False)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     content_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    folder: Mapped[str] = mapped_column(String(120), nullable=False, default="Uncategorized", index=True)
     storage_provider: Mapped[str] = mapped_column(String(50), nullable=False, default="supabase")
     storage_bucket: Mapped[str | None] = mapped_column(String(160), nullable=True)
     storage_path: Mapped[str] = mapped_column(String(800), nullable=False)

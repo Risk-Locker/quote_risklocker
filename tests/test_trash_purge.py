@@ -65,6 +65,9 @@ def test_purge_expired_trash_calls_storage_delete(monkeypatch):
         def scalars(self, statement):
             return _FakeResult(self._records)
 
+        def execute(self, _statement):
+            return None
+
         def delete(self, record):
             self.deleted_items.append(record)
             if record in self._records:

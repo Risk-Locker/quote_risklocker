@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api, API_BASE } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 
@@ -27,6 +28,8 @@ export default function VehiclesPage() {
   const [modelName, setModelName] = useState("");
   const [modelAliases, setModelAliases] = useState("");
   const [modelBrandId, setModelBrandId] = useState("");
+  const [pendingBrand, setPendingBrand] = useState<Brand | null>(null);
+  const [pendingModel, setPendingModel] = useState<Model | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -63,24 +66,26 @@ export default function VehiclesPage() {
     }
   }
 
-  async function removeBrand(brand: Brand) {
-    if (!confirm(`Delete "${brand.name}"?`)) return;
+  async function removeBrand() {
+    if (!pendingBrand) return;
     setError("");
     try {
-      await api(`/admin/dictionaries/vehicle-brands/${brand.id}`, { method: "DELETE" });
-      toast(`"${brand.name}" deleted.`, "success");
+      await api(`/admin/dictionaries/vehicle-brands/${pendingBrand.id}`, { method: "DELETE" });
+      toast(`"${pendingBrand.name}" deleted.`, "success");
+      setPendingBrand(null);
       await load();
     } catch (err) {
       setError(apiErrorMessage(err));
     }
   }
 
-  async function removeModel(model: Model) {
-    if (!confirm(`Delete "${model.name}"?`)) return;
+  async function removeModel() {
+    if (!pendingModel) return;
     setError("");
     try {
-      await api(`/admin/dictionaries/vehicle-models/${model.id}`, { method: "DELETE" });
-      toast(`"${model.name}" deleted.`, "success");
+      await api(`/admin/dictionaries/vehicle-models/${pendingModel.id}`, { method: "DELETE" });
+      toast(`"${pendingModel.name}" deleted.`, "success");
+      setPendingModel(null);
       await load();
     } catch (err) {
       setError(apiErrorMessage(err));
@@ -107,6 +112,25 @@ export default function VehiclesPage() {
 
         {error ? (
           <div className="rounded-[var(--rl-radius-sm)] bg-[var(--rl-red-light)] px-3 py-2.5 text-[13px] font-semibold text-[var(--rl-red)]">{error}</div>
+        ) : null}
+
+        {pendingBrand ? (
+          <ConfirmDialog
+            open
+            onOpenChange={(open) => { if (!open) setPendingBrand(null); }}
+            title={`Delete brand "${pendingBrand.name}"?`}
+            message="Its models are not deleted automatically."
+            onConfirm={removeBrand}
+          />
+        ) : null}
+
+        {pendingModel ? (
+          <ConfirmDialog
+            open
+            onOpenChange={(open) => { if (!open) setPendingModel(null); }}
+            title={`Delete model "${pendingModel.name}"?`}
+            onConfirm={removeModel}
+          />
         ) : null}
 
         {showBrandForm ? (
@@ -158,13 +182,13 @@ export default function VehiclesPage() {
           </Card>
         ) : null}
 
-        <TableSection title="Brands" cols={["Name", "Aliases", ""]} rows={brands.map((b) => [b.name, (b.aliases || []).join(", "), ""])} onDelete={(i) => removeBrand(brands[i])} />
+        <TableSection title="Brands" cols={["Name", "Aliases", ""]} rows={brands.map((b) => [b.name, (b.aliases || []).join(", "), ""])} onDelete={(i) => setPendingBrand(brands[i])} />
 
         {brands.map((brand) => {
           const brandModels = models.filter((m) => m.brand_id === brand.id);
           if (!brandModels.length) return null;
           return (
-            <TableSection key={brand.id} title={`Models — ${brand.name}`} cols={["Name", "Aliases", ""]} rows={brandModels.map((m, i) => [m.name, (m.aliases || []).join(", "), ""])} onDelete={(i) => removeModel(brandModels[i])} />
+            <TableSection key={brand.id} title={`Models — ${brand.name}`} cols={["Name", "Aliases", ""]} rows={brandModels.map((m, i) => [m.name, (m.aliases || []).join(", "), ""])} onDelete={(i) => setPendingModel(brandModels[i])} />
           );
         })}
       </section>

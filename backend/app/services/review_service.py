@@ -6,7 +6,7 @@ import logging
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import Session, selectinload
 
@@ -40,7 +40,12 @@ def get_accessible_draft(db: Session, user, draft_id: str) -> QuotationDraft:
 def _available_templates(db: Session | None) -> list[dict]:
     if db is None:
         return []
-    templates = db.scalars(select(OutputTemplateConfig).where(OutputTemplateConfig.status == "active").order_by(OutputTemplateConfig.name)).all()
+    templates = db.scalars(
+        select(OutputTemplateConfig).where(
+            OutputTemplateConfig.status == "active",
+            OutputTemplateConfig.deleted_at.is_(None),
+        ).order_by(OutputTemplateConfig.name)
+    ).all()
     output: list[dict] = []
     for template in templates:
         config = normalize_template_config(template.fixed_fields if isinstance(template.fixed_fields, dict) else {}, template.name)
@@ -273,7 +278,7 @@ def restore_from_trash(db: Session, user, uploaded_file_id: str) -> None:
 def purge_expired_trash(db: Session, user, storage) -> int:
     if user.role != Role.ADMIN.value:
         raise AppError("Only Admin can permanently delete records.", 403)
-    from app.models.tables import GeneratedPdfVersion
+    from app.models.tables import GeneratedPdfVersion, Session as SessionModel
 
     now = datetime.now(timezone.utc)
     records = list(db.scalars(select(UploadedFile).where(and_(UploadedFile.deleted_at.is_not(None), UploadedFile.purge_after <= now))).all())
@@ -291,6 +296,16 @@ def purge_expired_trash(db: Session, user, storage) -> int:
                     storage.delete_pdf(v.storage_path)
                 except Exception as exc:
                     logger.warning("Could not delete generated PDF %s during trash purge: %s", v.storage_path, exc)
+        # Some FKs lack ON DELETE CASCADE; remove dependents explicitly before the parent.
+        from app.models.tables import ClientRecord, CorrectionMemory, ExtractionRecord, QuotationDraft
+
+        db.execute(delete(ClientRecord).where(ClientRecord.uploaded_file_id == record.id))
+        db.execute(delete(SessionModel).where(SessionModel.uploaded_file_id == record.id))
+        db.execute(delete(CorrectionMemory).where(CorrectionMemory.uploaded_file_id == record.id))
+        db.execute(delete(GeneratedPdfVersion).where(GeneratedPdfVersion.uploaded_file_id == record.id))
+        db.execute(delete(ExtractionRecord).where(ExtractionRecord.uploaded_file_id == record.id))
+        db.execute(delete(QuotationDraft).where(QuotationDraft.uploaded_file_id == record.id))
+        db.execute(delete(TrashRecord).where(TrashRecord.entity_type == "uploaded_file", TrashRecord.entity_id == record.id))
         db.delete(record)
         count += 1
     db.commit()

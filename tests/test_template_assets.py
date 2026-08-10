@@ -79,6 +79,15 @@ class FakeDb:
     def get(self, _model, _object_id):
         return None
 
+    def add(self, _obj):
+        return None
+
+    def commit(self):
+        return None
+
+    def refresh(self, _obj):
+        return None
+
 
 def _http_client(*, user: User | None = None):
     app = FastAPI()
@@ -133,10 +142,153 @@ def test_settings_limits_returns_backend_values():
 
 
 def test_trash_includes_retention_days(monkeypatch):
-    monkeypatch.setattr(routes, "list_trash", lambda _db, _user: [])
+    from app.services import trash_service
+
+    monkeypatch.setattr(
+        trash_service,
+        "list_trash_categorized",
+        lambda _db, _user, retention_days: {"retention_days": retention_days, "sessions": [], "templates": [], "our_specials": [], "our_special_variants": [], "client_records": []},
+    )
     client = _http_client(user=_admin_user())
 
     response = client.get("/trash")
 
     assert response.status_code == 200
     assert response.json()["retention_days"] == 14
+
+
+def test_sanitize_folder_defaults_and_cleans():
+    from app.services.template_assets import FOLDER_DEFAULT, sanitize_folder
+
+    assert sanitize_folder(None) == FOLDER_DEFAULT
+    assert sanitize_folder("") == FOLDER_DEFAULT
+    assert sanitize_folder("   ") == FOLDER_DEFAULT
+    assert sanitize_folder("  Stickers & Symbols!! ") == "Stickers Symbols"
+    assert sanitize_folder("Logo/Backup") == "LogoBackup"
+    assert len(sanitize_folder("x" * 200)) <= 60
+
+
+def test_upload_template_asset_stores_into_folder_path(monkeypatch):
+    from app.services import template_assets as ta
+
+    captured: dict = {}
+
+    class FakeStored:
+        provider = "supabase"
+        bucket = "bucket"
+        object_key = None
+        sha256 = "abc123"
+
+    class FakeStorage:
+        def upload_asset(self, path, _data, _mime):
+            captured["path"] = path
+            stored = FakeStored()
+            stored.object_key = path
+            return stored
+
+    monkeypatch.setattr(ta, "SupabaseStorage", lambda _settings: FakeStorage())
+
+    record = ta.upload_template_asset(
+        FakeDb(),
+        SimpleNamespace(),
+        _admin_user(),
+        filename="sticker.png",
+        content_type="image/png",
+        data=b"\x89PNG\r\n\x1a\nfake",
+        label="Sticker",
+        folder="Stickers",
+    )
+
+    assert captured["path"] == f"template-assets/Stickers/{record.id}.png"
+    assert record.folder == "Stickers"
+    assert record.storage_path.startswith("template-assets/Stickers/")
+
+
+def test_upload_route_accepts_folder_and_returns_it(monkeypatch):
+    fake_record = SimpleNamespace(
+        id="asset-1",
+        label="Sticker",
+        filename="sticker.png",
+        folder="Symbols",
+        size_bytes=9,
+    )
+    monkeypatch.setattr(routes, "upload_template_asset", lambda *_args, **_kwargs: fake_record)
+    client = _http_client(user=_admin_user())
+
+    response = client.post(
+        "/admin/template-assets",
+        files={"file": ("sticker.png", b"\x89PNG\r\n\x1a\nfake", "image/png")},
+        data={"label": "Sticker", "folder": "Symbols"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["asset"]["folder"] == "Symbols"
+
+
+def test_upload_route_defaults_folder_when_omitted(monkeypatch):
+    from app.services.template_assets import FOLDER_DEFAULT
+
+    fake_record = SimpleNamespace(
+        id="asset-2",
+        label="Sticker",
+        filename="sticker.png",
+        folder=FOLDER_DEFAULT,
+        size_bytes=9,
+    )
+    monkeypatch.setattr(routes, "upload_template_asset", lambda *_args, **_kwargs: fake_record)
+    client = _http_client(user=_admin_user())
+
+    response = client.post(
+        "/admin/template-assets",
+        files={"file": ("sticker.png", b"\x89PNG\r\n\x1a\nfake", "image/png")},
+        data={"label": "Sticker"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["asset"]["folder"] == FOLDER_DEFAULT
+
+
+def test_list_assets_includes_folder(monkeypatch):
+    from app.services import template_assets as ta
+
+    fake_uploaded = SimpleNamespace(
+        id="asset-3",
+        label="Sticker",
+        filename="sticker.png",
+        size_bytes=9,
+        status="active",
+        created_at=None,
+        folder="Stickers",
+    )
+    monkeypatch.setattr(ta, "_local_assets", lambda: [])
+    monkeypatch.setattr(
+        ta,
+        "_uploaded_assets",
+        lambda _db: [
+            {
+                "id": fake_uploaded.id,
+                "label": fake_uploaded.label,
+                "filename": fake_uploaded.filename,
+                "extension": ".png",
+                "url": f"/template-assets/{fake_uploaded.id}",
+                "size_bytes": fake_uploaded.size_bytes,
+                "source": "uploaded",
+                "folder": fake_uploaded.folder,
+            }
+        ],
+    )
+
+    assets = ta.list_template_assets(FakeDb())
+
+    assert assets == [
+        {
+            "id": "asset-3",
+            "label": "Sticker",
+            "filename": "sticker.png",
+            "extension": ".png",
+            "url": "/template-assets/asset-3",
+            "size_bytes": 9,
+            "source": "uploaded",
+            "folder": "Stickers",
+        }
+    ]

@@ -10,6 +10,7 @@ import { Select } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 
@@ -50,6 +51,7 @@ export default function RoadTaxPage() {
   const [rules, setRules] = useState<RoadTaxRule[]>([]);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<RoadTaxRule | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [f, setF] = useState({ vehicle_type: "Car", owner_type: "Individual", jurisdiction: "West Malaysia", min_cc: "0", max_cc: "", base_rate: "0", formula: "", source: "", effective_from: "", effective_to: "", status: "active" });
   const { toast } = useToast();
@@ -88,12 +90,13 @@ export default function RoadTaxPage() {
     }
   }
 
-  async function remove(r: RoadTaxRule) {
-    if (!confirm(`Delete this rule?`)) return;
+  async function remove() {
+    if (!pendingDelete) return;
     setError("");
     try {
-      await api(`/admin/road-tax-rules/${r.id}`, { method: "DELETE" });
+      await api(`/admin/road-tax-rules/${pendingDelete.id}`, { method: "DELETE" });
       toast("Rule deleted.", "success");
+      setPendingDelete(null);
       await load();
     } catch (err) {
       setError(apiErrorMessage(err));
@@ -215,7 +218,7 @@ export default function RoadTaxPage() {
                             <td className="px-4 py-2.5">
                               <div className="flex gap-1">
                                 <Button variant="ghost" size="sm" icon={<PencilSimple size={14} weight="bold" />} onClick={() => startEdit(r)} title="Edit" />
-                                <Button variant="ghost" size="sm" icon={<Trash size={14} weight="bold" />} onClick={() => remove(r)} title="Delete" />
+                                <Button variant="ghost" size="sm" icon={<Trash size={14} weight="bold" />} onClick={() => setPendingDelete(r)} title="Delete" />
                               </div>
                             </td>
                           </tr>
@@ -260,7 +263,7 @@ export default function RoadTaxPage() {
                         <td className="px-4 py-2.5">
                           <div className="flex gap-1">
                             <Button variant="ghost" size="sm" icon={<PencilSimple size={14} weight="bold" />} onClick={() => startEdit(r)} title="Edit" />
-                            <Button variant="ghost" size="sm" icon={<Trash size={14} weight="bold" />} onClick={() => remove(r)} title="Delete" />
+                            <Button variant="ghost" size="sm" icon={<Trash size={14} weight="bold" />} onClick={() => setPendingDelete(r)} title="Delete" />
                           </div>
                         </td>
                       </tr>
@@ -272,6 +275,16 @@ export default function RoadTaxPage() {
           </div>
         ) : null}
       </section>
+
+      {pendingDelete ? (
+        <ConfirmDialog
+          open
+          onOpenChange={(open) => { if (!open) setPendingDelete(null); }}
+          title="Delete this road-tax rule?"
+          message={`${pendingDelete.vehicle_type} · ${pendingDelete.owner_type} · ${pendingDelete.jurisdiction} · ${pendingDelete.min_cc}cc+`}
+          onConfirm={remove}
+        />
+      ) : null}
     </AppShell>
   );
 }

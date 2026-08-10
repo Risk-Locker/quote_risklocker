@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import AuthContext, current_auth, current_auth_optional, current_user, ensure_trusted_origin, settings_dep
 from app.api.schemas import (
+    BulkClientRecordDeleteRequest,
+    BulkUploadedFileDeleteRequest,
     ClientRecordUpdateRequest,
     CompanySaveRequest,
     DraftGenerateRequest,
@@ -26,9 +28,11 @@ from app.api.schemas import (
     RoadTaxRuleSaveRequest,
     TemplateSaveRequest,
     TemplateUpdateRequest,
+    TrashDeleteForeverRequest,
     UserCreateRequest,
     UserPasswordChangeRequest,
     UserUpdateRequest,
+    VariantMoveRequest,
     VehicleBrandSaveRequest,
     VehicleModelSaveRequest,
 )
@@ -53,8 +57,6 @@ from app.models.tables import (
 )
 from app.services.admin_service import (
     copy_template,
-    delete_special,
-    delete_variant,
     delete_field_alias,
     delete_vehicle_brand,
     delete_vehicle_model,
@@ -67,8 +69,13 @@ from app.services.admin_service import (
     upsert_special,
     upsert_template,
     upsert_variant,
+    move_variant,
     upsert_vehicle_brand,
     upsert_vehicle_model,
+)
+from app.services.trash_service import (
+    delete_special,
+    delete_special_variant,
 )
 from app.services.auth_service import (
     change_password,
@@ -91,7 +98,6 @@ from app.services.pdf_content import load_pdf_bytes, parse_byte_range
 from app.services.review_service import (
     get_accessible_draft,
     list_history,
-    list_trash,
     move_to_trash,
     purge_expired_trash,
     restore_from_trash,
@@ -105,7 +111,7 @@ from app.services.upload_service import create_batch_from_uploads, serialize_bat
 from app.services.session_service import get_session, list_sessions, serialize_session
 from app.services.client_record_service import export_csv_bytes, get_record, list_records, serialize_record, update_record
 from app.services.road_tax_service import delete_rule as delete_road_tax_rule, list_rules, serialize_rule, upsert_rule as upsert_road_tax_rule
-from app.storage.supabase import SupabaseStorage
+from app.storage.supabase import StorageError, SupabaseStorage
 
 
 logger = logging.getLogger(__name__)
@@ -357,6 +363,7 @@ def draft_preview_png(draft_id: str, db: Session = Depends(get_db), user: User =
         draft.fields, template_name=template.name,
         template_config=config,
         insurer_name=(draft.fields.get("insurance_company") or {}).get("value"),
+        db=db,
     )
     try:
         from playwright.sync_api import sync_playwright
@@ -429,6 +436,27 @@ def client_record_update(record_id: str, payload: ClientRecordUpdateRequest, db:
     return {"record": serialize_record(record)}
 
 
+@router.delete("/client-records/{record_id}")
+def client_record_delete(record_id: str, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
+    from app.services.trash_service import delete_client_record
+    delete_client_record(db, settings, user, record_id)
+    return {"deleted": True}
+
+
+@router.post("/client-records/bulk-delete")
+def client_records_bulk_delete(payload: BulkClientRecordDeleteRequest, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
+    from app.services.trash_service import delete_client_record
+    deleted: list[str] = []
+    failed: list[dict] = []
+    for record_id in payload.record_ids:
+        try:
+            delete_client_record(db, settings, user, record_id)
+            deleted.append(record_id)
+        except AppError as exc:
+            failed.append({"id": record_id, "message": str(exc)})
+    return {"deleted": deleted, "failed": failed}
+
+
 @router.get("/history")
 def history(status: str | None = None, search: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     from app.models.tables import Session as SessionModel
@@ -452,9 +480,23 @@ def delete_record(uploaded_file_id: str, db: Session = Depends(get_db), settings
     return {"status": "Deleted"}
 
 
+@router.post("/records/bulk-delete")
+def delete_records_bulk(payload: BulkUploadedFileDeleteRequest, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
+    deleted: list[str] = []
+    failed: list[dict] = []
+    for uploaded_file_id in payload.uploaded_file_ids:
+        try:
+            move_to_trash(db, settings, user, uploaded_file_id)
+            deleted.append(uploaded_file_id)
+        except AppError as exc:
+            failed.append({"id": uploaded_file_id, "message": str(exc)})
+    return {"deleted": deleted, "failed": failed}
+
+
 @router.get("/trash")
 def trash(db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
-    return {"records": [serialize_file(file) for file in list_trash(db, user)], "retention_days": settings.trash_retention_days}
+    from app.services.trash_service import list_trash_categorized
+    return list_trash_categorized(db, user, settings.trash_retention_days)
 
 
 @router.post("/trash/{uploaded_file_id}/restore")
@@ -463,9 +505,71 @@ def trash_restore(uploaded_file_id: str, db: Session = Depends(get_db), user: Us
     return {"status": "Ready"}
 
 
+@router.post("/trash/templates/{template_id}/restore")
+def trash_template_restore(template_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    from app.services.trash_service import restore_template
+    restore_template(db, user, template_id)
+    return {"status": "Ready"}
+
+
+@router.post("/trash/our-specials/{special_id}/restore")
+def trash_special_restore(special_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    from app.services.trash_service import restore_special
+    restore_special(db, user, special_id)
+    return {"status": "Ready"}
+
+
+@router.post("/trash/our-special-variants/{variant_id}/restore")
+def trash_variant_restore(variant_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    from app.services.trash_service import restore_special_variant
+    restore_special_variant(db, user, variant_id)
+    return {"status": "Ready"}
+
+
+@router.post("/trash/client-records/{record_id}/restore")
+def trash_record_restore(record_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    from app.services.trash_service import restore_client_record
+    restore_client_record(db, user, record_id)
+    return {"status": "Ready"}
+
+
+@router.post("/trash/template-assets/{asset_id}/restore")
+def trash_asset_restore(asset_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    from app.services.trash_service import restore_template_asset
+    restore_template_asset(db, user, asset_id)
+    return {"status": "Ready"}
+
+
 @router.post("/trash/purge-expired")
 def trash_purge(db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
-    return {"purged": purge_expired_trash(db, user, SupabaseStorage(settings))}
+    from app.services.trash_service import purge_all_expired
+    purged = purge_expired_trash(db, user, SupabaseStorage(settings))
+    return {"purged": purged + purge_all_expired(db)}
+
+
+@router.post("/trash/empty")
+def trash_empty(db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
+    from app.services.trash_service import empty_all_trash
+    return {"emptied": empty_all_trash(db, user, SupabaseStorage(settings))}
+
+
+@router.post("/trash/delete-forever")
+def trash_delete_forever(payload: TrashDeleteForeverRequest, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
+    from app.services import trash_service
+
+    handlers = {
+        "session": lambda: trash_service.permanent_delete_session(db, user, payload.entity_id, SupabaseStorage(settings)),
+        "template": lambda: trash_service.permanent_delete_template(db, user, payload.entity_id),
+        "our_special": lambda: trash_service.permanent_delete_special(db, user, payload.entity_id),
+        "our_special_variant": lambda: trash_service.permanent_delete_special_variant(db, user, payload.entity_id),
+        "client_record": lambda: trash_service.permanent_delete_client_record(db, user, payload.entity_id),
+        "template_asset": lambda: trash_service.permanent_delete_template_asset(db, user, payload.entity_id),
+    }
+    handler = handlers.get(payload.entity_type)
+    if not handler:
+        raise AppError("Unknown trash item type.", 400)
+    handler()
+    return {"deleted": True}
 
 
 @router.get("/extractions/{uploaded_file_id}")
@@ -527,7 +631,22 @@ def admin_company_delete(company_id: str, db: Session = Depends(get_db), user: U
 @router.get("/admin/templates")
 def admin_templates(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
-    return {"templates": [serialize_template(item, db) for item in db.scalars(select(OutputTemplateConfig).order_by(OutputTemplateConfig.name)).all()]}
+    return {
+        "templates": [
+            serialize_template(item, db)
+            for item in db.scalars(
+                select(OutputTemplateConfig).where(OutputTemplateConfig.deleted_at.is_(None)).order_by(OutputTemplateConfig.name)
+            ).all()
+        ]
+    }
+
+
+@router.delete("/admin/templates/{template_id}")
+def admin_template_delete(template_id: str, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    from app.services.trash_service import delete_template
+    delete_template(db, settings, user, template_id)
+    return {"deleted": True}
 
 
 @router.get("/admin/template-assets")
@@ -540,13 +659,17 @@ def admin_template_assets(db: Session = Depends(get_db), user: User = Depends(cu
 async def admin_template_asset_upload(
     file: UploadFile = File(...),
     label: str | None = Form(None),
+    folder: str | None = Form(None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
 ) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
     data = await file.read()
-    record = upload_template_asset(db, settings, user, file.filename, file.content_type, data, label=label)
+    try:
+        record = upload_template_asset(db, settings, user, file.filename, file.content_type, data, label=label, folder=folder)
+    except StorageError as exc:
+        raise AppError(str(exc), 400) from exc
     return {
         "asset": {
             "id": record.id,
@@ -555,15 +678,17 @@ async def admin_template_asset_upload(
             "url": f"/template-assets/{record.id}",
             "size_bytes": record.size_bytes,
             "source": "uploaded",
+            "folder": record.folder,
         }
     }
 
 
 @router.delete("/admin/template-assets/{asset_id}")
-def admin_template_asset_delete(asset_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+def admin_template_asset_delete(asset_id: str, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
-    delete_template_asset(db, user, asset_id)
-    return {"status": "Deleted"}
+    from app.services.trash_service import delete_template_asset
+    delete_template_asset(db, settings, user, asset_id)
+    return {"deleted": True}
 
 
 @router.get("/admin/templates/{template_id}")
@@ -617,7 +742,11 @@ def admin_our_specials(db: Session = Depends(get_db), user: User = Depends(curre
     return {
         "our_specials": [
             serialize_special(item)
-            for item in db.scalars(select(OurSpecial).options(selectinload(OurSpecial.variants))).all()
+            for item in db.scalars(
+                select(OurSpecial)
+                .where(OurSpecial.deleted_at.is_(None))
+                .options(selectinload(OurSpecial.variants))
+            ).all()
         ]
     }
 
@@ -629,10 +758,9 @@ def admin_our_special_save(payload: OurSpecialSaveRequest, db: Session = Depends
 
 
 @router.delete("/admin/our-specials/{special_id}")
-def admin_our_special_delete(special_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+def admin_our_special_delete(special_id: str, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
-    from app.services.admin_service import delete_special as _delete_special
-    _delete_special(db, user, special_id)
+    delete_special(db, settings, user, special_id)
     return {"deleted": True}
 
 
@@ -643,11 +771,17 @@ def admin_our_special_variant_save(payload: OurSpecialVariantSaveRequest, db: Se
 
 
 @router.delete("/admin/our-special-variants/{variant_id}")
-def admin_our_special_variant_delete(variant_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+def admin_our_special_variant_delete(variant_id: str, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
-    from app.services.admin_service import delete_variant as _delete_variant
-    _delete_variant(db, user, variant_id)
+    delete_special_variant(db, settings, user, variant_id)
     return {"deleted": True}
+
+
+@router.post("/admin/our-special-variants/{variant_id}/move")
+def admin_our_special_variant_move(variant_id: str, payload: VariantMoveRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    variant = move_variant(db, user, variant_id, payload.special_id)
+    return {"variant": {"id": variant.id, "special_id": variant.special_id, "label": variant.label}}
 
 
 @router.get("/admin/dictionaries")

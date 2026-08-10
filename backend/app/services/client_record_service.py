@@ -93,7 +93,7 @@ def list_records(
     sort_by: str = "created_at",
     sort_dir: str = "desc",
 ) -> list[ClientRecord]:
-    q = select(ClientRecord)
+    q = select(ClientRecord).where(ClientRecord.deleted_at.is_(None))
     if search:
         term = f"%{search}%"
         q = q.where(

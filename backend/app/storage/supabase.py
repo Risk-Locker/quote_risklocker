@@ -83,6 +83,8 @@ class SupabaseStorage:
             return False
         return str(payload.get("statusCode")) == "404" or "not found" in str(payload.get("message", "")).lower()
 
+    ASSET_MIME_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/svg+xml"]
+
     def ensure_bucket(self) -> None:
         bucket_id = quote(self.bucket, safe="")
         response = self._request("GET", f"/storage/v1/bucket/{bucket_id}")
@@ -90,6 +92,17 @@ class SupabaseStorage:
             payload = response.json()
             if payload.get("public") is True:
                 raise StorageError("The Supabase PDF bucket must be private.")
+            allowed = payload.get("allowed_mime_types") or []
+            if not all(mime in allowed for mime in self.ASSET_MIME_TYPES):
+                updated = self._request(
+                    "PUT",
+                    f"/storage/v1/bucket/{bucket_id}",
+                    json={"allowed_mime_types": self.ASSET_MIME_TYPES},
+                )
+                if updated.status_code not in {200, 201}:
+                    raise StorageError(
+                        f"Supabase bucket mime-type update failed ({updated.status_code}): {self._error_message(updated)}"
+                    )
             return
         if not self._not_found(response):
             raise StorageError(f"Supabase bucket check failed ({response.status_code}): {self._error_message(response)}")
@@ -101,7 +114,7 @@ class SupabaseStorage:
                 "name": self.bucket,
                 "public": False,
                 "file_size_limit": self.settings.max_upload_bytes,
-                "allowed_mime_types": ["application/pdf"],
+                "allowed_mime_types": self.ASSET_MIME_TYPES,
             },
         )
         if created.status_code not in {200, 201}:

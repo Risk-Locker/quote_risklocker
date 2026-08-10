@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api, fileUrl } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 
@@ -167,6 +168,8 @@ export default function BuilderOurSpecialsPage() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [pendingDeleteSpecial, setPendingDeleteSpecial] = useState<OurSpecial | null>(null);
+  const [pendingDeleteVariant, setPendingDeleteVariant] = useState<Variant | null>(null);
   const [showCreateSpecial, setShowCreateSpecial] = useState(false);
   const [createLabel, setCreateLabel] = useState("");
   const [createCategory, setCreateCategory] = useState("FOC");
@@ -214,7 +217,7 @@ export default function BuilderOurSpecialsPage() {
   }
 
   async function deleteSpecial(special: OurSpecial) {
-    if (!confirm(`Delete "${special.label}" and all its variants?`)) return;
+    setError("");
     try {
       await api(`/admin/our-specials/${special.id}`, { method: "DELETE" });
       if (selectedId === special.id) {
@@ -222,6 +225,7 @@ export default function BuilderOurSpecialsPage() {
         setEditingVariant({ ...emptyVariant });
       }
       toast(`"${special.label}" deleted.`, "success");
+      setPendingDeleteSpecial(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not delete special.");
     }
@@ -274,10 +278,11 @@ export default function BuilderOurSpecialsPage() {
   }
 
   async function deleteVariant(variant: Variant) {
-    if (!confirm(`Delete "${variant.label}"?`)) return;
+    setError("");
     try {
       await api(`/admin/our-special-variants/${variant.id}`, { method: "DELETE" });
       toast("Variant deleted.", "success");
+      setPendingDeleteVariant(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not delete variant.");
     }
@@ -360,8 +365,8 @@ export default function BuilderOurSpecialsPage() {
               </Card>
             ) : null}
 
-            <SpecialList title="FOC" items={focSpecials} selectedId={selectedId} onSelect={setSelectedId} onDelete={deleteSpecial} onUpdate={updateSpecial} />
-            <SpecialList title="Add-on" items={addOnSpecials} selectedId={selectedId} onSelect={setSelectedId} onDelete={deleteSpecial} onUpdate={updateSpecial} />
+            <SpecialList title="FOC" items={focSpecials} selectedId={selectedId} onSelect={setSelectedId} onDelete={setPendingDeleteSpecial} onUpdate={updateSpecial} />
+            <SpecialList title="Add-on" items={addOnSpecials} selectedId={selectedId} onSelect={setSelectedId} onDelete={setPendingDeleteSpecial} onUpdate={updateSpecial} />
           </aside>
 
           <div className="grid gap-4 content-start">
@@ -379,7 +384,7 @@ export default function BuilderOurSpecialsPage() {
                 {selected.variants.length ? (
                   <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))" }}>
                     {selected.variants.map((v) => (
-                      <VariantCard key={v.id} variant={v} onEdit={() => startEdit(v)} onDelete={() => deleteVariant(v)} />
+                      <VariantCard key={v.id} variant={v} onEdit={() => startEdit(v)} onDelete={() => setPendingDeleteVariant(v)} />
                     ))}
                   </div>
                 ) : (
@@ -398,6 +403,26 @@ export default function BuilderOurSpecialsPage() {
               </Card>
             )}
           </div>
+
+          {pendingDeleteSpecial ? (
+            <ConfirmDialog
+              open
+              onOpenChange={(open) => { if (!open) setPendingDeleteSpecial(null); }}
+              title={`Delete "${pendingDeleteSpecial.label}"?`}
+              message="This deletes all its variants too. It moves to Trash and can be restored later."
+              onConfirm={() => deleteSpecial(pendingDeleteSpecial)}
+            />
+          ) : null}
+
+          {pendingDeleteVariant ? (
+            <ConfirmDialog
+              open
+              onOpenChange={(open) => { if (!open) setPendingDeleteVariant(null); }}
+              title={`Delete variant "${pendingDeleteVariant.label}"?`}
+              message="It moves to Trash and can be restored later."
+              onConfirm={() => deleteVariant(pendingDeleteVariant)}
+            />
+          ) : null}
 
           <aside className="grid gap-4 content-start">
             {isEditing ? (
@@ -495,6 +520,33 @@ export default function BuilderOurSpecialsPage() {
                       <option value="sm">Small</option>
                       <option value="md">Medium</option>
                       <option value="lg">Large</option>
+                    </Select>
+                  </div>
+
+                  <div className="grid gap-1.5">
+                    <label className="text-[13px] font-semibold text-[var(--rl-text-strong)]">Move to special</label>
+                    <Select
+                      value=""
+                      disabled={!editingVariant.id}
+                      onChange={async (e) => {
+                        const targetId = e.target.value;
+                        if (!targetId || !editingVariant.id) return;
+                        setError("");
+                        try {
+                          await api(`/admin/our-special-variants/${editingVariant.id}/move`, { method: "POST", body: JSON.stringify({ special_id: targetId }) });
+                          toast("Variant moved.", "success");
+                          setEditingVariant({ ...emptyVariant });
+                          setSelectedId(targetId);
+                          await load();
+                        } catch (err) {
+                          setError(apiErrorMessage(err));
+                        }
+                      }}
+                    >
+                      <option value="">{editingVariant.id ? "Move to another special…" : "Save the variant first"}</option>
+                      {specials.filter((s) => s.id !== selectedId).map((s) => (
+                        <option key={s.id} value={s.id}>{s.label}</option>
+                      ))}
                     </Select>
                   </div>
 

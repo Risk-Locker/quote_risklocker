@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "agent-browser": {
+      "source": "vercel-labs/agent-browser",
+      "sourceType": "github",
+      "skillPath": "skills/agent-browser/SKILL.md",
+      "computedHash": "a674b7d81066e3cc471a7512ddb4ae724418cbfefa75cbb050b0dc430e4d57a0"
+    },
     "brainstorming": {
       "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\superpowers",
       "sourceType": "local",
@@ -16,10 +22,40 @@
       "sourceType": "local",
       "computedHash": "93f53fd1c0352d3d7ec17b8f73d7351bf76f4821e55d123c9d2abc2c53ba48e4"
     },
+    "playwright-automation-fill-in-form": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "skillPath": "skills/playwright-automation-fill-in-form/SKILL.md",
+      "computedHash": "05c39652cc1ef6a3066221d77d51e208f88f3ac8cbdd7ffe57a99de93776efe7"
+    },
+    "playwright-best-practices": {
+      "source": "currents-dev/playwright-best-practices-skill",
+      "sourceType": "github",
+      "skillPath": "playwright-best-practices/SKILL.md",
+      "computedHash": "88623575c97314e115f0e361a7d942e31d3b7a4e8925832257e1ad33f52096e4"
+    },
+    "playwright-cli": {
+      "source": "microsoft/playwright-cli",
+      "sourceType": "github",
+      "skillPath": "skills/playwright-cli/SKILL.md",
+      "computedHash": "438b922468b7bb2ab5ce4a0f318fc65db93337f0df03908a5476effbae9487e6"
+    },
+    "playwright-explore-website": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "skillPath": "skills/playwright-explore-website/SKILL.md",
+      "computedHash": "ac361696198c2db22a0f9d3aa456d2f83c9f0110bf00d6ca529f735395fe3a5c"
+    },
     "python-testing": {
       "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\python-skills",
       "sourceType": "local",
       "computedHash": "72aa686b0fc4ef5688c6b79874e21126cecd908cac8af9efe439da913255f411"
+    },
+    "security-best-practices": {
+      "source": "openai/skills",
+      "sourceType": "github",
+      "skillPath": "skills/.curated/security-best-practices/SKILL.md",
+      "computedHash": "0c42fff660b6f7e85add36437edc36976466bb254b7cd9eb38ec67b2ad64a9bf"
     },
     "shadcn": {
       "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\shadcn-ui",
@@ -57,8 +93,9 @@
       "computedHash": "d8e7d3afe37dcc8a97b99ffb5afdb4d0919ae0092ea8b68f44eb201f035e33ac"
     },
     "webapp-testing": {
-      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\anthropic-skills",
-      "sourceType": "local",
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/webapp-testing/SKILL.md",
       "computedHash": "3f14af7f5690695209c22fbf8c8d133769a86d64892602c09bb13f135e14e857"
     },
     "writing-plans": {

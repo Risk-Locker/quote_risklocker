@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Check, CopySimple, FloppyDisk, LockKey, PencilSimple, Plus, X } from "@phosphor-icons/react";
+import { Check, CopySimple, FloppyDisk, LockKey, PencilSimple, Plus, Trash, X } from "@phosphor-icons/react";
 import { BuilderNav } from "@/components/builder-nav";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 
@@ -34,6 +35,7 @@ export default function BuilderTemplatesPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [newCompanyId, setNewCompanyId] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<TemplateRecord | null>(null);
   const { toast } = useToast();
 
   async function load() {
@@ -77,6 +79,19 @@ export default function BuilderTemplatesPage() {
       toast("Template copied.", "success");
       await load();
       window.location.href = `/builder/templates/${result.template.id}/builder`;
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    }
+  }
+
+  async function deleteTemplate() {
+    if (!pendingDelete) return;
+    setError("");
+    try {
+      await api(`/admin/templates/${pendingDelete.id}`, { method: "DELETE" });
+      toast("Template moved to Trash.", "success");
+      setPendingDelete(null);
+      await load();
     } catch (err) {
       setError(apiErrorMessage(err));
     }
@@ -173,11 +188,20 @@ export default function BuilderTemplatesPage() {
                           Copy
                         </Button>
                       ) : (
-                        <Link href={`/builder/templates/${template.id}/builder`}>
-                          <Button icon={<PencilSimple weight="bold" size={16} />}>
-                            Open builder
+                        <>
+                          <Link href={`/builder/templates/${template.id}/builder`}>
+                            <Button icon={<PencilSimple weight="bold" size={16} />}>
+                              Open builder
+                            </Button>
+                          </Link>
+                          <Button
+                            variant="danger"
+                            icon={<Trash weight="bold" size={16} />}
+                            onClick={() => setPendingDelete(template)}
+                          >
+                            Delete
                           </Button>
-                        </Link>
+                        </>
                       )}
                     </div>
                   </div>
@@ -187,6 +211,16 @@ export default function BuilderTemplatesPage() {
           ))
         )}
       </section>
+
+      {pendingDelete ? (
+        <ConfirmDialog
+          open
+          onOpenChange={(open) => { if (!open) setPendingDelete(null); }}
+          title={`Delete template "${pendingDelete.name}"?`}
+          message="It moves to Trash and can be restored later."
+          onConfirm={deleteTemplate}
+        />
+      ) : null}
     </AppShell>
   );
 }

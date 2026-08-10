@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 
@@ -35,6 +36,7 @@ export default function BuilderCompaniesPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [createName, setCreateName] = useState("");
   const [createPhrases, setCreatePhrases] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<Company | null>(null);
   const { toast } = useToast();
 
   async function load() {
@@ -96,11 +98,13 @@ export default function BuilderCompaniesPage() {
     }
   }
 
-  async function deleteCompany(company: Company) {
-    if (!confirm(`Delete "${company.name}"? This cannot be undone.`)) return;
+  async function deleteCompany() {
+    if (!pendingDelete) return;
+    setError("");
     try {
-      await api(`/admin/companies/${company.id}`, { method: "DELETE" });
-      toast(`"${company.name}" deleted.`, "success");
+      await api(`/admin/companies/${pendingDelete.id}`, { method: "DELETE" });
+      toast(`"${pendingDelete.name}" deleted.`, "success");
+      setPendingDelete(null);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not delete company.");
@@ -244,7 +248,7 @@ export default function BuilderCompaniesPage() {
                           variant="secondary"
                           icon={<Trash weight="bold" size={16} />}
                           disabled={companies.length <= 1}
-                          onClick={() => deleteCompany(company)}
+                          onClick={() => setPendingDelete(company)}
                         >
                           Delete
                         </Button>
@@ -260,6 +264,16 @@ export default function BuilderCompaniesPage() {
           })}
         </div>
       </section>
+
+      {pendingDelete ? (
+        <ConfirmDialog
+          open
+          onOpenChange={(open) => { if (!open) setPendingDelete(null); }}
+          title={`Delete "${pendingDelete.name}"?`}
+          message="This cannot be undone."
+          onConfirm={deleteCompany}
+        />
+      ) : null}
     </AppShell>
   );
 }

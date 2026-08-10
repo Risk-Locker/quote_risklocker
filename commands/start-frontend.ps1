@@ -78,11 +78,13 @@ if (-not $backendPort) {
 }
 
 Set-Content -Path $backendPortFile -Value $backendPort -Encoding ASCII
-$env:NEXT_PUBLIC_API_BASE_URL = "http://127.0.0.1:$backendPort"
+# Do not pin NEXT_PUBLIC_API_BASE_URL here: the frontend derives the API base
+# from window.location.hostname in development (api.ts), so both
+# http://localhost:3000 and http://127.0.0.1:3000 keep the auth cookie on the
+# same host. Set NEXT_PUBLIC_API_BASE_URL explicitly only in production.
 
 $port = 3000
 Write-Host "Starting Risklocker frontend on http://127.0.0.1:$port ..."
-Write-Host "Frontend API target: $env:NEXT_PUBLIC_API_BASE_URL"
 
 $listener = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $port -State Listen -ErrorAction SilentlyContinue
 if ($listener) {
@@ -91,4 +93,19 @@ if ($listener) {
     exit 1
 }
 
-npm.cmd run dev -- --hostname 127.0.0.1 --port $port
+# Production is the default daily experience: build once, then serve the fast
+# server. Use `npm run dev` (Turbopack) for feature development.
+$buildId = Join-Path $PSScriptRoot "..\frontend\.next\BUILD_ID"
+if (-not (Test-Path $buildId)) {
+    Write-Host "No production build found - building (this takes a few minutes on first start)..." -ForegroundColor Yellow
+    Push-Location (Join-Path $PSScriptRoot "..\frontend")
+    npm run build
+    if ($LASTEXITCODE -ne 0) {
+        Pop-Location
+        Write-Host "Frontend build failed." -ForegroundColor Red
+        exit 1
+    }
+    Pop-Location
+}
+
+npm.cmd run start -- --hostname 127.0.0.1 --port $port

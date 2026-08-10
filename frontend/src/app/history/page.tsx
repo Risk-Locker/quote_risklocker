@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/status-badge";
+import { PageLoading } from "@/components/ui/page-loading";
 import { api } from "@/lib/api";
 
 type RecordItem = {
@@ -31,9 +32,11 @@ export default function HistoryPage() {
   const [records, setRecords] = useState<RecordItem[]>([]);
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
 
   async function load() {
     setError("");
+    setLoading(true);
     try {
       const result = await api<{ records: RecordItem[] }>(
         `/history${search ? `?search=${encodeURIComponent(search)}` : ""}`
@@ -42,6 +45,8 @@ export default function HistoryPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load history.");
       setRecords([]);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -76,6 +81,9 @@ export default function HistoryPage() {
           </div>
         ) : null}
 
+        {loading ? (
+          <PageLoading />
+        ) : (
         <Card className="overflow-x-auto">
           <table className="min-w-[720px] w-full">
             <thead>
@@ -126,6 +134,7 @@ export default function HistoryPage() {
             </tbody>
           </table>
         </Card>
+        )}
       </section>
     </AppShell>
   );

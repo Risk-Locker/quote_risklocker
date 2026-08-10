@@ -36,8 +36,17 @@ export default function UploadPage() {
     Array.from(files).forEach((file) => form.append("files", file));
     form.append("enhanced_reading", String(enhanced));
     try {
-      const result = await api<{ batch: { id: string }; sessions?: Array<{ id: string }> }>("/batches/upload", { method: "POST", body: form });
+      const result = await api<{
+        batch: { id: string; failed_files?: Array<{ filename: string; message: string }> };
+        sessions?: Array<{ id: string }>;
+      }>("/batches/upload", { method: "POST", body: form });
       const sessions = result.sessions;
+      const failures = result.batch.failed_files || [];
+      if (failures.length && !sessions?.length) {
+        setFiles(null);
+        setError(failures.map((f) => `${f.filename}: ${f.message}`).join(" "));
+        return;
+      }
       if (sessions?.length === 1) {
         router.push(`/sessions/${sessions[0].id}/review`);
       } else {

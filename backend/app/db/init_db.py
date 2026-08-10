@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -89,15 +89,6 @@ def seed_defaults(db: Session, settings: Settings) -> None:
             )
             db.add(company)
             db.flush()
-    # Purge old companies/templates: clear ALL FK references with raw SQL first
-    default_names = [name for name, _, _ in DEFAULT_COMPANIES]
-    db.execute(text("UPDATE output_template_configs SET insurance_company_id = NULL"))
-    db.execute(text("UPDATE uploaded_files SET template_id = NULL, insurance_company_id = NULL"))
-    db.execute(text("UPDATE benefit_options SET insurance_company_id = NULL, template_id = NULL"))
-    db.flush()
-    for c in db.scalars(select(InsuranceCompany).where(InsuranceCompany.name.notin_(default_names))).all():
-        db.delete(c)
-    db.flush()
 
     default_template = db.scalar(select(OutputTemplateConfig).where(OutputTemplateConfig.name == "Risklocker Motor Template"))
     if not default_template:
@@ -112,9 +103,6 @@ def seed_defaults(db: Session, settings: Settings) -> None:
     default_template.status = AccountStatus.ACTIVE.value
     default_template.fixed_fields = default_template_config("Motor", locked=True)
     default_template.static_notes = "Generated from reviewed Risklocker draft data."
-
-    for template in db.scalars(select(OutputTemplateConfig).where(OutputTemplateConfig.name != "Risklocker Motor Template")).all():
-        db.delete(template)
 
     for field, aliases in DEFAULT_FIELD_ALIASES.items():
         if not db.scalar(select(FieldAlias).where(FieldAlias.field_name == field)):

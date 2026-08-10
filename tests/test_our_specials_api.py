@@ -50,6 +50,7 @@ def auth_settings():
         session_idle_hours=8,
         session_max_days=30,
         auth_hash_secret="test-auth-hash-secret-that-is-long-enough",
+        trash_retention_days=14,
     )
 
 
@@ -374,3 +375,27 @@ class TestOurSpecialsService:
 
         with pytest.raises(AppError, match="Variant not found"):
             delete_variant(db, user, "nope")
+
+    def test_move_variant_changes_special(self):
+        from app.services.admin_service import move_variant
+
+        parent_a = _make_special(id="a", label="Towing")
+        parent_b = _make_special(id="b", label="Windscreen")
+        variant = _make_variant("a", id="v1", label="Windscreen Coverage")
+        user = _admin_user()
+        db = FakeDb(user=user, specials=[parent_a, parent_b], variants=[variant])
+
+        moved = move_variant(db, user, "v1", "b")
+
+        assert moved.special_id == "b"
+        assert db.commits == 1
+
+    def test_move_variant_raises_404_on_bad_target(self):
+        from app.services.admin_service import move_variant
+
+        variant = _make_variant("a", id="v1")
+        user = _admin_user()
+        db = FakeDb(user=user, variants=[variant])
+
+        with pytest.raises(AppError, match="Target special not found"):
+            move_variant(db, user, "v1", "nope")

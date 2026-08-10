@@ -1,18 +1,20 @@
 "use client";
 
 import Link from "next/link";
+import type { Route } from "next";
 import { usePathname } from "next/navigation";
 
-const items = [
-  { href: "/builder/companies", label: "Companies" },
-  { href: "/builder/our-specials", label: "Our Specials" },
-  { href: "/builder/templates", label: "Templates" },
-] as const;
+const items: Array<{ href: Route; label: string }> = [
+  { href: "/builder/companies" as Route, label: "Companies" },
+  { href: "/builder/our-specials" as Route, label: "Our Specials" },
+  { href: "/builder/templates" as Route, label: "Templates" },
+  { href: "/builder/assets" as Route, label: "Assets" },
+];
 
 export function BuilderNav() {
   const pathname = usePathname();
   return (
-    <nav className="flex gap-1 p-1 rounded-[var(--rl-radius)] bg-[var(--rl-bg)] w-fit" aria-label="Builder sections">
+    <nav className="flex flex-wrap gap-1 p-1 rounded-[var(--rl-radius)] bg-[var(--rl-bg)] w-fit max-w-full overflow-x-auto" aria-label="Builder sections">
       {items.map((item) => {
         const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
         return (

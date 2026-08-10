@@ -3,7 +3,7 @@
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  TextT, BracketsCurly, Image, Square, LineSegment,
+  TextT, BracketsCurly, Image, Square, LineSegment, ArrowLeft,
   FloppyDisk, DownloadSimple, FileImage, ArrowArcLeft, ArrowArcRight,
   Trash, Plus, PencilSimple, X, CaretUp, CaretDown,
 } from "@phosphor-icons/react";
@@ -19,8 +19,8 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
-import { AppShell } from "@/components/app-shell";
-import { api, fileUrl } from "@/lib/api";
+import { SessionPhaseBar } from "@/components/session-phase-bar";
+import { api, apiRaw, fileUrl } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 
 type TemplateConfig = {
@@ -65,6 +65,8 @@ export default function SessionPreviewPage({ params }: { params: Promise<{ id: s
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const [loading, setLoading] = useState(true);
+  const [busyPdf, setBusyPdf] = useState(false);
+  const [busyPng, setBusyPng] = useState(false);
 
   const dragRef = useRef<DragState | null>(null);
   const resizeRef = useRef<ResizeState | null>(null);
@@ -268,21 +270,24 @@ export default function SessionPreviewPage({ params }: { params: Promise<{ id: s
   }, [id]);
 
   const downloadPdf = useCallback(async () => {
+    setBusyPdf(true);
     try {
       const res = await api<{ version: { download_url: string } }>(`/drafts/${draftId}/generate`, { method: "POST", body: JSON.stringify({}) });
       window.location.href = fileUrl(res.version.download_url);
-    } catch (err) { toast(apiErrorMessage(err), "error"); }
+    } catch (err) { toast(apiErrorMessage(err), "error"); setBusyPdf(false); }
   }, [draftId, toast]);
 
   const downloadPng = useCallback(async () => {
+    setBusyPng(true);
     try {
-      const res = await fetch(`${window.location.origin}/api/drafts/${draftId}/preview-png`, { method: "POST", credentials: "include" });
+      const res = await apiRaw(`/drafts/${draftId}/preview-png`, { method: "POST" });
       if (!res.ok) throw new Error("PNG generation failed");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url; a.download = "preview.png"; a.click();
       URL.revokeObjectURL(url);
     } catch (err) { toast(apiErrorMessage(err), "error"); }
+    finally { setBusyPng(false); }
   }, [draftId, toast]);
 
   const saveAsTemplate = useCallback(async () => {
@@ -307,14 +312,16 @@ export default function SessionPreviewPage({ params }: { params: Promise<{ id: s
   );
 
   return (
-    <AppShell>
-      <div className="flex min-h-[calc(100vh-60px)] flex-col">
-        {/* ---------- TOP TOOLBAR ---------- */}
-        <div className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--rl-border)] bg-[var(--rl-surface)] px-4 py-3">
-          <div className="flex items-center gap-3">
-            <h1 className="text-[20px] font-bold text-[var(--rl-text-strong)] font-[var(--font-manrope)]">Preview</h1>
+    <div className="flex h-dvh flex-col overflow-hidden bg-[var(--rl-bg)]">
+        <div className="z-20 flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--rl-border)] bg-[var(--rl-surface)] px-4 py-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button variant="ghost" icon={<ArrowLeft size={16} weight="bold" />} onClick={() => router.push(`/sessions/${id}/review`)}>
+              Review
+            </Button>
+            <h1 className="text-[20px] font-bold text-[var(--rl-text-strong)] font-[var(--font-manrope)]">Preview &amp; Edit</h1>
             {template && <Badge variant="info">{template.name}</Badge>}
           </div>
+          <SessionPhaseBar sessionId={id} current="preview" hasVersion={false} />
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-2 text-[13px] font-semibold text-[var(--rl-text-strong)]">
               Zoom
@@ -323,8 +330,8 @@ export default function SessionPreviewPage({ params }: { params: Promise<{ id: s
             <Button variant="secondary" size="sm" icon={<ArrowArcLeft size={14} weight="bold" />} onClick={undo} disabled={history.length === 0}>Undo</Button>
             <Button variant="secondary" size="sm" icon={<ArrowArcRight size={14} weight="bold" />} onClick={redo} disabled={future.length === 0}>Redo</Button>
             <Button variant="danger" size="sm" icon={<Trash size={14} weight="bold" />} onClick={deleteSelected} disabled={!selected}>Delete</Button>
-            <Button variant="secondary" size="sm" icon={<DownloadSimple size={14} weight="bold" />} onClick={downloadPdf}>PDF</Button>
-            <Button variant="secondary" size="sm" icon={<FileImage size={14} weight="bold" />} onClick={downloadPng}>PNG</Button>
+            <Button variant="secondary" size="sm" loading={busyPdf} icon={<DownloadSimple size={14} weight="bold" />} onClick={downloadPdf}>{busyPdf ? "Generating PDF" : "PDF"}</Button>
+            <Button variant="secondary" size="sm" loading={busyPng} icon={<FileImage size={14} weight="bold" />} onClick={downloadPng}>{busyPng ? "Rendering PNG" : "PNG"}</Button>
             <Button size="sm" icon={<FloppyDisk size={14} weight="bold" />} onClick={() => setShowSaveModal(true)}>Save as template</Button>
           </div>
         </div>
@@ -338,7 +345,7 @@ export default function SessionPreviewPage({ params }: { params: Promise<{ id: s
 
         {/* ---------- EDITOR BODY ---------- */}
         {!loading && (
-          <div className="grid flex-1 grid-cols-[280px_1fr] overflow-hidden">
+          <div className="grid min-h-0 flex-1 grid-cols-[280px_1fr] overflow-hidden">
             {/* SIDEBAR */}
             <aside className="flex flex-col overflow-hidden border-r border-[var(--rl-border)] bg-[var(--rl-surface)]">
               <div className="flex-1 overflow-auto p-4 space-y-5">
@@ -510,6 +517,5 @@ export default function SessionPreviewPage({ params }: { params: Promise<{ id: s
           </div>
         )}
       </div>
-    </AppShell>
   );
 }

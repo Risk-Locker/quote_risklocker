@@ -42,6 +42,14 @@ body {
   min-height: 100%;
 }
 
+/* Never let the page itself scroll horizontally: wide tables and charts live
+   in their own overflow containers. `clip` (not `hidden`) keeps position:sticky
+   working because it does not create a scroll container. */
+html,
+body {
+  overflow-x: clip;
+}
+
 body {
   margin: 0;
   color: var(--rl-text);
@@ -83,4 +91,12 @@ textarea {
   .rl-link:hover {
     opacity: 0.7;
   }
+}
+
+/* Allow grid/flex children inside the app content to shrink below their
+   content width; otherwise a single wide child (table, long label, nav bar)
+   forces horizontal page overflow on small viewports. */
+main .grid > *,
+main .flex > * {
+  min-width: 0;
 }

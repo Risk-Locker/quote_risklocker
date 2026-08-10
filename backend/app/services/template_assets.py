@@ -6,7 +6,6 @@ import base64
 import hashlib
 import mimetypes
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -23,6 +22,16 @@ from app.storage.supabase import SupabaseStorage
 
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".svg"}
 ALLOWED_MIME_TYPES = {"image/png", "image/jpeg", "image/svg+xml"}
+
+FOLDER_DEFAULT = "Uncategorized"
+_FOLDER_MAX_LENGTH = 60
+
+
+def sanitize_folder(folder: str | None) -> str:
+    """Normalize an asset folder name for storage paths and the database."""
+    cleaned = re.sub(r"[^A-Za-z0-9 _-]", "", (folder or "").strip())
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -_")
+    return cleaned[: _FOLDER_MAX_LENGTH] or FOLDER_DEFAULT
 
 
 def asset_root() -> Path:
@@ -56,6 +65,7 @@ def _local_assets() -> list[dict[str, Any]]:
                 "url": f"/template-assets/{asset_id}",
                 "size_bytes": path.stat().st_size,
                 "source": "local",
+                "folder": "Local",
             }
         )
     return assets
@@ -63,7 +73,9 @@ def _local_assets() -> list[dict[str, Any]]:
 
 def _uploaded_assets(db: Session) -> list[dict[str, Any]]:
     records = db.scalars(
-        select(TemplateAsset).where(TemplateAsset.status == AccountStatus.ACTIVE.value).order_by(TemplateAsset.created_at.desc())
+        select(TemplateAsset)
+        .where(TemplateAsset.status == AccountStatus.ACTIVE.value, TemplateAsset.deleted_at.is_(None))
+        .order_by(TemplateAsset.created_at.desc())
     ).all()
     return [
         {
@@ -74,6 +86,8 @@ def _uploaded_assets(db: Session) -> list[dict[str, Any]]:
             "url": f"/template-assets/{record.id}",
             "size_bytes": record.size_bytes,
             "source": "uploaded",
+            "folder": record.folder,
+            "created_at": record.created_at.isoformat() if record.created_at else None,
         }
         for record in records
     ]
@@ -170,10 +184,12 @@ def upload_template_asset(
     content_type: str | None,
     data: bytes,
     label: str | None = None,
+    folder: str | None = None,
 ) -> TemplateAsset:
     ext, mime = _validate_asset_upload(filename, content_type, data)
     asset_id = str(uuid4())
-    storage_path = f"template-assets/{datetime.now(timezone.utc):%Y/%m/%d}/{asset_id}{ext}"
+    asset_folder = sanitize_folder(folder)
+    storage_path = f"template-assets/{asset_folder}/{asset_id}{ext}"
     stored = SupabaseStorage(settings).upload_asset(storage_path, data, mime)
 
     record = TemplateAsset(
@@ -182,6 +198,7 @@ def upload_template_asset(
         label=label or Path(filename).stem,
         filename=filename,
         content_type=mime,
+        folder=asset_folder,
         storage_provider=stored.provider,
         storage_bucket=stored.bucket,
         storage_path=stored.object_key,

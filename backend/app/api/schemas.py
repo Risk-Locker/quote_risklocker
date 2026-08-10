@@ -48,6 +48,25 @@ class GenerateSelectedRequest(BaseModel):
     acknowledge_check_needed: bool = False
 
 
+# --- Bulk delete ---
+
+class BulkUploadedFileDeleteRequest(BaseModel):
+    uploaded_file_ids: list[str] = Field(default_factory=list)
+
+
+class BulkClientRecordDeleteRequest(BaseModel):
+    record_ids: list[str] = Field(default_factory=list)
+
+
+class VariantMoveRequest(BaseModel):
+    special_id: str = Field(min_length=1)
+
+
+class TrashDeleteForeverRequest(BaseModel):
+    entity_type: str = Field(min_length=1)
+    entity_id: str = Field(min_length=1)
+
+
 # --- Client Records ---
 
 class ClientRecordUpdateRequest(BaseModel):

@@ -35,8 +35,9 @@ export function useAuth() {
           cacheTime = Date.now();
           setUser(cachedUser);
         } else {
-          cachedUser = null;
-          cacheTime = Date.now();
+          // Never cache a negative (logged-out) result: a fresh login in the
+          // same session would otherwise keep bouncing back to /login for the
+          // cache window. Only successful responses are cached.
           setUser(null);
         }
       })

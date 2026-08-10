@@ -1,16 +1,49 @@
 "use client";
 
+import { useEffect, useRef } from "react";
+
 import { fileUrl } from "@/lib/api";
 
 export type CanvasStyle = {
   fontSize?: number;
   fontWeight?: string;
+  fontFamily?: string;
+  fontStyle?: string;
+  textTransform?: string;
   color?: string;
   textAlign?: string;
   borderWidth?: number;
   borderColor?: string;
+  borderStyle?: string;
+  borderRadius?: number;
   background?: string;
+  letterSpacing?: number;
+  lineHeight?: number;
+  padding?: number;
+  boxShadow?: string;
+  rotation?: number;
 };
+
+export const FONT_LIBRARY = [
+  "Arial",
+  "Arial Black",
+  "Georgia",
+  "Times New Roman",
+  "Verdana",
+  "Tahoma",
+  "Trebuchet MS",
+  "Impact",
+  "Courier New",
+  "Comic Sans MS",
+  "Lucida Console",
+  "Segoe UI",
+  "Calibri",
+  "Cambria",
+  "Consolas",
+  "Garamond",
+  "Palatino Linotype",
+  "Franklin Gothic Medium",
+] as const;
 
 export type CanvasElement = {
   id: string;
@@ -42,6 +75,15 @@ export type CanvasElement = {
   variant_border_width?: string;
   variant_border_color?: string;
   variant_shadow?: string;
+  shapeKind?: "circle" | "triangle" | "diamond";
+  groupId?: string;
+  groupName?: string;
+};
+
+export const SHAPE_CLIP: Record<string, string> = {
+  circle: "border-radius:50%",
+  triangle: "clip-path:polygon(50% 0, 100% 100%, 0 100%)",
+  diamond: "clip-path:polygon(50% 0, 100% 50%, 50% 100%, 0 50%)",
 };
 
 type AssetRecord = { id: string; label: string; url: string; source?: string };
@@ -119,6 +161,9 @@ export function CanvasElementView({
   readOnly,
   onPointerDown,
   onResizePointerDown,
+  onDoubleClick,
+  editingText,
+  onTextCommit,
 }: {
   element: CanvasElement;
   selected: boolean;
@@ -127,41 +172,67 @@ export function CanvasElementView({
   readOnly: boolean;
   onPointerDown: (event: React.PointerEvent) => void;
   onResizePointerDown?: (event: React.PointerEvent, handle: string) => void;
+  onDoubleClick?: (event: React.MouseEvent) => void;
+  editingText?: boolean;
+  onTextCommit?: (text: string) => void;
 }) {
   const assetId = element.assetId || (element.assetSlot ? config?.assets?.[element.assetSlot] : "");
   const asset = assets.find((item) => item.id === assetId);
   const isSpecial = element.type === "special";
+  const isLine = element.type === "line";
   const style = element.style || {};
+  const isLineDashed = isLine && (style.borderStyle === "dashed" || style.borderStyle === "dotted");
+  const dashPx = style.borderStyle === "dotted" ? 2 : 6;
   const common: React.CSSProperties = {
     position: "absolute",
     left: element.x,
     top: element.y,
     width: element.w,
-    height: element.h,
+    height: isLine ? Math.max(2, element.h) : element.h,
     zIndex: element.z || 1,
     fontSize: style.fontSize || 14,
     fontWeight: style.fontWeight || "400",
+    fontFamily: style.fontFamily || "inherit",
+    fontStyle: style.fontStyle || "normal",
+    textTransform: (style.textTransform || "none") as React.CSSProperties["textTransform"],
     color:
       isSpecial && element.variant_text_color
         ? element.variant_text_color
         : (style.color || "#111111"),
     textAlign: (style.textAlign || "left") as React.CSSProperties["textAlign"],
     border:
-      isSpecial && element.variant_border_width
-        ? `${element.variant_border_width} solid ${element.variant_border_color || "#D8DDE6"}`
-        : `${style.borderWidth || 0}px solid ${style.borderColor || "#111111"}`,
+      isLine
+        ? undefined
+        : isSpecial && element.variant_border_width
+          ? `${element.variant_border_width} solid ${element.variant_border_color || "#D8DDE6"}`
+          : `${style.borderWidth || 0}px ${style.borderStyle || "solid"} ${style.borderColor || "#111111"}`,
     background:
       isSpecial && element.variant_bg_color
         ? element.variant_bg_color
-        : (style.background || "transparent"),
+        : isLineDashed
+          ? `repeating-linear-gradient(90deg, ${style.color || "#111111"} 0 ${dashPx}px, transparent ${dashPx}px ${dashPx * 2}px)`
+          : (style.background || "transparent"),
     borderRadius:
-      isSpecial && element.variant_shape
-        ? (shapeRadii[element.variant_shape] || "12px")
-        : undefined,
+      element.shapeKind === "circle"
+        ? "50%"
+        : isSpecial && element.variant_shape
+          ? (shapeRadii[element.variant_shape] || "12px")
+          : style.borderRadius
+            ? `${style.borderRadius}px`
+            : undefined,
+    clipPath:
+      element.shapeKind === "triangle"
+        ? "polygon(50% 0, 100% 100%, 0 100%)"
+        : element.shapeKind === "diamond"
+          ? "polygon(50% 0, 100% 50%, 50% 100%, 0 50%)"
+          : undefined,
     boxShadow:
       isSpecial && element.variant_shadow
         ? (shadowMap[element.variant_shadow] || "none")
-        : "none",
+        : (style.boxShadow || "none"),
+    letterSpacing: style.letterSpacing ? `${style.letterSpacing}px` : undefined,
+    lineHeight: style.lineHeight,
+    transform: style.rotation ? `rotate(${style.rotation}deg)` : undefined,
     opacity: element.opacity ?? 1,
     overflow: "hidden",
     whiteSpace: "pre-wrap",
@@ -170,7 +241,7 @@ export function CanvasElementView({
     alignItems: isSpecial ? "center" : undefined,
     justifyContent: isSpecial ? "center" : undefined,
     gap: isSpecial ? "6px" : undefined,
-    padding: isSpecial ? "8px" : undefined,
+    padding: isSpecial ? "8px" : style.padding ? `${style.padding}px` : undefined,
   };
   const handles = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
   return (
@@ -180,14 +251,23 @@ export function CanvasElementView({
           ? "outline outline-2 outline-[#3b82f6]"
           : "outline outline-1 outline-transparent hover:outline-[var(--rl-border)]"
       }
+      data-bg={element.type === "image" && element.assetSlot === "background" ? "1" : undefined}
       style={common}
       onPointerDown={onPointerDown}
+      onDoubleClick={onDoubleClick}
       onClick={(event) => event.stopPropagation()}
     >
       {element.type === "image" && asset ? (
         <img className="h-full w-full object-contain" src={fileUrl(asset.url)} alt="" />
       ) : null}
-      {element.type === "text" ? element.text : null}
+      {element.type === "text" && editingText && !readOnly ? (
+        <EditableText
+          initial={element.text || ""}
+          onCommit={(text) => onTextCommit?.(text)}
+        />
+      ) : element.type === "text" ? (
+        element.text
+      ) : null}
       {element.type === "variable" ? (
         <span className="text-[var(--rl-red)]">
           {element.prefix || ""}
@@ -253,5 +333,45 @@ export function CanvasElementView({
           })
         : null}
     </div>
+  );
+}
+
+function EditableText({ initial, onCommit }: { initial: string; onCommit: (text: string) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const committed = useRef(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.textContent = initial;
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  }, []);
+  return (
+    <div
+      ref={ref}
+      contentEditable
+      suppressContentEditableWarning
+      className="h-full w-full cursor-text outline-none"
+      onBlur={() => {
+        if (committed.current) return;
+        committed.current = true;
+        onCommit(ref.current?.textContent || "");
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          committed.current = true;
+          onCommit(initial);
+        }
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          committed.current = true;
+          onCommit(ref.current?.textContent || "");
+        }
+      }}
+    />
   );
 }

@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api, API_BASE } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 
@@ -24,6 +25,7 @@ export default function FieldAliasesPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editField, setEditField] = useState("");
   const [editAliases, setEditAliases] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<FieldAlias | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -67,11 +69,12 @@ export default function FieldAliasesPage() {
     }
   }
 
-  async function remove(item: FieldAlias) {
-    if (!confirm(`Delete field alias "${item.field_name}"?`)) return;
+  async function remove() {
+    if (!pendingDelete) return;
     try {
-      await api(`/admin/dictionaries/field-aliases/${encodeURIComponent(item.field_name)}`, { method: "DELETE" });
-      toast(`"${item.field_name}" deleted.`, "success");
+      await api(`/admin/dictionaries/field-aliases/${encodeURIComponent(pendingDelete.field_name)}`, { method: "DELETE" });
+      toast(`"${pendingDelete.field_name}" deleted.`, "success");
+      setPendingDelete(null);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not delete."); }
     await load();
   }
@@ -177,7 +180,7 @@ export default function FieldAliasesPage() {
                       <td className="px-4 py-2.5 text-[14px]">
                         <div className="flex gap-1">
                           <Button variant="ghost" size="sm" icon={<PencilSimple size={14} weight="bold" />} onClick={() => startEdit(item)} title="Edit" />
-                          <Button variant="ghost" size="sm" icon={<Trash size={14} weight="bold" />} onClick={() => remove(item)} title="Delete" />
+                          <Button variant="ghost" size="sm" icon={<Trash size={14} weight="bold" />} onClick={() => setPendingDelete(item)} title="Delete" />
                         </div>
                       </td>
                     </tr>
@@ -189,6 +192,15 @@ export default function FieldAliasesPage() {
           </div>
         </Card>
       </section>
+
+      {pendingDelete ? (
+        <ConfirmDialog
+          open
+          onOpenChange={(open) => { if (!open) setPendingDelete(null); }}
+          title={`Delete field alias "${pendingDelete.field_name}"?`}
+          onConfirm={remove}
+        />
+      ) : null}
     </AppShell>
   );
 }
