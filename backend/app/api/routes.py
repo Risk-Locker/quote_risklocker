@@ -27,6 +27,7 @@ from app.api.schemas import (
     OurSpecialVariantSaveRequest,
     RoadTaxRuleSaveRequest,
     TemplateSaveRequest,
+    TemplateGroupSaveRequest,
     TemplateUpdateRequest,
     TrashDeleteForeverRequest,
     UserCreateRequest,
@@ -58,16 +59,23 @@ from app.models.tables import (
 from app.services.admin_service import (
     copy_template,
     delete_field_alias,
+    delete_template_group,
     delete_vehicle_brand,
     delete_vehicle_model,
+    get_runner_fee_default,
+    import_vehicles_workbook,
+    list_template_groups,
+    make_template_master,
     save_strategy_settings,
     serialize_special,
     serialize_template,
+    set_runner_fee_default,
     update_template,
     upsert_company,
     upsert_field_alias,
     upsert_special,
     upsert_template,
+    upsert_template_group,
     upsert_variant,
     move_variant,
     upsert_vehicle_brand,
@@ -97,7 +105,6 @@ from app.services.pdf_service import generate_pdf
 from app.services.pdf_content import load_pdf_bytes, parse_byte_range
 from app.services.review_service import (
     get_accessible_draft,
-    list_history,
     move_to_trash,
     purge_expired_trash,
     restore_from_trash,
@@ -106,11 +113,27 @@ from app.services.review_service import (
 )
 from app.services.system_checks import get_system_checks
 from app.services.storage_retention import purge_expired_pdfs
-from app.services.template_assets import delete_template_asset, list_template_assets, resolve_template_asset, upload_template_asset
-from app.services.upload_service import create_batch_from_uploads, serialize_batch, serialize_file
+from app.services.template_assets import (
+    _uploaded_assets as uploaded_assets_paged,
+    count_uploaded_assets,
+    delete_template_asset,
+    folder_summary,
+    list_template_assets,
+    resolve_template_asset,
+    upload_template_asset,
+)
+from app.services.upload_service import create_batch_from_uploads, serialize_batch
 from app.services.session_service import get_session, list_sessions, serialize_session
 from app.services.client_record_service import export_csv_bytes, get_record, list_records, serialize_record, update_record
-from app.services.road_tax_service import delete_rule as delete_road_tax_rule, list_rules, serialize_rule, upsert_rule as upsert_road_tax_rule
+from app.services.road_tax_service import (
+    delete_rule as delete_road_tax_rule,
+    export_csv_bytes as export_road_tax_csv,
+    import_rules as import_road_tax_rules,
+    list_rules,
+    serialize_rule,
+    upsert_rule as upsert_road_tax_rule,
+)
+from app.services.import_export import parse_tabular, parse_vehicles_workbook
 from app.storage.supabase import StorageError, SupabaseStorage
 
 
@@ -325,6 +348,7 @@ def draft_update(draft_id: str, payload: DraftUpdateRequest, db: Session = Depen
         draft_id,
         payload.fields,
         template_id=payload.template_id,
+        layout_override=payload.layout_override,
     )
     return {"draft": serialize_draft(draft, db)}
 
@@ -359,6 +383,8 @@ def draft_preview_png(draft_id: str, db: Session = Depends(get_db), user: User =
     if not template:
         raise AppError("Template not found.", 404)
     config = normalize_template_config(template.fixed_fields, template.name)
+    if draft.layout_override:
+        config = normalize_template_config(draft.layout_override, template.name)
     html = render_quotation_html(
         draft.fields, template_name=template.name,
         template_config=config,
@@ -389,9 +415,9 @@ def generate_selected(payload: GenerateSelectedRequest, db: Session = Depends(ge
 
 
 @router.get("/sessions")
-def sessions_list(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    sessions = list_sessions(db, user.id)
-    return {"sessions": [serialize_session(s) for s in sessions]}
+def sessions_list(search: str | None = None, limit: int = 25, offset: int = 0, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    sessions, total = list_sessions(db, user.id, search=search, limit=min(max(limit, 1), 100), offset=max(offset, 0))
+    return {"sessions": [serialize_session(s) for s in sessions], "total": total}
 
 
 @router.get("/sessions/{session_id}")
@@ -455,23 +481,6 @@ def client_records_bulk_delete(payload: BulkClientRecordDeleteRequest, db: Sessi
         except AppError as exc:
             failed.append({"id": record_id, "message": str(exc)})
     return {"deleted": deleted, "failed": failed}
-
-
-@router.get("/history")
-def history(status: str | None = None, search: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    from app.models.tables import Session as SessionModel
-    files = list_history(db, user, status, search)
-    file_ids = [f.id for f in files]
-    session_map = {}
-    if file_ids:
-        for s in db.scalars(select(SessionModel).where(SessionModel.uploaded_file_id.in_(file_ids))).all():
-            session_map[s.uploaded_file_id] = s.id
-    return {
-        "records": [
-            {**serialize_file(file), "session_id": session_map.get(file.id)}
-            for file in files
-        ]
-    }
 
 
 @router.delete("/records/{uploaded_file_id}")
@@ -628,6 +637,24 @@ def admin_company_delete(company_id: str, db: Session = Depends(get_db), user: U
     return {"deleted": True}
 
 
+@router.get("/admin/template-groups")
+def admin_template_groups(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    return {"groups": list_template_groups(db)}
+
+
+@router.post("/admin/template-groups")
+def admin_template_group_save(payload: TemplateGroupSaveRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    group = upsert_template_group(db, user, payload.model_dump(exclude_none=True))
+    return {"group": {"id": group.id, "name": group.name, "company_id": group.company_id}}
+
+
+@router.delete("/admin/template-groups/{group_id}")
+def admin_template_group_delete(group_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    delete_template_group(db, user, group_id)
+    return {"deleted": True}
+
+
 @router.get("/admin/templates")
 def admin_templates(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
@@ -650,9 +677,12 @@ def admin_template_delete(template_id: str, db: Session = Depends(get_db), setti
 
 
 @router.get("/admin/template-assets")
-def admin_template_assets(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+def admin_template_assets(folder: str | None = None, search: str | None = None, limit: int = 50, offset: int = 0, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
-    return {"assets": list_template_assets(db)}
+    local = [a for a in list_template_assets() if a["source"] == "local"]
+    uploaded = uploaded_assets_paged(db, folder=folder, search=search, limit=min(max(limit, 1), 200), offset=max(offset, 0))
+    total = count_uploaded_assets(db, folder=folder, search=search)
+    return {"assets": local + uploaded, "total": total, "folders": folder_summary(db)}
 
 
 @router.post("/admin/template-assets")
@@ -703,6 +733,12 @@ def admin_template_detail(template_id: str, db: Session = Depends(get_db), user:
 @router.post("/admin/templates/{template_id}/copy")
 def admin_template_copy(template_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     template = copy_template(db, user, template_id)
+    return {"template": serialize_template(template, db)}
+
+
+@router.post("/admin/templates/{template_id}/make-master")
+def admin_template_make_master(template_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    template = make_template_master(db, user, template_id)
     return {"template": serialize_template(template, db)}
 
 
@@ -924,6 +960,44 @@ def road_tax_rule_delete(rule_id: str, db: Session = Depends(get_db), user: User
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
     delete_road_tax_rule(db, rule_id)
     return {"deleted": True}
+
+
+@router.get("/admin/road-tax-rules/export")
+def road_tax_rules_export(db: Session = Depends(get_db), user: User = Depends(current_user)) -> Response:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    return Response(
+        export_road_tax_csv(list_rules(db)),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="road_tax_rules.csv"'},
+    )
+
+
+@router.post("/admin/road-tax-rules/import")
+async def road_tax_rules_import(file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    data = await file.read()
+    rows = parse_tabular(file.filename or "import.csv", data)
+    return import_road_tax_rules(db, rows)
+
+
+@router.post("/admin/dictionaries/vehicles/import")
+async def vehicles_import(file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    data = await file.read()
+    sheets = parse_vehicles_workbook(file.filename or "vehicles.xlsx", data)
+    return import_vehicles_workbook(db, user, sheets)
+
+
+@router.get("/admin/settings/runner-fee")
+def runner_fee_get(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    return {"amount": get_runner_fee_default(db)}
+
+
+@router.post("/admin/settings/runner-fee")
+def runner_fee_set(payload: dict, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    amount = set_runner_fee_default(db, user, float(payload.get("amount", 20.0)))
+    return {"amount": amount}
 
 
 @router.get("/settings/limits")

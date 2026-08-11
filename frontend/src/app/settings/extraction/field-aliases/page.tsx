@@ -26,6 +26,8 @@ export default function FieldAliasesPage() {
   const [editField, setEditField] = useState("");
   const [editAliases, setEditAliases] = useState("");
   const [pendingDelete, setPendingDelete] = useState<FieldAlias | null>(null);
+  const [runnerFee, setRunnerFee] = useState("20");
+  const [savingFee, setSavingFee] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -34,7 +36,10 @@ export default function FieldAliasesPage() {
     setItems(result.field_aliases);
   }
 
-  useEffect(() => { load().catch(() => {}); }, []);
+  useEffect(() => {
+    load().catch(() => {});
+    api<{ amount: number }>("/admin/settings/runner-fee").then((r) => setRunnerFee(String(r.amount))).catch(() => {});
+  }, []);
 
   async function create(event: React.FormEvent) {
     event.preventDefault();
@@ -97,10 +102,25 @@ export default function FieldAliasesPage() {
     try {
       const res = await fetch(`${API_BASE}/admin/dictionaries/field-aliases/import`, { method: "POST", body: form, credentials: "include" });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Import failed.");
       toast(`Import done: ${data.created || 0} created, ${data.updated || 0} updated.`, "success");
       await load();
     } catch (e) { setError(e instanceof Error ? e.message : "Import failed."); }
     if (fileRef.current) fileRef.current.value = "";
+  }
+
+  async function saveRunnerFee() {
+    setSavingFee(true);
+    setError("");
+    try {
+      const res = await api<{ amount: number }>("/admin/settings/runner-fee", {
+        method: "POST",
+        body: JSON.stringify({ amount: Number(runnerFee) || 0 }),
+      });
+      setRunnerFee(String(res.amount));
+      toast("Runner fee default saved.", "success");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save runner fee."); }
+    finally { setSavingFee(false); }
   }
 
   return (
@@ -113,12 +133,35 @@ export default function FieldAliasesPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" size="sm" icon={<DownloadSimple size={14} weight="bold" />} onClick={exportCsv}>Export CSV</Button>
-            <Button variant="secondary" size="sm" icon={<UploadSimple size={14} weight="bold" />} onClick={() => fileRef.current?.click()}>Import CSV</Button>
-            <input ref={fileRef} className="hidden" type="file" accept=".csv" onChange={importCsv} />
+            <Button variant="secondary" size="sm" icon={<UploadSimple size={14} weight="bold" />} onClick={() => fileRef.current?.click()}>Import CSV/Excel</Button>
+            <input ref={fileRef} className="hidden" type="file" accept=".csv,.xlsx" onChange={importCsv} />
             <Button size="sm" icon={<Plus size={14} weight="bold" />} onClick={() => setShowCreate((v) => !v)}>New alias</Button>
           </div>
         </div>
         <SettingsNav />
+
+        <Card>
+          <div className="flex flex-wrap items-center justify-between gap-3 p-4">
+            <div>
+              <h2 className="text-[15px] font-bold text-[var(--rl-text-strong)]">Runner fee default (RM)</h2>
+              <p className="mt-0.5 text-[13px] text-[var(--rl-text-muted)]">
+                Used when the runner fee is not detected on a quotation. Staff still confirms it during Check Values.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                className="w-32"
+                value={runnerFee}
+                onChange={(e) => setRunnerFee(e.target.value)}
+                aria-label="Runner fee default"
+              />
+              <Button size="sm" loading={savingFee} icon={<FloppyDisk size={14} weight="bold" />} onClick={saveRunnerFee}>Save</Button>
+            </div>
+          </div>
+        </Card>
 
         {error ? (
           <div className="rounded-[var(--rl-radius-sm)] bg-[var(--rl-red-light)] px-3 py-2.5 text-[13px] font-semibold text-[var(--rl-red)]">{error}</div>

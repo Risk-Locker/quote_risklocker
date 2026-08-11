@@ -19,7 +19,7 @@ if (-not $port) {
     exit 1
 }
 
-$tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "risklocker-quotation-converter"
+$tmpDir = Join-Path $root ".qc-tmp"
 New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
 Set-Content -Path (Join-Path $tmpDir "backend-port.txt") -Value $port -Encoding ASCII
 

@@ -6,7 +6,7 @@ import logging
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import and_, delete, select
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import Session, selectinload
 
@@ -14,8 +14,9 @@ from app.auth.rbac import can_view_owner_record
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.models.enums import RecordStatus, Role, StorageStatus
-from app.models.tables import Batch, CorrectionMemory, OutputTemplateConfig, QuotationDraft, TrashRecord, UploadedFile
+from app.models.tables import Batch, CorrectionMemory, InsuranceCompany, OutputTemplateConfig, QuotationDraft, TemplateGroup, TrashRecord, UploadedFile
 from app.services.template_config import normalize_template_config, review_schema_for
+from app.services.admin_service import get_runner_fee_default
 
 
 logger = logging.getLogger(__name__)
@@ -49,11 +50,20 @@ def _available_templates(db: Session | None) -> list[dict]:
     output: list[dict] = []
     for template in templates:
         config = normalize_template_config(template.fixed_fields if isinstance(template.fixed_fields, dict) else {}, template.name)
+        group = db.get(TemplateGroup, template.group_id) if template.group_id else None
+        group_company = db.get(InsuranceCompany, group.company_id) if group and group.company_id else None
+        template_company = db.get(InsuranceCompany, template.insurance_company_id) if template.insurance_company_id else None
         output.append(
             {
                 "id": template.id,
                 "name": template.name,
                 "insurance_type": template.insurance_type,
+                "insurance_company_id": template.insurance_company_id,
+                "insurance_company_name": template_company.name if template_company else None,
+                "group_id": template.group_id,
+                "group_name": group.name if group else None,
+                "group_company_id": group.company_id if group else None,
+                "group_company_name": group_company.name if group_company else None,
                 "status": template.status,
                 "locked": bool(config.get("locked")),
                 "is_default": bool(config.get("is_default")),
@@ -137,6 +147,7 @@ def serialize_draft(draft: QuotationDraft, db: Session | None = None) -> dict:
         "status": draft.status,
         "fields": draft.fields,
         "warnings": draft.warnings,
+        "layout_override": draft.layout_override,
         "source_pdf_url": source_pdf_url,
         "source_pdf_status": uploaded.storage_status if uploaded else StorageStatus.DELETED.value,
         "source_pdf_expires_at": uploaded.storage_expires_at.isoformat() if uploaded and uploaded.storage_expires_at else None,
@@ -146,6 +157,7 @@ def serialize_draft(draft: QuotationDraft, db: Session | None = None) -> dict:
         "field_hints": _field_hints(draft),
         "available_templates": _available_templates(db),
         "selected_template_id": selected_template_id,
+        "runner_fee_default": get_runner_fee_default(db) if db else 20.0,
         "review_schema": review_schema_for(config, None),
         "versions": [
             {
@@ -172,9 +184,13 @@ def update_draft_fields(
     draft_id: str,
     field_updates: dict[str, str | None],
     template_id: str | None = None,
+    layout_override: dict | None = None,
 ) -> QuotationDraft:
     draft = get_accessible_draft(db, user, draft_id)
     fields = deepcopy(draft.fields or {})
+    if layout_override is not None:
+        draft.layout_override = layout_override
+        flag_modified(draft, "layout_override")
     if template_id is not None:
         template = db.get(OutputTemplateConfig, template_id)
         if not template:
@@ -210,23 +226,6 @@ def update_draft_fields(
     db.commit()
     db.refresh(draft)
     return draft
-
-
-def list_history(db: Session, user, status_filter: str | None = None, search: str | None = None) -> list[UploadedFile]:
-    query = select(UploadedFile).options(selectinload(UploadedFile.draft)).where(UploadedFile.deleted_at.is_(None))
-    if user.role == Role.STAFF.value:
-        query = query.where(UploadedFile.owner_id == user.id)
-    if status_filter:
-        query = query.where(UploadedFile.status == status_filter)
-    if search:
-        like = f"%{search.lower()}%"
-        query = query.where(
-            or_(
-                UploadedFile.original_filename.ilike(like),
-                UploadedFile.draft.has(QuotationDraft.fields.cast(str).ilike(like)),
-            )
-        )
-    return list(db.scalars(query.order_by(UploadedFile.created_at.desc())).all())
 
 
 def move_to_trash(db: Session, settings: Settings, user, uploaded_file_id: str) -> None:

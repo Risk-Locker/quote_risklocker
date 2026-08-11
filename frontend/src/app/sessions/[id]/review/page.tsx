@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DownloadSimple, FloppyDisk, Eye, X } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
@@ -17,7 +17,11 @@ import { useToast } from "@/components/ui/toast";
 import { Select } from "@/components/ui/select";
 
 type DraftField = { value?: string | null; status?: string; message?: string };
-type TemplateRecord = { id: string; name: string; insurance_company_name?: string | null; locked: boolean; is_default: boolean };
+type TemplateRecord = {
+  id: string; name: string; insurance_company_name?: string | null;
+  group_id?: string | null; group_name?: string | null; group_company_name?: string | null;
+  locked: boolean; is_default: boolean;
+};
 type ReviewSchema = { groups?: Array<{ id: string; title: string; fields: string[] }> };
 type EvidenceEntry = { value: string; score: number; source_method: string; page?: number | null; evidence: string };
 type Draft = {
@@ -29,6 +33,7 @@ type Draft = {
   field_hints: Record<string, string>;
   available_templates: TemplateRecord[];
   selected_template_id?: string | null;
+  runner_fee_default?: number;
   review_schema?: ReviewSchema;
   versions: Array<{ id: string; filename: string; download_url: string; pdf_status: string; generated_at: string }>;
 };
@@ -65,6 +70,19 @@ function findMatchingTemplate(templates: TemplateRecord[], company: string): Tem
   return partial || templates[0];
 }
 
+function findMatchingGroup(templates: TemplateRecord[], company: string): string {
+  if (!company) return "";
+  const lower = company.toLowerCase();
+  const groupNames = new Map<string, string>();
+  for (const t of templates) {
+    if (t.group_id && t.group_name && t.group_company_name) groupNames.set(t.group_id, t.group_company_name);
+  }
+  const exact = [...groupNames.entries()].find(([, name]) => name.toLowerCase() === lower);
+  if (exact) return exact[0];
+  const partial = [...groupNames.entries()].find(([, name]) => name.toLowerCase().includes(lower) || lower.includes(name.toLowerCase()));
+  return partial ? partial[0] : "";
+}
+
 export default function SessionReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
@@ -72,6 +90,7 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
   const [draft, setDraft] = useState<Draft | null>(null);
   const [fields, setFields] = useState<Draft["fields"]>({});
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [selectedGroupId, setSelectedGroupId] = useState("");
   const [detectedCompany, setDetectedCompany] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [showEvidence, setShowEvidence] = useState(true);
@@ -87,8 +106,22 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
     const draftId = session.session.draft_id;
     const result = await api<{ draft: Draft }>(`/drafts/${draftId}`);
     setDraft(result.draft);
-    setFields(result.draft.fields);
-    const match = findMatchingTemplate(result.draft.available_templates, session.session.detected_company || "");
+    const prefilled = { ...result.draft.fields };
+    const runnerFee = prefilled.service_fee;
+    if (result.draft.runner_fee_default != null && (!runnerFee || (!runnerFee.value && runnerFee.status !== "check_needed" && runnerFee.status !== "check needed"))) {
+      prefilled.service_fee = { value: String(result.draft.runner_fee_default), status: "ready" };
+    }
+    setFields(prefilled);
+    const templates = result.draft.available_templates;
+    const detected = session.session.detected_company || "";
+    const groupId = findMatchingGroup(templates, detected);
+    if (groupId) {
+      setSelectedGroupId(groupId);
+      const first = templates.find((t) => t.group_id === groupId);
+      if (first) setSelectedTemplateId(first.id);
+      return;
+    }
+    const match = findMatchingTemplate(templates, detected);
     if (match) setSelectedTemplateId(match.id);
   }, [id]);
 
@@ -137,6 +170,18 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
 
   const matchedTemplate = draft?.available_templates.find((t) => t.id === selectedTemplateId);
   const hasCheckNeeded = Object.values(fields).some((f) => f.status === "check_needed" || f.status === "check needed");
+  const groups = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; company_name?: string | null }>();
+    for (const t of draft?.available_templates || []) {
+      if (t.group_id && t.group_name && !map.has(t.group_id)) {
+        map.set(t.group_id, { id: t.group_id, name: t.group_name, company_name: t.group_company_name });
+      }
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [draft]);
+  const visibleTemplates = selectedGroupId
+    ? (draft?.available_templates || []).filter((t) => t.group_id === selectedGroupId)
+    : (draft?.available_templates || []);
   const evidenceTerms = showHighlights
     ? Object.values(draft?.field_evidence || {}).flatMap((entries) => entries.map((c) => c.evidence).filter(Boolean))
     : [];
@@ -162,18 +207,39 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
                 {detectedCompany ? <span className="text-sm font-bold text-[var(--rl-text-strong)]">{detectedCompany}</span> : null}
               </div>
               {draft?.available_templates?.length ? (
-                <label className="flex items-center gap-2 mt-1">
+                <div className="mt-1 flex flex-wrap items-center gap-2">
                   <span className="text-[13px] font-medium text-[var(--rl-text-muted)]">Template:</span>
+                  {groups.length > 0 ? (
+                    <Select
+                      value={selectedGroupId}
+                      onChange={(e) => {
+                        setSelectedGroupId(e.target.value);
+                        const next = e.target.value
+                          ? draft.available_templates.find((t) => t.group_id === e.target.value)
+                          : draft.available_templates[0];
+                        if (next) setSelectedTemplateId(next.id);
+                      }}
+                      className="w-auto min-w-[180px]"
+                      aria-label="Template group"
+                    >
+                      <option value="">All groups</option>
+                      {groups.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.name}{g.company_name ? ` (${g.company_name})` : ""}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : null}
                   <Select
                     value={selectedTemplateId}
                     onChange={(e) => setSelectedTemplateId(e.target.value)}
-                    className="min-w-[200px] w-auto"
+                    className="min-w-[220px] w-auto"
                   >
-                    {draft.available_templates.map((t) => (
+                    {visibleTemplates.map((t) => (
                       <option key={t.id} value={t.id}>{t.name}{t.locked ? " (locked)" : ""}{t.is_default ? " (default)" : ""}</option>
                     ))}
                   </Select>
-                </label>
+                </div>
               ) : null}
             </div>
             <div className="flex flex-wrap gap-2">

@@ -4,13 +4,12 @@ import Link from "next/link";
 import type { Route } from "next";
 import { Check, LockKey } from "@phosphor-icons/react";
 
-export type PhaseKey = "upload" | "extraction" | "preview" | "publish";
+export type PhaseKey = "upload" | "extraction" | "preview";
 
 const STEPS: Array<{ key: PhaseKey; label: string }> = [
   { key: "upload", label: "1. Upload" },
-  { key: "extraction", label: "2. Extraction" },
+  { key: "extraction", label: "2. Check Values" },
   { key: "preview", label: "3. Preview & Edit" },
-  { key: "publish", label: "4. Publish" },
 ];
 
 type SessionPhaseBarProps = {
@@ -24,7 +23,7 @@ export function SessionPhaseBar({ sessionId, current, hasVersion = false }: Sess
   return (
     <div className="flex flex-wrap items-center gap-1.5 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-1.5">
       {STEPS.map((step, i) => {
-        const done = i < index || (step.key === "publish" && hasVersion);
+        const done = i < index || (step.key === "preview" && hasVersion);
         const active = step.key === current;
         const locked = step.key === "upload";
         return (
@@ -43,7 +42,7 @@ export function SessionPhaseBar({ sessionId, current, hasVersion = false }: Sess
               </span>
             ) : (
               <Link
-                href={`/sessions/${sessionId}/${step.key === "extraction" ? "review" : step.key === "preview" ? "preview" : "publish"}` as Route}
+                href={`/sessions/${sessionId}/${step.key === "extraction" ? "review" : "preview"}` as Route}
                 className={`inline-flex items-center gap-1.5 rounded-[var(--rl-radius-sm)] px-3 py-1.5 text-[12px] font-semibold transition-all
                   ${active
                     ? "bg-[var(--rl-black)] text-white shadow-card"

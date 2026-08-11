@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -71,12 +71,25 @@ def _local_assets() -> list[dict[str, Any]]:
     return assets
 
 
-def _uploaded_assets(db: Session) -> list[dict[str, Any]]:
-    records = db.scalars(
+def _uploaded_assets(db: Session, folder: str | None = None, search: str | None = None, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+    query = (
         select(TemplateAsset)
         .where(TemplateAsset.status == AccountStatus.ACTIVE.value, TemplateAsset.deleted_at.is_(None))
-        .order_by(TemplateAsset.created_at.desc())
-    ).all()
+    )
+    if folder:
+        query = query.where(TemplateAsset.folder == folder)
+    if search:
+        like = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                TemplateAsset.label.ilike(like),
+                TemplateAsset.filename.ilike(like),
+            )
+        )
+    query = query.order_by(TemplateAsset.created_at.desc())
+    if limit is not None:
+        query = query.limit(limit).offset(max(offset, 0))
+    records = db.scalars(query).all()
     return [
         {
             "id": record.id,
@@ -93,8 +106,36 @@ def _uploaded_assets(db: Session) -> list[dict[str, Any]]:
     ]
 
 
+def count_uploaded_assets(db: Session, folder: str | None = None, search: str | None = None) -> int:
+    query = select(func.count()).select_from(TemplateAsset).where(
+        TemplateAsset.status == AccountStatus.ACTIVE.value,
+        TemplateAsset.deleted_at.is_(None),
+    )
+    if folder:
+        query = query.where(TemplateAsset.folder == folder)
+    if search:
+        like = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                TemplateAsset.label.ilike(like),
+                TemplateAsset.filename.ilike(like),
+            )
+        )
+    return db.scalar(query) or 0
+
+
 def list_template_assets(db: Session | None = None) -> list[dict[str, Any]]:
     return _local_assets() + (_uploaded_assets(db) if db else [])
+
+
+def folder_summary(db: Session) -> list[dict[str, Any]]:
+    rows = db.execute(
+        select(TemplateAsset.folder, func.count())
+        .where(TemplateAsset.status == AccountStatus.ACTIVE.value, TemplateAsset.deleted_at.is_(None))
+        .group_by(TemplateAsset.folder)
+        .order_by(TemplateAsset.folder)
+    ).all()
+    return [{"folder": folder, "count": count} for folder, count in rows]
 
 
 def resolve_template_asset(db: Session | None, asset_id: str) -> Path | bytes:

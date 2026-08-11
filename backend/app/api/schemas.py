@@ -37,6 +37,7 @@ class UserPasswordChangeRequest(StrictRequest):
 class DraftUpdateRequest(BaseModel):
     fields: dict[str, str | None] = Field(default_factory=dict)
     template_id: str | None = None
+    layout_override: dict | None = None
 
 
 class DraftGenerateRequest(BaseModel):
@@ -118,6 +119,7 @@ class TemplateSaveRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     insurance_type: str = "Motor"
     insurance_company_id: str | None = None
+    group_id: str | None = None
     html_template: str | None = None
     css_template: str | None = None
     static_notes: str | None = None
@@ -130,10 +132,17 @@ class TemplateUpdateRequest(BaseModel):
     name: str | None = None
     insurance_type: str | None = None
     insurance_company_id: str | None = None
+    group_id: str | None = None
     static_notes: str | None = None
     editable_fields: list[str] | None = None
     fixed_fields: dict | None = None
     status: str | None = None
+
+
+class TemplateGroupSaveRequest(BaseModel):
+    id: str | None = None
+    name: str = Field(min_length=1, max_length=255)
+    company_id: str | None = None
 
 
 # --- Admin: Field Aliases ---

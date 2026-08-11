@@ -13,7 +13,7 @@ Start-Process powershell.exe -ArgumentList @(
     "`"$backendScript`""
 )
 
-$backendPortFile = Join-Path ([System.IO.Path]::GetTempPath()) "risklocker-quotation-converter\backend-port.txt"
+$backendPortFile = Join-Path $root ".qc-tmp\backend-port.txt"
 foreach ($attempt in 1..30) {
     if (Test-Path $backendPortFile) {
         $backendPort = (Get-Content $backendPortFile -Raw).Trim()

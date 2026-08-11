@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location (Join-Path $root "frontend")
 
-$backendPortFile = Join-Path ([System.IO.Path]::GetTempPath()) "risklocker-quotation-converter\backend-port.txt"
+$backendPortFile = Join-Path $root ".qc-tmp\backend-port.txt"
 
 function Add-PortCandidate {
     param(

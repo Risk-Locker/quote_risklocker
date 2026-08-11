@@ -2,15 +2,18 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { NotePencil, Trash } from "@phosphor-icons/react";
+import { MagnifyingGlass, NotePencil, Trash, X } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
 import { Card } from "@/components/ui/card";
 import { StatusBadge } from "@/components/status-badge";
 import { PageLoading } from "@/components/ui/page-loading";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
 import { useToast } from "@/components/ui/toast";
+
+const PAGE_SIZE = 25;
 
 type Session = {
   id: string;
@@ -30,24 +33,42 @@ function formatDate(iso: string) {
 
 export default function SessionsPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [total, setTotal] = useState(0);
+  const [search, setSearch] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Session | null>(null);
   const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const { toast } = useToast();
 
-  async function load() {
-    setLoading(true);
+  async function load(reset: boolean, term = appliedSearch) {
+    if (reset) setLoading(true);
+    else setLoadingMore(true);
+    setError("");
     try {
-      const result = await api<{ sessions: Session[] }>("/sessions");
-      setSessions(result.sessions);
+      const offset = reset ? 0 : sessions.length;
+      const result = await api<{ sessions: Session[]; total: number }>(
+        `/sessions?limit=${PAGE_SIZE}&offset=${offset}${term ? `&search=${encodeURIComponent(term)}` : ""}`
+      );
+      setSessions((current) => (reset ? result.sessions : [...current, ...result.sessions]));
+      setTotal(result.total);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load sessions.");
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
+  }
+
+  function applySearch(event: React.FormEvent) {
+    event.preventDefault();
+    setSelected(new Set());
+    load(true, search.trim());
+    setAppliedSearch(search.trim());
   }
 
   async function remove(session: Session) {
@@ -57,7 +78,7 @@ export default function SessionsPage() {
       await api(`/records/${session.uploaded_file_id}`, { method: "DELETE" });
       toast("Session moved to Trash.", "success");
       setPendingDelete(null);
-      await load();
+      await load(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not delete session.");
     } finally {
@@ -75,7 +96,7 @@ export default function SessionsPage() {
       toast(`${ids.length} session${ids.length > 1 ? "s" : ""} moved to Trash.`, "success");
       setSelected(new Set());
       setPendingBulkDelete(false);
-      await load();
+      await load(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not delete sessions.");
     } finally {
@@ -93,7 +114,7 @@ export default function SessionsPage() {
   }
 
   useEffect(() => {
-    load().catch((err) => setError(err instanceof Error ? err.message : "Could not load sessions."));
+    load(true).catch((err) => setError(err instanceof Error ? err.message : "Could not load sessions."));
   }, []);
 
   const grouped: Record<string, Session[]> = {};
@@ -124,6 +145,27 @@ export default function SessionsPage() {
           ) : null}
         </div>
 
+        <form onSubmit={applySearch} className="flex items-center gap-2">
+          <Input
+            className="max-w-sm"
+            placeholder="Search by file name or company…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <Button type="submit" variant="secondary" icon={<MagnifyingGlass weight="bold" size={16} />}>Search</Button>
+          {appliedSearch ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<X weight="bold" size={14} />}
+              onClick={() => { setSearch(""); setAppliedSearch(""); load(true, ""); }}
+            >
+              Clear
+            </Button>
+          ) : null}
+          {!loading ? <span className="text-[13px] text-[var(--rl-text-muted)]">{total} session{total === 1 ? "" : "s"}</span> : null}
+        </form>
+
         {error ? (
           <div className="rounded-[var(--rl-radius-sm)] bg-[var(--rl-red-light)] px-3 py-2.5 text-[13px] font-semibold text-[var(--rl-red)]">
             {error}
@@ -132,10 +174,12 @@ export default function SessionsPage() {
 
         {loading ? (
           <PageLoading />
-        ) : Object.keys(grouped).length === 0 && !error ? (
+        ) : sessions.length === 0 && !error ? (
           <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-10 text-center">
-            <p className="font-semibold text-[var(--rl-text-strong)]">No sessions yet.</p>
-            <p className="mt-1 text-[14px] text-[var(--rl-text-muted)]">Upload a quotation PDF to start one.</p>
+            <p className="font-semibold text-[var(--rl-text-strong)]">{appliedSearch ? "No sessions match your search." : "No sessions yet."}</p>
+            <p className="mt-1 text-[14px] text-[var(--rl-text-muted)]">
+              {appliedSearch ? "Try a different file name or company." : "Upload a quotation PDF to start one."}
+            </p>
           </div>
         ) : (
           Object.entries(grouped).map(([date, items]) => (
@@ -185,6 +229,13 @@ export default function SessionsPage() {
             </div>
           ))
         )}
+        {!loading && sessions.length < total ? (
+          <div className="flex justify-center">
+            <Button variant="secondary" loading={loadingMore} onClick={() => load(false)}>
+              Load more ({sessions.length} of {total})
+            </Button>
+          </div>
+        ) : null}
       </section>
 
       {pendingDelete ? (

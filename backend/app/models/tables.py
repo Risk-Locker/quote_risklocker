@@ -102,12 +102,21 @@ class OutputTemplateConfig(Base, TimestampMixin, SoftDeleteMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     insurance_type: Mapped[str] = mapped_column(String(100), nullable=False, default=InsuranceType.MOTOR.value, index=True)
     insurance_company_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_companies.id"), nullable=True)
+    group_id: Mapped[str | None] = mapped_column(ForeignKey("template_groups.id", ondelete="SET NULL"), nullable=True)
     html_template: Mapped[str] = mapped_column(Text, nullable=False, default="")
     css_template: Mapped[str] = mapped_column(Text, nullable=False, default="")
     static_notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
     editable_fields: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     fixed_fields: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default=AccountStatus.ACTIVE.value)
+
+
+class TemplateGroup(Base, TimestampMixin):
+    __tablename__ = "template_groups"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    company_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_companies.id", ondelete="SET NULL"), nullable=True)
 
 
 class OurSpecial(Base, TimestampMixin, SoftDeleteMixin):
@@ -352,6 +361,7 @@ class QuotationDraft(Base, TimestampMixin, SoftDeleteMixin):
     status: Mapped[str] = mapped_column(String(50), nullable=False, default=RecordStatus.CHECK_NEEDED.value, index=True)
     fields: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     warnings: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    layout_override: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reviewed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 

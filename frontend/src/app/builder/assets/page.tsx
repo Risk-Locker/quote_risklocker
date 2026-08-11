@@ -13,6 +13,8 @@ import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { api, fileUrl } from "@/lib/api";
 
+const PAGE_SIZE = 50;
+
 type Asset = {
   id: string;
   label: string;
@@ -23,6 +25,7 @@ type Asset = {
   created_at?: string | null;
   size_bytes?: number;
 };
+type FolderSummary = { folder: string; count: number };
 
 function formatDate(iso?: string | null) {
   if (!iso) return "-";
@@ -36,79 +39,91 @@ function formatBytes(bytes?: number) {
 
 export default function BuilderAssetsPage() {
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [folders, setFolders] = useState<FolderSummary[]>([]);
+  const [total, setTotal] = useState(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [folderMode, setFolderMode] = useState<"pick" | "new">("pick");
   const [uploadFolder, setUploadFolder] = useState("");
   const [search, setSearch] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [folderFilter, setFolderFilter] = useState("");
+  const [appliedFolder, setAppliedFolder] = useState("");
   const [sort, setSort] = useState("recent");
   const [pendingDelete, setPendingDelete] = useState<Asset | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
-  async function load() {
+  async function load(reset: boolean, term = appliedSearch, folder = appliedFolder) {
+    if (reset) setLoading(true);
+    else setLoadingMore(true);
+    setError("");
     try {
-      const result = await api<{ assets: Asset[] }>("/admin/template-assets");
-      setAssets(result.assets);
+      const offset = reset ? 0 : assets.length;
+      const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
+      if (term) params.set("search", term);
+      if (folder) params.set("folder", folder);
+      const result = await api<{ assets: Asset[]; total: number; folders: FolderSummary[] }>(`/admin/template-assets?${params}`);
+      setAssets((current) => (reset ? result.assets : [...current, ...result.assets.filter((a) => !current.some((c) => c.id === a.id))]));
+      setFolders(result.folders);
+      setTotal(result.total);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load assets.");
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   }
 
   useEffect(() => {
-    load();
+    load(true);
   }, []);
 
   const defaults = useMemo(() => assets.filter((a) => a.source === "local"), [assets]);
   const uploads = useMemo(() => assets.filter((a) => a.source !== "local"), [assets]);
 
-  const folders = useMemo(() => [...new Set(uploads.map((a) => a.folder || "Uncategorized"))].sort(), [uploads]);
-
   const filtered = useMemo(() => {
-    let items = uploads;
-    if (folderFilter) items = items.filter((a) => (a.folder || "Uncategorized") === folderFilter);
-    if (search) {
-      const term = search.toLowerCase();
-      items = items.filter((a) => a.label.toLowerCase().includes(term) || a.filename.toLowerCase().includes(term));
-    }
-    const sorted = [...items];
-    if (sort === "recent") sorted.sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
-    else if (sort === "oldest") sorted.sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
-    else if (sort === "name") sorted.sort((a, b) => a.label.localeCompare(b.label));
-    else if (sort === "folder") sorted.sort((a, b) => (a.folder || "").localeCompare(b.folder || ""));
-    return sorted;
-  }, [uploads, folderFilter, search, sort]);
+    const items = [...uploads];
+    if (sort === "recent") items.sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+    else if (sort === "oldest") items.sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
+    else if (sort === "name") items.sort((a, b) => a.label.localeCompare(b.label));
+    else if (sort === "folder") items.sort((a, b) => (a.folder || "").localeCompare(b.folder || ""));
+    return items;
+  }, [uploads, sort]);
 
   const recent = useMemo(() => {
     const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
     return filtered.filter((a) => a.created_at && new Date(a.created_at).getTime() >= cutoff);
   }, [filtered]);
 
+  function applyFilters(term: string, folder: string) {
+    setAppliedSearch(term);
+    setAppliedFolder(folder);
+    setAssets([]);
+    load(true, term, folder);
+  }
+
   async function uploadFiles(files: FileList | File[]) {
     const list = Array.from(files);
     if (!list.length) return;
     setUploading(true);
     setError("");
-    const targetFolder = folderMode === "new" ? uploadFolder.trim() : uploadFolder.trim();
+    const targetFolder = uploadFolder.trim();
     try {
       for (const file of list) {
         const form = new FormData();
         form.append("file", file);
         form.append("label", file.name.replace(/\.[^.]+$/, ""));
         form.append("folder", targetFolder || "Uncategorized");
-        const result = await api<{ asset: Asset }>("/admin/template-assets", { method: "POST", body: form });
-        setAssets((current) => [result.asset, ...current]);
+        await api<{ asset: Asset }>("/admin/template-assets", { method: "POST", body: form });
       }
       toast(`${list.length} asset${list.length > 1 ? "s" : ""} uploaded to "${targetFolder || "Uncategorized"}".`, "success");
-      if (folderMode === "new") {
-        setUploadFolder("");
-        setFolderMode("pick");
-      }
+      setUploadFolder("");
+      setFolderMode("pick");
+      applyFilters(appliedSearch, appliedFolder);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed.");
     } finally {
@@ -123,7 +138,7 @@ export default function BuilderAssetsPage() {
       await api(`/admin/template-assets/${pendingDelete.id}`, { method: "DELETE" });
       toast("Asset moved to Trash.", "success");
       setPendingDelete(null);
-      await load();
+      applyFilters(appliedSearch, appliedFolder);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not delete asset.");
     }
@@ -177,9 +192,8 @@ export default function BuilderAssetsPage() {
         <div>
           <h1 className="text-[30px] font-bold text-[var(--rl-text-strong)] font-[var(--font-manrope)]">Assets</h1>
           <p className="mt-2 max-w-3xl text-[14px] text-[var(--rl-text-muted)]">
-            This is where every logo, symbol, SVG and background image for your quotation templates lives. Upload them here,
-            sort them into folders, and they will be available everywhere in the template builder. The default assets below
-            are read-only.
+            Every logo, symbol, SVG and background image for your quotation templates lives here. Upload them, sort them into
+            folders, and they become available everywhere in the template builder. Default assets are read-only.
           </p>
         </div>
         <BuilderNav />
@@ -234,7 +248,7 @@ export default function BuilderAssetsPage() {
                   }}
                 >
                   <option value="">Uncategorized</option>
-                  {folders.map((f) => <option key={f} value={f}>{f}</option>)}
+                  {folders.map((f) => <option key={f.folder} value={f.folder}>{f.folder} ({f.count})</option>)}
                   <option value="__new__">＋ New folder…</option>
                 </Select>
               </label>
@@ -258,11 +272,23 @@ export default function BuilderAssetsPage() {
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative">
             <MagnifyingGlass aria-hidden="true" size={16} weight="bold" className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--rl-text-muted)]" />
-            <Input className="pl-9" placeholder="Search assets…" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <Input
+              className="pl-9"
+              placeholder="Search assets…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") applyFilters(search.trim(), folderFilter); }}
+            />
           </div>
-          <Select value={folderFilter} onChange={(e) => setFolderFilter(e.target.value)} className="w-52" aria-label="Filter by folder">
+          <Button variant="secondary" size="sm" onClick={() => applyFilters(search.trim(), folderFilter)}>Search</Button>
+          <Select
+            value={folderFilter}
+            onChange={(e) => { setFolderFilter(e.target.value); applyFilters(search.trim(), e.target.value); }}
+            className="w-56"
+            aria-label="Filter by folder"
+          >
             <option value="">All folders</option>
-            {folders.map((f) => <option key={f} value={f}>{f}</option>)}
+            {folders.map((f) => <option key={f.folder} value={f.folder}>{f.folder} ({f.count})</option>)}
           </Select>
           <Select value={sort} onChange={(e) => setSort(e.target.value)} className="w-52" aria-label="Sort by">
             <option value="recent">Sort: Newest first</option>
@@ -270,7 +296,9 @@ export default function BuilderAssetsPage() {
             <option value="name">Sort: Name A–Z</option>
             <option value="folder">Sort: Folder</option>
           </Select>
-          <span className="text-[12px] text-[var(--rl-text-muted)]">{filtered.length} upload{filtered.length !== 1 ? "s" : ""}</span>
+          <span className="text-[12px] text-[var(--rl-text-muted)]">
+            {appliedSearch || appliedFolder ? `${total} result${total === 1 ? "" : "s"}` : `${total} upload${total === 1 ? "" : "s"}`}
+          </span>
         </div>
 
         {loading ? (
@@ -284,19 +312,29 @@ export default function BuilderAssetsPage() {
               <AssetGrid items={defaults} emptyText="No default assets." />
             </div>
 
-            <div className="grid gap-3">
-              <h2 className="text-[13px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
-                Recently uploaded ({recent.length}) — last 7 days
-              </h2>
-              <AssetGrid items={recent} emptyText="Nothing uploaded in the last 7 days. Drop your first images in the box above." />
-            </div>
+            {!appliedSearch && !appliedFolder ? (
+              <div className="grid gap-3">
+                <h2 className="text-[13px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
+                  Recently uploaded ({recent.length}) — last 7 days
+                </h2>
+                <AssetGrid items={recent} emptyText="Nothing uploaded in the last 7 days. Drop your first images in the box above." />
+              </div>
+            ) : null}
 
             <div className="grid gap-3">
               <h2 className="text-[13px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
-                All uploads ({filtered.length})
+                {appliedSearch || appliedFolder ? "Matching uploads" : "All uploads"} ({filtered.length} of {total})
               </h2>
-              <AssetGrid items={filtered} emptyText="No uploads yet — drag & drop your logos and symbols in the box above." />
+              <AssetGrid items={filtered} emptyText="No uploads match. Try a different search or folder." />
             </div>
+
+            {uploads.length < total ? (
+              <div className="flex justify-center">
+                <Button variant="secondary" loading={loadingMore} onClick={() => load(false)}>
+                  Load more ({uploads.length} of {total})
+                </Button>
+              </div>
+            ) : null}
           </div>
         )}
       </section>

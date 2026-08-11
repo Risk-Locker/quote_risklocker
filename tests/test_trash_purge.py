@@ -26,7 +26,7 @@ os.environ.update(
     }
 )
 
-from app.services.review_service import list_history, list_trash, purge_expired_trash
+from app.services.review_service import list_trash, purge_expired_trash
 from app.models.enums import Role
 
 
@@ -36,10 +36,11 @@ def test_no_manager_role_references_in_source():
     assert "MANAGER" not in src
 
 
-def test_list_history_does_not_reference_manager():
-    src = (BACKEND / "app" / "services" / "review_service.py").read_text(encoding="utf-8")
-    history_fn = src[src.index("def list_history"): src.index("def move_to_trash")]
-    assert "MANAGER" not in history_fn
+def test_list_sessions_is_owner_scoped():
+    src = (BACKEND / "app" / "services" / "session_service.py").read_text(encoding="utf-8")
+    list_fn = src[src.index("def list_sessions"): src.index("def get_session")]
+    assert "owner_id == user_id" in list_fn
+    assert "MANAGER" not in list_fn
 
 
 def test_list_trash_does_not_reference_manager():

@@ -89,6 +89,27 @@ function colorSwatches(value: string, onChange: (v: string) => void) {
   );
 }
 
+const SPECIAL_CATEGORIES = ["FOC", "Add-on"] as const;
+
+function CategoryToggle({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="grid grid-cols-2 gap-1 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-1">
+      {SPECIAL_CATEGORIES.map((option) => (
+        <button
+          key={option}
+          type="button"
+          onClick={() => onChange(option)}
+          className={`rounded-[var(--rl-radius-sm)] px-3 py-1.5 text-[13px] font-bold transition-all ${
+            value === option ? "bg-[var(--rl-black)] text-white shadow-card" : "text-[var(--rl-text-muted)] hover:bg-[var(--rl-surface)]"
+          }`}
+        >
+          {option}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function VariantCard({
   variant,
   onEdit,
@@ -352,10 +373,7 @@ export default function BuilderOurSpecialsPage() {
                   </div>
                   <div className="grid gap-1.5">
                     <label className="text-[13px] font-semibold text-[var(--rl-text-strong)]">Category</label>
-                    <Select value={createCategory} onChange={(e) => setCreateCategory(e.target.value)}>
-                      <option value="FOC">FOC</option>
-                      <option value="Add-on">Add-on</option>
-                    </Select>
+                    <CategoryToggle value={createCategory} onChange={setCreateCategory} />
                   </div>
                   <div className="flex gap-2">
                     <Button type="submit" size="sm" icon={<FloppyDisk weight="bold" size={14} />}>Save</Button>
@@ -627,7 +645,7 @@ function SpecialList({
           {editingId === item.id ? (
             <div className="col-span-2 grid gap-2 p-1" onClick={(e) => e.stopPropagation()}>
               <Input value={editLabel} onChange={(e) => setEditLabel(e.target.value)} placeholder="Label" />
-              <Input value={editCategory} onChange={(e) => setEditCategory(e.target.value)} placeholder="Category" />
+              <CategoryToggle value={editCategory} onChange={setEditCategory} />
               <div className="flex gap-2">
                 <Button
                   type="button"

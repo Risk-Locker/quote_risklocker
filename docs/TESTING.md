@@ -17,15 +17,22 @@
 - Run the full repository check with `npm run test`. It runs backend pytest coverage and the frontend production build.
 - Run the code-map validation with `npm run code-map:check`.
 - Run the smoke workflow with `./.venv/Scripts/python.exe commands/smoke-test.py` when exercising configured local services.
+- Backend suite only: `.\.venv\Scripts\python.exe -m pytest -q` from the repo root.
+- Frontend static: `npx tsc --noEmit` and `npm run build` in `frontend/`.
+
+## Browser E2E (in-repo QA tooling)
+
+- Scripts live in `/.qc-tmp/` (gitignored): `groups3-e2e.js` (builder group/marquee E2E), `marquee-probe.js` (marquee diagnostics). Run with `node .qc-tmp/<script>.js` while backend :8100 and frontend :3000 are up. Playwright comes from `frontend/node_modules`; screenshots go to `.qc-tmp/shots/`. See OPERATIONS.md for the full runbook.
+- Verified baseline 2026-08-10: `groups3-e2e.js` green — marquee selects 3 added texts, group "Group (3)" with nested children, group drag moves members (dx=78 dy=37), ungroup removes the named group.
 
 ## Verified Baseline
 
-On 2026-07-17, `npm run test` completed successfully: 90 backend tests passed and the frontend production build succeeded.
+On 2026-08-10, the full check passed: 137 backend tests passed, `npx tsc --noEmit` clean, and the frontend production build succeeded.
 
 ## Known Coverage Gaps
 
 - Authentication has focused HTTP route coverage, but non-authentication routes still lack broad HTTP/RBAC integration coverage.
-- There are no browser end-to-end tests for login, upload, review, generation, history, trash, or admin flows.
+- Browser E2E exists only for the template builder (groups/marquee); login, upload, review, generation, history, trash, and admin flows still lack E2E scripts.
 - The repository has no checked-in CI workflow that runs the test and build checks remotely.
 - The existing suite is valuable unit/regression coverage, but a passing result does not prove production deployment controls, browser behavior, or full authorization paths.
 

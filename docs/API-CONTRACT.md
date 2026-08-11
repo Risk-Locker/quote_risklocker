@@ -23,8 +23,12 @@
 | Notifications | list notifications, unread count, mark-read, mark-all-read | authenticated user (recipient-scoped) |
 | Admin mail | test SMTP connection with delivery to own address | Admin |
 | Batches and uploads | upload batch, fetch batch | authenticated owner/authorized manager/admin |
-| Draft review | fetch draft, save reviewed fields, generate one or selected drafts | authenticated owner/authorized manager/admin |
-| History and trash | list history, delete, restore, purge expired trash | owner-scoped; trash purge is Admin-only |
+| Draft review | fetch draft, save reviewed fields (+ optional `layout_override`), generate one or selected drafts | authenticated owner/authorized manager/admin |
+| Sessions | list (search + limit/offset pagination), fetch session | owner-scoped |
+| Trash | delete, restore, purge expired trash | owner-scoped; trash purge is Admin-only |
+| Template groups | list/create/delete groups, link company, assign templates via `group_id` | Admin |
+| Templates | copy (locked/default only), **`POST /admin/templates/{id}/make-master`** (single master, previous master demoted) | Admin |
+| Settings imports | road-tax CSV/Excel export+import, vehicles multi-sheet Excel import, runner-fee default | Admin |
 | Extraction details | fetch hidden extraction record | Admin or Manager |
 | Admin configuration | companies, templates, assets, benefits, dictionaries, extraction settings, storage | Admin or Manager where allowed by service policy |
 | PDF content | source-file and generated-version content | authenticated and record-authorized |
@@ -36,6 +40,8 @@
 - `GET /auth/me` returns the current employee account for a valid session.
 - `POST /auth/logout` revokes the current server-side session, expires the cookie, and returns `{ "signed_out": true }`.
 - `POST /users/{user_id}/sessions/revoke` is Admin-only and immediately revokes every active session for the target account.
+- `PATCH /drafts/{draft_id}` accepts `layout_override` (template-config dict, session-scoped canvas layout) — generation and preview-png use it when present; the master template is never modified.
+- `GET /sessions` accepts `search` (filename/company), `limit` (max 100), `offset`; returns `{ sessions, total }`. The legacy `GET /history` endpoint is removed.
 - Creating, updating, seeding, and authenticating accounts all require a normalized named employee address with the exact `@risklocker.com` domain. Public registration does not exist.
 - New accounts are created in `invited` status. The create-user endpoint returns the invited account; an invitation email with a one-time login code is delivered through the backend SMTP relay. The account auto-promotes to `active` on the first successful code verification.
 

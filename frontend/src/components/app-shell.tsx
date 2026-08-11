@@ -4,16 +4,15 @@ import Link from "next/link";
 import type { Route } from "next";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Upload, Clock, Wrench, Gear, Users, Bell, Trash, SignOut, SquaresFour } from "@phosphor-icons/react";
+import { Upload, Wrench, Gear, Users, Bell, Trash, SignOut, SquaresFour } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { useAuth, clearAuthCache } from "@/lib/auth";
 import { subscribe } from "@/lib/activity";
 import { Button } from "@/components/ui/button";
 
 const nav: Array<{ href: Route; label: string; icon: typeof Upload }> = [
   { href: "/upload", label: "Upload", icon: Upload },
   { href: "/sessions", label: "Sessions", icon: SquaresFour },
-  { href: "/history", label: "History", icon: Clock },
   { href: "/builder/templates", label: "Builder", icon: Wrench },
   { href: "/settings/system-checks", label: "Settings", icon: Gear },
   { href: "/client-records", label: "Records", icon: Users },
@@ -90,6 +89,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       // Session already invalid – still redirect.
     } finally {
       setSigningOut(false);
+      clearAuthCache();
       router.replace("/login");
     }
   }

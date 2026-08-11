@@ -78,6 +78,7 @@ export type CanvasElement = {
   shapeKind?: "circle" | "triangle" | "diamond";
   groupId?: string;
   groupName?: string;
+  locked?: boolean;
 };
 
 export const SHAPE_CLIP: Record<string, string> = {
@@ -233,7 +234,7 @@ export function CanvasElementView({
     letterSpacing: style.letterSpacing ? `${style.letterSpacing}px` : undefined,
     lineHeight: style.lineHeight,
     transform: style.rotation ? `rotate(${style.rotation}deg)` : undefined,
-    opacity: element.opacity ?? 1,
+    opacity: (element.locked ? 0.55 : 1) * (element.opacity ?? 1),
     overflow: "hidden",
     whiteSpace: "pre-wrap",
     display: isSpecial ? "flex" : undefined,

@@ -78,3 +78,12 @@ All components live in `frontend/src/components/ui/`.
 ## Staff Language
 
 Use `Review / Edit`, `Please check this value.`, `Enhanced reading`, and `PDF Expired`. Use the approved statuses from [BUSINESS-RULES.md](BUSINESS-RULES.md). Do not reveal technical implementation terms to Staff.
+
+## Component Definition Standards
+
+- Use semantic tokens (`--rl-*`), never raw hex values, in component guidance and implementation.
+- Every component defines states for default, hover, focus-visible, active, disabled, loading, and error.
+- Component behavior specifies responsive and edge-case handling; interactive components document keyboard, pointer, and touch behavior.
+- Accessibility acceptance criteria must be testable in implementation (WCAG 2.2 AA minimum).
+- Do not introduce one-off spacing or typography exceptions; do not use ambiguous labels or non-descriptive actions.
+- Do not ship a component without explicit state rules; prefer system consistency over local visual exceptions.

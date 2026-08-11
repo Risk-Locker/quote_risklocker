@@ -6,10 +6,11 @@ from copy import deepcopy
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.errors import AppError
 from app.models.enums import AccountStatus, Role
-from app.models.tables import AppSetting, FieldAlias, InsuranceCompany, OurSpecial, OurSpecialVariant, OutputTemplateConfig, VehicleBrand, VehicleModel
+from app.models.tables import AppSetting, FieldAlias, InsuranceCompany, OurSpecial, OurSpecialVariant, OutputTemplateConfig, TemplateGroup, VehicleBrand, VehicleModel
 from app.services.template_config import normalize_template_config, review_schema_for
 
 
@@ -58,12 +59,151 @@ def upsert_template(db: Session, user, payload: dict) -> OutputTemplateConfig:
     if not template:
         template = OutputTemplateConfig(name=payload["name"], insurance_type=payload.get("insurance_type", "Motor"))
         db.add(template)
-    for key in ["name", "insurance_type", "insurance_company_id", "html_template", "css_template", "static_notes", "editable_fields", "fixed_fields", "status"]:
+        if not payload.get("fixed_fields"):
+            config = normalize_template_config({}, payload["name"])
+            config["is_default"] = False
+            config["locked"] = False
+            template.fixed_fields = config
+    for key in ["name", "insurance_type", "insurance_company_id", "group_id", "html_template", "css_template", "static_notes", "editable_fields", "fixed_fields", "status"]:
         if key in payload:
             setattr(template, key, payload[key])
     db.commit()
     db.refresh(template)
     return template
+
+
+def make_template_master(db: Session, user, template_id: str) -> OutputTemplateConfig:
+    require_admin(user)
+    template = db.get(OutputTemplateConfig, template_id)
+    if not template or template.deleted_at:
+        raise AppError("Template not found.", 404)
+    for other in db.scalars(select(OutputTemplateConfig).where(OutputTemplateConfig.deleted_at.is_(None))).all():
+        if other.id == template_id:
+            continue
+        config = normalize_template_config(other.fixed_fields, other.name)
+        if config.get("is_default"):
+            config["is_default"] = False
+            config["locked"] = False
+            other.fixed_fields = config
+            flag_modified(other, "fixed_fields")
+    config = normalize_template_config(template.fixed_fields, template.name)
+    config["is_default"] = True
+    config["locked"] = True
+    template.fixed_fields = config
+    flag_modified(template, "fixed_fields")
+    db.commit()
+    db.refresh(template)
+    return template
+
+
+def list_template_groups(db: Session) -> list[dict]:
+    groups = db.scalars(select(TemplateGroup).order_by(TemplateGroup.name)).all()
+    result = []
+    for group in groups:
+        company = db.get(InsuranceCompany, group.company_id) if group.company_id else None
+        count = db.scalar(
+            select(func.count()).select_from(OutputTemplateConfig).where(
+                OutputTemplateConfig.group_id == group.id,
+                OutputTemplateConfig.deleted_at.is_(None),
+            )
+        ) or 0
+        result.append({
+            "id": group.id,
+            "name": group.name,
+            "company_id": group.company_id,
+            "company_name": company.name if company else None,
+            "template_count": count,
+        })
+    return result
+
+
+def upsert_template_group(db: Session, user, payload: dict) -> TemplateGroup:
+    require_admin(user)
+    group = db.get(TemplateGroup, payload.get("id")) if payload.get("id") else None
+    if not group:
+        name = payload.get("name")
+        if not name or not name.strip():
+            raise AppError("Group name is required.", 400)
+        group = TemplateGroup(name=name.strip())
+        db.add(group)
+    if payload.get("name"):
+        group.name = payload["name"].strip()
+    group.company_id = payload.get("company_id") or None
+    db.commit()
+    db.refresh(group)
+    return group
+
+
+def delete_template_group(db: Session, user, group_id: str) -> None:
+    require_admin(user)
+    group = db.get(TemplateGroup, group_id)
+    if not group:
+        raise AppError("Group not found.", 404)
+    for template in db.scalars(select(OutputTemplateConfig).where(OutputTemplateConfig.group_id == group_id)).all():
+        template.group_id = None
+    db.delete(group)
+    db.commit()
+
+
+def import_vehicles_workbook(db: Session, user, sheets: list[tuple[str, list[dict]]]) -> dict:
+    """Import brands/models from parsed workbook sheets (brand per sheet)."""
+    require_admin(user)
+    created = 0
+    updated = 0
+    errors: list[str] = []
+    for brand_name, models in sheets:
+        try:
+            brand = db.scalar(select(VehicleBrand).where(VehicleBrand.name == brand_name))
+            if brand:
+                updated += 1
+            else:
+                brand = VehicleBrand(name=brand_name, aliases=[], status=AccountStatus.ACTIVE.value)
+                db.add(brand)
+                db.flush()
+                created += 1
+            for model in models:
+                name = model.get("name", "").strip()
+                if not name:
+                    continue
+                aliases = [a for a in model.get("aliases", []) if a]
+                existing_model = db.scalar(
+                    select(VehicleModel).where(
+                        VehicleModel.brand_id == brand.id,
+                        VehicleModel.name == name,
+                    )
+                )
+                if existing_model:
+                    existing_model.aliases = list(dict.fromkeys([*existing_model.aliases, *aliases]))
+                else:
+                    db.add(VehicleModel(name=name, brand_id=brand.id, aliases=aliases, status=AccountStatus.ACTIVE.value))
+                    created += 1
+        except Exception as exc:  # noqa: BLE001 - per-sheet errors are collected
+            errors.append(f"{brand_name}: {exc}")
+    db.commit()
+    return {"created": created, "updated": updated, "errors": errors}
+
+
+def get_runner_fee_default(db: Session) -> float:
+    setting = db.get(AppSetting, "runner_fee_default")
+    if setting is None:
+        return 20.0
+    try:
+        return float((setting.value or {}).get("amount", 20.0))
+    except (TypeError, ValueError):
+        return 20.0
+
+
+def set_runner_fee_default(db: Session, user, amount: float) -> float:
+    require_admin(user)
+    if amount < 0 or amount > 100000:
+        raise AppError("Runner fee must be between 0 and 100000.", 400)
+    setting = db.get(AppSetting, "runner_fee_default")
+    if setting is None:
+        setting = AppSetting(key="runner_fee_default", value={})
+        db.add(setting)
+    setting.value = {"amount": round(float(amount), 2)}
+    db.commit()
+    return float(setting.value["amount"])
 
 
 def serialize_template(template: OutputTemplateConfig, db: Session | None = None) -> dict:
@@ -72,12 +212,18 @@ def serialize_template(template: OutputTemplateConfig, db: Session | None = None
     if db is not None and template.insurance_company_id:
         company = db.get(InsuranceCompany, template.insurance_company_id)
         company_name = company.name if company else None
+    group_name = None
+    if db is not None and template.group_id:
+        group = db.get(TemplateGroup, template.group_id)
+        group_name = group.name if group else None
     return {
         "id": template.id,
         "name": template.name,
         "insurance_type": template.insurance_type,
         "insurance_company_id": template.insurance_company_id,
         "insurance_company_name": company_name,
+        "group_id": template.group_id,
+        "group_name": group_name,
         "status": template.status,
         "static_notes": template.static_notes,
         "editable_fields": template.editable_fields,
@@ -95,12 +241,15 @@ def copy_template(db: Session, user, template_id: str) -> OutputTemplateConfig:
     if not source or source.deleted_at:
         raise AppError("Template not found.", 404)
     config = normalize_template_config(source.fixed_fields, source.name)
+    if not (config.get("is_default") or config.get("locked")):
+        raise AppError("Only default (locked) templates can be copied.", 403)
     config["is_default"] = False
     config["locked"] = False
     copy = OutputTemplateConfig(
         name=f"Copy of {source.name}",
         insurance_type=source.insurance_type,
         insurance_company_id=source.insurance_company_id,
+        group_id=source.group_id,
         html_template=source.html_template,
         css_template=source.css_template,
         static_notes=source.static_notes,
@@ -122,7 +271,7 @@ def update_template(db: Session, user, template_id: str, payload: dict) -> Outpu
     current_config = normalize_template_config(template.fixed_fields, template.name)
     if current_config.get("locked"):
         raise AppError("Copy this default template before editing.")
-    for key in ["name", "insurance_type", "insurance_company_id", "static_notes", "editable_fields", "status"]:
+    for key in ["name", "insurance_type", "insurance_company_id", "group_id", "static_notes", "editable_fields", "status"]:
         if key in payload:
             setattr(template, key, payload[key])
     if "fixed_fields" in payload:
@@ -135,11 +284,17 @@ def update_template(db: Session, user, template_id: str, payload: dict) -> Outpu
     return template
 
 
+SPECIAL_CATEGORIES = {"FOC", "Add-on"}
+
+
 def upsert_special(db: Session, user, payload: dict) -> OurSpecial:
     require_admin(user)
     special = db.get(OurSpecial, payload.get("id")) if payload.get("id") else None
+    category = payload.get("category") or (special.category if special else "FOC")
+    if category not in SPECIAL_CATEGORIES:
+        raise AppError("Category must be FOC or Add-on.", 400)
     if not special:
-        special = OurSpecial(label=payload["label"], category=payload.get("category", "FOC"))
+        special = OurSpecial(label=payload["label"], category=category)
         db.add(special)
     for key in ["label", "category", "status"]:
         if key in payload:

@@ -1,45 +1,44 @@
 # AI Skill Routing
 
-Load only skills relevant to the current request. Skills guide work but do not override `AGENTS.md`, [BUSINESS-RULES.md](BUSINESS-RULES.md), tests, or user decisions.
+Load a skill only when the current task matches its description below. Read the selected skill completely before using it. Skills guide work but never override `AGENTS.md`, `docs/BUSINESS-RULES.md`, tests, or user decisions.
 
-## Project-local skills (installed under `.opencode/skills/`)
+## Installed Skills (`.agents/skills/`)
 
-These skills encode Risklocker's actual codebase conventions. They are registered in `opencode.json` via `skills.paths` and are preferred over generic external skills whenever they apply.
+The `.agents/` folder is gitignored (see `.gitignore`) — skills live only in local installs. On a fresh clone, reinstall via the opencode skill manager before relying on them.
 
-| Skill folder | Use when |
+| Skill | Use when |
 | --- | --- |
-| `risklocker-backend` | Editing the FastAPI backend: `backend/app/**`. Covers services pattern, RBAC helpers, `AppError`, `deps.py` auth chain, `get_settings()` env requirements, injected-`sender` mail pattern, route/schemas conventions. |
-| `risklocker-frontend` | Editing the Next.js frontend: `frontend/src/**`. Covers App Router layout, `rl-*` design tokens (from `tailwind.config.ts`), `AppShell` nav pattern, `api<T>()` cookie client, WCAG 2.2 AA accessibility, Lucide icons, `StatusBadge` conventions. |
-| `risklocker-testing` | Writing or extending tests under `tests/**`. Covers the `FakeSession` variants, `ScalarRows`, `dependency_overrides`, `os.environ.update` at module load, no `conftest.py`, injected `sender` lambda, fixture file rules. |
-| `risklocker-verification` | **Mandatory before declaring any task "done" or "verified".** Covers the full verification sequence and the env-check rule (see below). |
-| `risklocker-database` | Editing `migrations/**` or `backend/app/models/**`. Covers migration conventions (`BEGIN/COMMIT`, `IF NOT EXISTS`, `RLS` + `REVOKE`, `gen_random_uuid()`), `TimestampMixin`, `StrEnum`-as-string enums, ordered migration filenames. |
+| `agent-browser` | Browser automation: navigate, fill forms, click, screenshots, scrape, test web apps, Electron apps, QA/dogfooding runs. |
+| `brainstorming` | ANY creative work — features, components, behavior changes — before implementation (explores intent/requirements/design). |
+| `customize-opencode` | Editing opencode's own config: opencode.json/.jsonc, `.opencode/`, agents, subagents, skills, plugins, MCP servers, permissions. |
+| `fastapi` | Working on FastAPI APIs, Pydantic models, dependencies, SSE streaming, serving frontends. |
+| `find-skills` | "How do I do X?", "find a skill for X" — discovering new installable skills. Mandatory before proposing a new skill. |
+| `frontend-design` | Building new UI or reshaping existing UI; aesthetic direction, typography, non-templated visual choices. |
+| `playwright-automation-fill-in-form` | Automating form filling with Playwright MCP. |
+| `playwright-best-practices` | Writing Playwright tests, fixing flaky tests, POM, CI/CD, mocking, auth/OAuth, uploads/downloads, multi-tab, mobile, annotations. |
+| `playwright-cli` | Browser interaction and Playwright test work via CLI. |
+| `playwright-explore-website` | Website exploration for testing (Playwright MCP). |
+| `python-testing` | Writing/reviewing Python tests, flaky tests, regression coverage, nox multi-version, free-threaded Python. |
+| `security-best-practices` | Explicit security review requests for python/js/ts/go code. |
+| `shadcn` | shadcn/ui projects: add/search/fix/debug components, registries, presets, `components.json`. |
+| `systematic-debugging` | ANY bug, test failure, or unexpected behavior — root-cause investigation before fixes (mandatory per AGENTS.md). |
+| `test-driven-development` | Implementing any feature or bugfix — write failing tests first. |
+| `using-superpowers` | Conversation start — establishes skill discovery and invocation. |
+| `vercel-composition-patterns` | React composition: compound components, prop proliferation cleanup, component-library APIs. |
+| `vercel-react-best-practices` | React/Next.js performance: data fetching, bundle optimization, rendering patterns. |
+| `web-design-guidelines` | "Review my UI", accessibility audit, UX review against Web Interface Guidelines. |
+| `webapp-testing` | Interacting with and testing local web apps via Playwright; frontend verification, UI debugging, screenshots. |
+| `writing-plans` | Multi-step tasks with a spec — before touching code, write the plan. |
 
-### The verification rule (enforced by `risklocker-verification`)
+## Skill Discovery Loop
 
-A task is **not** verified until all of the following pass:
+1. When a capability is missing, load the `find-skills` skill and search.
+2. Install the skill (opencode skill manager); `.agents/` and `.skill-sources/` stay gitignored.
+3. Record the result here (add a row to the table) — that is part of the documentation duty.
 
-1. `.\.venv\Scripts\python.exe -m pytest tests/ -v` — backend tests green.
-2. `npx next build` from `frontend/` — frontend production build succeeds.
-3. The backend **actually starts** against the real `.env`:
-   - `npm run backend` must reach the "Started server process" line without raising.
-   - This calls the real `get_settings()`, which reads `.env`. It is the only check that proves the runtime config is complete.
-4. `.\.venv\Scripts\python.exe commands/update-code-map.py --check` — the code map is current.
+## Verification
 
-If step 3 fails because `.env` is missing required keys (compare against `.env.example`), the agent must **report it as a blocker before claiming success**. Declaring a task complete while `npm run backend` cannot start is a verification failure, regardless of how many unit tests pass. Unit tests use mocked settings via `dependency_overrides` and `os.environ.update`; they do not exercise the real config loader.
-
-## External skills (fallback)
-
-Use external skills only for capability not covered by a project-local skill above.
-
-| Work | Required or relevant skills |
-| --- | --- |
-| Supabase platform specifics beyond this repo's conventions | `supabase`, `supabase-postgres-best-practices` |
-| Next.js platform specifics beyond this repo's conventions | `vercel:nextjs`, `vercel-react-best-practices` |
-| New or substantially reshaped UI patterns | `frontend-design` |
-| UI accessibility or UX audit beyond the project rules | `web-design-guidelines` |
-| Browser workflow verification | `agent-browser` or `vercel:agent-browser-verify` |
-| Broad debugging not scoped to a known subsystem | `vercel:investigation-mode` |
-| Long repository work or broad exploration | `codex-token-efficiency` |
-| Missing capability | `find-skills` before proposing an install |
-
-Read the selected skill instructions completely before using a skill. Do not load unrelated skills just because they are available.
+- Backend: `.venv\Scripts\python.exe -m pytest -q` (from repo root).
+- Frontend: `npx tsc --noEmit` and `npm run build` in `frontend/`.
+- Structure changed: `python commands/update-code-map.py --write`, then `--check` before finishing.
+- E2E/QA scripts: `/.qc-tmp/` (see `docs/OPERATIONS.md` runbook).

@@ -46,6 +46,8 @@ def generate_pdf(db: Session, settings: Settings, user, draft: QuotationDraft, a
         raise AppError("Choose a valid Risklocker template before generating.")
 
     template_config = normalize_template_config(template.fixed_fields, template.name)
+    if draft.layout_override:
+        template_config = normalize_template_config(draft.layout_override, template.name)
     html = render_quotation_html(
         draft.fields,
         template_name=template.name,

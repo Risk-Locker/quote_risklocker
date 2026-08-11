@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Plus, FloppyDisk, Trash, PencilSimple } from "@phosphor-icons/react";
+import { useEffect, useRef, useState } from "react";
+import { Plus, FloppyDisk, Trash, PencilSimple, DownloadSimple, UploadSimple } from "@phosphor-icons/react";
 import { SettingsNav } from "@/components/settings-nav";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { api } from "@/lib/api";
+import { api, API_BASE } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 
 type RoadTaxRule = {
@@ -54,6 +54,7 @@ export default function RoadTaxPage() {
   const [pendingDelete, setPendingDelete] = useState<RoadTaxRule | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [f, setF] = useState({ vehicle_type: "Car", owner_type: "Individual", jurisdiction: "West Malaysia", min_cc: "0", max_cc: "", base_rate: "0", formula: "", source: "", effective_from: "", effective_to: "", status: "active" });
+  const fileRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   async function load() {
@@ -61,6 +62,26 @@ export default function RoadTaxPage() {
     setRules(data.rules);
   }
   useEffect(() => { load().catch(() => {}); }, []);
+
+  function exportCsv() {
+    window.location.href = `${API_BASE}/admin/road-tax-rules/export`;
+  }
+
+  async function importFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const form = new FormData();
+    form.append("file", file);
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}/admin/road-tax-rules/import`, { method: "POST", body: form, credentials: "include" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Import failed.");
+      toast(`Import done: ${data.created || 0} created, ${data.updated || 0} updated${data.errors?.length ? `, ${data.errors.length} errors` : ""}.`, "success");
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : "Import failed."); }
+    if (fileRef.current) fileRef.current.value = "";
+  }
 
   function reset() { setF({ vehicle_type: "Car", owner_type: "Individual", jurisdiction: "West Malaysia", min_cc: "0", max_cc: "", base_rate: "0", formula: "", source: "", effective_from: "", effective_to: "", status: "active" }); setEditId(null); setShowForm(false); }
 
@@ -113,7 +134,12 @@ export default function RoadTaxPage() {
             <h1 className="text-[30px] font-bold text-[var(--rl-text-strong)] font-[var(--font-manrope)]">Road Tax</h1>
             <p className="text-[14px] text-[var(--rl-text-muted)]">Manage road-tax rates by vehicle type, owner type, jurisdiction and CC range.</p>
           </div>
-          <Button size="sm" icon={<Plus size={14} weight="bold" />} onClick={() => { reset(); setShowForm((v) => !v); }}>New rule</Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" size="sm" icon={<DownloadSimple size={14} weight="bold" />} onClick={exportCsv}>Export CSV</Button>
+            <Button variant="secondary" size="sm" icon={<UploadSimple size={14} weight="bold" />} onClick={() => fileRef.current?.click()}>Import CSV/Excel</Button>
+            <input ref={fileRef} className="hidden" type="file" accept=".csv,.xlsx" onChange={importFile} />
+            <Button size="sm" icon={<Plus size={14} weight="bold" />} onClick={() => { reset(); setShowForm((v) => !v); }}>New rule</Button>
+          </div>
         </div>
         <SettingsNav />
 

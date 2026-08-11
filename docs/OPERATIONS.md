@@ -24,6 +24,16 @@ The three inactive settings are loaded by backend configuration but do not chang
 3. Configure `.env` with a Supabase/Postgres database URL, long authentication hash secret, backend SMTP relay, Supabase URL, and backend-only service-role key.
 4. Apply ordered migrations with `commands/apply-migrations.ps1`, initialize defaults with `commands/init_db.py`, and create/promote a named employee Admin with `commands/create_admin.py first.last@risklocker.com`.
 5. Use `npm run backend`, `npm run frontend`, or `npm run full` to start development services. Use `npm run stop` to stop project servers.
+6. Port coordination: `commands/start-backend.ps1` writes the chosen port to `.qc-tmp\backend-port.txt`; `start-frontend.ps1` and `start-full.ps1` read it. Backend :8100, frontend :3000.
+
+## QA and E2E Tooling (in-repo, gitignored)
+
+- All QA artifacts live in `/.qc-tmp/` INSIDE the repository (never `%TEMP%` or outside paths).
+- Playwright is available from `frontend/node_modules` (require path in scripts: `C:/.../frontend/node_modules/playwright`).
+- Scripts: `groups3-e2e.js` (group/marquee E2E — add 3 texts, marquee-select 3, group, drag group, ungroup), `marquee-probe.js` (marquee lifecycle diagnostics with console capture), plus older groups/groups2/debug scripts. Screenshots go to `.qc-tmp/shots/`.
+- Run: `node .qc-tmp/groups3-e2e.js` with backend :8100 and frontend :3000 up.
+- Dev login for E2E: admin@risklocker.local / admin123. Default motor template: `4a16bc96-7ca1-44db-be1b-c0a462e71e2f` (5 image, 24 text, 11 variable, 4 group elements; no specials — E2E group tests must add text elements first).
+- Logs from `commands/start-*.ps1` redirects go to `.qc-tmp/` too.
 
 ## Maintenance
 
@@ -31,6 +41,8 @@ The three inactive settings are loaded by backend configuration but do not chang
 - Run `commands/purge_trash.py` for scheduled trash maintenance where needed.
 - Run `npm run code-map` after structural changes and `npm run code-map:check` before completing work.
 - Migrations are ordered SQL files under `migrations/` and must be applied against Supabase/Postgres only.
+- `openpyxl` (requirements.txt) powers the settings CSV/Excel imports — road tax export/import, vehicles multi-sheet Excel import, field-alias import. Uploads are validated server-side (extension/size/row caps; Excel read data-only, no formula evaluation).
+- Frontend middleware (`frontend/src/middleware.ts`) guards protected routes by session cookie server-side; the cookie name must match `SESSION_COOKIE_NAME` in the backend `.env`.
 
 ## Deployment Boundaries
 

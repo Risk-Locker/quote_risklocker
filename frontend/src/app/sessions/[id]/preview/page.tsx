@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   TextT, BracketsCurly, Image, Square, LineSegment, ArrowLeft,
   FloppyDisk, DownloadSimple, FileImage, ArrowArcLeft, ArrowArcRight,
-  Trash, Plus, PencilSimple, X, CaretUp, CaretDown,
+  Trash, CopySimple, Eye, PencilSimple, X, ArrowsClockwise,
 } from "@phosphor-icons/react";
 import {
   CanvasElementView, shapeRadii, shadowMap,
@@ -67,6 +67,11 @@ export default function SessionPreviewPage({ params }: { params: Promise<{ id: s
   const [loading, setLoading] = useState(true);
   const [busyPdf, setBusyPdf] = useState(false);
   const [busyPng, setBusyPng] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [savingLayout, setSavingLayout] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [hasVersion, setHasVersion] = useState(false);
+  const [showEditor, setShowEditor] = useState(false);
 
   const dragRef = useRef<DragState | null>(null);
   const resizeRef = useRef<ResizeState | null>(null);
@@ -179,7 +184,7 @@ export default function SessionPreviewPage({ params }: { params: Promise<{ id: s
       );
       const updated = pendingElementsRef.current.find((e) => e.id === d.id);
       if (updated) {
-        const guides = computeGuides(d.startEl, { x: nx, y: ny }, elements, canvasW, canvasW / 2);
+        computeGuides(d.startEl, { x: nx, y: ny }, elements, canvasW, canvasW / 2);
       }
     }
 
@@ -201,16 +206,18 @@ export default function SessionPreviewPage({ params }: { params: Promise<{ id: s
   }
 
   function pointerUp() {
-    if (dragRef.current) {
-      const final = pendingElementsRef.current.find((e) => e.id === dragRef.current!.id);
+    const drag = dragRef.current;
+    const resize = resizeRef.current;
+    if (drag) {
+      const final = pendingElementsRef.current.find((e) => e.id === drag.id);
       if (final) {
         const prev = clone(elements);
         setElements(pendingElementsRef.current);
         pushHistory(prev);
       }
     }
-    if (resizeRef.current) {
-      const final = pendingElementsRef.current.find((e) => e.id === resizeRef.current!.id);
+    if (resize) {
+      const final = pendingElementsRef.current.find((e) => e.id === resize.id);
       if (final) {
         const prev = clone(elements);
         setElements(pendingElementsRef.current);
@@ -232,6 +239,21 @@ export default function SessionPreviewPage({ params }: { params: Promise<{ id: s
     return () => window.removeEventListener("keydown", onKey);
   }, [selected, elements, history, future, deleteSelected, undo, redo]);
 
+  const refreshPreview = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const res = await apiRaw(`/drafts/${draftId}/preview-png`, { method: "POST" });
+      if (!res.ok) throw new Error("Preview generation failed");
+      const blob = await res.blob();
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(URL.createObjectURL(blob));
+    } catch (err) {
+      toast(apiErrorMessage(err), "error");
+    } finally {
+      setRefreshing(false);
+    }
+  }, [draftId, previewUrl, toast]);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -240,7 +262,7 @@ export default function SessionPreviewPage({ params }: { params: Promise<{ id: s
         const dId = sess.session.draft_id;
         setDraftId(dId);
         const [draftRes, assetsRes, specialsRes] = await Promise.all([
-          api<{ draft: { fields: Record<string, DraftField>; selected_template_id?: string | null; available_templates: TemplateRecord[] } }>(`/drafts/${dId}`),
+          api<{ draft: { fields: Record<string, DraftField>; selected_template_id?: string | null; available_templates: TemplateRecord[]; versions: unknown[] } }>(`/drafts/${dId}`),
           api<{ assets: AssetRecord[] }>("/admin/template-assets"),
           api<{ our_specials: SpecialItem[] }>("/admin/our-specials"),
         ]);
@@ -249,6 +271,7 @@ export default function SessionPreviewPage({ params }: { params: Promise<{ id: s
         setFields(draft.fields);
         setAssets(assetsRes.assets);
         setSpecials(specialsRes.our_specials);
+        setHasVersion(draft.versions.length > 0);
         const tId = draft.selected_template_id;
         if (tId) {
           const tRes = await api<{ template: TemplateRecord }>(`/admin/templates/${tId}`);
@@ -268,6 +291,13 @@ export default function SessionPreviewPage({ params }: { params: Promise<{ id: s
     load();
     return () => { cancelled = true; };
   }, [id]);
+
+  useEffect(() => {
+    if (!loading && draftId) {
+      refreshPreview();
+    }
+    return () => { if (previewUrl) URL.revokeObjectURL(previewUrl); };
+  }, [loading, draftId]);
 
   const downloadPdf = useCallback(async () => {
     setBusyPdf(true);
@@ -290,6 +320,31 @@ export default function SessionPreviewPage({ params }: { params: Promise<{ id: s
     finally { setBusyPng(false); }
   }, [draftId, toast]);
 
+  const copyPng = useCallback(async () => {
+    try {
+      const res = await apiRaw(`/drafts/${draftId}/preview-png`, { method: "POST" });
+      if (!res.ok) throw new Error("PNG generation failed");
+      const blob = await res.blob();
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      toast("Preview copied to clipboard.", "success");
+    } catch (err) { toast(apiErrorMessage(err), "error"); }
+  }, [draftId, toast]);
+
+  const saveSessionLayout = useCallback(async () => {
+    if (!config) { toast("Template config not loaded.", "error"); return; }
+    setSavingLayout(true);
+    try {
+      const layout = { ...config, canvas: { width: canvasW, height: canvasH, elements } };
+      await api(`/drafts/${draftId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: {}, template_id: null, layout_override: layout }),
+      });
+      toast("Layout saved for this session only.", "success");
+      await refreshPreview();
+    } catch (err) { toast(apiErrorMessage(err), "error"); }
+    finally { setSavingLayout(false); }
+  }, [config, canvasW, canvasH, elements, draftId, toast, refreshPreview]);
+
   const saveAsTemplate = useCallback(async () => {
     if (!templateName.trim()) return;
     if (!config) { toast("Template config not loaded.", "error"); return; }
@@ -307,215 +362,254 @@ export default function SessionPreviewPage({ params }: { params: Promise<{ id: s
     setElements((els) => els.map((e) => e.id === eid ? { ...e, style: { ...e.style, [key]: value } } : e));
   }, []);
 
-  const filteredSpecials = specials.flatMap((sp) =>
-    sp.variants.map((v) => ({ ...v, _parent: sp.label, _category: sp.category }))
-  );
-
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-[var(--rl-bg)]">
-        <div className="z-20 flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--rl-border)] bg-[var(--rl-surface)] px-4 py-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <Button variant="ghost" icon={<ArrowLeft size={16} weight="bold" />} onClick={() => router.push(`/sessions/${id}/review`)}>
-              Review
-            </Button>
-            <h1 className="text-[20px] font-bold text-[var(--rl-text-strong)] font-[var(--font-manrope)]">Preview &amp; Edit</h1>
-            {template && <Badge variant="info">{template.name}</Badge>}
-          </div>
-          <SessionPhaseBar sessionId={id} current="preview" hasVersion={false} />
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-2 text-[13px] font-semibold text-[var(--rl-text-strong)]">
-              Zoom
-              <input className="w-24" type="range" min="0.45" max="1.1" step="0.05" value={zoom} onChange={(e) => setZoom(Number(e.target.value))} />
-            </label>
-            <Button variant="secondary" size="sm" icon={<ArrowArcLeft size={14} weight="bold" />} onClick={undo} disabled={history.length === 0}>Undo</Button>
-            <Button variant="secondary" size="sm" icon={<ArrowArcRight size={14} weight="bold" />} onClick={redo} disabled={future.length === 0}>Redo</Button>
-            <Button variant="danger" size="sm" icon={<Trash size={14} weight="bold" />} onClick={deleteSelected} disabled={!selected}>Delete</Button>
-            <Button variant="secondary" size="sm" loading={busyPdf} icon={<DownloadSimple size={14} weight="bold" />} onClick={downloadPdf}>{busyPdf ? "Generating PDF" : "PDF"}</Button>
-            <Button variant="secondary" size="sm" loading={busyPng} icon={<FileImage size={14} weight="bold" />} onClick={downloadPng}>{busyPng ? "Rendering PNG" : "PNG"}</Button>
-            <Button size="sm" icon={<FloppyDisk size={14} weight="bold" />} onClick={() => setShowSaveModal(true)}>Save as template</Button>
-          </div>
+      <div className="z-20 flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--rl-border)] bg-[var(--rl-surface)] px-4 py-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="ghost" icon={<ArrowLeft size={16} weight="bold" />} onClick={() => router.push(`/sessions/${id}/review`)}>
+            Review
+          </Button>
+          <h1 className="text-[20px] font-bold text-[var(--rl-text-strong)] font-[var(--font-manrope)]">Preview &amp; Edit</h1>
+          {template && <Badge variant="info">{template.name}</Badge>}
+          {hasVersion ? <Badge variant="success">Final PDF generated</Badge> : null}
         </div>
+        <SessionPhaseBar sessionId={id} current="preview" hasVersion={hasVersion} />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant={showEditor ? "primary" : "secondary"}
+            size="sm"
+            icon={<PencilSimple size={14} weight="bold" />}
+            onClick={() => setShowEditor((v) => !v)}
+          >
+            {showEditor ? "Done editing" : "Edit template"}
+          </Button>
+          {showEditor ? (
+            <Button variant="secondary" size="sm" loading={savingLayout} icon={<FloppyDisk size={14} weight="bold" />} onClick={saveSessionLayout}>
+              Save to session
+            </Button>
+          ) : null}
+          <Button variant="secondary" size="sm" icon={<ArrowsClockwise size={14} weight="bold" />} loading={refreshing} onClick={refreshPreview}>
+            Refresh preview
+          </Button>
+          <Button variant="secondary" size="sm" loading={busyPng} icon={<FileImage size={14} weight="bold" />} onClick={downloadPng}>
+            {busyPng ? "Rendering PNG" : "PNG"}
+          </Button>
+          <Button variant="secondary" size="sm" icon={<CopySimple size={14} weight="bold" />} onClick={copyPng}>
+            Copy PNG
+          </Button>
+          <Button variant="secondary" size="sm" loading={busyPdf} icon={<DownloadSimple size={14} weight="bold" />} onClick={downloadPdf}>
+            {busyPdf ? "Generating PDF" : "Download PDF"}
+          </Button>
+          <Button size="sm" icon={<FloppyDisk size={14} weight="bold" />} onClick={() => setShowSaveModal(true)}>Save as template</Button>
+        </div>
+      </div>
 
-        {/* ---------- LOADING ---------- */}
-        {loading && (
-          <div className="flex flex-1 items-center justify-center gap-3 text-[var(--rl-text-muted)]">
-            <Spinner /> Loading preview...
-          </div>
-        )}
+      {loading && (
+        <div className="flex flex-1 items-center justify-center gap-3 text-[var(--rl-text-muted)]">
+          <Spinner /> Loading preview...
+        </div>
+      )}
 
-        {/* ---------- EDITOR BODY ---------- */}
-        {!loading && (
-          <div className="grid min-h-0 flex-1 grid-cols-[280px_1fr] overflow-hidden">
-            {/* SIDEBAR */}
-            <aside className="flex flex-col overflow-hidden border-r border-[var(--rl-border)] bg-[var(--rl-surface)]">
-              <div className="flex-1 overflow-auto p-4 space-y-5">
-                {/* --- Element toolbar --- */}
-                <div>
-                  <h2 className="mb-2 font-bold text-[13px] text-[var(--rl-text-strong)]">Add Elements</h2>
-                  <div className="flex flex-wrap gap-1.5">
-                    <Button variant="secondary" size="sm" icon={<TextT size={13} weight="bold" />} onClick={() => addElement("text")}>Text</Button>
-                    <Button variant="secondary" size="sm" icon={<BracketsCurly size={13} weight="bold" />} onClick={() => addElement("variable")}>Variable</Button>
-                    <Button variant="secondary" size="sm" icon={<Image size={13} weight="bold" />} onClick={() => addElement("image")}>Image</Button>
-                    <Button variant="secondary" size="sm" icon={<LineSegment size={13} weight="bold" />} onClick={() => addElement("line")}>Line</Button>
-                    <Button variant="secondary" size="sm" icon={<Square size={13} weight="bold" />} onClick={() => addElement("box")}>Box</Button>
-                  </div>
+      {!loading && (
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_auto] overflow-hidden">
+          <section className="flex min-h-0 flex-col overflow-auto bg-neutral-200/60 p-6">
+            <div className="mx-auto flex w-fit flex-col items-center gap-3">
+              <div className="flex items-center gap-2">
+                <Badge variant="info">Risklocker final preview</Badge>
+              </div>
+              {previewUrl ? (
+                <img
+                  src={previewUrl}
+                  alt="Final quotation preview"
+                  className="max-w-full rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-white shadow-card"
+                  style={{ maxHeight: "calc(100vh - 220px)" }}
+                />
+              ) : (
+                <div className="flex h-64 w-80 items-center justify-center rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] text-[14px] text-[var(--rl-text-muted)]">
+                  {refreshing ? "Rendering preview..." : "No preview yet — click Refresh preview."}
                 </div>
+              )}
+            </div>
+          </section>
 
-                {/* --- Asset picker (image elements) --- */}
-                {selected?.type === "image" && (
+          {showEditor ? (
+            <div className="grid min-h-0 w-[720px] max-w-[70vw] grid-cols-[280px_1fr] overflow-hidden border-l border-[var(--rl-border)]">
+              <aside className="flex flex-col overflow-hidden border-r border-[var(--rl-border)] bg-[var(--rl-surface)]">
+                <div className="flex-1 overflow-auto p-4 space-y-5">
                   <div>
-                    <h2 className="mb-1.5 font-bold text-[13px] text-[var(--rl-text-strong)]">Image Asset</h2>
-                    {assets.length === 0 ? (
-                      <p className="text-[12px] text-[var(--rl-text-muted)]">Loading assets...</p>
-                    ) : (
-                      <Select
-                        value={selected.assetId || ""}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (val) updateElement(selected.id, { assetId: val });
-                        }}
-                      >
-                        <option value="">None</option>
-                        {assets.map((a) => (
-                          <option key={a.id} value={a.id}>{a.label || a.filename}</option>
-                        ))}
-                      </Select>
-                    )}
-                  </div>
-                )}
-
-                {/* --- Property panel --- */}
-                {selected && (
-                  <div>
-                    <h2 className="mb-2 font-bold text-[13px] text-[var(--rl-text-strong)]">Properties</h2>
-                    <div className="grid gap-2">
-                      <div className="grid grid-cols-[28px_1fr] items-center gap-1.5">
-                        <span className="text-[11px] font-semibold text-[var(--rl-text-muted)]">X</span>
-                        <Input type="number" className="min-h-[32px] text-[12px]" value={Math.round(selected.x)} onChange={(e) => updateElement(selected.id, { x: Number(e.target.value) || 0 })} />
-                      </div>
-                      <div className="grid grid-cols-[28px_1fr] items-center gap-1.5">
-                        <span className="text-[11px] font-semibold text-[var(--rl-text-muted)]">Y</span>
-                        <Input type="number" className="min-h-[32px] text-[12px]" value={Math.round(selected.y)} onChange={(e) => updateElement(selected.id, { y: Number(e.target.value) || 0 })} />
-                      </div>
-                      <div className="grid grid-cols-[28px_1fr] items-center gap-1.5">
-                        <span className="text-[11px] font-semibold text-[var(--rl-text-muted)]">W</span>
-                        <Input type="number" className="min-h-[32px] text-[12px]" value={Math.round(selected.w)} onChange={(e) => updateElement(selected.id, { w: Number(e.target.value) || 1 })} />
-                      </div>
-                      <div className="grid grid-cols-[28px_1fr] items-center gap-1.5">
-                        <span className="text-[11px] font-semibold text-[var(--rl-text-muted)]">H</span>
-                        <Input type="number" className="min-h-[32px] text-[12px]" value={Math.round(selected.h)} onChange={(e) => updateElement(selected.id, { h: Number(e.target.value) || 1 })} />
-                      </div>
-                      <div className="grid grid-cols-[60px_1fr] items-center gap-1.5">
-                        <span className="text-[11px] font-semibold text-[var(--rl-text-muted)]">Font Size</span>
-                        <Input type="number" className="min-h-[32px] text-[12px]" value={selected.style?.fontSize || 14} onChange={(e) => updateStyle(selected.id, "fontSize", Number(e.target.value) || 1)} />
-                      </div>
-                      <div className="grid grid-cols-[60px_1fr] items-center gap-1.5">
-                        <span className="text-[11px] font-semibold text-[var(--rl-text-muted)]">Color</span>
-                        <Input type="color" className="min-h-[32px] p-0.5 text-[12px]" value={selected.style?.color || "#111111"} onChange={(e) => updateStyle(selected.id, "color", e.target.value)} />
-                      </div>
-                      <div className="grid grid-cols-[60px_1fr] items-center gap-1.5">
-                        <span className="text-[11px] font-semibold text-[var(--rl-text-muted)]">Background</span>
-                        <Input type="color" className="min-h-[32px] p-0.5 text-[12px]" value={selected.style?.background || "#ffffff"} onChange={(e) => updateStyle(selected.id, "background", e.target.value)} />
-                      </div>
-                      <div className="grid grid-cols-[60px_1fr] items-center gap-1.5">
-                        <span className="text-[11px] font-semibold text-[var(--rl-text-muted)]">Border W</span>
-                        <Input type="number" className="min-h-[32px] text-[12px]" value={selected.style?.borderWidth || 0} onChange={(e) => updateStyle(selected.id, "borderWidth", Number(e.target.value) || 0)} />
-                      </div>
+                    <h2 className="mb-2 font-bold text-[13px] text-[var(--rl-text-strong)]">Add Elements</h2>
+                    <div className="flex flex-wrap gap-1.5">
+                      <Button variant="secondary" size="sm" icon={<TextT size={13} weight="bold" />} onClick={() => addElement("text")}>Text</Button>
+                      <Button variant="secondary" size="sm" icon={<BracketsCurly size={13} weight="bold" />} onClick={() => addElement("variable")}>Variable</Button>
+                      <Button variant="secondary" size="sm" icon={<Image size={13} weight="bold" />} onClick={() => addElement("image")}>Image</Button>
+                      <Button variant="secondary" size="sm" icon={<LineSegment size={13} weight="bold" />} onClick={() => addElement("line")}>Line</Button>
+                      <Button variant="secondary" size="sm" icon={<Square size={13} weight="bold" />} onClick={() => addElement("box")}>Box</Button>
                     </div>
                   </div>
-                )}
-              </div>
 
-              {/* --- Our Specials sidebar --- */}
-              <div className="border-t border-[var(--rl-border)] p-4 max-h-[280px] overflow-auto">
-                <h2 className="mb-1 font-bold text-[13px] text-[var(--rl-text-strong)]">Our Specials</h2>
-                <p className="text-[11px] text-[var(--rl-text-muted)]">Click to add to canvas</p>
-                <div className="mt-2 grid gap-1.5">
-                  {specials.map((sp) => (
-                    <div key={sp.id}>
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--rl-text-muted)]">{sp.label} ({sp.category})</div>
-                      <div className="grid gap-1 mt-0.5">
-                        {sp.variants.map((v) => (
-                          <button
-                            key={v.id}
-                            type="button"
-                            className="grid cursor-pointer grid-cols-[36px_1fr] items-center gap-2 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-1.5 text-left text-[12px] hover:bg-[var(--rl-bg)] transition-colors"
-                            onClick={() => addSpecial(v)}
-                          >
-                            {v.icon_asset_id ? (
-                              <img className="h-8 w-8 object-contain" src={fileUrl(`/template-assets/${v.icon_asset_id}`)} alt="" />
-                            ) : (
-                              <div
-                                className="flex h-8 w-8 items-center justify-center rounded-[var(--rl-radius-sm)] text-[9px] font-bold text-[var(--rl-text-strong)]"
-                                style={{
-                                  borderRadius: shapeRadii[v.shape || "rounded"] || "12px",
-                                  backgroundColor: v.bg_color || "#F6F8FB",
-                                  color: v.text_color || "#1B1717",
-                                  boxShadow: shadowMap[v.shadow || "none"] || "none",
-                                  border: v.border_width && v.border_width !== "none" ? `${v.border_width} solid ${v.border_color || "#D8DDE6"}` : undefined,
-                                }}
-                              >
-                                IC
+                  {selected?.type === "image" && (
+                    <div>
+                      <h2 className="mb-1.5 font-bold text-[13px] text-[var(--rl-text-strong)]">Image Asset</h2>
+                      {assets.length === 0 ? (
+                        <p className="text-[12px] text-[var(--rl-text-muted)]">Loading assets...</p>
+                      ) : (
+                        <Select
+                          value={selected.assetId || ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val) updateElement(selected.id, { assetId: val });
+                          }}
+                        >
+                          <option value="">None</option>
+                          {assets.map((a) => (
+                            <option key={a.id} value={a.id}>{a.label || a.filename}</option>
+                          ))}
+                        </Select>
+                      )}
+                    </div>
+                  )}
+
+                  {selected && (
+                    <div>
+                      <h2 className="mb-2 font-bold text-[13px] text-[var(--rl-text-strong)]">Properties</h2>
+                      <div className="grid gap-2">
+                        <div className="grid grid-cols-[28px_1fr] items-center gap-1.5">
+                          <span className="text-[11px] font-semibold text-[var(--rl-text-muted)]">X</span>
+                          <Input type="number" className="min-h-[32px] text-[12px]" value={Math.round(selected.x)} onChange={(e) => updateElement(selected.id, { x: Number(e.target.value) || 0 })} />
+                        </div>
+                        <div className="grid grid-cols-[28px_1fr] items-center gap-1.5">
+                          <span className="text-[11px] font-semibold text-[var(--rl-text-muted)]">Y</span>
+                          <Input type="number" className="min-h-[32px] text-[12px]" value={Math.round(selected.y)} onChange={(e) => updateElement(selected.id, { y: Number(e.target.value) || 0 })} />
+                        </div>
+                        <div className="grid grid-cols-[28px_1fr] items-center gap-1.5">
+                          <span className="text-[11px] font-semibold text-[var(--rl-text-muted)]">W</span>
+                          <Input type="number" className="min-h-[32px] text-[12px]" value={Math.round(selected.w)} onChange={(e) => updateElement(selected.id, { w: Number(e.target.value) || 1 })} />
+                        </div>
+                        <div className="grid grid-cols-[28px_1fr] items-center gap-1.5">
+                          <span className="text-[11px] font-semibold text-[var(--rl-text-muted)]">H</span>
+                          <Input type="number" className="min-h-[32px] text-[12px]" value={Math.round(selected.h)} onChange={(e) => updateElement(selected.id, { h: Number(e.target.value) || 1 })} />
+                        </div>
+                        <div className="grid grid-cols-[60px_1fr] items-center gap-1.5">
+                          <span className="text-[11px] font-semibold text-[var(--rl-text-muted)]">Font Size</span>
+                          <Input type="number" className="min-h-[32px] text-[12px]" value={selected.style?.fontSize || 14} onChange={(e) => updateStyle(selected.id, "fontSize", Number(e.target.value) || 1)} />
+                        </div>
+                        <div className="grid grid-cols-[60px_1fr] items-center gap-1.5">
+                          <span className="text-[11px] font-semibold text-[var(--rl-text-muted)]">Color</span>
+                          <Input type="color" className="min-h-[32px] p-0.5 text-[12px]" value={selected.style?.color || "#111111"} onChange={(e) => updateStyle(selected.id, "color", e.target.value)} />
+                        </div>
+                        <div className="grid grid-cols-[60px_1fr] items-center gap-1.5">
+                          <span className="text-[11px] font-semibold text-[var(--rl-text-muted)]">Background</span>
+                          <Input type="color" className="min-h-[32px] p-0.5 text-[12px]" value={selected.style?.background || "#ffffff"} onChange={(e) => updateStyle(selected.id, "background", e.target.value)} />
+                        </div>
+                        <div className="grid grid-cols-[60px_1fr] items-center gap-1.5">
+                          <span className="text-[11px] font-semibold text-[var(--rl-text-muted)]">Border W</span>
+                          <Input type="number" className="min-h-[32px] text-[12px]" value={selected.style?.borderWidth || 0} onChange={(e) => updateStyle(selected.id, "borderWidth", Number(e.target.value) || 0)} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-[var(--rl-border)] p-4 max-h-[280px] overflow-auto">
+                  <h2 className="mb-1 font-bold text-[13px] text-[var(--rl-text-strong)]">Our Specials</h2>
+                  <p className="text-[11px] text-[var(--rl-text-muted)]">Click to add to canvas</p>
+                  <div className="mt-2 grid gap-1.5">
+                    {specials.map((sp) => (
+                      <div key={sp.id}>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--rl-text-muted)]">{sp.label} ({sp.category})</div>
+                        <div className="grid gap-1 mt-0.5">
+                          {sp.variants.map((v) => (
+                            <button
+                              key={v.id}
+                              type="button"
+                              className="grid cursor-pointer grid-cols-[36px_1fr] items-center gap-2 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-1.5 text-left text-[12px] hover:bg-[var(--rl-bg)] transition-colors"
+                              onClick={() => addSpecial(v)}
+                            >
+                              {v.icon_asset_id ? (
+                                <img className="h-8 w-8 object-contain" src={fileUrl(`/template-assets/${v.icon_asset_id}`)} alt="" />
+                              ) : (
+                                <div
+                                  className="flex h-8 w-8 items-center justify-center rounded-[var(--rl-radius-sm)] text-[9px] font-bold text-[var(--rl-text-strong)]"
+                                  style={{
+                                    borderRadius: shapeRadii[v.shape || "rounded"] || "12px",
+                                    backgroundColor: v.bg_color || "#F6F8FB",
+                                    color: v.text_color || "#1B1717",
+                                    boxShadow: shadowMap[v.shadow || "none"] || "none",
+                                    border: v.border_width && v.border_width !== "none" ? `${v.border_width} solid ${v.border_color || "#D8DDE6"}` : undefined,
+                                  }}
+                                >
+                                  IC
+                                </div>
+                              )}
+                              <div className="leading-tight">
+                                <span className="font-bold text-[var(--rl-text-strong)]">{v.label}</span>
+                                {v.value_text && <span className="block text-[10px] text-[var(--rl-text-muted)]">{v.value_text}</span>}
                               </div>
-                            )}
-                            <div className="leading-tight">
-                              <span className="font-bold text-[var(--rl-text-strong)]">{v.label}</span>
-                              {v.value_text && <span className="block text-[10px] text-[var(--rl-text-muted)]">{v.value_text}</span>}
-                            </div>
-                          </button>
-                        ))}
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            </aside>
+              </aside>
 
-            {/* ---------- CANVAS AREA ---------- */}
-            <section className="overflow-auto p-6" onClick={() => setSelectedId("")}>
-              <div className="mx-auto w-fit rounded-[var(--rl-radius)] bg-neutral-300 p-6 shadow-inner" style={{ minHeight: (canvasH * zoom) + 60 }}>
-                <div
-                  className="relative origin-top-left overflow-hidden bg-white shadow-xl"
-                  style={{ width: canvasW, height: canvasH, transform: `scale(${zoom})` }}
-                  onPointerMove={pointerMove}
-                  onPointerUp={pointerUp}
-                  onPointerLeave={pointerUp}
-                >
-                  {elements.map((el) => (
-                    <CanvasElementView
-                      key={el.id}
-                      element={el}
-                      selected={el.id === selectedId}
-                      assets={assets}
-                      config={config || undefined}
-                      readOnly={false}
-                      onPointerDown={(e) => pointerDown(e, el)}
-                      onResizePointerDown={onResizePointerDown}
-                    />
-                  ))}
+              <section className="overflow-auto p-6" onClick={() => setSelectedId("")}>
+                <div className="flex items-center justify-between gap-3">
+                  <label className="flex items-center gap-2 text-[13px] font-semibold text-[var(--rl-text-strong)]">
+                    Zoom
+                    <input className="w-24" type="range" min="0.45" max="1.1" step="0.05" value={zoom} onChange={(e) => setZoom(Number(e.target.value))} />
+                  </label>
+                  <div className="flex gap-1.5">
+                    <Button variant="secondary" size="sm" icon={<ArrowArcLeft size={14} weight="bold" />} onClick={undo} disabled={history.length === 0}>Undo</Button>
+                    <Button variant="secondary" size="sm" icon={<ArrowArcRight size={14} weight="bold" />} onClick={redo} disabled={future.length === 0}>Redo</Button>
+                    <Button variant="danger" size="sm" icon={<Trash size={14} weight="bold" />} onClick={deleteSelected} disabled={!selected}>Delete</Button>
+                  </div>
                 </div>
-              </div>
-            </section>
-          </div>
-        )}
+                <div className="mx-auto mt-3 w-fit rounded-[var(--rl-radius)] bg-neutral-300 p-6 shadow-inner" style={{ minHeight: (canvasH * zoom) + 60 }}>
+                  <div
+                    className="relative origin-top-left overflow-hidden bg-white shadow-xl"
+                    style={{ width: canvasW, height: canvasH, transform: `scale(${zoom})` }}
+                    onPointerMove={pointerMove}
+                    onPointerUp={pointerUp}
+                    onPointerLeave={pointerUp}
+                  >
+                    {elements.map((el) => (
+                      <CanvasElementView
+                        key={el.id}
+                        element={el}
+                        selected={el.id === selectedId}
+                        assets={assets}
+                        config={config || undefined}
+                        readOnly={false}
+                        onPointerDown={(e) => pointerDown(e, el)}
+                        onResizePointerDown={onResizePointerDown}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </section>
+            </div>
+          ) : null}
+        </div>
+      )}
 
-        {/* ---------- SAVE MODAL ---------- */}
-        {showSaveModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowSaveModal(false)}>
-            <div className="w-full max-w-md rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-6 shadow-card" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">Save as new template</h2>
-                <button type="button" className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-bg)]" onClick={() => setShowSaveModal(false)}><X size={16} weight="bold" /></button>
-              </div>
-              <p className="mt-2 text-[14px] text-[var(--rl-text-muted)]">This creates a new template with the current canvas layout.</p>
-              <Input className="mt-3" placeholder="Template name" value={templateName} onChange={(e) => setTemplateName(e.target.value)} autoFocus />
-              <div className="mt-4 flex gap-2">
-                <Button size="sm" icon={<FloppyDisk size={14} weight="bold" />} onClick={saveAsTemplate}>Save</Button>
-                <Button variant="secondary" size="sm" onClick={() => setShowSaveModal(false)}>Cancel</Button>
-              </div>
+      {showSaveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowSaveModal(false)}>
+          <div className="w-full max-w-md rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-6 shadow-card" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">Save as new template</h2>
+              <button type="button" className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-bg)]" onClick={() => setShowSaveModal(false)}><X size={16} weight="bold" /></button>
+            </div>
+            <p className="mt-2 text-[14px] text-[var(--rl-text-muted)]">This creates a new template in Builder with the current canvas layout.</p>
+            <Input className="mt-3" placeholder="Template name" value={templateName} onChange={(e) => setTemplateName(e.target.value)} autoFocus />
+            <div className="mt-4 flex gap-2">
+              <Button size="sm" icon={<FloppyDisk size={14} weight="bold" />} onClick={saveAsTemplate}>Save</Button>
+              <Button variant="secondary" size="sm" onClick={() => setShowSaveModal(false)}>Cancel</Button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+    </div>
   );
 }

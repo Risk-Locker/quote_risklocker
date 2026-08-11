@@ -26,7 +26,10 @@ External chat tools cannot be forced to follow repository instructions. Give the
 | Templates or PDF generation | `BUSINESS-RULES.md`, `ARCHITECTURE.md`, `REFERENCES.md` | renderer, template config, builder, assets |
 | Database, Supabase, storage, migrations | `ARCHITECTURE.md`, `OPERATIONS.md` | models, migrations, storage services |
 | Testing, failures, regression coverage | `TESTING.md` | relevant tests and implementation |
-| Environment, local run, deployment, retention | `OPERATIONS.md` | config and command scripts |
+| Environment, local run, deployment, retention | `OPERATIONS.md`, `SETUP.md` | config and command scripts |
+| Deployment, VPS, subdomains, infrastructure | `SETUP.md` | `OPERATIONS.md` env tables |
+| How the owner talks / how to interpret him | `INSTRUCTIONS.md` | AGENTS.md interaction rules |
+| Recent work, logbook, current snapshot | `MEMORY.md` | files cited in the latest entries |
 | Documentation maintenance | this file, `MEMORY.md` if needed | the affected canonical document |
 | Skill selection | `SKILLS.md` | the selected skill instructions |
 
@@ -34,17 +37,19 @@ External chat tools cannot be forced to follow repository instructions. Give the
 
 | Document | Canonical purpose | Update when |
 | --- | --- | --- |
-| `MEMORY.md` | Short current project snapshot | current facts, active risks, or durable decisions change |
+| `MEMORY.md` | Short current project snapshot + ultra-short logbook of every interaction | after every interaction, without waiting for git commit |
+| `INSTRUCTIONS.md` | How the owner talks and how agents must interpret him | owner expresses a new preference or interaction rule |
 | `PROJECT-CONTEXT.md` | Product purpose, users, scope | product scope or supported workflows change |
 | `PROJECT-DIAGRAM.md` | Single visual map of user flow, features, and system boundaries | workflow, routes, roles, major services, or integrations change |
 | `BUSINESS-RULES.md` | Mandatory workflow, security, and business rules | rules, roles, data-retention, or review behavior changes |
 | `ARCHITECTURE.md` | System boundaries and data flow | services, storage, integrations, or data flow change |
-| `STRUCTURE.md` | Curated repository guide | top-level ownership or navigation changes |
+| `STRUCTURE.md` | Curated repository guide | top-level ownership or navigation changes (file add/delete) |
 | `DESIGN-SYSTEM.md` | UI and accessibility rules | visual, interaction, or workflow-screen rules change |
 | `API-CONTRACT.md` | HTTP contract summary | API behavior, auth, or file-access contract changes |
 | `TESTING.md` | Test strategy and commands | coverage expectations, fixtures, or checks change |
 | `OPERATIONS.md` | Configuration and runbook | environment, scripts, migrations, or deployment changes |
-| `SKILLS.md` | Agent skill routing | relevant skills or routing policy changes |
+| `SETUP.md` | Deployment runbook (VPS, subdomain, DB, storage, monitoring) | any infrastructure change; always placeholders only |
+| `SKILLS.md` | Agent skill routing | skills installed, removed, or routing policy changes |
 | `REFERENCES.md` | Runtime asset and private-reference policy | reference locations or asset policy changes |
 | `generated/CODEBASE-MAP.md` | Detailed generated source map | structure, routes, schema, environment, or major behavior changes |
 
