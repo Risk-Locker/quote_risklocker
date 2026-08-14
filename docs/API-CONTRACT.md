@@ -2,64 +2,63 @@
 
 ## Conventions
 
-- FastAPI exposes the same router at `/api` and the root path for compatibility.
-- Authenticated endpoints use the opaque `risklocker_session` HttpOnly cookie. Bearer tokens and query-string download tokens are not accepted.
-- The frontend sends requests with cookie credentials and stores no authentication token in `localStorage` or `sessionStorage`.
-- Cookie-authenticated mutations enforce the configured trusted frontend origins in addition to `SameSite=Lax`; production requests without a trusted `Origin` are rejected.
-- PDF endpoints use the same authenticated cookie, support byte-range responses, and never return provider URLs.
+- Production exposes one surface under `/api`; root aliases are non-production compatibility only.
+- Browser calls use relative `/api`, credentials, and no browser-stored authentication token.
+- Every mutation requires an allowed `Origin`. Authenticated mutations also require `X-CSRF-Token` matching the session-bound `risklocker_csrf` cookie.
+- Expensive endpoints use Postgres-backed rate limits. `429` includes `Retry-After`.
+- PDF endpoints authorize every request, support byte ranges, and never return provider URLs.
+- Mutations use idempotency keys where specified and optimistic `base_revision`; a `409` never overwrites newer state.
+- Errors converge on `{ "error": { "code", "message", "details?", "request_id?" } }`.
 
-## Contract Maturity
+## v7 Core Endpoints
 
-- Authentication and user create/update endpoints now accept strict Pydantic request models. Other mutable JSON endpoints still accept untyped dictionary payloads and apply validation in route/service logic.
-- A future API-hardening change should extend explicit request and response models to drafts, generation, and admin writes. That work must preserve the existing staff workflow and require endpoint-level regression coverage.
-- Do not describe request schemas as available until that implementation and its compatibility tests are complete.
-
-## Endpoint Groups
-
-| Group | Main operations | Access |
+| Endpoint | Contract | Delivery |
 | --- | --- | --- |
-| Health and authentication | health, request code, verify code, current user, logout | health and code request/verification are public; other operations require a valid session |
-| User management | create, list, update users; revoke a user's sessions | Admin; Manager is limited to Staff management, while session revocation is Admin-only |
-| Notifications | list notifications, unread count, mark-read, mark-all-read | authenticated user (recipient-scoped) |
-| Admin mail | test SMTP connection with delivery to own address | Admin |
-| Batches and uploads | upload batch, fetch batch | authenticated owner/authorized manager/admin |
-| Draft review | fetch draft, save reviewed fields (+ optional `layout_override`), generate one or selected drafts | authenticated owner/authorized manager/admin |
-| Sessions | list (search + limit/offset pagination), fetch session | owner-scoped |
-| Trash | delete, restore, purge expired trash | owner-scoped; trash purge is Admin-only |
-| Template groups | list/create/delete groups, link company, assign templates via `group_id` | Admin |
-| Templates | copy (locked/default only), **`POST /admin/templates/{id}/make-master`** (single master, previous master demoted) | Admin |
-| Settings imports | road-tax CSV/Excel export+import, vehicles multi-sheet Excel import, runner-fee default | Admin |
-| Extraction details | fetch hidden extraction record | Admin or Manager |
-| Admin configuration | companies, templates, assets, benefits, dictionaries, extraction settings, storage | Admin or Manager where allowed by service policy |
-| PDF content | source-file and generated-version content | authenticated and record-authorized |
+| `POST /api/uploads` | Exactly one PDF plus idempotency key; `202` with `session_id`, `job_id` | WP4 |
+| `GET /api/jobs/{job_id}` | queued/processing/completed/failed/cancelled, attempt, progress, safe error | WP4 |
+| `GET /api/sessions/{id}/workspace` | safe snapshot, reviewed decisions, pinned revisions, blockers, capabilities | WP5 |
+| `GET /api/sessions/{id}/source-pages` | lazy paginated source/evidence data | WP5 |
+| `PATCH /api/drafts/{id}/workspace` | dirty operations plus mandatory `base_revision`; canonical snapshot/revision response | WP5 |
+| `POST /api/sessions/{id}/template-selection-impact` | read-only impact for an exact published target and current draft revision | WP7 |
+| `GET /api/business/template-page-profiles` | active fixed page profiles available to business users | WP7 |
+| `GET /api/business/templates/published` | latest published revision of every active insurer-independent template | WP7 |
+| `POST /api/business/templates/{id}/publish` | optimistic publish of a validated immutable revision; identical content is idempotent | WP7 |
+| remaining impact-preview/apply endpoints | company/product/tier/package/catalog changes require explicit confirmation | WP5-WP6 |
+| `POST /api/sessions/{id}/preview-render` | saves/uses exact revision and returns cached result or render job | WP8 |
+| `POST /api/sessions/{id}/versions` | exact saved revision plus idempotency key; at most one immutable version | WP8 |
+| `GET /api/versions/{id}/pdf` | stream existing authorized PDF; never generate | WP8 |
+| `/api/business/*` | paginated business setup, draft/publish/revision/import/reference-aware retirement | WP6-WP7 |
+| `/api/records/*` | shared paginated records, saved filters, bulk archive/trash/restore/export/purge | WP9 |
 
-## Authentication Contract
+Existing `/batches`, legacy draft, old preview, and generated-content routes are compatibility-only and are removed from new UI callers as their v7 equivalents ship.
 
-- `POST /auth/request-code` accepts `{ "email": string }` and always returns `202` with the same message. Codes are sent only for an active, pre-created, named employee account; the response does not reveal whether an account exists, is disabled, is throttled, or failed delivery.
-- `POST /auth/verify-code` accepts `{ "email": string, "code": "000000" }`. A valid unconsumed code creates a server-side session and sets the HttpOnly cookie. Invalid, expired, or attempt-limited codes return the shared `401` error shape.
-- `GET /auth/me` returns the current employee account for a valid session.
-- `POST /auth/logout` revokes the current server-side session, expires the cookie, and returns `{ "signed_out": true }`.
-- `POST /users/{user_id}/sessions/revoke` is Admin-only and immediately revokes every active session for the target account.
-- `PATCH /drafts/{draft_id}` accepts `layout_override` (template-config dict, session-scoped canvas layout) — generation and preview-png use it when present; the master template is never modified.
-- `GET /sessions` accepts `search` (filename/company), `limit` (max 100), `offset`; returns `{ sessions, total }`. The legacy `GET /history` endpoint is removed.
-- Creating, updating, seeding, and authenticating accounts all require a normalized named employee address with the exact `@risklocker.com` domain. Public registration does not exist.
-- New accounts are created in `invited` status. The create-user endpoint returns the invited account; an invitation email with a one-time login code is delivered through the backend SMTP relay. The account auto-promotes to `active` on the first successful code verification.
+Business Setup owns company, product, tier, catalog, benefit concept, base/upgrade/optional offering, package, variation, source, asset, and alias records. The active UI never writes the legacy global Our Specials model.
 
-## Notification Contract
+Job responses include phase start/completion timestamps, heartbeat, elapsed duration, attempt, and safe retry state so the UI never infers progress from request count.
 
-- `GET /notifications` returns all notifications for the current user, ordered newest-first. Each notification includes `id`, `event_type` (invitation/role_change/status_change), `title`, `body`, `read_at` (null if unread), `delivery_state` (sent/failed), and `created_at`.
-- `GET /notifications/unread-count` returns `{ "unread_count": int }` for the current user.
-- `PATCH /notifications/{notification_id}/read` marks a single notification read. Returns 404 if the notification does not belong to the current user.
-- `PATCH /notifications/read` marks all unread notifications read for the current user and returns the count updated.
-- `POST /admin/mail/test` is Admin-only. It validates the SMTP connection, sends a test email to the Admin's own address, and returns `{ "ok": bool, "message": str }`. A failed SMTP connection does not send an email; a connected relay that fails delivery reports the delivery failure.
+## Temporary Authentication Contract
 
-## Admin Mail Contract
+- `POST /api/auth/login` is the protected password flow during core work. It returns generic failures, is rate-limited, rotates an opaque server session, and issues the session-bound CSRF cookie.
+- `GET /api/auth/me` returns the active user and capability summary.
+- `POST /api/auth/logout` revokes server state and expires both cookies.
+- `dev` accounts cannot authenticate or retain a production session.
+- Environment-driven owner resets are disabled. `python commands/create_admin.py <email>` is the one-time interactive Primary Admin bootstrap.
+- No public signup exists. A dormant backend mail-provider boundary may exist, but the current password flow never invokes it. OTP/onboarding/recovery and live Resend activation remain post-core work.
 
-## Workflow Contract
+## Access Contract
 
-- Upload returns a batch identifier; the frontend routes staff to the batch review list.
-- Draft updates save field values, selected template, package, benefits, and add-ons. Saving resets edited field status to ready; unresolved fields keep the draft in `Check Needed`.
-- Generation requires reviewed fields, a selected template, and a selected package. It returns a new version and download-content path.
-- A missing or expired source binary does not remove the draft, extracted text, or version history.
+- Staff, Admin, and Primary Admin share quotation/customer records and approved business setup.
+- Admin additionally manages users, security, audit, IP controls, and operations.
+- Primary Admin exclusively controls Admin promotion/demotion, ownership transfer, and emergency recovery.
+- Capabilities are server-issued; frontend gating is not an authorization boundary.
+- A session editor never mutates a master template.
+- Staff, Admin, and Primary Admin may manage template drafts/assets and publish revisions; security/user administration remains Admin-only.
 
-For full current routes and line locations, use [generated/CODEBASE-MAP.md](generated/CODEBASE-MAP.md). Update this document whenever the externally observable API behavior changes.
+## Review and Generation Contract
+
+- Extraction candidates are suggestions. Every source line needs one explicit disposition.
+- Scalar decisions are `Confirm`, `Edit`, `Clear`, or `Keep Check Needed`; editing one field cannot confirm another.
+- Unknown required value/cost, unresolved lines, invalid template/layout, or stale pinned selections are generation blockers.
+- Selecting a template first previews impact, then queues a confirmed `template_selection` workspace operation. A change clears any quotation layout bound to the previous template revision.
+- Generation exists only in final Preview/Generate and requires an exact saved revision. Download never creates a version.
+- Historical versions contain immutable render-context snapshots and remain unchanged by later catalog/template edits.

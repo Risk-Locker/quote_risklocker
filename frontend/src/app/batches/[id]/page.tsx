@@ -2,11 +2,10 @@
 
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
-import { Download, FilePenLine, RefreshCw } from "lucide-react";
+import { FilePenLine, RefreshCw } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
-import { apiErrorMessage } from "@/lib/errors";
 
 type Batch = {
   id: string;
@@ -26,19 +25,6 @@ export default function BatchPage({ params }: { params: Promise<{ id: string }> 
       .catch((err) => setError(err instanceof Error ? err.message : "Could not load batch."));
   }, [id]);
 
-  async function generateReady() {
-    if (!batch) return;
-    setError("");
-    try {
-      const draftIds = batch.files.filter((file) => file.status === "Ready" && file.draft_id).map((file) => file.draft_id);
-      await api("/drafts/generate-selected", { method: "POST", body: JSON.stringify({ draft_ids: draftIds }) });
-      const refreshed = await api<{ batch: Batch }>(`/batches/${id}`);
-      setBatch(refreshed.batch);
-    } catch (err) {
-      setError(apiErrorMessage(err));
-    }
-  }
-
   return (
     <AppShell>
       <section className="grid gap-5">
@@ -47,10 +33,6 @@ export default function BatchPage({ params }: { params: Promise<{ id: string }> 
             <h1 className="text-3xl font-bold text-rl-textStrong">Preparing quotations</h1>
             <p className="mt-2 text-rl-text">Check values, edit if needed, then generate PDFs.</p>
           </div>
-          <button className="rl-button" type="button" onClick={generateReady}>
-            <Download aria-hidden="true" size={18} />
-            Generate All Ready PDFs
-          </button>
         </div>
         {error ? <p className="rounded-md border border-rl-red bg-red-50 p-3 font-bold text-rl-red">{error}</p> : null}
         <div className="rl-panel overflow-x-auto">

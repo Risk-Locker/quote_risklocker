@@ -9,16 +9,23 @@ export type PhaseKey = "upload" | "extraction" | "preview";
 const STEPS: Array<{ key: PhaseKey; label: string }> = [
   { key: "upload", label: "1. Upload" },
   { key: "extraction", label: "2. Check Values" },
-  { key: "preview", label: "3. Preview & Edit" },
+  { key: "preview", label: "3. Preview & Generate" },
 ];
+
+const STEP_HREFS: Record<PhaseKey, string> = {
+  upload: "/upload",
+  extraction: "check",
+  preview: "preview",
+};
 
 type SessionPhaseBarProps = {
   sessionId: string;
   current: PhaseKey;
   hasVersion?: boolean;
+  onStep?: (key: PhaseKey) => void;
 };
 
-export function SessionPhaseBar({ sessionId, current, hasVersion = false }: SessionPhaseBarProps) {
+export function SessionPhaseBar({ sessionId, current, hasVersion = false, onStep }: SessionPhaseBarProps) {
   const index = STEPS.findIndex((s) => s.key === current);
   return (
     <div className="flex flex-wrap items-center gap-1.5 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-1.5">
@@ -42,7 +49,11 @@ export function SessionPhaseBar({ sessionId, current, hasVersion = false }: Sess
               </span>
             ) : (
               <Link
-                href={`/sessions/${sessionId}/${step.key === "extraction" ? "review" : "preview"}` as Route}
+                href={step.key === "extraction" ? `/sessions/${sessionId}` : `/sessions/${sessionId}?step=preview` as Route}
+                onClick={onStep ? (event) => {
+                  event.preventDefault();
+                  onStep(step.key);
+                } : undefined}
                 className={`inline-flex items-center gap-1.5 rounded-[var(--rl-radius-sm)] px-3 py-1.5 text-[12px] font-semibold transition-all
                   ${active
                     ? "bg-[var(--rl-black)] text-white shadow-card"

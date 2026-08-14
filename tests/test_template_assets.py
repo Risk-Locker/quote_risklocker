@@ -49,6 +49,7 @@ def auth_settings():
         auth_hash_secret="test-auth-hash-secret-that-is-long-enough",
         max_upload_files=25,
         max_upload_bytes=1024 * 1024,
+        max_source_pdf_bytes=20 * 1024 * 1024,
         trash_retention_days=14,
     )
 
@@ -137,8 +138,9 @@ def test_settings_limits_returns_backend_values():
 
     assert response.status_code == 200
     data = response.json()
-    assert data["max_upload_files"] == 25
+    assert data["max_upload_files"] == 1
     assert data["max_upload_bytes"] == 1024 * 1024
+    assert data["max_source_pdf_bytes"] == 20 * 1024 * 1024
 
 
 def test_trash_includes_retention_days(monkeypatch):
@@ -292,3 +294,16 @@ def test_list_assets_includes_folder(monkeypatch):
             "folder": "Stickers",
         }
     ]
+
+
+def test_active_asset_library_never_lists_legacy_local_assets(monkeypatch):
+    from app.services import template_assets as ta
+
+    monkeypatch.setattr(
+        ta,
+        "_local_assets",
+        lambda: [{"id": "legacy", "source": "local", "folder": "Local"}],
+    )
+    monkeypatch.setattr(ta, "_uploaded_assets", lambda _db: [])
+
+    assert ta.list_template_assets(FakeDb()) == []

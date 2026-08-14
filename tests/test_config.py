@@ -47,20 +47,39 @@ def test_supabase_url_requires_https():
             get_settings()
 
 
-def test_storage_retention_and_upload_limit_are_loaded():
-    env = {**VALID_ENV, "PDF_RETENTION_DAYS": "30", "MAX_UPLOAD_BYTES": "1048576"}
+def test_separate_production_resource_limits_are_loaded():
+    env = {
+        **VALID_ENV,
+        "MAX_SOURCE_PDF_BYTES": "20971520",
+        "MAX_PDF_PAGES": "100",
+        "MAX_GENERATED_PDF_BYTES": "26214400",
+        "MAX_ASSET_BYTES": "10485760",
+        "MAX_ASSET_PIXELS": "32000000",
+        "MAX_CATALOG_IMPORT_BYTES": "5242880",
+        "MAX_CATALOG_IMPORT_ROWS": "5000",
+        "MAX_TEMPLATE_JSON_BYTES": "2097152",
+        "MAX_TEMPLATE_ELEMENTS": "2000",
+    }
     with patch.dict(os.environ, env, clear=True):
         settings = get_settings()
-    assert settings.pdf_retention_days == 30
-    assert settings.max_upload_bytes == 1024 * 1024
-    assert settings.max_upload_files == 50
+    assert settings.max_source_pdf_bytes == 20 * 1024 * 1024
+    assert settings.max_pdf_pages == 100
+    assert settings.max_generated_pdf_bytes == 25 * 1024 * 1024
+    assert settings.max_asset_bytes == 10 * 1024 * 1024
+    assert settings.max_asset_pixels == 32_000_000
+    assert settings.max_catalog_import_bytes == 5 * 1024 * 1024
+    assert settings.max_catalog_import_rows == 5_000
+    assert settings.max_template_json_bytes == 2 * 1024 * 1024
+    assert settings.max_template_elements == 2_000
+    assert settings.max_upload_bytes == settings.max_source_pdf_bytes
+    assert settings.max_upload_files == 1
 
 
-def test_max_upload_files_can_be_overridden():
+def test_new_upload_count_is_fixed_to_one():
     env = {**VALID_ENV, "MAX_UPLOAD_FILES": "10"}
     with patch.dict(os.environ, env, clear=True):
-        settings = get_settings()
-    assert settings.max_upload_files == 10
+        with pytest.raises(RuntimeError, match="MAX_UPLOAD_FILES must be 1"):
+            get_settings()
 
 
 def test_invalid_max_upload_files_is_rejected():

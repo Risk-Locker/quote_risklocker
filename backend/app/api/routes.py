@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, Response as FastAPIResponse, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, Response as FastAPIResponse, UploadFile, status
+from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
@@ -15,8 +15,17 @@ from app.api.deps import AuthContext, current_auth, current_auth_optional, curre
 from app.api.schemas import (
     BulkClientRecordDeleteRequest,
     BulkUploadedFileDeleteRequest,
+    BenefitCatalogSaveRequest,
+    BenefitConceptSaveRequest,
+    BusinessCompanySaveRequest,
+    BusinessProductSaveRequest,
+    BusinessTierSaveRequest,
+    CatalogOfferingSaveRequest,
+    CatalogPublishRequest,
     ClientRecordUpdateRequest,
     CompanySaveRequest,
+    CompanyAliasSaveRequest,
+    DictionaryLearnRequest,
     DraftGenerateRequest,
     DraftUpdateRequest,
     ExtractionSettingsRequest,
@@ -26,8 +35,12 @@ from app.api.schemas import (
     OurSpecialSaveRequest,
     OurSpecialVariantSaveRequest,
     RoadTaxRuleSaveRequest,
+    RecordBulkActionRequest,
+    RecordSavedViewRequest,
     TemplateSaveRequest,
     TemplateGroupSaveRequest,
+    TemplatePublishRequest,
+    TemplateSelectionImpactRequest,
     TemplateUpdateRequest,
     TrashDeleteForeverRequest,
     UserCreateRequest,
@@ -36,16 +49,21 @@ from app.api.schemas import (
     VariantMoveRequest,
     VehicleBrandSaveRequest,
     VehicleModelSaveRequest,
+    WorkspacePatchRequest,
+    VersionGenerationRequest,
 )
 from app.auth.rbac import can_view_owner_record, require_role
 from app.core.config import Settings
 from app.core.errors import AppError
+from app.core.security import csrf_token_for_session
 from app.db.session import get_db
 from app.models.enums import Role, StorageStatus
 from app.models.tables import (
     FieldAlias,
+    BusinessAsset,
     GeneratedPdfVersion,
     InsuranceCompany,
+    Job,
     OurSpecial,
     OurSpecialVariant,
     OutputTemplateConfig,
@@ -62,8 +80,10 @@ from app.services.admin_service import (
     delete_template_group,
     delete_vehicle_brand,
     delete_vehicle_model,
+    dictionary_contains,
     get_runner_fee_default,
     import_vehicles_workbook,
+    learn_dictionary_value,
     list_template_groups,
     make_template_master,
     save_strategy_settings,
@@ -101,7 +121,11 @@ from app.services.notification_service import (
     mark_read,
     serialize_notification,
 )
-from app.services.pdf_service import generate_pdf
+from app.services.generation_service import (
+    render_snapshot_preview_html,
+    request_preview_render,
+    request_version_generation,
+)
 from app.services.pdf_content import load_pdf_bytes, parse_byte_range
 from app.services.review_service import (
     get_accessible_draft,
@@ -122,9 +146,32 @@ from app.services.template_assets import (
     resolve_template_asset,
     upload_template_asset,
 )
-from app.services.upload_service import create_batch_from_uploads, serialize_batch
+from app.services.upload_service import serialize_batch
+from app.services.upload_intake_service import create_queued_upload
+from app.services.job_service import cancel_job, serialize_job
 from app.services.session_service import get_session, list_sessions, serialize_session
-from app.services.client_record_service import export_csv_bytes, get_record, list_records, serialize_record, update_record
+from app.services.workspace_service import apply_workspace_patch, build_workspace_snapshot, template_selection_impact
+from app.services.workspace_service import workspace_capabilities
+from app.services.workspace_source_service import get_source_evidence, get_source_pages, get_workspace_template_config
+from app.services.template_revision_service import (
+    list_page_profiles,
+    list_published_templates,
+    publish_template_revision,
+    serialize_template_revision,
+)
+from app.services.client_record_service import (
+    delete_view as delete_record_view,
+    export_csv_bytes,
+    get_record,
+    list_records_page,
+    list_saved_views,
+    records_matching_ids,
+    save_view as save_record_view,
+    serialize_record,
+    serialize_saved_view,
+    set_records_archived,
+    update_record,
+)
 from app.services.road_tax_service import (
     delete_rule as delete_road_tax_rule,
     export_csv_bytes as export_road_tax_csv,
@@ -135,6 +182,26 @@ from app.services.road_tax_service import (
 )
 from app.services.import_export import parse_tabular, parse_vehicles_workbook
 from app.storage.supabase import StorageError, SupabaseStorage
+from app.services.business_setup_service import (
+    create_benefit_catalog,
+    get_catalog_workspace,
+    get_business_company_workspace,
+    list_benefit_concepts,
+    list_business_assets,
+    list_business_companies,
+    list_company_aliases,
+    list_source_documents,
+    save_benefit_concept,
+    save_business_company,
+    save_business_product,
+    save_business_tier,
+    save_company_alias,
+    save_catalog_offering,
+    publish_catalog_revision,
+    upload_business_asset,
+    retire_company_alias,
+)
+from app.services.worker_health import worker_readiness
 
 
 logger = logging.getLogger(__name__)
@@ -148,6 +215,15 @@ def _set_session_cookie(response: FastAPIResponse, settings: Settings, token: st
         value=token,
         max_age=max_age,
         httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+    response.set_cookie(
+        key=getattr(settings, "csrf_cookie_name", "risklocker_csrf"),
+        value=csrf_token_for_session(token, settings.auth_hash_secret),
+        max_age=max_age,
+        httponly=False,
         secure=settings.session_cookie_secure,
         samesite="lax",
         path="/",
@@ -173,6 +249,16 @@ def _pdf_response(data: bytes, filename: str, range_header: str | None, download
 @router.get("/health")
 def health(settings: Settings = Depends(settings_dep)) -> dict:
     return {"status": "Ready", "app": settings.app_name}
+
+
+@router.get("/health/ready")
+def readiness(db: Session = Depends(get_db)) -> JSONResponse:
+    worker = worker_readiness(db)
+    ready = bool(worker["ready"])
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        content={"status": "Ready" if ready else "Unavailable", "checks": {"worker": worker}},
+    )
 
 
 @router.post("/auth/login")
@@ -213,12 +299,19 @@ def auth_logout(
         httponly=True,
         samesite="lax",
     )
+    response.delete_cookie(
+        getattr(settings, "csrf_cookie_name", "risklocker_csrf"),
+        path="/",
+        secure=settings.session_cookie_secure,
+        httponly=False,
+        samesite="lax",
+    )
     return {"signed_out": True}
 
 
 @router.get("/auth/me")
 def me(user: User = Depends(current_user)) -> dict:
-    return serialize_user(user)
+    return {**serialize_user(user), "capabilities": workspace_capabilities(user)}
 
 
 @router.get("/system/checks")
@@ -308,18 +401,50 @@ async def upload_batch(
     settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
 ) -> dict:
-    batch = await create_batch_from_uploads(db, settings, user.id, files, enhanced_reading)
-    from app.models.tables import Session as SessionModel
-    from app.services.session_service import serialize_session
-    sessions = [
-        serialize_session(s)
-        for s in db.scalars(
-            select(SessionModel).where(
-                SessionModel.uploaded_file_id.in_([f.id for f in batch.files if not f.deleted_at])
-            )
-        ).all()
-    ]
-    return {"batch": serialize_batch(batch), "sessions": sessions}
+    # RL-DISABLED new batch upload — disabled 2026-08-13; legacy batch records remain readable.
+    raise AppError("Multi-file upload is no longer available. Upload one PDF from the Upload page.", 410)
+
+
+@router.post("/uploads", status_code=status.HTTP_202_ACCEPTED)
+async def upload_one(
+    file: UploadFile = File(...),
+    enhanced_reading: bool = Form(False),
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    queued = await create_queued_upload(
+        db,
+        settings,
+        owner_id=user.id,
+        upload=file,
+        idempotency_key=idempotency_key,
+        enhanced_reading=enhanced_reading,
+    )
+    return {
+        "session_id": queued.session.id,
+        "job_id": queued.job.id,
+        "uploaded_file_id": queued.uploaded_file.id,
+        "created": queued.created,
+    }
+
+
+@router.get("/jobs/{job_id}")
+def job_detail(job_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> dict:
+    job = db.get(Job, job_id)
+    if not job:
+        raise AppError("Job not found.", 404)
+    return {"job": serialize_job(job)}
+
+
+@router.post("/jobs/{job_id}/cancel")
+def job_cancel(job_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> dict:
+    job = db.get(Job, job_id)
+    if not job:
+        raise AppError("Job not found.", 404)
+    cancel_job(db, job)
+    return {"job": serialize_job(job)}
 
 
 @router.get("/batches/{batch_id}")
@@ -355,63 +480,20 @@ def draft_update(draft_id: str, payload: DraftUpdateRequest, db: Session = Depen
 
 @router.post("/drafts/{draft_id}/generate")
 def draft_generate(draft_id: str, payload: DraftGenerateRequest | None = None, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
-    draft = get_accessible_draft(db, user, draft_id)
-    version = generate_pdf(db, settings, user, draft, acknowledge_check_needed=bool((payload or DraftGenerateRequest()).acknowledge_check_needed))
-    return {
-        "version": {
-            "id": version.id,
-            "filename": version.filename,
-            "version_number": version.version_number,
-            "download_url": f"/generated-versions/{version.id}/content?download=true",
-        }
-    }
+    # RL-DISABLED legacy direct generation — disabled 2026-08-13; use the exact-revision session endpoint.
+    raise AppError("Generate PDFs only from the final session Preview step.", 410)
 
 
 @router.post("/drafts/{draft_id}/preview-png")
 def draft_preview_png(draft_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> Response:
-    from app.rendering.template_renderer import render_quotation_html
-    from app.models.tables import OutputTemplateConfig
-    from app.services.template_config import normalize_template_config
-    from app.core.errors import AppError
-    import tempfile
-    from pathlib import Path
-
-    draft = get_accessible_draft(db, user, draft_id)
-    if not draft.uploaded_file or not draft.uploaded_file.template_id:
-        raise AppError("No template assigned.", 400)
-    template = db.get(OutputTemplateConfig, draft.uploaded_file.template_id)
-    if not template:
-        raise AppError("Template not found.", 404)
-    config = normalize_template_config(template.fixed_fields, template.name)
-    if draft.layout_override:
-        config = normalize_template_config(draft.layout_override, template.name)
-    html = render_quotation_html(
-        draft.fields, template_name=template.name,
-        template_config=config,
-        insurer_name=(draft.fields.get("insurance_company") or {}).get("value"),
-        db=db,
-    )
-    try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch()
-            page = browser.new_page(viewport={"width": 794, "height": 1123})
-            page.set_content(html, wait_until="networkidle")
-            png = page.screenshot(type="png", full_page=False)
-            browser.close()
-        return Response(png, media_type="image/png")
-    except Exception as exc:
-        raise AppError(f"Preview generation failed: {exc.__class__.__name__}", 500) from exc
+    # RL-DISABLED request-local Chromium preview — disabled 2026-08-13; canonical queued preview is a later endpoint.
+    raise AppError("This legacy preview endpoint is no longer available.", 410)
 
 
 @router.post("/drafts/generate-selected")
 def generate_selected(payload: GenerateSelectedRequest, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
-    versions = []
-    for draft_id in payload.draft_ids:
-        draft = get_accessible_draft(db, user, draft_id)
-        version = generate_pdf(db, settings, user, draft, acknowledge_check_needed=payload.acknowledge_check_needed)
-        versions.append({"id": version.id, "filename": version.filename, "download_url": f"/generated-versions/{version.id}/content?download=true"})
-    return {"versions": versions}
+    # RL-DISABLED batch generation — disabled 2026-08-13; generation belongs only to the final session step.
+    raise AppError("Batch generation is no longer available. Review and generate each quotation from its final step.", 410)
 
 
 @router.get("/sessions")
@@ -426,6 +508,128 @@ def session_detail(session_id: str, db: Session = Depends(get_db), user: User = 
     return {"session": serialize_session(session)}
 
 
+@router.get("/sessions/{session_id}/workspace")
+def session_workspace(session_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    return {"workspace": build_workspace_snapshot(db, user, session_id)}
+
+
+@router.post("/sessions/{session_id}/template-selection-impact")
+def session_template_selection_impact(
+    session_id: str,
+    payload: TemplateSelectionImpactRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {
+        "impact": template_selection_impact(
+            db,
+            user,
+            session_id,
+            template_revision_id=payload.template_revision_id,
+            base_revision=payload.base_revision,
+        )
+    }
+
+
+@router.get("/sessions/{session_id}/source-pages")
+def session_source_pages(
+    session_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(5, ge=1, le=20),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return get_source_pages(db, user, session_id, page=page, page_size=page_size)
+
+
+@router.get("/sessions/{session_id}/evidence/{field_name}")
+def session_field_evidence(
+    session_id: str,
+    field_name: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return get_source_evidence(db, user, session_id, field_name)
+
+
+@router.get("/sessions/{session_id}/template-config")
+def session_template_config(
+    session_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"template": get_workspace_template_config(db, user, session_id)}
+
+
+@router.patch("/drafts/{draft_id}/workspace")
+def draft_workspace_patch(
+    draft_id: str,
+    payload: WorkspacePatchRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {
+        "workspace": apply_workspace_patch(
+            db,
+            user,
+            draft_id,
+            base_revision=payload.base_revision,
+            operations=payload.operations,
+        )
+    }
+
+
+@router.post("/sessions/{session_id}/versions", status_code=status.HTTP_202_ACCEPTED)
+def session_generate_version(
+    session_id: str,
+    payload: VersionGenerationRequest,
+    response: FastAPIResponse,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    result = request_version_generation(
+        db,
+        user,
+        session_id,
+        draft_revision=payload.draft_revision,
+        idempotency_key=idempotency_key,
+    )
+    version = result.get("version")
+    if version is not None:
+        response.status_code = status.HTTP_200_OK
+        return {
+            "created": False,
+            "version": {
+                "id": version.id,
+                "version_number": version.version_number,
+                "draft_revision": version.draft_revision,
+            },
+        }
+    response.status_code = status.HTTP_202_ACCEPTED
+    return {"created": bool(result["created"]), "job": serialize_job(result["job"])}
+
+
+@router.post("/sessions/{session_id}/preview-render")
+def session_preview_render(
+    session_id: str,
+    payload: VersionGenerationRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    snapshot = request_preview_render(
+        db,
+        user,
+        session_id,
+        draft_revision=payload.draft_revision,
+    )
+    return {
+        "preview_id": snapshot.id,
+        "context_hash": snapshot.context_hash,
+        "preview_url": f"/previews/{snapshot.id}/html",
+    }
+
+
 @router.get("/client-records")
 def client_records_list(
     search: str | None = None,
@@ -433,11 +637,38 @@ def client_records_list(
     date_to: str | None = None,
     sort_by: str = "created_at",
     sort_dir: str = "desc",
+    company: str | None = None,
+    state: str = "active",
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
-    records = list_records(db, search=search, date_from=date_from, date_to=date_to, sort_by=sort_by, sort_dir=sort_dir)
-    return {"records": [serialize_record(r) for r in records]}
+    result = list_records_page(
+        db, search=search, date_from=date_from, date_to=date_to, sort_by=sort_by,
+        sort_dir=sort_dir, company=company, state=state, page=page, page_size=page_size,
+    )
+    return {
+        "records": [serialize_record(item) for item in result["items"]],
+        "page": result["page"], "page_size": result["page_size"], "total": result["total"],
+        "companies": result["companies"],
+    }
+
+
+@router.get("/client-records/saved-views")
+def client_record_saved_views(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    return {"views": [serialize_saved_view(item) for item in list_saved_views(db, user)]}
+
+
+@router.post("/client-records/saved-views")
+def client_record_saved_view_save(payload: RecordSavedViewRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    return {"view": serialize_saved_view(save_record_view(db, user, payload.model_dump()))}
+
+
+@router.delete("/client-records/saved-views/{view_id}")
+def client_record_saved_view_delete(view_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    delete_record_view(db, user, view_id)
+    return {"deleted": True}
 
 
 @router.get("/client-records/export")
@@ -481,6 +712,26 @@ def client_records_bulk_delete(payload: BulkClientRecordDeleteRequest, db: Sessi
         except AppError as exc:
             failed.append({"id": record_id, "message": str(exc)})
     return {"deleted": deleted, "failed": failed}
+
+
+@router.post("/client-records/bulk-action")
+def client_records_bulk_action(payload: RecordBulkActionRequest, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
+    record_ids = records_matching_ids(db, payload.filters) if payload.all_matching else list(dict.fromkeys(payload.record_ids))
+    if not record_ids:
+        raise AppError("Choose at least one matching record.", 422)
+    if payload.action in {"archive", "unarchive"}:
+        changed = set_records_archived(db, user, record_ids, archived=payload.action == "archive")
+        return {"changed": changed, "failed": []}
+    from app.services.trash_service import delete_client_record
+    changed: list[str] = []
+    failed: list[dict] = []
+    for record_id in record_ids:
+        try:
+            delete_client_record(db, settings, user, record_id)
+            changed.append(record_id)
+        except AppError as exc:
+            failed.append({"id": record_id, "message": str(exc)})
+    return {"changed": changed, "failed": failed}
 
 
 @router.delete("/records/{uploaded_file_id}")
@@ -550,10 +801,9 @@ def trash_asset_restore(asset_id: str, db: Session = Depends(get_db), user: User
 
 
 @router.post("/trash/purge-expired")
-def trash_purge(db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
-    from app.services.trash_service import purge_all_expired
-    purged = purge_expired_trash(db, user, SupabaseStorage(settings))
-    return {"purged": purged + purge_all_expired(db)}
+def trash_purge(user: User = Depends(current_user)) -> dict:
+    # RL-DISABLED timed trash purge — disabled 2026-08-14; compatibility route.
+    raise AppError("Timed trash purge is disabled. Delete selected items or explicitly empty Trash.", 410)
 
 
 @router.post("/trash/empty")
@@ -639,7 +889,7 @@ def admin_company_delete(company_id: str, db: Session = Depends(get_db), user: U
 
 @router.get("/admin/template-groups")
 def admin_template_groups(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
     return {"groups": list_template_groups(db)}
 
 
@@ -655,9 +905,282 @@ def admin_template_group_delete(group_id: str, db: Session = Depends(get_db), us
     return {"deleted": True}
 
 
+@router.get("/business/template-page-profiles")
+def business_template_page_profiles(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    return {"page_profiles": list_page_profiles(db, user)}
+
+
+@router.get("/business/companies")
+def business_companies(
+    search: str = Query(default="", max_length=200),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=30, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {
+        "companies": list_business_companies(
+            db,
+            user,
+            search=search,
+            page=page,
+            page_size=page_size,
+        )
+    }
+
+
+@router.get("/business/company-aliases")
+def business_company_aliases(
+    search: str = Query(default="", max_length=200),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"aliases": list_company_aliases(db, user, search=search, page=page, page_size=page_size)}
+
+
+@router.post("/business/company-aliases")
+def business_company_alias_save(
+    payload: CompanyAliasSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"company_alias": save_company_alias(db, user, payload.model_dump(exclude_none=True))}
+
+
+@router.delete("/business/company-aliases/{alias_id}", status_code=status.HTTP_204_NO_CONTENT)
+def business_company_alias_retire(
+    alias_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> Response:
+    retire_company_alias(db, user, alias_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/business/companies")
+def business_company_save(
+    payload: BusinessCompanySaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"company": save_business_company(db, user, payload.model_dump(exclude_none=True))}
+
+
+@router.get("/business/companies/{company_id}/workspace")
+def business_company_workspace(
+    company_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"workspace": get_business_company_workspace(db, user, company_id)}
+
+
+@router.post("/business/products")
+def business_product_save(
+    payload: BusinessProductSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"product": save_business_product(db, user, payload.model_dump(exclude_none=True))}
+
+
+@router.post("/business/tiers")
+def business_tier_save(
+    payload: BusinessTierSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"tier": save_business_tier(db, user, payload.model_dump(exclude_none=True))}
+
+
+@router.get("/business/benefit-concepts")
+def business_benefit_concepts(
+    search: str = Query(default="", max_length=200),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {
+        "benefit_concepts": list_benefit_concepts(
+            db,
+            user,
+            search=search,
+            page=page,
+            page_size=page_size,
+        )
+    }
+
+
+@router.post("/business/benefit-concepts")
+def business_benefit_concept_save(
+    payload: BenefitConceptSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"benefit_concept": save_benefit_concept(db, user, payload.model_dump(exclude_none=True))}
+
+
+@router.get("/business/assets")
+def business_assets(
+    search: str = Query(default="", max_length=200),
+    kind: str | None = Query(default=None, max_length=40),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {
+        "assets": list_business_assets(
+            db,
+            user,
+            search=search,
+            kind=kind,
+            page=page,
+            page_size=page_size,
+        )
+    }
+
+
+@router.get("/business/assets/{asset_id}/content")
+def business_asset_content(
+    asset_id: str,
+    profile: str = Query(default="ui", pattern="^(ui|pdf|original)$"),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> Response:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
+    asset = db.get(BusinessAsset, asset_id)
+    if asset is None or asset.status not in {"active", "unassigned"}:
+        raise AppError("Asset not found.", 404)
+    item = (asset.derivative_manifest or {}).get(profile) if profile != "original" else None
+    storage_path = str((item or {}).get("storage_path") or asset.storage_path)
+    content_type = str((item or {}).get("content_type") or asset.content_type)
+    try:
+        data = SupabaseStorage(settings).download_bytes(storage_path)
+    except StorageError as exc:
+        raise AppError("Asset content is unavailable.", 503) from exc
+    return Response(
+        data,
+        media_type=content_type,
+        headers={
+            "Cache-Control": "private, max-age=86400, immutable",
+            "ETag": f'"{str((item or {}).get("content_hash") or asset.content_hash)}"',
+        },
+    )
+
+
+@router.post("/business/assets")
+async def business_asset_upload(
+    file: UploadFile = File(...),
+    label: str = Form(...),
+    kind: str = Form(...),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    data = await file.read()
+    try:
+        asset = upload_business_asset(
+            db,
+            settings,
+            user,
+            filename=file.filename or "asset",
+            label=label,
+            kind=kind,
+            data=data,
+        )
+    except StorageError as exc:
+        raise AppError("Asset storage is unavailable. Retry without changing the file.", 503) from exc
+    return {"asset": asset}
+
+
+@router.post("/business/catalogs")
+def business_catalog_create(
+    payload: BenefitCatalogSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"catalog": create_benefit_catalog(db, user, payload.model_dump(exclude_none=True))}
+
+
+@router.post("/business/catalogs/{catalog_id}/offerings")
+def business_catalog_offering_save(
+    catalog_id: str,
+    payload: CatalogOfferingSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {
+        "offering": save_catalog_offering(
+            db,
+            user,
+            catalog_id,
+            payload.model_dump(mode="json", exclude_none=True),
+        )
+    }
+
+
+@router.post("/business/catalogs/{catalog_id}/publish")
+def business_catalog_publish(
+    catalog_id: str,
+    payload: CatalogPublishRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"catalog": publish_catalog_revision(db, user, catalog_id, base_revision=payload.base_revision)}
+
+
+@router.get("/business/catalogs/{catalog_id}/workspace")
+def business_catalog_workspace(
+    catalog_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"workspace": get_catalog_workspace(db, user, catalog_id)}
+
+
+@router.get("/business/sources")
+def business_sources(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"sources": list_source_documents(db, user, page=page, page_size=page_size)}
+
+
+@router.get("/business/templates/published")
+def business_published_templates(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    return {"templates": list_published_templates(db, user)}
+
+
+@router.post("/business/templates/{template_id}/publish")
+def business_publish_template(
+    template_id: str,
+    payload: TemplatePublishRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    revision = publish_template_revision(
+        db,
+        user,
+        template_id,
+        base_revision=payload.base_revision,
+    )
+    template = db.get(OutputTemplateConfig, template_id)
+    return {
+        "template": serialize_template(template, db),
+        "template_revision": serialize_template_revision(db, revision),
+    }
+
+
 @router.get("/admin/templates")
 def admin_templates(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
     return {
         "templates": [
             serialize_template(item, db)
@@ -670,7 +1193,7 @@ def admin_templates(db: Session = Depends(get_db), user: User = Depends(current_
 
 @router.delete("/admin/templates/{template_id}")
 def admin_template_delete(template_id: str, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
-    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
     from app.services.trash_service import delete_template
     delete_template(db, settings, user, template_id)
     return {"deleted": True}
@@ -678,7 +1201,7 @@ def admin_template_delete(template_id: str, db: Session = Depends(get_db), setti
 
 @router.get("/admin/template-assets")
 def admin_template_assets(folder: str | None = None, search: str | None = None, limit: int = 50, offset: int = 0, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
     local = [a for a in list_template_assets() if a["source"] == "local"]
     uploaded = uploaded_assets_paged(db, folder=folder, search=search, limit=min(max(limit, 1), 200), offset=max(offset, 0))
     total = count_uploaded_assets(db, folder=folder, search=search)
@@ -694,7 +1217,7 @@ async def admin_template_asset_upload(
     settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
 ) -> dict:
-    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
     data = await file.read()
     try:
         record = upload_template_asset(db, settings, user, file.filename, file.content_type, data, label=label, folder=folder)
@@ -715,7 +1238,7 @@ async def admin_template_asset_upload(
 
 @router.delete("/admin/template-assets/{asset_id}")
 def admin_template_asset_delete(asset_id: str, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
-    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
     from app.services.trash_service import delete_template_asset
     delete_template_asset(db, settings, user, asset_id)
     return {"deleted": True}
@@ -723,7 +1246,7 @@ def admin_template_asset_delete(asset_id: str, db: Session = Depends(get_db), se
 
 @router.get("/admin/templates/{template_id}")
 def admin_template_detail(template_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
     template = db.get(OutputTemplateConfig, template_id)
     if not template:
         raise AppError("Template not found.", 404)
@@ -760,7 +1283,7 @@ def template_asset_file(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> Response:
-    if not user or user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value, Role.DEV.value}:
+    if not user or user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value, Role.STAFF.value}:
         raise AppError("File not found.", 404)
     try:
         resolved = resolve_template_asset(db, asset_id)
@@ -828,6 +1351,23 @@ def admin_dictionaries(db: Session = Depends(get_db), user: User = Depends(curre
         "vehicle_brands": [{"id": item.id, "name": item.name, "aliases": item.aliases} for item in db.scalars(select(VehicleBrand)).all()],
         "vehicle_models": [{"id": item.id, "brand_id": item.brand_id, "name": item.name, "aliases": item.aliases} for item in db.scalars(select(VehicleModel)).all()],
     }
+
+
+@router.get("/business/dictionaries/contains")
+def business_dictionary_contains(
+    field: str = Query(min_length=1, max_length=40),
+    value: str = Query(min_length=1, max_length=160),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
+    return {"known": dictionary_contains(db, field, value)}
+
+
+@router.post("/business/dictionaries/learn")
+def business_dictionary_learn(payload: DictionaryLearnRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    result = learn_dictionary_value(db, user, payload.field, payload.value)
+    return {"result": result}
 
 
 @router.post("/admin/dictionaries/field-aliases")
@@ -1006,8 +1546,9 @@ def settings_limits(
     user: User = Depends(current_user),
 ) -> dict:
     return {
-        "max_upload_files": settings.max_upload_files,
+        "max_upload_files": 1,
         "max_upload_bytes": settings.max_upload_bytes,
+        "max_source_pdf_bytes": settings.max_source_pdf_bytes,
     }
 
 
@@ -1031,7 +1572,7 @@ def admin_storage_status(
             "status": "Ready" if storage_ready else "Needs Setup",
             "message": storage_message,
             "bucket": settings.supabase_storage_bucket,
-            "retention_days": settings.pdf_retention_days,
+            "retention_policy": "manual_reference_aware_deletion",
             "tracked_source_bytes": int(source_bytes or 0),
         },
         "microsoft": {
@@ -1059,7 +1600,8 @@ def admin_storage_purge(
     user: User = Depends(current_user),
 ) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN)
-    return purge_expired_pdfs(db, SupabaseStorage(settings))
+    # RL-DISABLED automatic PDF expiry — disabled 2026-08-14; compatibility route.
+    raise AppError("PDF expiry is disabled. Use reference-aware deletion from Trash.", 410)
 
 
 @router.post("/admin/storage/microsoft/connect")
@@ -1096,3 +1638,41 @@ def generated_version_content(
     if not version or not version.draft or not can_view_owner_record(db, user, version.draft.owner_id):
         raise AppError("File not found.", 404)
     return _pdf_response(load_pdf_bytes(version, settings), version.filename, range_header, download)
+
+
+@router.get("/versions/{version_id}/pdf")
+def version_pdf(
+    version_id: str,
+    download: bool = Query(default=True),
+    range_header: str | None = Header(default=None, alias="Range"),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> Response:
+    version = db.scalar(
+        select(GeneratedPdfVersion)
+        .where(GeneratedPdfVersion.id == version_id)
+        .options(selectinload(GeneratedPdfVersion.draft))
+    )
+    if not version or not version.draft or not can_view_owner_record(db, user, version.draft.owner_id):
+        raise AppError("File not found.", 404)
+    return _pdf_response(load_pdf_bytes(version, settings), version.filename, range_header, download)
+
+
+@router.get("/previews/{preview_id}/html")
+def preview_html(
+    preview_id: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> Response:
+    html = render_snapshot_preview_html(db, user, preview_id, settings)
+    return Response(
+        content=html,
+        media_type="text/html",
+        headers={
+            "Cache-Control": "private, no-store",
+            "Content-Security-Policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

@@ -1,8 +1,6 @@
 # Optional extraction/rendering packages.
 # The backend starts without these and reports availability in Admin > System Checks.
-Pillow==11.1.0
 opencv-python-headless==4.11.0.86
-playwright==1.49.1
 
 # Optional local enhanced-reading engines. Install only when needed.
 # paddleocr can be heavy and may require platform-specific setup.

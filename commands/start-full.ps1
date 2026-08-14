@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $backendScript = Join-Path $root "commands\start-backend.ps1"
 $frontendScript = Join-Path $root "commands\start-frontend.ps1"
+$workerScript = Join-Path $root "commands\start-worker.ps1"
 
 Start-Process powershell.exe -ArgumentList @(
     "-NoExit",
@@ -11,7 +12,7 @@ Start-Process powershell.exe -ArgumentList @(
     "Bypass",
     "-File",
     "`"$backendScript`""
-)
+) -WindowStyle Hidden
 
 $backendPortFile = Join-Path $root ".qc-tmp\backend-port.txt"
 foreach ($attempt in 1..30) {
@@ -36,10 +37,19 @@ Start-Process powershell.exe -ArgumentList @(
     "-ExecutionPolicy",
     "Bypass",
     "-File",
-    "`"$frontendScript`""
-)
+    "`"$workerScript`""
+) -WindowStyle Hidden
 
-Write-Host "Started Risklocker backend and frontend in separate PowerShell windows."
+Start-Process powershell.exe -ArgumentList @(
+    "-NoExit",
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    "`"$frontendScript`""
+) -WindowStyle Hidden
+
+Write-Host "Started Risklocker backend, worker, and frontend as background processes."
 Write-Host "Backend:  auto-selected from http://127.0.0.1:8100 through http://127.0.0.1:8110"
 Write-Host "Frontend: http://127.0.0.1:3000/login"
 Write-Host "To stop cleanly: run npm run stop from the project root."

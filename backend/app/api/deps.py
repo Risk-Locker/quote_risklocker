@@ -12,6 +12,7 @@ from app.core.errors import AppError
 from app.db.session import get_db
 from app.models.tables import AuthSession, User
 from app.services.auth_service import authenticate_session
+from app.core.security import csrf_token_for_session
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,15 @@ def current_auth(
         samesite="lax",
         path="/",
     )
+    response.set_cookie(
+        key=getattr(settings, "csrf_cookie_name", "risklocker_csrf"),
+        value=csrf_token_for_session(raw_token, settings.auth_hash_secret),
+        max_age=remaining_seconds,
+        httponly=False,
+        secure=settings.session_cookie_secure,
+        samesite="lax",
+        path="/",
+    )
     return AuthContext(user=user, session=session, raw_token=raw_token)
 
 
@@ -84,6 +94,15 @@ def current_auth_optional(
         value=raw_token,
         max_age=remaining_seconds,
         httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+    response.set_cookie(
+        key=getattr(settings, "csrf_cookie_name", "risklocker_csrf"),
+        value=csrf_token_for_session(raw_token, settings.auth_hash_secret),
+        max_age=remaining_seconds,
+        httponly=False,
         secure=settings.session_cookie_secure,
         samesite="lax",
         path="/",

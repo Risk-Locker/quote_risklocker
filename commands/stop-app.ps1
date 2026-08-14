@@ -21,6 +21,7 @@ $processes = Get-CimInstance Win32_Process |
         $_.CommandLine -match $escapedRoot -and
         (
             $_.CommandLine -match "uvicorn" -or
+            $_.CommandLine -match "run-worker.py" -or
             $_.CommandLine -match "next dev" -or
             $_.CommandLine -match "next start" -or
             ($_.Name -eq "node.exe" -and $_.CommandLine -match $escapedFrontendRoot -and $_.CommandLine -match "next")
@@ -72,5 +73,5 @@ foreach ($listener in $listeners) {
 }
 
 if ($stoppedProcessIds.Count -eq 0) {
-    Write-Host "No Risklocker backend/frontend processes found for this project."
+    Write-Host "No Risklocker backend/worker/frontend processes found for this project."
 }

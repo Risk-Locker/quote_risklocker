@@ -10,13 +10,19 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.errors import AppError
 from app.models.enums import AccountStatus, Role
-from app.models.tables import AppSetting, FieldAlias, InsuranceCompany, OurSpecial, OurSpecialVariant, OutputTemplateConfig, TemplateGroup, VehicleBrand, VehicleModel
+from app.models.tables import AppSetting, FieldAlias, InsuranceCompany, OurSpecial, OurSpecialVariant, OutputTemplateConfig, TemplateGroup, TemplatePageProfile, TemplateRevision, VehicleBrand, VehicleModel
 from app.services.template_config import normalize_template_config, review_schema_for
+from app.services.template_revision_service import new_v7_template_config
 
 
 def require_admin(user) -> None:
     if user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value}:
         raise AppError("Only Admin can change this setting.", 403)
+
+
+def require_business_setup(user) -> None:
+    if user.role not in {Role.STAFF.value, Role.ADMIN.value, Role.SUPER_ADMIN.value}:
+        raise AppError("You do not have permission to manage business templates.", 403)
 
 
 def upsert_company(db: Session, user, payload: dict) -> InsuranceCompany:
@@ -52,7 +58,7 @@ def delete_company(db: Session, user, company_id: str) -> None:
 
 
 def upsert_template(db: Session, user, payload: dict) -> OutputTemplateConfig:
-    require_admin(user)
+    require_business_setup(user)
     template = db.get(OutputTemplateConfig, payload.get("id")) if payload.get("id") else None
     if template and normalize_template_config(template.fixed_fields, template.name).get("locked"):
         raise AppError("Copy this default template before editing.")
@@ -60,10 +66,7 @@ def upsert_template(db: Session, user, payload: dict) -> OutputTemplateConfig:
         template = OutputTemplateConfig(name=payload["name"], insurance_type=payload.get("insurance_type", "Motor"))
         db.add(template)
         if not payload.get("fixed_fields"):
-            config = normalize_template_config({}, payload["name"])
-            config["is_default"] = False
-            config["locked"] = False
-            template.fixed_fields = config
+            template.fixed_fields = new_v7_template_config(payload["name"])
     for key in ["name", "insurance_type", "insurance_company_id", "group_id", "html_template", "css_template", "static_notes", "editable_fields", "fixed_fields", "status"]:
         if key in payload:
             setattr(template, key, payload[key])
@@ -73,7 +76,7 @@ def upsert_template(db: Session, user, payload: dict) -> OutputTemplateConfig:
 
 
 def make_template_master(db: Session, user, template_id: str) -> OutputTemplateConfig:
-    require_admin(user)
+    require_business_setup(user)
     template = db.get(OutputTemplateConfig, template_id)
     if not template or template.deleted_at:
         raise AppError("Template not found.", 404)
@@ -118,7 +121,7 @@ def list_template_groups(db: Session) -> list[dict]:
 
 
 def upsert_template_group(db: Session, user, payload: dict) -> TemplateGroup:
-    require_admin(user)
+    require_business_setup(user)
     group = db.get(TemplateGroup, payload.get("id")) if payload.get("id") else None
     if not group:
         name = payload.get("name")
@@ -135,7 +138,7 @@ def upsert_template_group(db: Session, user, payload: dict) -> TemplateGroup:
 
 
 def delete_template_group(db: Session, user, group_id: str) -> None:
-    require_admin(user)
+    require_business_setup(user)
     group = db.get(TemplateGroup, group_id)
     if not group:
         raise AppError("Group not found.", 404)
@@ -216,8 +219,39 @@ def serialize_template(template: OutputTemplateConfig, db: Session | None = None
     if db is not None and template.group_id:
         group = db.get(TemplateGroup, template.group_id)
         group_name = group.name if group else None
+    revision_summaries: list[dict] = []
+    latest_published = None
+    if db is not None:
+        revisions = list(
+            db.scalars(
+                select(TemplateRevision)
+                .where(TemplateRevision.template_id == template.id)
+                .order_by(TemplateRevision.revision_number.desc())
+            ).all()
+        )
+        for revision in revisions:
+            profile = db.get(TemplatePageProfile, revision.page_profile_id)
+            summary = {
+                "id": revision.id,
+                "revision_number": revision.revision_number,
+                "state": revision.state,
+                "config_hash": revision.config_hash,
+                "published_at": revision.published_at.isoformat() if revision.published_at else None,
+                "page_profile": {
+                    "id": profile.id,
+                    "profile_key": profile.profile_key,
+                    "name": profile.name,
+                    "width": float(profile.width),
+                    "height": float(profile.height),
+                    "unit": profile.unit,
+                } if profile else None,
+            }
+            revision_summaries.append(summary)
+            if latest_published is None and revision.state == "published":
+                latest_published = summary
     return {
         "id": template.id,
+        "revision": template.revision,
         "name": template.name,
         "insurance_type": template.insurance_type,
         "insurance_company_id": template.insurance_company_id,
@@ -232,17 +266,17 @@ def serialize_template(template: OutputTemplateConfig, db: Session | None = None
         "is_default": bool(config.get("is_default")),
         "packages": config.get("packages", []),
         "review_schema": review_schema_for(config, None),
+        "template_revisions": revision_summaries,
+        "latest_published_revision": latest_published,
     }
 
 
 def copy_template(db: Session, user, template_id: str) -> OutputTemplateConfig:
-    require_admin(user)
+    require_business_setup(user)
     source = db.get(OutputTemplateConfig, template_id)
     if not source or source.deleted_at:
         raise AppError("Template not found.", 404)
     config = normalize_template_config(source.fixed_fields, source.name)
-    if not (config.get("is_default") or config.get("locked")):
-        raise AppError("Only default (locked) templates can be copied.", 403)
     config["is_default"] = False
     config["locked"] = False
     copy = OutputTemplateConfig(
@@ -264,13 +298,16 @@ def copy_template(db: Session, user, template_id: str) -> OutputTemplateConfig:
 
 
 def update_template(db: Session, user, template_id: str, payload: dict) -> OutputTemplateConfig:
-    require_admin(user)
+    require_business_setup(user)
     template = db.get(OutputTemplateConfig, template_id)
     if not template or template.deleted_at:
         raise AppError("Template not found.", 404)
     current_config = normalize_template_config(template.fixed_fields, template.name)
     if current_config.get("locked"):
         raise AppError("Copy this default template before editing.")
+    base_revision = payload.pop("base_revision", None)
+    if base_revision is not None and int(base_revision) != template.revision:
+        raise AppError("This template changed elsewhere. Reload before saving.", 409)
     for key in ["name", "insurance_type", "insurance_company_id", "group_id", "static_notes", "editable_fields", "status"]:
         if key in payload:
             setattr(template, key, payload[key])
@@ -279,6 +316,8 @@ def update_template(db: Session, user, template_id: str, payload: dict) -> Outpu
         config["is_default"] = False
         config["locked"] = False
         template.fixed_fields = config
+        flag_modified(template, "fixed_fields")
+    template.revision += 1
     db.commit()
     db.refresh(template)
     return template
@@ -429,6 +468,48 @@ def upsert_vehicle_model(db: Session, user, payload: dict) -> VehicleModel:
     db.commit()
     db.refresh(model)
     return model
+
+
+LEARNABLE_FIELDS = frozenset({"car_model", "car_brand"})
+
+
+def dictionary_contains(db: Session, field: str, value: str) -> bool:
+    if field not in LEARNABLE_FIELDS:
+        return False
+    folded = str(value or "").strip().casefold()
+    if not folded:
+        return False
+    if field == "car_model":
+        rows = db.scalars(select(VehicleModel)).all()
+    else:
+        rows = db.scalars(select(VehicleBrand)).all()
+    return any(
+        folded in {row.name.casefold(), *[alias.casefold() for alias in (row.aliases or [])]}
+        for row in rows
+    )
+
+
+def learn_dictionary_value(db: Session, user, field: str, value: str) -> dict:
+    if user.role not in {Role.STAFF.value, Role.ADMIN.value, Role.SUPER_ADMIN.value}:
+        raise AppError("You do not have permission to extend the extraction dictionary.", 403)
+    if field not in LEARNABLE_FIELDS:
+        raise AppError("Only vehicle make and model values can be learned.", 422)
+    value = str(value or "").strip()
+    if not value or len(value) > 160:
+        raise AppError("Dictionary value is invalid.", 422)
+    if dictionary_contains(db, field, value):
+        return {"added": False, "field": field, "value": value}
+    if field == "car_model":
+        model = VehicleModel(name=value, aliases=[value])
+        db.add(model)
+        db.commit()
+        db.refresh(model)
+        return {"added": True, "id": model.id, "field": field, "value": value}
+    brand = VehicleBrand(name=value, aliases=[value])
+    db.add(brand)
+    db.commit()
+    db.refresh(brand)
+    return {"added": True, "id": brand.id, "field": field, "value": value}
 
 
 def delete_vehicle_brand(db: Session, user, brand_id: str) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 
 from sqlalchemy import select
 
@@ -12,6 +13,7 @@ from app.db.init_db import seed_defaults
 from app.db.session import SessionLocal
 from app.models.enums import AccountStatus, Role
 from app.models.tables import User
+from app.services.auth_service import bootstrap_primary_admin
 
 
 def _normalize_email(email: str) -> str:
@@ -50,6 +52,16 @@ def create_admin(email: str, password: str) -> None:
         print(f"{action} Admin account: {normalized_email}")
 
 
+def bootstrap_primary(email: str) -> None:
+    password = getpass.getpass("Primary Admin temporary password: ")
+    confirmation = getpass.getpass("Confirm temporary password: ")
+    if password != confirmation:
+        raise ValueError("Passwords do not match.")
+    with SessionLocal() as db:
+        user = bootstrap_primary_admin(db, email, password)
+        print(f"Created Primary Admin account: {user.email}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -57,11 +69,15 @@ def main() -> None:
     admin = sub.add_parser("create-admin")
     admin.add_argument("email")
     admin.add_argument("password")
+    primary = sub.add_parser("bootstrap-primary-admin")
+    primary.add_argument("email")
     args = parser.parse_args()
     if args.command == "init-db":
         init_db()
     elif args.command == "create-admin":
         create_admin(args.email, args.password)
+    elif args.command == "bootstrap-primary-admin":
+        bootstrap_primary(args.email)
 
 
 if __name__ == "__main__":

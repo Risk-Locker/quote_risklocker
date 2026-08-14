@@ -1,453 +1,262 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { CaretDown, CopySimple, Crown, DotsThreeVertical, FloppyDisk, FolderPlus, LockKey, PencilSimple, Plus, Trash, X } from "@phosphor-icons/react";
-import { BuilderNav } from "@/components/builder-nav";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { CopySimple, Eye, FilePlus, MagnifyingGlass, PencilSimple, Star, Trash } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
+import { BuilderNav } from "@/components/builder-nav";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 
+type Revision = {
+  id: string;
+  revision_number: number;
+  state: "draft" | "published" | "retired" | "compatibility";
+  published_at?: string | null;
+  page_profile?: { name: string; width: number; height: number; unit: string } | null;
+};
+
+type CanvasNode = {
+  id: string;
+  type: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  text?: string;
+  variableId?: string;
+  gridKind?: string;
+  shapeKind?: string;
+  style?: { background?: string; color?: string; borderColor?: string; borderWidth?: number; fontSize?: number };
+};
+
 type TemplateRecord = {
   id: string;
+  revision: number;
   name: string;
-  insurance_type: string;
-  insurance_company_id?: string | null;
-  insurance_company_name?: string | null;
-  group_id?: string | null;
-  group_name?: string | null;
   status: string;
   locked: boolean;
   is_default: boolean;
+  fixed_fields: {
+    version?: number;
+    canvas?: { width?: number; height?: number; elements?: CanvasNode[] };
+    page_profile?: { name?: string; width?: number; height?: number; unit?: string };
+  };
+  template_revisions: Revision[];
+  latest_published_revision?: Revision | null;
 };
 
-type Company = { id: string; name: string; status: string };
-type TemplateGroup = { id: string; name: string; company_id?: string | null; company_name?: string | null; template_count: number };
+function templateState(template: TemplateRecord) {
+  if (template.status === "retired") return "retired";
+  return template.latest_published_revision?.state || (template.fixed_fields.version === 7 ? "draft" : "compatibility");
+}
+
+function pageProfile(template: TemplateRecord) {
+  const published = template.latest_published_revision?.page_profile;
+  if (published) return published;
+  const page = template.fixed_fields.page_profile;
+  const canvas = template.fixed_fields.canvas;
+  return {
+    name: page?.name || (Number(canvas?.height || 1123) > 1200 ? "Custom portrait" : "A4"),
+    width: Number(page?.width || canvas?.width || 794),
+    height: Number(page?.height || canvas?.height || 1123),
+    unit: page?.unit || "px",
+  };
+}
+
+function TemplateThumbnail({ template, large = false }: { template: TemplateRecord; large?: boolean }) {
+  const page = pageProfile(template);
+  const elements = (template.fixed_fields.canvas?.elements || []).filter((item) => item.type !== "layer-group");
+  const textNodes = elements.filter((item) => item.type === "text" || item.type === "variable").slice(0, large ? 80 : 42);
+  const shapeNodes = elements.filter((item) => !["text", "variable", "layer-group"].includes(item.type)).slice(0, large ? 100 : 60);
+  return (
+    <div className={`grid place-items-center bg-[#ececee] ${large ? "h-[68vh] p-8" : "h-[300px] p-6"}`}>
+      <svg viewBox={`0 0 ${page.width} ${page.height}`} className="h-full max-w-full bg-white shadow-card" role="img" aria-label={`Preview of ${template.name}`}>
+        <rect x="0" y="0" width={page.width} height={page.height} fill="white" />
+        {shapeNodes.map((node) => {
+          const fill = node.style?.background || (node.type === "benefit-grid" ? "#fff7f7" : "#f0f0f1");
+          const stroke = node.type === "benefit-grid" ? "#ed1c24" : (node.style?.borderColor || "#d1d1d4");
+          const strokeWidth = Math.max(1, Number(node.style?.borderWidth || 1));
+          if (node.type === "line") return <line key={node.id} x1={node.x} y1={node.y} x2={node.x + node.w} y2={node.y + node.h} stroke={node.style?.color || "#171717"} strokeWidth={strokeWidth} />;
+          if (node.type === "ellipse" || node.shapeKind === "circle") return <ellipse key={node.id} cx={node.x + node.w / 2} cy={node.y + node.h / 2} rx={node.w / 2} ry={node.h / 2} fill={fill} stroke={stroke} strokeWidth={strokeWidth} />;
+          if (node.type === "triangle" || node.shapeKind === "triangle") return <polygon key={node.id} points={`${node.x + node.w / 2},${node.y} ${node.x + node.w},${node.y + node.h} ${node.x},${node.y + node.h}`} fill={fill} stroke={stroke} strokeWidth={strokeWidth} />;
+          if (node.type === "diamond" || node.shapeKind === "diamond") return <polygon key={node.id} points={`${node.x + node.w / 2},${node.y} ${node.x + node.w},${node.y + node.h / 2} ${node.x + node.w / 2},${node.y + node.h} ${node.x},${node.y + node.h / 2}`} fill={fill} stroke={stroke} strokeWidth={strokeWidth} />;
+          return <rect key={node.id} x={node.x} y={node.y} width={node.w} height={node.h} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={node.type === "benefit-grid" ? "7 5" : undefined} />;
+        })}
+        {textNodes.map((node) => (
+          <text key={node.id} x={node.x} y={node.y + Math.min(node.h, Number(node.style?.fontSize || 14))} fill={node.type === "variable" ? "#ed1c24" : (node.style?.color || "#171717")} fontSize={Math.max(7, Number(node.style?.fontSize || 14))} fontWeight={node.type === "variable" ? 600 : 400}>
+            {(node.type === "variable" ? `{${node.variableId || "variable"}}` : (node.text || "Text")).slice(0, 70)}
+          </text>
+        ))}
+      </svg>
+    </div>
+  );
+}
 
 export default function BuilderTemplatesPage() {
   const [templates, setTemplates] = useState<TemplateRecord[]>([]);
-  const [groups, setGroups] = useState<TemplateGroup[]>([]);
-  const [companies, setCompanies] = useState<Company[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [showCreate, setShowCreate] = useState(false);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [profileFilter, setProfileFilter] = useState("all");
   const [newName, setNewName] = useState("");
-  const [newCompanyId, setNewCompanyId] = useState("");
-  const [newGroupId, setNewGroupId] = useState("");
-  const [showNewGroup, setShowNewGroup] = useState(false);
-  const [newGroupName, setNewGroupName] = useState("");
-  const [newGroupCompanyId, setNewGroupCompanyId] = useState("");
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [pendingDelete, setPendingDelete] = useState<TemplateRecord | null>(null);
-  const [pendingGroupDelete, setPendingGroupDelete] = useState<TemplateGroup | null>(null);
-  const [pendingMaster, setPendingMaster] = useState<TemplateRecord | null>(null);
-  const [editingGroup, setEditingGroup] = useState<TemplateGroup | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [preview, setPreview] = useState<TemplateRecord | null>(null);
+  const [pendingRetire, setPendingRetire] = useState<TemplateRecord | null>(null);
   const { toast } = useToast();
 
-  async function load() {
-    const [tResult, cResult, gResult] = await Promise.all([
-      api<{ templates: TemplateRecord[] }>("/admin/templates"),
-      api<{ companies: Company[] }>("/admin/companies"),
-      api<{ groups: TemplateGroup[] }>("/admin/template-groups"),
-    ]);
-    setTemplates(tResult.templates);
-    setCompanies(cResult.companies);
-    setGroups(gResult.groups);
-  }
-
-  useEffect(() => {
-    load().catch((err) => setError(err instanceof Error ? err.message : "Could not load templates."));
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const result = await api<{ templates: TemplateRecord[] }>("/admin/templates");
+      setTemplates(result.templates);
+    } catch (reason) {
+      setError(apiErrorMessage(reason));
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const profiles = useMemo(() => [...new Set(templates.map((item) => pageProfile(item).name))].sort(), [templates]);
+  const visibleTemplates = useMemo(() => {
+    const term = search.trim().toLocaleLowerCase();
+    return templates.filter((template) => {
+      const matchesText = !term || `${template.name} ${pageProfile(template).name}`.toLocaleLowerCase().includes(term);
+      const matchesStatus = statusFilter === "all" || templateState(template) === statusFilter;
+      const matchesProfile = profileFilter === "all" || pageProfile(template).name === profileFilter;
+      return matchesText && matchesStatus && matchesProfile;
+    });
+  }, [profileFilter, search, statusFilter, templates]);
 
   async function createTemplate(event: React.FormEvent) {
     event.preventDefault();
+    setCreating(true);
     setError("");
     try {
       const result = await api<{ template: TemplateRecord }>("/admin/templates", {
         method: "POST",
-        body: JSON.stringify({
-          name: newName,
-          insurance_type: "Motor",
-          insurance_company_id: newCompanyId || null,
-          group_id: newGroupId || null,
-        }),
+        body: JSON.stringify({ name: newName.trim(), insurance_type: "Motor" }),
       });
-      setShowCreate(false);
-      setNewName("");
-      setNewCompanyId("");
-      setNewGroupId("");
-      window.location.href = `/builder/templates/${result.template.id}/builder`;
-    } catch (err) {
-      setError(apiErrorMessage(err));
+      window.location.assign(`/builder/templates/${result.template.id}/builder`);
+    } catch (reason) {
+      setError(apiErrorMessage(reason));
+      setCreating(false);
     }
   }
 
-  async function moveToGroup(templateId: string, groupId: string) {
+  async function cloneTemplate(template: TemplateRecord) {
     setError("");
     try {
-      await api(`/admin/templates/${templateId}`, {
+      const result = await api<{ template: TemplateRecord }>(`/admin/templates/${template.id}/copy`, { method: "POST", body: "{}" });
+      toast("Template cloned as a new editable draft.", "success");
+      window.location.assign(`/builder/templates/${result.template.id}/builder`);
+    } catch (reason) {
+      setError(apiErrorMessage(reason));
+    }
+  }
+
+  async function retireTemplate() {
+    if (!pendingRetire) return;
+    setError("");
+    try {
+      await api(`/admin/templates/${pendingRetire.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ group_id: groupId || null }),
+        body: JSON.stringify({ base_revision: pendingRetire.revision, status: "retired" }),
       });
-      toast("Template moved.", "success");
+      setPendingRetire(null);
+      toast("Template retired. Published revisions remain available to pinned quotations.", "success");
       await load();
-    } catch (err) {
-      setError(apiErrorMessage(err));
+    } catch (reason) {
+      setError(apiErrorMessage(reason));
     }
   }
-
-  async function saveGroup(event: React.FormEvent) {
-    event.preventDefault();
-    setError("");
-    try {
-      await api("/admin/template-groups", {
-        method: "POST",
-        body: JSON.stringify({
-          id: editingGroup?.id || undefined,
-          name: editingGroup ? editingGroup.name : newGroupName,
-          company_id: editingGroup ? editingGroup.company_id || null : newGroupCompanyId || null,
-        }),
-      });
-      toast(editingGroup ? "Group updated." : "Group created.", "success");
-      setShowNewGroup(false);
-      setEditingGroup(null);
-      setNewGroupName("");
-      setNewGroupCompanyId("");
-      await load();
-    } catch (err) {
-      setError(apiErrorMessage(err));
-    }
-  }
-
-  async function deleteGroup() {
-    if (!pendingGroupDelete) return;
-    setError("");
-    try {
-      await api(`/admin/template-groups/${pendingGroupDelete.id}`, { method: "DELETE" });
-      toast("Group deleted. Templates moved to Ungrouped.", "success");
-      setPendingGroupDelete(null);
-      await load();
-    } catch (err) {
-      setError(apiErrorMessage(err));
-    }
-  }
-
-  async function makeMaster() {
-    if (!pendingMaster) return;
-    setError("");
-    try {
-      await api(`/admin/templates/${pendingMaster.id}/make-master`, { method: "POST", body: JSON.stringify({}) });
-      toast(`"${pendingMaster.name}" is now the master template.`, "success");
-      setPendingMaster(null);
-      await load();
-    } catch (err) {
-      setError(apiErrorMessage(err));
-    }
-  }
-
-  async function copyTemplate(templateId: string) {
-    setError("");
-    try {
-      const result = await api<{ template: TemplateRecord }>(`/admin/templates/${templateId}/copy`, { method: "POST", body: JSON.stringify({}) });
-      toast("Template copied.", "success");
-      await load();
-      window.location.href = `/builder/templates/${result.template.id}/builder`;
-    } catch (err) {
-      setError(apiErrorMessage(err));
-    }
-  }
-
-  async function deleteTemplate() {
-    if (!pendingDelete) return;
-    setError("");
-    try {
-      await api(`/admin/templates/${pendingDelete.id}`, { method: "DELETE" });
-      toast("Template moved to Trash.", "success");
-      setPendingDelete(null);
-      await load();
-    } catch (err) {
-      setError(apiErrorMessage(err));
-    }
-  }
-
-  function toggleCollapsed(groupId: string) {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(groupId)) next.delete(groupId);
-      else next.add(groupId);
-      return next;
-    });
-  }
-
-  const byGroup = (groupId: string | null) => templates.filter((t) => (t.group_id || null) === groupId);
-
-  const renderCard = (template: TemplateRecord) => (
-    <Card key={template.id} className="group">
-      <div className="grid gap-3 p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            {template.is_default ? (
-              <Badge variant="info">
-                <Crown weight="bold" size={11} className="-ml-0.5 mr-1" />
-                Master
-              </Badge>
-            ) : null}
-            {template.locked ? (
-              <Badge>
-                <LockKey weight="bold" size={11} className="-ml-0.5 mr-1" />
-                Locked
-              </Badge>
-            ) : null}
-            <h3 className="truncate text-lg font-bold text-[var(--rl-text-strong)]">{template.name}</h3>
-          </div>
-          <p className="mt-1 text-[14px] font-medium text-[var(--rl-text-muted)]">
-            {template.is_default
-              ? "Master template — copy before editing, cannot be deleted."
-              : template.locked
-                ? "Default template — copy before editing."
-                : "Editable template."}
-            {template.insurance_company_name ? ` · ${template.insurance_company_name}` : ""}
-            {template.status !== "active" ? ` · Status: ${template.status}` : ""}
-          </p>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <span className="text-[12px] font-semibold text-[var(--rl-text-muted)]">Folder:</span>
-            <Select
-              className="w-48"
-              value={template.group_id || ""}
-              onChange={(e) => moveToGroup(template.id, e.target.value)}
-              disabled={template.locked}
-              aria-label={`Folder for ${template.name}`}
-            >
-              <option value="">Ungrouped</option>
-              {groups.map((g) => (
-                <option key={g.id} value={g.id}>{g.name}</option>
-              ))}
-            </Select>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {!template.locked ? (
-            <Link href={`/builder/templates/${template.id}/builder`}>
-              <Button icon={<PencilSimple weight="bold" size={16} />}>
-                Open builder
-              </Button>
-            </Link>
-          ) : null}
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger asChild>
-              <Button variant="secondary" size="sm" icon={<DotsThreeVertical weight="bold" size={16} />} aria-label={`Actions for ${template.name}`}>
-                <span className="sr-only">Actions</span>
-              </Button>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.Content
-                align="end"
-                sideOffset={6}
-                className="z-50 min-w-[180px] rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-1 shadow-card"
-              >
-                {!template.is_default ? (
-                  <DropdownMenu.Item
-                    onSelect={() => setPendingMaster(template)}
-                    className="flex cursor-pointer items-center gap-2 rounded-[var(--rl-radius-sm)] px-2.5 py-2 text-[13px] font-medium text-[var(--rl-text-strong)] outline-none hover:bg-[var(--rl-bg)]"
-                  >
-                    <Crown size={14} weight="bold" className="text-[var(--rl-text-muted)]" />
-                    Set as master
-                  </DropdownMenu.Item>
-                ) : null}
-                {template.locked ? (
-                  <DropdownMenu.Item
-                    onSelect={() => copyTemplate(template.id)}
-                    className="flex cursor-pointer items-center gap-2 rounded-[var(--rl-radius-sm)] px-2.5 py-2 text-[13px] font-medium text-[var(--rl-text-strong)] outline-none hover:bg-[var(--rl-bg)]"
-                  >
-                    <CopySimple size={14} weight="bold" className="text-[var(--rl-text-muted)]" />
-                    Copy
-                  </DropdownMenu.Item>
-                ) : null}
-                {!template.is_default ? (
-                  <DropdownMenu.Item
-                    onSelect={() => setPendingDelete(template)}
-                    className="flex cursor-pointer items-center gap-2 rounded-[var(--rl-radius-sm)] px-2.5 py-2 text-[13px] font-medium text-[var(--rl-red)] outline-none hover:bg-[var(--rl-red-light)]"
-                  >
-                    <Trash size={14} weight="bold" />
-                    Delete
-                  </DropdownMenu.Item>
-                ) : null}
-              </DropdownMenu.Content>
-            </DropdownMenu.Portal>
-          </DropdownMenu.Root>
-        </div>
-      </div>
-    </Card>
-  );
 
   return (
     <AppShell>
       <section className="grid gap-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h1 className="text-[30px] font-bold text-[var(--rl-text-strong)] font-[var(--font-manrope)] mt-0">Templates</h1>
-            <p className="text-[14px] text-[var(--rl-text-muted)]">Locked defaults must be copied before editing. Group templates by company to find them faster.</p>
+            <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--rl-red)]">Builder</p>
+            <h1 className="m-0 font-[var(--font-manrope)] text-[30px] font-bold text-[var(--rl-text-strong)]">Templates</h1>
+            <p className="mt-1 text-[14px] text-[var(--rl-text-muted)]">Insurer-independent fixed-page masters with immutable published revisions.</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" icon={<FolderPlus weight="bold" size={16} />} onClick={() => { setEditingGroup(null); setShowNewGroup((v) => !v); }}>
-              New group
-            </Button>
-            <Button icon={<Plus weight="bold" size={16} />} onClick={() => setShowCreate((v) => !v)}>
-              New template
-            </Button>
-          </div>
-        </div>
+          <Button icon={<FilePlus size={16} weight="bold" />} onClick={() => { setNewName(""); setShowCreate(true); }}>New template</Button>
+        </header>
         <BuilderNav />
 
-        {error ? (
-          <div className="rounded-[var(--rl-radius-sm)] bg-[var(--rl-red-light)] px-3 py-2.5 text-[13px] font-semibold text-[var(--rl-red)]">{error}</div>
-        ) : null}
+        {error ? <div role="alert" className="border-l-2 border-[var(--rl-red)] bg-[var(--rl-red-light)] px-4 py-3 text-[13px] font-semibold text-[var(--rl-red)]">{error}</div> : null}
 
-        {showCreate ? (
-          <Card>
-            <form className="grid gap-4 p-4" onSubmit={createTemplate}>
-              <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">New template</h2>
-              <div className="grid gap-4 sm:grid-cols-3">
-                <div className="grid gap-1.5">
-                  <label className="text-[13px] font-semibold text-[var(--rl-text-strong)]">Name</label>
-                  <Input placeholder="e.g. QBE Motor Template" value={newName} onChange={(e) => setNewName(e.target.value)} required />
-                </div>
-                <div className="grid gap-1.5">
-                  <label className="text-[13px] font-semibold text-[var(--rl-text-strong)]">Company (optional)</label>
-                  <Select value={newCompanyId} onChange={(e) => setNewCompanyId(e.target.value)}>
-                    <option value="">None</option>
-                    {companies.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </Select>
-                </div>
-                <div className="grid gap-1.5">
-                  <label className="text-[13px] font-semibold text-[var(--rl-text-strong)]">Group (optional)</label>
-                  <Select value={newGroupId} onChange={(e) => setNewGroupId(e.target.value)}>
-                    <option value="">Ungrouped</option>
-                    {groups.map((g) => (
-                      <option key={g.id} value={g.id}>{g.name}</option>
-                    ))}
-                  </Select>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button type="submit" icon={<FloppyDisk weight="bold" size={16} />}>Create &amp; open builder</Button>
-                <Button variant="secondary" icon={<X weight="bold" size={16} />} onClick={() => setShowCreate(false)}>Cancel</Button>
-              </div>
-            </form>
-          </Card>
-        ) : null}
+        <div className="grid gap-3 border border-[var(--rl-border)] bg-[var(--rl-surface)] p-4 shadow-card md:grid-cols-[minmax(260px,1fr)_190px_190px_auto] md:items-center">
+          <label className="relative block">
+            <MagnifyingGlass size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--rl-text-muted)]" />
+            <Input aria-label="Search templates" className="pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search templates" />
+          </label>
+          <Select aria-label="Filter by publication status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="all">All statuses</option><option value="published">Published</option><option value="draft">Draft</option><option value="compatibility">Legacy compatibility</option><option value="retired">Retired</option>
+          </Select>
+          <Select aria-label="Filter by page profile" value={profileFilter} onChange={(event) => setProfileFilter(event.target.value)}><option value="all">All page profiles</option>{profiles.map((profile) => <option key={profile} value={profile}>{profile}</option>)}</Select>
+          <span className="text-right text-[12px] font-semibold text-[var(--rl-text-muted)]">{visibleTemplates.length} template{visibleTemplates.length === 1 ? "" : "s"}</span>
+        </div>
 
-        {showNewGroup ? (
-          <Card>
-            <form className="grid gap-4 p-4" onSubmit={saveGroup}>
-              <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">{editingGroup ? `Edit group "${editingGroup.name}"` : "New template group"}</h2>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="grid gap-1.5">
-                  <label className="text-[13px] font-semibold text-[var(--rl-text-strong)]">Group name</label>
-                  <Input
-                    value={editingGroup ? editingGroup.name : newGroupName}
-                    onChange={(e) => editingGroup ? setEditingGroup({ ...editingGroup, name: e.target.value }) : setNewGroupName(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="grid gap-1.5">
-                  <label className="text-[13px] font-semibold text-[var(--rl-text-strong)]">Company (optional)</label>
-                  <Select
-                    value={editingGroup ? editingGroup.company_id || "" : newGroupCompanyId}
-                    onChange={(e) => editingGroup ? setEditingGroup({ ...editingGroup, company_id: e.target.value }) : setNewGroupCompanyId(e.target.value)}
-                  >
-                    <option value="">None</option>
-                    {companies.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </Select>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button type="submit" icon={<FloppyDisk weight="bold" size={16} />}>{editingGroup ? "Save group" : "Create group"}</Button>
-                <Button variant="secondary" icon={<X weight="bold" size={16} />} onClick={() => { setShowNewGroup(false); setEditingGroup(null); }}>Cancel</Button>
-              </div>
-            </form>
-          </Card>
-        ) : null}
-
-        {templates.length === 0 && groups.length === 0 ? (
-          <p className="text-[14px] text-[var(--rl-text-muted)]">No templates yet.</p>
-        ) : (
-          <>
-            {groups.map((group) => {
-              const items = byGroup(group.id);
-              const open = !collapsed.has(group.id);
+        {loading ? <p role="status" className="border border-[var(--rl-border)] bg-white p-8 text-center text-[14px] text-[var(--rl-text-muted)]">Loading template previews…</p> : null}
+        {!loading && visibleTemplates.length ? (
+          <div className="grid gap-5 md:grid-cols-2 2xl:grid-cols-3">
+            {visibleTemplates.map((template) => {
+              const state = templateState(template);
+              const page = pageProfile(template);
+              const published = template.latest_published_revision;
               return (
-                <div key={group.id} className="grid gap-3">
-                  <div className="flex items-center gap-2">
-                    <button type="button" className="flex items-center gap-2" onClick={() => toggleCollapsed(group.id)}>
-                      <CaretDown size={14} weight="bold" className={`text-[var(--rl-text-muted)] transition-transform ${open ? "" : "-rotate-90"}`} />
-                      <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">{group.name}</h2>
-                      <span className="text-[13px] font-medium text-[var(--rl-text-muted)]">
-                        {group.company_name ? `· ${group.company_name}` : ""} · {items.length} template{items.length === 1 ? "" : "s"}
-                      </span>
-                    </button>
-                    <Button variant="ghost" size="sm" icon={<PencilSimple weight="bold" size={13} />} onClick={() => { setEditingGroup(group); setShowNewGroup(true); }}>
-                      Edit
-                    </Button>
-                    <Button variant="ghost" size="sm" icon={<Trash weight="bold" size={13} />} onClick={() => setPendingGroupDelete(group)} className="text-[var(--rl-red)] hover:bg-[var(--rl-red-light)]">
-                      Delete
-                    </Button>
+                <article key={template.id} className="group overflow-hidden border border-[var(--rl-border)] bg-[var(--rl-surface)] shadow-card">
+                  <button type="button" className="block w-full text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--rl-red)]" onClick={() => setPreview(template)} aria-label={`Preview ${template.name}`}>
+                    <TemplateThumbnail template={template} />
+                  </button>
+                  <div className="grid gap-4 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h2 className="m-0 truncate text-[17px] font-bold text-[var(--rl-text-strong)]">{template.name}</h2>
+                          {template.is_default ? <Star aria-label="Default template" size={15} weight="fill" className="shrink-0 text-[var(--rl-red)]" /> : null}
+                        </div>
+                        <p className="mt-1 text-[12px] text-[var(--rl-text-muted)]">{page.name} · {Math.round(page.width)} × {Math.round(page.height)} {page.unit}</p>
+                      </div>
+                      <span className={`border-l-2 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] ${state === "published" ? "border-emerald-600 text-emerald-700" : state === "draft" ? "border-amber-500 text-amber-700" : "border-[var(--rl-border-strong)] text-[var(--rl-text-muted)]"}`}>{state}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 border-t border-[var(--rl-border)] pt-3">
+                      <p className="m-0 text-[11px] text-[var(--rl-text-muted)]">{published ? `Published revision ${published.revision_number}` : `Working revision ${template.revision}`}</p>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="sm" icon={<Eye size={14} />} onClick={() => setPreview(template)}>Preview</Button>
+                        <Button variant="secondary" size="sm" icon={<CopySimple size={14} />} onClick={() => cloneTemplate(template)}>Clone</Button>
+                        {!template.locked && template.status !== "retired" ? <Link href={`/builder/templates/${template.id}/builder`}><Button size="sm" icon={<PencilSimple size={14} />}>Open</Button></Link> : null}
+                        {!template.locked && template.status !== "retired" ? <Button variant="ghost" size="sm" aria-label={`Retire ${template.name}`} icon={<Trash size={14} />} className="text-[var(--rl-red)]" onClick={() => setPendingRetire(template)}><span className="sr-only">Retire</span></Button> : null}
+                      </div>
+                    </div>
                   </div>
-                  {open ? items.map(renderCard) : null}
-                </div>
+                </article>
               );
             })}
-            {byGroup(null).length > 0 ? (
-              <div className="grid gap-3">
-                <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">Ungrouped</h2>
-                {byGroup(null).map(renderCard)}
-              </div>
-            ) : null}
-          </>
-        )}
+          </div>
+        ) : null}
+        {!loading && !visibleTemplates.length ? <p className="border border-dashed border-[var(--rl-border)] p-12 text-center text-[14px] text-[var(--rl-text-muted)]">No templates match these filters.</p> : null}
       </section>
 
-      {pendingDelete ? (
-        <ConfirmDialog
-          open
-          onOpenChange={(open) => { if (!open) setPendingDelete(null); }}
-          title={`Delete template "${pendingDelete.name}"?`}
-          message="It moves to Trash and can be restored later."
-          onConfirm={deleteTemplate}
-        />
-      ) : null}
+      <Dialog open={showCreate} onOpenChange={setShowCreate} title="Create an insurer-independent template" description="Start with a clean Standard A4 draft. Page profile and layout can be changed inside the Builder.">
+        <form onSubmit={createTemplate} className="grid gap-4"><label className="grid gap-1.5 text-[12px] font-semibold text-[var(--rl-text-strong)]">Template name<Input autoFocus value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="e.g. Standard A4" required /></label><div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setShowCreate(false)}>Cancel</Button><Button type="submit" loading={creating}>Create and open</Button></div></form>
+      </Dialog>
 
-      {pendingMaster ? (
-        <ConfirmDialog
-          open
-          onOpenChange={(open) => { if (!open) setPendingMaster(null); }}
-          title={`Make "${pendingMaster.name}" the master template?`}
-          message="The current master becomes a normal editable template. The master cannot be deleted and must always exist."
-          confirmLabel="Set as master"
-          onConfirm={makeMaster}
-        />
-      ) : null}
+      <Dialog open={Boolean(preview)} onOpenChange={(open) => { if (!open) setPreview(null); }} title={preview?.name || "Template preview"} description={preview ? `${pageProfile(preview).name} · ${templateState(preview)}` : undefined}>{preview ? <TemplateThumbnail template={preview} large /> : null}</Dialog>
 
-      {pendingGroupDelete ? (
-        <ConfirmDialog
-          open
-          onOpenChange={(open) => { if (!open) setPendingGroupDelete(null); }}
-          title={`Delete group "${pendingGroupDelete.name}"?`}
-          message="Its templates move to Ungrouped. The group itself is deleted."
-          onConfirm={deleteGroup}
-        />
-      ) : null}
+      {pendingRetire ? <ConfirmDialog open onOpenChange={(open) => { if (!open) setPendingRetire(null); }} title={`Retire “${pendingRetire.name}”?`} message="Pinned quotations keep their immutable published revision. This working template disappears from new selection." confirmLabel="Retire template" onConfirm={retireTemplate} /> : null}
     </AppShell>
   );
 }

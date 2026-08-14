@@ -36,10 +36,10 @@ def test_no_manager_role_references_in_source():
     assert "MANAGER" not in src
 
 
-def test_list_sessions_is_owner_scoped():
+def test_list_sessions_is_shared_across_staff():
     src = (BACKEND / "app" / "services" / "session_service.py").read_text(encoding="utf-8")
     list_fn = src[src.index("def list_sessions"): src.index("def get_session")]
-    assert "owner_id == user_id" in list_fn
+    assert "owner_id == user_id" not in list_fn
     assert "MANAGER" not in list_fn
 
 
@@ -49,7 +49,7 @@ def test_list_trash_does_not_reference_manager():
     assert "MANAGER" not in trash_fn
 
 
-def test_purge_expired_trash_calls_storage_delete(monkeypatch):
+def test_timed_trash_purge_is_disabled_and_never_deletes_storage(monkeypatch):
     from datetime import datetime, timezone
     from types import SimpleNamespace
     from uuid import uuid4
@@ -109,7 +109,7 @@ def test_purge_expired_trash_calls_storage_delete(monkeypatch):
 
     count = purge_expired_trash(db, user, storage)
 
-    assert count == 1
-    storage.delete_pdf.assert_any_call("source/2026/01/batch/file.pdf")
-    assert len(db.deleted_items) == 1
-    assert db.commits == 1
+    assert count == 0
+    storage.delete_pdf.assert_not_called()
+    assert len(db.deleted_items) == 0
+    assert db.commits == 0

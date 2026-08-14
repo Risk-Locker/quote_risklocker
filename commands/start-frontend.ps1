@@ -78,10 +78,7 @@ if (-not $backendPort) {
 }
 
 Set-Content -Path $backendPortFile -Value $backendPort -Encoding ASCII
-# Do not pin NEXT_PUBLIC_API_BASE_URL here: the frontend derives the API base
-# from window.location.hostname in development (api.ts), so both
-# http://localhost:3000 and http://127.0.0.1:3000 keep the auth cookie on the
-# same host. Set NEXT_PUBLIC_API_BASE_URL explicitly only in production.
+$env:BACKEND_API_ORIGIN = "http://127.0.0.1:$backendPort"
 
 $port = 3000
 Write-Host "Starting Risklocker frontend on http://127.0.0.1:$port ..."
@@ -96,8 +93,26 @@ if ($listener) {
 # Production is the default daily experience: build once, then serve the fast
 # server. Use `npm run dev` (Turbopack) for feature development.
 $buildId = Join-Path $PSScriptRoot "..\frontend\.next\BUILD_ID"
-if (-not (Test-Path $buildId)) {
-    Write-Host "No production build found - building (this takes a few minutes on first start)..." -ForegroundColor Yellow
+$requiresBuild = -not (Test-Path $buildId)
+if (-not $requiresBuild) {
+    $buildTime = (Get-Item -LiteralPath $buildId).LastWriteTimeUtc
+    $sourceRoots = @(
+        (Join-Path $PSScriptRoot "..\frontend\src"),
+        (Join-Path $PSScriptRoot "..\frontend\public")
+    )
+    $sourceFiles = foreach ($sourceRoot in $sourceRoots) {
+        if (Test-Path -LiteralPath $sourceRoot) {
+            Get-ChildItem -LiteralPath $sourceRoot -Recurse -File
+        }
+    }
+    $configFiles = @("package.json", "package-lock.json", "next.config.ts", "tailwind.config.ts", "tsconfig.json") |
+        ForEach-Object { Join-Path $PSScriptRoot "..\frontend\$_" } |
+        Where-Object { Test-Path -LiteralPath $_ } |
+        ForEach-Object { Get-Item -LiteralPath $_ }
+    $requiresBuild = @($sourceFiles + $configFiles | Where-Object { $_.LastWriteTimeUtc -gt $buildTime }).Count -gt 0
+}
+if ($requiresBuild) {
+    Write-Host "Frontend source changed - creating a current production build..." -ForegroundColor Yellow
     Push-Location (Join-Path $PSScriptRoot "..\frontend")
     npm run build
     if ($LASTEXITCODE -ne 0) {

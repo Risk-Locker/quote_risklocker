@@ -91,6 +91,9 @@ def test_backend_production_rejects_placeholder_auth_hash_secret():
         "APP_ENV": "production",
         "DATABASE_URL": "postgresql://postgres:password@db.project-ref.supabase.co:5432/postgres?sslmode=require",
         "AUTH_HASH_SECRET": "replace_me_with_a_long_random_string",
+        "APP_ORIGIN": "https://quotes.risklocker.com",
+        "TRUSTED_HOSTS": "quotes.risklocker.com",
+        "TRUSTED_PROXY_IPS": "10.0.0.2",
     }
     with patch.dict(os.environ, env, clear=True):
         with pytest.raises(RuntimeError, match="AUTH_HASH_SECRET must be changed"):
@@ -103,6 +106,9 @@ def test_backend_production_requires_secure_cookie():
         "APP_ENV": "production",
         "DATABASE_URL": "postgresql://postgres:password@db.project-ref.supabase.co:5432/postgres?sslmode=require",
         "AUTH_HASH_SECRET": "a-production-auth-hash-secret-that-is-long-enough",
+        "APP_ORIGIN": "https://quotes.risklocker.com",
+        "TRUSTED_HOSTS": "quotes.risklocker.com",
+        "TRUSTED_PROXY_IPS": "10.0.0.2",
     }
     with patch.dict(os.environ, base, clear=True):
         settings = get_settings()
@@ -122,4 +128,72 @@ def test_session_policy_is_fixed_at_eight_hours_and_thirty_days():
     }
     with patch.dict(os.environ, env, clear=True):
         with pytest.raises(RuntimeError, match="SESSION_IDLE_HOURS=8"):
+            get_settings()
+
+
+def test_backend_rejects_unknown_app_environment():
+    env = {
+        **BASE_ENV,
+        "APP_ENV": "prod",
+        "DATABASE_URL": "postgresql://postgres:password@db.project-ref.supabase.co:5432/postgres?sslmode=require",
+    }
+    with patch.dict(os.environ, env, clear=True):
+        with pytest.raises(RuntimeError, match="APP_ENV"):
+            get_settings()
+
+
+def test_backend_rejects_invalid_boolean_values():
+    env = {
+        **BASE_ENV,
+        "DATABASE_URL": "postgresql://postgres:password@db.project-ref.supabase.co:5432/postgres?sslmode=require",
+        "SESSION_COOKIE_SECURE": "sometimes",
+    }
+    with patch.dict(os.environ, env, clear=True):
+        with pytest.raises(RuntimeError, match="SESSION_COOKIE_SECURE"):
+            get_settings()
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({}, "APP_ORIGIN"),
+        ({"APP_ORIGIN": "http://quotes.risklocker.com"}, "HTTPS"),
+        ({"APP_ORIGIN": "https://quotes.risklocker.com"}, "TRUSTED_HOSTS"),
+        (
+            {
+                "APP_ORIGIN": "https://quotes.risklocker.com",
+                "TRUSTED_HOSTS": "quotes.risklocker.com",
+            },
+            "TRUSTED_PROXY_IPS",
+        ),
+    ],
+)
+def test_backend_production_requires_explicit_https_origin_hosts_and_proxies(
+    override: dict[str, str], message: str
+):
+    env = {
+        **BASE_ENV,
+        "APP_ENV": "production",
+        "DATABASE_URL": "postgresql://postgres:password@db.project-ref.supabase.co:5432/postgres?sslmode=require",
+        "AUTH_HASH_SECRET": "a-production-auth-hash-secret-that-is-long-enough",
+        **override,
+    }
+    with patch.dict(os.environ, env, clear=True):
+        with pytest.raises(RuntimeError, match=message):
+            get_settings()
+
+
+def test_backend_production_rejects_cross_origin_cors():
+    env = {
+        **BASE_ENV,
+        "APP_ENV": "production",
+        "DATABASE_URL": "postgresql://postgres:password@db.project-ref.supabase.co:5432/postgres?sslmode=require",
+        "AUTH_HASH_SECRET": "a-production-auth-hash-secret-that-is-long-enough",
+        "APP_ORIGIN": "https://quotes.risklocker.com",
+        "TRUSTED_HOSTS": "quotes.risklocker.com",
+        "TRUSTED_PROXY_IPS": "10.0.0.2",
+        "CORS_ORIGINS": "https://admin.risklocker.com",
+    }
+    with patch.dict(os.environ, env, clear=True):
+        with pytest.raises(RuntimeError, match="same origin"):
             get_settings()

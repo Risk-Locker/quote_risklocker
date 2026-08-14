@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 
 import { fileUrl } from "@/lib/api";
+import { packFixedGrid } from "./grid-layout";
 
 export type CanvasStyle = {
   fontSize?: number;
@@ -61,6 +62,21 @@ export type CanvasElement = {
   variantId?: string;
   section?: "specials" | "add_ons";
   columns?: number;
+  gridKind?: "current_benefits" | "available_addons";
+  packing?: {
+    strategy?: "balanced" | "square_biased" | "staggered";
+    alignment?: "start" | "center" | "end";
+    aspectRatio?: number;
+    referenceWidth?: number;
+    referenceHeight?: number;
+    gapRatio?: number;
+    paddingRatio?: number;
+    staggerRatio?: number;
+  };
+  cardStyle?: "standard" | "outlined" | "soft" | "minimal";
+  textDensity?: "comfortable" | "normal" | "compact";
+  emptyState?: "hide" | "message";
+  emptyMessage?: string;
   prefix?: string;
   suffix?: string;
   opacity?: number;
@@ -79,6 +95,10 @@ export type CanvasElement = {
   groupId?: string;
   groupName?: string;
   locked?: boolean;
+  visible?: boolean;
+  name?: string;
+  parentId?: string;
+  order?: number;
 };
 
 export const SHAPE_CLIP: Record<string, string> = {
@@ -131,10 +151,11 @@ export function computeGuides(
   next: Partial<CanvasElement>,
   elements: CanvasElement[],
   canvasWidth: number,
-  canvasMidpoint: number
+  canvasHeight: number,
 ) {
   const rect = { x: next.x ?? moving.x, y: next.y ?? moving.y, w: next.w ?? moving.w, h: next.h ?? moving.h };
-  const edges = [0, canvasMidpoint, canvasWidth];
+  const xEdges = [0, canvasWidth / 2, canvasWidth];
+  const yEdges = [0, canvasHeight / 2, canvasHeight];
   const myEdges = [rect.x, rect.x + rect.w / 2, rect.x + rect.w, rect.y, rect.y + rect.h / 2, rect.y + rect.h];
   const guidePositions: { x: number; y: number }[] = [];
   for (const el of elements) {
@@ -145,9 +166,11 @@ export function computeGuides(
     for (const a of myEdges.slice(3))
       for (const b of ex.slice(3)) if (Math.abs(a - b) <= GUIDE_THRESHOLD) guidePositions.push({ x: 0, y: b });
   }
-  for (const e of edges) {
+  for (const e of xEdges) {
     for (const a of [rect.x, rect.x + rect.w / 2, rect.x + rect.w])
       if (Math.abs(a - e) <= GUIDE_THRESHOLD) guidePositions.push({ x: e, y: 0 });
+  }
+  for (const e of yEdges) {
     for (const a of [rect.y, rect.y + rect.h / 2, rect.y + rect.h])
       if (Math.abs(a - e) <= GUIDE_THRESHOLD) guidePositions.push({ x: 0, y: e });
   }
@@ -159,24 +182,31 @@ export function CanvasElementView({
   selected,
   assets,
   config,
+  variableValues,
   readOnly,
   onPointerDown,
   onResizePointerDown,
+  onContextMenu,
   onDoubleClick,
   editingText,
   onTextCommit,
+  scenarioCount = 8,
 }: {
   element: CanvasElement;
   selected: boolean;
   assets: AssetRecord[];
   config?: TemplateConfig;
+  variableValues?: Record<string, string>;
   readOnly: boolean;
   onPointerDown: (event: React.PointerEvent) => void;
   onResizePointerDown?: (event: React.PointerEvent, handle: string) => void;
+  onContextMenu?: (event: React.MouseEvent) => void;
   onDoubleClick?: (event: React.MouseEvent) => void;
   editingText?: boolean;
   onTextCommit?: (text: string) => void;
+  scenarioCount?: number;
 }) {
+  if (element.type === "layer-group" || element.visible === false) return null;
   const assetId = element.assetId || (element.assetSlot ? config?.assets?.[element.assetSlot] : "");
   const asset = assets.find((item) => item.id === assetId);
   const isSpecial = element.type === "special";
@@ -214,7 +244,7 @@ export function CanvasElementView({
           ? `repeating-linear-gradient(90deg, ${style.color || "#111111"} 0 ${dashPx}px, transparent ${dashPx}px ${dashPx * 2}px)`
           : (style.background || "transparent"),
     borderRadius:
-      element.shapeKind === "circle"
+      element.type === "ellipse" || element.shapeKind === "circle"
         ? "50%"
         : isSpecial && element.variant_shape
           ? (shapeRadii[element.variant_shape] || "12px")
@@ -222,9 +252,9 @@ export function CanvasElementView({
             ? `${style.borderRadius}px`
             : undefined,
     clipPath:
-      element.shapeKind === "triangle"
+      element.type === "triangle" || element.shapeKind === "triangle"
         ? "polygon(50% 0, 100% 100%, 0 100%)"
-        : element.shapeKind === "diamond"
+        : element.type === "diamond" || element.shapeKind === "diamond"
           ? "polygon(50% 0, 100% 50%, 50% 100%, 0 50%)"
           : undefined,
     boxShadow:
@@ -234,7 +264,7 @@ export function CanvasElementView({
     letterSpacing: style.letterSpacing ? `${style.letterSpacing}px` : undefined,
     lineHeight: style.lineHeight,
     transform: style.rotation ? `rotate(${style.rotation}deg)` : undefined,
-    opacity: (element.locked ? 0.55 : 1) * (element.opacity ?? 1),
+    opacity: element.opacity ?? 1,
     overflow: "hidden",
     whiteSpace: "pre-wrap",
     display: isSpecial ? "flex" : undefined,
@@ -245,18 +275,29 @@ export function CanvasElementView({
     padding: isSpecial ? "8px" : style.padding ? `${style.padding}px` : undefined,
   };
   const handles = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+  const scenarioLayout = packFixedGrid(scenarioCount, element.w, element.h, element.packing);
+  const density = {
+    comfortable: { padding: 14, gap: 12, icon: 52, label: 17, value: 14 },
+    normal: { padding: 12, gap: 10, icon: 48, label: 16, value: 13 },
+    compact: { padding: 8, gap: 6, icon: 40, label: 14, value: 11 },
+  }[element.textDensity || "normal"];
   return (
     <div
       className={
         selected
-          ? "outline outline-2 outline-[#3b82f6]"
+          ? "outline outline-2 outline-[var(--rl-red)]"
           : "outline outline-1 outline-transparent hover:outline-[var(--rl-border)]"
       }
       data-bg={element.type === "image" && element.assetSlot === "background" ? "1" : undefined}
+      data-element-id={element.id}
       style={common}
       onPointerDown={onPointerDown}
       onDoubleClick={onDoubleClick}
+      onContextMenu={onContextMenu}
       onClick={(event) => event.stopPropagation()}
+      role={readOnly ? undefined : "button"}
+      tabIndex={readOnly ? undefined : 0}
+      aria-label={readOnly ? undefined : element.name || `${element.type} layer`}
     >
       {element.type === "image" && asset ? (
         <img className="h-full w-full object-contain" src={fileUrl(asset.url)} alt="" />
@@ -272,7 +313,9 @@ export function CanvasElementView({
       {element.type === "variable" ? (
         <span className="text-[var(--rl-red)]">
           {element.prefix || ""}
-          {`{${element.variableId || "variable"}}`}
+          {variableValues && (element.variableId || "") in variableValues
+            ? variableValues[element.variableId || ""]
+            : `{${element.variableId || "variable"}}`}
           {element.suffix || ""}
         </span>
       ) : null}
@@ -284,6 +327,31 @@ export function CanvasElementView({
       {element.type === "benefit-card" ? (
         <div className="p-1 text-xs font-bold">
           {config?.cards?.[element.cardId || ""]?.title || "Benefit card"}
+        </div>
+      ) : null}
+      {element.type === "benefit-grid" ? (
+        <div className="relative h-full w-full overflow-hidden border border-dashed border-[var(--rl-red)] bg-[var(--rl-red-light)]/20">
+          <div className="hidden">
+            <span>Dynamic benefit grid</span>
+            <span>{element.gridKind === "available_addons" ? "Available add-ons" : "Current benefits"} · {scenarioCount}</span>
+          </div>
+          {scenarioCount === 0 ? (
+            element.emptyState === "message"
+              ? <div className="grid h-full place-items-center text-center text-[10px] text-[var(--rl-text-muted)]">{element.emptyMessage || "Empty grid message"}</div>
+              : <div className="grid h-full place-items-center text-[10px] text-[var(--rl-text-muted)]">Hidden when empty</div>
+          ) : (
+            scenarioLayout.cards.map((card) => (
+              <article key={card.index} className="absolute grid place-items-center overflow-hidden" style={{ left: card.x, top: card.y, width: card.width, height: card.height }}>
+                <div
+                  className={`${element.cardStyle === "minimal" ? "bg-transparent" : element.cardStyle === "soft" ? "bg-[#f3f0f0] shadow-sm" : "border border-[var(--rl-border)] bg-white"} grid grid-cols-[58px_minmax(0,1fr)] items-center rounded-[10px]`}
+                  style={{ width: element.packing?.referenceWidth || 180, height: element.packing?.referenceHeight || 124, transform: `scale(${card.scale})`, transformOrigin: "center", padding: density.padding, gap: density.gap }}
+                >
+                  <span className="grid place-items-center rounded-full bg-[var(--rl-red-light)] font-black text-[var(--rl-red)]" style={{ width: density.icon, height: density.icon, fontSize: density.label }}>B{card.index + 1}</span>
+                  <span className="min-w-0"><strong className="block truncate" style={{ fontSize: density.label }}>Benefit {card.index + 1}</strong><span className="block truncate text-[var(--rl-text-muted)]" style={{ fontSize: density.value }}>Coverage value</span></span>
+                </div>
+              </article>
+            ))
+          )}
         </div>
       ) : null}
       {isSpecial ? (
@@ -319,15 +387,17 @@ export function CanvasElementView({
               w: "top-1/2 left-0 -translate-y-1/2",
             }[handle];
             return (
-              <span
+              <button
+                type="button"
                 key={handle}
-                className={`absolute ${pos} h-3 w-3 border border-[#3b82f6] bg-white ${
+                className={`absolute ${pos} h-3 w-3 border border-[var(--rl-red)] bg-white ${
                   handle.includes("n") || handle.includes("s")
                     ? handle.includes("e") || handle.includes("w")
                       ? "cursor-nwse-resize"
                       : "cursor-ns-resize"
                     : "cursor-ew-resize"
                 }`}
+                aria-label={`Resize ${element.name || element.type} from ${handle}`}
                 onPointerDown={(event) => onResizePointerDown(event, handle)}
               />
             );

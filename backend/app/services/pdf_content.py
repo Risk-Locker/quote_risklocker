@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from hashlib import sha256
 
 from app.core.config import Settings
@@ -19,11 +18,9 @@ ACTIVE_STORAGE_STATUSES = {
 
 
 def load_pdf_bytes(record, settings: Settings) -> bytes:
-    now = datetime.now(timezone.utc)
     supabase_available = (
         record.storage_provider == "supabase"
         and record.storage_status in ACTIVE_STORAGE_STATUSES
-        and (record.storage_expires_at is None or record.storage_expires_at > now)
     )
     if supabase_available:
         try:

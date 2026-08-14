@@ -16,9 +16,22 @@ from app.extraction.draft_mapper import build_draft
 from app.extraction.orchestrator import ExtractionOrchestrator
 
 
+COMPANY_RECORDS = [
+    {"name": "AmGen", "source_template_category": "Amgen / AmAssurance / Kurnia-style", "aliases": ["amgen", "amgeneral"]},
+    {"name": "Etiqa Takaful", "source_template_category": "Etiqa Takaful", "aliases": ["etiqa"]},
+    {"name": "Lonpac", "source_template_category": "Other / Unknown", "aliases": ["lonpac"]},
+    {"name": "Kurnia", "source_template_category": "Amgen / AmAssurance / Kurnia-style", "aliases": ["kurnia"]},
+]
+
+
 def extract_fixture(name: str, source_filename: str) -> dict:
     text = (FIXTURES / name).read_text(encoding="utf-8")
-    candidates = find_candidates(text, [{"page": 1, "text": text}], source_filename=source_filename)
+    candidates = find_candidates(
+        text,
+        [{"page": 1, "text": text}],
+        source_filename=source_filename,
+        db_companies=COMPANY_RECORDS,
+    )
     fields, warnings, status = build_draft(candidates)
     return {"fields": fields, "warnings": warnings, "status": status}
 
@@ -68,7 +81,12 @@ def test_etiqa_fixture_extracts_semantic_values():
     ],
 )
 def test_filename_company_detection_is_specific(filename: str, company: str):
-    fields, _, _ = build_draft(find_candidates("MOTOR QUOTATION", [{"page": 1, "text": "MOTOR QUOTATION"}], source_filename=filename))
+    fields, _, _ = build_draft(find_candidates(
+        "MOTOR QUOTATION",
+        [{"page": 1, "text": "MOTOR QUOTATION"}],
+        source_filename=filename,
+        db_companies=COMPANY_RECORDS,
+    ))
     assert field_value(fields, "insurance_company") == company
 
 

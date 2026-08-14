@@ -141,7 +141,7 @@ def test_delete_template_soft_deletes_editable_copy():
     trash_service.delete_template(db, _settings(), _user(), template.id)
 
     assert template.deleted_at is not None
-    assert template.purge_after is not None
+    assert template.purge_after is None
     assert template.status == "inactive"
     assert db.commits == 1
     assert any(getattr(e, "entity_type", None) == "template" for e in db.added)
@@ -216,8 +216,8 @@ def test_trash_list_categorized_shape():
 
     data = trash_service.list_trash_categorized(db, _user(), 14)
 
-    assert data["retention_days"] == 14
-    assert set(data.keys()) == {"retention_days", "sessions", "templates", "our_specials", "our_special_variants", "client_records", "assets"}
+    assert data["retention_policy"] == "manual_reference_aware_purge"
+    assert set(data.keys()) == {"retention_policy", "sessions", "templates", "our_specials", "our_special_variants", "client_records", "assets"}
     assert data["templates"] == []  # nothing deleted yet
     trash_service.delete_template(db, _settings(), _user(), template.id)
     trash_service.delete_special(db, _settings(), _user(), special.id)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -113,6 +113,11 @@ def authenticate_session(db: Session, settings: Settings, raw_token: str) -> tup
             session.revoked_at = now
             db.commit()
         raise AppError("This account is not active.", 401)
+    if getattr(settings, "app_env", "test") == "production" and user.role == Role.DEV.value:
+        if session.revoked_at is None:
+            session.revoked_at = now
+            db.commit()
+        raise AppError("This account type is not available in production.", 401)
 
     session.last_activity_at = now
     session.idle_expires_at = now + timedelta(hours=settings.session_idle_hours)
@@ -181,6 +186,8 @@ def login_with_password(
     normalized = _normalize_email(email)
     user = db.scalar(select(User).where(User.email == normalized))
     if not user or not user.password_hash or not verify_password(password, user.password_hash):
+        raise AppError("Invalid email or password.", 401)
+    if getattr(settings, "app_env", "test") == "production" and user.role == Role.DEV.value:
         raise AppError("Invalid email or password.", 401)
     if user.status != AccountStatus.ACTIVE.value:
         raise AppError("This account is not active.", 401)
@@ -271,39 +278,37 @@ def update_user(
     return target
 
 
-def ensure_super_admin(db: Session, settings: Settings) -> User | None:
-    """Create or update the super admin from environment variables on startup.
-    Returns None if no super admin credentials are configured."""
-    email = settings.super_admin_email
-    password = settings.super_admin_password
-    if not email or not password:
-        return None
+def bootstrap_primary_admin(db: Session, email: str, password: str) -> User:
+    """Create the sole Primary Admin without modifying an existing owner."""
 
+    if len(password) < 12:
+        raise AppError("The bootstrap password must be at least 12 characters.", 400)
     normalized = _normalize_email(email)
-    user = db.scalar(select(User).where(User.email == normalized))
-    if not user:
-        user = User(
-            email=normalized,
-            password_hash=hash_password(password),
-            role=Role.SUPER_ADMIN.value,
-            status=AccountStatus.ACTIVE.value,
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        return user
-
-    # Keep super admin credentials in sync with .env on every startup.
-    if user.role != Role.SUPER_ADMIN.value:
-        user.role = Role.SUPER_ADMIN.value
-    if user.status != AccountStatus.ACTIVE.value:
-        user.status = AccountStatus.ACTIVE.value
-    user.password_hash = hash_password(password)
+    db.execute(text("SELECT pg_advisory_xact_lock(hashtext('risklocker_primary_admin_bootstrap'))"))
+    owner = db.scalar(select(User).where(User.role == Role.SUPER_ADMIN.value).with_for_update())
+    if owner is not None:
+        raise AppError("A Primary Admin already exists. Bootstrap cannot modify it.", 409)
+    if db.scalar(select(User).where(User.email == normalized).with_for_update()) is not None:
+        raise AppError("A user with this email already exists.", 409)
+    user = User(
+        email=normalized,
+        password_hash=hash_password(password),
+        role=Role.SUPER_ADMIN.value,
+        status=AccountStatus.ACTIVE.value,
+    )
+    db.add(user)
     db.commit()
     db.refresh(user)
     return user
 
 
+def ensure_super_admin(db: Session, settings: Settings) -> User | None:
+    """RL-DISABLED environment credential reset — disabled 2026-08-13; bootstrap once via CLI."""
+
+    return None
+
+
 def initial_super_admin_from_env(db: Session, settings: Settings) -> User | None:
-    """Legacy alias for startup seeding."""
-    return ensure_super_admin(db, settings)
+    """RL-DISABLED legacy environment bootstrap — disabled 2026-08-13."""
+
+    return None

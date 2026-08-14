@@ -63,17 +63,23 @@ All components live in `frontend/src/components/ui/`.
 - **Toast** — `useToast()` hook returning `toast(message, variant?)`. Variants: `success|error|warning|info`. Slides in from top-right.
 - **Dialog** — confirmation modal with overlay, title, description, action buttons.
 - **Tooltip** — hover tooltip using Radix. Dark background, 6 px radius.
-- **Tabs** — Radix-based tab bar with pill-style active state.
+- **Tabs** — Radix-based tab bar with a 6 px rectangular active state.
 - **Spinner** — animated spinner for loading states.
 
 ## Workflow Screens
 
 - Preserve Upload -> Check Values -> Generate PDF.
-- **Shell:** Fixed 56 px glass header with Risklocker horizontal logo, user email, sign-out button. Fixed 220 px sidebar with distinct Phosphor icons per route, active state in black pill. Main area scrolls independently.
+- **Shell:** Fixed 56 px glass header with Risklocker horizontal logo, user email, sign-out button. Fixed 220 px sidebar with distinct Phosphor icons per route, active state in a 6 px black rectangle. Main area scrolls independently.
 - **Login:** Centered card on gray background, logo above form, minimal fields.
 - **Review:** Sticky toolbar, two-column layout (PDF iframe left, extracted text + fields right). DraftFieldTable component reused.
-- **Template Builder:** Full-screen toolbar, left element library, centered A4 canvas, right property inspector. Canvas drag/resize unchanged.
-- **Builder / Settings sub-navigation:** Pill-style link bar using the same transparent/white toggle pattern.
+- **Template Builder:** Compact command bar, hierarchy-only Layers panel on the left, fit-to-view fixed-page canvas in the center, contextual Properties inspector on the right, and zoom/page/guides controls in the bottom status bar. Renderable rectangles and semantic layer groups are separate node types.
+- **Builder navigation:** Templates, Benefits, and Asset Library only. Benefits is company-first. Company-detection aliases live under Settings → Extraction.
+- **Builder / Settings sub-navigation:** Compact rectangular links with a border or surface active state; never capsule tabs.
+
+## Loading and Progress
+
+- Loading state belongs to the operation or region that is waiting. Use skeletons for initial content, a button busy state for mutations, and named phase/progress/elapsed status for upload, extraction, preview, and generation.
+- Do not fabricate delay, show a global request capsule, or flash progress for background polling. After two seconds, long operations show their current phase, elapsed time, and a recovery action when stalled.
 
 ## Staff Language
 

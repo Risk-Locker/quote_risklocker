@@ -4,12 +4,13 @@
 
 | Category | Variables |
 | --- | --- |
-| Active application settings | `APP_ENV`, `APP_NAME`, `CORS_ORIGINS` |
+| Active application settings | `APP_ENV`, `APP_NAME`, `APP_ORIGIN`, `CORS_ORIGINS`, `TRUSTED_HOSTS`, `TRUSTED_PROXY_IPS` |
 | Active database settings | `DATABASE_PROVIDER`, `DATABASE_URL`, optional `TEST_DATABASE_URL` |
-| Active authentication settings | `AUTH_HASH_SECRET`, `AUTH_CODE_EXPIRE_MINUTES`, `AUTH_CODE_MAX_ATTEMPTS`, `AUTH_CODE_RESEND_SECONDS`, `SESSION_IDLE_HOURS`, `SESSION_MAX_DAYS`, `SESSION_COOKIE_NAME`, `SESSION_COOKIE_SECURE` |
-| Active backend mail settings | `SMTP_HOST`, `SMTP_PORT`, optional `SMTP_USERNAME`, backend-only `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_STARTTLS`, `SMTP_USE_SSL` |
+| Temporary authentication settings | `AUTH_HASH_SECRET`, `SESSION_IDLE_HOURS`, `SESSION_MAX_DAYS`, `SESSION_COOKIE_NAME`, `CSRF_COOKIE_NAME`, `SESSION_COOKIE_SECURE` |
+| Dormant mail seam | `EMAIL_PROVIDER=disabled|test|resend`, optional `RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_REPLY_TO`, `EMAIL_REQUEST_TIMEOUT_SECONDS`, `RESEND_WEBHOOK_SECRET`; current password auth never invokes mail |
 | Active Supabase Storage settings | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `STORAGE_DRIVER`, `SUPABASE_STORAGE_BUCKET` |
-| Active processing and retention settings | `PDF_RETENTION_DAYS`, `TRASH_RETENTION_DAYS`, `MAX_UPLOAD_BYTES`, `REQUIRE_MALWARE_SCANNER` |
+| Active resource limits | `MAX_UPLOAD_FILES=1`, `MAX_SOURCE_PDF_BYTES`, `MAX_PDF_PAGES`, `MAX_GENERATED_PDF_BYTES`, `MAX_ASSET_BYTES`, `MAX_ASSET_PIXELS`, `MAX_CATALOG_IMPORT_BYTES`, `MAX_CATALOG_IMPORT_ROWS`, `MAX_TEMPLATE_JSON_BYTES`, `MAX_TEMPLATE_ELEMENTS`, `REQUIRE_MALWARE_SCANNER` |
+| Active abuse limits | `RATE_LIMIT_LOGIN_*`, `RATE_LIMIT_UPLOAD_*`, `RATE_LIMIT_PREVIEW_*`, `RATE_LIMIT_GENERATION_*`, `RATE_LIMIT_DOWNLOAD_*`, `RATE_LIMIT_IMPORT_*` |
 | Defined but currently inactive settings | `ENHANCED_READING_ENABLED`, `STRICT_NO_GUESSING`, `AUTO_DOWNLOAD_GENERATED_PDF` |
 | Initial local setup | `INITIAL_ADMIN_EMAIL` |
 
@@ -21,9 +22,9 @@ The three inactive settings are loaded by backend configuration but do not chang
 
 1. Create the Python environment, install `requirements.txt` and optional requirements, then install Playwright Chromium.
 2. Install frontend dependencies in `frontend/`.
-3. Configure `.env` with a Supabase/Postgres database URL, long authentication hash secret, backend SMTP relay, Supabase URL, and backend-only service-role key.
-4. Apply ordered migrations with `commands/apply-migrations.ps1`, initialize defaults with `commands/init_db.py`, and create/promote a named employee Admin with `commands/create_admin.py first.last@risklocker.com`.
-5. Use `npm run backend`, `npm run frontend`, or `npm run full` to start development services. Use `npm run stop` to stop project servers.
+3. Configure `.env` from `.env.example`; production requires HTTPS origin, exact hosts/proxies, a long hash secret, Supabase credentials, and scanning.
+4. Apply migrations with `commands/apply-migrations.ps1`, initialize non-credential defaults explicitly, and bootstrap Primary Admin once with `python commands/create_admin.py first.last@risklocker.com`.
+5. Use `npm run backend`, `npm run frontend`, or `npm run full` to start development services. `npm run full` starts the API, frontend, and exactly one extraction/render worker. Use `npm run stop` to stop project servers.
 6. Port coordination: `commands/start-backend.ps1` writes the chosen port to `.qc-tmp\backend-port.txt`; `start-frontend.ps1` and `start-full.ps1` read it. Backend :8100, frontend :3000.
 
 ## QA and E2E Tooling (in-repo, gitignored)
@@ -37,21 +38,20 @@ The three inactive settings are loaded by backend configuration but do not chang
 
 ## Maintenance
 
-- Run `commands/purge-expired-pdfs.py` for a manual PDF-retention cycle; the backend also schedules daily retention.
-- Run `commands/purge_trash.py` for scheduled trash maintenance where needed.
+- Automatic PDF expiry and Trash purge are disabled. WP9 supplies the reference-aware manual purge workflow; do not schedule legacy expiry commands.
 - Run `npm run code-map` after structural changes and `npm run code-map:check` before completing work.
 - Migrations are ordered SQL files under `migrations/` and must be applied against Supabase/Postgres only.
+- Pre-ledger databases (schema applied before the migration-ledger system existed, so `schema_migrations` is missing/empty): run `python commands/backfill-ledger.py` (`--dry-run` first; defaults to recording versions 001-022, refuses to run if the ledger already has rows) before `commands/apply-migrations.ps1`. The runner executes migration SQL through the raw DBAPI cursor (`backend/app/db/migrations.py` `apply_migrations`) because psycopg3 client-side binding rejects `%I` (Postgres `format()` in `DO` blocks) and SQLAlchemy `text()` misreads `:NN` inside JSON literals.
 - `openpyxl` (requirements.txt) powers the settings CSV/Excel imports — road tax export/import, vehicles multi-sheet Excel import, field-alias import. Uploads are validated server-side (extension/size/row caps; Excel read data-only, no formula evaluation).
 - Frontend middleware (`frontend/src/middleware.ts`) guards protected routes by session cookie server-side; the cookie name must match `SESSION_COOKIE_NAME` in the backend `.env`.
 
 ## Deployment Boundaries
 
 - The application requires HTTPS Supabase Storage and private backend access to the service-role key.
-- Production requires the configured SMTP relay and `SESSION_COOKIE_SECURE=true`. HTTPS termination must cover both frontend and backend cookie traffic.
+- Production requires one HTTPS origin, exact host/proxy configuration, secure cookies, CSRF, scanning, and a current migration ledger.
 - `SESSION_IDLE_HOURS` is fixed at eight and rolls on authenticated activity; `SESSION_MAX_DAYS` is fixed at 30 as the hard server-side session limit.
-- SMTP credentials and `AUTH_HASH_SECRET` are backend-only secrets. Only `NEXT_PUBLIC_API_BASE_URL` belongs in frontend configuration.
-- Migration `008_passwordless_auth_sessions.sql` removes password hashes, adds the exact employee-domain database constraint, and creates the login-code and session tables with Data API access revoked.
-- Migration 008 is transactional and intentionally stops if a legacy user has a non-normalized, external-domain, or shared/group address. An operator must correct those accounts to confirmed named employee addresses before retrying; the migration never guesses or rewrites identities.
+- `AUTH_HASH_SECRET`, Supabase credentials, and `BACKEND_API_ORIGIN` are server-only. The browser has no backend-origin environment variable.
+- Legacy passwordless structures remain compatibility data but are not active core behavior. WP13 replaces authentication only after core approval.
 - The storage bucket is private and created/checked by backend startup.
 - Microsoft 365 archive integration stays disabled until backend deployment credentials and its archive worker are deliberately configured.
-- The repository has no checked-in CI workflow, in-app rate limiter, or HTTP security-header policy. Before production deployment, document the hosting platform, HTTPS termination, rate-limiting owner, security-header owner, logging, and alerting policy. Do not assume an external gateway provides them without verification.
+- The app owns trusted-host/origin validation, CSRF, headers, and Postgres rate limits. Checked-in CI, production observability, backup drills, and alerts are WP11 deliverables.

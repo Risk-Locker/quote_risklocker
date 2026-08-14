@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
@@ -34,9 +34,10 @@ class SoftDeleteMixin:
     purge_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def mark_deleted(self, retention_days: int) -> None:
-        now = utcnow()
-        self.deleted_at = now
-        self.purge_after = now + timedelta(days=retention_days)
+        # RL-DISABLED timed trash expiry — disabled 2026-08-14; v7 trash is
+        # retained until a user performs an explicit reference-aware purge.
+        self.deleted_at = utcnow()
+        self.purge_after = None
 
     def restore(self) -> None:
         self.deleted_at = None
@@ -75,6 +76,17 @@ class AuthSession(Base, TimestampMixin):
     user: Mapped[User] = relationship(back_populates="auth_sessions", foreign_keys=[user_id])
 
 
+class RateLimitBucket(Base):
+    __tablename__ = "rate_limit_buckets"
+
+    scope: Mapped[str] = mapped_column(String(80), primary_key=True)
+    key_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    request_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    blocked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
 class InsuranceCategory(Base, TimestampMixin):
     __tablename__ = "insurance_categories"
 
@@ -87,10 +99,14 @@ class InsuranceCompany(Base, TimestampMixin):
     __tablename__ = "insurance_companies"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    legal_entity_id: Mapped[str | None] = mapped_column(ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    slug: Mapped[str | None] = mapped_column(String(160), nullable=True, unique=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     category: Mapped[str] = mapped_column(String(100), nullable=False, default=InsuranceType.MOTOR.value, index=True)
     source_template_category: Mapped[str] = mapped_column(String(120), nullable=False, default="Other / Unknown")
     logo_path: Mapped[str | None] = mapped_column(String(600), nullable=True)
+    logo_asset_id: Mapped[str | None] = mapped_column(ForeignKey("business_assets.id", ondelete="SET NULL"), nullable=True, index=True)
     detection_phrases: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default=AccountStatus.ACTIVE.value, index=True)
 
@@ -99,6 +115,7 @@ class OutputTemplateConfig(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "output_template_configs"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     insurance_type: Mapped[str] = mapped_column(String(100), nullable=False, default=InsuranceType.MOTOR.value, index=True)
     insurance_company_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_companies.id"), nullable=True)
@@ -248,6 +265,19 @@ class ClientRecord(Base, TimestampMixin, SoftDeleteMixin):
     extracted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+
+class RecordSavedView(Base, TimestampMixin):
+    __tablename__ = "record_saved_views"
+    __table_args__ = (UniqueConstraint("owner_id", "name", name="uq_record_saved_view_owner_name"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    filters: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    is_shared: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
 class RoadTaxRule(Base, TimestampMixin):
@@ -345,6 +375,8 @@ class ExtractionRecord(Base, TimestampMixin):
     images: Mapped[list[dict]] = mapped_column(JSON, default=list, nullable=False)
     regions: Mapped[list[dict]] = mapped_column(JSON, default=list, nullable=False)
     candidates: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    benefit_lines: Mapped[list[dict]] = mapped_column(JSON, default=list, nullable=False)
+    company_resolution: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     warnings: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     reading_quality: Mapped[str] = mapped_column(String(50), nullable=False, default="check_needed")
 
@@ -355,13 +387,23 @@ class QuotationDraft(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "quotation_drafts"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     uploaded_file_id: Mapped[str] = mapped_column(ForeignKey("uploaded_files.id"), nullable=False, unique=True)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     insurance_type: Mapped[str] = mapped_column(String(100), nullable=False, default=InsuranceType.MOTOR.value)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default=RecordStatus.CHECK_NEEDED.value, index=True)
     fields: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    scalar_decisions: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     warnings: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    company_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_companies.id", ondelete="SET NULL"), nullable=True, index=True)
+    product_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_products.id", ondelete="SET NULL"), nullable=True, index=True)
+    tier_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_product_tiers.id", ondelete="SET NULL"), nullable=True, index=True)
+    catalog_revision_id: Mapped[str | None] = mapped_column(ForeignKey("benefit_catalog_revisions.id", ondelete="SET NULL"), nullable=True, index=True)
+    template_revision_id: Mapped[str | None] = mapped_column(ForeignKey("template_revisions.id", ondelete="SET NULL"), nullable=True, index=True)
     layout_override: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    layout_override_template_id: Mapped[str | None] = mapped_column(ForeignKey("output_template_configs.id", ondelete="SET NULL"), nullable=True)
+    layout_override_template_revision_id: Mapped[str | None] = mapped_column(ForeignKey("template_revisions.id", ondelete="SET NULL"), nullable=True)
+    layout_override_base_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reviewed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
@@ -371,12 +413,19 @@ class QuotationDraft(Base, TimestampMixin, SoftDeleteMixin):
 
 class GeneratedPdfVersion(Base, TimestampMixin):
     __tablename__ = "generated_pdf_versions"
-    __table_args__ = (UniqueConstraint("draft_id", "version_number", name="uq_generated_pdf_draft_version"),)
+    __table_args__ = (
+        UniqueConstraint("draft_id", "version_number", name="uq_generated_pdf_draft_version"),
+        UniqueConstraint("draft_id", "idempotency_key", name="uq_generated_pdf_draft_idempotency"),
+    )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
     draft_id: Mapped[str] = mapped_column(ForeignKey("quotation_drafts.id"), nullable=False, index=True)
     uploaded_file_id: Mapped[str] = mapped_column(ForeignKey("uploaded_files.id"), nullable=False, index=True)
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    draft_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    catalog_revision_id: Mapped[str | None] = mapped_column(ForeignKey("benefit_catalog_revisions.id", ondelete="SET NULL"), nullable=True)
+    template_revision_id: Mapped[str | None] = mapped_column(ForeignKey("template_revisions.id", ondelete="SET NULL"), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     storage_path: Mapped[str] = mapped_column(String(800), nullable=False)
     storage_provider: Mapped[str] = mapped_column(String(50), nullable=False, default="supabase")
@@ -393,6 +442,9 @@ class GeneratedPdfVersion(Base, TimestampMixin):
     archive_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     draft_snapshot: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     template_snapshot: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    render_context_snapshot: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    render_context_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    renderer_version: Mapped[str] = mapped_column(String(80), nullable=False, default="legacy")
     generated_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
@@ -408,7 +460,7 @@ class TrashRecord(Base, TimestampMixin):
     original_status: Mapped[str] = mapped_column(String(50), nullable=False)
     deleted_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     deleted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-    purge_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    purge_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class CorrectionMemory(Base, TimestampMixin):
@@ -428,9 +480,12 @@ class TemplateAsset(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "template_assets"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     uploaded_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     label: Mapped[str] = mapped_column(String(255), nullable=False)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     content_type: Mapped[str] = mapped_column(String(120), nullable=False)
     folder: Mapped[str] = mapped_column(String(120), nullable=False, default="Uncategorized", index=True)
     storage_provider: Mapped[str] = mapped_column(String(50), nullable=False, default="supabase")
@@ -485,3 +540,367 @@ class Notification(Base, TimestampMixin):
     delivery_state: Mapped[str] = mapped_column(String(20), nullable=False, default="sent")
     delivery_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     audit_event_id: Mapped[str | None] = mapped_column(ForeignKey("audit_events.id", ondelete="SET NULL"), nullable=True)
+
+
+# --- v7 additive business, review, template, job, and snapshot domain ---
+
+
+class LegalEntity(Base, TimestampMixin):
+    __tablename__ = "legal_entities"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    legal_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    registration_no: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    jurisdiction: Mapped[str] = mapped_column(String(80), nullable=False, default="MY")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active", index=True)
+
+
+class CompanyAlias(Base, TimestampMixin):
+    __tablename__ = "company_aliases"
+    __table_args__ = (UniqueConstraint("normalized_alias", name="uq_company_alias_normalized"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    company_id: Mapped[str] = mapped_column(ForeignKey("insurance_companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    alias: Mapped[str] = mapped_column(String(255), nullable=False)
+    normalized_alias: Mapped[str] = mapped_column(String(255), nullable=False)
+    alias_kind: Mapped[str] = mapped_column(String(40), nullable=False, default="detection")
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")
+
+
+class InsuranceProduct(Base, TimestampMixin):
+    __tablename__ = "insurance_products"
+    __table_args__ = (UniqueConstraint("company_id", "product_key", name="uq_product_company_key"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    company_id: Mapped[str] = mapped_column(ForeignKey("insurance_companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    product_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    channel: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active", index=True)
+
+
+class InsuranceProductTier(Base, TimestampMixin):
+    __tablename__ = "insurance_product_tiers"
+    __table_args__ = (UniqueConstraint("product_id", "tier_key", name="uq_product_tier_key"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    product_id: Mapped[str] = mapped_column(ForeignKey("insurance_products.id", ondelete="CASCADE"), nullable=False, index=True)
+    tier_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")
+
+
+class SourceDocument(Base, TimestampMixin):
+    __tablename__ = "source_documents"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    issuer: Mapped[str] = mapped_column(String(255), nullable=False)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    reference_url: Mapped[str | None] = mapped_column(String(1_500), nullable=True)
+    reference_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    effective_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    checksum: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    verification_status: Mapped[str] = mapped_column(String(40), nullable=False, default="unverified", index=True)
+    reviewed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class BenefitConcept(Base, TimestampMixin):
+    __tablename__ = "benefit_concepts"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    concept_key: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    value_schema: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    display_template: Mapped[str] = mapped_column(String(500), nullable=False, default="{label}")
+    required_variables: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    optional_variables: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    validation_rules: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    default_asset_id: Mapped[str | None] = mapped_column(ForeignKey("business_assets.id", ondelete="SET NULL"), nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active", index=True)
+
+
+class BenefitFacet(Base, TimestampMixin):
+    __tablename__ = "benefit_facets"
+    __table_args__ = (UniqueConstraint("parent_concept_id", "facet_key", name="uq_benefit_facet_key"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    parent_concept_id: Mapped[str] = mapped_column(ForeignKey("benefit_concepts.id", ondelete="CASCADE"), nullable=False, index=True)
+    facet_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    asset_id: Mapped[str | None] = mapped_column(ForeignKey("business_assets.id", ondelete="SET NULL"), nullable=True)
+    display_template: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")
+
+
+class BenefitCatalog(Base, TimestampMixin):
+    __tablename__ = "benefit_catalogs"
+    __table_args__ = (UniqueConstraint("company_id", "product_id", "tier_id", name="uq_catalog_context"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    company_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_companies.id", ondelete="CASCADE"), nullable=True, index=True)
+    product_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_products.id", ondelete="CASCADE"), nullable=True, index=True)
+    tier_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_product_tiers.id", ondelete="CASCADE"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="draft", index=True)
+
+
+class BenefitCatalogRevision(Base, TimestampMixin):
+    __tablename__ = "benefit_catalog_revisions"
+    __table_args__ = (UniqueConstraint("catalog_id", "revision_number", name="uq_catalog_revision"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    catalog_id: Mapped[str] = mapped_column(ForeignKey("benefit_catalogs.id", ondelete="CASCADE"), nullable=False, index=True)
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(40), nullable=False, default="draft", index=True)
+    source_document_ids: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    published_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CatalogOffering(Base, TimestampMixin):
+    __tablename__ = "catalog_offerings"
+    __table_args__ = (UniqueConstraint("catalog_revision_id", "offering_key", name="uq_catalog_offering_key"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    catalog_revision_id: Mapped[str] = mapped_column(ForeignKey("benefit_catalog_revisions.id", ondelete="CASCADE"), nullable=False, index=True)
+    offering_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    concept_id: Mapped[str] = mapped_column(ForeignKey("benefit_concepts.id", ondelete="RESTRICT"), nullable=False, index=True)
+    offering_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    label_override: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    typed_value: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    source_document_id: Mapped[str | None] = mapped_column(ForeignKey("source_documents.id", ondelete="SET NULL"), nullable=True)
+    source_citation: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    source_aliases: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    presentation_facet_ids: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active", index=True)
+
+
+class BenefitRelation(Base, TimestampMixin):
+    __tablename__ = "benefit_relations"
+    __table_args__ = (UniqueConstraint("catalog_revision_id", "from_offering_id", "relation_kind", "to_offering_id", name="uq_benefit_relation"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    catalog_revision_id: Mapped[str] = mapped_column(ForeignKey("benefit_catalog_revisions.id", ondelete="CASCADE"), nullable=False, index=True)
+    from_offering_id: Mapped[str] = mapped_column(ForeignKey("catalog_offerings.id", ondelete="CASCADE"), nullable=False, index=True)
+    to_offering_id: Mapped[str] = mapped_column(ForeignKey("catalog_offerings.id", ondelete="CASCADE"), nullable=False, index=True)
+    relation_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    branch_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class BenefitPackage(Base, TimestampMixin):
+    __tablename__ = "benefit_packages"
+    __table_args__ = (UniqueConstraint("catalog_revision_id", "package_key", name="uq_benefit_package_key"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    catalog_revision_id: Mapped[str] = mapped_column(ForeignKey("benefit_catalog_revisions.id", ondelete="CASCADE"), nullable=False, index=True)
+    package_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")
+
+
+class BenefitPackagePlan(Base, TimestampMixin):
+    __tablename__ = "benefit_package_plans"
+    __table_args__ = (UniqueConstraint("package_id", "plan_key", name="uq_benefit_package_plan_key"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    package_id: Mapped[str] = mapped_column(ForeignKey("benefit_packages.id", ondelete="CASCADE"), nullable=False, index=True)
+    plan_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")
+
+
+class BenefitPackagePlanItem(Base, TimestampMixin):
+    __tablename__ = "benefit_package_plan_items"
+    __table_args__ = (UniqueConstraint("plan_id", "offering_id", name="uq_benefit_package_plan_item"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("benefit_package_plans.id", ondelete="CASCADE"), nullable=False, index=True)
+    offering_id: Mapped[str] = mapped_column(ForeignKey("catalog_offerings.id", ondelete="RESTRICT"), nullable=False, index=True)
+    typed_value_override: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class CatalogImport(Base, TimestampMixin):
+    __tablename__ = "catalog_imports"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    requested_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
+    state: Mapped[str] = mapped_column(String(40), nullable=False, default="dry_run", index=True)
+    source_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    report: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BusinessAsset(Base, TimestampMixin):
+    __tablename__ = "business_assets"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    asset_key: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    asset_kind: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    storage_path: Mapped[str] = mapped_column(String(800), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    width_px: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height_px: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    has_transparency: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    derivative_manifest: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="unassigned", index=True)
+
+
+class ExtractionBenefitLine(Base, TimestampMixin):
+    __tablename__ = "extraction_benefit_lines"
+    __table_args__ = (UniqueConstraint("extraction_record_id", "line_id", name="uq_extraction_benefit_line"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    extraction_record_id: Mapped[str] = mapped_column(ForeignKey("extraction_records.id", ondelete="CASCADE"), nullable=False, index=True)
+    line_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    raw_label: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_label: Mapped[str] = mapped_column(String(500), nullable=False)
+    page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    section: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_scope: Mapped[str] = mapped_column(String(60), nullable=False, default="unknown")
+    line_kind: Mapped[str] = mapped_column(String(60), nullable=False, default="unknown")
+    inclusion_state: Mapped[str] = mapped_column(String(40), nullable=False, default="unknown")
+    evidence: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    candidate_mappings: Mapped[list[dict]] = mapped_column(JSON, default=list, nullable=False)
+    extracted_value: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class DraftSourceLineDecision(Base, TimestampMixin):
+    __tablename__ = "draft_source_line_decisions"
+    __table_args__ = (UniqueConstraint("draft_id", "source_line_id", name="uq_draft_source_line_decision"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    draft_id: Mapped[str] = mapped_column(ForeignKey("quotation_drafts.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_line_id: Mapped[str] = mapped_column(ForeignKey("extraction_benefit_lines.id", ondelete="CASCADE"), nullable=False, index=True)
+    disposition: Mapped[str] = mapped_column(String(40), nullable=False, default="unresolved", index=True)
+    selection_id: Mapped[str | None] = mapped_column(ForeignKey("draft_benefit_selections.id", ondelete="SET NULL"), nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DraftBenefitSelection(Base, TimestampMixin):
+    __tablename__ = "draft_benefit_selections"
+    __table_args__ = (UniqueConstraint("draft_id", "selection_key", name="uq_draft_benefit_selection_key"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    draft_id: Mapped[str] = mapped_column(ForeignKey("quotation_drafts.id", ondelete="CASCADE"), nullable=False, index=True)
+    selection_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    catalog_offering_id: Mapped[str | None] = mapped_column(ForeignKey("catalog_offerings.id", ondelete="SET NULL"), nullable=True, index=True)
+    concept_id: Mapped[str | None] = mapped_column(ForeignKey("benefit_concepts.id", ondelete="SET NULL"), nullable=True, index=True)
+    source_line_id: Mapped[str | None] = mapped_column(ForeignKey("extraction_benefit_lines.id", ondelete="SET NULL"), nullable=True)
+    item_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    state: Mapped[str] = mapped_column(String(40), nullable=False, default="unresolved", index=True)
+    cost_status: Mapped[str] = mapped_column(String(40), nullable=False, default="unknown")
+    label_override: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    typed_value_override: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    evidence_snapshot: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    selected_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    superseded_by_id: Mapped[str | None] = mapped_column(ForeignKey("draft_benefit_selections.id", ondelete="SET NULL"), nullable=True)
+
+
+class TemplatePageProfile(Base, TimestampMixin):
+    __tablename__ = "template_page_profiles"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    profile_key: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    width: Mapped[Numeric] = mapped_column(Numeric(12, 4), nullable=False)
+    height: Mapped[Numeric] = mapped_column(Numeric(12, 4), nullable=False)
+    unit: Mapped[str] = mapped_column(String(20), nullable=False, default="px")
+    safe_margins: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    bleed: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    background_behavior: Mapped[str] = mapped_column(String(40), nullable=False, default="clip")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")
+
+
+class TemplateRevision(Base, TimestampMixin):
+    __tablename__ = "template_revisions"
+    __table_args__ = (UniqueConstraint("template_id", "revision_number", name="uq_template_revision"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    template_id: Mapped[str] = mapped_column(ForeignKey("output_template_configs.id", ondelete="CASCADE"), nullable=False, index=True)
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(40), nullable=False, default="draft", index=True)
+    page_profile_id: Mapped[str] = mapped_column(ForeignKey("template_page_profiles.id", ondelete="RESTRICT"), nullable=False)
+    config: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    config_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    published_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Job(Base, TimestampMixin):
+    __tablename__ = "jobs"
+    __table_args__ = (UniqueConstraint("job_type", "idempotency_key", name="uq_job_type_idempotency"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    session_id: Mapped[str | None] = mapped_column(ForeignKey("sessions.id", ondelete="CASCADE"), nullable=True, index=True)
+    uploaded_file_id: Mapped[str | None] = mapped_column(ForeignKey("uploaded_files.id", ondelete="CASCADE"), nullable=True, index=True)
+    job_type: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    state: Mapped[str] = mapped_column(String(40), nullable=False, default="queued", index=True)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    result: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    safe_error: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    phase: Mapped[str] = mapped_column(String(80), nullable=False, default="queued")
+    phase_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    phase_timestamps: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    lease_owner: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class WorkerHeartbeat(Base):
+    __tablename__ = "worker_heartbeats"
+
+    worker_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    state: Mapped[str] = mapped_column(String(40), nullable=False, default="idle")
+    process_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    release_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+
+
+class RenderSnapshot(Base, TimestampMixin):
+    __tablename__ = "render_snapshots"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    draft_id: Mapped[str] = mapped_column(ForeignKey("quotation_drafts.id", ondelete="RESTRICT"), nullable=False, index=True)
+    draft_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    catalog_revision_id: Mapped[str | None] = mapped_column(ForeignKey("benefit_catalog_revisions.id", ondelete="RESTRICT"), nullable=True)
+    template_revision_id: Mapped[str] = mapped_column(ForeignKey("template_revisions.id", ondelete="RESTRICT"), nullable=False)
+    context_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    context: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    asset_hashes: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    renderer_version: Mapped[str] = mapped_column(String(80), nullable=False)

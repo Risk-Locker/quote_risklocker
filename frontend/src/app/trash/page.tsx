@@ -18,7 +18,7 @@ type RecordItem = { id: string; insurer_no: string; customer_name?: string | nul
 type AssetItem = { id: string; label: string; filename: string; folder?: string | null; deleted_at?: string | null };
 
 type TrashData = {
-  retention_days: number;
+  retention_policy: "manual_reference_aware_purge";
   sessions: SessionItem[];
   templates: TemplateItem[];
   our_specials: SpecialItem[];
@@ -126,7 +126,7 @@ export default function TrashPage() {
         <div>
           <h1 className="text-[30px] font-bold text-[var(--rl-text-strong)] font-[var(--font-manrope)]">Trash</h1>
           <p className="mt-2 text-[14px] text-[var(--rl-text-muted)]">
-            Deleted items are recoverable for {data?.retention_days ?? 14} days before permanent deletion.
+            Deleted items remain recoverable until someone explicitly deletes them permanently. Nothing expires automatically.
           </p>
         </div>
 
@@ -137,7 +137,7 @@ export default function TrashPage() {
                 key={t.key}
                 type="button"
                 onClick={() => setTab(t.key)}
-                className={`rounded-[var(--rl-radius-sm)] px-3.5 py-2 text-[13px] font-semibold transition-all
+                className={`rounded-[var(--rl-radius-sm)] px-3.5 py-2 text-[13px] font-semibold transition-colors
                   ${tab === t.key
                     ? "bg-[var(--rl-black)] text-white shadow-card"
                     : "bg-[var(--rl-surface)] text-[var(--rl-text)] border border-[var(--rl-border)] hover:bg-[var(--rl-bg)]"}`}

@@ -6,7 +6,6 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +16,7 @@ import fitz
 import pikepdf
 
 from app.core.config import Settings
+from app.core.workspace import QC_TEMP_ROOT, qc_temp_directory
 
 
 MAX_PDF_PAGES = 100
@@ -45,7 +45,7 @@ def _defender_command(path: Path) -> tuple[list[str], str] | None:
 
 
 def scanner_status() -> tuple[bool, str]:
-    placeholder = Path(tempfile.gettempdir()) / "risklocker-scanner-check.pdf"
+    placeholder = QC_TEMP_ROOT / "risklocker-scanner-check.pdf"
     command = _defender_command(placeholder)
     if not command:
         return False, "Install or enable Microsoft Defender/ClamAV for required PDF scanning."
@@ -72,7 +72,7 @@ def _scan_malware(path: Path, required: bool) -> dict:
     return {"engine": engine, "result": "clean", "signature_version": signature}
 
 
-def _inspect_pdf(path: Path) -> dict:
+def _inspect_pdf(path: Path, max_pages: int = MAX_PDF_PAGES) -> dict:
     raw = path.read_bytes()
     for marker, description in FORBIDDEN_PDF_MARKERS.items():
         if marker.lower() in raw.lower():
@@ -103,8 +103,8 @@ def _inspect_pdf(path: Path) -> dict:
             raise ValueError("Encrypted or password-protected PDFs are not accepted.")
         if document.page_count < 1:
             raise ValueError("The PDF has no readable pages.")
-        if document.page_count > MAX_PDF_PAGES:
-            raise ValueError(f"PDFs may contain up to {MAX_PDF_PAGES} pages.")
+        if document.page_count > max_pages:
+            raise ValueError(f"PDFs may contain up to {max_pages} pages.")
         embedded_count = len(document.embfile_names()) if hasattr(document, "embfile_names") else 0
         if embedded_count:
             raise ValueError("PDFs containing embedded files are not accepted.")
@@ -119,10 +119,10 @@ def _inspect_pdf(path: Path) -> dict:
 
 @contextmanager
 def quarantined_pdf(data: bytes, settings: Settings) -> Iterator[tuple[Path, dict]]:
-    with tempfile.TemporaryDirectory(prefix="risklocker-quarantine-") as directory:
-        path = Path(directory) / f"{uuid4()}.pdf"
+    with qc_temp_directory("quarantine-") as directory:
+        path = directory / f"{uuid4()}.pdf"
         path.write_bytes(data)
-        structure = _inspect_pdf(path)
+        structure = _inspect_pdf(path, settings.max_pdf_pages)
         malware = _scan_malware(path, settings.require_malware_scanner)
         scan = {
             **structure,

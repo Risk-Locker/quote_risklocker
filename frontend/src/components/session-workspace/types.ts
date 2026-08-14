@@ -1,0 +1,79 @@
+export type ScalarDecision = "confirm" | "edit" | "clear" | "keep_check_needed";
+
+export type WorkspaceField = {
+  value?: string | null;
+  status: string;
+  message?: string;
+  decision?: { decision: ScalarDecision } | null;
+};
+
+export type GenerationBlocker = { code: string; path: string; message: string };
+
+export type BenefitCardSummary = {
+  card_key: string;
+  selection_id: string | null;
+  offering_id: string;
+  offering_key: string;
+  concept_id: string;
+  concept_key: string;
+  label: string;
+  value: string;
+  cost_status: string | null;
+  branch_key?: string | null;
+};
+
+export type WorkspaceCapabilities = {
+  can_edit_fields: boolean;
+  can_edit_selections: boolean;
+  can_edit_layout: boolean;
+  can_generate: boolean;
+  can_manage_catalogs: boolean;
+  can_manage_templates: boolean;
+  can_manage_assets: boolean;
+  can_view_all_records: boolean;
+  can_manage_users: boolean;
+  can_manage_security: boolean;
+  can_view_audit: boolean;
+  can_manage_ip_controls: boolean;
+  can_transfer_primary_admin: boolean;
+};
+
+export type WorkspaceSnapshot = {
+  session_id: string;
+  draft_id: string;
+  uploaded_file_id: string;
+  revision: number;
+  status: string;
+  fields: Record<string, WorkspaceField>;
+  benefits: Array<Record<string, unknown> & { id: string; selection_key: string; label?: string | null; state: string; cost_status: string }>;
+  benefit_cards: { current_benefits: BenefitCardSummary[]; available_addons: BenefitCardSummary[] };
+  source_lines: Array<Record<string, unknown> & {
+    source_line_id: string;
+    raw_label: string;
+    disposition: string;
+    candidate_mappings: Array<{ concept_id: string; label: string; matched_alias: string }>;
+    extracted_value: Record<string, unknown> | null;
+  }>;
+  pinned: Record<string, string | null>;
+  pinned_names: { company_name: string | null; product_name: string | null; tier_name: string | null };
+  catalog: {
+    defaults: Array<{ offering_id: string; label: string; value: string }>;
+    addons: Array<{ offering_id: string; label: string; value: string }>;
+  };
+  template: { id: string; revision_id: string; revision_number: number; config_hash: string } | null;
+  layout_override: Record<string, unknown> | null;
+  layout_binding: { template_id: string | null; template_revision_id: string | null; base_hash: string | null };
+  generation_blockers: GenerationBlocker[];
+  versions: Array<{ id: string; version_number: number; draft_revision: number; stale: boolean; generated_at: string }>;
+  capabilities: WorkspaceCapabilities;
+};
+
+export type WorkspaceOperation = Record<string, unknown> & { op: string };
+
+export type MutationState = {
+  dirty: boolean;
+  dirtyPaths: string[];
+  saving: boolean;
+  saveError: string | null;
+  lastSavedAt: string | null;
+};

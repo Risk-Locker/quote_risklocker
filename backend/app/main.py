@@ -2,63 +2,64 @@
 
 from __future__ import annotations
 
-import asyncio
-from contextlib import suppress
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.routes import router
 from app.core.config import get_settings
 from app.core.errors import register_error_handlers
-from app.db.init_db import seed_defaults
-from app.db.session import SessionLocal, verify_database_connection
-from app.models.tables import Base
-from app.services.storage_retention import purge_expired_pdfs
-from app.storage.supabase import SupabaseStorage
+from app.core.http_security import RequestSecurityMiddleware, SecurityHeadersMiddleware
+from app.core.rate_limit import RateLimitMiddleware
+from app.db.init_db import seed_defaults  # RL-DISABLED startup seeding — disabled 2026-08-13; invoke explicitly from CLI only.
+from app.db.session import SessionLocal, verify_database_connection, verify_schema_version
+from app.models.tables import Base  # RL-DISABLED runtime schema creation — disabled 2026-08-13; migrations own schema changes.
+from app.services.storage_retention import purge_expired_pdfs  # RL-DISABLED automatic expiry — disabled 2026-08-13; PDFs are manually retained.
+from app.storage.supabase import SupabaseStorage, close_shared_storage_client
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title=settings.app_name)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        verify_database_connection()
+        verify_schema_version()
+        SupabaseStorage(settings).ensure_bucket()
+        try:
+            yield
+        finally:
+            close_shared_storage_client()
+
+    production = settings.app_env == "production"
+    app = FastAPI(
+        title=settings.app_name,
+        lifespan=lifespan,
+        docs_url=None if production else "/docs",
+        redoc_url=None if production else "/redoc",
+        openapi_url=None if production else "/openapi.json",
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.cors_origins),
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Idempotency-Key", "Range", "X-CSRF-Token"],
     )
+    app.add_middleware(
+        RequestSecurityMiddleware,
+        settings=settings,
+        csrf_exempt_paths={"/api/auth/login", "/auth/login"},
+    )
+    app.add_middleware(RateLimitMiddleware, settings=settings, session_factory=SessionLocal)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.trusted_hosts))
+    app.add_middleware(SecurityHeadersMiddleware, production=production)
     register_error_handlers(app)
     app.include_router(router, prefix="/api")
-    app.include_router(router)
-
-    def retention_cycle() -> None:
-        with SessionLocal() as db:
-            purge_expired_pdfs(db, SupabaseStorage(settings))
-
-    async def retention_loop() -> None:
-        while True:
-            await asyncio.sleep(24 * 60 * 60)
-            await asyncio.to_thread(retention_cycle)
-
-    @app.on_event("startup")
-    async def startup() -> None:
-        verify_database_connection()
-        Base.metadata.create_all(bind=SessionLocal().get_bind())
-        SupabaseStorage(settings).ensure_bucket()
-        if settings.app_env != "production":
-            with SessionLocal() as db:
-                seed_defaults(db, settings)
-        await asyncio.to_thread(retention_cycle)
-        app.state.storage_retention_task = asyncio.create_task(retention_loop())
-
-    @app.on_event("shutdown")
-    async def shutdown() -> None:
-        task = getattr(app.state, "storage_retention_task", None)
-        if task:
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
+    if not production:
+        app.include_router(router)
 
     return app
 

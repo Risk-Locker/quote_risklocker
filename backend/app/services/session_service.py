@@ -32,7 +32,6 @@ def list_sessions(db: Session, user_id: str, search: str | None = None, limit: i
     base = (
         select(SessionModel)
         .join(UploadedFile, SessionModel.uploaded_file_id == UploadedFile.id)
-        .where(SessionModel.owner_id == user_id)
     )
     if search:
         like = f"%{search.strip()}%"

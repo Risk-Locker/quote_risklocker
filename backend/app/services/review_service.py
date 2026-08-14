@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import and_, delete, select
 from sqlalchemy.orm.attributes import flag_modified
@@ -246,7 +246,7 @@ def move_to_trash(db: Session, settings: Settings, user, uploaded_file_id: str) 
             entity_id=uploaded.id,
             original_status=original_status,
             deleted_by=user.id,
-            purge_after=datetime.now(timezone.utc) + timedelta(days=settings.trash_retention_days),
+            purge_after=None,
         )
     )
     db.commit()
@@ -254,8 +254,6 @@ def move_to_trash(db: Session, settings: Settings, user, uploaded_file_id: str) 
 
 def list_trash(db: Session, user) -> list[UploadedFile]:
     query = select(UploadedFile).where(UploadedFile.deleted_at.is_not(None)).options(selectinload(UploadedFile.draft))
-    if user.role == Role.STAFF.value:
-        query = query.where(UploadedFile.owner_id == user.id)
     return list(db.scalars(query.order_by(UploadedFile.deleted_at.desc())).all())
 
 
@@ -275,38 +273,7 @@ def restore_from_trash(db: Session, user, uploaded_file_id: str) -> None:
 
 
 def purge_expired_trash(db: Session, user, storage) -> int:
-    if user.role != Role.ADMIN.value:
-        raise AppError("Only Admin can permanently delete records.", 403)
-    from app.models.tables import GeneratedPdfVersion, Session as SessionModel
-
-    now = datetime.now(timezone.utc)
-    records = list(db.scalars(select(UploadedFile).where(and_(UploadedFile.deleted_at.is_not(None), UploadedFile.purge_after <= now))).all())
-    count = 0
-    for record in records:
-        if record.storage_path:
-            try:
-                storage.delete_pdf(record.storage_path)
-            except Exception as exc:
-                logger.warning("Could not delete source PDF %s during trash purge: %s", record.storage_path, exc)
-        versions = db.scalars(select(GeneratedPdfVersion).where(GeneratedPdfVersion.uploaded_file_id == record.id)).all()
-        for v in versions:
-            if v.storage_path:
-                try:
-                    storage.delete_pdf(v.storage_path)
-                except Exception as exc:
-                    logger.warning("Could not delete generated PDF %s during trash purge: %s", v.storage_path, exc)
-        # Some FKs lack ON DELETE CASCADE; remove dependents explicitly before the parent.
-        from app.models.tables import ClientRecord, CorrectionMemory, ExtractionRecord, QuotationDraft
-
-        db.execute(delete(ClientRecord).where(ClientRecord.uploaded_file_id == record.id))
-        db.execute(delete(SessionModel).where(SessionModel.uploaded_file_id == record.id))
-        db.execute(delete(CorrectionMemory).where(CorrectionMemory.uploaded_file_id == record.id))
-        db.execute(delete(GeneratedPdfVersion).where(GeneratedPdfVersion.uploaded_file_id == record.id))
-        db.execute(delete(ExtractionRecord).where(ExtractionRecord.uploaded_file_id == record.id))
-        db.execute(delete(QuotationDraft).where(QuotationDraft.uploaded_file_id == record.id))
-        db.execute(delete(TrashRecord).where(TrashRecord.entity_type == "uploaded_file", TrashRecord.entity_id == record.id))
-        db.delete(record)
-        count += 1
-    db.commit()
-    return count
+    # RL-DISABLED timed trash purge — disabled 2026-08-14. Use the explicit
+    # reference-aware permanent-delete endpoints instead.
+    return 0
 

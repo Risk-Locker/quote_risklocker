@@ -5,6 +5,7 @@ from __future__ import annotations
 from html import escape
 from typing import Any
 
+from app.rendering.grid_layout import GridBounds, GridSpec, pack_fixed_grid
 from app.services.template_assets import asset_data_uri, find_asset_by_hint
 from app.services.template_config import default_template_config, normalize_template_config
 
@@ -27,6 +28,17 @@ SHADOW_MAP = {
     "sm": "0 1px 3px rgba(0,0,0,0.12)",
     "md": "0 4px 12px rgba(0,0,0,0.15)",
     "lg": "0 8px 24px rgba(0,0,0,0.18)",
+}
+GRID_CARD_STYLES = {
+    "standard": "border:1px solid #D8DDE6;border-radius:12px;background:#F6F8FB",
+    "outlined": "border:2px solid #D8DDE6;border-radius:10px;background:#FFFFFF",
+    "soft": "border:0;border-radius:16px;background:#F3F0F0;box-shadow:0 2px 8px rgba(27,23,23,.10)",
+    "minimal": "border:0;border-radius:0;background:transparent",
+}
+GRID_TEXT_DENSITIES = {
+    "comfortable": {"padding": 14, "gap": 12, "icon": 52, "label": 17, "value": 14},
+    "normal": {"padding": 12, "gap": 10, "icon": 48, "label": 16, "value": 13},
+    "compact": {"padding": 8, "gap": 6, "icon": 40, "label": 14, "value": 11},
 }
 
 
@@ -80,11 +92,12 @@ def _style(element: dict[str, Any]) -> str:
         "overflow:hidden",
         "white-space:pre-wrap",
     ]
-    if element.get("shapeKind") == "circle":
+    element_type = str(element.get("type") or "")
+    if element_type == "ellipse" or element.get("shapeKind") == "circle":
         css.append("border-radius:50%")
-    elif element.get("shapeKind") == "triangle":
+    elif element_type == "triangle" or element.get("shapeKind") == "triangle":
         css.append("clip-path:polygon(50% 0, 100% 100%, 0 100%)")
-    elif element.get("shapeKind") == "diamond":
+    elif element_type == "diamond" or element.get("shapeKind") == "diamond":
         css.append("clip-path:polygon(50% 0, 100% 50%, 50% 100%, 0 50%)")
     if border_width:
         css.append(
@@ -129,19 +142,104 @@ def _asset_id_for_slot(config: dict[str, Any], slot: str | None, fields: dict) -
     return find_asset_by_hint(None, [str(item) for item in hints])
 
 
-def _image_html(element: dict[str, Any], config: dict[str, Any], fields: dict) -> str:
+def _image_html(
+    element: dict[str, Any],
+    config: dict[str, Any],
+    fields: dict,
+    resolved_assets: dict[str, str] | None = None,
+) -> str:
     asset_id = str(element.get("assetId") or _asset_id_for_slot(config, element.get("assetSlot"), fields))
-    src = asset_data_uri(None, asset_id)
+    if resolved_assets is not None:
+        src = resolved_assets.get(asset_id, "")
+    else:
+        src = asset_data_uri(None, asset_id)
     if not src:
-        return ""
+        # Preserve the authored geometry when an optional or legacy image is
+        # unavailable. A broken-image glyph must never leak into a customer PDF.
+        return f'<div data-missing-asset="{escape(str(element.get("assetSlot") or asset_id or "image"))}" style="{_style(element)}"></div>'
     return f'<img alt="" src="{src}" style="{_style(element)};object-fit:contain" />'
 
 
 def _benefit_section(element: dict[str, Any], db: Any = None) -> str:
+    """RL-DISABLED legacy global specials — compatibility rendering only."""
     columns = max(1, int(element.get("columns") or 2))
     grid = f'{_style(element)};display:grid;grid-template-columns:repeat({columns},1fr);gap:10px 18px;overflow:visible'
     cards = "".join(_variant_card(variant, db) for variant in _section_variants(db, element.get("section")))
     return f'<div style="{grid}">{cards}</div>'
+
+
+def _dynamic_benefit_grid(
+    element: dict[str, Any],
+    render_context: dict[str, Any],
+    resolved_assets: dict[str, str],
+) -> str:
+    kind = str(element.get("gridKind") or "current_benefits")
+    if kind not in {"current_benefits", "available_addons"}:
+        return ""
+    cards = list(render_context.get(kind) or [])
+    packing = element.get("packing") or {}
+    bounds = GridBounds(
+        x=float(element.get("x") or 0),
+        y=float(element.get("y") or 0),
+        width=float(element.get("w") or 0),
+        height=float(element.get("h") or 0),
+    )
+    spec = GridSpec(
+        strategy=str(packing.get("strategy") or "balanced"),
+        alignment=str(packing.get("alignment") or "center"),
+        aspect_ratio=float(packing.get("aspectRatio") or 1.45),
+        reference_width=float(packing.get("referenceWidth") or 180),
+        reference_height=float(packing.get("referenceHeight") or 124),
+        gap_ratio=float(packing["gapRatio"]) if packing.get("gapRatio") is not None else 0.06,
+        padding_ratio=float(packing["paddingRatio"]) if packing.get("paddingRatio") is not None else 0.02,
+        stagger_ratio=float(packing.get("staggerRatio") if packing.get("staggerRatio") is not None else 0.5),
+        empty_state=str(element.get("emptyState") or "hide"),
+    )
+    layout = pack_fixed_grid(len(cards), bounds, spec)
+    if not cards:
+        empty_message = escape(str(element.get("emptyMessage") or "")) if layout.empty_state == "message" else ""
+        return (
+            f'<div data-grid-kind="{escape(kind)}" data-grid-empty="{escape(layout.empty_state or "hide")}" '
+            f'style="position:absolute;left:{bounds.x}px;top:{bounds.y}px;width:{bounds.width}px;height:{bounds.height}px;'
+            f'overflow:hidden;display:flex;align-items:center;justify-content:center;text-align:center">{empty_message}</div>'
+        )
+    card_style_name = str(element.get("cardStyle") or "standard")
+    card_style = GRID_CARD_STYLES.get(card_style_name, GRID_CARD_STYLES["standard"])
+    density_name = str(element.get("textDensity") or "normal")
+    density = GRID_TEXT_DENSITIES.get(density_name, GRID_TEXT_DENSITIES["normal"])
+    output: list[str] = []
+    for packed, card in zip(layout.cards, cards, strict=True):
+        label = escape(str(card.get("label") or ""))
+        value = escape(str(card.get("value") or ""))
+        cost = str(card.get("cost_status") or "")
+        asset_id = str(card.get("asset_id") or "")
+        asset_uri = resolved_assets.get(asset_id, "")
+        icon = (
+            f'<img alt="" src="{escape(asset_uri)}" style="width:{density["icon"]}px;height:{density["icon"]}px;object-fit:contain" />'
+            if asset_uri else ""
+        )
+        cost_label = "FOC" if cost == "foc" else ""
+        scale = packed.scale
+        output.append(
+            f'<article data-benefit-card="1" data-card-scale="{scale:.12f}" '
+            f'data-card-style="{escape(card_style_name)}" data-text-density="{escape(density_name)}" '
+            f'style="position:absolute;left:{packed.x:.8f}px;top:{packed.y:.8f}px;'
+            f'width:{packed.width:.8f}px;height:{packed.height:.8f}px;overflow:hidden;'
+            'display:flex;align-items:center;justify-content:center">'
+            f'<div style="width:{spec.reference_width}px;height:{spec.reference_height}px;transform:scale({scale:.12f});'
+            'transform-origin:center;display:grid;align-items:center;'
+            f'grid-template-columns:{density["icon"] + 10}px minmax(0,1fr);gap:{density["gap"]}px;padding:{density["padding"]}px;'
+            f'box-sizing:border-box;{card_style};overflow:hidden">'
+            f'<div>{icon}</div><div style="min-width:0"><strong style="display:block;font-size:{density["label"]}px;line-height:1.2">{label}</strong>'
+            f'<span style="display:block;margin-top:4px;font-size:{density["value"]}px;line-height:1.25">{value}</span>'
+            f'{f"<em style=\"font-size:11px;font-weight:800\">{cost_label}</em>" if cost_label else ""}</div></div></article>'
+        )
+    warning = escape(layout.warning or "")
+    return (
+        f'<section data-grid-kind="{escape(kind)}" data-density-warning="{warning}" '
+        f'style="position:absolute;left:0;top:0;width:100%;height:100%;overflow:hidden">'
+        f'{"".join(output)}</section>'
+    )
 
 
 def _section_variants(db: Any, section: str | None) -> list[Any]:
@@ -250,10 +348,19 @@ def _special_html(element: dict[str, Any], config: dict[str, Any]) -> str:
     return f'<div style="{card_style}"><div style="{icon_box}">{icon}</div>{copy}</div>'
 
 
-def _element_html(element: dict[str, Any], fields: dict, config: dict[str, Any], db: Any = None) -> str:
+def _element_html(
+    element: dict[str, Any],
+    fields: dict,
+    config: dict[str, Any],
+    db: Any = None,
+    render_context: dict[str, Any] | None = None,
+    resolved_assets: dict[str, str] | None = None,
+) -> str:
     element_type = element.get("type")
+    if element.get("visible") is False or element_type == "layer-group":
+        return ""
     if element_type == "image":
-        return _image_html(element, config, fields)
+        return _image_html(element, config, fields, resolved_assets)
     if element_type == "line":
         style = element.get("style") or {}
         thickness = max(2.0, float(element.get("h") or 2))
@@ -263,13 +370,15 @@ def _element_html(element: dict[str, Any], fields: dict, config: dict[str, Any],
             color = escape(str(style.get("color") or "#111"))
             line_style += f";background:repeating-linear-gradient(90deg,{color} 0 {dash}px,transparent {dash}px {dash * 2}px)"
         return f'<div style="{line_style}"></div>'
-    if element_type in {"shape", "group"}:
+    if element_type in {"shape", "group", "rectangle", "ellipse", "triangle", "diamond"}:
         return f'<div style="{_style(element)}"></div>'
     if element_type == "variable":
         value = _format_value(_variable_value(fields, config, element.get("variableId")), str(element.get("prefix") or ""), str(element.get("suffix") or ""))
         return f'<div style="{_style(element)}">{escape(value)}</div>'
     if element_type == "benefit-section":
         return _benefit_section(element, db)
+    if element_type == "benefit-grid":
+        return _dynamic_benefit_grid(element, render_context or {}, resolved_assets or {})
     if element_type == "special":
         return _special_html(element, config)
     text = str(element.get("text") or "")
@@ -283,6 +392,8 @@ def render_quotation_html(
     template_config: dict[str, Any] | None = None,
     insurer_name: str | None = None,
     db: Any = None,
+    render_context: dict[str, Any] | None = None,
+    resolved_assets: dict[str, str] | None = None,
 ) -> str:
     config = normalize_template_config(template_config or default_template_config())
     if insurer_name:
@@ -291,14 +402,17 @@ def render_quotation_html(
     width = int(canvas.get("width") or 794)
     height = int(canvas.get("height") or 1123)
     elements = sorted(canvas.get("elements") or [], key=lambda item: int(item.get("z", 1)))
-    body = "".join(_element_html(element, draft_fields, config, db) for element in elements)
+    body = "".join(
+        _element_html(element, draft_fields, config, db, render_context, resolved_assets)
+        for element in elements
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <title>{escape(template_name)}</title>
 <style>
-@page {{ size: A4; margin: 0; }}
+@page {{ size: {width}px {height}px; margin: 0; }}
 * {{ box-sizing: border-box; }}
 body {{ margin: 0; font-family: "Be Vietnam Pro", Arial, sans-serif; color: #111; background: #fff; }}
 .page {{ position: relative; width: {width}px; height: {height}px; margin: 0 auto; overflow: hidden; background: #fff; }}

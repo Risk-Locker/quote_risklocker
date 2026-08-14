@@ -1,4 +1,4 @@
-"""Create or reset an admin user from the command line."""
+"""One-time interactive Primary Admin bootstrap command."""
 
 import sys
 from pathlib import Path
@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from app.cli import create_admin
+from app.cli import bootstrap_primary
 
 
 if __name__ == "__main__":
@@ -15,6 +15,5 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("email")
-    parser.add_argument("password")
     args = parser.parse_args()
-    create_admin(args.email, args.password)
+    bootstrap_primary(args.email)

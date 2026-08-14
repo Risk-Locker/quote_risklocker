@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import tempfile
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -90,7 +90,7 @@ def generate_pdf(db: Session, settings: Settings, user, draft: QuotationDraft, a
         storage_sha256=stored.sha256,
         storage_etag=stored.etag,
         storage_stored_at=now,
-        storage_expires_at=now + timedelta(days=settings.pdf_retention_days),
+        storage_expires_at=None,
         draft_snapshot=deepcopy(draft.fields),
         template_snapshot=deepcopy(template_config),
         generated_by=user.id,

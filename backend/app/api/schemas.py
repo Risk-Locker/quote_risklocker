@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.domain.benefits import BenefitValue
+
 
 class StrictRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -40,6 +42,20 @@ class DraftUpdateRequest(BaseModel):
     layout_override: dict | None = None
 
 
+class WorkspacePatchRequest(StrictRequest):
+    base_revision: int = Field(ge=1)
+    operations: list[dict] = Field(min_length=1, max_length=200)
+
+
+class TemplateSelectionImpactRequest(StrictRequest):
+    base_revision: int = Field(ge=1)
+    template_revision_id: str = Field(min_length=1, max_length=80)
+
+
+class VersionGenerationRequest(StrictRequest):
+    draft_revision: int = Field(ge=1)
+
+
 class DraftGenerateRequest(BaseModel):
     acknowledge_check_needed: bool = False
 
@@ -57,6 +73,21 @@ class BulkUploadedFileDeleteRequest(BaseModel):
 
 class BulkClientRecordDeleteRequest(BaseModel):
     record_ids: list[str] = Field(default_factory=list)
+
+
+class RecordBulkActionRequest(StrictRequest):
+    action: str = Field(pattern=r"^(archive|unarchive|trash)$")
+    record_ids: list[str] = Field(default_factory=list, max_length=5_000)
+    all_matching: bool = False
+    filters: dict = Field(default_factory=dict)
+
+
+class RecordSavedViewRequest(StrictRequest):
+    id: str | None = None
+    base_revision: int | None = Field(default=None, ge=1)
+    name: str = Field(min_length=1, max_length=120)
+    filters: dict = Field(default_factory=dict)
+    is_shared: bool = True
 
 
 class VariantMoveRequest(BaseModel):
@@ -129,6 +160,7 @@ class TemplateSaveRequest(BaseModel):
 
 
 class TemplateUpdateRequest(BaseModel):
+    base_revision: int | None = Field(default=None, ge=1)
     name: str | None = None
     insurance_type: str | None = None
     insurance_company_id: str | None = None
@@ -137,6 +169,87 @@ class TemplateUpdateRequest(BaseModel):
     editable_fields: list[str] | None = None
     fixed_fields: dict | None = None
     status: str | None = None
+
+
+# --- Business Setup v7 ---
+
+class BusinessCompanySaveRequest(StrictRequest):
+    id: str | None = None
+    base_revision: int | None = Field(default=None, ge=1)
+    name: str = Field(min_length=1, max_length=255)
+    slug: str | None = Field(default=None, max_length=160)
+    legal_entity_id: str | None = None
+    logo_asset_id: str | None = None
+    status: str = "active"
+
+
+class BusinessProductSaveRequest(StrictRequest):
+    id: str | None = None
+    base_revision: int | None = Field(default=None, ge=1)
+    company_id: str
+    product_key: str | None = Field(default=None, max_length=160)
+    name: str = Field(min_length=1, max_length=255)
+    channel: str | None = Field(default=None, max_length=120)
+    status: str = "active"
+
+
+class BusinessTierSaveRequest(StrictRequest):
+    id: str | None = None
+    base_revision: int | None = Field(default=None, ge=1)
+    product_id: str
+    tier_key: str | None = Field(default=None, max_length=160)
+    name: str = Field(min_length=1, max_length=255)
+    sort_order: int = Field(default=0, ge=0)
+    status: str = "active"
+
+
+class CompanyAliasSaveRequest(StrictRequest):
+    id: str | None = None
+    company_id: str
+    alias: str = Field(min_length=1, max_length=255)
+    alias_kind: str = Field(default="detection", max_length=40)
+    status: str = "active"
+
+
+class BenefitConceptSaveRequest(StrictRequest):
+    id: str | None = None
+    base_revision: int | None = Field(default=None, ge=1)
+    concept_key: str = Field(min_length=1, max_length=160)
+    label: str = Field(min_length=1, max_length=255)
+    value_schema: dict = Field(default_factory=dict)
+    display_template: str = Field(default="{label}", min_length=1, max_length=500)
+    required_variables: list[str] = Field(default_factory=list, max_length=40)
+    optional_variables: list[str] = Field(default_factory=list, max_length=40)
+    validation_rules: dict = Field(default_factory=dict)
+    default_asset_id: str | None = None
+    status: str = "active"
+
+
+class BenefitCatalogSaveRequest(StrictRequest):
+    company_id: str
+    product_id: str | None = None
+    tier_id: str | None = None
+    name: str = Field(min_length=1, max_length=255)
+
+
+class CatalogOfferingSaveRequest(StrictRequest):
+    id: str | None = None
+    base_revision: int = Field(ge=1)
+    offering_key: str = Field(min_length=1, max_length=160)
+    concept_id: str
+    offering_kind: str
+    label_override: str | None = Field(default=None, max_length=255)
+    typed_value: BenefitValue | None = None
+    source_document_id: str | None = None
+    source_citation: dict = Field(default_factory=dict)
+    source_aliases: list[str] = Field(default_factory=list, max_length=100)
+    presentation_facet_ids: list[str] = Field(default_factory=list, max_length=100)
+    sort_order: int = Field(default=0, ge=0)
+    status: str = "active"
+
+
+class TemplatePublishRequest(StrictRequest):
+    base_revision: int = Field(ge=1)
 
 
 class TemplateGroupSaveRequest(BaseModel):
@@ -169,6 +282,19 @@ class VehicleModelSaveRequest(BaseModel):
     brand_id: str | None = None
     aliases: list[str] = Field(default_factory=list)
     status: str | None = None
+
+
+# --- Business: dictionary learning ---
+
+class DictionaryLearnRequest(BaseModel):
+    field: str = Field(min_length=1, max_length=40)
+    value: str = Field(min_length=1, max_length=160)
+
+
+# --- Business: catalog publication ---
+
+class CatalogPublishRequest(BaseModel):
+    base_revision: int = Field(ge=1)
 
 
 # --- Admin: Extraction Settings ---

@@ -32,7 +32,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         type={type}
         disabled={disabled || loading}
         className={
-          `inline-flex items-center justify-center font-semibold rounded-[var(--rl-radius-sm)] border transition-all ${variantStyles[variant]}
+          `inline-flex items-center justify-center font-semibold rounded-[var(--rl-radius-sm)] border transition-colors ${variantStyles[variant]}
           ${size === "sm" ? "min-h-[32px] gap-1.5 px-3 text-[13px]" : "min-h-[40px] gap-2 px-4 text-[14px]"}
           disabled:cursor-not-allowed disabled:opacity-50
           ${className}`

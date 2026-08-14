@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Generator
 
-from sqlalchemy import create_engine, text
+from pathlib import Path
+
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -40,6 +42,24 @@ def verify_database_connection() -> None:
         raise RuntimeError(
             "Supabase/Postgres database connection failed. Check DATABASE_URL, network access, and Supabase database status."
         ) from None
+
+
+def verify_schema_version() -> None:
+    from app.db.migrations import AppliedMigration, MigrationError, discover_migrations, validate_schema_history
+
+    migration_root = Path(__file__).resolve().parents[3] / "migrations"
+    migrations = discover_migrations(migration_root)
+    with engine.connect() as connection:
+        if not inspect(connection).has_table("schema_migrations", schema="public"):
+            raise RuntimeError("Database schema migration ledger is missing. Run the migration command before startup.")
+        rows = connection.execute(
+            text("SELECT version, name, checksum FROM public.schema_migrations ORDER BY version")
+        ).mappings()
+        history = [AppliedMigration(row["version"], row["name"], row["checksum"]) for row in rows]
+    try:
+        validate_schema_history(migrations, history)
+    except MigrationError as exc:
+        raise RuntimeError(str(exc)) from exc
 
 
 def get_db() -> Generator[Session, None, None]:

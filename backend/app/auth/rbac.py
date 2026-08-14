@@ -12,6 +12,7 @@ from app.models.tables import User
 
 ADMIN_ROLES = {Role.SUPER_ADMIN.value, Role.ADMIN.value}
 PRIVILEGED_ROLES = {Role.SUPER_ADMIN.value, Role.ADMIN.value, Role.DEV.value}
+BUSINESS_ROLES = {Role.SUPER_ADMIN.value, Role.ADMIN.value, Role.STAFF.value}
 
 
 def require_role(user: User, *roles: Role) -> None:
@@ -20,13 +21,11 @@ def require_role(user: User, *roles: Role) -> None:
 
 
 def can_view_owner(user: User, owner_id: str) -> bool:
-    return user.role in PRIVILEGED_ROLES or user.id == owner_id
+    return user.role in BUSINESS_ROLES
 
 
 def can_view_owner_record(db: Session, actor: User, owner_id: str) -> bool:
-    if actor.role in PRIVILEGED_ROLES:
-        return True
-    return actor.id == owner_id
+    return actor.role in BUSINESS_ROLES
 
 
 def can_manage_target(actor: User, target_role: str) -> bool:

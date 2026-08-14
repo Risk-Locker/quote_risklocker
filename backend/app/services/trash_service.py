@@ -6,7 +6,7 @@ Sessions share the existing uploaded-file trash flow in review_service.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.orm import Session
@@ -39,13 +39,9 @@ def _trash_entry(db: Session, user, entity_type: str, entity_id: str, original_s
             entity_id=entity_id,
             original_status=original_status,
             deleted_by=user.id,
-            purge_after=datetime.now(timezone.utc) + timedelta(days=retention_days),
+            purge_after=None,
         )
     )
-
-
-def _purge_after(settings: Settings) -> datetime:
-    return datetime.now(timezone.utc) + timedelta(days=settings.trash_retention_days)
 
 
 # ---------------------------------------------------------------- templates
@@ -84,15 +80,9 @@ def list_trash_templates(db: Session) -> list[OutputTemplateConfig]:
 
 
 def purge_expired_templates(db: Session, now: datetime) -> int:
-    count = 0
-    for item in db.scalars(
-        select(OutputTemplateConfig).where(
-            and_(OutputTemplateConfig.deleted_at.is_not(None), OutputTemplateConfig.purge_after <= now)
-        )
-    ):
-        db.delete(item)
-        count += 1
-    return count
+    # RL-DISABLED timed trash purge — disabled 2026-08-14; explicit permanent
+    # deletion performs reference checks through the handlers below.
+    return 0
 
 
 # ---------------------------------------------------------------- our specials
@@ -158,19 +148,7 @@ def list_trash_variants(db: Session) -> list[OurSpecialVariant]:
 
 
 def purge_expired_specials(db: Session, now: datetime) -> int:
-    count = 0
-    for special in db.scalars(
-        select(OurSpecial).where(and_(OurSpecial.deleted_at.is_not(None), OurSpecial.purge_after <= now))
-    ):
-        db.delete(special)
-        count += 1
-    for variant in db.scalars(
-        select(OurSpecialVariant).where(and_(OurSpecialVariant.deleted_at.is_not(None), OurSpecialVariant.purge_after <= now))
-    ):
-        if variant.special_id and db.get(OurSpecial, variant.special_id) and not db.get(OurSpecial, variant.special_id).deleted_at:
-            db.delete(variant)
-            count += 1
-    return count
+    return 0
 
 
 # ---------------------------------------------------------------- client records
@@ -199,13 +177,7 @@ def list_trash_client_records(db: Session) -> list[ClientRecord]:
 
 
 def purge_expired_client_records(db: Session, now: datetime) -> int:
-    count = 0
-    for record in db.scalars(
-        select(ClientRecord).where(and_(ClientRecord.deleted_at.is_not(None), ClientRecord.purge_after <= now))
-    ):
-        db.delete(record)
-        count += 1
-    return count
+    return 0
 
 
 # ---------------------------------------------------------------- template assets
@@ -241,14 +213,7 @@ def list_trash_template_assets(db: Session) -> list:
 
 
 def purge_expired_template_assets(db: Session, now: datetime) -> int:
-    from app.models.tables import TemplateAsset
-    count = 0
-    for asset in db.scalars(
-        select(TemplateAsset).where(and_(TemplateAsset.deleted_at.is_not(None), TemplateAsset.purge_after <= now))
-    ):
-        db.delete(asset)
-        count += 1
-    return count
+    return 0
 
 
 # ---------------------------------------------------------------- combined
@@ -293,7 +258,7 @@ def list_trash_categorized(db: Session, user, retention_days: int) -> dict:
         for a in list_trash_template_assets(db)
     ]
     return {
-        "retention_days": retention_days,
+        "retention_policy": "manual_reference_aware_purge",
         "sessions": sessions,
         "templates": templates,
         "our_specials": specials,
@@ -304,13 +269,7 @@ def list_trash_categorized(db: Session, user, retention_days: int) -> dict:
 
 
 def purge_all_expired(db: Session, retention_days: int | None = None) -> int:
-    now = datetime.now(timezone.utc)
-    return (
-        purge_expired_templates(db, now)
-        + purge_expired_specials(db, now)
-        + purge_expired_client_records(db, now)
-        + purge_expired_template_assets(db, now)
-    )
+    return 0
 
 
 # ---------------------------------------------------------------- permanent delete (empty trash)

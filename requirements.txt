@@ -10,6 +10,8 @@ PyMuPDF==1.25.1
 pdfplumber==0.11.5
 pikepdf==9.5.2
 bcrypt==5.0.0
+Pillow==11.1.0
+playwright==1.49.1
 
 # Testing
 pytest==7.4.3

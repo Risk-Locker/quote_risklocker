@@ -32,6 +32,7 @@ def stored_record(record_id: str, *, archived: bool = False):
         storage_path=f"source/2026/07/batch/{record_id}.pdf",
         storage_provider="supabase",
         storage_status=StorageStatus.AVAILABLE.value,
+        storage_sha256=None,
         storage_expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
         storage_deleted_at=None,
         archive_status=StorageStatus.ARCHIVED.value if archived else None,
@@ -50,26 +51,28 @@ def test_byte_ranges_support_browser_pdf_loading():
     assert error.value.status_code == 416
 
 
-def test_expired_source_keeps_database_history_but_content_is_unavailable():
+def test_legacy_expiry_timestamp_does_not_hide_an_available_private_object(monkeypatch):
     record = stored_record("expired-source")
-    with pytest.raises(AppError, match="PDF Expired") as error:
-        load_pdf_bytes(record, SimpleNamespace())
-    assert error.value.status_code == 410
+    expected = b"%PDF-1.4 available"
+    storage = MagicMock()
+    storage.download_bytes.return_value = expected
+    monkeypatch.setattr("app.services.pdf_content.SupabaseStorage", lambda _settings: storage)
+
+    assert load_pdf_bytes(record, SimpleNamespace()) == expected
     assert record.extracted_history == "retained"
 
 
-def test_retention_deletes_objects_and_preserves_records():
+def test_legacy_retention_service_is_disabled_and_deletes_nothing():
     source = stored_record("source")
     generated = stored_record("generated", archived=True)
     db = MagicMock()
-    db.scalars.side_effect = [ScalarResult([source]), ScalarResult([generated])]
     storage = MagicMock()
 
     result = purge_expired_pdfs(db, storage)
 
-    assert result == {"processed": 2, "deleted": 2, "failures": []}
-    assert storage.delete_pdf.call_count == 2
-    assert source.storage_status == StorageStatus.EXPIRED.value
-    assert generated.storage_status == StorageStatus.ARCHIVED.value
+    assert result == {"processed": 0, "deleted": 0, "failures": [], "disabled": True}
+    storage.delete_pdf.assert_not_called()
+    assert source.storage_status == StorageStatus.AVAILABLE.value
+    assert generated.storage_status == StorageStatus.AVAILABLE.value
     assert source.extracted_history == "retained"
-    db.commit.assert_called_once()
+    db.commit.assert_not_called()

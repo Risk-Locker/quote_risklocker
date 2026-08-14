@@ -5,11 +5,36 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import PurePosixPath
+from threading import Lock
 from urllib.parse import quote
 
 import httpx
 
 from app.core.config import Settings, get_settings
+
+
+_shared_client: httpx.Client | None = None
+_shared_client_lock = Lock()
+
+
+def _get_shared_client() -> httpx.Client:
+    global _shared_client
+    if _shared_client is None or _shared_client.is_closed:
+        with _shared_client_lock:
+            if _shared_client is None or _shared_client.is_closed:
+                _shared_client = httpx.Client(
+                    timeout=httpx.Timeout(30.0, connect=10.0),
+                    limits=httpx.Limits(max_connections=40, max_keepalive_connections=20, keepalive_expiry=30.0),
+                )
+    return _shared_client
+
+
+def close_shared_storage_client() -> None:
+    global _shared_client
+    with _shared_client_lock:
+        if _shared_client is not None and not _shared_client.is_closed:
+            _shared_client.close()
+        _shared_client = None
 
 
 class StorageError(RuntimeError):
@@ -33,7 +58,7 @@ class StoredPdf:
 class SupabaseStorage:
     def __init__(self, settings: Settings | None = None, client: httpx.Client | None = None):
         self._settings = settings
-        self._client = client
+        self._client = client or _get_shared_client()
         self._bucket: str | None = None
 
     @property
@@ -54,15 +79,10 @@ class SupabaseStorage:
         return {"apikey": key, "Authorization": f"Bearer {key}"}
 
     def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
-        client = self._client or httpx.Client(timeout=httpx.Timeout(30.0, connect=10.0))
-        close_client = self._client is None
         try:
-            response = client.request(method, f"{self.settings.supabase_url}{path}", headers=self.headers, **kwargs)
+            response = self._client.request(method, f"{self.settings.supabase_url}{path}", headers=self.headers, **kwargs)
         except httpx.HTTPError as exc:
             raise StorageError("Supabase Storage could not be reached.") from exc
-        finally:
-            if close_client:
-                client.close()
         return response
 
     @staticmethod
@@ -83,7 +103,17 @@ class SupabaseStorage:
             return False
         return str(payload.get("statusCode")) == "404" or "not found" in str(payload.get("message", "")).lower()
 
-    ASSET_MIME_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/svg+xml"]
+    ASSET_MIME_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/webp", "image/svg+xml"]
+
+    def _bucket_file_size_limit(self) -> int:
+        """Return the largest configured object limit, including v6 adapters."""
+
+        legacy = int(getattr(self.settings, "max_upload_bytes", 0) or 0)
+        return max(
+            int(getattr(self.settings, "max_source_pdf_bytes", legacy) or legacy),
+            int(getattr(self.settings, "max_generated_pdf_bytes", legacy) or legacy),
+            int(getattr(self.settings, "max_asset_bytes", legacy) or legacy),
+        )
 
     def ensure_bucket(self) -> None:
         bucket_id = quote(self.bucket, safe="")
@@ -97,7 +127,10 @@ class SupabaseStorage:
                 updated = self._request(
                     "PUT",
                     f"/storage/v1/bucket/{bucket_id}",
-                    json={"allowed_mime_types": self.ASSET_MIME_TYPES},
+                    json={
+                        "file_size_limit": self._bucket_file_size_limit(),
+                        "allowed_mime_types": self.ASSET_MIME_TYPES,
+                    },
                 )
                 if updated.status_code not in {200, 201}:
                     raise StorageError(
@@ -113,16 +146,16 @@ class SupabaseStorage:
                 "id": self.bucket,
                 "name": self.bucket,
                 "public": False,
-                "file_size_limit": self.settings.max_upload_bytes,
+                "file_size_limit": self._bucket_file_size_limit(),
                 "allowed_mime_types": self.ASSET_MIME_TYPES,
             },
         )
         if created.status_code not in {200, 201}:
             raise StorageError(f"Supabase private bucket creation failed ({created.status_code}): {self._error_message(created)}")
 
-    def upload_pdf(self, object_key: str, data: bytes) -> StoredPdf:
+    def _upload_pdf_with_limit(self, object_key: str, data: bytes, maximum: int) -> StoredPdf:
         key = self._validate_object_key(object_key)
-        if len(data) > self.settings.max_upload_bytes:
+        if len(data) > maximum:
             raise StorageError("PDF exceeds the configured upload limit.")
         encoded_key = quote(key, safe="/")
         response = self._request(
@@ -142,8 +175,22 @@ class SupabaseStorage:
             etag=response.headers.get("etag"),
         )
 
+    def upload_pdf(self, object_key: str, data: bytes) -> StoredPdf:
+        """Compatibility/source upload; new callers should use the typed method."""
+
+        source_limit = int(getattr(self.settings, "max_source_pdf_bytes", self.settings.max_upload_bytes))
+        return self._upload_pdf_with_limit(object_key, data, source_limit)
+
+    def upload_generated_pdf(self, object_key: str, data: bytes) -> StoredPdf:
+        maximum = int(getattr(self.settings, "max_generated_pdf_bytes", self.settings.max_upload_bytes))
+        return self._upload_pdf_with_limit(object_key, data, maximum)
+
     def upload_asset(self, object_key: str, data: bytes, content_type: str) -> StoredPdf:
         key = self._validate_object_key(object_key)
+        if content_type not in self.ASSET_MIME_TYPES or content_type == "application/pdf":
+            raise StorageError("Asset content type is not allowed.")
+        if len(data) > self.settings.max_asset_bytes:
+            raise StorageError("Asset exceeds the configured upload limit.")
         encoded_key = quote(key, safe="/")
         response = self._request(
             "POST",

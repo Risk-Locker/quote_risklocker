@@ -38,6 +38,10 @@ def asset_root() -> Path:
     return Path(__file__).resolve().parents[1] / "assets" / "template_assets"
 
 
+def compatibility_asset_root() -> Path:
+    return Path(__file__).resolve().parents[1] / "assets" / "template_assets_compat"
+
+
 def _local_asset_id(path: Path) -> str:
     return hashlib.sha1(path.name.encode("utf-8")).hexdigest()[:16]
 
@@ -125,7 +129,9 @@ def count_uploaded_assets(db: Session, folder: str | None = None, search: str | 
 
 
 def list_template_assets(db: Session | None = None) -> list[dict[str, Any]]:
-    return _local_assets() + (_uploaded_assets(db) if db else [])
+    # RL-DISABLED legacy-local-asset-library — disabled 2026-08-14; restore only
+    # for a historical compatibility export, never in the active asset picker.
+    return _uploaded_assets(db) if db else []
 
 
 def folder_summary(db: Session) -> list[dict[str, Any]]:
@@ -143,14 +149,14 @@ def resolve_template_asset(db: Session | None, asset_id: str) -> Path | bytes:
         raise FileNotFoundError(asset_id)
 
     # Try local assets first.
-    root = asset_root()
     if re.fullmatch(r"[a-f0-9]{16}", asset_id):
-        for path in root.iterdir() if root.exists() else []:
-            if path.is_file() and path.suffix.lower() in ALLOWED_EXTENSIONS and _local_asset_id(path) == asset_id:
-                resolved = path.resolve()
-                if root.resolve() not in resolved.parents:
-                    raise FileNotFoundError(asset_id)
-                return resolved
+        for root in (asset_root(), compatibility_asset_root()):
+            for path in root.iterdir() if root.exists() else []:
+                if path.is_file() and path.suffix.lower() in ALLOWED_EXTENSIONS and _local_asset_id(path) == asset_id:
+                    resolved = path.resolve()
+                    if root.resolve() not in resolved.parents:
+                        raise FileNotFoundError(asset_id)
+                    return resolved
 
     # Try uploaded assets.
     if db is not None:

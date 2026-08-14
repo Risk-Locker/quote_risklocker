@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Cloud, Archive, ArrowsClockwise, HardDrives } from "@phosphor-icons/react";
+import { Cloud, Archive } from "@phosphor-icons/react";
 import { SettingsNav } from "@/components/settings-nav";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ type StorageStatus = {
     status: string;
     message: string;
     bucket: string;
-    retention_days: number;
+    retention_policy: string;
     tracked_source_bytes: number;
   };
   microsoft: {
@@ -44,17 +44,6 @@ export default function SettingsStoragePage() {
   useEffect(() => {
     load().catch((err) => setError(err instanceof Error ? err.message : "Storage status could not be loaded."));
   }, []);
-
-  async function purge() {
-    setError("");
-    try {
-      const result = await api<{ deleted: number }>("/admin/storage/purge-expired", { method: "POST" });
-      toast(`${result.deleted} expired PDF${result.deleted === 1 ? "" : "s"} removed.`, "success");
-      await load();
-    } catch (err) {
-      setError(apiErrorMessage(err));
-    }
-  }
 
   async function connectMicrosoft() {
     setError("");
@@ -94,17 +83,12 @@ export default function SettingsStoragePage() {
               <dl className="mt-5 grid grid-cols-[1fr_auto] gap-x-4 gap-y-3 text-[14px]">
                 <dt className="text-[var(--rl-text-muted)]">Private bucket</dt>
                 <dd className="font-bold text-[var(--rl-text-strong)]">{status?.supabase.bucket || "-"}</dd>
-                <dt className="text-[var(--rl-text-muted)]">Rolling retention</dt>
-                <dd className="font-bold text-[var(--rl-text-strong)]">{status?.supabase.retention_days ?? "-"} days</dd>
+                <dt className="text-[var(--rl-text-muted)]">Retention</dt>
+                <dd className="font-bold text-[var(--rl-text-strong)]">Manual purge only</dd>
                 <dt className="text-[var(--rl-text-muted)]">Tracked source PDFs</dt>
                 <dd className="font-bold text-[var(--rl-text-strong)]">{formatBytes(status?.supabase.tracked_source_bytes || 0)}</dd>
               </dl>
               <p className="mt-4 text-[14px] text-[var(--rl-text-muted)]">{status?.supabase.message}</p>
-              <div className="mt-5">
-                <Button variant="secondary" icon={<ArrowsClockwise size={16} weight="bold" />} onClick={purge}>
-                  Purge expired PDFs
-                </Button>
-              </div>
             </div>
           </Card>
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import UploadFile
 from sqlalchemy import select
@@ -76,7 +76,7 @@ def _persist_upload(
         storage_sha256=stored.sha256,
         storage_etag=stored.etag,
         storage_stored_at=now,
-        storage_expires_at=now + timedelta(days=settings.pdf_retention_days),
+        storage_expires_at=None,
         security_scan=scan,
         size_bytes=stored.size_bytes,
         status=draft_data["status"],

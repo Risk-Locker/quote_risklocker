@@ -13,6 +13,7 @@ if str(BACKEND) not in sys.path:
 
 from app.services.file_validation import display_filename, validate_upload_bytes
 from app.services.document_security import quarantined_pdf
+from app.storage import supabase as supabase_module
 from app.storage.supabase import StorageError, SupabaseStorage
 
 
@@ -49,6 +50,26 @@ def test_supabase_object_key_blocks_traversal():
         SupabaseStorage._validate_object_key("../outside.pdf")
 
 
+def test_supabase_storage_reuses_one_pooled_http_client(monkeypatch):
+    created: list[httpx.Client] = []
+    real_client = httpx.Client
+
+    def build_client(*args, **kwargs):
+        client = real_client(*args, **kwargs)
+        created.append(client)
+        return client
+
+    monkeypatch.setattr(supabase_module, "_shared_client", None, raising=False)
+    monkeypatch.setattr(supabase_module.httpx, "Client", build_client)
+    first = SupabaseStorage(storage_settings())
+    second = SupabaseStorage(storage_settings())
+
+    assert first._client is second._client
+    assert first._client is not None
+    assert len(created) == 1
+    first._client.close()
+
+
 def test_supabase_storage_uses_private_backend_requests():
     uploaded = b"%PDF-1.7\nverified"
 
@@ -61,7 +82,7 @@ def test_supabase_storage_uses_private_backend_requests():
                 json={
                     "id": "risklocker-pdfs",
                     "public": False,
-                    "allowed_mime_types": ["application/pdf", "image/png", "image/jpeg", "image/svg+xml"],
+                    "allowed_mime_types": ["application/pdf", "image/png", "image/jpeg", "image/webp", "image/svg+xml"],
                 },
             )
         if request.method == "POST":
@@ -104,7 +125,7 @@ def test_supabase_bucket_reconciles_asset_mime_types():
 
 def test_quarantine_rejects_active_pdf_content(monkeypatch, tmp_path):
     monkeypatch.setattr("app.services.document_security._defender_command", lambda _: None)
-    settings = SimpleNamespace(require_malware_scanner=False)
+    settings = SimpleNamespace(require_malware_scanner=False, max_pdf_pages=100)
     dangerous = b"%PDF-1.4\n/JavaScript\n%%EOF"
     with pytest.raises(ValueError, match="prohibited JavaScript"):
         with quarantined_pdf(dangerous, settings):

@@ -136,4 +136,5 @@ def seed_defaults(db: Session, settings: Settings) -> None:
             )
         )
 
-    ensure_super_admin(db, settings)
+    # RL-DISABLED startup credential synchronization — disabled 2026-08-13;
+    # Primary Admin bootstrap is an explicit one-time operational command.

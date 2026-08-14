@@ -95,50 +95,8 @@ DEFAULT_ALIASES = {
     "towing": ["towing"],
 }
 
-COMPANY_TEMPLATE_CATEGORY = {
-    "AmGen": "Amgen / AmAssurance / Kurnia-style",
-    "AmAssurance": "Amgen / AmAssurance / Kurnia-style",
-    "Kurnia": "Amgen / AmAssurance / Kurnia-style",
-    "QBE-DPP": "QBE-DPP",
-    "QBE": "QBE",
-    "STMB": "STMB",
-    "Liberty": "Liberty",
-    "Etiqa Takaful": "Etiqa Takaful",
-    "AIG": "AIG",
-    "Lonpac": "Other / Unknown",
-    "MMIP": "MMIP",
-}
-
-FILENAME_COMPANY_TOKENS = [
-    ("QBE-DPP", ["qbe-dpp", "qbe_dpp", "dpp"]),
-    ("Etiqa Takaful", ["etiqa"]),
-    ("Lonpac", ["lonpac"]),
-    ("AmAssurance", ["amassurance", "am_assurance", "am-assurance"]),
-    ("AmGen", ["amgen", "amgeneral", "am_general", "am-general"]),
-    ("Kurnia", ["kurnia"]),
-    ("Liberty", ["liberty"]),
-    ("STMB", ["stmb"]),
-    ("AIG", ["aig"]),
-    ("MMIP", ["mmip"]),
-    ("QBE", ["qbe"]),
-]
-
-TEXT_COMPANY_PHRASES = [
-    ("Etiqa Takaful", ["etiqa takaful", "etiqa general takaful"], 0.96),
-    ("Lonpac", ["lonpac insurance", "lonpac"], 0.96),
-    ("QBE-DPP", ["driver passenger protection", "dpp"], 0.95),
-    ("QBE", ["qbe insurance", "qbe"], 0.94),
-    ("AmAssurance", ["amassurance", "am assurance"], 0.94),
-    ("AmGen", ["amgeneral", "am general", "amgen"], 0.94),
-    ("Kurnia", ["kurnia insurans", "kurnia insurance"], 0.94),
-    ("Liberty", ["liberty insurance", "liberty general"], 0.9),
-    ("STMB", ["sumbangan tenaga", "stmb"], 0.94),
-    ("AIG", ["aig malaysia", "aig"], 0.94),
-    ("MMIP", ["malaysia motor insurance pool", "mmip"], 0.94),
-]
-
-BRANDS = ["PROTON", "PERODUA", "HONDA", "TOYOTA", "NISSAN", "BMW", "MERCEDES", "MERCEDES-BENZ", "MAZDA", "MITSUBISHI", "KIA", "HYUNDAI"]
-MODELS = ["SAGA BLM", "SAGA", "BLM", "WAJA", "MYVI", "AXIA", "ATIVA", "BEZZA", "ALZA", "VIVA", "VIOS", "CITY", "CIVIC", "ACCORD", "CAMRY", "HILUX"]
+DEFAULT_VEHICLE_BRANDS = ("PROTON", "PERODUA", "HONDA", "TOYOTA", "NISSAN", "BMW", "MERCEDES", "MERCEDES-BENZ", "MAZDA", "MITSUBISHI", "KIA", "HYUNDAI")
+DEFAULT_VEHICLE_MODELS = ("SAGA BLM", "SAGA", "BLM", "WAJA", "MYVI", "AXIA", "ATIVA", "BEZZA", "ALZA", "VIVA", "VIOS", "CITY", "CIVIC", "ACCORD", "CAMRY", "HILUX")
 CANONICAL_COVERAGE_TYPES = ["COMPREHENSIVE", "THIRD PARTY", "THIRD PARTY FIRE AND THEFT", "PRIVATE CAR", "MOTOR TAKAFUL"]
 DATE_RE = r"\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b"
 MONEY_RE = r"(?:RM\s*)?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})?"
@@ -401,9 +359,14 @@ def _add_optional_covers(text: str, page_text: list[dict], results: dict[str, li
         _add_static(results, "benefits_selected", evidence, "semantic_optional_covers", 0.85, evidence, text, page_text)
 
 
-def _add_messy_compact_text(text: str, page_text: list[dict], results: dict[str, list[CandidateValue]]) -> None:
+def _add_messy_compact_text(
+    text: str,
+    page_text: list[dict],
+    results: dict[str, list[CandidateValue]],
+    vehicle_models: tuple[str, ...],
+) -> None:
     compact = re.sub(r"[^A-Za-z0-9.%/-]", "", text.upper())
-    for model in sorted(MODELS, key=len, reverse=True):
+    for model in sorted(vehicle_models, key=len, reverse=True):
         token = re.sub(r"[^A-Z0-9]", "", model)
         if token and token in compact:
             normalized = "SAGA BLM" if model in {"SAGA BLM", "BLM"} else model
@@ -536,53 +499,79 @@ def _add_amgen_profile(text: str, page_text: list[dict], results: dict[str, list
             _add_static(results, "benefits_selected", value, "profile_optional_covers", 0.9, optional_window.group(0), text, page_text)
 
 
-def _company_from_filename(source_filename: str) -> str | None:
-    filename = source_filename.lower()
-    for company, tokens in FILENAME_COMPANY_TOKENS:
-        if any(token in filename for token in tokens):
-            return company
-    return None
+def _normalized_detection_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
 
-def _add_company_detection(source_filename: str, text: str, page_text: list[dict], results: dict[str, list[CandidateValue]]) -> None:
-    filename_company = _company_from_filename(source_filename)
-    if filename_company:
-        category = COMPANY_TEMPLATE_CATEGORY.get(filename_company, "Other / Unknown")
-        _add_static(results, "insurance_company", filename_company, "filename_company", 0.99, source_filename, text, page_text)
-        _add_static(results, "source_template_category", category, "filename_company", 0.98, source_filename, text, page_text)
+def _add_company_detection(
+    source_filename: str,
+    text: str,
+    page_text: list[dict],
+    results: dict[str, list[CandidateValue]],
+    companies: list[dict],
+) -> None:
+    """Resolve companies exclusively from active database records and aliases."""
 
-    lower = text.lower()
-    for company, phrases, score in TEXT_COMPANY_PHRASES:
-        for phrase in phrases:
-            match = re.search(re.escape(phrase), lower)
-            if not match:
+    normalized_filename = f" {_normalized_detection_text(source_filename)} "
+    normalized_text = f" {_normalized_detection_text(text)} "
+    matches: list[tuple[int, str, dict, str]] = []
+    for company in companies:
+        name = str(company.get("name") or "").strip()
+        if not name:
+            continue
+        aliases = [name, *(company.get("aliases") or [])]
+        for raw_alias in aliases:
+            alias = _normalized_detection_text(str(raw_alias))
+            if not alias:
                 continue
-            category = COMPANY_TEMPLATE_CATEGORY.get(company, "Other / Unknown")
-            if not filename_company or company == filename_company or COMPANY_TEMPLATE_CATEGORY.get(filename_company) != category:
-                _add(results, "insurance_company", company, "insurer_phrase", score, text, match.start(), match.end(), page_text)
-            _add(results, "source_template_category", category, "insurer_phrase", min(score, 0.94), text, match.start(), match.end(), page_text)
-            break
+            needle = f" {alias} "
+            if needle in normalized_filename:
+                matches.append((len(alias), "database_company_filename", company, str(raw_alias)))
+            elif needle in normalized_text:
+                matches.append((len(alias), "database_company_text", company, str(raw_alias)))
+
+    if not matches:
+        return
+    # Prefer the most specific alias, then filename evidence. Equal-scoring
+    # alternatives remain visible to the conflict detector for human review.
+    best_length = max(item[0] for item in matches)
+    selected = [item for item in matches if item[0] == best_length]
+    seen: set[tuple[str, str]] = set()
+    for _length, method, company, alias in selected:
+        name = str(company["name"])
+        marker = (name, method)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        evidence = source_filename if method.endswith("filename") else alias
+        _add_static(results, "insurance_company", name, method, 0.99 if method.endswith("filename") else 0.95, evidence, text, page_text)
+        category = str(company.get("source_template_category") or "Other / Unknown")
+        _add_static(results, "source_template_category", category, method, 0.94, evidence, text, page_text)
 
 
-def find_candidates(raw_text: str, page_text: list[dict], words: list[dict] | None = None, aliases: dict[str, list[str]] | None = None, source_filename: str = "", db_brands: list[str] | None = None, db_models: list[str] | None = None) -> dict[str, list[CandidateValue]]:
-    global BRANDS, MODELS
+def find_candidates(
+    raw_text: str,
+    page_text: list[dict],
+    words: list[dict] | None = None,
+    aliases: dict[str, list[str]] | None = None,
+    source_filename: str = "",
+    db_brands: list[str] | None = None,
+    db_models: list[str] | None = None,
+    db_companies: list[dict] | None = None,
+) -> dict[str, list[CandidateValue]]:
     text = raw_text or ""
     active_aliases = {**DEFAULT_ALIASES, **(aliases or {})}
     results: dict[str, list[CandidateValue]] = defaultdict(list)
 
-    if db_brands:
-        BRANDS = list(dict.fromkeys(db_brands + list(BRANDS)))
-    if db_models:
-        extra = [" ".join(m.upper().split()) for m in db_models if m]
-        seen = set(MODELS)
-        MODELS = [m for m in extra if m not in seen] + list(MODELS)
+    active_brands = tuple(dict.fromkeys([*(" ".join(item.upper().split()) for item in (db_brands or []) if item), *DEFAULT_VEHICLE_BRANDS]))
+    active_models = tuple(dict.fromkeys([*(" ".join(item.upper().split()) for item in (db_models or []) if item), *DEFAULT_VEHICLE_MODELS]))
 
-    _add_company_detection(source_filename, text, page_text, results)
+    _add_company_detection(source_filename, text, page_text, results, db_companies or [])
     _add_amgen_profile(text, page_text, results)
     _add_semantic_label_values(text, page_text, results)
     _add_contribution_rows(text, page_text, results)
     _add_optional_covers(text, page_text, results)
-    _add_messy_compact_text(text, page_text, results)
+    _add_messy_compact_text(text, page_text, results, active_models)
 
     for field, field_aliases in active_aliases.items():
         for alias in field_aliases:
@@ -618,13 +607,13 @@ def find_candidates(raw_text: str, page_text: list[dict], words: list[dict] | No
         _add(results, "cover_end_date", dates[1].group(0), "date_order_hint", 0.55, text, dates[1].start(), dates[1].end(), page_text)
 
     upper = text.upper()
-    for brand in BRANDS:
+    for brand in active_brands:
         match = re.search(rf"\b{re.escape(brand)}\b", upper)
         if match:
             _add(results, "car_brand", brand, "vehicle_dictionary", 0.86, text, match.start(), match.end(), page_text)
             break
 
-    for model in sorted(MODELS, key=len, reverse=True):
+    for model in sorted(active_models, key=len, reverse=True):
         match = re.search(rf"\b{re.escape(model)}\b", upper)
         if match:
             normalized = "SAGA BLM" if model in {"SAGA BLM", "BLM"} else model

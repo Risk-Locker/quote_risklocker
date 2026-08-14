@@ -18,22 +18,18 @@ import {
   CopySimple,
   Diamond,
   FloppyDisk,
-  FolderSimple,
   GridFour,
   Image,
   LineSegment,
   LockSimple,
-  LockSimpleOpen,
   MagnifyingGlass,
   Plus,
   Square,
-  Star,
   TextIndent,
   TextOutdent,
   TextT,
   Trash,
   Triangle,
-  UploadSimple,
   X,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
@@ -41,29 +37,75 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Dialog } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
 import { api, fileUrl } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { CanvasElementView, FONT_LIBRARY, type CanvasElement, type CanvasStyle, SNAP, snapValue, computeGuides } from "@/components/template-canvas/shared";
+import { LayersPanel, type LayerAction } from "@/components/template-builder/layers-panel";
 
 type TemplateVariable = { id: string; label: string; type: string; source: string; field?: string; fixed_value?: string };
 type BenefitCard = { icon?: string; title?: string; subtitle?: string; lines?: string[]; asset_id?: string };
 type PackageConfig = { name: string; included_cards?: string[]; add_on_cards?: string[]; included?: string[]; add_ons?: string[] };
-type TemplateConfig = { variables: TemplateVariable[]; cards: Record<string, BenefitCard>; packages: PackageConfig[]; assets: Record<string, string>; canvas: { width: number; height: number; elements: CanvasElement[] } };
-type TemplateRecord = { id: string; name: string; insurance_type: string; status: string; locked: boolean; fixed_fields: TemplateConfig };
+type PageProfile = { id?: string; profile_key: string; name: string; width: number; height: number; unit: "px"; safe_margins: { top?: number; right?: number; bottom?: number; left?: number }; background_behavior?: string };
+type TemplateConfig = { version?: number; page_profile?: PageProfile; variables: TemplateVariable[]; cards: Record<string, BenefitCard>; packages: PackageConfig[]; assets: Record<string, string>; canvas: { width: number; height: number; elements: CanvasElement[] } };
+type TemplateRecord = { id: string; revision: number; name: string; insurance_type: string; status: string; locked: boolean; fixed_fields: TemplateConfig };
 type AssetRecord = { id: string; label: string; filename: string; url: string; source?: string; folder?: string };
-type DragState = { id: string; mode: "move" | "resize"; startX: number; startY: number; start: CanvasElement; handle?: string; members: Set<string>; memberStart: Map<string, { x: number; y: number }> };
-type VariantItem = { id: string; special_id: string; label: string; secondary_label?: string | null; value_text?: string | null; icon_asset_id?: string | null; shape?: string | null; bg_color?: string | null; text_color?: string | null; border_width?: string | null; border_color?: string | null; shadow?: string | null; status: string };
-type SpecialItem = { id: string; label: string; category: string; status: string; variants: VariantItem[] };
+type DragState = {
+  id: string;
+  mode: "move" | "resize";
+  startX: number;
+  startY: number;
+  start: CanvasElement;
+  handle?: string;
+  members: Set<string>;
+  memberStart: Map<string, { x: number; y: number; w: number; h: number }>;
+  preview: Map<string, Partial<CanvasElement>>;
+  historySnapshot: TemplateConfig;
+  changed: boolean;
+};
 
 const assetSlots = ["risklocker_logo", "insurer_logo", "bank_logo", "all_driver_icon", "background"];
 const variableTypes = ["text", "money", "number", "date", "percent", "image", "boolean", "choice", "benefit_card"];
 const sourceFields = ["customer_name", "vehicle_no", "insurance_company", "coverage_type", "cover_period", "car_model", "ncd_percent", "coverage_amount", "premium", "roadtax", "service_fee", "total_amount", "valid_until"];
 
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)); }
+function templateFingerprint(value: TemplateRecord) { return JSON.stringify({ name: value.name, fixed_fields: value.fixed_fields }); }
 function makeId(prefix: string) { return `${prefix}_${Math.random().toString(36).slice(2, 9)}`; }
 function slug(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || makeId("var"); }
+
+function convertLegacyNodes(config: TemplateConfig): TemplateConfig {
+  const next = clone(config);
+  const source = next.canvas.elements || [];
+  const referenced = new Set(source.map((item) => item.groupId).filter(Boolean));
+  const ids = new Set(source.map((item) => item.id));
+  const converted: CanvasElement[] = [];
+  source.forEach((item, index) => {
+    if (item.type === "shape") {
+      converted.push({ ...item, type: item.shapeKind === "circle" ? "ellipse" : item.shapeKind || "rectangle", shapeKind: undefined });
+      return;
+    }
+    if (item.type !== "group") { converted.push(item); return; }
+    if (!referenced.has(item.id)) {
+      converted.push({ ...item, type: "rectangle", groupName: undefined });
+      return;
+    }
+    converted.push({ id: item.id, type: "layer-group", name: item.groupName || item.name || `Group ${index + 1}`, groupName: item.groupName || item.name || `Group ${index + 1}`, x: 0, y: 0, w: 1, h: 1, z: item.z, order: item.order ?? item.z ?? index, visible: item.visible !== false, locked: item.locked });
+    const style = item.style || {};
+    const visibleBox = !["", "transparent", "none"].includes(String(style.background || "").toLowerCase()) || Number(style.borderWidth || 0) > 0;
+    if (visibleBox) {
+      let rectangleId = `${item.id}--rectangle`;
+      let suffix = 2;
+      while (ids.has(rectangleId)) { rectangleId = `${item.id}--rectangle-${suffix}`; suffix += 1; }
+      ids.add(rectangleId);
+      converted.push({ ...item, id: rectangleId, type: "rectangle", groupId: item.id, groupName: undefined });
+    }
+  });
+  next.version = 7;
+  next.canvas.elements = converted;
+  return next;
+}
 
 function layerLabel(element: CanvasElement): string {
   switch (element.type) {
@@ -71,11 +113,17 @@ function layerLabel(element: CanvasElement): string {
     case "variable": return `Var: ${element.variableId || "?"}`;
     case "image": return element.assetSlot ? `Image: ${element.assetSlot}` : "Image";
     case "line": return "Line";
-    case "group": return "Box";
-    case "shape": return "Shape";
+    case "layer-group": return element.name || element.groupName || "Group";
+    case "group": return "Legacy box";
+    case "rectangle": return element.name || "Rectangle";
+    case "ellipse": return element.name || "Ellipse";
+    case "triangle": return element.name || "Triangle";
+    case "diamond": return element.name || "Diamond";
+    case "shape": return "Legacy shape";
     case "benefit-section": return element.section === "add_ons" ? "Add-on section" : "Specials section";
     case "special": return element.variant_label ? `Special: ${element.variant_label}` : "Special";
     case "benefit-card": return "Benefit card";
+    case "benefit-grid": return element.gridKind === "available_addons" ? "Available add-ons grid" : "Current benefits grid";
     default: return element.type;
   }
 }
@@ -86,9 +134,9 @@ function defaultStyle(type: string): CanvasStyle {
     fontWeight: "400",
     color: "#111111",
     textAlign: "left",
-    borderWidth: type === "group" || type === "shape" ? 1 : 0,
+    borderWidth: ["group", "shape", "rectangle", "ellipse", "triangle", "diamond"].includes(type) ? 1 : 0,
     borderColor: "#111111",
-    background: type === "group" || type === "shape" ? "#ffffff" : "transparent"
+    background: ["group", "shape", "rectangle", "ellipse", "triangle", "diamond"].includes(type) ? "#ffffff" : "transparent"
   };
 }
 
@@ -103,23 +151,21 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [primaryId, setPrimaryId] = useState("");
   const [draftText, setDraftText] = useState("");
-  const [rightTab, setRightTab] = useState<"layers" | "properties">("layers");
   const [showLeft, setShowLeft] = useState(true);
   const [showRight, setShowRight] = useState(true);
   const [leftWidth, setLeftWidth] = useState(280);
   const [rightWidth, setRightWidth] = useState(320);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [rulerGuides, setRulerGuides] = useState<{ x: number[]; y: number[] }>({ x: [], y: [] });
-  const [rulerDrag, setRulerDrag] = useState<{ axis: "x" | "y"; pos: number; active: boolean } | null>(null);
+  const [rulerDrag, setRulerDrag] = useState<{ axis: "x" | "y"; pos: number; active: boolean; origin?: number; outside?: boolean } | null>(null);
+  const [selectedRulerGuide, setSelectedRulerGuide] = useState<{ axis: "x" | "y"; pos: number } | null>(null);
   const [marquee, setMarquee] = useState<{ startX: number; startY: number; curX: number; curY: number } | null>(null);
   const [drawLineMode, setDrawLineMode] = useState(false);
   const [lineThickness, setLineThickness] = useState(2);
   const [drawPreview, setDrawPreview] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const drawRef = useRef<{ x: number; y: number } | null>(null);
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
   const suppressClickRef = useRef(false);
-  const [zoom, setZoom] = useState(0.72);
+  const [zoom, setZoom] = useState(1);
   const [error, setError] = useState("");
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState("");
@@ -129,25 +175,47 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
   const [newVariable, setNewVariable] = useState({ label: "", type: "text", field: "" });
   const [showGrid, setShowGrid] = useState(true);
   const [previewMode, setPreviewMode] = useState(false);
-  const [guides, setGuides] = useState<{ x: number; y: number }[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [assetFolder, setAssetFolder] = useState("Uncategorized");
-  const [specials, setSpecials] = useState<SpecialItem[]>([]);
-  const [specialSearch, setSpecialSearch] = useState("");
+  const [pageProfiles, setPageProfiles] = useState<PageProfile[]>([]);
+  const [scenarioCount, setScenarioCount] = useState(6);
+  const [publishing, setPublishing] = useState(false);
+  const [savedFingerprint, setSavedFingerprint] = useState("");
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  const [savingAndLeaving, setSavingAndLeaving] = useState(false);
+  const [canvasMenu, setCanvasMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  const propertyGestureRef = useRef<{ snapshot: TemplateConfig; changed: boolean } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const snapGuideXRef = useRef<HTMLDivElement>(null);
+  const snapGuideYRef = useRef<HTMLDivElement>(null);
+  const workspaceRef = useRef<HTMLElement>(null);
 
   async function load() {
-    const [templateResult, assetResult, specialsResult] = await Promise.all([
+    const [templateResult, businessAssetResult, profilesResult] = await Promise.all([
       api<{ template: TemplateRecord }>(`/admin/templates/${id}`),
-      api<{ assets: AssetRecord[] }>("/admin/template-assets"),
-      api<{ our_specials: SpecialItem[] }>("/admin/our-specials"),
+      api<{ assets: { items: Array<{ id: string; label: string; url: string; asset_kind: string }> } }>("/business/assets?page=1&page_size=100"),
+      api<{ page_profiles: PageProfile[] }>("/business/template-page-profiles"),
     ]);
-    setTemplate(templateResult.template);
-    setAssets(assetResult.assets);
-    setSpecials(specialsResult.our_specials);
-    selectOnly(templateResult.template.fixed_fields.canvas.elements[0]?.id || "");
+    const original = clone(templateResult.template);
+    const loaded = clone(templateResult.template);
+    if (!loaded.fixed_fields.page_profile) {
+      loaded.fixed_fields.page_profile = {
+        profile_key: "a4",
+        name: "A4",
+        width: loaded.fixed_fields.canvas.width || 794,
+        height: loaded.fixed_fields.canvas.height || 1123,
+        unit: "px",
+        safe_margins: { top: 24, right: 24, bottom: 24, left: 24 },
+      };
+    }
+    loaded.fixed_fields = convertLegacyNodes(loaded.fixed_fields);
+    setTemplate(loaded);
+    setSavedFingerprint(templateFingerprint(original));
+    setAssets(businessAssetResult.assets.items.map((asset) => ({ ...asset, filename: asset.label, source: "business", folder: asset.asset_kind === "company_logo" ? "Company logos" : "Benefit artwork" })));
+    setPageProfiles(profilesResult.page_profiles.length ? profilesResult.page_profiles : [{
+      profile_key: "a4", name: "A4", width: 794, height: 1123, unit: "px",
+      safe_margins: { top: 24, right: 24, bottom: 24, left: 24 },
+    }]);
+    selectOnly(loaded.fixed_fields.canvas.elements[0]?.id || "");
   }
 
   useEffect(() => {
@@ -162,37 +230,36 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
   const selected = elements.find((item) => item.id === primaryId) || null;
   const selection = elements.filter((item) => selectedIds.has(item.id));
   const readOnly = Boolean(template?.locked) || previewMode;
+  const dirty = Boolean(template && savedFingerprint && templateFingerprint(template) !== savedFingerprint);
   const selectedCard = selected?.cardId && config?.cards ? config.cards[selected.cardId] : null;
-  const sortedElements = useMemo(() => [...elements].sort((a, b) => (a.z || 1) - (b.z || 1)), [elements]);
+  const sortedElements = useMemo(() => {
+    const byId = new Map(elements.map((item) => [item.id, item]));
+    const inheritedState = (groupId?: string, visited = new Set<string>()): { visible: boolean; locked: boolean } => {
+      if (!groupId || visited.has(groupId)) return { visible: true, locked: false };
+      visited.add(groupId);
+      const group = byId.get(groupId);
+      if (!group || group.type !== "layer-group") return { visible: true, locked: false };
+      const parent = inheritedState(group.parentId, visited);
+      return { visible: parent.visible && group.visible !== false, locked: parent.locked || Boolean(group.locked) };
+    };
+    return elements
+      .filter((item) => item.type !== "layer-group")
+      .map((item) => {
+        const inherited = inheritedState(item.groupId);
+        return { ...item, visible: inherited.visible && item.visible !== false, locked: inherited.locked || Boolean(item.locked) };
+      })
+      .sort((a, b) => (a.z || 1) - (b.z || 1));
+  }, [elements]);
 
   function nextZ() {
     return Math.max(1, ...elements.map((item) => item.z || 1)) + 1;
   }
 
   function selectedGroupIds() {
-    return new Set(selection.filter((e) => e.type === "group").map((e) => e.id));
+    return new Set(selection.filter((e) => e.type === "layer-group").map((e) => e.id));
   }
 
-  function buildSpecialElement(variant: VariantItem, x: number, y: number): CanvasElement {
-    return {
-      id: makeId("special"),
-      type: "special",
-      x, y, w: 160, h: 80,
-      z: nextZ(),
-      style: defaultStyle("special"),
-      variantId: variant.id,
-      variant_label: variant.label,
-      variant_secondary_label: variant.secondary_label || undefined,
-      variant_value_text: variant.value_text || undefined,
-      variant_icon_asset_id: variant.icon_asset_id || undefined,
-      variant_shape: variant.shape || undefined,
-      variant_bg_color: variant.bg_color || undefined,
-      variant_text_color: variant.text_color || undefined,
-      variant_border_width: variant.border_width || undefined,
-      variant_border_color: variant.border_color || undefined,
-      variant_shadow: variant.shadow || undefined,
-    };
-  }
+  // RL-DISABLED new manual benefit cards — disabled 2026-08-14; legacy elements remain readable, while new content uses dynamic benefit grids.
 
   useEffect(() => {
     setDraftText(selected?.text || "");
@@ -224,24 +291,98 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
     setPrimaryId("");
   }
 
-  function assignToGroup(elementId: string, groupId: string | null) {
-    if (readOnly) return;
-    const source = elements.find((e) => e.id === elementId);
-    if (!source || source.type === "group") return;
-    const targets = selection.length > 1 && selectedIds.has(elementId)
-      ? selection.filter((e) => e.type !== "group").map((e) => e.id)
-      : [elementId];
-    updateElements(new Set(targets), () => ({ groupId: groupId ?? undefined }));
+  function nestLayer(elementId: string, groupId: string | null) {
+    if (readOnly || elementId === groupId) return;
+    const source = elements.find((item) => item.id === elementId);
+    if (!source) return;
+    if (source.type === "layer-group") {
+      let parent = groupId ? elements.find((item) => item.id === groupId) : null;
+      while (parent?.parentId) {
+        if (parent.parentId === source.id) return;
+        parent = elements.find((item) => item.id === parent?.parentId) || null;
+      }
+      updateElement(source.id, { parentId: groupId || undefined });
+    } else {
+      updateElement(source.id, { groupId: groupId || undefined });
+    }
+  }
+
+  function reorderLayer(elementId: string, targetId: string, position: "before" | "after") {
+    if (readOnly || elementId === targetId) return;
+    const source = elements.find((item) => item.id === elementId);
+    const target = elements.find((item) => item.id === targetId);
+    if (!source || !target || (source.type === "layer-group") !== (target.type === "layer-group")) return;
+    if (source.type === "layer-group") {
+      const siblings = elements.filter((item) => item.type === "layer-group" && item.parentId === target.parentId && item.id !== source.id).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      const index = Math.max(0, siblings.findIndex((item) => item.id === target.id) + (position === "after" ? 1 : 0));
+      siblings.splice(index, 0, source);
+      commit((current) => { current.canvas.elements = current.canvas.elements.map((item) => { const order = siblings.findIndex((sibling) => sibling.id === item.id); return order >= 0 ? { ...item, order, parentId: target.parentId } : item; }); return current; });
+      return;
+    }
+    const siblings = elements.filter((item) => item.type !== "layer-group" && item.groupId === target.groupId && item.id !== source.id).sort((a, b) => (a.z || 0) - (b.z || 0));
+    const index = Math.max(0, siblings.findIndex((item) => item.id === target.id) + (position === "after" ? 1 : 0));
+    siblings.splice(index, 0, source);
+    commit((current) => { current.canvas.elements = current.canvas.elements.map((item) => { const order = siblings.findIndex((sibling) => sibling.id === item.id); return order >= 0 ? { ...item, z: order + 1, groupId: target.groupId } : item; }); return current; });
+  }
+
+  function toggleVisibility(id: string) {
+    const target = elements.find((item) => item.id === id);
+    if (target) updateElement(id, { visible: target.visible === false });
+  }
+
+  function layerAction(action: LayerAction, id: string) {
+    const target = elements.find((item) => item.id === id);
+    if (!target || readOnly) return;
+    if (action === "group") { groupSelection(); return; }
+    if (action === "ungroup") {
+      commit((current) => { current.canvas.elements = current.canvas.elements.filter((item) => item.id !== id).map((item) => item.groupId === id ? { ...item, groupId: undefined } : item); return current; });
+      clearSelection();
+      return;
+    }
+    if (action === "lock") { toggleLock(id); return; }
+    if (action === "visibility") { toggleVisibility(id); return; }
+    if (action === "delete") {
+      commit((current) => { current.canvas.elements = current.canvas.elements.filter((item) => item.id !== id && item.groupId !== id && item.parentId !== id); return current; });
+      clearSelection();
+      return;
+    }
+    if (action === "duplicate") {
+      if (target.type === "benefit-grid") return;
+      const copy = { ...clone(target), id: makeId(target.type), name: target.name ? `${target.name} copy` : undefined, x: Math.min(canvasW - target.w, target.x + 16), y: Math.min(canvasH - target.h, target.y + 16), z: nextZ() };
+      commit((current) => { current.canvas.elements.push(copy); return current; });
+      selectOnly(copy.id);
+      return;
+    }
+    const z = target.z || 1;
+    const max = Math.max(1, ...elements.filter((item) => item.type !== "layer-group").map((item) => item.z || 1));
+    const next = action === "forward" ? Math.min(max, z + 1) : action === "backward" ? Math.max(1, z - 1) : action === "front" ? max + 1 : 1;
+    updateElement(id, { z: next });
   }
 
   function commit(updater: (current: TemplateConfig) => TemplateConfig) {
     if (!template || readOnly) return;
     setTemplate((current) => {
       if (!current) return current;
-      setHistory((items) => [...items.slice(-30), clone(current.fixed_fields)]);
-      setFuture([]);
+      if (propertyGestureRef.current) propertyGestureRef.current.changed = true;
+      else {
+        setHistory((items) => [...items.slice(-30), clone(current.fixed_fields)]);
+        setFuture([]);
+      }
       return { ...current, fixed_fields: updater(clone(current.fixed_fields)) };
     });
+  }
+
+  function beginPropertyGesture() {
+    if (!template || readOnly || propertyGestureRef.current) return;
+    propertyGestureRef.current = { snapshot: clone(template.fixed_fields), changed: false };
+  }
+
+  function endPropertyGesture() {
+    const gesture = propertyGestureRef.current;
+    propertyGestureRef.current = null;
+    if (!gesture?.changed) return;
+    setHistory((items) => [...items.slice(-30), gesture.snapshot]);
+    setFuture([]);
   }
 
   function updateElement(elementId: string, patch: Partial<CanvasElement>) {
@@ -253,28 +394,6 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
 
   function updateStyle(elementId: string, patch: Partial<CanvasStyle>) {
     updateElement(elementId, { style: patch });
-  }
-
-  function addSpecialElement(variant: VariantItem) {
-    const element = buildSpecialElement(variant, 80, 120);
-    commit((current) => { current.canvas.elements.push(element); return current; });
-    selectOnly(element.id);
-  }
-
-  function handleCanvasDragOver(event: React.DragEvent) { event.preventDefault(); }
-  function handleCanvasDrop(event: React.DragEvent) {
-    event.preventDefault();
-    const raw = event.dataTransfer.getData("application/variant");
-    if (!raw) return;
-    try {
-      const variant: VariantItem = JSON.parse(raw);
-      const rect = canvasRef.current?.getBoundingClientRect();
-      const dx = rect ? (event.clientX - rect.left) / zoom : 80;
-      const dy = rect ? (event.clientY - rect.top) / zoom : 120;
-      const element = buildSpecialElement(variant, Math.round(dx - 24), Math.round(dy - 24));
-      commit((current) => { current.canvas.elements.push(element); return current; });
-      selectOnly(element.id);
-    } catch { /* ignore invalid drop data */ }
   }
 
   function addElement(type: string, patch: Partial<CanvasElement> = {}) {
@@ -293,6 +412,67 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
     selectOnly(element.id);
   }
 
+  function addBenefitGrid(gridKind: "current_benefits" | "available_addons") {
+    const existing = elements.find((element) => element.type === "benefit-grid" && element.gridKind === gridKind);
+    if (existing) {
+      selectOnly(existing.id);
+      toast("This template already has that dynamic grid.", "info");
+      return;
+    }
+    const element: CanvasElement = {
+      id: makeId("benefit_grid"),
+      type: "benefit-grid",
+      gridKind,
+      x: 24,
+      y: gridKind === "current_benefits" ? Math.round(canvasH * 0.42) : Math.round(canvasH * 0.69),
+      w: Math.max(120, canvasW - 48),
+      h: Math.max(100, Math.round(canvasH * 0.22)),
+      z: nextZ(),
+      packing: {
+        strategy: "balanced",
+        alignment: "center",
+        aspectRatio: 1.45,
+        referenceWidth: 180,
+        referenceHeight: 124,
+        gapRatio: 0.06,
+        paddingRatio: 0.02,
+        staggerRatio: 0.5,
+      },
+      cardStyle: "standard",
+      textDensity: "normal",
+      emptyState: "hide",
+    };
+    commit((current) => { current.canvas.elements.push(element); return current; });
+    selectOnly(element.id);
+  }
+
+  function updatePageGeometry(profile: PageProfile) {
+    commit((current) => {
+      const width = Math.max(320, Math.round(profile.width));
+      const height = Math.max(320, Math.round(profile.height));
+      current.version = 7;
+      current.page_profile = { ...profile, width, height, unit: "px" };
+      current.canvas.width = width;
+      current.canvas.height = height;
+      current.canvas.elements = current.canvas.elements.map((element) => {
+        const w = Math.min(Math.max(1, element.w), width);
+        const h = Math.min(Math.max(1, element.h), height);
+        return { ...element, w, h, x: Math.min(Math.max(0, element.x), width - w), y: Math.min(Math.max(0, element.y), height - h) };
+      });
+      return current;
+    });
+  }
+
+  function updateSafeMargin(side: "top" | "right" | "bottom" | "left", value: number) {
+    const maximum = Math.floor((side === "top" || side === "bottom" ? canvasH : canvasW) / 2) - 1;
+    const margin = Math.max(0, Math.min(maximum, Math.round(Number.isFinite(value) ? value : 0)));
+    commit((current) => {
+      const page = current.page_profile || { profile_key: "custom", name: "Custom fixed page", width: canvasW, height: canvasH, unit: "px", safe_margins: {} };
+      current.page_profile = { ...page, safe_margins: { ...(page.safe_margins || {}), [side]: margin } };
+      return current;
+    });
+  }
+
   function updateElements(ids: Set<string>, patch: (el: CanvasElement) => Partial<CanvasElement>) {
     commit((current) => {
       current.canvas.elements = current.canvas.elements.map((item) => ids.has(item.id) ? { ...item, ...patch(item) } : item);
@@ -302,7 +482,7 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
 
   function moveSelectionIds(): Set<string> {
     const ids = new Set(selection.filter((e) => !e.locked).map((e) => e.id));
-    const groupIds = new Set(selection.filter((e) => e.type === "group").map((e) => e.id));
+    const groupIds = new Set(selection.filter((e) => e.type === "layer-group").map((e) => e.id));
     for (const el of elements) {
       if (el.groupId && groupIds.has(el.groupId) && !el.locked) ids.add(el.id);
     }
@@ -323,7 +503,7 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
 
   function deleteSelection() {
     if (!selectedIds.size || readOnly) return;
-    const groupIds = new Set(selection.filter((e) => e.type === "group").map((e) => e.id));
+    const groupIds = new Set(selection.filter((e) => e.type === "layer-group").map((e) => e.id));
     const targets = new Set(selection.filter((e) => !e.locked).map((e) => e.id));
     commit((current) => {
       current.canvas.elements = current.canvas.elements
@@ -337,9 +517,9 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
   function duplicateSelection() {
     if (!selectedIds.size || readOnly) return;
     const idMap = new Map<string, string>();
-    const copies = selection.filter((el) => !el.locked).map((el) => {
+    const copies = selection.filter((el) => !el.locked && el.type !== "benefit-grid").map((el) => {
       const copy = { ...clone(el), id: makeId(el.type), x: el.x + 18, y: el.y + 18, z: (el.z || 1) + 1 };
-      if (el.type === "group") idMap.set(el.id, copy.id);
+      if (el.type === "layer-group") idMap.set(el.id, copy.id);
       return copy;
     }).map((el) => {
       if (el.groupId && idMap.has(el.groupId)) return { ...el, groupId: idMap.get(el.groupId) };
@@ -350,27 +530,28 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
       }
       return el;
     });
+    if (!copies.length) {
+      toast("Dynamic grids are unique. Add one of each grid kind from the left panel.", "info");
+      return;
+    }
     commit((current) => { current.canvas.elements.push(...copies); return current; });
     selectOnly(copies[copies.length - 1].id);
   }
 
   function groupSelection() {
-    const members = selection.filter((e) => e.type !== "group" && !e.locked);
+    const members = selection.filter((e) => e.type !== "layer-group" && !e.locked);
     if (members.length < 2 || readOnly) return;
-    const minX = Math.min(...members.map((m) => m.x));
-    const minY = Math.min(...members.map((m) => m.y));
-    const maxX = Math.max(...members.map((m) => m.x + m.w));
-    const maxY = Math.max(...members.map((m) => m.y + m.h));
     const gid = makeId("group");
-    const count = elements.filter((e) => e.type === "group").length;
+    const count = elements.filter((e) => e.type === "layer-group").length;
     const groupEl: CanvasElement = {
       id: gid,
-      type: "group",
+      type: "layer-group",
+      name: `Group ${count + 1}`,
       groupName: `Group ${count + 1}`,
-      x: Math.floor(minX - 8), y: Math.floor(minY - 8),
-      w: Math.ceil(maxX - minX + 16), h: Math.ceil(maxY - minY + 16),
+      x: 0, y: 0, w: 1, h: 1,
       z: Math.max(1, Math.min(...members.map((m) => m.z || 1)) - 1),
-      style: { background: "transparent", borderWidth: 1, borderColor: "#94a3b8" },
+      order: elements.length,
+      visible: true,
     };
     commit((current) => {
       current.canvas.elements = current.canvas.elements.map((e) => members.some((m) => m.id === e.id) ? { ...e, groupId: gid } : e);
@@ -462,6 +643,7 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
 
   function removeRulerGuide(axis: "x" | "y", pos: number) {
     setRulerGuides((current) => ({ ...current, [axis]: current[axis].filter((p) => p !== pos) }));
+    setSelectedRulerGuide((current) => current?.axis === axis && current.pos === pos ? null : current);
   }
 
   function startRulerDrag(event: React.PointerEvent, axis: "x" | "y") {
@@ -474,12 +656,22 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
     setRulerDrag({ axis, pos: clampPos(pos, axis), active: true });
   }
 
+  function startExistingGuide(event: React.PointerEvent, axis: "x" | "y", pos: number) {
+    if (readOnly) return;
+    event.preventDefault();
+    event.stopPropagation();
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    setSelectedRulerGuide({ axis, pos });
+    setRulerDrag({ axis, pos, origin: pos, active: true, outside: false });
+  }
+
   function moveRulerDrag(event: React.PointerEvent) {
     if (!rulerDrag?.active) return;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const pos = rulerDrag.axis === "x" ? (event.clientX - rect.left) / zoom : (event.clientY - rect.top) / zoom;
-    setRulerDrag((current) => (current ? { ...current, pos: clampPos(pos, current.axis) } : current));
+    const raw = rulerDrag.axis === "x" ? (event.clientX - rect.left) / zoom : (event.clientY - rect.top) / zoom;
+    const outside = event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom;
+    setRulerDrag((current) => (current ? { ...current, pos: current.origin === undefined ? clampPos(raw, current.axis) : raw, outside } : current));
   }
 
   function endRulerDrag() {
@@ -487,32 +679,60 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
     const axis = rulerDrag.axis;
     const pos = Math.round(rulerDrag.pos);
     setRulerGuides((current) => {
-      const list = current[axis];
+      const list = rulerDrag.origin === undefined ? current[axis] : current[axis].filter((item) => item !== rulerDrag.origin);
+      if (rulerDrag.outside || pos < 0 || pos > (axis === "x" ? canvasW : canvasH)) return { ...current, [axis]: list };
       const existing = list.find((p) => Math.abs(p - pos) <= 3);
       const next = existing ? list : [...list, pos].sort((a, b) => a - b);
       return { ...current, [axis]: next };
     });
+    setSelectedRulerGuide(rulerDrag.outside ? null : { axis, pos });
     setRulerDrag(null);
   }
 
   function pointerDown(event: React.PointerEvent, element: CanvasElement, mode: "move" | "resize", handle?: string) {
-    if (readOnly) return;
+    if (readOnly || !template) return;
     if (drawLineMode) return;
     if (element.locked) return;
     if (element.type === "image" && element.assetSlot === "background" && mode === "move") return;
     event.preventDefault();
     event.stopPropagation();
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
     if (event.shiftKey && mode === "move") {
       toggleSelect(element.id);
     } else if (!selectedIds.has(element.id)) {
       selectOnly(element.id);
     }
     const members = mode === "move" ? moveSelectionIds() : new Set([element.id]);
-    const memberStart = new Map<string, { x: number; y: number }>();
+    const memberStart = new Map<string, { x: number; y: number; w: number; h: number }>();
     for (const el of elements) {
-      if (members.has(el.id)) memberStart.set(el.id, { x: el.x, y: el.y });
+      if (members.has(el.id)) memberStart.set(el.id, { x: el.x, y: el.y, w: el.w, h: el.h });
     }
-    dragRef.current = { id: element.id, mode, startX: event.clientX, startY: event.clientY, start: clone(element), handle, members, memberStart };
+    dragRef.current = {
+      id: element.id,
+      mode,
+      startX: event.clientX,
+      startY: event.clientY,
+      start: clone(element),
+      handle,
+      members,
+      memberStart,
+      preview: new Map(),
+      historySnapshot: clone(template.fixed_fields),
+      changed: false,
+    };
+  }
+
+  function showSnapGuides(next: { x: number; y: number }[]) {
+    const x = next.find((guide) => guide.x !== 0)?.x;
+    const y = next.find((guide) => guide.y !== 0)?.y;
+    if (snapGuideXRef.current) {
+      snapGuideXRef.current.style.display = x === undefined ? "none" : "block";
+      if (x !== undefined) snapGuideXRef.current.style.left = `${x}px`;
+    }
+    if (snapGuideYRef.current) {
+      snapGuideYRef.current.style.display = y === undefined ? "none" : "block";
+      if (y !== undefined) snapGuideYRef.current.style.top = `${y}px`;
+    }
   }
 
   function pointerMove(event: React.PointerEvent) {
@@ -520,6 +740,7 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
     if (!drag || !template) return;
     const dx = (event.clientX - drag.startX) / zoom;
     const dy = (event.clientY - drag.startY) / zoom;
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
 
     if (drag.mode === "move") {
       let nx = Math.round(drag.start.x + dx);
@@ -530,42 +751,62 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
         nx = gx ?? sx;
         ny = gy ?? sy;
       }
-      const guides = event.altKey ? [] : computeGuides(drag.start, { x: nx, y: ny }, elements, canvasW, canvasW / 2);
-      setGuides(guides);
-      const ddx = nx - drag.start.x;
-      const ddy = ny - drag.start.y;
-      setTemplate((current) => {
-        if (!current) return current;
-        const next = clone(current);
-        next.fixed_fields.canvas.elements = next.fixed_fields.canvas.elements.map((item: CanvasElement) => {
-          if (!drag.members.has(item.id)) return item;
-          const start = drag.memberStart.get(item.id);
-          return start ? { ...item, x: Math.round(start.x + ddx), y: Math.round(start.y + ddy) } : item;
+      let ddx = nx - drag.start.x;
+      let ddy = ny - drag.start.y;
+      if (!event.altKey) {
+        const xTargets = [0, canvasW / 2, canvasW];
+        const yTargets = [0, canvasH / 2, canvasH];
+        elements.forEach((item) => {
+          if (drag.members.has(item.id) || item.type === "layer-group" || item.visible === false) return;
+          xTargets.push(item.x, item.x + item.w / 2, item.x + item.w);
+          yTargets.push(item.y, item.y + item.h / 2, item.y + item.h);
         });
-        return { ...current, fixed_fields: next.fixed_fields };
+        const xEdges = [drag.start.x + ddx, drag.start.x + ddx + drag.start.w / 2, drag.start.x + ddx + drag.start.w];
+        const yEdges = [drag.start.y + ddy, drag.start.y + ddy + drag.start.h / 2, drag.start.y + ddy + drag.start.h];
+        const nearest = (edges: number[], targets: number[]) => edges.flatMap((edge) => targets.map((target) => target - edge)).reduce<number | null>((best, delta) => Math.abs(delta) <= 6 && (best === null || Math.abs(delta) < Math.abs(best)) ? delta : best, null);
+        ddx += nearest(xEdges, xTargets) ?? 0;
+        ddy += nearest(yEdges, yTargets) ?? 0;
+      }
+      for (const bounds of drag.memberStart.values()) {
+        ddx = Math.max(-bounds.x, Math.min(canvasW - bounds.w - bounds.x, ddx));
+        ddy = Math.max(-bounds.y, Math.min(canvasH - bounds.h - bounds.y, ddy));
+      }
+      const guides = event.altKey ? [] : computeGuides(drag.start, { x: drag.start.x + ddx, y: drag.start.y + ddy }, elements, canvasW, canvasH);
+      showSnapGuides(guides);
+      drag.changed = drag.changed || ddx !== 0 || ddy !== 0;
+      drag.members.forEach((id) => {
+        const start = drag.memberStart.get(id);
+        if (!start) return;
+        const patch = { x: Math.round(start.x + ddx), y: Math.round(start.y + ddy) };
+        drag.preview.set(id, patch);
+        const node = canvasRef.current?.querySelector<HTMLElement>(`[data-element-id="${CSS.escape(id)}"]`);
+        if (node) { node.style.left = `${patch.x}px`; node.style.top = `${patch.y}px`; }
       });
     } else {
       const patch: Partial<CanvasElement> = {};
-      if (drag.handle?.includes("e")) patch.w = Math.max(8, Math.round(drag.start.w + dx));
-      if (drag.handle?.includes("s")) patch.h = Math.max(2, Math.round(drag.start.h + dy));
+      if (drag.handle?.includes("e")) patch.w = Math.min(canvasW - drag.start.x, Math.max(8, Math.round(drag.start.w + dx)));
+      if (drag.handle?.includes("s")) patch.h = Math.min(canvasH - drag.start.y, Math.max(2, Math.round(drag.start.h + dy)));
       if (drag.handle?.includes("w")) {
-        const nw = Math.max(8, Math.round(drag.start.w - dx));
-        patch.w = nw;
-        patch.x = drag.start.x + drag.start.w - nw;
+        const right = drag.start.x + drag.start.w;
+        patch.x = Math.max(0, Math.min(right - 8, Math.round(drag.start.x + dx)));
+        patch.w = right - patch.x;
       }
       if (drag.handle?.includes("n")) {
-        const nh = Math.max(2, Math.round(drag.start.h - dy));
-        patch.h = nh;
-        patch.y = drag.start.y + drag.start.h - nh;
+        const bottom = drag.start.y + drag.start.h;
+        patch.y = Math.max(0, Math.min(bottom - 2, Math.round(drag.start.y + dy)));
+        patch.h = bottom - patch.y;
       }
-      const guides = computeGuides(drag.start, patch, elements, canvasW, (canvasW) / 2);
-      setGuides(guides);
-      setTemplate((current) => {
-        if (!current) return current;
-        const next = clone(current);
-        next.fixed_fields.canvas.elements = next.fixed_fields.canvas.elements.map((item: CanvasElement) => item.id === drag.id ? { ...item, ...patch } : item);
-        return { ...current, fixed_fields: next.fixed_fields };
-      });
+      const guides = computeGuides(drag.start, patch, elements, canvasW, canvasH);
+      showSnapGuides(guides);
+      drag.changed = drag.changed || Object.entries(patch).some(([key, value]) => value !== drag.start[key as keyof CanvasElement]);
+      drag.preview.set(drag.id, patch);
+      const node = canvasRef.current?.querySelector<HTMLElement>(`[data-element-id="${CSS.escape(drag.id)}"]`);
+      if (node) {
+        if (patch.x !== undefined) node.style.left = `${patch.x}px`;
+        if (patch.y !== undefined) node.style.top = `${patch.y}px`;
+        if (patch.w !== undefined) node.style.width = `${patch.w}px`;
+        if (patch.h !== undefined) node.style.height = `${patch.h}px`;
+      }
     }
   }
 
@@ -664,13 +905,21 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
   function pointerUp() {
     const drag = dragRef.current;
     dragRef.current = null;
-    setGuides([]);
-    if (drag) suppressClickRef.current = true;
-    if (drag && template) {
-      const element = template.fixed_fields.canvas.elements.find((item) => item.id === drag.id);
-      if (element) {
-        setHistory((items) => [...items.slice(-30), clone(template.fixed_fields)]);
-      }
+    showSnapGuides([]);
+    if (drag?.changed) {
+      suppressClickRef.current = true;
+      setTemplate((current) => current ? {
+        ...current,
+        fixed_fields: {
+          ...current.fixed_fields,
+          canvas: {
+            ...current.fixed_fields.canvas,
+            elements: current.fixed_fields.canvas.elements.map((item) => drag.preview.has(item.id) ? { ...item, ...drag.preview.get(item.id) } : item),
+          },
+        },
+      } : current);
+      setHistory((items) => [...items.slice(-30), drag.historySnapshot]);
+      setFuture([]);
     }
   }
 
@@ -703,7 +952,7 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
       setImportError("Missing or invalid \"canvas.elements\" array.");
       return false;
     }
-    const knownTypes = new Set(["text", "variable", "image", "line", "group", "shape", "benefit-section", "benefit-card", "special"]);
+    const knownTypes = new Set(["text", "variable", "image", "line", "rectangle", "ellipse", "triangle", "diamond", "layer-group", "group", "shape", "benefit-grid", "benefit-section", "benefit-card", "special"]);
     const num = (value: unknown, fallback: number) => (typeof value === "number" && Number.isFinite(value) ? value : fallback);
     const str = (value: unknown) => (typeof value === "string" ? value : undefined);
     const elements = (canvas.elements as unknown[]).map((entry, index) => {
@@ -711,8 +960,11 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
       if (!el || typeof el !== "object" || !knownTypes.has(String(el.type))) {
         throw new Error(`Element ${index + 1} has an unknown type "${String(el?.type)}".`);
       }
+      const persisted = Object.fromEntries(
+        Object.entries(el).filter(([key]) => !["scenarioMode", "scenarioData", "scenarioItems"].includes(key)),
+      );
       return {
-        ...el,
+        ...persisted,
         id: str(el.id) || `imported_${index + 1}_${Math.random().toString(36).slice(2, 7)}`,
         type: String(el.type),
         x: num(el.x, 80),
@@ -722,7 +974,7 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
         z: el.z === undefined ? undefined : num(el.z, 1),
       };
     });
-    const imported: TemplateConfig = {
+    const imported: TemplateConfig = convertLegacyNodes({
       ...(config || {}),
       ...input,
       canvas: {
@@ -730,10 +982,22 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
         height: num(canvas.height, canvasH),
         elements,
       },
-    };
+    });
     // An imported layout never locks or defaults the current template.
     (imported as Record<string, unknown>).is_default = false;
     (imported as Record<string, unknown>).locked = false;
+    delete (imported as Record<string, unknown>).scenarioMode;
+    delete (imported as Record<string, unknown>).scenarioData;
+    delete (imported as Record<string, unknown>).previewScenario;
+    imported.version = 7;
+    imported.page_profile = imported.page_profile || {
+      profile_key: "custom",
+      name: "Imported fixed page",
+      width: imported.canvas.width,
+      height: imported.canvas.height,
+      unit: "px",
+      safe_margins: { top: 24, right: 24, bottom: 24, left: 24 },
+    };
     if (!imported.variables || !imported.variables.length) imported.variables = config?.variables || [];
     setTemplate((current) => current ? { ...current, fixed_fields: imported } : current);
     return true;
@@ -751,31 +1015,43 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
     }
   }
 
-  async function save(status?: string) {
-    if (!template) return;
+  async function saveDraft(showToast = true): Promise<TemplateRecord> {
+    if (!template) throw new Error("Template is not loaded.");
+    setError("");
     const result = await api<{ template: TemplateRecord }>(`/admin/templates/${template.id}`, {
       method: "PATCH",
-      body: JSON.stringify({ name: template.name, insurance_type: template.insurance_type, status: status || template.status, fixed_fields: template.fixed_fields })
+      body: JSON.stringify({
+        base_revision: template.revision,
+        name: template.name,
+        insurance_type: template.insurance_type,
+        fixed_fields: template.fixed_fields,
+      }),
     });
     setTemplate(result.template);
-    toast(status === "active" ? "Template published." : "Template saved.", "success");
+    setSavedFingerprint(templateFingerprint(result.template));
+    if (showToast) toast("Template draft saved.", "success");
+    return result.template;
   }
 
-  async function uploadAsset(file: File) {
-    setUploading(true);
+  async function publishTemplate() {
+    if (!template || publishing) return;
+    setPublishing(true);
     setError("");
     try {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("label", file.name.replace(/\.[^.]+$/, ""));
-      form.append("folder", assetFolder.trim() || "Uncategorized");
-      const result = await api<{ asset: AssetRecord }>("/admin/template-assets", { method: "POST", body: form });
-      setAssets((current) => [result.asset, ...current]);
-      toast(`Asset uploaded to "${result.asset.folder || "Uncategorized"}" folder.`, "success");
+      const saved = await saveDraft(false);
+      const result = await api<{
+        template: TemplateRecord;
+        template_revision: { revision_number: number };
+      }>(`/business/templates/${id}/publish`, {
+        method: "POST",
+        body: JSON.stringify({ base_revision: saved.revision }),
+      });
+      setTemplate(result.template);
+      toast(`Published immutable revision ${result.template_revision.revision_number}.`, "success");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
+      setError(err instanceof Error ? err.message : "Template publication failed.");
     } finally {
-      setUploading(false);
+      setPublishing(false);
     }
   }
 
@@ -790,24 +1066,81 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
     function onKeyDown(event: KeyboardEvent) {
       if (readOnly) return;
       const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) {
+        return;
+      }
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedRulerGuide) {
+        event.preventDefault();
+        removeRulerGuide(selectedRulerGuide.axis, selectedRulerGuide.pos);
+        return;
+      }
       const meta = event.ctrlKey || event.metaKey;
       if (meta && event.key.toLowerCase() === "z") { event.preventDefault(); if (event.shiftKey) redo(); else undo(); return; }
       if (meta && event.key.toLowerCase() === "y") { event.preventDefault(); redo(); return; }
       if (meta && event.key.toLowerCase() === "d") { event.preventDefault(); duplicateSelection(); return; }
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) {
-        return;
-      }
       if (!selectedIds.size) return;
       if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); deleteSelection(); return; }
       const step = event.shiftKey ? 10 : 1;
-      if (event.key === "ArrowUp") { event.preventDefault(); updateElements(moveSelectionIds(), (e) => ({ y: (e.y || 0) - step })); }
-      else if (event.key === "ArrowDown") { event.preventDefault(); updateElements(moveSelectionIds(), (e) => ({ y: (e.y || 0) + step })); }
-      else if (event.key === "ArrowLeft") { event.preventDefault(); updateElements(moveSelectionIds(), (e) => ({ x: (e.x || 0) - step })); }
-      else if (event.key === "ArrowRight") { event.preventDefault(); updateElements(moveSelectionIds(), (e) => ({ x: (e.x || 0) + step })); }
+      if (event.key === "ArrowUp") { event.preventDefault(); updateElements(moveSelectionIds(), (e) => ({ y: Math.max(0, (e.y || 0) - step) })); }
+      else if (event.key === "ArrowDown") { event.preventDefault(); updateElements(moveSelectionIds(), (e) => ({ y: Math.min(canvasH - e.h, (e.y || 0) + step) })); }
+      else if (event.key === "ArrowLeft") { event.preventDefault(); updateElements(moveSelectionIds(), (e) => ({ x: Math.max(0, (e.x || 0) - step) })); }
+      else if (event.key === "ArrowRight") { event.preventDefault(); updateElements(moveSelectionIds(), (e) => ({ x: Math.min(canvasW - e.w, (e.x || 0) + step) })); }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedIds, readOnly, history, future, elements]);
+  }, [selectedIds, selectedRulerGuide, readOnly, history, future, elements]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  useEffect(() => {
+    if (!canvasMenu) return;
+    const close = () => setCanvasMenu(null);
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", escape);
+    return () => { window.removeEventListener("pointerdown", close); window.removeEventListener("keydown", escape); };
+  }, [canvasMenu]);
+
+  const fitPage = useCallback(() => {
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+    const width = Math.max(240, workspace.clientWidth - 96);
+    const height = Math.max(240, workspace.clientHeight - 120);
+    setZoom(Math.max(0.1, Math.min(1, width / canvasW, height / canvasH)));
+  }, [canvasH, canvasW]);
+
+  const fitSelection = useCallback(() => {
+    const workspace = workspaceRef.current;
+    if (!workspace || !selectedIds.size) return;
+    const selectedGroups = new Set(elements.filter((item) => selectedIds.has(item.id) && item.type === "layer-group").map((item) => item.id));
+    const selectedNodes = elements.filter((item) => item.type !== "layer-group" && (selectedIds.has(item.id) || Boolean(item.groupId && selectedGroups.has(item.groupId))));
+    if (!selectedNodes.length) return;
+    const left = Math.min(...selectedNodes.map((item) => item.x));
+    const top = Math.min(...selectedNodes.map((item) => item.y));
+    const right = Math.max(...selectedNodes.map((item) => item.x + item.w));
+    const bottom = Math.max(...selectedNodes.map((item) => item.y + item.h));
+    const availableWidth = Math.max(160, workspace.clientWidth - 144);
+    const availableHeight = Math.max(160, workspace.clientHeight - 176);
+    const nextZoom = Math.max(0.1, Math.min(2, availableWidth / Math.max(1, right - left), availableHeight / Math.max(1, bottom - top)));
+    setZoom(nextZoom);
+    requestAnimationFrame(() => {
+      const node = canvasRef.current?.querySelector<HTMLElement>(`[data-element-id="${selectedNodes[0].id}"]`);
+      node?.scrollIntoView({ block: "center", inline: "center" });
+    });
+  }, [elements, selectedIds]);
+
+  useEffect(() => {
+    if (!template) return;
+    const frame = requestAnimationFrame(fitPage);
+    const observer = new ResizeObserver(fitPage);
+    if (workspaceRef.current) observer.observe(workspaceRef.current);
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); };
+  }, [fitPage, template?.id]);
 
   useEffect(() => {
     if (!authLoading && user === null) {
@@ -833,7 +1166,7 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
           <Button
             variant="ghost"
             icon={<ArrowLeft weight="bold" size={16} />}
-            onClick={() => router.push("/builder/templates")}
+            onClick={() => { if (dirty) setLeaveOpen(true); else router.push("/builder/templates"); }}
           >
             Templates
           </Button>
@@ -933,14 +1266,16 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                 variant="secondary"
                 size="sm"
                 icon={<FloppyDisk weight="bold" size={16} />}
-                onClick={() => save()}
+                disabled={publishing}
+                onClick={() => saveDraft().catch((err) => setError(err instanceof Error ? err.message : "Template save failed."))}
               >
                 Save draft
               </Button>
               <Button
                 variant="primary"
                 size="sm"
-                onClick={() => save("active")}
+                loading={publishing}
+                onClick={publishTemplate}
               >
                 Publish
               </Button>
@@ -955,15 +1290,150 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
         </div>
       ) : null}
 
+      <Dialog open={leaveOpen} onOpenChange={setLeaveOpen} title="Unsaved template changes" description="Save this draft before leaving, discard the working changes, or keep editing.">
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="secondary" onClick={() => setLeaveOpen(false)}>Keep editing</Button>
+          <Button variant="danger" onClick={() => router.push("/builder/templates")}>Discard and leave</Button>
+          <Button loading={savingAndLeaving} onClick={async () => { setSavingAndLeaving(true); try { await saveDraft(false); router.push("/builder/templates"); } catch (reason) { setError(reason instanceof Error ? reason.message : "Template save failed."); setSavingAndLeaving(false); setLeaveOpen(false); } }}>Save and leave</Button>
+        </div>
+      </Dialog>
+
+      {canvasMenu ? (
+        <div
+          role="menu"
+          aria-label="Canvas layer actions"
+          className="fixed z-[120] min-w-48 border border-[var(--rl-border)] bg-white py-1 shadow-lift"
+          style={{ left: Math.min(canvasMenu.x, window.innerWidth - 210), top: Math.min(canvasMenu.y, window.innerHeight - 360) }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          {([
+            ["duplicate", "Duplicate"], ["delete", "Delete"], ["group", "Group selection"], ["ungroup", "Ungroup"],
+            ["lock", elements.find((item) => item.id === canvasMenu.id)?.locked ? "Unlock" : "Lock"],
+            ["visibility", elements.find((item) => item.id === canvasMenu.id)?.visible === false ? "Show" : "Hide"],
+            ["forward", "Bring forward"], ["backward", "Send backward"], ["front", "Bring to front"], ["back", "Send to back"],
+          ] as Array<[LayerAction, string]>).map(([action, label]) => {
+            const target = elements.find((item) => item.id === canvasMenu.id);
+            const disabled = readOnly || (action === "group" && selection.filter((item) => item.type !== "layer-group").length < 2) || (action === "ungroup" && target?.type !== "layer-group") || (action === "duplicate" && target?.type === "benefit-grid");
+            return <button key={action} role="menuitem" type="button" disabled={disabled} className={`block w-full px-3 py-2 text-left text-[12px] font-medium hover:bg-[var(--rl-bg)] disabled:opacity-35 ${action === "delete" ? "text-[var(--rl-red)]" : "text-[var(--rl-text-strong)]"}`} onClick={() => { layerAction(action, canvasMenu.id); setCanvasMenu(null); }}>{label}</button>;
+          })}
+        </div>
+      ) : null}
+
+      <div className="grid min-h-0 flex-1 place-items-center px-6 text-center lg:hidden">
+        <div className="max-w-md border border-[var(--rl-border)] bg-[var(--rl-surface)] p-6 shadow-sm">
+          <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">Canvas editing needs a wider screen</h2>
+          <p className="mt-2 text-sm leading-6 text-[var(--rl-text-muted)]">Open Template Builder at 1024 px or wider. Tablet review and the rest of the quotation workflow remain available from 768 px.</p>
+          <Button className="mt-4" variant="secondary" onClick={() => router.push("/builder/templates")}>Back to templates</Button>
+        </div>
+      </div>
+
       <div
-        className="grid min-h-0 flex-1"
+        className="hidden min-h-0 flex-1 lg:grid"
         style={{
           gridTemplateColumns: `${showLeft && !previewMode ? leftWidth : 0}px 6px minmax(0,1fr) 6px ${showRight && !previewMode ? rightWidth : 0}px`,
           transition: "grid-template-columns 160ms ease",
         }}
       >
         {!previewMode && showLeft ? (
-          <aside className="min-h-0 overflow-y-auto border-r border-[var(--rl-border)] bg-[var(--rl-surface)] p-4">
+          <aside className="min-h-0 overflow-y-auto border-r border-[var(--rl-border)] bg-[var(--rl-surface)]">
+            <div className="h-[44vh] min-h-52 overflow-hidden border-b border-[var(--rl-border)]">
+              <LayersPanel
+                elements={elements}
+                selectedIds={selectedIds}
+                readOnly={readOnly}
+                onSelect={(layerId, additive) => additive ? toggleSelect(layerId) : selectOnly(layerId)}
+                onRename={(layerId, name) => updateElement(layerId, { name, groupName: name })}
+                onToggleLock={toggleLock}
+                onToggleVisibility={toggleVisibility}
+                onNest={nestLayer}
+                onReorder={reorderLayer}
+                onAction={layerAction}
+              />
+            </div>
+            <div className="p-4">
+            <PanelSection title="Fixed page">
+              <div className="grid gap-3">
+                <label className="grid gap-1 text-xs font-bold uppercase text-[var(--rl-text-muted)]">
+                  Page profile
+                  <Select
+                    value={config?.page_profile?.profile_key || "custom"}
+                    disabled={readOnly}
+                    onChange={(event) => {
+                      const profile = pageProfiles.find((item) => item.profile_key === event.target.value);
+                      if (profile) updatePageGeometry(profile);
+                    }}
+                  >
+                    {pageProfiles.map((profile) => (
+                      <option key={profile.profile_key} value={profile.profile_key}>{profile.name} · {profile.width} × {profile.height}</option>
+                    ))}
+                    {!pageProfiles.some((profile) => profile.profile_key === config?.page_profile?.profile_key) ? (
+                      <option value="custom">Custom fixed page</option>
+                    ) : null}
+                  </Select>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="grid gap-1 text-xs font-bold uppercase text-[var(--rl-text-muted)]">
+                    Width (px)
+                    <Input
+                      type="number"
+                      min={320}
+                      max={2400}
+                      value={canvasW}
+                      disabled={readOnly}
+                      onChange={(event) => updatePageGeometry({
+                        ...(config?.page_profile || { profile_key: "custom", name: "Custom fixed page", unit: "px", safe_margins: {} }),
+                        profile_key: "custom",
+                        name: "Custom fixed page",
+                        width: Number(event.target.value) || canvasW,
+                        height: canvasH,
+                        unit: "px",
+                      })}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs font-bold uppercase text-[var(--rl-text-muted)]">
+                    Height (px)
+                    <Input
+                      type="number"
+                      min={320}
+                      max={5000}
+                      value={canvasH}
+                      disabled={readOnly}
+                      onChange={(event) => updatePageGeometry({
+                        ...(config?.page_profile || { profile_key: "custom", name: "Custom fixed page", unit: "px", safe_margins: {} }),
+                        profile_key: "custom",
+                        name: "Custom fixed page",
+                        width: canvasW,
+                        height: Number(event.target.value) || canvasH,
+                        unit: "px",
+                      })}
+                    />
+                  </label>
+                </div>
+                <fieldset className="grid grid-cols-2 gap-2 border-t border-[var(--rl-border)] pt-3">
+                  <legend className="col-span-2 mb-1 text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--rl-text-muted)]">Safe margins (px)</legend>
+                  {(["top", "right", "bottom", "left"] as const).map((side) => (
+                    <label key={side} className="grid gap-1 text-[11px] font-semibold capitalize text-[var(--rl-text-muted)]">
+                      {side}
+                      <Input type="number" min={0} max={Math.floor((side === "top" || side === "bottom" ? canvasH : canvasW) / 2) - 1} value={config?.page_profile?.safe_margins?.[side] || 0} disabled={readOnly} onChange={(event) => updateSafeMargin(side, Number(event.target.value))} />
+                    </label>
+                  ))}
+                </fieldset>
+                <p className="text-[11px] leading-relaxed text-[var(--rl-text-muted)]">The page never extends automatically. A longer quotation is a separate fixed master profile.</p>
+              </div>
+            </PanelSection>
+
+            <PanelSection title="Benefit grids">
+              <div className="grid gap-2">
+                <Button variant="secondary" size="sm" disabled={readOnly} onClick={() => addBenefitGrid("current_benefits")} className="justify-start">
+                  <GridFour weight="bold" size={16} /> Current benefits
+                </Button>
+                <Button variant="secondary" size="sm" disabled={readOnly} onClick={() => addBenefitGrid("available_addons")} className="justify-start">
+                  <GridFour weight="bold" size={16} /> Available add-ons
+                </Button>
+                <p className="text-[11px] leading-relaxed text-[var(--rl-text-muted)]">At most one of each. Every card shrinks uniformly as rows and columns increase.</p>
+              </div>
+            </PanelSection>
+
             <PanelSection title="Elements">
               <div className="grid grid-cols-2 gap-2">
               <Button
@@ -1001,10 +1471,10 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                 size="sm"
                 icon={<Square weight="bold" size={16} />}
                 disabled={readOnly}
-                onClick={() => addElement("group", { w: 180, h: 80 })}
+                onClick={() => addElement("rectangle", { w: 180, h: 80 })}
                 className="justify-start"
               >
-                Box
+                Rectangle
               </Button>
               <Button
                 variant="secondary"
@@ -1021,17 +1491,17 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                 size="sm"
                 icon={<Circle weight="bold" size={16} />}
                 disabled={readOnly}
-                onClick={() => addElement("shape", { shapeKind: "circle", w: 100, h: 100, style: { background: "#F6F8FB", borderWidth: 1, borderColor: "#D8DDE6" } })}
+                onClick={() => addElement("ellipse", { w: 100, h: 100, style: { background: "#F6F8FB", borderWidth: 1, borderColor: "#D8DDE6" } })}
                 className="justify-start"
               >
-                Circle
+                Ellipse
               </Button>
               <Button
                 variant="secondary"
                 size="sm"
                 icon={<Triangle weight="bold" size={16} />}
                 disabled={readOnly}
-                onClick={() => addElement("shape", { shapeKind: "triangle", w: 100, h: 90, style: { background: "#F6F8FB" } })}
+                onClick={() => addElement("triangle", { w: 100, h: 90, style: { background: "#F6F8FB" } })}
                 className="justify-start"
               >
                 Triangle
@@ -1041,7 +1511,7 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                 size="sm"
                 icon={<Diamond weight="bold" size={16} />}
                 disabled={readOnly}
-                onClick={() => addElement("shape", { shapeKind: "diamond", w: 100, h: 100, style: { background: "#F6F8FB", borderWidth: 1, borderColor: "#D8DDE6" } })}
+                onClick={() => addElement("diamond", { w: 100, h: 100, style: { background: "#F6F8FB", borderWidth: 1, borderColor: "#D8DDE6" } })}
                 className="justify-start"
               >
                 Diamond
@@ -1092,34 +1562,10 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
 
             <PanelSection title="Assets">
               <div className="grid gap-2">
-              <div className="grid gap-1.5">
-                <label className="text-xs font-semibold text-[var(--rl-text-muted)]">Upload to folder</label>
-                <Input
-                  className="text-sm"
-                  value={assetFolder}
-                  disabled={readOnly}
-                  list="asset-folders"
-                  placeholder="Uncategorized"
-                  onChange={(e) => setAssetFolder(e.target.value)}
-                />
-                <datalist id="asset-folders">
-                  {[...new Set(assets.map((a) => a.folder || "Uncategorized"))].sort().map((folder) => (
-                    <option key={folder} value={folder} />
-                  ))}
-                </datalist>
-                <p className="text-[11px] text-[var(--rl-text-muted)]">Leave empty or pick an existing folder; a new folder name is created on upload.</p>
+              <div className="flex items-center justify-between border-b border-[var(--rl-border)] pb-2">
+                <p className="text-[11px] leading-4 text-[var(--rl-text-muted)]">Choose from approved active assets. Uploading and metadata changes belong in Asset Library.</p>
+                <Link className="shrink-0 text-[11px] font-bold text-[var(--rl-red)] underline-offset-2 hover:underline" href="/builder/assets">Manage assets</Link>
               </div>
-              <input ref={fileInputRef} className="sr-only" type="file" accept=".png,.jpg,.jpeg,.svg" onChange={(event) => event.target.files?.[0] && uploadAsset(event.target.files[0])} />
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={<UploadSimple weight="bold" size={16} />}
-                disabled={readOnly || uploading}
-                onClick={() => fileInputRef.current?.click()}
-                className="justify-start"
-              >
-                {uploading ? "Uploading" : "Upload asset"}
-              </Button>
               <div className="grid max-h-64 gap-2 overflow-auto">
                 {Object.entries(
                   assets.reduce<Record<string, AssetRecord[]>>((groups, asset) => {
@@ -1148,65 +1594,25 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
               </div>
             </PanelSection>
 
-            <PanelSection title="Our Specials">
-              <div className="grid gap-2">
-              <Input
-                className="text-sm"
-                placeholder="Search variants..."
-                value={specialSearch}
-                disabled={readOnly}
-                onChange={(e) => setSpecialSearch(e.target.value)}
-              />
-              <div className="grid max-h-72 gap-2 overflow-auto">
-                {specials.flatMap((sp) => {
-                  const filtered = specialSearch
-                    ? sp.variants.filter((v) =>
-                        v.label.toLowerCase().includes(specialSearch.toLowerCase()) ||
-                        sp.label.toLowerCase().includes(specialSearch.toLowerCase()))
-                    : sp.variants;
-                  if (!filtered.length) return [];
-                  return (
-                    <div key={sp.id} className="grid gap-1">
-                      <div className="text-[10px] font-bold uppercase text-[var(--rl-text-muted)]">{sp.label} ({sp.category})</div>
-                      {filtered.map((v) => (
-                        <div
-                          key={v.id}
-                          className="grid cursor-grab grid-cols-[36px_1fr] items-center gap-2 rounded border border-[var(--rl-border)] bg-[var(--rl-surface)] p-1.5 text-left text-xs hover:bg-[var(--rl-bg)] active:cursor-grabbing"
-                          draggable={!readOnly}
-                          onDragStart={(e) => {
-                            e.dataTransfer.setData("application/variant", JSON.stringify(v));
-                            e.dataTransfer.effectAllowed = "copy";
-                          }}
-                          onClick={(e) => { e.stopPropagation(); if (!readOnly) addSpecialElement(v); }}
-                        >
-                          {v.icon_asset_id ? (
-                            <img className="h-8 w-8 object-contain" src={fileUrl(`/template-assets/${v.icon_asset_id}`)} alt="" />
-                          ) : (
-                            <div className="flex h-8 w-8 items-center justify-center rounded border border-[var(--rl-border)] bg-[var(--rl-bg)] text-[9px] text-[var(--rl-text-muted)]">IC</div>
-                          )}
-                          <div className="grid gap-0.5 leading-tight">
-                            <span className="font-bold">{v.label}</span>
-                            {v.value_text ? <span className="text-[10px] text-[var(--rl-text-muted)]">{v.value_text}</span> : null}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })}
-                {!specials.length ? <p className="text-xs text-[var(--rl-text-muted)]">No specials yet. Create them in Our Specials.</p> : null}
-              </div>
-              </div>
-            </PanelSection>
+            </div>
           </aside>
         ) : <div />}
 
         <div
+          role="separator"
+          aria-label="Resize layers and tools panel"
+          aria-orientation="vertical"
+          aria-valuemin={200}
+          aria-valuemax={520}
+          aria-valuenow={leftWidth}
+          tabIndex={0}
           className="z-10 cursor-col-resize border-x border-[var(--rl-border)] bg-[var(--rl-bg)] transition-colors hover:bg-[var(--rl-border)]"
           onPointerDown={startPanelResize("left")}
+          onKeyDown={(event) => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); setLeftWidth((value) => Math.max(200, Math.min(520, value + (event.key === "ArrowRight" ? 16 : -16)))); } }}
           title="Drag to resize the left panel"
         />
 
-        <section className="flex overflow-auto p-6">
+        <section ref={workspaceRef} className="flex min-h-0 flex-col overflow-auto p-4">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-sm font-bold text-[var(--rl-text-strong)]">Canvas</span>
@@ -1235,31 +1641,17 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                 </div>
               ) : null}
             </div>
-            <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2 text-sm font-bold">
-                Zoom
-                <input className="w-32" type="range" min="0.25" max="2" step="0.05" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} />
-              </label>
-              {rulerGuides.x.length + rulerGuides.y.length > 0 ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setRulerGuides({ x: [], y: [] })}
-                  title="Remove all guides"
-                >
-                  Clear guides ({rulerGuides.x.length + rulerGuides.y.length})
-                </Button>
-              ) : null}
-            </div>
           </div>
           <div className="m-auto w-fit flex-shrink-0 rounded-md bg-neutral-300 p-6 shadow-inner" style={{ minHeight: ((canvasH) * zoom) + 60 }}>
             <div className="relative" style={{ width: (canvasW) * zoom, height: (canvasH) * zoom }}>
               {!previewMode ? (
                 <>
-                  <div className="absolute -top-6 left-0 h-5 w-full select-none overflow-hidden border-b border-[var(--rl-border)] bg-[var(--rl-surface)]"
+                  <div data-testid="horizontal-ruler" className="absolute -top-6 left-0 h-5 w-full select-none overflow-hidden border-b border-[var(--rl-border)] bg-[var(--rl-surface)]"
                     onPointerDown={(event) => startRulerDrag(event, "x")}
                     onPointerMove={(event) => moveRulerDrag(event)}
                     onPointerUp={endRulerDrag}
+                    onPointerCancel={endRulerDrag}
+                    onLostPointerCapture={endRulerDrag}
                     onContextMenu={(event) => {
                       event.preventDefault();
                       const rect = canvasRef.current?.getBoundingClientRect();
@@ -1281,10 +1673,12 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                       <span className="absolute top-0 h-full w-px bg-[var(--rl-red)]" style={{ left: rulerDrag.pos * zoom }} />
                     ) : null}
                   </div>
-                  <div className="absolute -left-6 top-0 w-5 select-none overflow-hidden border-r border-[var(--rl-border)] bg-[var(--rl-surface)]"
+                  <div data-testid="vertical-ruler" className="absolute -left-6 top-0 w-5 select-none overflow-hidden border-r border-[var(--rl-border)] bg-[var(--rl-surface)]"
                     onPointerDown={(event) => startRulerDrag(event, "y")}
                     onPointerMove={(event) => moveRulerDrag(event)}
                     onPointerUp={endRulerDrag}
+                    onPointerCancel={endRulerDrag}
+                    onLostPointerCapture={endRulerDrag}
                     onContextMenu={(event) => {
                       event.preventDefault();
                       const rect = canvasRef.current?.getBoundingClientRect();
@@ -1311,35 +1705,75 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
               ) : null}
               <div
                 ref={canvasRef}
+                data-testid="template-canvas"
                 className="relative origin-top-left overflow-hidden bg-white shadow-xl"
                 style={{ width: canvasW, height: canvasH, transform: `scale(${zoom})` }}
                 onPointerDown={canvasPointerDown}
                 onPointerMove={(event) => { pointerMove(event); canvasPointerMove(event); }}
                 onPointerUp={(event) => { pointerUp(); canvasPointerUp(); }}
-                onPointerLeave={pointerUp}
-                onDragOver={handleCanvasDragOver}
-                onDrop={handleCanvasDrop}
-                onClick={() => { if (suppressClickRef.current) { suppressClickRef.current = false; return; } clearSelection(); setEditingTextId(null); }}
+                onPointerCancel={() => {
+                  pointerUp();
+                  setMarquee(null);
+                  drawRef.current = null;
+                  setDrawPreview(null);
+                }}
+                onLostPointerCapture={pointerUp}
+                onClick={() => { if (suppressClickRef.current) { suppressClickRef.current = false; return; } clearSelection(); setSelectedRulerGuide(null); setEditingTextId(null); }}
               >
                 {showGrid && !previewMode && (
-                  <div className="pointer-events-none absolute inset-0 opacity-10" style={{ backgroundImage: `linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)`, backgroundSize: `${SNAP * zoom}px ${SNAP * zoom}px` }} />
+                  <div className="pointer-events-none absolute inset-0 opacity-10" style={{ backgroundImage: `linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)`, backgroundSize: `${SNAP}px ${SNAP}px` }} />
                 )}
-                {guides.map((guide, index) => (
-                  guide.x > 0 ? (
-                    <div key={`v${index}`} className="pointer-events-none absolute top-0 bottom-0 border-l border-dashed" style={{ left: guide.x, zIndex: 9999, borderColor: "var(--rl-red)" }} />
-                  ) : (
-                    <div key={`h${index}`} className="pointer-events-none absolute left-0 right-0 border-t border-dashed" style={{ top: guide.y, zIndex: 9999, borderColor: "var(--rl-red)" }} />
-                  )
-                ))}
+                {!previewMode && config?.page_profile?.safe_margins ? (
+                  <div
+                    className="pointer-events-none absolute z-[9996] border border-dashed border-[var(--rl-red)]/60"
+                    style={{
+                      top: config.page_profile.safe_margins.top || 0,
+                      right: config.page_profile.safe_margins.right || 0,
+                      bottom: config.page_profile.safe_margins.bottom || 0,
+                      left: config.page_profile.safe_margins.left || 0,
+                    }}
+                    aria-hidden="true"
+                  />
+                ) : null}
+                <div ref={snapGuideXRef} className="pointer-events-none absolute bottom-0 top-0 hidden border-l border-dashed border-[var(--rl-red)]" style={{ zIndex: 9999 }} />
+                <div ref={snapGuideYRef} className="pointer-events-none absolute left-0 right-0 hidden border-t border-dashed border-[var(--rl-red)]" style={{ zIndex: 9999 }} />
                 {!previewMode && rulerGuides.x.map((x) => (
-                  <div key={`gx${x}`} className="pointer-events-none absolute top-0 bottom-0 border-l border-dashed" style={{ left: x, zIndex: 9998, borderColor: "#3b82f6" }} />
+                  <button
+                    key={`gx${x}`}
+                    type="button"
+                    aria-label={`Vertical guide at ${x} pixels`}
+                    className="absolute -ml-[3px] w-[7px] cursor-col-resize border-0 bg-transparent p-0 before:absolute before:bottom-0 before:left-[3px] before:top-0 before:border-l before:border-dashed before:border-[var(--rl-red)]"
+                    style={{ left: x, top: 0, bottom: 0, zIndex: 9998, opacity: selectedRulerGuide?.axis === "x" && selectedRulerGuide.pos === x ? 1 : 0.65 }}
+                    onPointerDown={(event) => startExistingGuide(event, "x", x)}
+                    onPointerMove={moveRulerDrag}
+                    onPointerUp={endRulerDrag}
+                    onPointerCancel={endRulerDrag}
+                    onLostPointerCapture={endRulerDrag}
+                    onClick={(event) => { event.stopPropagation(); setSelectedRulerGuide({ axis: "x", pos: x }); event.currentTarget.focus(); }}
+                    onKeyDown={(event) => { if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); event.stopPropagation(); removeRulerGuide("x", x); } }}
+                    onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); removeRulerGuide("x", x); }}
+                  />
                 ))}
                 {!previewMode && rulerGuides.y.map((y) => (
-                  <div key={`gy${y}`} className="pointer-events-none absolute left-0 right-0 border-t border-dashed" style={{ top: y, zIndex: 9998, borderColor: "#3b82f6" }} />
+                  <button
+                    key={`gy${y}`}
+                    type="button"
+                    aria-label={`Horizontal guide at ${y} pixels`}
+                    className="absolute -mt-[3px] h-[7px] cursor-row-resize border-0 bg-transparent p-0 before:absolute before:left-0 before:right-0 before:top-[3px] before:border-t before:border-dashed before:border-[var(--rl-red)]"
+                    style={{ top: y, left: 0, right: 0, zIndex: 9998, opacity: selectedRulerGuide?.axis === "y" && selectedRulerGuide.pos === y ? 1 : 0.65 }}
+                    onPointerDown={(event) => startExistingGuide(event, "y", y)}
+                    onPointerMove={moveRulerDrag}
+                    onPointerUp={endRulerDrag}
+                    onPointerCancel={endRulerDrag}
+                    onLostPointerCapture={endRulerDrag}
+                    onClick={(event) => { event.stopPropagation(); setSelectedRulerGuide({ axis: "y", pos: y }); event.currentTarget.focus(); }}
+                    onKeyDown={(event) => { if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); event.stopPropagation(); removeRulerGuide("y", y); } }}
+                    onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); removeRulerGuide("y", y); }}
+                  />
                 ))}
                 {marquee ? (
                   <div
-                    className="pointer-events-none absolute border border-[#3b82f6] bg-[#3b82f6]/10"
+                    className="pointer-events-none absolute border border-[var(--rl-red)] bg-[var(--rl-red-light)]/40"
                     style={{
                       left: Math.min(marquee.startX, marquee.curX),
                       top: Math.min(marquee.startY, marquee.curY),
@@ -1352,15 +1786,15 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                 {drawPreview ? (
                   <>
                     <div
-                      className="pointer-events-none absolute bg-[#3b82f6]"
+                      className="pointer-events-none absolute bg-[var(--rl-red)]"
                       style={{ left: drawPreview.x, top: drawPreview.y, width: drawPreview.w, height: drawPreview.h, zIndex: 9997 }}
                     />
                     <div
-                      className="pointer-events-none absolute h-2 w-2 rounded-full border-2 border-[#3b82f6] bg-white"
+                      className="pointer-events-none absolute h-2 w-2 rounded-full border-2 border-[var(--rl-red)] bg-white"
                       style={{ left: drawPreview.x - 4, top: drawPreview.y + drawPreview.h / 2 - 4, zIndex: 9997 }}
                     />
                     <div
-                      className="pointer-events-none absolute h-2 w-2 rounded-full border-2 border-[#3b82f6] bg-white"
+                      className="pointer-events-none absolute h-2 w-2 rounded-full border-2 border-[var(--rl-red)] bg-white"
                       style={{ left: drawPreview.x + drawPreview.w - 4, top: drawPreview.y + drawPreview.h / 2 - 4, zIndex: 9997 }}
                     />
                   </>
@@ -1372,9 +1806,17 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                     selected={!previewMode && selectedIds.has(element.id)}
                     assets={assets}
                     config={config}
+                    scenarioCount={scenarioCount}
                     readOnly={readOnly}
                     onPointerDown={(event) => pointerDown(event, element, "move")}
                     onResizePointerDown={(event, handle) => pointerDown(event, element, "resize", handle)}
+                    onContextMenu={(event) => {
+                      if (readOnly) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (!selectedIds.has(element.id)) selectOnly(element.id);
+                      setCanvasMenu({ id: element.id, x: event.clientX, y: event.clientY });
+                    }}
                     onDoubleClick={(event) => {
                       if (element.type !== "text" || readOnly) return;
                       event.stopPropagation();
@@ -1391,234 +1833,49 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
               </div>
             </div>
           </div>
+          <footer className="mt-3 flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--rl-border)] bg-[var(--rl-surface)] px-3 py-2" aria-label="Canvas view controls">
+            <label className="flex items-center gap-2 text-[12px] font-bold">
+              Scenario
+              <Select className="w-24" value={String(scenarioCount)} onChange={(event) => setScenarioCount(Number(event.target.value))}>
+                <option value="0">Empty</option><option value="1">1</option><option value="6">6</option><option value="12">12</option><option value="15">15</option><option value="20">20</option>
+              </Select>
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              {rulerGuides.x.length + rulerGuides.y.length > 0 ? <Button variant="ghost" size="sm" onClick={() => { setRulerGuides({ x: [], y: [] }); setSelectedRulerGuide(null); }}>Clear guides ({rulerGuides.x.length + rulerGuides.y.length})</Button> : <span className="text-[11px] text-[var(--rl-text-muted)]">Drag from a ruler to add a guide</span>}
+              <label className="flex items-center gap-2 text-[12px] font-bold">Zoom <input aria-label="Canvas zoom" className="w-28 accent-[var(--rl-red)]" type="range" min="0.1" max="2" step="0.05" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /></label>
+              <output className="w-11 text-right text-[12px] tabular-nums">{Math.round(zoom * 100)}%</output>
+              <Button variant="ghost" size="sm" onClick={() => setZoom(Math.max(0.1, zoom - 0.1))} aria-label="Zoom out">−</Button>
+              <Button variant="ghost" size="sm" onClick={() => setZoom(Math.min(2, zoom + 0.1))} aria-label="Zoom in">+</Button>
+              <Button variant="ghost" size="sm" onClick={() => setZoom(1)}>100%</Button>
+              <Button variant="ghost" size="sm" onClick={fitPage}>Fit page</Button>
+              <Button variant="ghost" size="sm" disabled={!selectedIds.size} onClick={fitSelection}>Fit selection</Button>
+            </div>
+          </footer>
         </section>
 
         <div
+          role="separator"
+          aria-label="Resize properties panel"
+          aria-orientation="vertical"
+          aria-valuemin={200}
+          aria-valuemax={520}
+          aria-valuenow={rightWidth}
+          tabIndex={0}
           className="z-10 cursor-col-resize border-x border-[var(--rl-border)] bg-[var(--rl-bg)] transition-colors hover:bg-[var(--rl-border)]"
           onPointerDown={startPanelResize("right")}
+          onKeyDown={(event) => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); setRightWidth((value) => Math.max(200, Math.min(520, value + (event.key === "ArrowLeft" ? 16 : -16)))); } }}
           title="Drag to resize the inspector panel"
         />
 
         {!previewMode && showRight ? (
           <aside className="flex min-h-0 flex-col overflow-hidden border-l border-[var(--rl-border)] bg-[var(--rl-surface)]">
-            <div className="flex shrink-0 gap-1 border-b border-[var(--rl-border)] p-2">
-              <button
-                type="button"
-                onClick={() => setRightTab("layers")}
-                className={`flex-1 rounded-[var(--rl-radius-sm)] px-3 py-2 text-[13px] font-bold transition-all ${rightTab === "layers" ? "bg-[var(--rl-black)] text-white" : "text-[var(--rl-text-muted)] hover:bg-[var(--rl-bg)]"}`}
-              >
-                Layers
-              </button>
-              <button
-                type="button"
-                onClick={() => setRightTab("properties")}
-                className={`flex-1 rounded-[var(--rl-radius-sm)] px-3 py-2 text-[13px] font-bold transition-all ${rightTab === "properties" ? "bg-[var(--rl-black)] text-white" : "text-[var(--rl-text-muted)] hover:bg-[var(--rl-bg)]"}`}
-              >
-                Properties
-              </button>
+            <div className="shrink-0 border-b border-[var(--rl-border)] px-4 py-3">
+              <h2 className="m-0 text-[12px] font-bold uppercase tracking-[0.12em] text-[var(--rl-text-muted)]">Properties</h2>
             </div>
 
-            {rightTab === "layers" ? (
-              <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                <h2 className="font-bold text-[var(--rl-text-strong)]">Layers</h2>
-                <p className="mt-1 text-[12px] text-[var(--rl-text-muted)]">
-                  Top of the list sits on top of the canvas. Tick boxes or Shift-click to multi-select; drag a row onto a group folder to organise.
-                </p>
-                <div className="mt-3 grid gap-1">
-                  {elements.length === 0 ? (
-                    <p className="text-xs text-[var(--rl-text-muted)]">No elements yet. Add one from the left sidebar.</p>
-                  ) : (
-                    <>
-                      {selection.length > 1 ? (
-                        <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded border border-[#3b82f6] bg-[#eff6ff] p-1.5">
-                          <span className="px-1 text-[11px] font-bold text-[#3b82f6]">{selection.length} selected</span>
-                          <button type="button" className="rounded bg-[#3b82f6] px-2 py-0.5 text-[11px] font-bold text-white disabled:opacity-40" disabled={readOnly} onClick={groupSelection}>Group</button>
-                          <button type="button" className="rounded border border-[var(--rl-border)] bg-white px-2 py-0.5 text-[11px] font-bold" disabled={readOnly} onClick={duplicateSelection}>Duplicate</button>
-                          <button type="button" className="rounded border border-[var(--rl-red)] bg-white px-2 py-0.5 text-[11px] font-bold text-[var(--rl-red)]" disabled={readOnly} onClick={deleteSelection}>Delete</button>
-                        </div>
-                      ) : null}
-                      {selection.some((e) => e.type === "group") ? (
-                        <button type="button" className="mb-1 w-full rounded border border-[var(--rl-border)] bg-[var(--rl-surface)] px-2 py-1 text-[11px] font-bold text-[var(--rl-text-strong)] hover:bg-[var(--rl-bg)] disabled:opacity-40" disabled={readOnly} onClick={ungroup}>
-                          Ungroup selected
-                        </button>
-                      ) : null}
-                      {(() => {
-                        const groups = elements.filter((e) => e.type === "group").sort((a, b) => (b.z || 1) - (a.z || 1));
-                        const members = (gid: string) => elements.filter((e) => e.groupId === gid && e.type !== "group").sort((a, b) => (b.z || 1) - (a.z || 1));
-                        const ungrouped = elements.filter((e) => !e.groupId && e.type !== "group").sort((a, b) => (b.z || 1) - (a.z || 1));
-                        const rowClass = (id: string) => `flex items-center gap-1 rounded border px-1.5 py-1 text-xs transition-colors ${selectedIds.has(id) ? "border-[#3b82f6] bg-[#eff6ff]" : "border-[var(--rl-border)] bg-[var(--rl-surface)] hover:bg-[var(--rl-bg)]"}`;
-                        const typeIcon = (el: CanvasElement) => {
-                          switch (el.type) {
-                            case "group": return <FolderSimple size={13} weight="bold" className="shrink-0 text-[var(--rl-text-muted)]" />;
-                            case "text": return <TextT size={13} weight="bold" className="shrink-0 text-[var(--rl-text-muted)]" />;
-                            case "variable": return <BracketsCurly size={13} weight="bold" className="shrink-0 text-[var(--rl-red)]" />;
-                            case "image": return <Image size={13} weight="bold" className="shrink-0 text-[var(--rl-text-muted)]" />;
-                            case "line": return <LineSegment size={13} weight="bold" className="shrink-0 text-[var(--rl-text-muted)]" />;
-                            case "special": return <Star size={13} weight="bold" className="shrink-0 text-[var(--rl-text-muted)]" />;
-                            default: return <Square size={13} weight="bold" className="shrink-0 text-[var(--rl-text-muted)]" />;
-                          }
-                        };
-                        const dragProps = (el: CanvasElement) => ({
-                          draggable: !readOnly,
-                          onDragStart: (event: React.DragEvent) => {
-                            event.dataTransfer.setData("application/risklocker-layer", el.id);
-                            event.dataTransfer.effectAllowed = "move";
-                          },
-                        });
-                        const dropProps = (groupId: string | null) => ({
-                          onDragOver: (event: React.DragEvent) => event.preventDefault(),
-                          onDragEnter: () => setDragOverGroup(groupId),
-                          onDragLeave: () => setDragOverGroup((current) => (current === groupId ? null : current)),
-                          onDrop: (event: React.DragEvent) => {
-                            event.preventDefault();
-                            setDragOverGroup(null);
-                            const id = event.dataTransfer.getData("application/risklocker-layer");
-                            if (id) assignToGroup(id, groupId);
-                          },
-                        });
-                        const checkbox = (el: CanvasElement) => (
-                          <input
-                            type="checkbox"
-                            aria-label={`Select ${layerLabel(el)}`}
-                            className="h-3.5 w-3.5 shrink-0 accent-[var(--rl-red)]"
-                            checked={selectedIds.has(el.id)}
-                            onChange={() => toggleSelect(el.id)}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        );
-                        const labelButton = (el: CanvasElement, indent: boolean) => (
-                          <button
-                            type="button"
-                            className={`flex min-w-0 flex-1 items-center gap-1.5 truncate text-left font-medium text-[var(--rl-text-strong)] ${indent ? "pl-2" : ""}`}
-                            onClick={(e) => { if (e.shiftKey) toggleSelect(el.id); else selectOnly(el.id); }}
-                            title={layerLabel(el)}
-                          >
-                            {typeIcon(el)}
-                            <span className="shrink-0 text-[10px] text-[var(--rl-text-muted)]">z{el.z || 1}</span>
-                            <span className="truncate">{layerLabel(el)}</span>
-                          </button>
-                        );
-                        const zButtons = (el: CanvasElement) => (
-                          <>
-                            <button
-                              type="button"
-                              className="rounded p-0.5 text-[var(--rl-text-muted)] hover:bg-[var(--rl-bg)] hover:text-[var(--rl-text-strong)] disabled:opacity-30"
-                              disabled={readOnly || (el.z || 1) >= Math.max(1, ...elements.map((e) => e.z || 1))}
-                              title="Bring forward"
-                              onClick={() => { selectOnly(el.id); bringForward(); }}
-                            >
-                              <CaretUp size={13} weight="bold" />
-                            </button>
-                            <button
-                              type="button"
-                              className="rounded p-0.5 text-[var(--rl-text-muted)] hover:bg-[var(--rl-bg)] hover:text-[var(--rl-text-strong)] disabled:opacity-30"
-                              disabled={readOnly || (el.z || 1) <= 1}
-                              title="Send backward"
-                              onClick={() => { selectOnly(el.id); sendBackward(); }}
-                            >
-                              <CaretDown size={13} weight="bold" />
-                            </button>
-                          </>
-                        );
-                        const lockButton = (el: CanvasElement) => (
-                          <button
-                            type="button"
-                            className={`rounded p-0.5 ${el.locked ? "text-[var(--rl-red)]" : "text-[var(--rl-text-muted)]"} hover:bg-[var(--rl-bg)]`}
-                            disabled={readOnly}
-                            title={el.locked ? "Unlock layer" : "Lock layer (cannot be selected, moved or deleted)"}
-                            onClick={(e) => { e.stopPropagation(); toggleLock(el.id); }}
-                          >
-                            {el.locked ? <LockSimple size={13} weight="fill" /> : <LockSimpleOpen size={13} weight="bold" />}
-                          </button>
-                        );
-                        return (
-                          <>
-                            {groups.length > 0 ? (
-                              <div className="grid gap-1">
-                                <h3 className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">Groups ({groups.length})</h3>
-                                {groups.map((group) => {
-                                  const kids = members(group.id);
-                                  const open = !collapsedGroups.has(group.id);
-                                  const dropActive = dragOverGroup === group.id;
-                                  return (
-                                    <div key={group.id} className="grid gap-1">
-                                      <div
-                                        className={`${rowClass(group.id)} ${dropActive ? "border-[#3b82f6] bg-[#dbeafe]" : ""}`}
-                                        {...dropProps(group.id)}
-                                        {...dragProps(group)}
-                                      >
-                                        <button
-                                          type="button"
-                                          className="rounded p-0.5 text-[var(--rl-text-muted)] hover:bg-[var(--rl-bg)]"
-                                          onClick={() => setCollapsedGroups((prev) => { const n = new Set(prev); if (n.has(group.id)) n.delete(group.id); else n.add(group.id); return n; })}
-                                          title={open ? "Collapse group" : "Expand group"}
-                                        >
-                                          <CaretDown size={13} weight="bold" className={`transition-transform ${open ? "" : "-rotate-90"}`} />
-                                        </button>
-                                        {checkbox(group)}
-                                        {typeIcon(group)}
-                                        <button
-                                          type="button"
-                                          className="min-w-0 flex-1 truncate text-left font-bold text-[var(--rl-text-strong)]"
-                                          onClick={(e) => { if (e.shiftKey) toggleSelect(group.id); else selectOnly(group.id); }}
-                                          title={`${group.groupName || layerLabel(group)} (${kids.length})`}
-                                        >
-                                          <span className="mr-1.5 text-[10px] text-[var(--rl-text-muted)]">z{group.z || 1}</span>
-                                          {group.groupName || layerLabel(group)} ({kids.length})
-                                        </button>
-                                        {zButtons(group)}
-                                        {lockButton(group)}
-                                      </div>
-                                      {open ? (
-                                        <div className={`ml-3 border-l border-[var(--rl-border)] pl-1.5 ${dropActive ? "rounded-r border-[#3b82f6] bg-[#dbeafe]/60" : ""}`} {...dropProps(group.id)}>
-                                          {kids.map((kid) => (
-                                            <div key={kid.id} className={`${rowClass(kid.id)} mb-1`} {...(!kid.locked ? dragProps(kid) : {})}>
-                                              {checkbox(kid)}
-                                              {labelButton(kid, true)}
-                                              {zButtons(kid)}
-                                              {lockButton(kid)}
-                                            </div>
-                                          ))}
-                                          {kids.length === 0 ? (
-                                            <p className="px-1 py-1 text-[11px] italic text-[var(--rl-text-muted)]">Empty — drag elements here to add them to this group.</p>
-                                          ) : null}
-                                        </div>
-                                      ) : null}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            ) : null}
-                            {ungrouped.length > 0 ? (
-                              <div className="grid gap-1">
-                                <h3
-                                  className={`text-[11px] font-bold uppercase tracking-wider ${dragOverGroup === null ? "text-[var(--rl-red)]" : "text-[var(--rl-text-muted)]"}`}
-                                  {...dropProps(null)}
-                                >
-                                  Ungrouped ({ungrouped.length})
-                                </h3>
-                                {ungrouped.map((el) => (
-                                  <div key={el.id} className={rowClass(el.id)} {...(!el.locked ? dragProps(el) : {})}>
-                                    {checkbox(el)}
-                                    {labelButton(el, false)}
-                                    {zButtons(el)}
-                                    {lockButton(el)}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : null}
-                          </>
-                        );
-                      })()}
-                    </>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="min-h-0 flex-1 overflow-y-auto p-4">
-            <h2 className="font-bold text-[var(--rl-text-strong)]">Properties</h2>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
             {selection.length > 1 ? (
-              <p className="mt-1 rounded-[var(--rl-radius-sm)] border border-[#3b82f6] bg-[#eff6ff] px-2 py-1.5 text-[12px] font-semibold text-[#3b82f6]">
+              <p className="mt-1 border-l-2 border-[var(--rl-red)] bg-[var(--rl-red-light)] px-2 py-1.5 text-[12px] font-semibold text-[var(--rl-text-strong)]">
                 Editing 1 of {selection.length} selected — edits apply to the last-clicked element.
               </p>
             ) : null}
@@ -1638,21 +1895,27 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                     </button>
                   </div>
                 ) : null}
-                {selected.type === "group" ? (
+                {selected.type === "layer-group" ? (
                   <label className="grid gap-1 font-bold">
                     Group name
-                    <Input value={selected.groupName || ""} disabled={readOnly} onChange={(event) => updateElement(selected.id, { groupName: event.target.value })} />
+                    <Input value={selected.name || selected.groupName || ""} disabled={readOnly} onChange={(event) => updateElement(selected.id, { name: event.target.value, groupName: event.target.value })} />
                   </label>
                 ) : null}
-                <div className="grid grid-cols-2 gap-2">
-                  {(["x", "y", "w", "h", "z", "opacity"] as const).map((key) => (
+                {selected.type !== "layer-group" ? <div className="grid grid-cols-2 gap-2">
+                  {(["x", "y", "w", "h", "z"] as const).map((key) => (
                     <label key={key} className="grid gap-1 text-xs font-bold uppercase">
                       {key}
                       <Input
                         type="number"
-                        value={key === "opacity" ? (selected.opacity ?? 1) : selected[key] || 0}
+                        min={key === "z" ? 1 : 0}
+                        max={key === "x" ? canvasW - selected.w : key === "y" ? canvasH - selected.h : key === "w" ? canvasW - selected.x : key === "h" ? canvasH - selected.y : undefined}
+                        value={selected[key] || 0}
                         disabled={readOnly || Boolean(selected.locked)}
-                        onChange={(event) => updateElement(selected.id, { [key]: Number(event.target.value) })}
+                        onChange={(event) => {
+                          const raw = Number(event.target.value);
+                          const value = key === "x" ? Math.max(0, Math.min(canvasW - selected.w, raw)) : key === "y" ? Math.max(0, Math.min(canvasH - selected.h, raw)) : key === "w" ? Math.max(1, Math.min(canvasW - selected.x, raw)) : key === "h" ? Math.max(1, Math.min(canvasH - selected.y, raw)) : Math.max(1, raw);
+                          updateElement(selected.id, { [key]: value });
+                        }}
                       />
                     </label>
                   ))}
@@ -1665,7 +1928,8 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                       onChange={(event) => updateStyle(selected.id, { rotation: Number(event.target.value) })}
                     />
                   </label>
-                </div>
+                </div> : null}
+                {selected.type !== "layer-group" ? <RangeControl label="Opacity" value={selected.opacity ?? 1} min={0} max={1} step={0.05} unit="" disabled={readOnly || Boolean(selected.locked)} resetValue={1} onGestureStart={beginPropertyGesture} onGestureEnd={endPropertyGesture} onChange={(value) => updateElement(selected.id, { opacity: value })} /> : null}
                 {selected.type === "shape" ? (
                   <label className="grid gap-1 font-bold">
                     Shape
@@ -1680,6 +1944,94 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                       <option value="diamond">Diamond</option>
                     </Select>
                   </label>
+                ) : null}
+                {selected.type === "benefit-grid" ? (
+                  <EditorShell title="Dynamic benefit grid">
+                    <label className="grid gap-1 font-bold">
+                      Content
+                      <Select value={selected.gridKind || "current_benefits"} disabled>
+                        <option value="current_benefits">Current benefits</option>
+                        <option value="available_addons">Available add-ons</option>
+                      </Select>
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="grid gap-1 text-xs font-bold uppercase">
+                        Packing
+                        <Select
+                          value={selected.packing?.strategy || "balanced"}
+                          disabled={readOnly || Boolean(selected.locked)}
+                          onChange={(event) => updateElement(selected.id, { packing: { ...(selected.packing || {}), strategy: event.target.value as NonNullable<CanvasElement["packing"]>["strategy"] } })}
+                        >
+                          <option value="balanced">Balanced</option>
+                          <option value="square_biased">Square biased</option>
+                          <option value="staggered">Staggered</option>
+                        </Select>
+                      </label>
+                      <label className="grid gap-1 text-xs font-bold uppercase">
+                        Alignment
+                        <Select
+                          value={selected.packing?.alignment || "center"}
+                          disabled={readOnly || Boolean(selected.locked)}
+                          onChange={(event) => updateElement(selected.id, { packing: { ...(selected.packing || {}), alignment: event.target.value as NonNullable<CanvasElement["packing"]>["alignment"] } })}
+                        >
+                          <option value="start">Start</option>
+                          <option value="center">Center</option>
+                          <option value="end">End</option>
+                        </Select>
+                      </label>
+                      <label className="grid gap-1 text-xs font-bold uppercase">
+                        Card style
+                        <Select
+                          value={selected.cardStyle || "standard"}
+                          disabled={readOnly || Boolean(selected.locked)}
+                          onChange={(event) => updateElement(selected.id, { cardStyle: event.target.value as CanvasElement["cardStyle"] })}
+                        >
+                          <option value="standard">Standard</option>
+                          <option value="outlined">Outlined</option>
+                          <option value="soft">Soft</option>
+                          <option value="minimal">Minimal</option>
+                        </Select>
+                      </label>
+                      <label className="grid gap-1 text-xs font-bold uppercase">
+                        Text density
+                        <Select
+                          value={selected.textDensity || "normal"}
+                          disabled={readOnly || Boolean(selected.locked)}
+                          onChange={(event) => updateElement(selected.id, { textDensity: event.target.value as CanvasElement["textDensity"] })}
+                        >
+                          <option value="comfortable">Comfortable</option>
+                          <option value="normal">Normal</option>
+                          <option value="compact">Compact</option>
+                        </Select>
+                      </label>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <NumField label="Aspect" value={selected.packing?.aspectRatio ?? 1.45} disabled={readOnly || Boolean(selected.locked)} onChange={(value) => updateElement(selected.id, { packing: { ...(selected.packing || {}), aspectRatio: Math.max(0.1, value) } })} />
+                      <RangeControl label="Stagger" value={selected.packing?.staggerRatio ?? 0.5} min={0} max={1} step={0.05} unit="" disabled={readOnly || Boolean(selected.locked)} resetValue={0.5} onGestureStart={beginPropertyGesture} onGestureEnd={endPropertyGesture} onChange={(value) => updateElement(selected.id, { packing: { ...(selected.packing || {}), staggerRatio: value } })} />
+                      <RangeControl label="Gap" value={selected.packing?.gapRatio ?? 0.06} min={0} max={0.3} step={0.01} unit="" disabled={readOnly || Boolean(selected.locked)} resetValue={0.06} onGestureStart={beginPropertyGesture} onGestureEnd={endPropertyGesture} onChange={(value) => updateElement(selected.id, { packing: { ...(selected.packing || {}), gapRatio: value } })} />
+                      <RangeControl label="Padding" value={selected.packing?.paddingRatio ?? 0.02} min={0} max={0.2} step={0.01} unit="" disabled={readOnly || Boolean(selected.locked)} resetValue={0.02} onGestureStart={beginPropertyGesture} onGestureEnd={endPropertyGesture} onChange={(value) => updateElement(selected.id, { packing: { ...(selected.packing || {}), paddingRatio: value } })} />
+                      <NumField label="Reference width" value={selected.packing?.referenceWidth ?? 180} disabled={readOnly || Boolean(selected.locked)} onChange={(value) => updateElement(selected.id, { packing: { ...(selected.packing || {}), referenceWidth: Math.max(1, value) } })} />
+                      <NumField label="Reference height" value={selected.packing?.referenceHeight ?? 124} disabled={readOnly || Boolean(selected.locked)} onChange={(value) => updateElement(selected.id, { packing: { ...(selected.packing || {}), referenceHeight: Math.max(1, value) } })} />
+                    </div>
+                    <label className="grid gap-1 font-bold">
+                      Empty state
+                      <Select
+                        value={selected.emptyState || "hide"}
+                        disabled={readOnly || Boolean(selected.locked)}
+                        onChange={(event) => updateElement(selected.id, { emptyState: event.target.value as CanvasElement["emptyState"] })}
+                      >
+                        <option value="hide">Hide grid</option>
+                        <option value="message">Show message</option>
+                      </Select>
+                    </label>
+                    {selected.emptyState === "message" ? (
+                      <label className="grid gap-1 font-bold">
+                        Empty message
+                        <Input value={selected.emptyMessage || ""} disabled={readOnly || Boolean(selected.locked)} onChange={(event) => updateElement(selected.id, { emptyMessage: event.target.value })} />
+                      </label>
+                    ) : null}
+                    <p className="text-[11px] leading-relaxed text-[var(--rl-text-muted)]">Scenario count is editor-only. It is never saved into the published template.</p>
+                  </EditorShell>
                 ) : null}
                 {selected.type === "line" ? (
                   <div className="grid grid-cols-3 gap-2">
@@ -1764,30 +2116,9 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                   </>
                 ) : null}
                 {selected.type === "benefit-section" ? (
-                  <>
-                    <label className="grid gap-1 font-bold">
-                      Section
-                      <Select
-                        value={selected.section || "specials"}
-                        disabled={readOnly}
-                        onChange={(event) => updateElement(selected.id, { section: event.target.value as "specials" | "add_ons" })}
-                      >
-                        <option value="specials">Our Specials</option>
-                        <option value="add_ons">You May Add On</option>
-                      </Select>
-                    </label>
-                    <label className="grid gap-1 font-bold">
-                      Columns
-                      <Input
-                        type="number"
-                        min={1}
-                        max={3}
-                        value={selected.columns || 2}
-                        disabled={readOnly}
-                        onChange={(event) => updateElement(selected.id, { columns: Number(event.target.value) })}
-                      />
-                    </label>
-                  </>
+                  <div className="border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3 text-[12px] leading-5 text-[var(--rl-text-muted)]">
+                    Legacy benefit section retained for historical layout compatibility. Replace it with a Current Benefits or Available Add-ons grid before publication.
+                  </div>
                 ) : null}
                 {selected.type === "benefit-card" ? (
                   <>
@@ -1805,21 +2136,15 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                   </>
                 ) : null}
                 {selected.type === "special" ? (
-                  <div className="grid gap-2 rounded-md border border-[var(--rl-border)] p-3">
-                    <h3 className="font-bold text-[var(--rl-text-strong)]">Our Special variant</h3>
-                    {selected.variant_icon_asset_id ? (
-                      <img className="mx-auto h-12 w-12 object-contain" src={fileUrl(`/template-assets/${selected.variant_icon_asset_id}`)} alt="" />
-                    ) : null}
-                    <p className="text-sm font-bold text-[var(--rl-text-strong)]">{selected.variant_label || "Unnamed"}</p>
-                    {selected.variant_value_text ? <p className="text-xs text-[var(--rl-text-muted)]">{selected.variant_value_text}</p> : null}
-                    {selected.variant_secondary_label ? <p className="text-xs text-[var(--rl-text-muted)]">{selected.variant_secondary_label}</p> : null}
-                    <p className="text-[11px] text-[var(--rl-text-muted)]">Card style (colors, border, shape, shadow) is managed in Our Specials.</p>
+                  <div className="grid gap-2 border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3">
+                    <h3 className="font-bold text-[var(--rl-text-strong)]">Legacy benefit card</h3>
+                    <p className="text-[11px] leading-5 text-[var(--rl-text-muted)]">Read-only compatibility content. Replace it with a dynamic benefit grid before publication.</p>
                   </div>
                 ) : null}
                 {["text", "variable"].includes(selected.type) ? (
                   <TextStyleEditor style={selected.style} readOnly={readOnly || Boolean(selected.locked)} onChange={(patch) => updateStyle(selected.id, patch)} />
                 ) : null}
-                {["group", "shape", "box"].includes(selected.type) ? (
+                {["rectangle", "ellipse", "triangle", "diamond", "group", "shape", "box"].includes(selected.type) ? (
                   <BoxStyleEditor style={selected.style} readOnly={readOnly || Boolean(selected.locked)} onChange={(patch) => updateStyle(selected.id, patch)} />
                 ) : null}
                 {selected.type === "line" ? (
@@ -1844,7 +2169,6 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
               </div>
             ) : <p className="mt-3 text-sm text-[var(--rl-text-muted)]">Select an element on the canvas.</p>}
               </div>
-            )}
           </aside>
         ) : <div />}
       </div>
@@ -1918,6 +2242,22 @@ function NumField({ label, value, disabled, onChange }: { label: string; value: 
       {label}
       <Input type="number" value={value} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} />
     </label>
+  );
+}
+
+function RangeControl({ label, value, min, max, step, unit, disabled, resetValue, onGestureStart, onGestureEnd, onChange }: { label: string; value: number; min: number; max: number; step: number; unit: string; disabled: boolean; resetValue: number; onGestureStart?: () => void; onGestureEnd?: () => void; onChange: (value: number) => void }) {
+  const clamped = Math.max(min, Math.min(max, Number.isFinite(value) ? value : resetValue));
+  return (
+    <fieldset className="col-span-full grid grid-cols-[1fr_84px_auto] items-end gap-2 border border-[var(--rl-border)] p-2">
+      <legend className="px-1 text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--rl-text-muted)]">{label}</legend>
+      <label className="grid gap-1 text-[10px] font-semibold text-[var(--rl-text-muted)]">{min} to {max}{unit}
+        <input aria-label={`${label} slider`} type="range" min={min} max={max} step={step} value={clamped} disabled={disabled} onPointerDown={onGestureStart} onPointerUp={onGestureEnd} onPointerCancel={onGestureEnd} onChange={(event) => onChange(Number(event.target.value))} className="h-8 w-full accent-[var(--rl-red)]" />
+      </label>
+      <label className="grid gap-1 text-[10px] font-semibold text-[var(--rl-text-muted)]">Value
+        <span className="relative"><Input aria-label={`${label} value`} type="number" min={min} max={max} step={step} value={clamped} disabled={disabled} onChange={(event) => onChange(Math.max(min, Math.min(max, Number(event.target.value))))} className={unit ? "pr-7" : ""} />{unit ? <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-[var(--rl-text-muted)]">{unit}</span> : null}</span>
+      </label>
+      <Button variant="ghost" size="sm" disabled={disabled || clamped === resetValue} onClick={() => onChange(resetValue)}>Reset</Button>
+    </fieldset>
   );
 }
 
@@ -1997,7 +2337,7 @@ function TextStyleEditor({ style, readOnly, onChange }: { style?: CanvasStyle; r
           type="button"
           disabled={readOnly}
           onClick={() => onChange({ fontWeight: weight >= 700 ? "400" : "700" })}
-          className={`rounded-[var(--rl-radius-sm)] border px-3 py-2 text-[13px] font-bold transition-all disabled:opacity-40 ${weight >= 700 ? "border-[var(--rl-black)] bg-[var(--rl-black)] text-white" : "border-[var(--rl-border)] bg-[var(--rl-surface)] text-[var(--rl-text-strong)] hover:bg-[var(--rl-bg)]"}`}
+          className={`rounded-[var(--rl-radius-sm)] border px-3 py-2 text-[13px] font-bold transition-colors disabled:opacity-40 ${weight >= 700 ? "border-[var(--rl-black)] bg-[var(--rl-black)] text-white" : "border-[var(--rl-border)] bg-[var(--rl-surface)] text-[var(--rl-text-strong)] hover:bg-[var(--rl-bg)]"}`}
         >
           Bold {weight >= 700 ? "on" : "off"}
         </button>
@@ -2005,7 +2345,7 @@ function TextStyleEditor({ style, readOnly, onChange }: { style?: CanvasStyle; r
           type="button"
           disabled={readOnly}
           onClick={() => onChange({ fontStyle: s.fontStyle === "italic" ? "normal" : "italic" })}
-          className={`rounded-[var(--rl-radius-sm)] border px-3 py-2 text-[13px] font-bold italic transition-all disabled:opacity-40 ${s.fontStyle === "italic" ? "border-[var(--rl-black)] bg-[var(--rl-black)] text-white" : "border-[var(--rl-border)] bg-[var(--rl-surface)] text-[var(--rl-text-strong)] hover:bg-[var(--rl-bg)]"}`}
+          className={`rounded-[var(--rl-radius-sm)] border px-3 py-2 text-[13px] font-bold italic transition-colors disabled:opacity-40 ${s.fontStyle === "italic" ? "border-[var(--rl-black)] bg-[var(--rl-black)] text-white" : "border-[var(--rl-border)] bg-[var(--rl-surface)] text-[var(--rl-text-strong)] hover:bg-[var(--rl-bg)]"}`}
         >
           Italic {s.fontStyle === "italic" ? "on" : "off"}
         </button>

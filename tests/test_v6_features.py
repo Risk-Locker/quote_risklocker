@@ -70,13 +70,14 @@ def test_road_tax_explicit_dates_are_kept():
     assert rule.effective_to == date(2025, 12, 31)
 
 
-def test_copy_template_rejects_editable_template():
+def test_copy_template_clones_editable_template_as_an_independent_draft():
     db = _fake_db()
     editable = OutputTemplateConfig(name="Editable", fixed_fields={"canvas": {"elements": []}, "locked": False, "is_default": False})
     db.get.return_value = editable
-    with pytest.raises(AppError) as exc:
-        admin_service.copy_template(db, _admin_user(), "template-id")
-    assert exc.value.status_code == 403
+    copy = admin_service.copy_template(db, _admin_user(), "template-id")
+    assert copy.name == "Copy of Editable"
+    assert copy.fixed_fields["locked"] is False
+    assert copy.fixed_fields["is_default"] is False
 
 
 def test_copy_template_allows_locked_default_and_inherits_group():
@@ -131,6 +132,9 @@ def test_upsert_template_seeds_editable_config():
     config = template.fixed_fields
     assert config.get("locked") is False
     assert config.get("is_default") is False
+    assert config["version"] == 7
+    assert config["page_profile"]["profile_key"] == "a4"
+    assert config["canvas"]["elements"] == []
 
 
 def test_make_template_master_promotes_and_demotes():

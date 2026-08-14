@@ -30,3 +30,9 @@ def verify_password(password: str, hashed: str) -> bool:
 
 def keyed_hash(value: str, secret: str) -> str:
     return hmac.new(secret.encode("utf-8"), value.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def csrf_token_for_session(session_token: str, secret: str) -> str:
+    """Derive a CSRF token that is valid only for one opaque server session."""
+
+    return keyed_hash(f"csrf:{session_token}", secret)

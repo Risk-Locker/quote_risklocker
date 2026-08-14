@@ -2,6 +2,17 @@
 
 Load a skill only when the current task matches its description below. Read the selected skill completely before using it. Skills guide work but never override `AGENTS.md`, `docs/BUSINESS-RULES.md`, tests, or user decisions.
 
+## v7 Implementation Routing
+
+- `using-superpowers` governs skill selection and workflow.
+- `test-driven-development` and `python-testing` govern every backend behavior change and regression contract.
+- `fastapi` governs API, schema, dependency, and response changes.
+- `security-best-practices` governs the approved Python/TypeScript security baseline.
+- `vercel-react-best-practices` and `vercel-composition-patterns` govern the persistent workspace and large React component boundaries.
+- `playwright-best-practices` governs checked-in browser, accessibility, role, upload, and canvas tests.
+- `systematic-debugging` must be loaded immediately when an implementation or verification failure is encountered.
+- The 2026-08-14 template-publication connection used brainstorming/writing-plans for the approved boundary, TDD/Python testing for contracts, FastAPI for API work, React/frontend-design guidance for Builder/Review integration, and systematic debugging for verification failures.
+
 ## Installed Skills (`.agents/skills/`)
 
 The `.agents/` folder is gitignored (see `.gitignore`) — skills live only in local installs. On a fresh clone, reinstall via the opencode skill manager before relying on them.

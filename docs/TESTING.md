@@ -8,9 +8,14 @@
 | Extraction and deterministic rendering | `tests/test_extraction_pipeline.py`, `tests/test_extraction_regression.py` |
 | Upload and PDF hardening | `tests/test_hardening.py` |
 | Private PDF storage, byte ranges, and retention | `tests/test_pdf_storage.py` |
-| Passwordless policy, code hashing/expiry/throttling, session rolling/expiry/revocation, and browser-storage regression | `tests/test_security.py` |
+| Temporary password policy, session rolling/expiry/revocation, production dev denial, bootstrap, browser-storage regression | `tests/test_security.py` |
 | Authentication HTTP contract, secure cookie, login/logout, revoked and disabled sessions | `tests/test_auth_http.py` |
 | Notifications, invitations, role/status notices, recipient isolation, mark-read, and Admin mail test RBAC | `tests/test_notifications.py` |
+| Lifecycle mutation safety, headers, CSRF, trusted proxies, and durable rate limits | `tests/test_app_lifecycle.py`, `tests/test_http_security.py`, `tests/test_rate_limits.py` |
+| Migration ordering, checksums, drift, and readiness | `tests/test_migration_runner.py` |
+| Shared Staff quotation/customer access | `tests/test_shared_access.py` |
+| Immutable template publication, fixed profiles, template switching, and dynamic-grid schema/rendering | `tests/test_template_publication.py`, `tests/test_template_revision_validation.py`, `tests/test_dynamic_grid_renderer.py`, `tests/test_workspace_service.py` |
+| Builder publication/gesture and Check Values integration contract | `tests/test_frontend_template_publication_contract.py`, `tests/test_frontend_workspace_contract.py` |
 
 ## Commands
 
@@ -27,7 +32,7 @@
 
 ## Verified Baseline
 
-On 2026-08-10, the full check passed: 137 backend tests passed, `npx tsc --noEmit` clean, and the frontend production build succeeded.
+On 2026-08-14 after the WP7/WP8 template connection, 355 tests passed in the workspace sandbox with the Playwright PDF smoke deselected because Windows blocks Chromium from traversing its installed user-directory path there. That smoke passed separately outside the restriction, so all 356 collected tests passed across the two runs. `npx.cmd tsc --noEmit` and the Next.js production build passed. Re-run the final checks after any subsequent code or generated-map change.
 
 ## Known Coverage Gaps
 
