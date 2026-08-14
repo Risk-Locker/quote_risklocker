@@ -15,6 +15,11 @@
 ## Work Log (newest first)
 
 ## 2026-08-14 · opencode-go/deepseek-v4-pro
+Asked: commit and push everything to origin v7 and main.
+Done: committed all v7 work as dfc9d8c (280 files, +21235/-4520) and pushed to origin/v7 (d9f408d..dfc9d8c) + origin/main (b7db959..dfc9d8c). Includes: Phase 1 (state machine, catalog pinning/publish, auto-apply benefits, worker auto-confirm, one-page review/preview UI, upload FK ordering fix, migration 032) on top of the previous agent's uncommitted v7 work.
+Pending: 422 "Something went wrong." on /business/catalogs/{id}/offerings — pydantic validation errors (typed_value invalid/empty) return FastAPI {"detail":...} which api.ts renders generically; add a RequestValidationError handler + builder dialog value validation.
+
+## 2026-08-14 · opencode-go/deepseek-v4-pro
 Asked: audit whether the app is production-ready (features perfect, not deployment) and continue where the previous agent stopped; scope approved = Phase 0 + 1 only; commit per phase.
 Done: full audit — 382 pytest + tsc green, but backend cannot start (migrations 028-031 on disk, unapplied); verified 2 blockers in the new state machine: comma-grouped typed values ("1,200 km") 500 the workspace/generation (`benefits.py:85-89` swallow + `render_context.py:27-30` unguarded), and catalog seeding inert end-to-end (no tier field in `candidate_finder.py` → `catalog_review_service.py:50` can never pin); plus majors list (worker cancel crash, no evidence UI, unvalidated scalar edits, bricked failed jobs, hardcoded runner fee 20, unaudited/staff-wide trash purge, super_admin hole). Owner accuracy rules recorded: dates store only date, literal vehicle model "Others" preserved verbatim, benefits lock to detected insurer (defaults + add-ons), confident extracted entries auto-apply to benefit cards, last variant removes add-on, easy remove/re-add/temporary-variant flexibility.
 Phase 0 done: applied migrations 030-031 via apply-migrations.ps1 (028-029 were already applied), backend started (WMI-detached), /health Ready, login 200 super_admin, 2 worker processes running. Committed.
