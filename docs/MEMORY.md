@@ -3,15 +3,41 @@
 ## Current Snapshot
 
 - Private internal motor-quotation converter. Staff workflow: Upload -> Check Values -> Generate PDF. Stack: FastAPI (`backend/`), Next.js 15.5 (`frontend/`), Supabase/Postgres (`migrations/`), private Supabase Storage for PDFs.
-- Auth: passwordless one-time codes for named `@risklocker.com` employees; sessions in Postgres, HttpOnly cookie; `invited` accounts auto-promote to `active` on first code verification. In-app notifications + Inbox. Dev login: admin@risklocker.local / admin123.
+- Auth: temporary protected password login with opaque Postgres sessions, HttpOnly cookie, session-bound CSRF, and rate limits. OTP/onboarding is deferred to WP13 and Resend to WP14 after owner core approval. Dev login: admin@risklocker.local / admin123 (non-production only).
 - UI: Apple-inspired design system (red/black/white, Manrope/Inter/JetBrains Mono, Phosphor icons, Radix, Framer Motion) — rules in `DESIGN-SYSTEM.md`.
 - v5 (commit b7db959, on origin/v4 + origin/main): trash service (`backend/app/services/trash_service.py`, migrations 018-020, routes `routes.py` L496-556), template asset folders, our-specials categories/variants, sessions publish phase (`frontend/src/app/sessions/[id]/publish/`), client records, road-tax rules, builder layer groups + multi-select + marquee (`builder/page.tsx`: marquee handlers L499-541, `suppressClickRef` fix L501/L547, group ops L274-351), shared canvas `frontend/src/components/template-canvas/shared.tsx`.
 - Verification baseline 2026-08-10: 137 backend tests pass, `npx tsc --noEmit` clean, `npm run build` green, `groups3-e2e.js` all green (marquee 3 selected, group drag, ungroup).
 - QA/E2E tooling lives IN the repo at `/.qc-tmp/` (gitignored): Playwright scripts (use `frontend/node_modules`), logs, screenshots. Never create temp files outside the repo.
 - Port file convention: `.qc-tmp\backend-port.txt`, written by `commands/start-backend.ps1`, read by `commands/start-frontend.ps1` / `start-full.ps1`.
 - Model used for recent work: opencode-go/deepseek-v4-flash.
+- Database state 2026-08-14: full v7 schema, migration ledger 001-031 applied (028-029 pre-applied, 030-031 applied this session), verified by backend startup + /health Ready + login 200 (super_admin).
 
 ## Work Log (newest first)
+
+## 2026-08-14 · opencode-go/deepseek-v4-pro
+Asked: audit whether the app is production-ready (features perfect, not deployment) and continue where the previous agent stopped; scope approved = Phase 0 + 1 only; commit per phase.
+Done: full audit — 382 pytest + tsc green, but backend cannot start (migrations 028-031 on disk, unapplied); verified 2 blockers in the new state machine: comma-grouped typed values ("1,200 km") 500 the workspace/generation (`benefits.py:85-89` swallow + `render_context.py:27-30` unguarded), and catalog seeding inert end-to-end (no tier field in `candidate_finder.py` → `catalog_review_service.py:50` can never pin); plus majors list (worker cancel crash, no evidence UI, unvalidated scalar edits, bricked failed jobs, hardcoded runner fee 20, unaudited/staff-wide trash purge, super_admin hole). Owner accuracy rules recorded: dates store only date, literal vehicle model "Others" preserved verbatim, benefits lock to detected insurer (defaults + add-ons), confident extracted entries auto-apply to benefit cards, last variant removes add-on, easy remove/re-add/temporary-variant flexibility.
+Phase 0 done: applied migrations 030-031 via apply-migrations.ps1 (028-029 were already applied), backend started (WMI-detached), /health Ready, login 200 super_admin, 2 worker processes running. Committed.
+Pending: Phase 1 (P1.1-P1.6: comma-value crash, catalog pinning/tier + manual pin UI + re-pin + missing_catalog blocker, accuracy rules, flexibility UI, worker cancel tolerance, un-brick generation jobs), then pause before Phase 2+.
+
+## 2026-08-14 · GPT-5 Codex
+Asked: implement the approved v7 core recovery after a product audit found the Builder, asset/catalog activation, runtime worker, and functional QA incomplete.
+Done: execution started from the preserved dirty worktree; contract locked for company-first catalogs, Figma-like Builder, three fixed-page masters, safe legacy-asset quarantine, real browser/PDF evidence, and a dormant mail-provider seam.
+Pending: complete Phases 1-8, run functional/performance certification, then pause before OTP/onboarding/live Resend.
+
+## 2026-08-14 · opencode-go/deepseek-v4-flash
+Asked: backend refused to start ("Database schema migration ledger is missing") after restoring a pre-v7 database; he chose the safe keep-data path.
+Done: backed up DB to `.qc-tmp/db-backup-2026-08-14.sql` (pg_dump); new `commands/backfill-ledger.py` (records already-applied migrations 001-022 into `schema_migrations`, `--dry-run` first, refuses when rows exist); applied 023-027 via `commands/apply-migrations.ps1`. Fixed a real runner bug: `backend/app/db/migrations.py:131` now executes migration SQL through the raw DBAPI cursor — psycopg3 client-side binding rejects `%I` (DO-block `format()`) and SQLAlchemy `text()` misreads `:24` inside JSON literals. Verified: schema current, 9/9 `test_migration_runner.py` green (basetemp override `.qc-tmp\pytest-alt` — `.qc-tmp\pytest` has a transient Windows lock), backend up, `/health` 200, login 200 (super_admin).
+Pending: optional v7 data backfill `python commands/backfill-v7.py --dry-run` when v7 catalog endpoints are exercised; `.qc-tmp\pytest` stale lock (retry delete later). Not committed.
+
+## 2026-08-13 · GPT-5 Codex
+Asked: implement the approved v7 production plan, with core business/security/templates first and authentication/Resend last.
+Done: WP0 contract recorded; WP1 security/database safety implemented and documented (strict config, one-origin CSRF/headers/rate limits, safe lifecycle/bootstrap, migration ledger/RLS, shared Staff access); 180 backend tests and frontend typecheck green.
+Pending: implement WP2-WP12; stop for owner approval before WP13-WP14.
+
+## 2026-08-11 · opencode-go/deepseek-v4-flash
+Asked: commit + push everything to a new origin branch (v6); the first attempt cut off mid-push when internet died.
+Done: committed all v6 work as d9f408d on local branch v6 (54 files, +2917/-2348); the interrupted `git push -u` corrupted `.git/config` (707 NUL bytes) and left a NUL garbage file at `.git/refs/remotes/origin/v6` — recovered by rebuilding `.git/config` (core + origin URL https://github.com/risklocker/quote_risklocker.git + branch tracking for main/v4/v6), deleting the garbage ref, verifying tree clean + d9f408d intact, then `git push -u origin v6` — remote already had d9f408d (upload had completed before the local config write died), so it finished as "Everything up-to-date" and set upstream tracking; `origin/v6` confirmed, working tree clean.
 
 ## 2026-08-11 · opencode-go/deepseek-v4-flash
 Asked: builder UX — panels should be mouse-draggable to resize (and expand via mouse), canvas repositions badly when panels hide, lines need anchor-style preview + thickness variants, Ctrl+Z still flaky, and ruler guides can't be removed once added.
@@ -61,3 +87,12 @@ Done: committed v5 b7db959 and pushed to origin/v4 + origin/main (60 files, 4580
 ## 2026-08-10 · opencode-go/deepseek-v4-flash
 Asked: fix "marquee selects nothing" in the template builder.
 Done: instrumented probe proved the marquee chain works (down/move/up/hits/click-suppress all logged) — the real issues were scripts dragging from points on top of elements and the E2E region missing the added texts; fixed the genuine app bug where an element drag's trailing click cleared selection via `suppressClickRef` (page.tsx L501 reset on canvas press, L547 set on drag end); removed all 5 debug console.logs; rebuilt, reran `groups3-e2e.js` green (marquee 3 selected, Group (3), drag dx=78 dy=37, ungroup true); 137 pytest + tsc clean.
+## 2026-08-13 · GPT-5.4
+Asked: stop after the current fixed-page template/grid and immutable-generation module; then asked to stop immediately because the final connection audit was taking too long.
+Done: stopped without further implementation; the last attempted publication/selection regression patch did not apply and changed no files. Current v7 work remains uncommitted; final full verification and documentation reconciliation are pending.
+Pending: only when explicitly told to proceed, resume at the WP7 connection gap (immutable Builder publication, published-template selection, dynamic-grid Builder controls), then verify and pause before later workstreams.
+
+## 2026-08-14 · GPT-5 Codex
+Asked: proceed with only the paused WP7/WP8 template connection, verify it, then pause again.
+Done: immutable optimistic template publication + A4/custom profiles, dynamic-grid/scenario Builder UI, published-template impact/selection, safe layout reset, renderer styling, and pre-gesture pointer history/bounds (`template_revision_service.py`, `workspace_service.py`, Builder/Review/shared canvas, migration 027, tests/docs).
+Pending: paused by owner request; do not start WP6 expansion, WP9+, authentication, or Resend until explicitly told to continue.
