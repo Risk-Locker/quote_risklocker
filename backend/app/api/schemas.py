@@ -216,12 +216,64 @@ class BenefitConceptSaveRequest(StrictRequest):
     base_revision: int | None = Field(default=None, ge=1)
     concept_key: str = Field(min_length=1, max_length=160)
     label: str = Field(min_length=1, max_length=255)
+    category: str | None = Field(default=None, pattern=r"^(default|addon)$")
+    variants: list[str] = Field(default_factory=list, max_length=50)
     value_schema: dict = Field(default_factory=dict)
     display_template: str = Field(default="{label}", min_length=1, max_length=500)
     required_variables: list[str] = Field(default_factory=list, max_length=40)
     optional_variables: list[str] = Field(default_factory=list, max_length=40)
     validation_rules: dict = Field(default_factory=dict)
+    description: str | None = Field(default=None, max_length=2_000)
+    demo_value: dict | None = None
+    match_dataset: list[str] = Field(default_factory=list, max_length=500)
+    value_pattern_dataset: list[str] = Field(default_factory=list, max_length=500)
+    description_variants: list[dict] = Field(default_factory=list, max_length=2)
+    sort_order: int = Field(default=0, ge=0)
     default_asset_id: str | None = None
+    status: str = "active"
+
+
+class SegmentSaveRequest(StrictRequest):
+    id: str | None = None
+    segment_key: str | None = Field(default=None, max_length=160)
+    name: str = Field(min_length=1, max_length=255)
+    sort_order: int = Field(default=0, ge=0)
+    status: str = "active"
+
+
+class VehicleCategorySaveRequest(StrictRequest):
+    id: str | None = None
+    category_key: str | None = Field(default=None, max_length=160)
+    name: str = Field(min_length=1, max_length=255)
+    sort_order: int = Field(default=0, ge=0)
+    status: str = "active"
+
+
+class VehicleSubcategorySaveRequest(StrictRequest):
+    id: str | None = None
+    category_id: str
+    subcategory_key: str | None = Field(default=None, max_length=160)
+    name: str = Field(min_length=1, max_length=255)
+    sort_order: int = Field(default=0, ge=0)
+    status: str = "active"
+
+
+class CoverageTypeSaveRequest(StrictRequest):
+    id: str | None = None
+    coverage_key: str | None = Field(default=None, max_length=160)
+    name: str = Field(min_length=1, max_length=255)
+    sort_order: int = Field(default=0, ge=0)
+    status: str = "active"
+
+
+class BenefitAliasSaveRequest(StrictRequest):
+    id: str | None = None
+    benefit_id: str
+    phrase: str = Field(min_length=1, max_length=255)
+    scope: str = Field(default="global", max_length=40)
+    company_id: str | None = None
+    product_id: str | None = None
+    package_id: str | None = None
     status: str = "active"
 
 
@@ -229,23 +281,58 @@ class BenefitCatalogSaveRequest(StrictRequest):
     company_id: str
     product_id: str | None = None
     tier_id: str | None = None
+    segment_id: str | None = None
+    vehicle_category_id: str | None = None
+    vehicle_subcategory_id: str | None = None
+    coverage_type_id: str | None = None
     name: str = Field(min_length=1, max_length=255)
+
+
+class CatalogContextRequest(StrictRequest):
+    base_revision: int = Field(ge=1)
+    segment_id: str | None = None
+    vehicle_category_id: str | None = None
+    vehicle_subcategory_id: str | None = None
+    coverage_type_id: str | None = None
 
 
 class CatalogOfferingSaveRequest(StrictRequest):
     id: str | None = None
     base_revision: int = Field(ge=1)
-    offering_key: str = Field(min_length=1, max_length=160)
-    concept_id: str
-    offering_kind: str
+    offering_key: str | None = Field(default=None, max_length=160)
+    concept_id: str | None = None
+    offering_kind: str | None = None
+    applies_to_type: str | None = Field(default=None, pattern=r"^(product|package|bundle)$")
+    applies_to_id: str | None = None
+    role: str | None = Field(default=None, pattern=r"^(included|addon_option|bundle_component)$")
     label_override: str | None = Field(default=None, max_length=255)
     typed_value: BenefitValue | None = None
+    display_value: str | None = Field(default=None, max_length=500)
+    optional_price: dict | None = None
     source_document_id: str | None = None
     source_citation: dict = Field(default_factory=dict)
     source_aliases: list[str] = Field(default_factory=list, max_length=100)
     presentation_facet_ids: list[str] = Field(default_factory=list, max_length=100)
     sort_order: int = Field(default=0, ge=0)
     status: str = "active"
+
+
+class PackageSaveRequest(StrictRequest):
+    id: str | None = None
+    base_revision: int = Field(ge=1)
+    package_key: str | None = Field(default=None, max_length=160)
+    name: str = Field(min_length=1, max_length=255)
+    package_kind: str = Field(default="comprehensive", pattern=r"^(comprehensive|addon_bundle)$")
+    sort_order: int = Field(default=0, ge=0)
+    status: str = "active"
+
+
+class PackageCloneRequest(StrictRequest):
+    base_revision: int = Field(ge=1)
+    package_key: str = Field(min_length=1, max_length=160)
+    name: str = Field(min_length=1, max_length=255)
+    package_kind: str | None = Field(default=None, pattern=r"^(comprehensive|addon_bundle)$")
+    sort_order: int = Field(default=0, ge=0)
 
 
 class TemplatePublishRequest(StrictRequest):

@@ -38,10 +38,10 @@ def verify_database_connection() -> None:
             raise RuntimeError(
                 "Supabase/Postgres database connection failed: password authentication failed for DATABASE_URL. "
                 "Use the Supabase database password, not the anon or service-role API key."
-            ) from None
+            ) from exc
         raise RuntimeError(
-            "Supabase/Postgres database connection failed. Check DATABASE_URL, network access, and Supabase database status."
-        ) from None
+            f"Supabase/Postgres database connection failed: {exc}. Check DATABASE_URL, network access, and Supabase database status."
+        ) from exc
 
 
 def verify_schema_version() -> None:

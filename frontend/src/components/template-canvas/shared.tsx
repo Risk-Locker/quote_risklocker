@@ -191,6 +191,8 @@ export function CanvasElementView({
   editingText,
   onTextCommit,
   scenarioCount = 8,
+  benefitData,
+  conceptAssets,
 }: {
   element: CanvasElement;
   selected: boolean;
@@ -205,6 +207,8 @@ export function CanvasElementView({
   editingText?: boolean;
   onTextCommit?: (text: string) => void;
   scenarioCount?: number;
+  benefitData?: { current_benefits: any[]; available_addons: any[] };
+  conceptAssets?: Record<string, string>;
 }) {
   if (element.type === "layer-group" || element.visible === false) return null;
   const assetId = element.assetId || (element.assetSlot ? config?.assets?.[element.assetSlot] : "");
@@ -299,8 +303,20 @@ export function CanvasElementView({
       tabIndex={readOnly ? undefined : 0}
       aria-label={readOnly ? undefined : element.name || `${element.type} layer`}
     >
-      {element.type === "image" && asset ? (
-        <img className="h-full w-full object-contain" src={fileUrl(asset.url)} alt="" />
+      {element.type === "image" ? (
+        asset ? (
+          <img className="h-full w-full object-contain" src={fileUrl(asset.url)} alt="" />
+        ) : element.assetSlot ? (
+          <div className="flex h-full w-full items-center justify-center rounded border border-dashed border-gray-200 bg-gray-50/60 p-1 text-center font-bold text-gray-500 text-[10px]">
+            {element.assetSlot === "risklocker_logo" ? (
+              <span className="text-red-600 font-black tracking-tight text-[11px]">RISKLOCKER</span>
+            ) : element.assetSlot === "insurer_logo" ? (
+              <span className="text-slate-800 font-bold text-[11px]">{variableValues?.insurance_company || variableValues?.insurance_name || "INSURER"}</span>
+            ) : (
+              element.assetSlot
+            )}
+          </div>
+        ) : null
       ) : null}
       {element.type === "text" && editingText && !readOnly ? (
         <EditableText
@@ -330,29 +346,86 @@ export function CanvasElementView({
         </div>
       ) : null}
       {element.type === "benefit-grid" ? (
-        <div className="relative h-full w-full overflow-hidden border border-dashed border-[var(--rl-red)] bg-[var(--rl-red-light)]/20">
-          <div className="hidden">
-            <span>Dynamic benefit grid</span>
-            <span>{element.gridKind === "available_addons" ? "Available add-ons" : "Current benefits"} · {scenarioCount}</span>
-          </div>
-          {scenarioCount === 0 ? (
-            element.emptyState === "message"
-              ? <div className="grid h-full place-items-center text-center text-[10px] text-[var(--rl-text-muted)]">{element.emptyMessage || "Empty grid message"}</div>
-              : <div className="grid h-full place-items-center text-[10px] text-[var(--rl-text-muted)]">Hidden when empty</div>
-          ) : (
-            scenarioLayout.cards.map((card) => (
-              <article key={card.index} className="absolute grid place-items-center overflow-hidden" style={{ left: card.x, top: card.y, width: card.width, height: card.height }}>
-                <div
-                  className={`${element.cardStyle === "minimal" ? "bg-transparent" : element.cardStyle === "soft" ? "bg-[#f3f0f0] shadow-sm" : "border border-[var(--rl-border)] bg-white"} grid grid-cols-[58px_minmax(0,1fr)] items-center rounded-[10px]`}
-                  style={{ width: element.packing?.referenceWidth || 180, height: element.packing?.referenceHeight || 124, transform: `scale(${card.scale})`, transformOrigin: "center", padding: density.padding, gap: density.gap }}
-                >
-                  <span className="grid place-items-center rounded-full bg-[var(--rl-red-light)] font-black text-[var(--rl-red)]" style={{ width: density.icon, height: density.icon, fontSize: density.label }}>B{card.index + 1}</span>
-                  <span className="min-w-0"><strong className="block truncate" style={{ fontSize: density.label }}>Benefit {card.index + 1}</strong><span className="block truncate text-[var(--rl-text-muted)]" style={{ fontSize: density.value }}>Coverage value</span></span>
-                </div>
-              </article>
-            ))
-          )}
-        </div>
+        (() => {
+          const isAddons = element.gridKind === "available_addons";
+          const items = benefitData 
+            ? (isAddons ? benefitData.available_addons : benefitData.current_benefits)
+            : [];
+          const actualCount = benefitData ? items.length : scenarioCount;
+          const actualLayout = packFixedGrid(actualCount, element.w, element.h, element.packing);
+
+          return (
+            <div className={`relative h-full w-full overflow-hidden ${benefitData ? "" : "border border-dashed border-[var(--rl-red)] bg-[var(--rl-red-light)]/20"}`}>
+              <div className="hidden">
+                <span>Dynamic benefit grid</span>
+                <span>{isAddons ? "Available add-ons" : "Current benefits"} · {actualCount}</span>
+              </div>
+              {actualCount === 0 ? (
+                element.emptyState === "message"
+                  ? <div className="grid h-full place-items-center text-center text-[10px] text-[var(--rl-text-muted)]">{element.emptyMessage || "Empty grid message"}</div>
+                  : <div className="grid h-full place-items-center text-[10px] text-[var(--rl-text-muted)]">Hidden when empty</div>
+              ) : (
+                actualLayout.cards.map((card, idx) => {
+                  const b = items[idx];
+                  const label = b ? b.label : `Benefit ${card.index + 1}`;
+                  const val = b ? (b.value || "Included") : "Coverage value";
+                  const assetUrl = b
+                    ? b.asset_url ||
+                      (b.asset_id ? `/business/assets/${b.asset_id}/content?profile=ui` : null) ||
+                      (conceptAssets?.[b.concept_key] || conceptAssets?.[b.concept_id] || null) ||
+                      (b.label ? conceptAssets?.[b.label.toLowerCase()] || conceptAssets?.[b.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] || null : null) ||
+                      (assets.find((a) => a.id === b.asset_id)?.url || null)
+                    : null;
+
+                  return (
+                    <article key={card.index} className="absolute grid place-items-center overflow-hidden" style={{ left: card.x, top: card.y, width: card.width, height: card.height }}>
+                      <div
+                        className={`${element.cardStyle === "minimal" ? "bg-transparent" : element.cardStyle === "soft" ? "bg-[#f3f0f0] shadow-sm" : "border border-[var(--rl-border)] bg-white"} grid grid-cols-[58px_minmax(0,1fr)] items-center rounded-[10px]`}
+                        style={{ width: element.packing?.referenceWidth || 180, height: element.packing?.referenceHeight || 124, transform: `scale(${card.scale})`, transformOrigin: "center", padding: density.padding, gap: density.gap }}
+                      >
+                        <div className="flex items-center justify-center overflow-hidden shrink-0" style={{ width: density.icon, height: density.icon }}>
+                          {assetUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={fileUrl(assetUrl)}
+                              alt={label}
+                              className="h-full w-full object-contain"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLElement).style.display = "none";
+                              }}
+                            />
+                          ) : (
+                            <span
+                              className="grid place-items-center rounded-full bg-[var(--rl-red-light)] font-black text-[var(--rl-red)]"
+                              style={{ width: density.icon, height: density.icon, fontSize: Math.max(9, density.label - 4) }}
+                            >
+                              {label ? label.slice(0, 2).toUpperCase() : `B${card.index + 1}`}
+                            </span>
+                          )}
+                        </div>
+                        <span className="min-w-0 flex flex-col justify-center">
+                          <strong
+                            className="block font-bold leading-tight break-words text-[var(--rl-text-strong)]"
+                            style={{
+                              fontSize: label.length > 28 ? Math.max(10, density.label - 3) : label.length > 18 ? Math.max(11, density.label - 1.5) : density.label,
+                            }}
+                          >
+                            {label}
+                          </strong>
+                          {val ? (
+                            <span className="block text-[var(--rl-text-muted)] leading-tight break-words mt-0.5" style={{ fontSize: density.value }}>
+                              {val}
+                            </span>
+                          ) : null}
+                        </span>
+                      </div>
+                    </article>
+                  );
+                })
+              )}
+            </div>
+          );
+        })()
       ) : null}
       {isSpecial ? (
         <>

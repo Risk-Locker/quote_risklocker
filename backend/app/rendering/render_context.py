@@ -204,24 +204,61 @@ def resolve_benefit_cards(
             ))
             offered_ids.add(target.id)
 
-    # A concept with no current/base choice may expose only its first explicit
-    # optional offering. Numeric value magnitude is never consulted.
-    active_concepts = {str(item.concept_id) for item in current}
+        # Also support same-concept upgrade options without requiring an explicit edge
+        if item.concept_id:
+            same_concept_upgrades = [
+                off for off in offerings
+                if str(off.concept_id) == str(item.concept_id)
+                and off.id != item.catalog_offering_id
+                and off.id not in selected_offering_ids
+                and off.id not in offered_ids
+                and off.status in {"active", "compatibility"}
+                and (off.offering_kind in {"upgrade", "optional"} or getattr(off, "role", None) in {"addon_option", "bundle_component"})
+            ]
+            for off in sorted(same_concept_upgrades, key=lambda row: (int(row.sort_order or 0), str(row.offering_key))):
+                concept = concepts_by_id.get(str(off.concept_id))
+                if concept:
+                    available_cards.append(_card(
+                        selection=None, offering=off, concept=concept, typed_value=off.typed_value,
+                        branch_key=getattr(off, "branch_key", None),
+                    ))
+                    offered_ids.add(off.id)
+
+    active_concepts = {str(item.concept_id) for item in current if item.concept_id}
     optionals_by_concept: dict[str, list[Any]] = {}
     for item in offerings:
-        if item.offering_kind == "optional" and item.status in {"active", "compatibility"}:
+        is_optional = (
+            item.offering_kind == "optional"
+            or getattr(item, "role", None) in {"addon_option", "bundle_component"}
+        )
+        if is_optional and item.status in {"active", "compatibility"}:
             optionals_by_concept.setdefault(str(item.concept_id), []).append(item)
     for concept_id, items in optionals_by_concept.items():
         if concept_id in active_concepts or any(str(item.id) in offered_ids for item in items):
             continue
         first = min(items, key=lambda item: (int(item.sort_order or 0), str(item.offering_key)))
         concept = concepts_by_id.get(concept_id)
-        if concept:
+        if concept and str(first.id) not in selected_offering_ids and str(first.id) not in offered_ids:
             available_cards.append(_card(selection=None, offering=first, concept=concept, typed_value=first.typed_value))
             offered_ids.add(first.id)
 
-    available_selected = [item for item in selections if item.state == "available_addon"]
+    available_selected = [item for item in selections if item.state in {"available_addon", "removed"}]
     for item in sorted(available_selected, key=lambda row: (int(row.sort_order or 0), str(row.selection_key))):
+        if item.concept_id and str(item.concept_id) in active_concepts:
+            continue
+        if item.item_kind == "custom":
+            concept = concepts_by_id.get(str(item.concept_id))
+            concept = concept or type("CustomConcept", (), {
+                "id": item.concept_id or f"custom:{item.id}", "concept_key": item.selection_key,
+                "label": item.label_override or "Custom benefit", "default_asset_id": None,
+            })()
+            pseudo = type("CustomOffering", (), {
+                "id": f"custom:{item.id}", "label_override": item.label_override,
+                "typed_value": item.typed_value_override, "sort_order": item.sort_order,
+                "presentation_facet_ids": [],
+            })()
+            available_cards.append(_card(selection=item, offering=pseudo, concept=concept, typed_value=item.typed_value_override))
+            continue
         offering = offerings_by_id.get(str(item.catalog_offering_id))
         if not offering or offering.id in offered_ids:
             continue

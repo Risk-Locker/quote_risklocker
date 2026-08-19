@@ -69,11 +69,11 @@ All components live in `frontend/src/components/ui/`.
 ## Workflow Screens
 
 - Preserve Upload -> Check Values -> Generate PDF.
-- **Shell:** Fixed 56 px glass header with Risklocker horizontal logo, user email, sign-out button. Fixed 220 px sidebar with distinct Phosphor icons per route, active state in a 6 px black rectangle. Main area scrolls independently.
+- **Shell:** Fixed 56 px glass header with Risklocker horizontal logo, user email, sign-out button. Fixed 220 px sidebar with distinct Phosphor icons per route, active state in a 6 px black rectangle. Main area scrolls independently. Sidebar sections: Upload, Sessions, Builder, **Extraction & Aliases** (Company Detection, Field Aliases, Benefit Aliases, Vehicles, Road Tax), Settings (Users, System Checks, Storage only), Records, Inbox, Trash.
 - **Login:** Centered card on gray background, logo above form, minimal fields.
 - **Review:** Sticky toolbar, two-column layout (PDF iframe left, extracted text + fields right). DraftFieldTable component reused.
 - **Template Builder:** Compact command bar, hierarchy-only Layers panel on the left, fit-to-view fixed-page canvas in the center, contextual Properties inspector on the right, and zoom/page/guides controls in the bottom status bar. Renderable rectangles and semantic layer groups are separate node types.
-- **Builder navigation:** Templates, Benefits, and Asset Library only. Benefits is company-first. Company-detection aliases live under Settings → Extraction.
+- **Builder navigation:** Templates, Benefits, Global Benefits, and Asset Library. Benefits is the company configuration workspace: Insurance Company → Segment (tooltip; Private by default) → Vehicle Type → Product → Benefits & Add-ons in Single mode (no packages) or Package mode (package chain cards), with a List ↔ Mind-map view toggle and a separate Revisions tab. Global Benefits is the reusable library (name, key, artwork, description variants with implied value shapes, match dataset, value-pattern dataset). All aliases live under Extraction & Aliases → Benefit Aliases.
 - **Builder / Settings sub-navigation:** Compact rectangular links with a border or surface active state; never capsule tabs.
 
 ## Loading and Progress

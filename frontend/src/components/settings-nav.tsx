@@ -8,10 +8,6 @@ const items: Array<{ href: Route; label: string }> = [
   { href: "/settings/users" as Route, label: "Users" },
   { href: "/settings/system-checks" as Route, label: "System Checks" },
   { href: "/settings/storage" as Route, label: "Storage" },
-  { href: "/settings/extraction/field-aliases" as Route, label: "Field Aliases" },
-  { href: "/settings/extraction/vehicles" as Route, label: "Vehicles" },
-  { href: "/settings/extraction/road-tax" as Route, label: "Road Tax" },
-  { href: "/settings/extraction/companies" as Route, label: "Company Detection" },
 ];
 
 export function SettingsNav() {

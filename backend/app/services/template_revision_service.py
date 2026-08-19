@@ -258,8 +258,8 @@ def serialize_page_profile(profile: TemplatePageProfile) -> dict:
         "id": profile.id,
         "profile_key": profile.profile_key,
         "name": profile.name,
-        "width": float(profile.width),
-        "height": float(profile.height),
+        "width": float(str(profile.width)),
+        "height": float(str(profile.height)),
         "unit": profile.unit,
         "safe_margins": deepcopy(profile.safe_margins or {}),
         "background_behavior": profile.background_behavior or "clip",
@@ -376,8 +376,8 @@ def _canonical_page(profile: TemplatePageProfile) -> dict:
     return {
         "profile_key": profile.profile_key,
         "name": profile.name,
-        "width": float(profile.width),
-        "height": float(profile.height),
+        "width": float(str(profile.width)),
+        "height": float(str(profile.height)),
         "unit": profile.unit,
         "safe_margins": deepcopy(profile.safe_margins or {}),
         "bleed": deepcopy(profile.bleed or {}),
@@ -406,8 +406,8 @@ def publish_template_revision(db, user, template_id: str, *, base_revision: int)
         config = validate_template_config(config)
         profile = _resolve_page_profile(db, config["page_profile"])
         config["page_profile"] = _canonical_page(profile)
-        config["canvas"]["width"] = float(profile.width)
-        config["canvas"]["height"] = float(profile.height)
+        config["canvas"]["width"] = float(str(profile.width))
+        config["canvas"]["height"] = float(str(profile.height))
         config = validate_template_config(config)
         config_hash = canonical_context_hash(config)
         revisions = [

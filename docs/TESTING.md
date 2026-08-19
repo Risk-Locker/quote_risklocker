@@ -32,7 +32,7 @@
 
 ## Verified Baseline
 
-On 2026-08-14 after the WP7/WP8 template connection, 355 tests passed in the workspace sandbox with the Playwright PDF smoke deselected because Windows blocks Chromium from traversing its installed user-directory path there. That smoke passed separately outside the restriction, so all 356 collected tests passed across the two runs. `npx.cmd tsc --noEmit` and the Next.js production build passed. Re-run the final checks after any subsequent code or generated-map change.
+On 2026-08-16 after the Python 3.12 venv rebuild and migration-ledger repair: 401 passed, 2 skipped (owner DOCX absent), `npx tsc --noEmit` clean, Next.js production build green, code map current. Re-run the final checks after any subsequent code or generated-map change.
 
 ## Known Coverage Gaps
 
@@ -46,4 +46,5 @@ On 2026-08-14 after the WP7/WP8 template connection, 355 tests passed in the wor
 - Use focused tests for the subsystem changed, then run the required build or end-to-end check proportionate to risk.
 - Add only anonymized, deterministic fixtures under `tests/fixtures/` for extraction regressions.
 - Never depend on private customer PDFs, external process folders, generated PDFs, caches, or runtime secrets in tests.
+- The two owner-material tests in `tests/test_reference_docx_intake.py` skip when `Malaysia_Motor_Insurance_Quick_Benefits_Addons_2026.docx` is absent from the repo root (owner-private, gitignored, not a runtime dependency); restore that file to re-enable them.
 - Update tests when API behavior, extraction behavior, security validation, rendering behavior, storage behavior, or business rules change.

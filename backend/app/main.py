@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -28,9 +29,39 @@ def create_app() -> FastAPI:
         verify_database_connection()
         verify_schema_version()
         SupabaseStorage(settings).ensure_bucket()
+        worker_task = None
+        if settings.app_env != "test" and os.getenv("ENABLE_EMBEDDED_WORKER", "1") == "1":
+            import asyncio
+            import socket
+            from app.workers.extraction_worker import run_one_job
+
+            async def _embedded_worker_loop():
+                worker_id = f"embedded:{socket.gethostname()}:{os.getpid()}"
+                while True:
+                    try:
+                        def _work():
+                            with SessionLocal() as db:
+                                return run_one_job(db, settings, worker_id=worker_id)
+
+                        job = await asyncio.to_thread(_work)
+                        if job is None:
+                            await asyncio.sleep(1.0)
+                    except asyncio.CancelledError:
+                        break
+                    except Exception:
+                        await asyncio.sleep(2.0)
+
+            worker_task = asyncio.create_task(_embedded_worker_loop())
+
         try:
             yield
         finally:
+            if worker_task:
+                worker_task.cancel()
+                try:
+                    await worker_task
+                except (asyncio.CancelledError, Exception):
+                    pass
             close_shared_storage_client()
 
     production = settings.app_env == "production"

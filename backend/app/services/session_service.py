@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, String
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
-from app.models.tables import Session as SessionModel, UploadedFile
+from app.models.tables import Session as SessionModel, UploadedFile, QuotationDraft
 
 
 def create_session(
@@ -32,6 +32,7 @@ def list_sessions(db: Session, user_id: str, search: str | None = None, limit: i
     base = (
         select(SessionModel)
         .join(UploadedFile, SessionModel.uploaded_file_id == UploadedFile.id)
+        .outerjoin(QuotationDraft, SessionModel.draft_id == QuotationDraft.id)
     )
     if search:
         like = f"%{search.strip()}%"
@@ -39,6 +40,7 @@ def list_sessions(db: Session, user_id: str, search: str | None = None, limit: i
             or_(
                 SessionModel.detected_company.ilike(like),
                 UploadedFile.original_filename.ilike(like),
+                func.cast(QuotationDraft.fields, String).ilike(like),
             )
         )
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
@@ -60,6 +62,14 @@ def get_session(db: Session, session_id: str) -> SessionModel:
 def serialize_session(session: SessionModel) -> dict:
     filename = session.uploaded_file.original_filename if session.uploaded_file else ""
     draft_status = session.draft.status if session.draft else ""
+    fields = session.draft.fields if session.draft and session.draft.fields else {}
+    
+    # Extract identifiers safely
+    insured_name = fields.get("customer_name", {}).get("value")
+    vehicle_plate = fields.get("vehicle_no", {}).get("value")
+    vehicle_model = fields.get("car_model", {}).get("value")
+    total_premium = fields.get("total_amount", {}).get("value")
+    
     return {
         "id": session.id,
         "owner_id": session.owner_id,
@@ -69,6 +79,10 @@ def serialize_session(session: SessionModel) -> dict:
         "filename": filename,
         "status": session.status,
         "draft_status": draft_status,
+        "insured_name": insured_name,
+        "vehicle_plate": vehicle_plate,
+        "vehicle_model": vehicle_model,
+        "total_premium": total_premium,
         "created_at": session.created_at.isoformat(),
         "updated_at": session.updated_at.isoformat(),
     }

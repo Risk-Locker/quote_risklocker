@@ -7,12 +7,12 @@ from dataclasses import dataclass
 from fastapi import Depends, Request, Response
 from sqlalchemy.orm import Session
 
+from app.auth.cookies import set_auth_cookies
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.db.session import get_db
 from app.models.tables import AuthSession, User
 from app.services.auth_service import authenticate_session
-from app.core.security import csrf_token_for_session
 
 
 @dataclass(frozen=True)
@@ -36,6 +36,10 @@ def ensure_trusted_origin(request: Request, settings: Settings) -> None:
         raise AppError("This request origin is not allowed.", 403)
 
 
+def _remaining_session_seconds(session: AuthSession) -> int:
+    return max(0, int((session.absolute_expires_at - session.last_activity_at).total_seconds()))
+
+
 def current_auth(
     request: Request,
     response: Response,
@@ -47,25 +51,7 @@ def current_auth(
     if not raw_token:
         raise AppError("Please log in.", 401)
     user, session = authenticate_session(db, settings, raw_token)
-    remaining_seconds = max(0, int((session.absolute_expires_at - session.last_activity_at).total_seconds()))
-    response.set_cookie(
-        key=settings.session_cookie_name,
-        value=raw_token,
-        max_age=remaining_seconds,
-        httponly=True,
-        secure=settings.session_cookie_secure,
-        samesite="lax",
-        path="/",
-    )
-    response.set_cookie(
-        key=getattr(settings, "csrf_cookie_name", "risklocker_csrf"),
-        value=csrf_token_for_session(raw_token, settings.auth_hash_secret),
-        max_age=remaining_seconds,
-        httponly=False,
-        secure=settings.session_cookie_secure,
-        samesite="lax",
-        path="/",
-    )
+    set_auth_cookies(response, settings, raw_token, _remaining_session_seconds(session))
     return AuthContext(user=user, session=session, raw_token=raw_token)
 
 
@@ -88,23 +74,6 @@ def current_auth_optional(
         user, session = authenticate_session(db, settings, raw_token)
     except AppError:
         return None
-    remaining_seconds = max(0, int((session.absolute_expires_at - session.last_activity_at).total_seconds()))
-    response.set_cookie(
-        key=settings.session_cookie_name,
-        value=raw_token,
-        max_age=remaining_seconds,
-        httponly=True,
-        secure=settings.session_cookie_secure,
-        samesite="lax",
-        path="/",
-    )
-    response.set_cookie(
-        key=getattr(settings, "csrf_cookie_name", "risklocker_csrf"),
-        value=csrf_token_for_session(raw_token, settings.auth_hash_secret),
-        max_age=remaining_seconds,
-        httponly=False,
-        secure=settings.session_cookie_secure,
-        samesite="lax",
-        path="/",
-    )
+    set_auth_cookies(response, settings, raw_token, _remaining_session_seconds(session))
     return AuthContext(user=user, session=session, raw_token=raw_token)
+

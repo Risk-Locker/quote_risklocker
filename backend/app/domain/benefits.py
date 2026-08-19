@@ -54,6 +54,7 @@ class BenefitValue(BaseModel):
         "formula",
         "package_plan",
         "custom",
+        "text",
     ]
     value: Decimal | int | str | bool | None = None
     unit: str | None = Field(default=None, max_length=40)

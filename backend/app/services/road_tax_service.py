@@ -29,6 +29,82 @@ def _eval_formula(formula: str, cc: int) -> float | None:
         return None
 
 
+_MOTORCYCLE_RATES = (
+    (150, 2.00),
+    (200, 30.00),
+    (250, 50.00),
+    (500, 180.00),
+    (800, 250.00),
+    (float("inf"), 350.00),
+)
+
+_COMMERCIAL_RATES = (
+    (1600, 120.00),
+    (2500, 240.00),
+    (float("inf"), 480.00),
+)
+
+_COMPANY_CAR_RATES = (
+    (1000, 20.00, 0.0, 0),
+    (1200, 110.00, 0.0, 0),
+    (1400, 140.00, 0.0, 0),
+    (1600, 180.00, 0.0, 0),
+    (1800, 400.00, 0.80, 1600),
+    (2000, 560.00, 1.00, 1800),
+    (2500, 760.00, 3.00, 2000),
+    (3000, 2260.00, 7.50, 2500),
+    (float("inf"), 6010.00, 13.50, 3000),
+)
+
+_PRIVATE_CAR_RATES = (
+    (1000, 20.00, 0.0, 0),
+    (1200, 55.00, 0.0, 0),
+    (1400, 70.00, 0.0, 0),
+    (1600, 90.00, 0.0, 0),
+    (1800, 200.00, 0.40, 1600),
+    (2000, 280.00, 0.50, 1800),
+    (2500, 380.00, 1.00, 2000),
+    (3000, 880.00, 2.50, 2500),
+    (float("inf"), 2130.00, 4.50, 3000),
+)
+
+
+def calculate_road_tax(
+    cc: int | float | None,
+    vehicle_type: str = "Car",
+    owner_type: str = "Individual",
+    jurisdiction: str = "West Malaysia",
+) -> float:
+    """Calculate Malaysian road tax directly from standard JPJ schedules."""
+    if cc is None or cc <= 0:
+        return 0.0
+    engine_cc = round(cc)
+    norm_vtype = (vehicle_type or "Car").strip().capitalize()
+    norm_owner = (owner_type or "Individual").strip().capitalize()
+
+    # Motorcycle (Private and Company use same scale)
+    if norm_vtype in {"Motorcycle", "Bike", "Motor"}:
+        for max_cc, rate in _MOTORCYCLE_RATES:
+            if engine_cc <= max_cc:
+                return rate
+
+    # Lorry / Commercial vehicle default fallback
+    if norm_vtype in {"Lorry", "Truck", "Commercial", "Others"}:
+        for max_cc, rate in _COMMERCIAL_RATES:
+            if engine_cc <= max_cc:
+                return rate
+
+    # Car - Company vs Private Ownership
+    rates = _COMPANY_CAR_RATES if norm_owner in {"Company", "Corporate", "Business"} else _PRIVATE_CAR_RATES
+    for max_cc, base, per_cc, threshold in rates:
+        if engine_cc <= max_cc:
+            if per_cc == 0.0:
+                return base
+            return round(base + ((engine_cc - threshold) * per_cc), 2)
+
+    return 0.0
+
+
 def find_matching_rule(
     db: Session,
     cc: int,
@@ -61,7 +137,7 @@ def compute_rate(rule: RoadTaxRule, cc: int) -> float:
         result = _eval_formula(rule.formula, cc)
         if result is not None:
             return result
-    return float(rule.base_rate)
+    return float(str(rule.base_rate)) if rule.base_rate is not None else 0.0
 
 
 def upsert_rule(db: Session, payload: dict) -> RoadTaxRule:
@@ -75,14 +151,18 @@ def upsert_rule(db: Session, payload: dict) -> RoadTaxRule:
     ]:
         if key in payload:
             setattr(rule, key, payload[key])
-    if "effective_from" in payload:
-        rule.effective_from = date.fromisoformat(payload["effective_from"]) if isinstance(payload["effective_from"], str) else payload["effective_from"]
-    if "effective_to" in payload and payload["effective_to"]:
-        rule.effective_to = date.fromisoformat(payload["effective_to"]) if isinstance(payload["effective_to"], str) else payload["effective_to"]
-    if rule.effective_from is None:
-        rule.effective_from = date.today()
-    if rule.effective_to is None:
-        rule.effective_to = date.today() + timedelta(days=365)
+    effective_from_val = payload.get("effective_from")
+    if effective_from_val:
+        setattr(rule, "effective_from", date.fromisoformat(effective_from_val) if isinstance(effective_from_val, str) else effective_from_val)
+    elif getattr(rule, "effective_from", None) is None:
+        setattr(rule, "effective_from", date.today())
+
+    effective_to_val = payload.get("effective_to")
+    if effective_to_val:
+        setattr(rule, "effective_to", date.fromisoformat(effective_to_val) if isinstance(effective_to_val, str) else effective_to_val)
+    elif getattr(rule, "effective_to", None) is None:
+        setattr(rule, "effective_to", date.today() + timedelta(days=365))
+
     db.commit()
     db.refresh(rule)
     return rule
@@ -111,7 +191,7 @@ def serialize_rule(r: RoadTaxRule) -> dict:
         "jurisdiction": r.jurisdiction,
         "min_cc": r.min_cc,
         "max_cc": r.max_cc,
-        "base_rate": float(r.base_rate),
+        "base_rate": float(str(r.base_rate)),
         "formula": r.formula,
         "source": r.source,
         "effective_from": r.effective_from.isoformat() if r.effective_from else None,
@@ -138,7 +218,7 @@ def export_csv_bytes(rules: list[RoadTaxRule]) -> bytes:
     for rule in rules:
         serialized = serialize_rule(rule)
         writer.writerow({col: serialized.get(col, "") for col in EXPORT_COLUMNS})
-    return "\ufeff" + buffer.getvalue()
+    return ("\ufeff" + buffer.getvalue()).encode("utf-8")
 
 
 def import_rules(db: Session, rows: list[list[object]]) -> dict:
@@ -159,11 +239,11 @@ def import_rules(db: Session, rows: list[list[object]]) -> dict:
                 value = row[idx] if idx < len(row) else None
                 if col in {"min_cc", "max_cc"}:
                     if value not in (None, ""):
-                        payload[col] = int(value)
+                        payload[col] = int(str(value))
                 elif col == "base_rate":
                     if value in (None, ""):
                         raise ValueError("base_rate is required")
-                    payload[col] = float(value)
+                    payload[col] = float(str(value))
                 elif col == "status":
                     if value not in (None, ""):
                         payload[col] = str(value)
@@ -196,3 +276,78 @@ def import_rules(db: Session, rows: list[list[object]]) -> dict:
         except (ValueError, TypeError) as exc:
             errors.append(f"Row {index}: {exc}")
     return {"created": created, "updated": updated, "errors": errors}
+
+
+STANDARD_ROAD_TAX_RULES = [
+    # Private Car (West Malaysia)
+    {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1, "max_cc": 1000, "base_rate": 20.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1001, "max_cc": 1200, "base_rate": 55.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1201, "max_cc": 1400, "base_rate": 70.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1401, "max_cc": 1600, "base_rate": 90.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1601, "max_cc": 1800, "base_rate": 200.00, "formula": "200 + ((cc - 1600) * 0.40)", "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1801, "max_cc": 2000, "base_rate": 280.00, "formula": "280 + ((cc - 1800) * 0.50)", "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 2001, "max_cc": 2500, "base_rate": 380.00, "formula": "380 + ((cc - 2000) * 1.00)", "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 2501, "max_cc": 3000, "base_rate": 880.00, "formula": "880 + ((cc - 2500) * 2.50)", "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 3001, "max_cc": None, "base_rate": 2130.00, "formula": "2130 + ((cc - 3000) * 4.50)", "source": "JPJ Schedule (Peninsular)"},
+
+    # Company Car (West Malaysia)
+    {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 1, "max_cc": 1000, "base_rate": 20.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 1001, "max_cc": 1200, "base_rate": 110.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 1201, "max_cc": 1400, "base_rate": 140.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 1401, "max_cc": 1600, "base_rate": 180.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 1601, "max_cc": 1800, "base_rate": 400.00, "formula": "400 + ((cc - 1600) * 0.80)", "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 1801, "max_cc": 2000, "base_rate": 560.00, "formula": "560 + ((cc - 1800) * 1.00)", "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 2001, "max_cc": 2500, "base_rate": 760.00, "formula": "760 + ((cc - 2000) * 3.00)", "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 2501, "max_cc": 3000, "base_rate": 2260.00, "formula": "2260 + ((cc - 2500) * 7.50)", "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 3001, "max_cc": None, "base_rate": 6010.00, "formula": "6010 + ((cc - 3000) * 13.50)", "source": "JPJ Schedule (Peninsular)"},
+
+    # Motorcycle Private (West Malaysia)
+    {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1, "max_cc": 150, "base_rate": 2.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 151, "max_cc": 200, "base_rate": 30.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 201, "max_cc": 250, "base_rate": 50.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 251, "max_cc": 500, "base_rate": 180.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 501, "max_cc": 800, "base_rate": 250.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 801, "max_cc": None, "base_rate": 350.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+
+    # Motorcycle Company (West Malaysia)
+    {"vehicle_type": "Motorcycle", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 1, "max_cc": 150, "base_rate": 2.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Motorcycle", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 151, "max_cc": 200, "base_rate": 30.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Motorcycle", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 201, "max_cc": 250, "base_rate": 50.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Motorcycle", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 251, "max_cc": 500, "base_rate": 180.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Motorcycle", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 501, "max_cc": 800, "base_rate": 250.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Motorcycle", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 801, "max_cc": None, "base_rate": 350.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+]
+
+
+def seed_standard_road_tax_rules(db: Session) -> int:
+    """Seed standard Malaysian road tax rules if none exist or update active rules."""
+    seeded = 0
+    today = date.today()
+    for item in STANDARD_ROAD_TAX_RULES:
+        existing = db.scalar(
+            select(RoadTaxRule).where(
+                RoadTaxRule.vehicle_type == item["vehicle_type"],
+                RoadTaxRule.owner_type == item["owner_type"],
+                RoadTaxRule.jurisdiction == item["jurisdiction"],
+                RoadTaxRule.min_cc == item["min_cc"],
+                or_(RoadTaxRule.max_cc.is_(None), RoadTaxRule.max_cc == item["max_cc"]),
+            )
+        )
+        if not existing:
+            rule = RoadTaxRule(
+                vehicle_type=item["vehicle_type"],
+                owner_type=item["owner_type"],
+                jurisdiction=item["jurisdiction"],
+                min_cc=item["min_cc"],
+                max_cc=item["max_cc"],
+                base_rate=item["base_rate"],
+                formula=item["formula"],
+                source=item["source"],
+                effective_from=today,
+                status="active",
+            )
+            db.add(rule)
+            seeded += 1
+    if seeded > 0:
+        db.commit()
+    return seeded

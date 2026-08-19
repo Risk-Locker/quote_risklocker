@@ -2,14 +2,31 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowCounterClockwise,
   ArrowRight,
+  ArrowsInSimple,
+  ArrowsOutSimple,
+  ArrowSquareOut,
+  CaretDown,
   CaretLeft,
+  CaretUp,
+  Check,
+  CheckCircle,
+  Copy,
+  DownloadSimple,
   Eye,
+  FilePdf,
   FloppyDisk,
+  Lightning,
+  Lock,
+  MagnifyingGlass,
+  MagnifyingGlassMinus,
+  MagnifyingGlassPlus,
   Plus,
+  Sparkle,
   X,
 } from "@phosphor-icons/react";
-import { SessionPhaseBar } from "@/components/session-phase-bar";
+import { toBlob, toPng } from "html-to-image";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +34,10 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageLoading } from "@/components/ui/page-loading";
 import { Select } from "@/components/ui/select";
+import {
+  CanvasElementView,
+  type CanvasElement,
+} from "@/components/template-canvas/shared";
 import {
   useWorkspaceActions,
   useWorkspaceData,
@@ -26,27 +47,52 @@ import type { BenefitCardSummary, WorkspaceField } from "@/components/session-wo
 import { api, fileUrl } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 
-type FieldKind = "text" | "date" | "percent" | "money" | "total";
+type FieldKind = "text" | "date" | "percent" | "money" | "total" | "vehicle_type";
 
 type FormField = { name: string; label: string; kind: FieldKind };
 
 const FORM_FIELDS: FormField[] = [
-  { name: "insurance_company", label: "Insurer", kind: "text" },
   { name: "customer_name", label: "Insured name", kind: "text" },
-  { name: "issue_date", label: "Issued date", kind: "date" },
-  { name: "valid_until", label: "Valid until", kind: "date" },
-  { name: "vehicle_no", label: "Car plate no.", kind: "text" },
-  { name: "vehicle_class", label: "Vehicle class", kind: "text" },
+  { name: "vehicle_no", label: "Vehicle no. / Car plate", kind: "text" },
+  { name: "vehicle_type", label: "Vehicle type", kind: "vehicle_type" },
+  { name: "insurance_company", label: "Insurance name", kind: "text" },
   { name: "coverage_type", label: "Coverage type", kind: "text" },
   { name: "cover_period", label: "Cover period", kind: "text" },
   { name: "car_model", label: "Car model", kind: "text" },
   { name: "ncd_percent", label: "NCD", kind: "percent" },
-  { name: "coverage_amount", label: "Coverage", kind: "money" },
   { name: "premium", label: "Insurance premium", kind: "money" },
   { name: "roadtax", label: "Road tax", kind: "money" },
   { name: "service_fee", label: "Runner fee", kind: "money" },
   { name: "total_amount", label: "Total premium", kind: "total" },
 ];
+
+// The 7 Core Baseline Comprehensive Benefits
+const BASELINE_COMPREHENSIVE_KEYS = [
+  "special-perils",
+  "repair-allowance-cart",
+  "legal-liability-to-passengers",
+  "strike-riot-civil-commotion",
+  "roadside-assistance",
+  "towing",
+  "repair-workmanship-warranty",
+];
+
+const GLOBAL_BENEFIT_KEYS = new Set([
+  "towing",
+  "roadside-assistance",
+  "repair-workmanship-warranty",
+  "all-drivers",
+  "personal-accident",
+  "repair-allowance-cart",
+  "betterment-protection",
+  "flood-relief-allowance",
+  "total-loss-theft-allowance",
+  "key-replacement",
+  "ambulance-fees",
+  "personal-belongings-theft",
+  "falling-object-damage",
+  "document-replacement",
+]);
 
 type CompanyOption = { id: string; name: string };
 type CompanyWorkspace = {
@@ -61,6 +107,7 @@ type PublishedTemplateOption = {
   name: string;
   revision_number: number;
   config_hash: string;
+  config?: TemplateConfig;
   page_profile: { name: string; width: number; height: number; unit: string };
 };
 
@@ -70,6 +117,32 @@ type TemplateSelectionImpact = {
   will_reset_layout_override: boolean;
   requires_confirmation: boolean;
   messages: string[];
+};
+
+type GlobalConcept = {
+  id: string;
+  concept_key: string;
+  label: string;
+  description: string | null;
+  sort_order: number;
+  default_asset_id?: string | null;
+  default_asset?: { id: string; label: string; url: string } | null;
+};
+
+type TemplateConfig = {
+  canvas: { width: number; height: number; elements: CanvasElement[] };
+  assets?: Record<string, string>;
+  [key: string]: unknown;
+};
+
+type TemplatePayload = {
+  template_id: string;
+  template_revision_id: string;
+  revision_number: number;
+  config_hash: string;
+  source: string;
+  config: TemplateConfig;
+  binding: { template_id: string; template_revision_id: string; base_hash: string };
 };
 
 const LEARNABLE = new Map<string, string>([
@@ -85,76 +158,176 @@ function formatMoney(raw: string | null | undefined): string {
 
 function formatDate(raw: string | null | undefined): string {
   const value = String(raw ?? "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  const [year, month, day] = value.split("-");
-  return `${day}/${month}/${year}`;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split("-");
+    return `${day}-${month}-${year}`;
+  }
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
+    return value.replace(/\//g, "-");
+  }
+  return value;
+}
+
+function formatCoverPeriod(raw: string | null | undefined): string {
+  const value = String(raw ?? "").trim();
+  if (!value) return "";
+  return value
+    .replace(/(\d{4})-(\d{2})-(\d{2})/g, "$3-$2-$1")
+    .replace(/(\d{2})\/(\d{2})\/(\d{4})/g, "$1-$2-$3");
+}
+
+function computeMalaysianRoadTax(cc: number, vehicleType: string = "Car", ownerType: string = "Individual"): number {
+  if (!cc || cc <= 0) return 0;
+  const normType = (vehicleType || "Car").toLowerCase();
+  const normOwner = (ownerType || "Individual").toLowerCase();
+
+  if (normType.includes("motor") || normType.includes("bike")) {
+    if (cc <= 150) return 2;
+    if (cc <= 200) return 30;
+    if (cc <= 250) return 50;
+    if (cc <= 500) return 180;
+    if (cc <= 800) return 250;
+    return 350;
+  }
+
+  if (normType.includes("lorry") || normType.includes("other") || normType.includes("truck")) {
+    if (cc <= 1600) return 120;
+    if (cc <= 2500) return 240;
+    return 480;
+  }
+
+  if (normOwner.includes("company") || normOwner.includes("corp")) {
+    if (cc <= 1000) return 20;
+    if (cc <= 1200) return 110;
+    if (cc <= 1400) return 140;
+    if (cc <= 1600) return 180;
+    if (cc <= 1800) return 400 + ((cc - 1600) * 0.80);
+    if (cc <= 2000) return 560 + ((cc - 1800) * 1.00);
+    if (cc <= 2500) return 760 + ((cc - 2000) * 3.00);
+    if (cc <= 3000) return 2260 + ((cc - 2500) * 7.50);
+    return 6010 + ((cc - 3000) * 13.50);
+  }
+
+  // Private Car
+  if (cc <= 1000) return 20;
+  if (cc <= 1200) return 55;
+  if (cc <= 1400) return 70;
+  if (cc <= 1600) return 90;
+  if (cc <= 1800) return 200 + ((cc - 1600) * 0.40);
+  if (cc <= 2000) return 280 + ((cc - 1800) * 0.50);
+  if (cc <= 2500) return 380 + ((cc - 2000) * 1.00);
+  if (cc <= 3000) return 880 + ((cc - 2500) * 2.50);
+  return 2130 + ((cc - 3000) * 4.50);
+}
+
+function inferCCFromCarModel(modelStr: string | null | undefined): number | null {
+  if (!modelStr) return null;
+  const matchDirect = modelStr.match(/\b([0-9]{3,4})\s*(?:cc|c\.c\.)\b/i);
+  if (matchDirect) return parseInt(matchDirect[1], 10);
+
+  const matchLitre = modelStr.match(/\b([1-9]\.[0-9])\b/i);
+  if (matchLitre) {
+    const litres = parseFloat(matchLitre[1]);
+    const mapping: Record<number, number> = {
+      1.0: 998,
+      1.2: 1197,
+      1.3: 1329,
+      1.4: 1395,
+      1.5: 1496,
+      1.6: 1598,
+      1.8: 1798,
+      2.0: 1998,
+      2.2: 2198,
+      2.4: 2362,
+      2.5: 2494,
+      2.8: 2755,
+      3.0: 2997,
+      3.5: 3456,
+    };
+    return mapping[litres] || Math.round(litres * 1000);
+  }
+  return null;
 }
 
 function displayValue(kind: FieldKind, value: string | null | undefined): string {
   if (kind === "money") return formatMoney(value);
   if (kind === "date") return formatDate(value);
   if (kind === "percent") return value ? `${String(value).replace(/%/g, "")}%` : "";
-  return String(value ?? "");
+  if (kind === "vehicle_type") return String(value || "Car");
+  return formatCoverPeriod(String(value ?? ""));
 }
 
 function IncludedCard({
   card,
+  index,
+  assetUrl,
   selection,
   canUndo,
   onQueue,
 }: {
   card: BenefitCardSummary;
+  index: number;
+  assetUrl?: string | null;
   selection?: { id: string; cost_status: string } | Record<string, unknown> | null;
   canUndo: boolean;
   onQueue: (operation: Record<string, unknown> & { op: string }, path: string) => void;
 }) {
-  const selectionId = selection && typeof selection === "object" && "id" in selection ? String(selection.id) : null;
+  const selectionId = selection && typeof selection === "object" && "id" in selection ? String(selection.id) : (card.selection_id || null);
   const pending = !selectionId || selectionId.startsWith("pending:");
-  const cost = selection && typeof selection === "object" && "cost_status" in selection
-    ? String(selection.cost_status || card.cost_status || "included")
-    : String(card.cost_status || "included");
+
   return (
-    <article className="grid gap-2 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] p-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">{card.label}</h3>
-          <p className="mt-0.5 text-xs text-[var(--rl-text)]">{card.value || "Value to confirm"}</p>
+    <article className="flex items-center justify-between gap-2.5 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-2.5 shadow-xs transition-all hover:border-[var(--rl-border-strong)]">
+      <div className="flex items-center gap-2.5 min-w-0">
+        <span className="shrink-0 flex h-6 w-6 items-center justify-center rounded bg-neutral-100 font-mono text-[10px] font-bold text-[var(--rl-text-muted)]">
+          #{index + 1}
+        </span>
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--rl-border)] bg-white p-1">
+          {assetUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={fileUrl(assetUrl)} alt={card.label} className="h-full w-full object-contain" />
+          ) : (
+            <Sparkle size={16} className="text-[var(--rl-text-muted)]" />
+          )}
         </div>
-        <button
-          type="button"
-          aria-label={`Remove ${card.label} from this quotation`}
-          disabled={pending}
-          onClick={() => selectionId && onQueue({ op: "benefit_update", selection_id: selectionId, state: "removed" }, `benefits.${selectionId}.state`)}
-          className="rounded-full p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] disabled:opacity-40"
-        >
-          <X size={15} weight="bold" />
-        </button>
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <h3 className="truncate text-xs font-bold text-[var(--rl-text-strong)]">{card.label}</h3>
+            <span className="rounded bg-emerald-50 px-1 py-0.2 text-[9px] font-bold text-emerald-700">Default/FOC</span>
+          </div>
+          <p className="truncate text-[11px] text-[var(--rl-text-muted)] font-medium">{card.value || "Included standard cover"}</p>
+        </div>
       </div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        <label className="grid flex-1 gap-1 text-[10px] font-bold uppercase tracking-wide text-[var(--rl-text-muted)]">
-          Cost
-          <Select
-            value={cost}
-            disabled={pending}
-            onChange={(event) => selectionId && onQueue({ op: "benefit_update", selection_id: selectionId, cost_status: event.target.value }, `benefits.${selectionId}.cost_status`)}
-            className="min-h-7 text-xs"
-          >
-            <option value="included">Included</option>
-            <option value="paid">Paid</option>
-            <option value="foc">FOC</option>
-            <option value="unknown">Unknown</option>
-          </Select>
-        </label>
+      <div className="flex items-center gap-1.5 shrink-0">
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={pending}
+          title="Move this benefit to Optional Add-ons"
+          onClick={() => selectionId && onQueue({ op: "benefit_update", selection_id: selectionId, state: "available_addon", cost_status: "paid" }, `benefits.${selectionId}.state`)}
+          className="text-[11px] h-7 px-2"
+        >
+          → Add-on
+        </Button>
         {canUndo ? (
           <Button
             variant="secondary"
             size="sm"
             disabled={pending}
             onClick={() => selectionId && onQueue({ op: "revert_benefit", selection_id: selectionId }, `benefits.${selectionId}.revert`)}
+            className="text-[11px] h-7 px-2"
           >
-            Undo upgrade
+            Undo
           </Button>
         ) : null}
+        <button
+          type="button"
+          aria-label={`Remove ${card.label} from this quotation`}
+          disabled={pending}
+          onClick={() => selectionId && onQueue({ op: "benefit_update", selection_id: selectionId, state: "removed" }, `benefits.${selectionId}.state`)}
+          className="rounded-full p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] disabled:opacity-40 transition-colors"
+        >
+          <X size={14} weight="bold" />
+        </button>
       </div>
     </article>
   );
@@ -162,25 +335,73 @@ function IncludedCard({
 
 function AddonCard({
   card,
+  index,
+  assetUrl,
   onQueue,
 }: {
   card: BenefitCardSummary;
+  index: number;
+  assetUrl?: string | null;
   onQueue: (operation: Record<string, unknown> & { op: string }, path: string) => void;
 }) {
+  const selectionId = card.selection_id;
+
+  const handleMoveToDefault = () => {
+    if (selectionId) {
+      onQueue({ op: "benefit_update", selection_id: selectionId, state: "current", cost_status: "included" }, `benefits.${selectionId}.state`);
+    } else {
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, cost_status: "included" }, `benefits.offer.${card.offering_id}`);
+    }
+  };
+
+  const handleRemove = () => {
+    if (selectionId) {
+      onQueue({ op: "benefit_update", selection_id: selectionId, state: "removed" }, `benefits.${selectionId}.state`);
+    }
+  };
+
   return (
-    <article className="grid gap-2 rounded-[var(--rl-radius-sm)] border border-dashed border-[var(--rl-border)] p-3">
-      <div>
-        <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">{card.label}</h3>
-        <p className="mt-0.5 text-xs text-[var(--rl-text)]">{card.value || "Value to confirm"}</p>
-        {card.branch_key ? <p className="mt-0.5 text-[10px] text-[var(--rl-text-muted)]">Choice: {card.branch_key}</p> : null}
+    <article className="group flex items-center justify-between gap-2.5 rounded-[var(--rl-radius-sm)] border border-dashed border-[var(--rl-border)] bg-[var(--rl-surface)] p-2.5 transition-all hover:border-[var(--rl-black)] hover:bg-white">
+      <div className="flex items-center gap-2.5 min-w-0">
+        <span className="shrink-0 flex h-6 w-6 items-center justify-center rounded bg-neutral-100 font-mono text-[10px] font-bold text-[var(--rl-text-muted)]">
+          #{index + 1}
+        </span>
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--rl-border)] bg-white p-1">
+          {assetUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={fileUrl(assetUrl)} alt={card.label} className="h-full w-full object-contain" />
+          ) : (
+            <Plus size={16} className="text-[var(--rl-text-muted)]" />
+          )}
+        </div>
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <h3 className="truncate text-xs font-bold text-[var(--rl-text-strong)]">{card.label}</h3>
+            <span className="rounded bg-gray-100 px-1 py-0.2 text-[9px] font-bold text-[var(--rl-text-muted)]">Add-on</span>
+          </div>
+          <p className="truncate text-[11px] text-[var(--rl-text-muted)] font-medium">{card.value || "Optional payable add-on"}</p>
+        </div>
       </div>
-      <div className="flex flex-wrap gap-1.5">
-        <Button size="sm" variant="secondary" onClick={() => onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, cost_status: "paid" }, `benefits.offer.${card.offering_id}`)}>
-          Add paid
+      <div className="flex items-center gap-1.5 shrink-0">
+        <Button
+          size="sm"
+          variant="secondary"
+          title="Move to Default / FOC Benefits"
+          onClick={handleMoveToDefault}
+          className="text-[11px] h-7 px-2 group-hover:bg-[var(--rl-black)] group-hover:text-white"
+        >
+          ← Default/FOC
         </Button>
-        <Button size="sm" variant="secondary" onClick={() => onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, cost_status: "foc" }, `benefits.offer.${card.offering_id}`)}>
-          Add FOC
-        </Button>
+        {selectionId ? (
+          <button
+            type="button"
+            aria-label={`Remove ${card.label}`}
+            onClick={handleRemove}
+            className="rounded-full p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] transition-colors"
+          >
+            <X size={14} weight="bold" />
+          </button>
+        ) : null}
       </div>
     </article>
   );
@@ -190,7 +411,8 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const { workspace, loading, loadError } = useWorkspaceData();
   const { decideField, save, reload, queueOperation } = useWorkspaceActions();
   const mutation = useWorkspaceMutation();
-  const [pdfOpen, setPdfOpen] = useState(true);
+
+  const [pdfOpen, setPdfOpen] = useState(false);
   const [formValues, setFormValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(FORM_FIELDS.map((field) => [field.name, ""]))
   );
@@ -198,16 +420,115 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
   const [companyWorkspace, setCompanyWorkspace] = useState<CompanyWorkspace | null>(null);
   const [pinLoading, setPinLoading] = useState(false);
-  const [customBox, setCustomBox] = useState<"included" | "addons" | null>(null);
+  const [globalConcepts, setGlobalConcepts] = useState<GlobalConcept[]>([]);
+  const [showGlobalModal, setShowGlobalModal] = useState(false);
+  const [globalSearch, setGlobalSearch] = useState("");
+  const [modalFilter, setModalFilter] = useState<"all" | "global" | "addons">("all");
+  const [activeTab, setActiveTab] = useState<"included" | "addons">("included");
+  const [modalTarget, setModalTarget] = useState<"current" | "available_addon">("current");
+  const [benefitsViewMode, setBenefitsViewMode] = useState<"defaults" | "addons" | "both">("defaults");
+  const [previewExpanded, setPreviewExpanded] = useState(false);
+  const [benefitsExpanded, setBenefitsExpanded] = useState(false);
+  const [templateCollapsed, setTemplateCollapsed] = useState(false);
+  const [extractedValuesCollapsed, setExtractedValuesCollapsed] = useState(false);
+  const [previewCollapsed, setPreviewCollapsed] = useState(false);
+  const [benefitsCollapsed, setBenefitsCollapsed] = useState(false);
+
+  // Quick Action Export States (PNG / PDF)
+  const canvasExportRef = useRef<HTMLDivElement>(null);
+  const [copyingPng, setCopyingPng] = useState(false);
+  const [copiedPng, setCopiedPng] = useState(false);
+  const [downloadingPng, setDownloadingPng] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [viewLoading, setViewLoading] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!toastMessage) return;
+    const timer = setTimeout(() => setToastMessage(null), 3000);
+    return () => clearTimeout(timer);
+  }, [toastMessage]);
+
+  // Pure Flexbox Drag-to-Resize State
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState<"pdf" | "main" | null>(null);
+  const [colSizes, setColSizes] = useState({ pdf: 25, middle: 35, right: 40 });
+  const [split2Col, setSplit2Col] = useState(45);
+
+  const handlePointerDown = useCallback((which: "pdf" | "main") => (e: React.PointerEvent) => {
+    e.preventDefault();
+    setIsDragging(which);
+  }, []);
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handlePointerMove = (e: PointerEvent) => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const totalWidth = rect.width;
+      if (totalWidth <= 0) return;
+
+      const offsetX = e.clientX - rect.left;
+      const percent = Math.max(10, Math.min(90, (offsetX / totalWidth) * 100));
+
+      if (pdfOpen) {
+        if (isDragging === "pdf") {
+          const newPdf = Math.max(15, Math.min(45, percent));
+          setColSizes((prev) => {
+            const remaining = 100 - newPdf;
+            const currentMiddleRight = prev.middle + prev.right || 1;
+            const middleRatio = prev.middle / currentMiddleRight;
+            const newMiddle = Math.max(20, Math.min(remaining - 20, remaining * middleRatio));
+            const newRight = remaining - newMiddle;
+            return { pdf: newPdf, middle: newMiddle, right: newRight };
+          });
+        } else if (isDragging === "main") {
+          setColSizes((prev) => {
+            const minMiddle = 20;
+            const maxMiddle = 100 - prev.pdf - 20;
+            const newMiddle = Math.max(minMiddle, Math.min(maxMiddle, percent - prev.pdf));
+            const newRight = Math.max(20, 100 - prev.pdf - newMiddle);
+            return { ...prev, middle: newMiddle, right: newRight };
+          });
+        }
+      } else {
+        const newLeft = Math.max(20, Math.min(80, percent));
+        setSplit2Col(newLeft);
+      }
+    };
+
+    const handlePointerUp = () => {
+      setIsDragging(null);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [isDragging, pdfOpen]);
+
   const [customLabel, setCustomLabel] = useState("");
   const [customValue, setCustomValue] = useState("");
-  const [customCost, setCustomCost] = useState("paid");
   const [learnPrompt, setLearnPrompt] = useState<{ field: string; value: string } | null>(null);
   const promptedRef = useRef<Set<string>>(new Set());
+
   const [publishedTemplates, setPublishedTemplates] = useState<PublishedTemplateOption[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(true);
   const [templateError, setTemplateError] = useState<string | null>(null);
   const [templateImpact, setTemplateImpact] = useState<TemplateSelectionImpact | null>(null);
+
+  // Live Canvas Preview state
+  const [previewTemplate, setPreviewTemplate] = useState<TemplatePayload | null>(null);
+  const [previewZoom, setPreviewZoom] = useState(0.48);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const syncForm = useCallback(() => {
     if (!workspace) return;
@@ -228,6 +549,11 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     api<{ companies: { items: Array<{ id: string; name: string }> } }>("/business/companies?page_size=100")
       .then((result) => { if (!cancelled) setCompanies(result.companies?.items || []); })
       .catch(() => undefined);
+
+    api<{ benefit_concepts: { items: GlobalConcept[] } }>("/business/benefit-concepts?page=1&page_size=100")
+      .then((res) => { if (!cancelled) setGlobalConcepts(res.benefit_concepts?.items || []); })
+      .catch(() => undefined);
+
     return () => { cancelled = true; };
   }, []);
 
@@ -248,24 +574,92 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     let cancelled = false;
     setTemplatesLoading(true);
     api<{ templates: PublishedTemplateOption[] }>("/business/templates/published")
-      .then((result) => { if (!cancelled) setPublishedTemplates(result.templates); })
+      .then((result) => {
+        if (!cancelled) {
+          const list = result.templates || [];
+          setPublishedTemplates(list);
+          if (list.length > 0) {
+            const currentRevisionId = workspace?.pinned.template_revision_id;
+            const matching = list.find((item) => item.template_revision_id === currentRevisionId) || list[0];
+            if (matching.config && !previewTemplate) {
+              setPreviewTemplate({
+                template_id: matching.template_id,
+                template_revision_id: matching.template_revision_id,
+                revision_number: matching.revision_number,
+                config_hash: matching.config_hash,
+                source: "template_revision",
+                config: matching.config,
+                binding: { template_id: matching.template_id, template_revision_id: matching.template_revision_id, base_hash: matching.config_hash },
+              });
+            }
+            if (!currentRevisionId) {
+              selectTemplateDirectly(matching.template_revision_id);
+            }
+          }
+        }
+      })
       .catch((error) => { if (!cancelled) setTemplateError(apiErrorMessage(error)); })
       .finally(() => { if (!cancelled) setTemplatesLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [workspace?.pinned.template_revision_id]);
 
-  async function previewTemplateSelection(templateRevisionId: string) {
+  // Load template config for real-time live preview
+  useEffect(() => {
+    let cancelled = false;
+    setPreviewLoading(true);
+    api<{ template: TemplatePayload | null }>(`/sessions/${id}/template-config`)
+      .then((res) => {
+        if (!cancelled && res.template) setPreviewTemplate(res.template);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [id, workspace?.pinned.template_revision_id]);
+
+  async function selectTemplateDirectly(templateRevisionId: string) {
     setTemplateError(null);
     setTemplateImpact(null);
-    if (!templateRevisionId || templateRevisionId === workspace?.pinned.template_revision_id) return;
+    if (!templateRevisionId) return;
+    const option = publishedTemplates.find((item) => item.template_revision_id === templateRevisionId);
+    if (!option) {
+      setTemplateError("That published template is no longer available.");
+      return;
+    }
+    if (option.config) {
+      setPreviewTemplate({
+        template_id: option.template_id,
+        template_revision_id: option.template_revision_id,
+        revision_number: option.revision_number,
+        config_hash: option.config_hash,
+        source: "template_revision",
+        config: option.config,
+        binding: { template_id: option.template_id, template_revision_id: option.template_revision_id, base_hash: option.config_hash },
+      });
+    }
+    if (templateRevisionId === workspace?.pinned.template_revision_id) return;
     try {
-      const result = await api<{ impact: TemplateSelectionImpact }>(`/sessions/${id}/template-selection-impact`, {
+      await api<{ impact: TemplateSelectionImpact }>(`/sessions/${id}/template-selection-impact`, {
         method: "POST",
         body: JSON.stringify({ base_revision: workspace?.revision, template_revision_id: templateRevisionId }),
       });
-      setTemplateImpact(result.impact);
-    } catch (error) {
-      setTemplateError(apiErrorMessage(error));
+    } catch {
+      // Best effort
+    }
+    queueOperation({
+      op: "template_selection",
+      template_revision_id: option.template_revision_id,
+      template_id: option.template_id,
+      revision_number: option.revision_number,
+      config_hash: option.config_hash,
+      confirmed: true,
+    }, "template_revision_id");
+
+    try {
+      await save();
+    } catch {
+      // optimistic state active
     }
   }
 
@@ -276,6 +670,17 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       setTemplateError("That published template is no longer available. Refresh this page.");
       return;
     }
+    if (option.config) {
+      setPreviewTemplate({
+        template_id: option.template_id,
+        template_revision_id: option.template_revision_id,
+        revision_number: option.revision_number,
+        config_hash: option.config_hash,
+        source: "template_revision",
+        config: option.config,
+        binding: { template_id: option.template_id, template_revision_id: option.template_revision_id, base_hash: option.config_hash },
+      });
+    }
     queueOperation({
       op: "template_selection",
       template_revision_id: option.template_revision_id,
@@ -285,6 +690,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       confirmed: true,
     }, "template_revision_id");
     setTemplateImpact(null);
+    save().catch(() => undefined);
   }
 
   const productOptions = useMemo(() => companyWorkspace?.products || [], [companyWorkspace]);
@@ -293,18 +699,105 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     [companyWorkspace, workspace?.pinned.product_id],
   );
 
+  const companyName = workspace?.pinned_names.company_name;
+
+  const filteredConcepts = useMemo(() => {
+    return globalConcepts.filter((c) => {
+      if (modalFilter === "global" && !GLOBAL_BENEFIT_KEYS.has(c.concept_key)) return false;
+      if (modalFilter === "addons" && GLOBAL_BENEFIT_KEYS.has(c.concept_key)) return false;
+      if (!globalSearch.trim()) return true;
+      const term = globalSearch.toLowerCase();
+      return c.label.toLowerCase().includes(term) || c.concept_key.toLowerCase().includes(term);
+    });
+  }, [globalConcepts, modalFilter, globalSearch]);
+
+  const conceptAssets = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const c of globalConcepts) {
+      const url = c.default_asset?.url || (c.default_asset_id ? `/business/assets/${c.default_asset_id}/content?profile=ui` : null);
+      if (url) {
+        if (c.concept_key) map[c.concept_key] = url;
+        if (c.id) map[c.id] = url;
+        if (c.label) {
+          map[c.label.toLowerCase()] = url;
+          map[c.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] = url;
+        }
+      }
+    }
+    return map;
+  }, [globalConcepts]);
+
+  const previewFields = useMemo(() => {
+    const fields: Record<string, string> = {};
+    if (workspace?.fields) {
+      for (const [name, field] of Object.entries(workspace.fields)) {
+        fields[name] = String(field?.value ?? "");
+      }
+    }
+    // Overlay real-time active form values on every keystroke
+    for (const [name, val] of Object.entries(formValues)) {
+      if (val !== undefined && val !== null) {
+        fields[name] = String(val);
+      }
+    }
+    // Handle plate & company aliases
+    if (formValues["vehicle_no"]) {
+      fields["vehicle_no"] = formValues["vehicle_no"];
+      fields["vehicle_plate"] = formValues["vehicle_no"];
+      fields["car_plate"] = formValues["vehicle_no"];
+      fields["plate_no"] = formValues["vehicle_no"];
+    }
+    const effectiveCompany = formValues["insurance_company"] || companyName;
+    if (effectiveCompany) {
+      fields["insurance_company"] = effectiveCompany;
+      fields["insurance_name"] = effectiveCompany;
+      fields["company_name"] = effectiveCompany;
+    }
+    return fields;
+  }, [workspace?.fields, formValues, companyName]);
+
   function commitField(field: FormField) {
     const current = formValues[field.name];
     if (current === undefined || current.trim() === "") return;
     if (field.kind === "total") return;
     decideField(field.name, "edit", current);
+
+    if (field.name === "insurance_company") {
+      const match = companies.find(
+        (c) => c.name.toLowerCase().trim() === current.toLowerCase().trim()
+      );
+      if (match && match.id !== workspace?.pinned.company_id) {
+        pinCatalog(match.id);
+      }
+    }
   }
 
-  function pinCatalog(companyId: string, productId?: string | null, tierId?: string | null) {
+  function commitFieldDirectly(name: string, value: string) {
+    if (value === undefined || value.trim() === "") return;
+    decideField(name, "edit", value);
+    if (name === "insurance_company") {
+      const match = companies.find(
+        (c) => c.name.toLowerCase().trim() === value.toLowerCase().trim()
+      );
+      if (match && match.id !== workspace?.pinned.company_id) {
+        pinCatalog(match.id);
+      }
+    }
+  }
+
+  async function pinCatalog(companyId: string, productId?: string | null, tierId?: string | null) {
     setPinLoading(true);
     const company = companies.find((item) => item.id === companyId);
     const product = productId ? productOptions.find((item) => item.id === productId) : null;
     const tier = tierId ? tierOptions.find((item) => item.id === tierId) : null;
+
+    if (company) {
+      setFormValues((prev) => ({
+        ...prev,
+        insurance_company: company.name,
+      }));
+    }
+
     queueOperation({
       op: "pin_catalog",
       company_id: companyId,
@@ -314,24 +807,58 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       ...(product ? { product_name: product.name } : {}),
       ...(tier ? { tier_name: tier.name } : {}),
     }, "catalog");
-    setPinLoading(false);
+
+    try {
+      await save();
+    } catch {
+      // Best effort
+    } finally {
+      setPinLoading(false);
+    }
   }
 
-  function addCustomBenefit() {
+  function addConceptAsBenefit(concept: GlobalConcept, state: "current" | "available_addon" = "current") {
+    const key = `concept:${concept.concept_key}:${crypto.randomUUID().slice(0, 8)}`;
+    queueOperation({
+      op: "create_custom_benefit",
+      selection_key: key,
+      concept_id: concept.id,
+      concept_key: concept.concept_key,
+      label: concept.label,
+      typed_value: { type: "custom", display_text: concept.label },
+      cost_status: state === "current" ? "included" : "paid",
+      state,
+    }, `benefits.${key}`);
+    setShowGlobalModal(false);
+  }
+
+  // Reset all benefits back to company defaults and detected extraction items (idempotent)
+  async function handleResetDefaults() {
+    if (!workspace) return;
+    queueOperation({ op: "reset_benefits" }, "benefits");
+    try {
+      await save();
+      setToastMessage("Reset all benefits back to insurance defaults and detections.");
+    } catch {
+      // Handled by workspace mutation
+    }
+  }
+
+  function addCustomBenefit(targetState: "current" | "available_addon" = "current") {
     const label = customLabel.trim();
     if (!label) return;
+    const isAddon = targetState === "available_addon";
     const key = `custom:${crypto.randomUUID()}`;
     queueOperation({
       op: "create_custom_benefit",
       selection_key: key,
       label,
       typed_value: customValue.trim() ? { type: "custom", display_text: customValue.trim() } : { type: "custom", display_text: label },
-      cost_status: customCost,
-      state: "current",
+      cost_status: isAddon ? "paid" : "included",
+      state: targetState,
     }, `benefits.${key}`);
     setCustomLabel("");
     setCustomValue("");
-    setCustomBox(null);
   }
 
   async function saveAndCheckLearning() {
@@ -351,7 +878,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
             break;
           }
         } catch {
-          // Dataset checks are best-effort and never block the flow.
+          // Best effort
         }
       }
     } catch (error) {
@@ -367,18 +894,152 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         body: JSON.stringify({ field: learnPrompt.field, value: learnPrompt.value }),
       });
     } catch {
-      // Learning is best-effort.
+      // Best effort
     }
     setLearnPrompt(null);
   }
 
-  async function handleNext() {
+  async function handleCopyPng() {
+    if (mutation.dirty) {
+      setActionError("Please click 'Save' to save all changes first before copying as PNG.");
+      return;
+    }
+    if (!canvasExportRef.current) return;
+    setCopyingPng(true);
     setActionError(null);
     try {
-      await save();
-      onNext();
+      const blob = await toBlob(canvasExportRef.current, {
+        cacheBust: true,
+        backgroundColor: "#ffffff",
+        pixelRatio: 2.5,
+      });
+      if (blob) {
+        await navigator.clipboard.write([
+          new ClipboardItem({ "image/png": blob }),
+        ]);
+        setCopiedPng(true);
+        setToastMessage("High-definition quotation PNG copied to clipboard!");
+        setTimeout(() => setCopiedPng(false), 2500);
+      }
+    } catch {
+      setActionError("Could not copy PNG image to clipboard. Check browser permissions.");
+    } finally {
+      setCopyingPng(false);
+    }
+  }
+
+  async function handleDownloadPng() {
+    if (mutation.dirty) {
+      setActionError("Please click 'Save' to save all changes first before downloading as PNG.");
+      return;
+    }
+    if (!canvasExportRef.current) return;
+    setDownloadingPng(true);
+    setActionError(null);
+    try {
+      const dataUrl = await toPng(canvasExportRef.current, {
+        cacheBust: true,
+        backgroundColor: "#ffffff",
+        pixelRatio: 2.5,
+      });
+      const link = document.createElement("a");
+      link.href = dataUrl;
+      link.download = `quotation_${formValues.vehicle_no || id}.png`;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setToastMessage("High-definition quotation PNG downloaded!");
+    } catch {
+      setActionError("Could not generate PNG for download.");
+    } finally {
+      setDownloadingPng(false);
+    }
+  }
+
+  async function handleViewPdfInNewTab() {
+    if (mutation.dirty) {
+      setActionError("Please click 'Save' to save all changes first before viewing the PDF.");
+      return;
+    }
+    if (!workspace) return;
+    setViewLoading(true);
+    setActionError(null);
+    try {
+      const result = await api<{ preview_url: string }>(`/sessions/${id}/preview-render`, {
+        method: "POST",
+        body: JSON.stringify({ draft_revision: workspace.revision }),
+      });
+      const url = fileUrl(result.preview_url);
+      window.open(url, "_blank");
+      setToastMessage("Opening PDF in new tab...");
     } catch (error) {
       setActionError(apiErrorMessage(error));
+    } finally {
+      setViewLoading(false);
+    }
+  }
+
+  async function handleDownloadPdf() {
+    if (mutation.dirty) {
+      setActionError("Please click 'Save' to save all changes first before downloading the PDF.");
+      return;
+    }
+    if (!workspace) return;
+    setPdfLoading(true);
+    setActionError(null);
+    try {
+      const nonFatalBlockers = (workspace.generation_blockers || []).filter(
+        (b) => b.code !== "scalar_check_needed" && b.code !== "missing_catalog"
+      );
+      if (nonFatalBlockers.length > 0) {
+        throw new Error(nonFatalBlockers[0].message || "Resolve generation blockers before creating the PDF.");
+      }
+
+      const requested = await api<{ job?: { id: string }; version?: { id: string } }>(
+        `/sessions/${id}/versions`,
+        {
+          method: "POST",
+          body: JSON.stringify({ draft_revision: workspace.revision }),
+        }
+      );
+
+      const jobId = requested.job?.id;
+      if (jobId) {
+        let completed = false;
+        for (let attempt = 0; attempt < 60; attempt += 1) {
+          const status = await api<{ job: { state: string; error?: { message?: string } } }>(`/jobs/${jobId}`);
+          if (status.job.state === "completed") {
+            completed = true;
+            break;
+          }
+          if (status.job.state === "failed" || status.job.state === "cancelled") {
+            throw new Error(status.job.error?.message || "PDF generation did not complete.");
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 800));
+        }
+      }
+
+      await reload();
+
+      const downloadUrl = requested.version?.id
+        ? fileUrl(`/versions/${requested.version.id}/pdf?download=true`)
+        : fileUrl(`/sessions/${id}/preview-render`);
+
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = `quotation_${formValues.vehicle_no || id}.pdf`;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setToastMessage("Official PDF download started!");
+    } catch (error) {
+      setActionError(apiErrorMessage(error));
+    } finally {
+      setPdfLoading(false);
     }
   }
 
@@ -395,28 +1056,130 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
   const currentCards = workspace.benefit_cards.current_benefits;
   const addonCards = workspace.benefit_cards.available_addons;
-  const companyName = workspace.pinned_names.company_name;
 
   return (
-    <section className="grid gap-4">
-      <SessionPhaseBar sessionId={id} current="extraction" onStep={(key) => { if (key === "preview") onNext(); }} />
-
-      <Card className="sticky top-[68px] z-20 p-4">
+    <section className="grid gap-4 max-w-7xl mx-auto pb-12">
+      {/* Top Header Bar */}
+      <Card className="sticky top-[68px] z-20 p-4 border border-[var(--rl-border)] bg-[var(--rl-surface)]/95 backdrop-blur-md shadow-xs">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-[22px] font-bold text-[var(--rl-text-strong)]">Check quotation values</h1>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold text-[var(--rl-text-strong)]">Quotation Workspace</h1>
+              {companyName ? <Badge variant="default">{companyName}</Badge> : null}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
               <StatusBadge status={workspace.status} />
               {mutation.dirty ? <Badge variant="warning">Unsaved changes</Badge> : <Badge variant="success">Saved</Badge>}
+              <span className="text-xs text-[var(--rl-text-muted)] font-mono">
+                {formValues.vehicle_no || "Draft"} · {formValues.customer_name || "Client"}
+              </span>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" loading={mutation.saving} icon={<FloppyDisk weight="bold" />} onClick={() => saveAndCheckLearning()}>
-              Save
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={pdfOpen ? <CaretLeft weight="bold" /> : <FilePdf weight="bold" />}
+              onClick={() => setPdfOpen((v) => !v)}
+            >
+              {pdfOpen ? "Hide PDF" : "Show source PDF"}
             </Button>
-            <Button icon={<Eye weight="bold" />} onClick={handleNext}>
-              Next: Preview <ArrowRight />
+            <Button
+              variant={mutation.dirty ? "primary" : "secondary"}
+              loading={mutation.saving}
+              icon={<FloppyDisk weight="bold" />}
+              onClick={() => saveAndCheckLearning()}
+            >
+              {mutation.dirty ? "Save Changes" : "Saved"}
             </Button>
+
+            {/* PNG Actions Button (Copy as PNG | Download as PNG with Hover Reveal) */}
+            <div
+              className={`relative flex items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white p-0.5 shadow-xs transition-all ${
+                mutation.dirty || mutation.saving
+                  ? "opacity-60 bg-neutral-50 cursor-not-allowed"
+                  : "hover:border-[var(--rl-border-strong)] hover:shadow-sm"
+              }`}
+            >
+              {/* Copy as PNG */}
+              <button
+                type="button"
+                onClick={handleCopyPng}
+                disabled={copyingPng}
+                className="group/copy flex items-center gap-1 rounded-[4px] px-2 py-1.5 text-xs font-semibold text-[var(--rl-text-strong)] hover:bg-neutral-100 hover:text-[var(--rl-black)] transition-all"
+                title={mutation.dirty ? "Save changes first to copy PNG" : "Copy high-resolution quotation PNG to clipboard"}
+              >
+                {copiedPng ? (
+                  <Check size={15} weight="bold" className="text-emerald-600 shrink-0" />
+                ) : (
+                  <Copy size={15} weight="bold" className="shrink-0 text-neutral-600" />
+                )}
+                <span className="max-w-0 opacity-0 overflow-hidden whitespace-nowrap group-hover/copy:max-w-[120px] group-hover/copy:opacity-100 transition-all duration-200 ease-out text-[11px]">
+                  {copiedPng ? "Copied!" : "Copy as PNG"}
+                </span>
+              </button>
+
+              <div className="h-4 w-[1px] bg-neutral-200 shrink-0 mx-0.5" />
+
+              {/* Download as PNG */}
+              <button
+                type="button"
+                onClick={handleDownloadPng}
+                disabled={downloadingPng}
+                className="group/dlpng flex items-center gap-1.5 rounded-[4px] px-2 py-1.5 text-xs font-semibold text-[var(--rl-text-strong)] hover:bg-neutral-100 hover:text-[var(--rl-black)] transition-all"
+                title={mutation.dirty ? "Save changes first to download PNG" : "Download high-resolution quotation PNG"}
+              >
+                <DownloadSimple size={15} weight="bold" className="shrink-0 text-neutral-600" />
+                <span className="max-w-0 opacity-0 overflow-hidden whitespace-nowrap group-hover/dlpng:max-w-[130px] group-hover/dlpng:opacity-100 transition-all duration-200 ease-out text-[11px]">
+                  {downloadingPng ? "Generating..." : "Download as PNG"}
+                </span>
+                <span className="rounded bg-neutral-100 px-1 py-0.2 font-mono text-[9px] font-extrabold text-neutral-600 uppercase">
+                  PNG
+                </span>
+              </button>
+            </div>
+
+            {/* PDF Actions Button (View as PDF / in new tab | Download PDF with Hover Reveal) */}
+            <div
+              className={`relative flex items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white p-0.5 shadow-xs transition-all ${
+                mutation.dirty || mutation.saving
+                  ? "opacity-60 bg-neutral-50 cursor-not-allowed"
+                  : "hover:border-[var(--rl-border-strong)] hover:shadow-sm"
+              }`}
+            >
+              {/* View as PDF in New Tab */}
+              <button
+                type="button"
+                onClick={handleViewPdfInNewTab}
+                disabled={viewLoading}
+                className="group/viewpdf flex items-center gap-1 rounded-[4px] px-2 py-1.5 text-xs font-semibold text-[var(--rl-text-strong)] hover:bg-neutral-100 hover:text-[var(--rl-black)] transition-all"
+                title={mutation.dirty ? "Save changes first to view PDF" : "View authoritative PDF quotation in new tab"}
+              >
+                <ArrowSquareOut size={15} weight="bold" className="shrink-0 text-neutral-600" />
+                <span className="max-w-0 opacity-0 overflow-hidden whitespace-nowrap group-hover/viewpdf:max-w-[130px] group-hover/viewpdf:opacity-100 transition-all duration-200 ease-out text-[11px]">
+                  {viewLoading ? "Opening..." : "View as PDF"}
+                </span>
+              </button>
+
+              <div className="h-4 w-[1px] bg-neutral-200 shrink-0 mx-0.5" />
+
+              {/* Download PDF */}
+              <button
+                type="button"
+                onClick={handleDownloadPdf}
+                disabled={pdfLoading}
+                className="group/dlpdf flex items-center gap-1.5 rounded-[4px] px-2 py-1.5 text-xs font-semibold text-[var(--rl-text-strong)] hover:bg-neutral-100 hover:text-[var(--rl-black)] transition-all"
+                title={mutation.dirty ? "Save changes first to download PDF" : "Generate & download official PDF quotation"}
+              >
+                <FilePdf size={15} weight="bold" className="shrink-0 text-[var(--rl-red)]" />
+                <span className="max-w-0 opacity-0 overflow-hidden whitespace-nowrap group-hover/dlpdf:max-w-[120px] group-hover/dlpdf:opacity-100 transition-all duration-200 ease-out text-[11px]">
+                  {pdfLoading ? "Generating..." : "Download PDF"}
+                </span>
+                <span className="rounded bg-red-50 px-1 py-0.2 font-mono text-[9px] font-extrabold text-[var(--rl-red)] uppercase">
+                  PDF
+                </span>
+              </button>
+            </div>
           </div>
         </div>
       </Card>
@@ -439,219 +1202,845 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         </Card>
       ) : null}
 
-      <div className={`grid items-start gap-4 ${pdfOpen ? "xl:grid-cols-[minmax(280px,0.85fr)_minmax(0,1.15fr)_minmax(340px,420px)]" : "xl:grid-cols-[minmax(0,1fr)_minmax(340px,420px)]"}`}>
+      {/* 3-Column Resizable Workspace with Draggable Flexbox Sliders */}
+      <div
+        ref={containerRef}
+        className="flex flex-col lg:flex-row items-stretch min-h-[580px] w-full gap-0 select-none relative"
+      >
+        {/* Column 1 (Optional): Source Quotation PDF */}
         {pdfOpen ? (
-          <div className="relative min-w-0">
-            <Card className="sticky top-[140px] h-[calc(100vh-180px)] p-2">
-              <iframe
-                title="Source quotation PDF"
-                src={fileUrl(`/uploaded-files/${workspace.uploaded_file_id}/content`)}
-                className="h-full w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white"
-              />
-            </Card>
-            <Button
-              variant="secondary"
-              size="sm"
-              className="absolute right-1 top-1"
-              aria-label="Hide the source PDF"
-              onClick={() => setPdfOpen(false)}
+          <>
+            <div
+              style={{ width: `${colSizes.pdf}%` }}
+              className="w-full lg:w-auto min-w-0 flex-shrink-0 relative overflow-hidden pr-0 lg:pr-1"
             >
-              <CaretLeft weight="bold" /> Hide PDF
-            </Button>
-          </div>
-        ) : (
-          <Button variant="secondary" className="w-fit" onClick={() => setPdfOpen(true)}>
-            Show source PDF
-          </Button>
-        )}
+              <div className="relative min-w-0 h-full">
+                <Card className="sticky top-[140px] h-[calc(100vh-180px)] p-2">
+                  <iframe
+                    title="Source quotation PDF"
+                    src={fileUrl(`/uploaded-files/${workspace.uploaded_file_id}/content`)}
+                    className={`h-full w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white ${isDragging ? "pointer-events-none" : ""}`}
+                  />
+                </Card>
+              </div>
+            </div>
+            {/* Draggable Slider 1 (between PDF and Form) */}
+            <div
+              onPointerDown={handlePointerDown("pdf")}
+              role="separator"
+              aria-orientation="vertical"
+              className="group w-3.5 -mx-1 flex items-center justify-center cursor-col-resize self-stretch z-20 shrink-0 hidden lg:flex"
+            >
+              <div className={`w-1 h-full rounded-full transition-colors ${isDragging === "pdf" ? "bg-[var(--rl-red)]" : "bg-[var(--rl-border)] group-hover:bg-[var(--rl-red)]"}`} />
+            </div>
+          </>
+        ) : null}
 
-        <Card className="grid gap-3 p-4">
-          <div>
-            <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">Extracted values</h2>
-            <p className="mt-1 text-sm text-[var(--rl-text-muted)]">Only what the template needs. Everything else is kept for customer records.</p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {FORM_FIELDS.map((field) => {
-              const stored = workspace.fields[field.name];
-              const empty = !(stored?.value);
-              return (
-                <label key={field.name} className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
-                  {field.label}
-                  <span className="relative">
-                    {field.kind === "money" ? <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--rl-text-muted)]">RM</span> : null}
-                    <Input
-                      value={formValues[field.name]}
-                      disabled={field.kind === "total"}
-                      placeholder={empty ? "Missing" : ""}
-                      title={!empty && stored?.status === "check_needed" ? "Extracted with low confidence. Check this value." : undefined}
-                      className={`${field.kind === "money" ? "pl-9" : ""} ${empty ? "ring-2 ring-amber-300" : ""}`}
-                      onChange={(event) => setFormValues((values) => ({ ...values, [field.name]: event.target.value }))}
-                      onBlur={() => commitField(field)}
-                      onKeyDown={(event) => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }}
-                    />
+        {/* Column 2: Master Template + Extracted Values */}
+        <div
+          style={{ width: pdfOpen ? `${colSizes.middle}%` : `${split2Col}%` }}
+          className="w-full lg:w-auto min-w-0 flex-shrink-0 px-0 lg:px-2"
+        >
+          <section aria-label="Template configuration and extracted values" className="grid grid-cols-1 gap-4 content-start">
+            {/* Row 1: Master Template Selection */}
+            <Card className="grid gap-3 p-4 border border-[var(--rl-border)] bg-white shadow-xs">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-bold text-[var(--rl-text-strong)]">Master template</h2>
+                  <p className="text-xs text-[var(--rl-text-muted)]">Pins the exact published revision used for rendering.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="default">Published</Badge>
+                  <button
+                    type="button"
+                    onClick={() => setTemplateCollapsed((v) => !v)}
+                    className="flex items-center gap-1 rounded px-2 py-0.5 text-xs font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors"
+                    title={templateCollapsed ? "Expand Master Template" : "Collapse Master Template"}
+                  >
+                    {templateCollapsed ? <CaretDown size={14} weight="bold" /> : <CaretUp size={14} weight="bold" />}
+                    <span>{templateCollapsed ? "Expand" : "Collapse"}</span>
+                  </button>
+                </div>
+              </div>
+              
+              {templateCollapsed ? (
+                <div className="flex flex-wrap items-center justify-between text-xs text-[var(--rl-text-muted)] pt-2 border-t border-[var(--rl-border)]">
+                  <span>Template: <strong className="text-[var(--rl-text-strong)] font-semibold">{publishedTemplates.find((t) => t.template_revision_id === workspace.pinned.template_revision_id)?.name || "Master Template"}</strong></span>
+                  <span>Insurer: <strong className="text-[var(--rl-text-strong)] font-semibold">{companyName || "Standard Motor"}</strong></span>
+                </div>
+              ) : (
+                <>
+                  <label className="grid gap-1.5 text-xs font-semibold text-[var(--rl-text-strong)]">
+                    Published template revision
+                    <Select
+                      value={workspace.pinned.template_revision_id || ""}
+                      disabled={templatesLoading || !publishedTemplates.length}
+                      onChange={(event) => selectTemplateDirectly(event.target.value)}
+                    >
+                      <option value="">Choose a published template</option>
+                      {publishedTemplates.map((option) => (
+                        <option key={option.template_revision_id} value={option.template_revision_id}>
+                          {option.name} · r{option.revision_number} · {option.page_profile.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+
+                  {templateError ? <p role="alert" className="text-xs font-semibold text-[var(--rl-red)]">{templateError}</p> : null}
+
+                  {templateImpact ? (
+                    <div className="grid gap-2 rounded-[var(--rl-radius-sm)] border border-amber-300 bg-amber-50 p-3">
+                      <p className="text-sm font-bold text-[var(--rl-text-strong)]">Change to {templateImpact.target.name} revision {templateImpact.target.revision_number}?</p>
+                      {templateImpact.messages.map((message) => <p key={message} className="text-xs font-semibold text-amber-800">{message}</p>)}
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <Button size="sm" onClick={confirmTemplateSelection}>Confirm template change</Button>
+                        <Button variant="secondary" size="sm" onClick={() => setTemplateImpact(null)}>Cancel</Button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* Insurer / Product Context Selectors */}
+                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-[var(--rl-border)]">
+                    <label className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
+                      Insurer catalog
+                      <Select
+                        value={workspace.pinned.company_id || ""}
+                        disabled={pinLoading || !companies.length}
+                        onChange={(event) => pinCatalog(event.target.value)}
+                      >
+                        <option value="">Choose insurer</option>
+                        {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+                      </Select>
+                    </label>
+
+                    <label className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
+                      Product / Package
+                      <Select
+                        value={workspace.pinned.product_id || ""}
+                        disabled={pinLoading || !productOptions.length}
+                        onChange={(event) => pinCatalog(workspace.pinned.company_id as string, event.target.value)}
+                      >
+                        <option value="">{productOptions.length ? "Choose package" : "Standard Motor"}</option>
+                        {productOptions.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+                      </Select>
+                    </label>
+                  </div>
+                </>
+              )}
+            </Card>
+
+            {/* Row 2: Extracted Policy & Vehicle Values */}
+            <Card className="grid gap-3 p-4 border border-[var(--rl-border)] bg-white shadow-xs">
+              <div className="flex items-center justify-between border-b border-[var(--rl-border)] pb-2">
+                <div>
+                  <h2 className="text-sm font-bold text-[var(--rl-text-strong)]">Extracted values</h2>
+                  <p className="text-xs text-[var(--rl-text-muted)]">Verified quotation details formatted for the master template.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="default">{FORM_FIELDS.length} fields</Badge>
+                  <button
+                    type="button"
+                    onClick={() => setExtractedValuesCollapsed((v) => !v)}
+                    className="flex items-center gap-1 rounded px-2 py-0.5 text-xs font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors"
+                    title={extractedValuesCollapsed ? "Expand Extracted Values" : "Collapse Extracted Values"}
+                  >
+                    {extractedValuesCollapsed ? <CaretDown size={14} weight="bold" /> : <CaretUp size={14} weight="bold" />}
+                    <span>{extractedValuesCollapsed ? "Expand" : "Collapse"}</span>
+                  </button>
+                </div>
+              </div>
+
+              {extractedValuesCollapsed ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded bg-gray-50 p-2.5 text-xs">
+                  <div><span className="text-[var(--rl-text-muted)]">Plate:</span> <strong className="text-[var(--rl-text-strong)] font-mono">{formValues.vehicle_no || "—"}</strong></div>
+                  <div><span className="text-[var(--rl-text-muted)]">Insured:</span> <strong className="text-[var(--rl-text-strong)] truncate max-w-[140px] inline-block align-bottom">{formValues.customer_name || "—"}</strong></div>
+                  <div><span className="text-[var(--rl-text-muted)]">Total:</span> <strong className="text-[var(--rl-red)] font-mono font-bold">RM {formValues.total_amount || "0.00"}</strong></div>
+                </div>
+              ) : (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {FORM_FIELDS.map((field) => {
+                      const stored = workspace.fields[field.name] as WorkspaceField | undefined;
+                      const empty = !(stored?.value);
+                      const needsCheck = !empty && stored?.status === "check_needed";
+                      return (
+                        <label key={field.name} className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
+                          <span className="flex items-center justify-between">
+                            {field.label}
+                            {needsCheck ? <span className="text-[10px] text-amber-700 font-bold">Check value</span> : null}
+                          </span>
+                          {field.kind === "vehicle_type" ? (
+                            <Select
+                              value={formValues[field.name] || "Car"}
+                              onChange={(event) => {
+                                const newVtype = event.target.value;
+                                setFormValues((values) => ({ ...values, [field.name]: newVtype }));
+                                commitFieldDirectly(field.name, newVtype);
+                                const modelVal = formValues["car_model"] || (workspace.fields["car_model"] as WorkspaceField | undefined)?.value;
+                                const inferredCC = inferCCFromCarModel(modelVal);
+                                if (inferredCC) {
+                                  const computedRT = computeMalaysianRoadTax(inferredCC, newVtype);
+                                  if (computedRT > 0) {
+                                    const rtFormatted = computedRT.toFixed(2);
+                                    setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
+                                    commitFieldDirectly("roadtax", rtFormatted);
+                                  }
+                                }
+                              }}
+                              className="text-xs font-medium"
+                            >
+                              <option value="Car">Car (Private / Passenger)</option>
+                              <option value="Motorcycle">Motorcycle</option>
+                              <option value="Lorry">Lorry</option>
+                              <option value="Others">Others (Lorry / Commercial)</option>
+                            </Select>
+                          ) : (
+                            <span className="relative">
+                              {field.kind === "money" ? (
+                                <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-[var(--rl-text-muted)]">
+                                  RM
+                                </span>
+                              ) : null}
+                              <Input
+                                value={formValues[field.name] ?? ""}
+                                disabled={field.kind === "total"}
+                                placeholder={empty ? "Missing" : ""}
+                                list={field.name === "insurance_company" ? "company-suggestions" : undefined}
+                                className={`${field.kind === "money" ? "pl-8 text-xs font-mono font-medium" : "text-xs font-medium"} ${needsCheck ? "border-amber-400 bg-amber-50/50 ring-1 ring-amber-300" : ""}`}
+                                onChange={(event) => setFormValues((values) => ({ ...values, [field.name]: event.target.value }))}
+                                onBlur={() => {
+                                  commitField(field);
+                                  if (field.name === "car_model") {
+                                    const inferredCC = inferCCFromCarModel(formValues[field.name]);
+                                    const currentRT = formValues["roadtax"];
+                                    if (inferredCC && (!currentRT || currentRT === "0" || currentRT === "Missing")) {
+                                      const vtype = formValues["vehicle_type"] || "Car";
+                                      const computedRT = computeMalaysianRoadTax(inferredCC, vtype);
+                                      if (computedRT > 0) {
+                                        const rtFormatted = computedRT.toFixed(2);
+                                        setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
+                                        commitFieldDirectly("roadtax", rtFormatted);
+                                      }
+                                    }
+                                  }
+                                }}
+                                onKeyDown={(event) => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }}
+                              />
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <datalist id="company-suggestions">
+                    {companies.map((c) => (
+                      <option key={c.id} value={c.name} />
+                    ))}
+                  </datalist>
+                  <p className="text-[11px] text-[var(--rl-text-muted)]">Amounts are formatted in RM. Totals compute automatically from premium, road tax, and runner fee.</p>
+                </>
+              )}
+            </Card>
+          </section>
+        </div>
+
+        {/* Draggable Slider 2 (between Form and Live Preview) */}
+        <div
+          onPointerDown={handlePointerDown("main")}
+          role="separator"
+          aria-orientation="vertical"
+          className="group w-3.5 -mx-1 flex items-center justify-center cursor-col-resize self-stretch z-20 shrink-0 hidden lg:flex"
+        >
+          <div className={`w-1 h-full rounded-full transition-colors ${isDragging === "main" ? "bg-[var(--rl-red)]" : "bg-[var(--rl-border)] group-hover:bg-[var(--rl-red)]"}`} />
+        </div>
+
+        {/* Column 3: Live Quotation Preview + Insurer Benefits */}
+        <div
+          style={{ width: pdfOpen ? `${colSizes.right}%` : `${100 - split2Col}%` }}
+          className="w-full lg:w-auto min-w-0 flex-1 pl-0 lg:pl-2"
+        >
+          <section aria-label="Live preview and benefits manager" className="grid grid-cols-1 gap-4 content-start">
+            {/* Row 1: Real-time Live Preview Canvas */}
+            <Card className="grid gap-2.5 p-3.5 border border-[var(--rl-border)] bg-white shadow-xs overflow-hidden">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-bold text-[var(--rl-text-strong)]">Live Quotation Preview</h2>
+                  <span className="flex items-center gap-1 rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    Real-time
                   </span>
-                </label>
-              );
-            })}
-          </div>
-          <p className="text-xs text-[var(--rl-text-muted)]">Amber fields need a value. NCD is a percentage; amounts are in RM and totals are computed.</p>
-        </Card>
-
-        <aside className="grid content-start gap-4">
-          <Card className="grid gap-3 p-4">
-            <div>
-              <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">{companyName ? `${companyName} benefits` : "Benefits"}</h2>
-              <p className="mt-1 text-xs text-[var(--rl-text-muted)]">
-                {companyName ? `Defaults and add-ons from the pinned catalog.` : "Pin an insurer to load its verified benefits automatically."}
-              </p>
-            </div>
-            {!companyName ? (
-              <label className="grid gap-1.5 text-sm font-semibold text-[var(--rl-text-strong)]">
-                Insurance company
-                <Select
-                  value={workspace.pinned.company_id || ""}
-                  disabled={pinLoading || !companies.length}
-                  onChange={(event) => pinCatalog(event.target.value)}
-                >
-                  <option value="">Choose the insurer</option>
-                  {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
-                </Select>
-              </label>
-            ) : null}
-            {companyName && productOptions.length > 0 && (!workspace.pinned.product_id || productOptions.length > 1) ? (
-              <label className="grid gap-1.5 text-sm font-semibold text-[var(--rl-text-strong)]">
-                Product
-                <Select value={workspace.pinned.product_id || ""} disabled={pinLoading} onChange={(event) => pinCatalog(workspace.pinned.company_id as string, event.target.value)}>
-                  <option value="">Choose the product</option>
-                  {productOptions.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
-                </Select>
-              </label>
-            ) : null}
-            {companyName && workspace.pinned.product_id && tierOptions.length > 0 && (!workspace.pinned.tier_id || tierOptions.length > 1) ? (
-              <label className="grid gap-1.5 text-sm font-semibold text-[var(--rl-text-strong)]">
-                Tier
-                <Select value={workspace.pinned.tier_id || ""} disabled={pinLoading} onChange={(event) => pinCatalog(workspace.pinned.company_id as string, workspace.pinned.product_id, event.target.value)}>
-                  <option value="">Choose the tier</option>
-                  {tierOptions.map((tier) => <option key={tier.id} value={tier.id}>{tier.name}</option>)}
-                </Select>
-              </label>
-            ) : null}
-          <Card className="grid gap-3 p-4">
-            <div>
-              <h2 className="text-sm font-bold text-[var(--rl-text-strong)]">Master template</h2>
-              <p className="mt-1 text-xs text-[var(--rl-text-muted)]">Pins the exact published revision used for the PDF.</p>
-            </div>
-            <label className="grid gap-1.5 text-sm font-semibold text-[var(--rl-text-strong)]">
-              Published template revision
-              <Select
-                value={workspace.pinned.template_revision_id || ""}
-                disabled={templatesLoading || !publishedTemplates.length}
-                onChange={(event) => previewTemplateSelection(event.target.value)}
-              >
-                <option value="">Choose a published template</option>
-                {publishedTemplates.map((option) => (
-                  <option key={option.template_revision_id} value={option.template_revision_id}>
-                    {option.name} · r{option.revision_number} · {option.page_profile.name}
-                  </option>
-                ))}
-              </Select>
-            </label>
-            {templateError ? <p role="alert" className="text-xs font-semibold text-[var(--rl-red)]">{templateError}</p> : null}
-            {templateImpact ? (
-              <div className="grid gap-2 rounded-[var(--rl-radius-sm)] border border-amber-300 bg-amber-50 p-3">
-                <p className="text-sm font-bold text-[var(--rl-text-strong)]">Change to {templateImpact.target.name} revision {templateImpact.target.revision_number}?</p>
-                {templateImpact.messages.map((message) => <p key={message} className="text-xs font-semibold text-amber-800">{message}</p>)}
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" onClick={confirmTemplateSelection}>Confirm template change</Button>
-                  <Button variant="secondary" size="sm" onClick={() => setTemplateImpact(null)}>Cancel</Button>
+                </div>
+                <div className="flex items-center gap-1">
+                  {!previewCollapsed ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewZoom((z) => Math.max(0.25, z - 0.05))}
+                        className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-gray-100"
+                        title="Zoom Out"
+                      >
+                        <MagnifyingGlassMinus size={16} />
+                      </button>
+                      <span className="text-[11px] font-mono text-[var(--rl-text-muted)] w-10 text-center">
+                        {Math.round(previewZoom * 100)}%
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewZoom((z) => Math.min(1.0, z + 0.05))}
+                        className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-gray-100"
+                        title="Zoom In"
+                      >
+                        <MagnifyingGlassPlus size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewZoom(0.48)}
+                        className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100"
+                      >
+                        Fit
+                      </button>
+                      <div className="h-4 w-px bg-[var(--rl-border)] mx-1" />
+                      <button
+                        type="button"
+                        onClick={() => setPreviewExpanded((v) => !v)}
+                        className="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors"
+                        title={previewExpanded ? "Compress live preview" : "Expand live preview"}
+                      >
+                        {previewExpanded ? <ArrowsInSimple size={14} weight="bold" /> : <ArrowsOutSimple size={14} weight="bold" />}
+                        <span>{previewExpanded ? "Compress" : "Expand"}</span>
+                      </button>
+                      <div className="h-4 w-px bg-[var(--rl-border)] mx-1" />
+                    </>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => setPreviewCollapsed((v) => !v)}
+                    className="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors"
+                    title={previewCollapsed ? "Expand live preview canvas" : "Collapse live preview canvas"}
+                  >
+                    {previewCollapsed ? <CaretDown size={14} weight="bold" /> : <CaretUp size={14} weight="bold" />}
+                    <span>{previewCollapsed ? "Expand" : "Collapse"}</span>
+                  </button>
                 </div>
               </div>
-            ) : null}
-          </Card>
 
-          <div className="grid grid-cols-2 gap-3">
-              <div>
-                <h3 className="text-xs font-bold uppercase tracking-wide text-[var(--rl-text-muted)]">Defaults</h3>
-                <ul className="mt-2 grid gap-1.5">
-                  {workspace.catalog.defaults.length ? workspace.catalog.defaults.map((item) => (
-                    <li key={item.offering_id} className="text-xs text-[var(--rl-text)]">
-                      <span className="font-semibold">{item.label}</span>
-                      <span className="ml-1 text-[var(--rl-text-muted)]">{item.value}</span>
-                    </li>
-                  )) : <li className="text-xs text-[var(--rl-text-muted)]">None pinned yet</li>}
-                </ul>
-              </div>
-              <div>
-                <h3 className="text-xs font-bold uppercase tracking-wide text-[var(--rl-text-muted)]">Add-ons</h3>
-                <ul className="mt-2 grid gap-1.5">
-                  {workspace.catalog.addons.length ? workspace.catalog.addons.map((item) => (
-                    <li key={item.offering_id} className="text-xs text-[var(--rl-text)]">
-                      <span className="font-semibold">{item.label}</span>
-                      <span className="ml-1 text-[var(--rl-text-muted)]">{item.value}</span>
-                    </li>
-                  )) : <li className="text-xs text-[var(--rl-text-muted)]">None pinned yet</li>}
-                </ul>
-              </div>
-            </div>
-          </Card>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Card className="grid content-start gap-2 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="text-sm font-bold text-[var(--rl-text-strong)]">Included</h2>
-                <Button variant="ghost" size="sm" aria-label="Add a temporary custom item" onClick={() => setCustomBox(customBox === "included" ? null : "included")}>
-                  <Plus weight="bold" />
-                </Button>
-              </div>
-              {customBox === "included" ? (
-                <div className="grid gap-1.5 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] p-2">
-                  <Input aria-label="Custom item label" placeholder="Item name" value={customLabel} onChange={(event) => setCustomLabel(event.target.value)} />
-                  <Input aria-label="Custom item value" placeholder="Value" value={customValue} onChange={(event) => setCustomValue(event.target.value)} />
-                  <div className="flex gap-1.5">
-                    <Select value={customCost} onChange={(event) => setCustomCost(event.target.value)}>
-                      <option value="paid">Paid</option>
-                      <option value="foc">FOC</option>
-                      <option value="included">Included</option>
-                    </Select>
-                    <Button size="sm" disabled={!customLabel.trim()} onClick={addCustomBenefit}>Add</Button>
-                  </div>
+              {previewCollapsed ? (
+                <div className="flex items-center justify-center p-3.5 text-xs text-[var(--rl-text-muted)] italic bg-gray-50/70 rounded">
+                  Live quotation preview canvas is collapsed. Click Expand to preview document.
                 </div>
-              ) : null}
-              {currentCards.length ? currentCards.map((card) => {
-                const selection = workspace.benefits.find((item) => item.id === card.selection_id);
-                const canUndo = Boolean(selection && workspace.benefits.some((item) => item.superseded_by_id === selection.id));
-                return <IncludedCard key={card.card_key} card={card} selection={selection} canUndo={canUndo} onQueue={queueOperation} />;
-              }) : <p className="text-xs text-[var(--rl-text-muted)]">Pin an insurer to auto-load its defaults.</p>}
+              ) : (
+                /* Canvas Render Container */
+                <div className={`flex ${previewExpanded ? "h-[640px]" : "h-[380px]"} w-full items-start justify-center overflow-auto rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-gray-50/80 p-3 transition-all duration-200`}>
+                  {previewLoading && !previewTemplate ? (
+                    <div className="flex h-full items-center justify-center text-xs text-[var(--rl-text-muted)]">
+                      Loading preview template...
+                    </div>
+                  ) : previewTemplate ? (
+                    <div
+                      style={{
+                        width: (previewTemplate.config.canvas?.width || 794) * previewZoom,
+                        height: (previewTemplate.config.canvas?.height || 1123) * previewZoom,
+                        position: "relative",
+                        backgroundColor: "#ffffff",
+                        boxShadow: "0 4px 14px rgba(0,0,0,0.08)",
+                        borderRadius: "4px",
+                        overflow: "hidden",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: previewTemplate.config.canvas?.width || 794,
+                          height: previewTemplate.config.canvas?.height || 1123,
+                          transform: `scale(${previewZoom})`,
+                          transformOrigin: "top left",
+                          position: "relative",
+                        }}
+                      >
+                        {(previewTemplate.config.canvas?.elements || []).map((element) => (
+                          <CanvasElementView
+                            key={element.id}
+                            element={element}
+                            selected={false}
+                            readOnly={true}
+                            onPointerDown={() => {}}
+                            variableValues={previewFields}
+                            benefitData={workspace.benefit_cards}
+                            conceptAssets={conceptAssets}
+                            assets={Object.entries(previewTemplate.config.assets || {}).map(([key, id]) => ({
+                              id,
+                              label: key,
+                              url: `/template-assets/${id}`,
+                            }))}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-xs text-[var(--rl-text-muted)]">
+                      Select a template to generate live preview
+                    </div>
+                  )}
+                </div>
+              )}
             </Card>
 
-            <Card className="grid content-start gap-2 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="text-sm font-bold text-[var(--rl-text-strong)]">Add-ons</h2>
-                <Button variant="ghost" size="sm" aria-label="Add a temporary custom item" onClick={() => setCustomBox(customBox === "addons" ? null : "addons")}>
-                  <Plus weight="bold" />
-                </Button>
-              </div>
-              {customBox === "addons" ? (
-                <div className="grid gap-1.5 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] p-2">
-                  <Input aria-label="Custom item label" placeholder="Item name" value={customLabel} onChange={(event) => setCustomLabel(event.target.value)} />
-                  <Input aria-label="Custom item value" placeholder="Value" value={customValue} onChange={(event) => setCustomValue(event.target.value)} />
-                  <div className="flex gap-1.5">
-                    <Select value={customCost} onChange={(event) => setCustomCost(event.target.value)}>
-                      <option value="paid">Paid</option>
-                      <option value="foc">FOC</option>
-                      <option value="included">Included</option>
-                    </Select>
-                    <Button size="sm" disabled={!customLabel.trim()} onClick={addCustomBenefit}>Add</Button>
-                  </div>
+            {/* Row 2: Interactive Benefits & Add-ons Manager with Tabs */}
+            <div className="grid gap-4 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-4 shadow-card transition-all">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-bold text-[var(--rl-text-strong)]">
+                    {companyName ? `${companyName} Benefits & Add-ons` : "Benefits & Add-ons"}
+                  </h2>
+                  <p className="text-xs text-[var(--rl-text-muted)]">
+                    Manage policy defaults and payable add-ons with automatic canvas and PDF slot alignment.
+                  </p>
                 </div>
-              ) : null}
-              {addonCards.length ? addonCards.map((card) => (
-                <AddonCard key={card.card_key} card={card} onQueue={queueOperation} />
-              )) : <p className="text-xs text-[var(--rl-text-muted)]">All available upgrades are already applied.</p>}
-            </Card>
-          </div>
-        </aside>
+                
+                <div className="flex items-center gap-2">
+                  {!benefitsCollapsed ? (
+                    <div className="flex items-center gap-1 rounded-md border border-[var(--rl-border)] bg-gray-100 p-1">
+                      <button
+                        type="button"
+                        onClick={() => setBenefitsViewMode("defaults")}
+                        className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-semibold transition-all ${
+                          benefitsViewMode === "defaults"
+                            ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
+                            : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                        }`}
+                      >
+                        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-100 text-[10px] font-bold text-emerald-800">
+                          {currentCards.length}
+                        </span>
+                        Default / FOC Benefits
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setBenefitsViewMode("addons")}
+                        className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-semibold transition-all ${
+                          benefitsViewMode === "addons"
+                            ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
+                            : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                        }`}
+                      >
+                        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-800">
+                          {addonCards.length}
+                        </span>
+                        Optional Add-ons
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setBenefitsViewMode("both")}
+                        className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-semibold transition-all ${
+                          benefitsViewMode === "both"
+                            ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
+                            : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                        }`}
+                      >
+                        Side by Side
+                      </button>
+                    </div>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    onClick={() => setBenefitsCollapsed((v) => !v)}
+                    className="flex items-center gap-1 rounded px-2 py-1 text-xs font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors"
+                    title={benefitsCollapsed ? "Expand Benefits & Add-ons" : "Collapse Benefits & Add-ons"}
+                  >
+                    {benefitsCollapsed ? <CaretDown size={14} weight="bold" /> : <CaretUp size={14} weight="bold" />}
+                    <span>{benefitsCollapsed ? "Expand" : "Collapse"}</span>
+                  </button>
+                </div>
+              </div>
+
+              {benefitsCollapsed ? (
+                <div className="flex flex-wrap items-center justify-between text-xs text-[var(--rl-text-muted)] pt-2 border-t border-[var(--rl-border)]">
+                  <span>Included / FOC: <strong className="text-emerald-700 font-semibold">{currentCards.length} active</strong></span>
+                  <span>Optional Add-ons: <strong className="text-blue-700 font-semibold">{addonCards.length} configured</strong></span>
+                </div>
+              ) : (
+                <>
+                  {/* Global Actions Toolbar */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--rl-border)] pb-3">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        icon={<ArrowCounterClockwise size={14} weight="bold" className="text-amber-600" />}
+                        onClick={handleResetDefaults}
+                        title="Reset to insurance defaults and detections"
+                      >
+                        Reset Defaults
+                      </Button>
+                      <span className="text-xs text-[var(--rl-text-muted)]">
+                        {currentCards.length} active standard covers
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        icon={<Sparkle size={14} weight="bold" className="text-[var(--rl-red)]" />}
+                        onClick={() => {
+                          setModalTarget("current");
+                          setShowGlobalModal(true);
+                        }}
+                      >
+                        + Global Library
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Two-Box Interactive Grid Display */}
+                  <div className={`grid gap-4 ${benefitsViewMode === "both" ? "lg:grid-cols-2" : "grid-cols-1"}`}>
+                    {/* BOX 1: Default / FOC Included Benefits */}
+                    {(benefitsViewMode === "defaults" || benefitsViewMode === "both") && (
+                      <div className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-gray-50/60 p-3 flex flex-col gap-2.5">
+                        <div className="flex items-center justify-between border-b border-[var(--rl-border)] pb-2">
+                          <div className="flex items-center gap-1.5">
+                            <CheckCircle size={16} weight="fill" className="text-emerald-600" />
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-strong)]">
+                              Included / FOC Benefits
+                            </h3>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                              {currentCards.length} covers
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setModalTarget("current");
+                                setShowGlobalModal(true);
+                              }}
+                              className="rounded p-1 text-emerald-700 hover:bg-emerald-100"
+                              title="Add from Global Library to Defaults"
+                            >
+                              <Plus size={14} weight="bold" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-2 max-h-[380px] overflow-y-auto pr-1">
+                          {currentCards.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center p-6 text-center text-xs text-[var(--rl-text-muted)]">
+                              <p>No included benefits active.</p>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={handleResetDefaults}
+                                className="mt-2 text-xs"
+                              >
+                                Reset to insurance defaults
+                              </Button>
+                            </div>
+                          ) : (
+                            currentCards.map((card, idx) => {
+                              const selection = workspace.benefits.find((item) => item.catalog_offering_id === card.offering_id || item.selection_key === card.card_key);
+                              const concept = globalConcepts.find(
+                                (c) => c.concept_key === card.concept_key || c.id === card.concept_id || c.label.toLowerCase() === card.label.toLowerCase()
+                              );
+                              const assetUrl =
+                                concept?.default_asset?.url ||
+                                (concept?.default_asset_id ? `/business/assets/${concept.default_asset_id}/content?profile=ui` : null) ||
+                                (card.asset_id ? `/business/assets/${card.asset_id}/content?profile=ui` : null) ||
+                                (card.label ? conceptAssets[card.label.toLowerCase()] || conceptAssets[card.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] : null);
+                              return (
+                                <IncludedCard
+                                  key={card.offering_id || card.card_key || idx}
+                                  card={card}
+                                  index={idx}
+                                  assetUrl={assetUrl}
+                                  selection={selection}
+                                  canUndo={Boolean(card.branch_key)}
+                                  onQueue={queueOperation}
+                                />
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* BOX 2: Optional Payable Add-ons */}
+                    {(benefitsViewMode === "addons" || benefitsViewMode === "both") && (
+                      <div className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-gray-50/60 p-3 flex flex-col gap-2.5">
+                        <div className="flex items-center justify-between border-b border-[var(--rl-border)] pb-2">
+                          <div className="flex items-center gap-1.5">
+                            <Lightning size={16} weight="fill" className="text-blue-600" />
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-strong)]">
+                              Optional Add-on Covers
+                            </h3>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-800">
+                              {addonCards.length} available
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setModalTarget("available_addon");
+                                setShowGlobalModal(true);
+                              }}
+                              className="rounded p-1 text-blue-700 hover:bg-blue-100"
+                              title="Add from Global Library to Add-ons"
+                            >
+                              <Plus size={14} weight="bold" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-2 max-h-[380px] overflow-y-auto pr-1">
+                          {addonCards.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center p-6 text-center text-xs text-[var(--rl-text-muted)]">
+                              <p>No optional add-ons configured for this quotation.</p>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => {
+                                  setModalTarget("available_addon");
+                                  setShowGlobalModal(true);
+                                }}
+                                className="mt-2 text-xs"
+                              >
+                                Browse Global Add-ons
+                              </Button>
+                            </div>
+                          ) : (
+                            addonCards.map((card, idx) => {
+                              const concept = globalConcepts.find(
+                                (c) => c.concept_key === card.concept_key || c.id === card.concept_id || c.label.toLowerCase() === card.label.toLowerCase()
+                              );
+                              const assetUrl =
+                                concept?.default_asset?.url ||
+                                (concept?.default_asset_id ? `/business/assets/${concept.default_asset_id}/content?profile=ui` : null) ||
+                                (card.asset_id ? `/business/assets/${card.asset_id}/content?profile=ui` : null) ||
+                                (card.label ? conceptAssets[card.label.toLowerCase()] || conceptAssets[card.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] : null);
+                              return (
+                                <AddonCard
+                                  key={card.offering_id || card.card_key || idx}
+                                  card={card}
+                                  index={idx}
+                                  assetUrl={assetUrl}
+                                  onQueue={queueOperation}
+                                />
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Quick Custom Benefit Adder Row */}
+                  <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[var(--rl-border)]">
+                    <div className="flex-1 min-w-[200px]">
+                      <Input
+                        value={customLabel}
+                        placeholder="Type custom benefit name (e.g. Free 24h Car Wash, Special Battery Cover)..."
+                        onChange={(e) => setCustomLabel(e.target.value)}
+                        className="text-xs font-medium"
+                      />
+                    </div>
+                    <div className="w-36">
+                      <Input
+                        value={customValue}
+                        placeholder="Value (e.g. FOC, RM 500)"
+                        onChange={(e) => setCustomValue(e.target.value)}
+                        className="text-xs font-medium"
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => addCustomBenefit("current")}
+                      disabled={!customLabel.trim()}
+                      className="text-xs"
+                    >
+                      + Add to Default / FOC
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => addCustomBenefit("available_addon")}
+                      disabled={!customLabel.trim()}
+                      className="text-xs"
+                    >
+                      + Add to Add-ons
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          </section>
+        </div>
       </div>
+
+      {/* Global Benefit Library Modal */}
+      {showGlobalModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
+          <Card className="flex flex-col max-h-[85vh] w-full max-w-3xl border border-[var(--rl-border)] bg-white shadow-xl overflow-hidden">
+            <div className="flex items-center justify-between border-b border-[var(--rl-border)] p-4">
+              <div>
+                <h3 className="text-base font-bold text-[var(--rl-text-strong)]">Global Benefits & Add-ons Library</h3>
+                <p className="text-xs text-[var(--rl-text-muted)]">
+                  Currently adding to: <strong className="text-[var(--rl-text-strong)]">{modalTarget === "current" ? "Default / FOC Benefits" : "Optional Add-ons"}</strong>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowGlobalModal(false)}
+                className="rounded-full p-1 text-[var(--rl-text-muted)] hover:bg-gray-100"
+              >
+                <X size={18} weight="bold" />
+              </button>
+            </div>
+
+            {/* Modal Controls: Search & Category Filter */}
+            <div className="p-4 border-b border-[var(--rl-border)] bg-gray-50/50 flex flex-wrap items-center justify-between gap-3">
+              <div className="relative flex-1 min-w-[220px]">
+                <MagnifyingGlass size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--rl-text-muted)]" />
+                <Input
+                  value={globalSearch}
+                  placeholder="Search benefits (Towing, Windscreen, Flood, CART)..."
+                  className="pl-9 text-xs"
+                  onChange={(e) => setGlobalSearch(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setModalFilter("all")}
+                  className={`rounded-md px-2.5 py-1 text-xs font-bold transition-all ${modalFilter === "all" ? "bg-[var(--rl-black)] text-white" : "bg-white border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"}`}
+                >
+                  All ({globalConcepts.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModalFilter("global")}
+                  className={`rounded-md px-2.5 py-1 text-xs font-bold transition-all ${modalFilter === "global" ? "bg-[var(--rl-black)] text-white" : "bg-white border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"}`}
+                >
+                  Table 1: Global (14)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModalFilter("addons")}
+                  className={`rounded-md px-2.5 py-1 text-xs font-bold transition-all ${modalFilter === "addons" ? "bg-[var(--rl-black)] text-white" : "bg-white border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"}`}
+                >
+                  Table 2: Add-ons (18)
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 grid gap-2 sm:grid-cols-2">
+              {filteredConcepts.map((concept) => (
+                <div
+                  key={concept.id}
+                  className="group flex items-center justify-between gap-2.5 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] p-2.5 transition-all hover:border-[var(--rl-border-strong)] hover:bg-gray-50/70"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--rl-border)] bg-white p-1">
+                      {concept.default_asset?.url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={fileUrl(concept.default_asset.url)} alt={concept.label} className="h-full w-full object-contain" />
+                      ) : (
+                        <Sparkle size={18} className="text-[var(--rl-text-muted)]" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="truncate text-xs font-bold text-[var(--rl-text-strong)]">{concept.label}</h4>
+                      <p className="truncate text-[10px] text-[var(--rl-text-muted)] font-mono">{concept.concept_key}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => addConceptAsBenefit(concept, "current")}
+                      className="text-[10px] h-7 px-2"
+                      title="Add to Default / FOC Benefits"
+                    >
+                      + Default
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => addConceptAsBenefit(concept, "available_addon")}
+                      className="text-[10px] h-7 px-2"
+                      title="Add to Optional Add-ons"
+                    >
+                      + Add-on
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            <div className="flex justify-end border-t border-[var(--rl-border)] p-3 bg-gray-50">
+              <Button variant="secondary" size="sm" onClick={() => setShowGlobalModal(false)}>
+                Close
+              </Button>
+            </div>
+          </Card>
+        </div>
+      ) : null}
+
+      {/* Off-screen Full-Resolution 1:1 Canvas for Ultra-HD PNG & Clipboard Generation */}
+      {previewTemplate ? (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "fixed",
+            left: "-99999px",
+            top: "-99999px",
+            width: previewTemplate.config.canvas?.width || 794,
+            height: previewTemplate.config.canvas?.height || 1123,
+            overflow: "hidden",
+            pointerEvents: "none",
+            zIndex: -999,
+          }}
+        >
+          <div
+            ref={canvasExportRef}
+            style={{
+              width: previewTemplate.config.canvas?.width || 794,
+              height: previewTemplate.config.canvas?.height || 1123,
+              position: "relative",
+              backgroundColor: "#ffffff",
+            }}
+          >
+            {(previewTemplate.config.canvas?.elements || []).map((element) => (
+              <CanvasElementView
+                key={element.id}
+                element={element}
+                selected={false}
+                readOnly={true}
+                onPointerDown={() => {}}
+                variableValues={previewFields}
+                benefitData={workspace.benefit_cards}
+                conceptAssets={conceptAssets}
+                assets={Object.entries(previewTemplate.config.assets || {}).map(([key, id]) => ({
+                  id,
+                  label: key,
+                  url: `/template-assets/${id}`,
+                }))}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Floating Action Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-[var(--rl-radius-sm)] border border-neutral-800 bg-neutral-900/95 px-4 py-3 text-xs font-semibold text-white shadow-2xl backdrop-blur-md transition-all">
+          <CheckCircle size={17} weight="fill" className="text-emerald-400 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
     </section>
   );
 }

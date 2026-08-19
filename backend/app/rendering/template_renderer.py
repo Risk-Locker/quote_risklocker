@@ -219,6 +219,9 @@ def _dynamic_benefit_grid(
             if asset_uri else ""
         )
         cost_label = "FOC" if cost == "foc" else ""
+        cost_html = f'<em style="font-size:11px;font-weight:800">{cost_label}</em>' if cost_label else ""
+        value_html = f'<span style="display:block;margin-top:2px;font-size:{density["value"]}px;line-height:1.2;color:#6b7280;word-break:break-word">{value}</span>' if value else ""
+        font_size = density["label"] if len(label) <= 18 else max(10, density["label"] - 3)
         scale = packed.scale
         output.append(
             f'<article data-benefit-card="1" data-card-scale="{scale:.12f}" '
@@ -230,9 +233,9 @@ def _dynamic_benefit_grid(
             'transform-origin:center;display:grid;align-items:center;'
             f'grid-template-columns:{density["icon"] + 10}px minmax(0,1fr);gap:{density["gap"]}px;padding:{density["padding"]}px;'
             f'box-sizing:border-box;{card_style};overflow:hidden">'
-            f'<div>{icon}</div><div style="min-width:0"><strong style="display:block;font-size:{density["label"]}px;line-height:1.2">{label}</strong>'
-            f'<span style="display:block;margin-top:4px;font-size:{density["value"]}px;line-height:1.25">{value}</span>'
-            f'{f"<em style=\"font-size:11px;font-weight:800\">{cost_label}</em>" if cost_label else ""}</div></div></article>'
+            f'<div>{icon}</div><div style="min-width:0;display:flex;flex-direction:column;justify-content:center">'
+            f'<strong style="display:block;font-size:{font_size}px;line-height:1.18;word-break:break-word">{label}</strong>'
+            f'{value_html}{cost_html}</div></div></article>'
         )
     warning = escape(layout.warning or "")
     return (

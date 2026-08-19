@@ -13,18 +13,21 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import AuthContext, current_auth, current_auth_optional, current_user, ensure_trusted_origin, settings_dep
 from app.api.schemas import (
-    BulkClientRecordDeleteRequest,
-    BulkUploadedFileDeleteRequest,
+    BenefitAliasSaveRequest,
     BenefitCatalogSaveRequest,
     BenefitConceptSaveRequest,
+    BulkClientRecordDeleteRequest,
+    BulkUploadedFileDeleteRequest,
     BusinessCompanySaveRequest,
     BusinessProductSaveRequest,
     BusinessTierSaveRequest,
+    CatalogContextRequest,
     CatalogOfferingSaveRequest,
     CatalogPublishRequest,
     ClientRecordUpdateRequest,
     CompanySaveRequest,
     CompanyAliasSaveRequest,
+    CoverageTypeSaveRequest,
     DictionaryLearnRequest,
     DraftGenerateRequest,
     DraftUpdateRequest,
@@ -34,9 +37,12 @@ from app.api.schemas import (
     LoginRequest,
     OurSpecialSaveRequest,
     OurSpecialVariantSaveRequest,
+    PackageCloneRequest,
+    PackageSaveRequest,
     RoadTaxRuleSaveRequest,
     RecordBulkActionRequest,
     RecordSavedViewRequest,
+    SegmentSaveRequest,
     TemplateSaveRequest,
     TemplateGroupSaveRequest,
     TemplatePublishRequest,
@@ -48,14 +54,16 @@ from app.api.schemas import (
     UserUpdateRequest,
     VariantMoveRequest,
     VehicleBrandSaveRequest,
+    VehicleCategorySaveRequest,
     VehicleModelSaveRequest,
+    VehicleSubcategorySaveRequest,
     WorkspacePatchRequest,
     VersionGenerationRequest,
 )
+from app.auth.cookies import clear_auth_cookies, set_auth_cookies
 from app.auth.rbac import can_view_owner_record, require_role
 from app.core.config import Settings
 from app.core.errors import AppError
-from app.core.security import csrf_token_for_session
 from app.db.session import get_db
 from app.models.enums import Role, StorageStatus
 from app.models.tables import (
@@ -184,6 +192,7 @@ from app.services.import_export import parse_tabular, parse_vehicles_workbook
 from app.storage.supabase import StorageError, SupabaseStorage
 from app.services.business_setup_service import (
     create_benefit_catalog,
+    create_new_draft_revision,
     get_catalog_workspace,
     get_business_company_workspace,
     list_benefit_concepts,
@@ -193,41 +202,43 @@ from app.services.business_setup_service import (
     list_source_documents,
     save_benefit_concept,
     save_business_company,
+    delete_business_company,
     save_business_product,
     save_business_tier,
     save_company_alias,
     save_catalog_offering,
+    remove_catalog_offering,
     publish_catalog_revision,
+    update_catalog_context,
     upload_business_asset,
     retire_company_alias,
 )
 from app.services.worker_health import worker_readiness
+from app.services.benefit_setup_service import (
+    clone_package,
+    list_benefit_aliases,
+    list_coverage_types,
+    list_segments,
+    list_vehicle_categories,
+    list_vehicle_subcategories,
+    retire_benefit_alias,
+    retire_coverage_type,
+    retire_package,
+    retire_segment,
+    retire_vehicle_category,
+    retire_vehicle_subcategory,
+    save_benefit_alias,
+    save_coverage_type,
+    save_package,
+    save_segment,
+    save_vehicle_category,
+    save_vehicle_subcategory,
+)
 
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-def _set_session_cookie(response: FastAPIResponse, settings: Settings, token: str, max_age: int) -> None:
-    response.set_cookie(
-        key=settings.session_cookie_name,
-        value=token,
-        max_age=max_age,
-        httponly=True,
-        secure=settings.session_cookie_secure,
-        samesite="lax",
-        path="/",
-    )
-    response.set_cookie(
-        key=getattr(settings, "csrf_cookie_name", "risklocker_csrf"),
-        value=csrf_token_for_session(token, settings.auth_hash_secret),
-        max_age=max_age,
-        httponly=False,
-        secure=settings.session_cookie_secure,
-        samesite="lax",
-        path="/",
-    )
 
 
 def _pdf_response(data: bytes, filename: str, range_header: str | None, download: bool) -> Response:
@@ -279,7 +290,7 @@ def auth_login(
         ip_address=request.client.host if request.client else None,
     )
     max_age = int((session.absolute_expires_at - session.last_activity_at).total_seconds())
-    _set_session_cookie(response, settings, raw_token, max_age)
+    set_auth_cookies(response, settings, raw_token, max_age)
     return {"user": serialize_user(user)}
 
 
@@ -292,20 +303,7 @@ def auth_logout(
 ) -> dict:
     if auth is not None:
         revoke_session(db, auth.session, auth.user.id)
-    response.delete_cookie(
-        settings.session_cookie_name,
-        path="/",
-        secure=settings.session_cookie_secure,
-        httponly=True,
-        samesite="lax",
-    )
-    response.delete_cookie(
-        getattr(settings, "csrf_cookie_name", "risklocker_csrf"),
-        path="/",
-        secure=settings.session_cookie_secure,
-        httponly=False,
-        samesite="lax",
-    )
+    clear_auth_cookies(response, settings)
     return {"signed_out": True}
 
 
@@ -558,7 +556,12 @@ def session_template_config(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
-    return {"template": get_workspace_template_config(db, user, session_id)}
+    try:
+        return {"template": get_workspace_template_config(db, user, session_id)}
+    except AppError as err:
+        if err.status_code == 409:
+            return {"template": None}
+        raise
 
 
 @router.patch("/drafts/{draft_id}/workspace")
@@ -968,6 +971,16 @@ def business_company_save(
     return {"company": save_business_company(db, user, payload.model_dump(exclude_none=True))}
 
 
+@router.delete("/business/companies/{company_id}", status_code=status.HTTP_204_NO_CONTENT)
+def business_company_delete(
+    company_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> Response:
+    delete_business_company(db, user, company_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/business/companies/{company_id}/workspace")
 def business_company_workspace(
     company_id: str,
@@ -1021,6 +1034,161 @@ def business_benefit_concept_save(
     user: User = Depends(current_user),
 ) -> dict:
     return {"benefit_concept": save_benefit_concept(db, user, payload.model_dump(exclude_none=True))}
+
+
+@router.get("/business/segments")
+def business_segments(
+    search: str = Query(default="", max_length=200),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"segments": list_segments(db, user, search=search, page=page, page_size=page_size)}
+
+
+@router.post("/business/segments")
+def business_segment_save(
+    payload: SegmentSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"segment": save_segment(db, user, payload.model_dump(exclude_none=True))}
+
+
+@router.delete("/business/segments/{segment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def business_segment_retire(
+    segment_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> Response:
+    retire_segment(db, user, segment_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/business/vehicle-categories")
+def business_vehicle_categories(
+    search: str = Query(default="", max_length=200),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"vehicle_categories": list_vehicle_categories(db, user, search=search, page=page, page_size=page_size)}
+
+
+@router.post("/business/vehicle-categories")
+def business_vehicle_category_save(
+    payload: VehicleCategorySaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"vehicle_category": save_vehicle_category(db, user, payload.model_dump(exclude_none=True))}
+
+
+@router.delete("/business/vehicle-categories/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
+def business_vehicle_category_retire(
+    category_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> Response:
+    retire_vehicle_category(db, user, category_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/business/vehicle-subcategories")
+def business_vehicle_subcategories(
+    category_id: str | None = Query(default=None, max_length=80),
+    search: str = Query(default="", max_length=200),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"vehicle_subcategories": list_vehicle_subcategories(db, user, category_id=category_id, search=search, page=page, page_size=page_size)}
+
+
+@router.post("/business/vehicle-subcategories")
+def business_vehicle_subcategory_save(
+    payload: VehicleSubcategorySaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"vehicle_subcategory": save_vehicle_subcategory(db, user, payload.model_dump(exclude_none=True))}
+
+
+@router.delete("/business/vehicle-subcategories/{subcategory_id}", status_code=status.HTTP_204_NO_CONTENT)
+def business_vehicle_subcategory_retire(
+    subcategory_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> Response:
+    retire_vehicle_subcategory(db, user, subcategory_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/business/coverage-types")
+def business_coverage_types(
+    search: str = Query(default="", max_length=200),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"coverage_types": list_coverage_types(db, user, search=search, page=page, page_size=page_size)}
+
+
+@router.post("/business/coverage-types")
+def business_coverage_type_save(
+    payload: CoverageTypeSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"coverage_type": save_coverage_type(db, user, payload.model_dump(exclude_none=True))}
+
+
+@router.delete("/business/coverage-types/{coverage_id}", status_code=status.HTTP_204_NO_CONTENT)
+def business_coverage_type_retire(
+    coverage_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> Response:
+    retire_coverage_type(db, user, coverage_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/business/benefit-aliases")
+def business_benefit_aliases(
+    benefit_id: str | None = Query(default=None, max_length=80),
+    scope: str | None = Query(default=None, max_length=40),
+    product_id: str | None = Query(default=None, max_length=80),
+    package_id: str | None = Query(default=None, max_length=80),
+    search: str = Query(default="", max_length=200),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"benefit_aliases": list_benefit_aliases(db, user, benefit_id=benefit_id, scope=scope, product_id=product_id, package_id=package_id, search=search, page=page, page_size=page_size)}
+
+
+@router.post("/business/benefit-aliases")
+def business_benefit_alias_save(
+    payload: BenefitAliasSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"benefit_alias": save_benefit_alias(db, user, payload.model_dump(exclude_none=True))}
+
+
+@router.delete("/business/benefit-aliases/{alias_id}", status_code=status.HTTP_204_NO_CONTENT)
+def business_benefit_alias_retire(
+    alias_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> Response:
+    retire_benefit_alias(db, user, alias_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/business/assets")
@@ -1107,6 +1275,16 @@ def business_catalog_create(
     return {"catalog": create_benefit_catalog(db, user, payload.model_dump(exclude_none=True))}
 
 
+@router.post("/business/catalogs/{catalog_id}/context")
+def business_catalog_context(
+    catalog_id: str,
+    payload: CatalogContextRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"catalog": update_catalog_context(db, user, catalog_id, payload.model_dump(exclude_none=True))}
+
+
 @router.post("/business/catalogs/{catalog_id}/offerings")
 def business_catalog_offering_save(
     catalog_id: str,
@@ -1124,6 +1302,50 @@ def business_catalog_offering_save(
     }
 
 
+@router.delete("/business/catalogs/{catalog_id}/offerings/{offering_id}", status_code=status.HTTP_204_NO_CONTENT)
+def business_catalog_offering_delete(
+    catalog_id: str,
+    offering_id: str,
+    base_revision: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> Response:
+    remove_catalog_offering(db, user, catalog_id, offering_id, base_revision=base_revision)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/business/catalogs/{catalog_id}/packages")
+def business_catalog_package_save(
+    catalog_id: str,
+    payload: PackageSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"package": save_package(db, user, catalog_id, payload.model_dump(exclude_none=True))}
+
+
+@router.post("/business/catalogs/{catalog_id}/packages/{package_id}/clone")
+def business_catalog_package_clone(
+    catalog_id: str,
+    package_id: str,
+    payload: PackageCloneRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"package": clone_package(db, user, catalog_id, package_id, payload.model_dump(exclude_none=True))}
+
+
+@router.delete("/business/catalogs/{catalog_id}/packages/{package_id}", status_code=status.HTTP_204_NO_CONTENT)
+def business_catalog_package_retire(
+    catalog_id: str,
+    package_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> Response:
+    retire_package(db, user, catalog_id, package_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/business/catalogs/{catalog_id}/publish")
 def business_catalog_publish(
     catalog_id: str,
@@ -1132,6 +1354,16 @@ def business_catalog_publish(
     user: User = Depends(current_user),
 ) -> dict:
     return {"catalog": publish_catalog_revision(db, user, catalog_id, base_revision=payload.base_revision)}
+
+
+@router.post("/business/catalogs/{catalog_id}/new-draft")
+def business_catalog_new_draft(
+    catalog_id: str,
+    payload: CatalogPublishRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"catalog": create_new_draft_revision(db, user, catalog_id, base_revision=payload.base_revision)}
 
 
 @router.get("/business/catalogs/{catalog_id}/workspace")
@@ -1172,6 +1404,8 @@ def business_publish_template(
         base_revision=payload.base_revision,
     )
     template = db.get(OutputTemplateConfig, template_id)
+    if not template:
+        raise AppError("Template not found.", 404)
     return {
         "template": serialize_template(template, db),
         "template_revision": serialize_template_revision(db, revision),
@@ -1219,8 +1453,10 @@ async def admin_template_asset_upload(
 ) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
     data = await file.read()
+    filename = str(file.filename or "asset.png")
+    content_type = file.content_type or "application/octet-stream"
     try:
-        record = upload_template_asset(db, settings, user, file.filename, file.content_type, data, label=label, folder=folder)
+        record = upload_template_asset(db, settings, user, filename, content_type, data, label=label, folder=folder)
     except StorageError as exc:
         raise AppError(str(exc), 400) from exc
     return {

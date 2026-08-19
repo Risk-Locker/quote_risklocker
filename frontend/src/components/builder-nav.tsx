@@ -6,7 +6,9 @@ import { usePathname } from "next/navigation";
 
 const items: Array<{ href: Route; label: string }> = [
   { href: "/builder/templates" as Route, label: "Templates" },
+  { href: "/builder/companies" as Route, label: "Insurance Companies" },
   { href: "/builder/benefits" as Route, label: "Benefits" },
+  { href: "/builder/global-benefits" as Route, label: "Global Benefits" },
   { href: "/builder/assets" as Route, label: "Asset Library" },
 ];
 

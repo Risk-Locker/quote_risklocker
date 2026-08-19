@@ -123,6 +123,13 @@ def _add(results: dict[str, list[CandidateValue]], field: str, value: str | None
     cleaned = re.sub(r"\s+", " ", str(value)).strip(" :;-")
     if not cleaned:
         return
+    if field == "vehicle_no":
+        cleaned = re.sub(r"\s+", "", cleaned).strip(" .:;-")
+        if not cleaned or len(cleaned) < 2 or cleaned.startswith("RM") or "UNREGISTERED" in cleaned.upper():
+            return
+    if field == "car_brand":
+        if len(cleaned) <= 1 or cleaned in {"&", "AND", "-"}:
+            return
     if field in MONEY_FIELDS:
         normalized_money = normalize_money(cleaned)
         if normalized_money is None:
@@ -141,7 +148,10 @@ def _add(results: dict[str, list[CandidateValue]], field: str, value: str | None
         cc_match = re.search(r"\d{3,5}", cleaned)
         cleaned = cc_match.group(0) if cc_match else cleaned
     if field in {"cover_start_date", "cover_end_date", "issue_date", "valid_until"}:
-        cleaned = normalize_date(cleaned) or cleaned
+        norm_date = normalize_date(cleaned)
+        if not norm_date:
+            return
+        cleaned = norm_date
     results[field].append(
         CandidateValue(
             field=field,
@@ -192,7 +202,8 @@ def _line_value(line: str, lines: list[str], index: int) -> str:
     if ":" in line:
         tail = line.split(":", 1)[1].strip()
         if tail:
-            return tail
+            parts = re.split(r"\s{2,}|(?i:\b(?:car|model|vehicle|chassis|engine|year|reg(?:ist|istration)?|premium|ncd)\b[\s\-:])", tail)
+            return parts[0].strip() if parts else tail
     return _next_value(lines, index)
 
 
@@ -220,31 +231,46 @@ def _semantic_label_map() -> list[tuple[str, str]]:
         ("applicant", "customer_name"),
         ("insured name", "customer_name"),
         ("participant name", "customer_name"),
+        ("participant", "customer_name"),
+        ("name", "customer_name"),
         ("quotation date", "issue_date"),
         ("issued date", "issue_date"),
+        ("date", "issue_date"),
         ("valid until", "valid_until"),
         ("validity period", "valid_until"),
         ("vehicle registration number", "vehicle_no"),
         ("vehicle no", "vehicle_no"),
         ("registration no", "vehicle_no"),
+        ("regist. no", "vehicle_no"),
+        ("regist no", "vehicle_no"),
+        ("reg. no", "vehicle_no"),
+        ("reg no", "vehicle_no"),
         ("vehicle make", "car_brand"),
         ("make", "car_brand"),
         ("vehicle model", "car_model"),
         ("make & model", "car_model"),
+        ("model", "car_model"),
         ("year of manufactured", "vehicle_year"),
+        ("year of manufacture", "vehicle_year"),
         ("year of make", "vehicle_year"),
+        ("year", "vehicle_year"),
         ("cubic capacity", "engine_cc"),
         ("capacity", "engine_cc"),
         ("chassis number", "chassis_no"),
         ("chassis no", "chassis_no"),
         ("engine/motor no", "engine_no"),
         ("engine no", "engine_no"),
+        ("sum covered (rm)", "coverage_amount"),
         ("sum covered", "coverage_amount"),
         ("vehicle sum insured", "coverage_amount"),
         ("sum insured", "coverage_amount"),
         ("cover type", "coverage_type"),
         ("coverage type", "coverage_type"),
+        ("scope of cover", "coverage_type"),
+        ("takaful scheme", "coverage_type"),
         ("product type", "product_name"),
+        ("basic contribution", "basic_premium_vehicle"),
+        ("basic premium", "basic_premium_vehicle"),
         ("gross contribution", "premium"),
         ("gross premium", "premium"),
         ("total contribution payable", "total_amount"),
@@ -254,12 +280,15 @@ def _semantic_label_map() -> list[tuple[str, str]]:
         ("service tax", "service_tax"),
         ("excess all claims", "excess_amount"),
         ("excess amount", "excess_amount"),
+        ("policy excess", "excess_amount"),
     ]
 
 
 def _add_period_of_cover(text: str, lines: list[str], page_text: list[dict], results: dict[str, list[CandidateValue]]) -> None:
     patterns = [
         r"(?i)period of cover\s*:?\s*(?P<start>\d{1,2}[/-]\d{1,2}[/-]\d{4})\s*(?:until|to|-)\s*(?P<end>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
+        r"(?i)period of takaful\s*:?\s*(?P<start>\d{1,2}[/-]\d{1,2}[/-]\d{4})\s*(?:until|to|-)\s*(?P<end>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
+        r"(?i)period of insurance\s*:?\s*(?P<start>\d{1,2}[/-]\d{1,2}[/-]\d{4})\s*(?:until|to|-)\s*(?P<end>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
     ]
     for pattern in patterns:
         match = re.search(pattern, text, re.DOTALL)
@@ -268,7 +297,7 @@ def _add_period_of_cover(text: str, lines: list[str], page_text: list[dict], res
             _add(results, "cover_end_date", match.group("end"), "semantic_cover_period", 0.97, text, match.start(), match.end(), page_text)
             return
     for index, line in enumerate(lines):
-        if line.lower() in {"period of cover", "cover period"}:
+        if line.lower() in {"period of cover", "cover period", "period of takaful", "period of insurance"}:
             value = _next_value(lines, index)
             dates = _dates(value)
             if len(dates) >= 2:
@@ -291,6 +320,10 @@ def _add_semantic_label_values(text: str, page_text: list[dict], results: dict[s
                 if field == "coverage_amount" and "market value" in value.lower():
                     money_values = _money(value)
                     value = money_values[0] if money_values else value
+                if field == "vehicle_no":
+                    # Ignore values like '-UNREGISTERED-' or currency-like tokens
+                    if "unregistered" in value.lower() or value.upper().startswith("RM"):
+                        continue
                 if value:
                     _add_line_value(results, field, value, "semantic_label_value", 0.94, line, text, page_text)
 
@@ -301,26 +334,29 @@ def _add_contribution_rows(text: str, page_text: list[dict], results: dict[str, 
         line = lines[index]
         if "www." in line.lower() or "head office" in line.lower():
             return None
-        line_money = _money(line)
+        cleaned_line = re.sub(r"\(\d+(?:\.\d+)?\s*%\)", "", line)
+        line_money = _money(cleaned_line)
         if line_money:
             return line_money[0]
         for candidate in lines[index + 1 : index + 4]:
             if candidate.strip().upper() == "RM":
                 continue
-            values = _money(candidate)
-            return values[0] if values else None
+            cand_clean = re.sub(r"\(\d+(?:\.\d+)?\s*%\)", "", candidate)
+            values = _money(cand_clean)
+            if values:
+                return values[0]
         return None
 
     for index, line in enumerate(lines):
         lower = line.lower()
         window = " ".join(lines[index : index + 5])
-        money_values = _money(window)
-        if "ncd" in lower:
+        money_values = _money(re.sub(r"\(\d+(?:\.\d+)?\s*%\)", "", window))
+        if "ncd" in lower or "no-claim-discount" in lower:
             percent = re.search(r"\((?P<ncd>\d{1,2}(?:\.\d+)?)\s*%\)|(?P<ncd2>\d{1,2}(?:\.\d+)?)\s*%", line)
             if percent:
                 _add_line_value(results, "ncd_percent", percent.group("ncd") or percent.group("ncd2"), "semantic_contribution_row", 0.96, line, text, page_text)
             if money_values:
-                _add_line_value(results, "ncd_amount", money_values[-1], "semantic_contribution_row", 0.9, line, text, page_text)
+                _add_line_value(results, "ncd_amount", money_values[0], "semantic_contribution_row", 0.9, line, text, page_text)
         if lower.startswith("gross contribution") or lower.startswith("gross premium"):
             amount = row_amount(index)
             if amount:
@@ -330,6 +366,17 @@ def _add_contribution_rows(text: str, page_text: list[dict], results: dict[str, 
             amount = row_amount(index)
             if amount:
                 _add_line_value(results, "total_amount", amount, "semantic_contribution_row", 0.98, line, text, page_text)
+        if lower.startswith("service tax") or lower.startswith("sst"):
+            amount = row_amount(index)
+            if amount:
+                _add_line_value(results, "service_tax", amount, "semantic_contribution_row", 0.95, line, text, page_text)
+        if lower.startswith("stamp duty"):
+            amount = row_amount(index)
+            if amount:
+                _add_line_value(results, "stamp_duty", amount, "semantic_contribution_row", 0.95, line, text, page_text)
+        if "policy excess" in lower or (lower.startswith("excess") and "rm" in window.lower()):
+            if money_values:
+                _add_line_value(results, "excess_amount", money_values[0], "semantic_contribution_row", 0.92, line, text, page_text)
         if lower.startswith("windscreen"):
             money_match = re.search(r"\((RM\s*[\d,]+(?:\.\d{2})?)\)", line, re.IGNORECASE)
             if money_match:
@@ -581,10 +628,32 @@ def find_candidates(
                 value = re.split(r"\s{2,}|(?i:\b(vehicle|model|premium|total|road\s*tax|ncd|sum insured|cover)\b)", value)[0]
                 _add(results, field, value, "label_nearby", 0.78, text, match.start(), match.end(), page_text)
 
+    # Filename vehicle number extraction hint (e.g., 20250604_JJC9250_Quotation_STMB.pdf -> JJC9250)
+    if source_filename:
+        clean_fn = source_filename.upper().replace("_", " ").replace("-", " ")
+        for fn_candidate in re.findall(r"\b[A-Z]{1,3}\d{1,4}[A-Z]?\b", clean_fn):
+            if not re.fullmatch(r"20\d{2}|19\d{2}|PDF|REF|STMB|AMGEN|QBE|PDS", fn_candidate):
+                _add_static(results, "vehicle_no", fn_candidate, "filename_vehicle_no", 0.95, source_filename, text, page_text)
+
+    non_plate_words = {
+        "ACT", "THE", "FOR", "NOT", "AND", "ALL", "BUT", "ANY", "CAN", "MAY", "ARE", "SEE",
+        "NEW", "OLD", "CAR", "VAN", "BUS", "FAX", "TEL", "PER", "ONE", "TWO", "SUM", "NET",
+        "MAX", "MIN", "STD", "TAX", "SST", "PDS", "REF", "NCD", "JPJ", "CC", "RM", "PIDM",
+        "BHD", "SDN", "LTD", "INC", "JAN", "FEB", "MAR", "APR", "JUN", "JUL", "AUG", "SEP",
+        "OCT", "NOV", "DEC", "YES", "NO", "WEST", "EAST", "IS", "IN", "IF", "IT", "AT", "BY",
+        "ON", "TO", "OF", "OR", "SO", "AS", "HE", "WE", "DO", "GO", "UP", "MY", "AN", "AM",
+        "ME", "US",
+    }
     for match in re.finditer(r"\b[A-Z]{1,3}\s?\d{1,4}[A-Z]?\b", text.upper()):
         value = match.group(0)
-        if not re.fullmatch(r"20\d{2}|19\d{2}", value):
-            _add(results, "vehicle_no", value, "pattern_vehicle_no", 0.7, text, match.start(), match.end(), page_text)
+        norm_val = re.sub(r"\s+", "", value)
+        prefix_match = re.match(r"^[A-Z]+", norm_val)
+        prefix = prefix_match.group(0) if prefix_match else ""
+        if prefix in non_plate_words or norm_val in non_plate_words:
+            continue
+        if norm_val.startswith("RM") or re.fullmatch(r"20\d{2}|19\d{2}", norm_val):
+            continue
+        _add(results, "vehicle_no", value, "pattern_vehicle_no", 0.7, text, match.start(), match.end(), page_text)
 
     for match in re.finditer(r"\b(?:19|20)\d{2}\b", text):
         year = match.group(0)

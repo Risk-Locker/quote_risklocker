@@ -181,3 +181,48 @@ def test_extracted_optional_addon_value_auto_selects_the_offer():
     selected = next(item for item in db.added if isinstance(item, DraftBenefitSelection))
     assert selected.catalog_offering_id == flood.id and selected.state == "current" and selected.cost_status == "paid"
     assert decision.disposition == "mapped" and decision.selection_id == selected.id
+
+
+def test_package_based_catalog_pinning_and_primary_package_seeding():
+    product = InsuranceProduct(id="prod-qbe", company_id="comp-qbe", product_key="qbe-pc", name="QBE Private Car", status="active")
+    catalog = BenefitCatalog(id="cat-qbe", company_id="comp-qbe", product_id=product.id, name="QBE Private Car", status="published", package_id="pkg-lite")
+    revision = BenefitCatalogRevision(id="rev-qbe", catalog_id=catalog.id, revision_number=1, state="published", content_hash="d" * 64)
+    lite_towing = CatalogOffering(id="off-lite-tow", catalog_revision_id=revision.id, offering_key="lite-tow", concept_id="c-tow", offering_kind="base", role="included", applies_to_type="package", applies_to_id="pkg-lite", status="active")
+    plus_towing = CatalogOffering(id="off-plus-tow", catalog_revision_id=revision.id, offering_key="plus-tow", concept_id="c-tow", offering_kind="base", role="included", applies_to_type="package", applies_to_id="pkg-plus", status="active")
+    lite_windscreen = CatalogOffering(id="off-lite-ws", catalog_revision_id=revision.id, offering_key="lite-ws", concept_id="c-ws", offering_kind="optional", role="addon_option", applies_to_type="package", applies_to_id="pkg-lite", status="active")
+
+    draft = QuotationDraft(id="draft-qbe", uploaded_file_id="f-qbe", owner_id="u-1", company_id="comp-qbe", fields={"product_name": {"value": "QBE Private Car"}}, scalar_decisions={}, warnings=[])
+    db = FakeDb([product, catalog, revision, lite_towing, plus_towing, lite_windscreen])
+
+    res = initialize_catalog_review(db, draft)
+    assert res["catalog_revision_id"] == revision.id
+    assert res["base_benefits_created"] == 1
+    selections = [item for item in db.added if isinstance(item, DraftBenefitSelection)]
+    assert len(selections) == 1
+    assert selections[0].catalog_offering_id == lite_towing.id
+
+
+def test_same_concept_addon_upgrade_supersedes_without_relations_edge():
+    product = InsuranceProduct(id="prod-1", company_id="comp-1", name="Product", status="active")
+    catalog = BenefitCatalog(id="cat-1", company_id="comp-1", product_id=product.id, name="Product", status="published")
+    revision = BenefitCatalogRevision(id="rev-1", catalog_id=catalog.id, revision_number=1, state="published", content_hash="e" * 64)
+    base_towing = CatalogOffering(id="off-base", catalog_revision_id=revision.id, offering_key="tow-50", concept_id="c-tow", offering_kind="base", role="included", typed_value={"type": "distance", "value": "50", "unit": "km"}, status="active")
+    upgrade_towing = CatalogOffering(id="off-upg", catalog_revision_id=revision.id, offering_key="tow-150", concept_id="c-tow", offering_kind="optional", role="addon_option", typed_value={"type": "distance", "value": "150", "unit": "km"}, status="active")
+
+    extraction = ExtractionRecord(id="ext-1", uploaded_file_id="f-1", benefit_lines=[], company_resolution={}, candidates={}, warnings=[])
+    line = ExtractionBenefitLine(id="l-1", extraction_record_id=extraction.id, line_id="p1-l1", raw_label="Towing 150 km", normalized_label="towing 150 km", page_number=1, source_scope="quotation_selected", line_kind="benefit_candidate", inclusion_state="selected", evidence={}, candidate_mappings=[{"concept_id": "c-tow", "label": "Towing"}], extracted_value={"type": "distance", "value": "150", "unit": "km"})
+    decision = DraftSourceLineDecision(id="dec-1", draft_id="draft-1", source_line_id=line.id, disposition="unresolved")
+    current_sel = DraftBenefitSelection(id="sel-base", draft_id="draft-1", selection_key="catalog:tow-50", catalog_offering_id=base_towing.id, concept_id="c-tow", item_kind="catalog", state="current", cost_status="included", evidence_snapshot={}, sort_order=0)
+    draft = QuotationDraft(id="draft-1", uploaded_file_id="f-1", owner_id="u-1", company_id="comp-1", product_id=product.id, catalog_revision_id=revision.id, fields={}, scalar_decisions={}, warnings=[])
+
+    # Note: NO BenefitRelation objects in db!
+    db = FakeDb([product, catalog, revision, base_towing, upgrade_towing, extraction, line, decision, current_sel, draft])
+
+    result = auto_apply_extracted_benefits(db, draft)
+    assert result["applied"] == 1
+    assert current_sel.state == "superseded"
+    new_sel = next(item for item in db.added if isinstance(item, DraftBenefitSelection))
+    assert new_sel.catalog_offering_id == upgrade_towing.id
+    assert new_sel.state == "current"
+    assert decision.disposition == "mapped"
+

@@ -10,6 +10,7 @@ from app.domain.benefits import BenefitValue
 from app.models.tables import (
     BenefitCatalog,
     BenefitCatalogRevision,
+    BenefitPackage,
     BenefitRelation,
     CatalogOffering,
     DraftBenefitSelection,
@@ -42,10 +43,12 @@ def _single_exact(rows: list, name: str) -> object | None:
 
 
 def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | None:
-    """Pin only an exact, unambiguous catalog context; never guess a product/tier."""
+    """Pin only an exact, unambiguous catalog context; never guess an arbitrary catalog."""
 
     if not draft.company_id:
         return None
+
+    # 1. Resolve product
     products = [item for item in _rows(db, InsuranceProduct) if item.company_id == draft.company_id and item.status == "active"]
     if draft.product_id and all(item.id != draft.product_id for item in products):
         draft.product_id = None
@@ -57,6 +60,7 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
     if not draft.product_id and not product_name and len(products) == 1:
         draft.product_id = products[0].id
 
+    # 2. Resolve legacy tier (if product has tiers)
     tiers = [item for item in _rows(db, InsuranceProductTier) if item.product_id == draft.product_id and item.status == "active"] if draft.product_id else []
     if draft.tier_id and all(item.id != draft.tier_id for item in tiers):
         draft.tier_id = None
@@ -68,26 +72,49 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
     if not draft.tier_id and not tier_name and len(tiers) == 1:
         draft.tier_id = tiers[0].id
 
-    if not draft.product_id or not draft.tier_id:
-        draft.catalog_revision_id = None
-        return None
+    # 3. Find candidate catalogs
     catalogs = [
         item for item in _rows(db, BenefitCatalog)
         if item.company_id == draft.company_id
         and item.status in {"active", "published", "draft"}
-        and item.product_id == draft.product_id
-        and item.tier_id == draft.tier_id
     ]
-    if len(catalogs) != 1:
-        return None
+    if draft.product_id:
+        catalogs = [item for item in catalogs if item.product_id == draft.product_id]
+    if tiers:
+        if not draft.tier_id:
+            # Ambiguous tier required
+            draft.catalog_revision_id = None
+            return None
+        catalogs = [item for item in catalogs if item.tier_id == draft.tier_id]
+
+    if not catalogs or len(catalogs) != 1:
+        # If no single catalog found, check if there is exactly 1 catalog for this company
+        company_catalogs = [
+            item for item in _rows(db, BenefitCatalog)
+            if item.company_id == draft.company_id and item.status in {"active", "published"}
+        ]
+        if len(company_catalogs) == 1:
+            target_catalog = company_catalogs[0]
+            if not draft.product_id and target_catalog.product_id:
+                draft.product_id = target_catalog.product_id
+        else:
+            draft.catalog_revision_id = None
+            return None
+    else:
+        target_catalog = catalogs[0]
+
     revisions = [
         item for item in _rows(db, BenefitCatalogRevision)
-        if item.catalog_id == catalogs[0].id and item.state == "published"
+        if item.catalog_id == target_catalog.id and item.state == "published"
     ]
     if not revisions:
+        draft.catalog_revision_id = None
         return None
+
     revision = max(revisions, key=lambda item: (int(item.revision_number), str(item.id)))
     draft.catalog_revision_id = revision.id
+    if target_catalog.tier_id and not draft.tier_id:
+        draft.tier_id = target_catalog.tier_id
     return revision
 
 
@@ -95,12 +122,29 @@ def seed_base_benefits(db, draft: QuotationDraft, revision: BenefitCatalogRevisi
     existing = [item for item in _rows(db, DraftBenefitSelection) if item.draft_id == draft.id]
     existing_offerings = {item.catalog_offering_id for item in existing if item.catalog_offering_id}
     existing_concepts = {item.concept_id for item in existing if item.state == "current" and item.concept_id}
-    offerings = [
+
+    # Find catalog to check primary package
+    catalogs = [item for item in _rows(db, BenefitCatalog) if item.id == revision.catalog_id]
+    primary_pkg_id = catalogs[0].package_id if catalogs else None
+
+    # Filter offerings belonging to this revision that are included/base
+    all_offerings = [
         item for item in _rows(db, CatalogOffering)
-        if item.catalog_revision_id == revision.id and item.status in {"active", "compatibility"} and item.offering_kind == "base"
+        if item.catalog_revision_id == revision.id and item.status in {"active", "compatibility"}
     ]
+
+    base_offerings = []
+    for item in all_offerings:
+        is_included = item.role == "included" or (item.offering_kind == "base" and item.role is None)
+        if not is_included:
+            continue
+        # If package hierarchy applies, only seed offerings for the primary package (or product-wide)
+        if primary_pkg_id and item.applies_to_type == "package" and item.applies_to_id != primary_pkg_id:
+            continue
+        base_offerings.append(item)
+
     created = 0
-    for offering in sorted(offerings, key=lambda item: (int(item.sort_order or 0), item.offering_key)):
+    for offering in sorted(base_offerings, key=lambda item: (int(item.sort_order or 0), item.offering_key)):
         if offering.id in existing_offerings or offering.concept_id in existing_concepts:
             continue
         db.add(DraftBenefitSelection(
@@ -224,9 +268,9 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                 concept_id = mapping.get("concept_id")
                 if not concept_id:
                     continue
-                concept_offerings = [item for item in offerings if item.concept_id == concept_id]
+                concept_offerings = [item for item in offerings if str(item.concept_id) == str(concept_id)]
                 current = next(
-                    (item for item in selections if item.concept_id == concept_id and item.state == "current"),
+                    (item for item in selections if str(item.concept_id) == str(concept_id) and item.state == "current"),
                     None,
                 )
                 if current is not None and current.catalog_offering_id in offering_by_id:
@@ -235,6 +279,7 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                         decision.disposition = "mapped"
                         decision.selection_id = current.id
                         break
+                    # Check relations or same-concept upgrade options without requiring an explicit edge
                     upgrade_ids = {
                         item.to_offering_id
                         for item in relations
@@ -242,8 +287,9 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     }
                     matched = next((item for item in concept_offerings if item.id in upgrade_ids and _value_matches(item.typed_value, extracted)), None)
                     if matched is None:
+                        # Allow same-concept upgrade options matching extracted value
                         matched = next(
-                            (item for item in concept_offerings if item.offering_kind == "upgrade" and _value_matches(item.typed_value, extracted)),
+                            (item for item in concept_offerings if (item.offering_kind in {"upgrade", "optional"} or item.role == "addon_option") and _value_matches(item.typed_value, extracted)),
                             None,
                         )
                     if matched is not None:
@@ -277,7 +323,7 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                         decision.selection_id = current.id
                     break
                 if current is None:
-                    optionals = [item for item in concept_offerings if item.offering_kind in {"optional", "upgrade"}]
+                    optionals = [item for item in concept_offerings if item.offering_kind in {"optional", "upgrade"} or item.role == "addon_option"]
                     matched = next((item for item in optionals if _value_matches(item.typed_value, extracted)), None)
                     if matched is None and len(optionals) == 1:
                         matched = optionals[0]

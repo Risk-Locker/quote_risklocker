@@ -20,7 +20,7 @@ The three inactive settings are loaded by backend configuration but do not chang
 
 ## Local Setup and Run
 
-1. Create the Python environment, install `requirements.txt` and optional requirements, then install Playwright Chromium.
+1. Create the Python **3.12** environment (`py -3.12 -m venv .venv`; the pinned requirements predate Python 3.14 wheels), install `requirements.txt` and optional requirements (`.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-optional.txt`), then install Playwright Chromium (`.\.venv\Scripts\python.exe -m playwright install chromium`).
 2. Install frontend dependencies in `frontend/`.
 3. Configure `.env` from `.env.example`; production requires HTTPS origin, exact hosts/proxies, a long hash secret, Supabase credentials, and scanning.
 4. Apply migrations with `commands/apply-migrations.ps1`, initialize non-credential defaults explicitly, and bootstrap Primary Admin once with `python commands/create_admin.py first.last@risklocker.com`.
@@ -43,6 +43,7 @@ The three inactive settings are loaded by backend configuration but do not chang
 - Migrations are ordered SQL files under `migrations/` and must be applied against Supabase/Postgres only.
 - Pre-ledger databases (schema applied before the migration-ledger system existed, so `schema_migrations` is missing/empty): run `python commands/backfill-ledger.py` (`--dry-run` first; defaults to recording versions 001-022, refuses to run if the ledger already has rows) before `commands/apply-migrations.ps1`. The runner executes migration SQL through the raw DBAPI cursor (`backend/app/db/migrations.py` `apply_migrations`) because psycopg3 client-side binding rejects `%I` (Postgres `format()` in `DO` blocks) and SQLAlchemy `text()` misreads `:NN` inside JSON literals.
 - `openpyxl` (requirements.txt) powers the settings CSV/Excel imports — road tax export/import, vehicles multi-sheet Excel import, field-alias import. Uploads are validated server-side (extension/size/row caps; Excel read data-only, no formula evaluation).
+- Migration files must stay LF on disk: ledger checksums hash the raw file bytes, so a CRLF checkout would block backend startup with a checksum-drift error. `.gitattributes` enforces `migrations/*.sql text eol=lf`; do not remove that rule.
 - Frontend middleware (`frontend/src/middleware.ts`) guards protected routes by session cookie server-side; the cookie name must match `SESSION_COOKIE_NAME` in the backend `.env`.
 
 ## Deployment Boundaries

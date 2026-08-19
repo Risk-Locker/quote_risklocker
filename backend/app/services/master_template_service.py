@@ -112,10 +112,120 @@ def _master_config(key: str, name: str, *, height: int, dense: bool, extended: b
     return validate_template_config(config)
 
 
+def _agency_bilingual_config() -> dict:
+    name = "Bilingual Agency Motor"
+    key = "agency_bilingual"
+    height = 1123
+    config = new_v7_template_config(name)
+
+    NAVY = "#1E293B"
+    DARK = "#0F172A"
+    LABEL_COLOR = "#334155"
+    MUTED_COLOR = "#64748B"
+    BORDER_COLOR = "#E2E8F0"
+    RED_COLOR = "#DC2626"
+    BG_LIGHT = "#F8FAFC"
+
+    elements = [
+        # 1. Page Background
+        _rectangle("page_bg", 0, 0, 794, height, 1, background="#FFFFFF", border=""),
+
+        # 2. Header: Logos, Quotation Ref, and Top Divider
+        _image("risklocker_logo", "risklocker_logo", 40, 32, 160, 44, 5),
+        _image("insurer_logo", "insurer_logo", 230, 28, 140, 48, 5),
+        _text("ref_label", "Quotation Ref: ", 480, 44, 150, 18, 5, size=11, weight="500", color=MUTED_COLOR, align="right"),
+        _variable("ref_val", "vehicle_no", 630, 44, 124, 18, 5, size=11, weight="700", color=MUTED_COLOR, align="left"),
+        _line("header_rule", 40, 84, 714, 2, color=BORDER_COLOR, height=1),
+
+        # 3. Main Title
+        _text("title_motor", "Motor Insurance ", 40, 96, 210, 36, 5, size=25, weight="800", color=DARK),
+        _text("title_quotation", "Quotation", 246, 96, 160, 36, 5, size=25, weight="800", color=RED_COLOR),
+
+        # 4. Left Column: Coverage & Vehicle Information Card (x=40, w=454, y=140, h=248)
+        _rectangle("cov_header_bg", 40, 140, 454, 28, 2, background=NAVY, border="", radius=4),
+        _text("cov_header_txt", "Coverage & Vehicle Information / 车辆及保单资料", 52, 146, 430, 18, 5, size=10.5, weight="700", color="#FFFFFF"),
+        _rectangle("cov_table_bg", 40, 168, 454, 220, 2, background="#FFFFFF", border=BORDER_COLOR, radius=4),
+
+        # Row 1: Coverage Type
+        _text("lbl_cov_type", "Coverage Type / 保单种类", 52, 176, 160, 16, 5, size=9.5, weight="600", color=LABEL_COLOR),
+        _variable("val_cov_type", "coverage_type", 216, 176, 266, 16, 5, size=10, weight="700", color=DARK),
+
+        # Row 2: Car Model
+        _text("lbl_car_model", "Car Model / 车型", 52, 196, 160, 16, 5, size=9.5, weight="600", color=LABEL_COLOR),
+        _variable("val_car_model", "car_model", 216, 196, 266, 16, 5, size=10, weight="700", color=DARK),
+
+        # Row 3: NCD
+        _text("lbl_ncd", "NCD", 52, 216, 160, 16, 5, size=9.5, weight="600", color=LABEL_COLOR),
+        _variable("val_ncd", "ncd_percent", 216, 216, 266, 16, 5, size=10, weight="700", color=DARK, suffix="%"),
+
+        # Row 4: Coverage Period
+        _text("lbl_period", "Coverage Period / 保单期限", 52, 236, 160, 16, 5, size=9.5, weight="600", color=LABEL_COLOR),
+        _variable("val_period", "cover_period", 216, 236, 266, 16, 5, size=10, weight="700", color=DARK),
+
+        # Row 5: Coverage Premium
+        _text("lbl_premium", "Coverage Premium / 保费", 52, 256, 160, 16, 5, size=9.5, weight="600", color=LABEL_COLOR),
+        _variable("val_premium", "premium", 216, 256, 266, 16, 5, size=10, weight="700", color=DARK, prefix="RM "),
+
+        # Table inner divider
+        _line("cov_table_div", 52, 278, 430, 2, color=BORDER_COLOR, height=1),
+
+        # Row 6: Roadtax
+        _text("lbl_roadtax", "Roadtax", 52, 286, 160, 16, 5, size=9.5, weight="600", color=LABEL_COLOR),
+        _variable("val_roadtax", "roadtax", 216, 286, 266, 16, 5, size=10, weight="700", color=DARK, prefix="RM "),
+
+        # Row 7: Runner Fee
+        _text("lbl_runner", "Runner Fee", 52, 306, 160, 16, 5, size=9.5, weight="600", color=LABEL_COLOR),
+        _variable("val_runner", "service_fee", 216, 306, 266, 16, 5, size=10, weight="700", color=DARK, prefix="RM "),
+
+        # Row 8: Total Premium
+        _text("lbl_total", "Total Premium 总额", 52, 332, 160, 20, 5, size=11, weight="800", color=DARK),
+        _variable("val_total", "total_amount", 216, 332, 266, 20, 5, size=13, weight="800", color=RED_COLOR, prefix="RM "),
+
+        # 5. Right Column: Payment Method Card (x=508, w=246, y=140, h=248)
+        _rectangle("pay_card_bg", 508, 140, 246, 248, 2, background="#FFFFFF", border=BORDER_COLOR, radius=6),
+        _text("pay_title", "Payment Method", 522, 152, 218, 16, 5, size=10.5, weight="700", color=LABEL_COLOR),
+        _text("pay_bank_logo", "Hong Leong", 522, 174, 218, 20, 5, size=13, weight="800", color=DARK),
+        _text("pay_details_lbl", "Bank details", 522, 204, 218, 14, 5, size=9, weight="600", color=MUTED_COLOR),
+        _text("pay_acc_no", "12303105859", 522, 220, 218, 16, 5, size=11, weight="700", color=DARK),
+        _text("pay_holder", "RiskLocker Sdn. Bhd.", 522, 238, 218, 14, 5, size=9.5, weight="600", color=LABEL_COLOR),
+        _text("pay_bank_sub", "Hong Leong Bank", 522, 254, 218, 14, 5, size=9.5, weight="500", color=MUTED_COLOR),
+
+        # All Driver Box inside payment card
+        _rectangle("all_driver_bg", 522, 286, 218, 86, 2, background=BG_LIGHT, border=BORDER_COLOR, radius=4),
+        _text("all_driver_title", "All Driver Included", 534, 302, 194, 18, 5, size=10.5, weight="700", color=DARK),
+        _text("all_driver_sub", "Authorised Drivers Covered", 534, 322, 194, 14, 5, size=9, weight="500", color=MUTED_COLOR),
+
+        # 6. Section 1: Our Specials / 特别优惠 (Included Benefits Grid)
+        _rectangle("specials_header_bg", 40, 402, 714, 26, 2, background=NAVY, border="", radius=4),
+        _text("specials_header_txt", "Our Specials / 特别优惠", 52, 407, 690, 16, 5, size=10.5, weight="700", color="#FFFFFF"),
+        _grid("current_benefits_grid", "current_benefits", 40, 434, 714, 360, 4, dense=True),
+
+        # 7. Section 2: You May Add On / 可添加项目 (Available Add-ons Grid)
+        _rectangle("addons_header_bg", 40, 804, 714, 26, 2, background=NAVY, border="", radius=4),
+        _text("addons_header_txt", "You May Add On (With Additional Charges) / 可添加项目 (额外收费)", 52, 809, 690, 16, 5, size=10.5, weight="700", color="#FFFFFF"),
+        _grid("available_addons_grid", "available_addons", 40, 836, 714, 216, 4, dense=True),
+
+        # 8. Footer
+        _text("footer_terms", "*Terms & Conditions Apply | Validity: 30 Days", 40, 1068, 714, 16, 5, size=8.5, weight="500", color=MUTED_COLOR),
+    ]
+
+    config.update({
+        "version": 7, "template_name": name, "v7_master_key": key, "is_default": False, "locked": True,
+        "page_profile": {
+            "profile_key": "a4", "name": "A4",
+            "width": 794, "height": height, "unit": "px", "safe_margins": {"top": 24, "right": 24, "bottom": 24, "left": 24},
+            "bleed": {}, "background_behavior": "clip",
+        },
+    })
+    config["canvas"] = {**config["canvas"], "width": 794, "height": height, "elements": elements}
+    return validate_template_config(config)
+
+
 def master_template_specs() -> list[dict]:
     return [
         {"key": "standard_a4", "name": "Standard A4", "is_default": True, "config": _master_config("standard_a4", "Standard A4", height=1123, dense=False, extended=False, is_default=True)},
         {"key": "dense_a4", "name": "Dense A4", "is_default": False, "config": _master_config("dense_a4", "Dense A4", height=1123, dense=True, extended=False, is_default=False)},
+        {"key": "agency_bilingual", "name": "Bilingual Agency Motor", "is_default": False, "config": _agency_bilingual_config()},
         {"key": "extended_portrait", "name": "Extended Portrait", "is_default": False, "config": _master_config("extended_portrait", "Extended Portrait", height=1480, dense=False, extended=True, is_default=False)},
     ]
 

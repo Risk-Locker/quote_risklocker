@@ -44,6 +44,44 @@ def _trash_entry(db: Session, user, entity_type: str, entity_id: str, original_s
     )
 
 
+def _soft_delete_item(
+    db: Session,
+    settings: Settings,
+    user,
+    item,
+    entity_type: str,
+    *,
+    has_status: bool = True,
+) -> None:
+    if has_status and hasattr(item, "status"):
+        item.status = AccountStatus.INACTIVE.value
+    item.mark_deleted(settings.trash_retention_days)
+    _trash_entry(db, user, entity_type, item.id, getattr(item, "status", "active"), settings.trash_retention_days)
+    db.commit()
+
+
+def _restore_item(
+    db: Session,
+    item,
+    *,
+    has_status: bool = True,
+) -> None:
+    if has_status and hasattr(item, "status"):
+        item.status = AccountStatus.ACTIVE.value
+    item.restore()
+    db.commit()
+
+
+def _list_trash_items(db: Session, model_cls):
+    return list(
+        db.scalars(
+            select(model_cls)
+            .where(model_cls.deleted_at.is_not(None))
+            .order_by(model_cls.deleted_at.desc())
+        ).all()
+    )
+
+
 # ---------------------------------------------------------------- templates
 
 def delete_template(db: Session, settings: Settings, user, template_id: str) -> None:
@@ -54,29 +92,18 @@ def delete_template(db: Session, settings: Settings, user, template_id: str) -> 
     config = normalize_template_config(template.fixed_fields, template.name)
     if config.get("locked") or config.get("is_default"):
         raise AppError("The locked default template cannot be deleted. Copy it first.", 400)
-    template.status = AccountStatus.INACTIVE.value
-    template.mark_deleted(settings.trash_retention_days)
-    _trash_entry(db, user, "template", template.id, template.status, settings.trash_retention_days)
-    db.commit()
+    _soft_delete_item(db, settings, user, template, "template")
 
 
 def restore_template(db: Session, user, template_id: str) -> None:
     template = db.get(OutputTemplateConfig, template_id)
     if not template or not template.deleted_at:
         raise AppError("Trash template not found.", 404)
-    template.status = AccountStatus.ACTIVE.value
-    template.restore()
-    db.commit()
+    _restore_item(db, template)
 
 
 def list_trash_templates(db: Session) -> list[OutputTemplateConfig]:
-    return list(
-        db.scalars(
-            select(OutputTemplateConfig)
-            .where(OutputTemplateConfig.deleted_at.is_not(None))
-            .order_by(OutputTemplateConfig.deleted_at.desc())
-        ).all()
-    )
+    return _list_trash_items(db, OutputTemplateConfig)
 
 
 def purge_expired_templates(db: Session, now: datetime) -> int:
@@ -91,60 +118,42 @@ def delete_special(db: Session, settings: Settings, user, special_id: str) -> No
     special = db.get(OurSpecial, special_id)
     if not special or special.deleted_at:
         raise AppError("Our Special not found.", 404)
-    special.status = AccountStatus.INACTIVE.value
-    special.mark_deleted(settings.trash_retention_days)
     for variant in special.variants:
         variant.status = AccountStatus.INACTIVE.value
         variant.mark_deleted(settings.trash_retention_days)
-    _trash_entry(db, user, "our_special", special.id, special.status, settings.trash_retention_days)
-    db.commit()
+    _soft_delete_item(db, settings, user, special, "our_special")
 
 
 def restore_special(db: Session, user, special_id: str) -> None:
     special = db.get(OurSpecial, special_id)
     if not special or not special.deleted_at:
         raise AppError("Trash Our Special not found.", 404)
-    special.status = AccountStatus.ACTIVE.value
-    special.restore()
     for variant in special.variants:
         variant.status = AccountStatus.ACTIVE.value
         variant.restore()
-    db.commit()
+    _restore_item(db, special)
 
 
 def delete_special_variant(db: Session, settings: Settings, user, variant_id: str) -> None:
     variant = db.get(OurSpecialVariant, variant_id)
     if not variant or variant.deleted_at:
         raise AppError("Variant not found.", 404)
-    variant.status = AccountStatus.INACTIVE.value
-    variant.mark_deleted(settings.trash_retention_days)
-    _trash_entry(db, user, "our_special_variant", variant.id, variant.status, settings.trash_retention_days)
-    db.commit()
+    _soft_delete_item(db, settings, user, variant, "our_special_variant")
 
 
 def restore_special_variant(db: Session, user, variant_id: str) -> None:
     variant = db.get(OurSpecialVariant, variant_id)
     if not variant or not variant.deleted_at:
         raise AppError("Trash variant not found.", 404)
-    variant.status = AccountStatus.ACTIVE.value
-    variant.restore()
-    db.commit()
+    _restore_item(db, variant)
 
 
 def list_trash_specials(db: Session) -> list[OurSpecial]:
-    return list(
-        db.scalars(select(OurSpecial).where(OurSpecial.deleted_at.is_not(None)).order_by(OurSpecial.deleted_at.desc())).all()
-    )
+    return _list_trash_items(db, OurSpecial)
 
 
 def list_trash_variants(db: Session) -> list[OurSpecialVariant]:
-    return list(
-        db.scalars(
-            select(OurSpecialVariant)
-            .where(OurSpecialVariant.deleted_at.is_not(None))
-            .order_by(OurSpecialVariant.deleted_at.desc())
-        ).all()
-    )
+    return _list_trash_items(db, OurSpecialVariant)
 
 
 def purge_expired_specials(db: Session, now: datetime) -> int:
@@ -157,23 +166,18 @@ def delete_client_record(db: Session, settings: Settings, user, record_id: str) 
     record = db.get(ClientRecord, record_id)
     if not record or record.deleted_at:
         raise AppError("Client record not found.", 404)
-    record.mark_deleted(settings.trash_retention_days)
-    _trash_entry(db, user, "client_record", record.id, "active", settings.trash_retention_days)
-    db.commit()
+    _soft_delete_item(db, settings, user, record, "client_record", has_status=False)
 
 
 def restore_client_record(db: Session, user, record_id: str) -> None:
     record = db.get(ClientRecord, record_id)
     if not record or not record.deleted_at:
         raise AppError("Trash client record not found.", 404)
-    record.restore()
-    db.commit()
+    _restore_item(db, record, has_status=False)
 
 
 def list_trash_client_records(db: Session) -> list[ClientRecord]:
-    return list(
-        db.scalars(select(ClientRecord).where(ClientRecord.deleted_at.is_not(None)).order_by(ClientRecord.deleted_at.desc())).all()
-    )
+    return _list_trash_items(db, ClientRecord)
 
 
 def purge_expired_client_records(db: Session, now: datetime) -> int:
@@ -187,10 +191,7 @@ def delete_template_asset(db: Session, settings: Settings, user, asset_id: str) 
     asset = db.get(TemplateAsset, asset_id)
     if not asset or asset.deleted_at:
         raise AppError("Asset not found.", 404)
-    asset.status = AccountStatus.INACTIVE.value
-    asset.mark_deleted(settings.trash_retention_days)
-    _trash_entry(db, user, "template_asset", asset.id, asset.status, settings.trash_retention_days)
-    db.commit()
+    _soft_delete_item(db, settings, user, asset, "template_asset")
 
 
 def restore_template_asset(db: Session, user, asset_id: str) -> None:
@@ -198,18 +199,12 @@ def restore_template_asset(db: Session, user, asset_id: str) -> None:
     asset = db.get(TemplateAsset, asset_id)
     if not asset or not asset.deleted_at:
         raise AppError("Trash asset not found.", 404)
-    asset.status = AccountStatus.ACTIVE.value
-    asset.restore()
-    db.commit()
+    _restore_item(db, asset)
 
 
 def list_trash_template_assets(db: Session) -> list:
     from app.models.tables import TemplateAsset
-    return list(
-        db.scalars(
-            select(TemplateAsset).where(TemplateAsset.deleted_at.is_not(None)).order_by(TemplateAsset.deleted_at.desc())
-        ).all()
-    )
+    return _list_trash_items(db, TemplateAsset)
 
 
 def purge_expired_template_assets(db: Session, now: datetime) -> int:

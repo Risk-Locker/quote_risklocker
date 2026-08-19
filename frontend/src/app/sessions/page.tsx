@@ -23,6 +23,10 @@ type Session = {
   detected_company?: string | null;
   status: string;
   draft_status: string;
+  insured_name?: string | null;
+  vehicle_plate?: string | null;
+  vehicle_model?: string | null;
+  total_premium?: string | null;
   created_at: string;
 };
 
@@ -197,17 +201,29 @@ export default function SessionsPage() {
                     />
                     <div>
                       <div className="text-[14px] font-medium text-[var(--rl-text-strong)]">{s.filename}</div>
-                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                      {s.insured_name || s.vehicle_plate ? (
+                        <div className="mt-1 text-[13px] text-[var(--rl-text)]">
+                          {[
+                            s.insured_name,
+                            s.vehicle_plate,
+                            s.vehicle_model,
+                            s.total_premium ? `RM ${s.total_premium}` : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" • ")}
+                        </div>
+                      ) : null}
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2">
                         <StatusBadge status={s.draft_status} />
                         {s.detected_company ? (
-                          <span className="text-[14px] text-[var(--rl-text)]">{s.detected_company}</span>
+                          <span className="text-[13px] font-medium text-[var(--rl-text)]">{s.detected_company}</span>
                         ) : null}
                       </div>
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <Link
-                      href={`/sessions/${s.id}/review`}
+                      href={`/sessions/${s.id}`}
                       className="inline-flex items-center justify-center gap-2 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-4 py-2 text-[14px] font-semibold text-[var(--rl-text-strong)] transition-all hover:bg-[var(--rl-bg)] active:scale-[0.98]"
                     >
                       <NotePencil aria-hidden="true" size={18} weight="bold" />

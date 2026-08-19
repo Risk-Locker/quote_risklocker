@@ -79,8 +79,6 @@ def _inspect_pdf(path: Path, max_pages: int = MAX_PDF_PAGES) -> dict:
             raise ValueError(f"PDF contains a prohibited {description}.")
     try:
         with pikepdf.open(path) as pdf:
-            if pdf.is_encrypted:
-                raise ValueError("Encrypted or password-protected PDFs are not accepted.")
             if len(pdf.attachments):
                 raise ValueError("PDFs containing embedded files are not accepted.")
             root = pdf.Root

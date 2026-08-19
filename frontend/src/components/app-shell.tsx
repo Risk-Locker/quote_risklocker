@@ -4,7 +4,7 @@ import Link from "next/link";
 import type { Route } from "next";
 import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Upload, Wrench, Gear, Users, Bell, Trash, SignOut, SquaresFour } from "@phosphor-icons/react";
+import { Upload, Wrench, Gear, Users, Bell, Trash, SignOut, SquaresFour, FunnelSimple, Buildings } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
 import { useAuth, clearAuthCache } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ const nav: Array<{ href: Route; label: string; icon: typeof Upload }> = [
   { href: "/upload", label: "Upload", icon: Upload },
   { href: "/sessions", label: "Sessions", icon: SquaresFour },
   { href: "/builder/templates", label: "Builder", icon: Wrench },
+  { href: "/extraction/company-detection" as Route, label: "Extraction & Aliases", icon: FunnelSimple },
   { href: "/settings/system-checks", label: "Settings", icon: Gear },
   { href: "/client-records", label: "Records", icon: Users },
   { href: "/inbox", label: "Inbox", icon: Bell },
@@ -97,7 +98,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </header>
       <div className="mx-auto grid max-w-[1560px] grid-cols-[220px_minmax(0,1fr)] gap-6 px-5 py-6">
         <nav className="flex flex-col gap-1">
-          {nav.map((item) => {
+          {nav
+            .filter((item) => {
+              const isStaff = user?.role === "staff";
+              if (isStaff) {
+                return item.href === "/upload" || item.href === "/sessions";
+              }
+              return true;
+            })
+            .map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (

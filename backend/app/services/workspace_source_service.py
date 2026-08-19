@@ -25,12 +25,10 @@ def _records(db, user, session_id: str) -> tuple[Session, QuotationDraft, Upload
     extraction = db.scalar(
         select(ExtractionRecord).where(ExtractionRecord.uploaded_file_id == uploaded.id)
     )
-    if extraction and extraction.uploaded_file_id != uploaded.id:
-        extraction = None
     return session, draft, uploaded, extraction
 
 
-def get_source_pages(db, user, session_id: str, *, page: int, page_size: int) -> dict:
+def get_source_pages(db, user, session_id: str, *, page: int = 1, page_size: int = 20) -> dict:
     if page < 1 or page_size < 1 or page_size > 20:
         raise AppError("Source-page pagination is invalid.", 422)
     _session, _draft, uploaded, extraction = _records(db, user, session_id)
@@ -70,9 +68,15 @@ def get_source_evidence(db, user, session_id: str, field_name: str) -> dict:
 
 def get_workspace_template_config(db, user, session_id: str) -> dict:
     _session, draft, _uploaded, _extraction = _records(db, user, session_id)
-    if not draft.template_revision_id:
+    revision_id = draft.template_revision_id
+    if not revision_id:
+        from app.services.template_revision_service import list_published_templates
+        published = list_published_templates(db, user)
+        if published:
+            revision_id = published[0]["template_revision_id"]
+    if not revision_id:
         raise AppError("Choose a published template before opening Preview.", 409)
-    revision = db.get(TemplateRevision, draft.template_revision_id)
+    revision = db.get(TemplateRevision, revision_id)
     if not revision or revision.state not in {"published", "compatibility"}:
         raise AppError("The pinned template revision is unavailable.", 409)
     exact_binding = (

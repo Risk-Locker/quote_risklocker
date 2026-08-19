@@ -15,6 +15,7 @@ from app.models.enums import AccountStatus, RecordStatus
 from app.models.tables import (
     AppSetting,
     Batch,
+    BenefitAlias,
     BenefitConcept,
     CompanyAlias,
     DraftSourceLineDecision,
@@ -85,11 +86,31 @@ def load_extraction_context(db) -> dict:
         }
         for company in company_rows
     ]
+
+    benefit_alias_rows = db.scalars(
+        select(BenefitAlias).where(BenefitAlias.status == AccountStatus.ACTIVE.value)
+    ).all()
+    aliases_by_concept: dict[str, list[dict]] = {}
+    for item in benefit_alias_rows:
+        aliases_by_concept.setdefault(str(item.benefit_id), []).append({
+            "phrase": item.phrase,
+            "normalized_phrase": item.normalized_phrase,
+            "scope": item.scope,
+            "company_id": str(item.company_id) if item.company_id else None,
+            "product_id": str(item.product_id) if item.product_id else None,
+            "package_id": str(item.package_id) if item.package_id else None,
+        })
+
     benefit_concepts = [
         {
             "concept_id": concept.id,
+            "concept_key": concept.concept_key,
             "label": concept.label,
-            "aliases": [],
+            "description": concept.description,
+            "description_variants": concept.description_variants,
+            "match_dataset": concept.match_dataset or [],
+            "value_pattern_dataset": concept.value_pattern_dataset or [],
+            "aliases": aliases_by_concept.get(str(concept.id), []),
         }
         for concept in db.scalars(
             select(BenefitConcept).where(BenefitConcept.status == AccountStatus.ACTIVE.value)
@@ -191,9 +212,11 @@ def process_extraction_job(
     if record is None:
         record = ExtractionRecord(id=new_id(), uploaded_file_id=uploaded.id, **values)
         db.add(record)
+        db.flush()
     else:
         for field, value in values.items():
             setattr(record, field, value)
+        db.flush()
 
     fields = draft_data.get("fields") or {}
     for field in fields.values():
@@ -238,6 +261,7 @@ def process_extraction_job(
         ).all()
         if item.extraction_record_id == record.id
     }
+    new_lines = []
     for source in values["benefit_lines"]:
         line_id = str(source.get("line_id") or "")
         if not line_id or line_id in existing_line_ids:
@@ -258,14 +282,20 @@ def process_extraction_job(
             extracted_value=source.get("extracted_value"),
         )
         db.add(line)
-        db.add(DraftSourceLineDecision(
-            id=new_id(),
-            draft_id=draft.id,
-            source_line_id=line.id,
-            disposition="unresolved",
-        ))
+        new_lines.append(line)
         existing_line_ids.add(line_id)
-    db.flush()
+
+    if new_lines:
+        db.flush()
+        for line in new_lines:
+            db.add(DraftSourceLineDecision(
+                id=new_id(),
+                draft_id=draft.id,
+                source_line_id=line.id,
+                disposition="unresolved",
+            ))
+        db.flush()
+
     auto_apply_extracted_benefits(db, draft)
     complete_job(
         db,

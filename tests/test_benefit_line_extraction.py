@@ -1,10 +1,9 @@
-"""Conservative, evidence-bearing extraction of quotation benefit lines."""
+"""Conservative, evidence-bearing extraction of quotation benefit lines with scoped aliases and templates."""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
@@ -15,9 +14,71 @@ from app.extraction.benefit_lines import extract_benefit_lines
 
 
 CONCEPTS = [
-    {"concept_id": "windscreen", "label": "Windscreen Cover", "aliases": ["windscreen", "windscreen damage"]},
-    {"concept_id": "special-perils", "label": "Special Perils", "aliases": ["special perils"]},
-    {"concept_id": "towing", "label": "Towing", "aliases": ["towing", "roadside towing"]},
+    {
+        "concept_id": "windscreen",
+        "concept_key": "windscreen",
+        "label": "Windscreen Cover",
+        "description": "up to RM1,000",
+        "description_variants": [
+            {"key": "default", "template": "up to {value}", "value_type": "money"}
+        ],
+        "match_dataset": ["windscreen", "window", "glass", "tinted glass"],
+        "aliases": [
+            {"phrase": "Windscreen Damage", "scope": "global"},
+            {"phrase": "Etiqa Windscreen Plus", "scope": "company", "company_id": "etiqa-123"},
+        ],
+    },
+    {
+        "concept_id": "special-perils",
+        "concept_key": "special-perils",
+        "label": "Special Perils",
+        "description": "up to RM50,000",
+        "description_variants": [
+            {"key": "default", "template": "up to {value}", "value_type": "money"}
+        ],
+        "match_dataset": ["special perils", "storm", "flood", "landslide", "natural disaster"],
+        "aliases": [
+            {"phrase": "Damage by Natural Disasters", "scope": "global"},
+        ],
+    },
+    {
+        "concept_id": "towing",
+        "concept_key": "towing",
+        "label": "Towing",
+        "description": "up to 50 km",
+        "description_variants": [
+            {"key": "default", "template": "up to {value}", "value_type": "distance"}
+        ],
+        "match_dataset": ["towing", "breakdown", "roadside assistance"],
+        "aliases": [
+            {"phrase": "24/7 Roadside Towing", "scope": "global"},
+            {"phrase": "QBE Super Towing", "scope": "company", "company_id": "qbe-123"},
+        ],
+    },
+    {
+        "concept_id": "warranty",
+        "concept_key": "repair-workmanship-warranty",
+        "label": "Repair Workmanship Warranty",
+        "description": "up to 3 years",
+        "description_variants": [
+            {"key": "default", "template": "up to {value}", "value_type": "duration"}
+        ],
+        "match_dataset": ["workmanship", "repair warranty"],
+        "aliases": [
+            {"phrase": "Panel Workshop Warranty", "scope": "global"},
+        ],
+    },
+    {
+        "concept_id": "hospital-income",
+        "concept_key": "daily-hospital-income",
+        "label": "Daily Hospital Income",
+        "description": "up to RM100/day",
+        "description_variants": [
+            {"key": "default", "template": "up to {value}", "value_type": "per_day"}
+        ],
+        "match_dataset": ["hospital income", "hospital allowance"],
+        "aliases": [],
+    },
 ]
 
 
@@ -73,7 +134,7 @@ This benefit is not included.
 
 
 def test_unstructured_benefit_like_line_remains_unknown_for_review():
-    text = "BENEFITS\nRoadside Towing 200 km\n"
+    text = "BENEFITS\n24/7 Roadside Towing 200 km\n"
     lines = extract_benefit_lines([{"page": 3, "text": text}], concepts=CONCEPTS)
 
     assert len(lines) == 1
@@ -97,4 +158,55 @@ def test_broad_coverage_facets_are_not_split_into_extra_entitlements():
 
     assert len(lines) == 1
     assert lines[0]["candidate_mappings"][0]["concept_id"] == "special-perils"
-    assert "flood" not in {candidate["concept_id"] for line in lines for candidate in line["candidate_mappings"]}
+
+
+def test_scoped_aliases_priority_boost():
+    # When company_id='qbe-123', 'QBE Super Towing' gets boosted priority
+    text = "SELECTED BENEFITS\n☑ QBE Super Towing 150 km\n"
+    lines = extract_benefit_lines(
+        [{"page": 1, "text": text}],
+        concepts=CONCEPTS,
+        company_id="qbe-123",
+    )
+    assert len(lines) == 1
+    mapping = lines[0]["candidate_mappings"][0]
+    assert mapping["concept_id"] == "towing"
+    assert mapping["match_type"] == "scoped_alias"
+    assert mapping["shaped_description"] == "up to 150 km"
+
+
+def test_match_dataset_fallback_matching():
+    # Line contains match dataset word 'breakdown' rather than explicit alias
+    text = "SELECTED BENEFITS\n☑ Emergency Breakdown Assistance 50 km\n"
+    lines = extract_benefit_lines([{"page": 1, "text": text}], concepts=CONCEPTS)
+
+    assert len(lines) == 1
+    assert any(c["concept_id"] == "towing" and c["match_type"] == "match_dataset" for c in lines[0]["candidate_mappings"])
+    assert lines[0]["candidate_mappings"][0]["shaped_description"] == "up to 50 km"
+
+
+def test_typed_values_and_description_shaping_across_types():
+    text = """SELECTED BENEFITS
+☑ Towing Unlimited
+☑ Windscreen Damage RM 2,500.00
+☑ Repair Workmanship Warranty 3 years
+☑ Daily Hospital Income RM 100 per day
+"""
+    lines = extract_benefit_lines([{"page": 1, "text": text}], concepts=CONCEPTS)
+    by_concept = {l["candidate_mappings"][0]["concept_id"]: l for l in lines if l["candidate_mappings"]}
+
+    # 1. Distance unlimited
+    assert by_concept["towing"]["extracted_value"] == {"type": "distance", "value": None, "unit": "km", "unlimited": True}
+    assert by_concept["towing"]["candidate_mappings"][0]["shaped_description"] == "up to Unlimited"
+
+    # 2. Money limit
+    assert by_concept["windscreen"]["extracted_value"]["value"] == "2500.00"
+    assert by_concept["windscreen"]["candidate_mappings"][0]["shaped_description"] == "up to RM2,500"
+
+    # 3. Duration
+    assert by_concept["warranty"]["extracted_value"] == {"type": "duration", "value": "3", "unit": "years"}
+    assert by_concept["warranty"]["candidate_mappings"][0]["shaped_description"] == "up to 3 years"
+
+    # 4. Per day income
+    assert by_concept["hospital-income"]["extracted_value"] == {"type": "per_day", "value": "100.00", "currency": "MYR", "unit": "day"}
+    assert by_concept["hospital-income"]["candidate_mappings"][0]["shaped_description"] == "up to RM100/day"

@@ -119,7 +119,8 @@ def seed_defaults(db: Session, settings: Settings) -> None:
 
     for brand, model, aliases in DEFAULT_MODELS:
         if not db.scalar(select(VehicleModel).where(VehicleModel.name == model)):
-            db.add(VehicleModel(brand_id=brand_by_name.get(brand).id if brand_by_name.get(brand) else None, name=model, aliases=aliases))
+            brand_entry = brand_by_name.get(brand)
+            db.add(VehicleModel(brand_id=brand_entry.id if brand_entry is not None else None, name=model, aliases=aliases))
 
     if not db.get(AppSetting, "extraction_strategies"):
         db.add(
@@ -135,6 +136,15 @@ def seed_defaults(db: Session, settings: Settings) -> None:
                 },
             )
         )
+
+    if not db.get(AppSetting, "default_runner_fee"):
+        db.add(AppSetting(key="default_runner_fee", value={"amount": 20.0, "currency": "MYR"}))
+
+    from app.services.road_tax_service import seed_standard_road_tax_rules
+    seed_standard_road_tax_rules(db)
+
+    from app.services.vehicle_catalog_service import seed_vehicle_catalog_to_db
+    seed_vehicle_catalog_to_db(db)
 
     # RL-DISABLED startup credential synchronization — disabled 2026-08-13;
     # Primary Admin bootstrap is an explicit one-time operational command.

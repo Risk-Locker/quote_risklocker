@@ -53,7 +53,9 @@ def validate_money(value: str | None) -> tuple[bool, str | None]:
 
 
 def validate_date(value: str | None) -> tuple[bool, str | None]:
-    return (normalize_date(value) is not None, None if normalize_date(value) else "Please check this value.")
+    if normalize_date(value) is None:
+        return False, "Please check this value."
+    return True, None
 
 
 def validate_date_range(start: str | None, end: str | None) -> tuple[bool, str | None]:
@@ -73,7 +75,9 @@ def validate_ncd(value: str | None) -> tuple[bool, str | None]:
     if not match:
         return False, "Please check this value."
     number = Decimal(match.group(0))
-    return (Decimal("0") <= number <= Decimal("55"), None if Decimal("0") <= number <= Decimal("55") else "Please check this value.")
+    if not (Decimal("0") <= number <= Decimal("55")):
+        return False, "Please check this value."
+    return True, None
 
 
 def validate_engine_cc(value: str | None) -> tuple[bool, str | None]:

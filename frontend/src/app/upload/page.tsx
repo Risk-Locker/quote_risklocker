@@ -104,7 +104,7 @@ export default function UploadPage() {
       if (!mounted.current || cancelRequested.current) return;
       setJob(response.job);
       if (response.job.state === "completed") {
-        router.push(`/sessions/${result.session_id}/review`);
+        router.push(`/sessions/${result.session_id}`);
         return;
       }
       if (response.job.state === "failed" || response.job.state === "cancelled") {

@@ -63,6 +63,10 @@ export async function apiRaw(path: string, options: RequestInit = {}): Promise<R
   });
 }
 
-export function fileUrl(path: string) {
-  return `${API_BASE}${path}`;
+export function fileUrl(path: string | null | undefined): string {
+  if (!path) return "";
+  if (path.startsWith("http://") || path.startsWith("https://") || path.startsWith("/api/")) {
+    return path;
+  }
+  return `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
 }

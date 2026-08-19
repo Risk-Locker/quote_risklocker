@@ -623,7 +623,69 @@ class BenefitConcept(Base, TimestampMixin):
     optional_variables: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     validation_rules: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     default_asset_id: Mapped[str | None] = mapped_column(ForeignKey("business_assets.id", ondelete="SET NULL"), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    demo_value: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    match_dataset: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    value_pattern_dataset: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    description_variants: Mapped[list[dict]] = mapped_column(JSON, default=list, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active", index=True)
+
+
+class BenefitAlias(Base, TimestampMixin):
+    __tablename__ = "benefit_aliases"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    benefit_id: Mapped[str] = mapped_column(ForeignKey("benefit_concepts.id", ondelete="CASCADE"), nullable=False, index=True)
+    phrase: Mapped[str] = mapped_column(String(255), nullable=False)
+    normalized_phrase: Mapped[str] = mapped_column(String(255), nullable=False)
+    scope: Mapped[str] = mapped_column(String(40), nullable=False, default="global")
+    company_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_companies.id", ondelete="CASCADE"), nullable=True)
+    product_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_products.id", ondelete="CASCADE"), nullable=True)
+    package_id: Mapped[str | None] = mapped_column(ForeignKey("benefit_packages.id", ondelete="CASCADE"), nullable=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")
+
+
+class Segment(Base, TimestampMixin):
+    __tablename__ = "segments"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    segment_key: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active", index=True)
+
+
+class VehicleCategory(Base, TimestampMixin):
+    __tablename__ = "vehicle_categories"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    category_key: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active", index=True)
+
+
+class VehicleSubcategory(Base, TimestampMixin):
+    __tablename__ = "vehicle_subcategories"
+    __table_args__ = (UniqueConstraint("category_id", "subcategory_key", name="uq_vehicle_subcategory_key"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    category_id: Mapped[str] = mapped_column(ForeignKey("vehicle_categories.id", ondelete="CASCADE"), nullable=False, index=True)
+    subcategory_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active", index=True)
+
+
+class CoverageType(Base, TimestampMixin):
+    __tablename__ = "coverage_types"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    coverage_key: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="active", index=True)
 
 
@@ -648,6 +710,11 @@ class BenefitCatalog(Base, TimestampMixin):
     company_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_companies.id", ondelete="CASCADE"), nullable=True, index=True)
     product_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_products.id", ondelete="CASCADE"), nullable=True, index=True)
     tier_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_product_tiers.id", ondelete="CASCADE"), nullable=True, index=True)
+    package_id: Mapped[str | None] = mapped_column(ForeignKey("benefit_packages.id", ondelete="SET NULL"), nullable=True, index=True)
+    segment_id: Mapped[str | None] = mapped_column(ForeignKey("segments.id", ondelete="SET NULL"), nullable=True)
+    vehicle_category_id: Mapped[str | None] = mapped_column(ForeignKey("vehicle_categories.id", ondelete="SET NULL"), nullable=True)
+    vehicle_subcategory_id: Mapped[str | None] = mapped_column(ForeignKey("vehicle_subcategories.id", ondelete="SET NULL"), nullable=True)
+    coverage_type_id: Mapped[str | None] = mapped_column(ForeignKey("coverage_types.id", ondelete="SET NULL"), nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="draft", index=True)
@@ -676,8 +743,13 @@ class CatalogOffering(Base, TimestampMixin):
     offering_key: Mapped[str] = mapped_column(String(160), nullable=False)
     concept_id: Mapped[str] = mapped_column(ForeignKey("benefit_concepts.id", ondelete="RESTRICT"), nullable=False, index=True)
     offering_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    applies_to_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    applies_to_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True)
+    role: Mapped[str | None] = mapped_column(String(40), nullable=True)
     label_override: Mapped[str | None] = mapped_column(String(255), nullable=True)
     typed_value: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    display_value: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    optional_price: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     source_document_id: Mapped[str | None] = mapped_column(ForeignKey("source_documents.id", ondelete="SET NULL"), nullable=True)
     source_citation: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     source_aliases: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
@@ -707,6 +779,8 @@ class BenefitPackage(Base, TimestampMixin):
     catalog_revision_id: Mapped[str] = mapped_column(ForeignKey("benefit_catalog_revisions.id", ondelete="CASCADE"), nullable=False, index=True)
     package_key: Mapped[str] = mapped_column(String(160), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    package_kind: Mapped[str] = mapped_column(String(40), nullable=False, default="comprehensive")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")
 

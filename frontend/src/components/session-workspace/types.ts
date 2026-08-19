@@ -20,6 +20,8 @@ export type BenefitCardSummary = {
   value: string;
   cost_status: string | null;
   branch_key?: string | null;
+  asset_id?: string | null;
+  asset_url?: string | null;
 };
 
 export type WorkspaceCapabilities = {

@@ -42,10 +42,118 @@ def build_draft(candidates: dict[str, list[CandidateValue]]) -> tuple[dict, list
             fields[name]["message"] = "Please check this value."
             fields[name].setdefault("warnings", []).append(date_message or "Please check this value.")
 
-    start = fields.get("cover_start_date", {}).get("value") or ""
-    end = fields.get("cover_end_date", {}).get("value") or ""
-    fields["cover_period"]["value"] = f"{start} to {end}".strip(" to")
-    fields["cover_period"]["status"] = "check_needed" if not date_ok else "ready"
+    # Date range formatting (Always DD-MM-YYYY)
+    start_raw = fields.get("cover_start_date", {}).get("value") or fields.get("issue_date", {}).get("value") or ""
+    end_raw = fields.get("cover_end_date", {}).get("value") or ""
+
+    def _to_dmy(date_str: str) -> str:
+        if not date_str:
+            return ""
+        import datetime
+        try:
+            if "-" in date_str:
+                parts = [int(p) for p in date_str.strip().split("-")]
+                if len(parts) == 3:
+                    if parts[0] > 1000:  # YYYY-MM-DD
+                        return f"{parts[2]:02d}-{parts[1]:02d}-{parts[0]:04d}"
+                    elif parts[2] > 1000:  # DD-MM-YYYY
+                        return f"{parts[0]:02d}-{parts[1]:02d}-{parts[2]:04d}"
+            elif "/" in date_str:
+                parts = [int(p) for p in date_str.strip().split("/")]
+                if len(parts) == 3:
+                    if parts[2] > 1000:
+                        return f"{parts[0]:02d}-{parts[1]:02d}-{parts[2]:04d}"
+                    elif parts[0] > 1000:
+                        return f"{parts[2]:02d}-{parts[1]:02d}-{parts[0]:04d}"
+        except Exception:
+            pass
+        return date_str
+
+    if start_raw and not end_raw:
+        import datetime
+        try:
+            dt = None
+            if "-" in start_raw:
+                parts = [int(p) for p in start_raw.strip().split("-")]
+                if len(parts) == 3:
+                    dt = datetime.date(parts[0], parts[1], parts[2]) if parts[0] > 1000 else datetime.date(parts[2], parts[1], parts[0])
+            elif "/" in start_raw:
+                parts = [int(p) for p in start_raw.strip().split("/")]
+                if len(parts) == 3:
+                    dt = datetime.date(parts[2], parts[1], parts[0]) if parts[2] > 1000 else datetime.date(parts[0], parts[1], parts[2])
+            if dt:
+                try:
+                    end_dt = dt.replace(year=dt.year + 1)
+                except ValueError:
+                    end_dt = dt + datetime.timedelta(days=365)
+                end_raw = f"{end_dt.day:02d}-{end_dt.month:02d}-{end_dt.year:04d}"
+                if "cover_end_date" in fields:
+                    fields["cover_end_date"]["value"] = end_raw
+                date_ok = True
+        except Exception:
+            pass
+
+    start_dmy = _to_dmy(start_raw)
+    end_dmy = _to_dmy(end_raw)
+
+    if start_dmy and end_dmy:
+        fields["cover_period"]["value"] = f"{start_dmy} to {end_dmy}"
+    elif start_dmy:
+        fields["cover_period"]["value"] = start_dmy
+    elif end_dmy:
+        fields["cover_period"]["value"] = end_dmy
+    else:
+        fields["cover_period"]["value"] = ""
+
+    fields["cover_period"]["status"] = "ready" if (start_dmy and end_dmy and date_ok) else ("check_needed" if not date_ok else "ready")
+
+    # Infer vehicle CC and vehicle type
+    from app.services.vehicle_catalog_service import infer_vehicle_cc_and_type
+    from app.services.road_tax_service import calculate_road_tax
+
+    car_model_val = fields.get("car_model", {}).get("value")
+    inferred_cc, inferred_type = infer_vehicle_cc_and_type(car_model_val)
+    if "vehicle_type" in fields:
+        if not fields["vehicle_type"].get("value"):
+            fields["vehicle_type"]["value"] = inferred_type
+            fields["vehicle_type"]["status"] = "ready"
+
+    # Default Runner Fee to RM 20.00 if missing
+    if "service_fee" in fields and not fields["service_fee"].get("value"):
+        fields["service_fee"]["value"] = "20.00"
+        fields["service_fee"]["status"] = "ready"
+
+    # Auto-calculate Road Tax based on vehicle CC and rules if roadtax is missing or not provided
+    if "roadtax" in fields and (not fields["roadtax"].get("value") or fields["roadtax"].get("value") == "0"):
+        cc_val = fields.get("engine_cc", {}).get("value")
+        effective_cc = None
+        try:
+            if cc_val:
+                effective_cc = int(float(cc_val))
+        except (ValueError, TypeError):
+            pass
+        if not effective_cc:
+            effective_cc = inferred_cc
+
+        if effective_cc:
+            computed_rt = calculate_road_tax(effective_cc, vehicle_type=inferred_type)
+            if computed_rt > 0:
+                fields["roadtax"]["value"] = f"{computed_rt:.2f}"
+                fields["roadtax"]["status"] = "ready"
+
+    # Calculate total amount from premium + roadtax + service_fee if total_amount is missing
+    if "total_amount" in fields and not fields["total_amount"].get("value"):
+        try:
+            from decimal import Decimal
+            p_val = fields.get("premium", {}).get("value")
+            r_val = fields.get("roadtax", {}).get("value")
+            s_val = fields.get("service_fee", {}).get("value")
+            if p_val:
+                tot = Decimal(str(p_val)) + Decimal(str(r_val or "0")) + Decimal(str(s_val or "0"))
+                fields["total_amount"]["value"] = f"{tot:.2f}"
+                fields["total_amount"]["status"] = "ready"
+        except Exception:
+            pass
 
     check_count = sum(1 for field in fields.values() if field.get("status") == "check_needed")
     if check_count:

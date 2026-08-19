@@ -1,6 +1,7 @@
 "use client";
 
-import { use, useState } from "react";
+import { use } from "react";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { AppShell } from "@/components/app-shell";
 import { ReviewPhase } from "@/components/session-workspace/review-phase";
@@ -22,18 +23,19 @@ export default function SessionWorkspacePage({
 }) {
   const { id } = use(params);
   const { step } = use(searchParams);
-  const [phase, setPhase] = useState<"review" | "preview">(step === "preview" ? "preview" : "review");
+  const router = useRouter();
+  const phase = step === "preview" ? "preview" : "review";
 
   return (
     <AppShell>
       <AnimatePresence mode="wait" initial={false}>
         {phase === "review" ? (
           <motion.div key="review" {...SLIDE}>
-            <ReviewPhase id={id} onNext={() => setPhase("preview")} />
+            <ReviewPhase id={id} onNext={() => router.push(`?step=preview`, { scroll: false })} />
           </motion.div>
         ) : (
           <motion.div key="preview" {...SLIDE}>
-            <PreviewPhase id={id} onBack={() => setPhase("review")} />
+            <PreviewPhase id={id} onBack={() => router.push(`?step=review`, { scroll: false })} />
           </motion.div>
         )}
       </AnimatePresence>

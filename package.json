@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "scripts": {
     "backend": "powershell -NoProfile -ExecutionPolicy Bypass -File commands/start-backend.ps1",
+    "worker": "powershell -NoProfile -ExecutionPolicy Bypass -File commands/start-worker.ps1",
     "frontend": "powershell -NoProfile -ExecutionPolicy Bypass -File commands/start-frontend.ps1",
+    "dev": "powershell -NoProfile -ExecutionPolicy Bypass -File commands/start-full.ps1",
     "full": "powershell -NoProfile -ExecutionPolicy Bypass -File commands/start-full.ps1",
     "stop": "powershell -NoProfile -ExecutionPolicy Bypass -File commands/stop-app.ps1",
     "test": "powershell -NoProfile -ExecutionPolicy Bypass -File commands/test-all.ps1",

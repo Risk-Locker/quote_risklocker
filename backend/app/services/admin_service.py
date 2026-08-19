@@ -204,7 +204,7 @@ def set_runner_fee_default(db: Session, user, amount: float) -> float:
     if setting is None:
         setting = AppSetting(key="runner_fee_default", value={})
         db.add(setting)
-    setting.value = {"amount": round(float(amount), 2)}
+    setting.value = {"amount": round(amount, 2)}
     db.commit()
     return float(setting.value["amount"])
 
@@ -241,8 +241,8 @@ def serialize_template(template: OutputTemplateConfig, db: Session | None = None
                     "id": profile.id,
                     "profile_key": profile.profile_key,
                     "name": profile.name,
-                    "width": float(profile.width),
-                    "height": float(profile.height),
+                    "width": float(str(profile.width)),
+                    "height": float(str(profile.height)),
                     "unit": profile.unit,
                 } if profile else None,
             }
@@ -476,7 +476,7 @@ LEARNABLE_FIELDS = frozenset({"car_model", "car_brand"})
 def dictionary_contains(db: Session, field: str, value: str) -> bool:
     if field not in LEARNABLE_FIELDS:
         return False
-    folded = str(value or "").strip().casefold()
+    folded = (value or "").strip().casefold()
     if not folded:
         return False
     if field == "car_model":
@@ -494,22 +494,22 @@ def learn_dictionary_value(db: Session, user, field: str, value: str) -> dict:
         raise AppError("You do not have permission to extend the extraction dictionary.", 403)
     if field not in LEARNABLE_FIELDS:
         raise AppError("Only vehicle make and model values can be learned.", 422)
-    value = str(value or "").strip()
-    if not value or len(value) > 160:
+    cleaned = (value or "").strip()
+    if not cleaned or len(cleaned) > 160:
         raise AppError("Dictionary value is invalid.", 422)
-    if dictionary_contains(db, field, value):
-        return {"added": False, "field": field, "value": value}
+    if dictionary_contains(db, field, cleaned):
+        return {"added": False, "field": field, "value": cleaned}
     if field == "car_model":
-        model = VehicleModel(name=value, aliases=[value])
+        model = VehicleModel(name=cleaned, aliases=[cleaned])
         db.add(model)
         db.commit()
         db.refresh(model)
-        return {"added": True, "id": model.id, "field": field, "value": value}
-    brand = VehicleBrand(name=value, aliases=[value])
+        return {"added": True, "id": model.id, "field": field, "value": cleaned}
+    brand = VehicleBrand(name=cleaned, aliases=[cleaned])
     db.add(brand)
     db.commit()
     db.refresh(brand)
-    return {"added": True, "id": brand.id, "field": field, "value": value}
+    return {"added": True, "id": brand.id, "field": field, "value": cleaned}
 
 
 def delete_vehicle_brand(db: Session, user, brand_id: str) -> None:
@@ -543,3 +543,23 @@ def save_strategy_settings(db: Session, user, payload: dict) -> AppSetting:
     db.commit()
     db.refresh(setting)
     return setting
+
+
+def get_runner_fee_default(db: Session) -> float:
+    setting = db.get(AppSetting, "default_runner_fee")
+    if not setting or not isinstance(setting.value, dict):
+        return 20.0
+    return float(setting.value.get("amount", 20.0))
+
+
+def set_runner_fee_default(db: Session, user, amount: float) -> float:
+    require_admin(user)
+    setting = db.get(AppSetting, "default_runner_fee")
+    if not setting:
+        setting = AppSetting(key="default_runner_fee", value={"amount": amount, "currency": "MYR"})
+        db.add(setting)
+    else:
+        setting.value = {"amount": amount, "currency": "MYR"}
+    db.commit()
+    db.refresh(setting)
+    return amount

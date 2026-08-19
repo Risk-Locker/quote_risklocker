@@ -61,7 +61,7 @@ def _for_draft(db, model, draft_id: str) -> list:
 
 
 def _idempotency_key(value: str) -> str:
-    key = str(value or "").strip()
+    key = (value or "").strip()
     if not key or len(key) > 160:
         raise AppError("A non-empty idempotency key of at most 160 characters is required.", 422)
     return key
@@ -92,22 +92,26 @@ def _template_config(draft: QuotationDraft, revision: TemplateRevision, page: Te
         and draft.layout_override_template_revision_id == revision.id
         and draft.layout_override_base_hash == revision.config_hash
     )
-    config = deepcopy(draft.layout_override if exact_override else revision.config)
+    raw_config = draft.layout_override if exact_override else revision.config
+    config: dict = deepcopy(raw_config) if raw_config is not None else {}
     config.setdefault("version", 7 if revision.state == "published" else 2)
+    page_w = float(str(page.width)) if page.width is not None else 595.28
+    page_h = float(str(page.height)) if page.height is not None else 841.89
     config.setdefault("page_profile", {
         "profile_key": page.profile_key,
         "name": page.name,
-        "width": float(page.width),
-        "height": float(page.height),
+        "width": page_w,
+        "height": page_h,
         "unit": page.unit,
         "safe_margins": deepcopy(page.safe_margins or {}),
         "bleed": deepcopy(page.bleed or {}),
         "background_behavior": page.background_behavior,
     })
     canvas = config.setdefault("canvas", {})
-    canvas.setdefault("width", float(page.width))
-    canvas.setdefault("height", float(page.height))
-    canvas.setdefault("elements", [])
+    if isinstance(canvas, dict):
+        canvas.setdefault("width", page_w)
+        canvas.setdefault("height", page_h)
+        canvas.setdefault("elements", [])
     try:
         return validate_template_config(config, compatibility=revision.state == "compatibility")
     except ValueError as exc:
@@ -252,12 +256,20 @@ def request_version_generation(
     if not draft or draft.deleted_at:
         raise AppError("Quotation not found.", 404)
     draft._generation_session_id = session.id
+    if draft.revision != draft_revision:
+        raise AppError("The quotation changed. Save the latest revision before generating.", 409)
     existing = _existing_request(db, user, draft, key, draft_revision)
     if existing:
         return existing
-    if draft.revision != draft_revision:
-        raise AppError("The quotation changed. Save and review the latest revision before generating.", 409)
     revision = db.get(TemplateRevision, draft.template_revision_id) if draft.template_revision_id else None
+    if not revision:
+        revision = db.scalars(
+            select(TemplateRevision)
+            .where(TemplateRevision.state.in_(["published", "compatibility"]))
+            .order_by(TemplateRevision.revision_number.desc())
+        ).first()
+        if revision:
+            draft.template_revision_id = revision.id
     decisions = _for_draft(db, DraftSourceLineDecision, draft.id)
     selections = _for_draft(db, DraftBenefitSelection, draft.id)
     blockers = generation_blockers(draft, decisions, selections, template_revision=revision)
@@ -341,6 +353,14 @@ def request_preview_render(db, user, session_id: str, *, draft_revision: int) ->
     if draft.revision != draft_revision:
         raise AppError("The quotation changed. Save the latest revision before previewing.", 409)
     revision = db.get(TemplateRevision, draft.template_revision_id) if draft.template_revision_id else None
+    if not revision:
+        revision = db.scalars(
+            select(TemplateRevision)
+            .where(TemplateRevision.state.in_(["published", "compatibility"]))
+            .order_by(TemplateRevision.revision_number.desc())
+        ).first()
+        if revision:
+            draft.template_revision_id = revision.id
     decisions = _for_draft(db, DraftSourceLineDecision, draft.id)
     selections = _for_draft(db, DraftBenefitSelection, draft.id)
     if generation_blockers(draft, decisions, selections, template_revision=revision):

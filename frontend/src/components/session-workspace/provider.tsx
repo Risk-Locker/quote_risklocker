@@ -15,6 +15,7 @@ import type { Route } from "next";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 import type {
+  BenefitCardSummary,
   MutationState,
   ScalarDecision,
   WorkspaceOperation,
@@ -63,24 +64,42 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
     };
   }
   if (operation.op === "create_custom_benefit") {
-    const key = String(operation.selection_key || "custom");
+    const key = String(operation.selection_key || `custom:${Date.now()}`);
     const selectionId = `pending:${key}`;
-    const typed = operation.typed_value as Record<string, unknown> | undefined;
-    const value = String(typed?.display_text ?? typed?.value ?? "");
+    const typed = operation.typed_value as Record<string, unknown> | null | undefined;
+    const value = String(typed?.display_text || typed?.value || operation.label || "Included");
+    const isAddon = operation.state === "available_addon";
+    const newCard: BenefitCardSummary = {
+      card_key: selectionId,
+      selection_id: selectionId,
+      offering_id: selectionId,
+      offering_key: key,
+      concept_id: selectionId,
+      concept_key: key,
+      label: String(operation.label || "Custom benefit"),
+      value,
+      cost_status: String(operation.cost_status || (isAddon ? "paid" : "included")),
+    };
+
     return {
       ...snapshot,
       benefits: [...snapshot.benefits, {
-        id: selectionId, selection_key: key, label: String(operation.label || "Custom benefit"),
-        state: String(operation.state || "current"), cost_status: String(operation.cost_status || "unknown"),
-        concept_id: null, item_kind: "custom", typed_value: typed || null,
+        id: selectionId,
+        selection_key: key,
+        label: String(operation.label || "Custom benefit"),
+        state: isAddon ? "available_addon" : "current",
+        cost_status: String(operation.cost_status || (isAddon ? "paid" : "included")),
+        concept_id: null,
+        item_kind: "custom",
+        typed_value: typed || null,
       }],
       benefit_cards: {
-        ...snapshot.benefit_cards,
-        current_benefits: [...snapshot.benefit_cards.current_benefits, {
-          card_key: selectionId, selection_id: selectionId, offering_id: selectionId, offering_key: key,
-          concept_id: selectionId, concept_key: key, label: String(operation.label || "Custom benefit"), value,
-          cost_status: String(operation.cost_status || "unknown"),
-        }],
+        current_benefits: isAddon
+          ? snapshot.benefit_cards.current_benefits
+          : [...snapshot.benefit_cards.current_benefits, newCard],
+        available_addons: isAddon
+          ? [...snapshot.benefit_cards.available_addons, newCard]
+          : snapshot.benefit_cards.available_addons,
       },
     };
   }
@@ -119,14 +138,54 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
       ...(costStatus ? { cost_status: costStatus } : {}),
       ...(operation.typed_value !== undefined ? { typed_value: typed } : {}),
     } : item);
-    const nextCards = snapshot.benefit_cards.current_benefits
-      .filter((item) => !(item.selection_id === selectionId && state === "removed"))
-      .map((item) => item.selection_id === selectionId ? {
+
+    // Find the target card in either current_benefits or available_addons
+    const inCurrent = snapshot.benefit_cards.current_benefits.find((item) => item.selection_id === selectionId);
+    const inAddon = snapshot.benefit_cards.available_addons.find((item) => item.selection_id === selectionId);
+    const targetCard = inCurrent || inAddon;
+
+    let nextCurrent = snapshot.benefit_cards.current_benefits;
+    let nextAddons = snapshot.benefit_cards.available_addons;
+
+    if (state === "removed") {
+      nextCurrent = nextCurrent.filter((item) => item.selection_id !== selectionId);
+      nextAddons = nextAddons.filter((item) => item.selection_id !== selectionId);
+    } else if (state === "available_addon" && inCurrent) {
+      // Move from current to addon
+      nextCurrent = nextCurrent.filter((item) => item.selection_id !== selectionId);
+      nextAddons = [...nextAddons, {
+        ...inCurrent,
+        ...(costStatus ? { cost_status: costStatus } : {}),
+      }];
+    } else if (state === "current" && inAddon) {
+      // Move from addon to current
+      nextAddons = nextAddons.filter((item) => item.selection_id !== selectionId);
+      nextCurrent = [...nextCurrent, {
+        ...inAddon,
+        ...(costStatus ? { cost_status: costStatus } : {}),
+      }];
+    } else {
+      // Update in-place
+      nextCurrent = nextCurrent.map((item) => item.selection_id === selectionId ? {
         ...item,
         ...(costStatus ? { cost_status: costStatus } : {}),
         ...(typed ? { value: String(typed.display_text ?? typed.value ?? item.value) } : {}),
       } : item);
-    return { ...snapshot, benefits: nextBenefits, benefit_cards: { ...snapshot.benefit_cards, current_benefits: nextCards } };
+      nextAddons = nextAddons.map((item) => item.selection_id === selectionId ? {
+        ...item,
+        ...(costStatus ? { cost_status: costStatus } : {}),
+        ...(typed ? { value: String(typed.display_text ?? typed.value ?? item.value) } : {}),
+      } : item);
+    }
+
+    return {
+      ...snapshot,
+      benefits: nextBenefits,
+      benefit_cards: {
+        current_benefits: nextCurrent,
+        available_addons: nextAddons,
+      },
+    };
   }
   if (operation.op === "layout_override") {
     return {

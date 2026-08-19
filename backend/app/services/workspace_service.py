@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.errors import AppError
@@ -108,7 +108,15 @@ def _rows_for_draft(db, model, draft_id: str) -> list:
 
 
 def _template_for_draft(db, draft: QuotationDraft) -> TemplateRevision | None:
-    return db.get(TemplateRevision, draft.template_revision_id) if draft.template_revision_id else None
+    if draft.template_revision_id:
+        rev = db.get(TemplateRevision, draft.template_revision_id)
+        if rev:
+            return rev
+    return db.scalars(
+        select(TemplateRevision)
+        .where(TemplateRevision.state.in_(["published", "compatibility"]))
+        .order_by(TemplateRevision.revision_number.desc())
+    ).first()
 
 
 def generation_blockers(
@@ -124,12 +132,11 @@ def generation_blockers(
         if not isinstance(field, dict):
             continue
         explicit = (scalar_decisions.get(field_name) or {}).get("decision")
-        needs_review = field.get("status") in {"check_needed", "cannot_read"}
-        if needs_review or (field.get("value") not in {None, ""} and explicit not in SCALAR_DECISIONS):
+        if explicit not in SCALAR_DECISIONS:
             blockers.append({
                 "code": "scalar_check_needed",
                 "path": f"fields.{field_name}",
-                "message": "Confirm, edit, clear, or keep this value marked for review.",
+                "message": f"Confirm or edit {field_name.replace('_', ' ')}.",
             })
 
     for decision in decisions:
@@ -177,8 +184,8 @@ def generation_blockers(
     if not draft.catalog_revision_id:
         blockers.append({
             "code": "missing_catalog",
-            "path": "catalog",
-            "message": "Pin this quotation to a verified company catalog before generating.",
+            "path": "catalog_revision_id",
+            "message": "Choose a published catalog version.",
         })
 
     if template_revision is None or template_revision.state not in {"published", "compatibility"}:
@@ -273,12 +280,12 @@ def _decision_summary(db, decision: DraftSourceLineDecision) -> dict:
 
 
 def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBenefitSelection]) -> dict[str, list[dict]]:
+    concepts = list(db.scalars(select(BenefitConcept)).all())
     if not draft.catalog_revision_id:
-        # Reviewed custom items still need to appear even without a catalog.
         offerings: list = []
-        concepts: list = []
         relations: list = []
         facets: list = []
+        valid_selections = [s for s in selections if s.item_kind != "catalog"]
     else:
         offerings = [
             item for item in db.scalars(select(CatalogOffering)).all()
@@ -286,15 +293,18 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
         ]
         offering_ids = {item.id for item in offerings}
         concept_ids = {item.concept_id for item in offerings}
-        concepts = [item for item in db.scalars(select(BenefitConcept)).all() if item.id in concept_ids]
         relations = [
             item for item in db.scalars(select(BenefitRelation)).all()
             if item.catalog_revision_id == draft.catalog_revision_id
             and item.from_offering_id in offering_ids and item.to_offering_id in offering_ids
         ]
         facets = [item for item in db.scalars(select(BenefitFacet)).all() if item.parent_concept_id in concept_ids]
+        valid_selections = [
+            s for s in selections
+            if s.item_kind != "catalog" or s.catalog_offering_id in offering_ids
+        ]
     return resolve_benefit_cards(
-        selections=selections, offerings=offerings, concepts=concepts, relations=relations, facets=facets,
+        selections=valid_selections, offerings=offerings, concepts=concepts, relations=relations, facets=facets,
     )
 
 
@@ -582,35 +592,41 @@ def _sync_detected_company(db, draft: QuotationDraft) -> None:
     session.detected_company = _draft_field_text(draft, "insurance_company") or None
 
 
+def _reset_catalog_pin(draft: QuotationDraft, *, clear_company: bool = True) -> None:
+    if clear_company:
+        draft.company_id = None
+    draft.product_id = None
+    draft.tier_id = None
+    draft.catalog_revision_id = None
+
+
 def _reconcile_catalog_pin(db, draft: QuotationDraft, *, changed_field: str) -> None:
     """Re-resolve the pinned catalog after a staff edit; never guess ambiguous names."""
+    prev_company_id = draft.company_id
     if changed_field == "insurance_company":
         name = _draft_field_text(draft, "insurance_company")
-        if name:
+        if not name:
+            _reset_catalog_pin(draft, clear_company=True)
+        else:
             companies = db.scalars(select(InsuranceCompany).where(InsuranceCompany.status == "active")).all()
             matches = [item for item in companies if str(item.name or "").strip().casefold() == name.casefold()]
-            if len(matches) == 1 and matches[0].id != draft.company_id:
-                draft.company_id = matches[0].id
-                draft.product_id = None
-                draft.tier_id = None
-                draft.catalog_revision_id = None
-            elif len(matches) != 1:
-                draft.company_id = None
-                draft.product_id = None
-                draft.tier_id = None
-                draft.catalog_revision_id = None
-        else:
-            draft.company_id = None
-            draft.product_id = None
-            draft.tier_id = None
-            draft.catalog_revision_id = None
+            if len(matches) == 1:
+                if matches[0].id != draft.company_id:
+                    draft.company_id = matches[0].id
+                    _reset_catalog_pin(draft, clear_company=False)
+            else:
+                _reset_catalog_pin(draft, clear_company=True)
     elif changed_field in {"product_name", "product"}:
-        draft.product_id = None
-        draft.tier_id = None
-        draft.catalog_revision_id = None
+        _reset_catalog_pin(draft, clear_company=False)
     elif changed_field in {"tier_name", "product_tier", "plan_name"}:
         draft.tier_id = None
         draft.catalog_revision_id = None
+
+    if prev_company_id != draft.company_id:
+        for s in _rows_for_draft(db, DraftBenefitSelection, draft.id):
+            if s.item_kind == "catalog":
+                db.delete(s)
+
     _sync_detected_company(db, draft)
     initialize_catalog_review(db, draft)
     auto_apply_extracted_benefits(db, draft)
@@ -625,6 +641,13 @@ def _apply_pin_catalog(db, draft: QuotationDraft, user, operation: dict) -> str:
     company = db.get(InsuranceCompany, company_id)
     if company is None or company.status != "active":
         raise AppError("That insurance company is not active.", 422)
+
+    company_changed = draft.company_id != company.id
+    if company_changed:
+        for s in _rows_for_draft(db, DraftBenefitSelection, draft.id):
+            if s.item_kind == "catalog":
+                db.delete(s)
+
     draft.company_id = company.id
     draft.product_id = None
     draft.tier_id = None
@@ -653,6 +676,17 @@ def _apply_pin_catalog(db, draft: QuotationDraft, user, operation: dict) -> str:
     return "catalog"
 
 
+def _apply_reset_benefits(db, draft: QuotationDraft, user, operation: dict) -> str:
+    """Reset all benefit selections back to the clean catalog defaults and auto-applied detections."""
+    for s in _rows_for_draft(db, DraftBenefitSelection, draft.id):
+        db.delete(s)
+    for d in _rows_for_draft(db, DraftSourceLineDecision, draft.id):
+        db.delete(d)
+    initialize_catalog_review(db, draft)
+    auto_apply_extracted_benefits(db, draft)
+    return "benefits"
+
+
 def _apply_custom_benefit(db, draft: QuotationDraft, user, operation: dict) -> tuple[str, DraftBenefitSelection]:
     key = _validate_selection_key(operation.get("selection_key"))
     if _selection_by_key(db, draft.id, key):
@@ -671,11 +705,22 @@ def _apply_custom_benefit(db, draft: QuotationDraft, user, operation: dict) -> t
     source_line_id = operation.get("source_line_id")
     if source_line_id:
         _line_belongs_to_draft(db, draft, str(source_line_id))
+    concept_id = operation.get("concept_id")
+    if not concept_id and operation.get("concept_key"):
+        matched_concept = db.scalar(select(BenefitConcept).where(BenefitConcept.concept_key == operation.get("concept_key")))
+        if matched_concept:
+            concept_id = matched_concept.id
+    if not concept_id:
+        matched_concept = db.scalar(select(BenefitConcept).where(func.lower(BenefitConcept.label) == label.lower()))
+        if matched_concept:
+            concept_id = matched_concept.id
+
     selection = DraftBenefitSelection(
         id=new_id(),
         draft_id=draft.id,
         selection_key=key,
         source_line_id=str(source_line_id) if source_line_id else None,
+        concept_id=str(concept_id) if concept_id else None,
         item_kind="custom",
         state=state,
         cost_status=cost_status,
@@ -714,9 +759,14 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
             and relation.to_offering_id == offering.id
             for relation in db.scalars(select(BenefitRelation)).all()
         )
-        if not valid_edge:
+        same_concept_addon = (
+            offering.concept_id
+            and offering.concept_id == current[0].concept_id
+            and (getattr(offering, "role", None) in {"addon_option", "bundle_component"} or offering.offering_kind in {"optional", "base"})
+        )
+        if not valid_edge and not same_concept_addon:
             raise AppError("That offering is not an explicit upgrade for the current benefit.", 422)
-    elif not current and offering.offering_kind not in {"optional", "base"}:
+    elif not current and offering.offering_kind not in {"optional", "base"} and getattr(offering, "role", None) not in {"addon_option", "bundle_component", "included"}:
         raise AppError("An upgrade requires its explicit current benefit.", 422)
 
     try:
@@ -922,6 +972,8 @@ def apply_workspace_patch(
                 changed_paths.append(_apply_layout_override(db, draft, operation))
             elif operation_name == "pin_catalog":
                 changed_paths.append(_apply_pin_catalog(db, draft, user, operation))
+            elif operation_name == "reset_benefits":
+                changed_paths.append(_apply_reset_benefits(db, draft, user, operation))
             elif operation_name == "template_selection":
                 changed_paths.append(_apply_template_selection(db, draft, operation))
             else:

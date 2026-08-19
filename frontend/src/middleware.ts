@@ -19,6 +19,7 @@ export const config = {
     "/sessions/:path*",
     "/batches/:path*",
     "/builder/:path*",
+    "/extraction/:path*",
     "/settings/:path*",
     "/admin/:path*",
     "/trash/:path*",
