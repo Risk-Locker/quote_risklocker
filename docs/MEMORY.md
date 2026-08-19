@@ -15,6 +15,11 @@
 - Benefits & Package refactor: ALL WORKSTREAMS COMPLETED (WS0 through WS8). Master run log at `docs/superpowers/plans/2026-08-16-benefits-package-refactor/RUN-LOG.md`. Full test suite: 461 passed, 0 failed, 0 skipped. Frontend tsc clean, Next.js build green.
 - Database state 2026-08-17: full v7 schema, migrations 001-035 applied & checksummed in PostgreSQL, seed-demo.py verified idempotent.
 
+## 2026-08-19 · Antigravity (Gemini 3.7 Flash) — Pushed v8 Codebase to origin/main & origin/v8
+Asked: commit and push all current workspace changes to origin/main and remote origin/v8 branch without creating local branches.
+Done: staged all changes, committed commit `8c1f1af`, pushed cleanly to `origin/main` and `origin/v8`; working tree clean.
+Pending: none.
+
 ## 2026-08-19 · Antigravity (Gemini 3.7 Flash) — Extraction Intelligence & Failure Mode Diagnostics
 Asked: explain why the current extraction failed on QBE quotation (extracted "Nama Ejen" as name, "Jenis Perlindungan" as coverage type, partial car model, and missed NCD) and propose solutions to add real thinking/intelligence.
 Done: diagnosed root causes (naive 1D lookahead grabbing bilingual Malay label translations, generic substring matching on "name" without negative keyword filtering for "Nama Ejen", rigid model word trimming, and missing "NCB" acronym); presented concrete architecture options (Multimodal LLM extraction, Hybrid pipeline, and Layout-aware bilingual table parsing).
