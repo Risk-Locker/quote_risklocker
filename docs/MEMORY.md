@@ -16,6 +16,11 @@
 - Database state 2026-08-17: full v7 schema, migrations 001-035 applied & checksummed in PostgreSQL, seed-demo.py verified idempotent.
 - Database state 2026-08-20: migrations 001-036 applied & checksummed (036 adds `draft_benefit_selections.package_plan_id` + `price`).
 
+## 2026-08-20 · Copilot (opencode-go/deepseek-v4-flash) — v8 branch: commit + push everything to v8 & main
+Asked: create branch v8, commit and push everything to origin/v8, then push the same to origin/main.
+Done: created local `v8` from main; committed all 50 files (41 modified + 9 new incl. `.github/workflows/deploy.yml`, `deploy/`, `backend/app/extraction/gemini_extractor.py`, `ecosystem.config.cjs`, `migrations/036_package_plans.sql`, `tests/test_package_plans.py`, `frontend/src/app/ai-context/page.tsx`, `frontend/src/components/guided-tour.tsx`, `frontend/src/components/gemini-quota-meter.tsx`) as `e896257`; fast-forwarded `main` to `e896257`; pushed both to origin; origin/v8 == origin/main == e896257, working tree clean.
+Pending: none.
+
 ## 2026-08-20 · Copilot (opencode-go/deepseek-v4-flash) — Production Deploy Pipeline (VPS)
 Asked: check whether any deploy script exists in the repo; study the RLTS deploy pattern (GitHub Actions + rsync + PM2 + nginx) and adapt it to this project's different architecture; provide VPS setup guidelines.
 Done: added `.github/workflows/deploy.yml` (pytest + tsc + next build gate, then SSH/rsync deploy to `/var/www/html/quote_risklocker` with `pm2 startOrReload`), `ecosystem.config.cjs` (3 PM2 apps: `rl-quote-api` :8100, `rl-quote-worker`, `rl-quote-frontend` :3000; paths from `RL_DEPLOY_PATH`; API runs `ENABLE_EMBEDDED_WORKER=0`), `deploy/nginx-quote-risklocker.conf` (port-80 template; `/api/ -> :8100/api/`, `/ -> :3000`, 25m uploads, CSP; certbot adds TLS), `deploy/setup-vps.sh` (idempotent bootstrap: packages, venv, Chromium --with-deps, build, migrations, nginx, certbot, pm2 startup); rewrote `docs/SETUP.md` with the real layout; added deployment notes to `docs/OPERATIONS.md`, `docs/STRUCTURE.md`, `docs/TESTING.md`; README deploy note. Decisions: root user, CI gate on, certbot HTTPS (app requires it), Supabase stays cloud.
