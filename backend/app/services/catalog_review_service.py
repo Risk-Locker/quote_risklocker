@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import select
@@ -11,6 +12,8 @@ from app.models.tables import (
     BenefitCatalog,
     BenefitCatalogRevision,
     BenefitPackage,
+    BenefitPackagePlan,
+    BenefitPackagePlanItem,
     BenefitRelation,
     CatalogOffering,
     DraftBenefitSelection,
@@ -26,6 +29,10 @@ from app.models.tables import (
 
 def _rows(db, model) -> list:
     return list(db.scalars(select(model)).all())
+
+
+def _norm(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
 
 
 def _field_value(fields: dict, *names: str) -> str:
@@ -352,4 +359,138 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                         break
         if decision.disposition == "unresolved":
             decision.disposition = "source_only" if selected else "omitted"
+
+    # Apply confidently detected benefit packs (bundled add-on plans).
+    detected_packs = (extraction.candidates or {}).get("detected_packs") or []
+    if detected_packs:
+        applied += _apply_detected_packs(db, draft, draft.catalog_revision_id, detected_packs, selections, offering_by_id)
     return {"applied": applied}
+
+
+def _apply_detected_packs(
+    db,
+    draft: QuotationDraft,
+    catalog_revision_id: str,
+    detected_packs: list[dict],
+    selections: list[DraftBenefitSelection],
+    offering_by_id: dict,
+) -> int:
+    """Apply AI-detected purchased packs atomically (same semantics as the workspace op)."""
+    packages = {
+        item.id: item for item in _rows(db, BenefitPackage)
+        if item.catalog_revision_id == catalog_revision_id and item.package_kind == "addon_bundle" and item.status == "active"
+    }
+    if not packages:
+        return 0
+    plans = [item for item in _rows(db, BenefitPackagePlan) if item.package_id in packages and item.status == "active"]
+    items_by_plan: dict[str, list[BenefitPackagePlanItem]] = {}
+    for item in _rows(db, BenefitPackagePlanItem):
+        items_by_plan.setdefault(item.plan_id, []).append(item)
+    applied = 0
+    for pack in detected_packs:
+        if not isinstance(pack, dict):
+            continue
+        package_name = _norm(pack.get("package_name"))
+        plan_name = _norm(pack.get("plan_name"))
+        if not package_name and not plan_name:
+            continue
+        matches = []
+        for plan in plans:
+            plan_norm = _norm(plan.name)
+            if plan_name and (plan_norm == plan_name or plan_norm.endswith(f" {plan_name}")):
+                matches.append(plan)
+            elif not plan_name and (plan_norm == package_name or plan_norm.startswith(package_name)):
+                matches.append(plan)
+        if len(matches) != 1:
+            continue
+        plan = matches[0]
+        package = packages[plan.package_id]
+
+        # Drop members of other plans of the same bundle first (clean ladder switch).
+        sibling_ids = {item.id for item in plans if item.package_id == package.id} - {plan.id}
+        for sel in [s for s in selections if s.package_plan_id and str(s.package_plan_id) in {str(i) for i in sibling_ids}]:
+            _drop_plan_selection(selections, sel)
+
+        for item in sorted(items_by_plan.get(plan.id, []), key=lambda row: (int(row.sort_order or 0), str(row.id))):
+            offering = offering_by_id.get(item.offering_id)
+            if offering is None or offering.status not in {"active", "compatibility"}:
+                continue
+            current = next(
+                (s for s in selections if s.concept_id == offering.concept_id and s.state == "current"),
+                None,
+            )
+            if current is not None:
+                if current.typed_value_override is not None:
+                    current.package_plan_id = plan.id
+                    continue
+                selection_id = new_id()
+                current.state = "superseded"
+                current.superseded_by_id = selection_id
+                replacement = DraftBenefitSelection(
+                    id=selection_id,
+                    draft_id=draft.id,
+                    selection_key=f"plan:{plan.plan_key}:{offering.offering_key}"[:160],
+                    catalog_offering_id=offering.id,
+                    concept_id=offering.concept_id,
+                    item_kind="catalog",
+                    state="current",
+                    cost_status="paid",
+                    label_override=offering.label_override,
+                    typed_value_override=item.typed_value_override,
+                    evidence_snapshot={
+                        "package_id": package.id,
+                        "plan_id": plan.id,
+                        "plan_key": plan.plan_key,
+                        "source": "package_plan",
+                        "is_detected": True,
+                    },
+                    sort_order=int(item.sort_order or 0),
+                    package_plan_id=plan.id,
+                )
+                db.add(replacement)
+                selections.append(replacement)
+            else:
+                member = DraftBenefitSelection(
+                    id=new_id(),
+                    draft_id=draft.id,
+                    selection_key=f"plan:{plan.plan_key}:{offering.offering_key}"[:160],
+                    catalog_offering_id=offering.id,
+                    concept_id=offering.concept_id,
+                    item_kind="catalog",
+                    state="current",
+                    cost_status="paid",
+                    label_override=offering.label_override,
+                    typed_value_override=item.typed_value_override,
+                    evidence_snapshot={
+                        "package_id": package.id,
+                        "plan_id": plan.id,
+                        "plan_key": plan.plan_key,
+                        "source": "package_plan",
+                        "is_detected": True,
+                    },
+                    sort_order=int(item.sort_order or 0),
+                    package_plan_id=plan.id,
+                )
+                db.add(member)
+                selections.append(member)
+            applied += 1
+    return applied
+
+
+def _drop_plan_selection(selections: list[DraftBenefitSelection], selection: DraftBenefitSelection) -> None:
+    """Remove one plan member and restore its superseded default, if any."""
+    source = str((selection.evidence_snapshot or {}).get("source") or "")
+    if source != "package_plan":
+        selection.package_plan_id = None
+        return
+    predecessors = [
+        item for item in selections
+        if item.superseded_by_id == selection.id and item.state == "superseded"
+    ]
+    selection.state = "removed"
+    selection.superseded_by_id = None
+    selection.package_plan_id = None
+    if predecessors:
+        predecessors[0].state = "current"
+        predecessors[0].superseded_by_id = None
+        predecessors[0].package_plan_id = None

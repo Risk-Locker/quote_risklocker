@@ -56,3 +56,13 @@ The three inactive settings are loaded by backend configuration but do not chang
 - The storage bucket is private and created/checked by backend startup.
 - Microsoft 365 archive integration stays disabled until backend deployment credentials and its archive worker are deliberately configured.
 - The app owns trusted-host/origin validation, CSRF, headers, and Postgres rate limits. Checked-in CI, production observability, backup drills, and alerts are WP11 deliverables.
+
+## Production Deployment (VPS)
+
+- Runtime: three PM2 processes (`ecosystem.config.cjs`) — `rl-quote-api` (uvicorn :8100), `rl-quote-worker` (`commands/run-worker.py`), `rl-quote-frontend` (`next start` :3000). Paths derive from `RL_DEPLOY_PATH`.
+- The API must run with `ENABLE_EMBEDDED_WORKER=0` so jobs are claimed only by the dedicated worker.
+- nginx (`deploy/nginx-quote-risklocker.conf`): `/api/ -> 127.0.0.1:8100/api/`, `/ -> 127.0.0.1:3000`, `client_max_body_size 25m`, HTTPS via certbot.
+- Production `.env` values: `APP_ORIGIN`/`TRUSTED_HOSTS`/`CORS_ORIGINS=https://quote.risklocker.com`, `TRUSTED_PROXY_IPS=127.0.0.1` (nginx on the same host), `SESSION_COOKIE_SECURE=true`.
+- Migrations on the VPS: `PYTHONPATH=backend .venv/bin/python -m app.db.migrations` (idempotent; runs on every deploy).
+- CI/CD: `.github/workflows/deploy.yml` (tests + build on GitHub, then rsync + install + migrate + `pm2 startOrReload` on the VPS). Secrets: `VPS_HOST`, `VPS_PORT`, `VPS_USER`, `VPS_SSH_KEY_B64`.
+- One-time bootstrap: `deploy/setup-vps.sh` (see `docs/SETUP.md`).

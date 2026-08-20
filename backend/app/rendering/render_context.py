@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from typing import Any, Iterable
 
 from pydantic import ValidationError
 
-from app.domain.benefits import BenefitValue
+from app.domain.benefits import BenefitValue, MoneyAmount
 
 
 class RenderContextError(ValueError):
@@ -37,6 +37,61 @@ def _number(value: Any) -> str:
 def _money(value: Any, currency: str | None) -> str:
     prefix = "RM" if currency == "MYR" else str(currency or "").upper()
     return f"{prefix} {_number(value)}".strip()
+
+
+def format_money_amount(raw_price: dict | None) -> str:
+    """Render a stored MoneyAmount-like price dict; tolerant of legacy shapes."""
+    if not raw_price:
+        return ""
+    try:
+        price = MoneyAmount.model_validate(raw_price)
+    except ValidationError:
+        amount = (raw_price or {}).get("amount")
+        currency = (raw_price or {}).get("currency")
+        if amount is None:
+            return ""
+        try:
+            return _money(amount, currency)
+        except RenderContextError:
+            return ""
+    return _money(price.amount, price.currency)
+
+
+def build_extras(selections: Iterable[Any], concepts: Iterable[Any]) -> list[dict]:
+    """Staff-added priced extras shown above the coverage premium."""
+    concept_labels = {str(item.id): item.label for item in concepts}
+    extras: list[dict] = []
+    for sel in selections:
+        if sel.state != "current" or not sel.price:
+            continue
+        label = str(sel.label_override or "").strip() or concept_labels.get(str(sel.concept_id), "Extra benefit")
+        extras.append({
+            "selection_id": sel.id,
+            "label": label,
+            "price": sel.price,
+            "sort_order": int(sel.sort_order or 0),
+        })
+    extras.sort(key=lambda item: (item["sort_order"], item["label"].casefold(), item["selection_id"]))
+    return extras
+
+
+def adjusted_total_text(fields: dict, extras: list[dict]) -> str:
+    """Total premium including staff-added extras; deterministic from extracted values."""
+    raw = (fields or {}).get("total_amount")
+    value = raw.get("value") if isinstance(raw, dict) else raw
+    try:
+        total = Decimal(str(value or "").replace(",", ""))
+    except (InvalidOperation, TypeError, ValueError):
+        return ""
+    for extra in extras:
+        amount = (extra.get("price") or {}).get("amount")
+        try:
+            total += Decimal(str(amount))
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+    if total == total.to_integral_value():
+        return f"{int(total):,}"
+    return format(total, ",f")
 
 
 def format_benefit_value(raw_value: dict | None) -> str:
@@ -106,6 +161,11 @@ def _card(
         "asset_id": asset_id or concept.default_asset_id,
         "cost_status": getattr(selection, "cost_status", None),
         "sort_order": int(getattr(offering, "sort_order", 0) or 0),
+        "is_detected": bool(
+            (getattr(selection, "evidence_snapshot", None) or {}).get("is_detected")
+            or (getattr(selection, "evidence_snapshot", None) or {}).get("source") in {"extracted_addon", "gemini_multimodal", "extracted_upgrade"}
+        ),
+        "group_id": getattr(selection, "package_plan_id", None),
     }
 
 
@@ -138,6 +198,7 @@ def resolve_benefit_cards(
     concepts: list[Any],
     relations: list[Any],
     facets: list[Any],
+    plans: list[Any] | None = None,
 ) -> dict[str, list[dict]]:
     """Resolve current and available cards solely from pinned rows and decisions."""
 
@@ -268,7 +329,28 @@ def resolve_benefit_cards(
             offered_ids.add(offering.id)
 
     order = lambda card: (card["sort_order"], card["label"].casefold(), card["card_key"])
+    current_sorted = sorted(current_cards, key=order)
+    addons_sorted = sorted(available_cards, key=order)
+    plan_rows = {str(item.id): item for item in (plans or [])}
+    groups: list[dict] = []
+    for card in current_sorted:
+        group_id = card.get("group_id")
+        if not group_id:
+            continue
+        group = next((item for item in groups if item["plan_id"] == group_id), None)
+        if group is None:
+            plan = plan_rows.get(group_id)
+            group = {
+                "plan_id": group_id,
+                "plan_key": getattr(plan, "plan_key", "") or "",
+                "plan_label": getattr(plan, "name", "") or "Package plan",
+                "cards": [],
+            }
+            groups.append(group)
+        group["cards"].append(card)
+    groups.sort(key=lambda item: (int(getattr(plan_rows.get(item["plan_id"]), "sort_order", 0) or 0), item["plan_key"]))
     return {
-        "current_benefits": sorted(current_cards, key=order),
-        "available_addons": sorted(available_cards, key=order),
+        "current_benefits": current_sorted,
+        "available_addons": addons_sorted,
+        "groups": groups,
     }

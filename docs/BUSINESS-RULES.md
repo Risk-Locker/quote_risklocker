@@ -32,6 +32,18 @@
 - A company/product/tier with no base offering for a concept does not receive that current benefit. An optional offer appears only in Available Add-ons when a verified catalog defines it.
 - Missing or unverified catalog information remains empty. Artwork and filenames never establish coverage by themselves.
 
+## Benefit Packs (Bundled Add-on Plans)
+
+- A benefit pack is an `addon_bundle` package with plan levels (A/B/C/D); each higher plan is an upgrade of the previous one. Packs are add-ons only and are never auto-added on catalog pin.
+- Staff may add any plan level directly (no forced ladder climb). Adding a higher/lower plan of the same pack replaces the previous level in place — it never creates a duplicate grid of cards.
+- A plan member upgrades an untouched catalog default in place (e.g. Towing 50 km -> 200 km -> Unlimited); the upgraded card moves inside the pack's group border. A staff- or AI-customized value is preserved and only adopted into the group.
+- One current selection per concept is enforced; a benefit already present cannot be added again.
+- In the final template, pack members render as normal grid cards wrapped in a red border with a corner badge showing the plan name. The grid never paginates or clips.
+- Removing a pack removes its members and restores the superseded defaults.
+- Packs carry no price of their own. Pricing comes from the quotation PDF; per-plan description changes are carried via the member's typed-value `display_text`.
+- AI extraction detects purchased packs from cost-summary lines (e.g. "DPA pack A -> 288.05 RM") with tolerant description matching; confident detections auto-apply with a detection marker, uncertain ones stay `Check Needed`.
+- Staff-added custom add-ons may carry a price (optional RM). Priced extras appear in an Extras block above the Coverage Premium in the bilingual master template and are added to the Total Premium. PDF-embedded add-ons stay inside the coverage premium and are not listed as extras.
+
 ## Templates and Versions
 
 - Templates are insurer-independent fixed-page revisions. A4 is the default; longer pages are separate explicit page profiles, never automatic canvas extension.

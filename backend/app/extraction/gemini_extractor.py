@@ -1,0 +1,425 @@
+"""Free Gemini Multimodal PDF Extraction Service with RAG Grounding and API Key Rotation."""
+
+from __future__ import annotations
+
+import base64
+import json
+import logging
+import re
+import threading
+from typing import Any
+
+import httpx
+
+from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+
+import time
+from datetime import datetime, timezone
+
+
+class GeminiKeyPool:
+    """Thread-safe round-robin API key pool with automatic failover and quota tracking."""
+
+    def __init__(self, keys: tuple[str, ...]):
+        self._keys = list(keys)
+        self._index = 0
+        self._lock = threading.Lock()
+        self._request_timestamps: list[float] = []
+
+    def record_request(self) -> None:
+        with self._lock:
+            now = time.time()
+            self._request_timestamps.append(now)
+            cutoff = now - 86400
+            self._request_timestamps = [t for t in self._request_timestamps if t >= cutoff]
+
+    def get_quota_stats(self) -> dict[str, Any]:
+        with self._lock:
+            now = time.time()
+            rpm_used = sum(1 for t in self._request_timestamps if t >= now - 60)
+            today_utc_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+            rpd_used = sum(1 for t in self._request_timestamps if t >= today_utc_start)
+
+            keys_count = max(len(self._keys), 1)
+            rpm_limit = keys_count * 15
+            rpd_limit = keys_count * 1500
+
+            rpd_remaining = max(0, rpd_limit - rpd_used)
+            rpm_remaining = max(0, rpm_limit - rpm_used)
+
+            return {
+                "keys_count": len(self._keys),
+                "rpm_limit": rpm_limit,
+                "rpm_used": rpm_used,
+                "rpm_remaining": rpm_remaining,
+                "rpd_limit": rpd_limit,
+                "rpd_used": rpd_used,
+                "rpd_remaining": rpd_remaining,
+                "percent_rpd_remaining": round((rpd_remaining / rpd_limit) * 100, 1) if rpd_limit > 0 else 0,
+            }
+
+    def get_next_key(self) -> str | None:
+        with self._lock:
+            if not self._keys:
+                return None
+            key = self._keys[self._index % len(self._keys)]
+            self._index = (self._index + 1) % len(self._keys)
+            return key
+
+    def get_all_keys(self) -> list[str]:
+        with self._lock:
+            return list(self._keys)
+
+
+_key_pool: GeminiKeyPool | None = None
+
+
+def get_key_pool() -> GeminiKeyPool:
+    global _key_pool
+    settings = get_settings()
+    if _key_pool is None or _key_pool.get_all_keys() != list(settings.gemini_api_keys):
+        existing_timestamps = _key_pool._request_timestamps if _key_pool else []
+        _key_pool = GeminiKeyPool(settings.gemini_api_keys)
+        _key_pool._request_timestamps = existing_timestamps
+    return _key_pool
+
+
+GEMINI_EXTRACTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "customer_name": {
+            "type": "string",
+            "description": "Full name of the policyholder/insured customer (e.g. found under 'The Insured / Pihak Diinsuranskan', 'Insured Name', 'Participant'). NEVER extract the Agent's Name, Agency, or Broker (e.g. ignore 'Nama Ejen', 'No. Akaun', 'RISKLOCKER').",
+        },
+        "insurance_company": {
+            "type": "string",
+            "description": "The underwriting insurance company name (e.g. QBE, Etiqa, AmAssurance, Lonpac, Allianz, Zurich, Liberty, MSIG, Tokio Marine, Berjaya Sompo, RHB).",
+        },
+        "product_name": {
+            "type": "string",
+            "description": "Insurance product or scheme title (e.g. 'Private Car Protector', 'Private Car Comprehensive', 'Motor Takaful').",
+        },
+        "detected_package_name": {
+            "type": "string",
+            "description": "If this is a packaged insurer (like AmAssurance), specify the package/tier name found in the document (e.g. 'Lite', 'Plus', 'Standard', 'Premier', 'Comprehensive'). Otherwise empty string.",
+        },
+        "vehicle_no": {
+            "type": "string",
+            "description": "Vehicle registration / plate number (e.g. 'JUM2709', 'WYY1234', 'VAA8888').",
+        },
+        "car_brand": {
+            "type": "string",
+            "description": "Vehicle make/manufacturer (e.g. 'PERODUA', 'PROTON', 'HONDA', 'TOYOTA', 'MAZDA', 'MERCEDES-BENZ', 'BMW').",
+        },
+        "car_model": {
+            "type": "string",
+            "description": "Complete vehicle model, variant, transmission, and body type text (e.g. 'PERODUA ATIVA AV MY21 D55L 4D WAGON 1 SP AUTOMATIC CONSTANTLY VARIABLE (CVT) / 4D WAGON').",
+        },
+        "vehicle_year": {
+            "type": "string",
+            "description": "Year of manufacture (e.g. '2021', '2023').",
+        },
+        "engine_cc": {
+            "type": "string",
+            "description": "Engine capacity in CC (e.g. '998 CC' or '1500').",
+        },
+        "chassis_no": {
+            "type": "string",
+            "description": "Vehicle chassis / VIN number.",
+        },
+        "engine_no": {
+            "type": "string",
+            "description": "Vehicle engine / motor number.",
+        },
+        "coverage_type": {
+            "type": "string",
+            "description": "Scope of coverage. Must be normalized to 'Comprehensive', 'Third Party Fire & Theft', or 'Third Party'. NEVER return 'Jenis Perlindungan' (which is just the Malay word for Cover Type).",
+        },
+        "coverage_amount": {
+            "type": "string",
+            "description": "Sum insured / agreed value / market value (e.g. '53,000.00').",
+        },
+        "cover_start_date": {
+            "type": "string",
+            "description": "Coverage period start date in DD/MM/YYYY or DD-MM-YYYY format.",
+        },
+        "cover_end_date": {
+            "type": "string",
+            "description": "Coverage period expiry / end date in DD/MM/YYYY or DD-MM-YYYY format.",
+        },
+        "ncd_percent": {
+            "type": "string",
+            "description": "No Claim Discount percentage number without percent sign (e.g. '25.00' or '55'). Check 'NCD', 'NCB', 'No Claim Bonus', 'No Claim Discount'.",
+        },
+        "premium": {
+            "type": "string",
+            "description": "Gross or basic insurance premium payable before runner fees (e.g. '1,056.45' or '1,381.94').",
+        },
+        "service_tax": {
+            "type": "string",
+            "description": "SST / Service tax amount (e.g. '84.52').",
+        },
+        "stamp_duty": {
+            "type": "string",
+            "description": "Stamp duty amount (e.g. '10.00').",
+        },
+        "total_amount": {
+            "type": "string",
+            "description": "Final total quotation amount payable (e.g. '1,150.97').",
+        },
+        "roadtax": {
+            "type": "string",
+            "description": "Road tax amount if specified.",
+        },
+        "service_fee": {
+            "type": "string",
+            "description": "Runner / service fee if specified.",
+        },
+        "detected_benefits": {
+            "type": "array",
+            "description": "List of all benefits, add-ons, extra covers, and riders explicitly present in this quotation (e.g. Windscreen RM 1,000, 24-hr Towing, Special Perils, Legal Liability to Passengers, All Drivers, Workmanship Warranty, Compassionate Allowance, Flood Relief, etc.).",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "label": {
+                        "type": "string",
+                        "description": "The standard name of the benefit.",
+                    },
+                    "concept_key": {
+                        "type": "string",
+                        "description": "Matched concept key from the concepts library (e.g. 'wndscrn', 'towing', 'spcl_peril', 'llp', 'all_driver', 'comp_allowance', 'flood_allowance', 'excess', 'ambulance_fee', 'one_touch_mobile', 'express_claim', 'workmanship_warranty', 'e_hailing', 'waiver_betterment', 'cart_plan').",
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "The coverage value, limit amount, or description (e.g. 'Up to RM 1,000', 'Unlimited Towing', 'Included', 'RM 4,500', '3 Years').",
+                    },
+                    "raw_text": {
+                        "type": "string",
+                        "description": "The verbatim excerpt found in the quotation table or endorsement.",
+                    },
+                },
+                "required": ["label", "value"],
+            },
+        },
+        "detected_packs": {
+            "type": "array",
+            "description": "Purchased benefit packs / bundled add-on plans explicitly present in the quotation (e.g. a cost summary line 'DPA pack A -> 288.05 RM', 'Driver Protection Plan B', 'Key Replacement -> 43 RM'). Include ONLY packs that were actually purchased/selected (they appear in the cost summary or a selected-benefits table with a price or checkmark). Do NOT list generic marketing or unselected options. Tolerate small wording variations in the description text.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "package_name": {
+                        "type": "string",
+                        "description": "The pack/bundle name (e.g. 'Driver Protection Pack', 'DPA Pack', 'Key Replacement').",
+                    },
+                    "plan_name": {
+                        "type": "string",
+                        "description": "The plan level if present (e.g. 'Plan A', 'A', 'Plan B', 'B'). Empty string if the pack has no level.",
+                    },
+                    "raw_text": {
+                        "type": "string",
+                        "description": "The verbatim line from the cost summary or benefits table (e.g. 'DPA pack A 288.05 RM').",
+                    },
+                },
+                "required": ["package_name"],
+            },
+        },
+    },
+    "required": [
+        "customer_name",
+        "insurance_company",
+        "vehicle_no",
+        "coverage_type",
+        "coverage_amount",
+        "total_amount",
+    ],
+}
+
+
+def build_rag_system_prompt(
+    db_companies: list[dict] | None = None,
+    db_benefit_concepts: list[dict] | None = None,
+    db_aliases: dict | None = None,
+    db_packs: list[dict] | None = None,
+    prompt_override: str | None = None,
+) -> str:
+    """Build grounded insurance domain prompt with live active database context.
+
+    When ``prompt_override`` is provided it replaces the fixed instruction
+    block; the live grounding sections (companies, concepts, packs) are always
+    appended so the model still has authoritative database context.
+    """
+    companies_str = ", ".join(c.get("name", "") for c in (db_companies or []) if c.get("name")) or "QBE, Etiqa, AmAssurance, Lonpac, Allianz, Zurich, Liberty"
+    
+    concepts_list = []
+    for c in (db_benefit_concepts or []):
+        key = c.get("key", "")
+        name = c.get("name", "")
+        if name:
+            concepts_list.append(f"- {name} (concept_key: '{key}')")
+    concepts_str = "\n".join(concepts_list) if concepts_list else "- Windscreen Coverage ('wndscrn')\n- Towing Service ('towing')\n- Special Perils ('spcl_peril')\n- All Drivers ('all_driver')\n- Legal Liability ('llp')"
+
+    packs_list = []
+    for pack in (db_packs or []):
+        name = pack.get("name", "")
+        plans = pack.get("plans", [])
+        if name:
+            plan_names = ", ".join(str(p.get("name", "")) for p in plans if p.get("name"))
+            packs_list.append(f"- {name}" + (f" (plans: {plan_names})" if plan_names else ""))
+    packs_str = "\n".join(packs_list) if packs_list else ""
+
+    grounding = f"""
+### LIVE DATABASE GROUNDING CONTEXT (always authoritative):
+- Active insurance companies: {companies_str}
+- Benefit concepts library:
+{concepts_str}
+- Known benefit packs and plan levels:
+{packs_str}
+Return strictly structured JSON adhering to the provided schema.
+"""
+
+    if prompt_override and prompt_override.strip():
+        return f"""{prompt_override.strip()}
+
+{grounding}"""
+
+    return f"""You are the RiskLocker High-Precision Malaysian Motor Insurance Quotation Extractor.
+Extract structured quotation data from the provided insurance document with 100% accuracy.
+
+### CRITICAL GROUNDING RULES:
+1. **CUSTOMER NAME (The Insured)**:
+   - Extract the customer/policyholder name (e.g. under 'The Insured / Pihak Diinsuranskan', 'Insured Name', 'Participant').
+   - NEVER extract the Agent's Name, Broker Name, Agency Name, or Account Number (e.g. IGNORE 'Account No. / Agent\'s Name', 'Nama Ejen', '02103586', 'RISKLOCKER SDN.BHD.').
+2. **COVERAGE TYPE**:
+   - MUST be normalized to 'Comprehensive', 'Third Party Fire & Theft', or 'Third Party'.
+   - NEVER output 'Jenis Perlindungan' (which is simply the Malay translation of 'Cover Type').
+3. **VEHICLE MAKE & MODEL**:
+   - Extract the COMPLETE vehicle make, model, variant, and transmission (e.g. 'PERODUA ATIVA AV MY21 D55L 4D WAGON 1 SP AUTOMATIC (CVT)'). Do NOT truncate to a single word.
+4. **NCD / NCB**:
+   - Look for 'NCD', 'NCB', 'No Claim Bonus', 'No Claim Discount', 'NCB (25.00%)'. Output the percentage value (e.g. '25.00').
+5. **INSURANCE COMPANY**:
+   - Match one of the active insurance companies: {companies_str}.
+6. **PACKAGE DETECTION (For Packaged Insurers like AmAssurance)**:
+   - Check if any specific package/tier is mentioned anywhere in the document (e.g. 'Lite', 'Plus', 'Standard', 'Comprehensive', 'Premier').
+7. **BENEFIT CONCEPTS LIBRARY**:
+   Match detected benefits against the official library where applicable:
+{concepts_str}
+8. **BENEFIT PACKS / BUNDLED ADD-ON PLANS**:
+   - Detect purchased packs from the cost summary and selected-benefits table (e.g. 'DPA pack A -> 288.05 RM', 'Driver Protection Plan B', 'Key Replacement -> 43 RM').
+   - Only report packs that were actually purchased/selected (they carry a price or a selection marker). Never report unselected marketing options.
+   - Tolerate small wording variations in the description text and match the plan level (A/B/C/D) when present.
+   - Known packs and their plan levels:
+{packs_str}
+Return strictly structured JSON adhering to the provided schema.
+"""
+
+
+def extract_with_gemini_sync(
+    pdf_bytes: bytes,
+    *,
+    document_text: str | None = None,
+    db_companies: list[dict] | None = None,
+    db_benefit_concepts: list[dict] | None = None,
+    db_aliases: dict | None = None,
+    db_packs: list[dict] | None = None,
+    prompt_override: str | None = None,
+    timeout_seconds: float = 15.0,
+) -> dict[str, Any] | None:
+    """Extract quotation fields using Gemini AI with API key rotation."""
+    pool = get_key_pool()
+    all_keys = pool.get_all_keys()
+    if not all_keys:
+        logger.info("No GEMINI_API_KEY configured; skipping Gemini extraction.")
+        return None
+
+    settings = get_settings()
+    model = settings.gemini_model or "gemini-3.6-flash"
+    if model in {"gemini-2.0-flash", "gemini-2.5-flash"}:
+        model = "gemini-3.6-flash"
+    system_prompt = build_rag_system_prompt(db_companies, db_benefit_concepts, db_aliases, db_packs, prompt_override)
+
+    if document_text and len(document_text.strip()) > 30:
+        parts: list[dict[str, Any]] = [
+            {
+                "text": f"Extract all insurance quotation values, vehicle details, coverage, and detected benefits from this document according to the JSON schema:\n\n--- DOCUMENT TEXT ---\n{document_text}\n--- END DOCUMENT TEXT ---"
+            }
+        ]
+    else:
+        b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+        parts = [
+            {
+                "inline_data": {
+                    "mime_type": "application/pdf",
+                    "data": b64_pdf,
+                }
+            },
+            {
+                "text": "Extract all quotation information and benefits from this Malaysian motor insurance document according to the JSON schema."
+            }
+        ]
+
+    payload = {
+        "system_instruction": {
+            "parts": [{"text": system_prompt}]
+        },
+        "contents": [
+            {
+                "role": "user",
+                "parts": parts,
+            }
+        ],
+        "generationConfig": {
+            "response_mime_type": "application/json",
+            "response_schema": GEMINI_EXTRACTION_SCHEMA,
+            "temperature": 0.0,
+        },
+    }
+
+    candidate_models = [
+        "gemini-3.1-flash-lite-preview",
+        "gemini-3.5-flash",
+        "gemini-3.6-flash",
+        model,
+    ]
+    seen_models: set[str] = set()
+    models_to_try = [m for m in candidate_models if m and not (m in seen_models or seen_models.add(m))]
+
+    # Attempt keys in pool with round-robin + multi-model fallback
+    for attempt in range(len(all_keys)):
+        api_key = pool.get_next_key()
+        if not api_key:
+            break
+
+        for m_name in models_to_try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m_name}:generateContent?key={api_key}"
+            try:
+                with httpx.Client(timeout=timeout_seconds) as client:
+                    response = client.post(url, json=payload)
+                    if response.status_code == 200:
+                        data = response.json()
+                        candidates = data.get("candidates") or []
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts") or []
+                            if parts:
+                                raw_text = parts[0].get("text", "")
+                                parsed = json.loads(raw_text)
+                                pool.record_request()
+                                logger.info("Gemini AI extraction succeeded with %s on attempt %d.", m_name, attempt + 1)
+                                return parsed
+                    elif response.status_code == 429:
+                        logger.warning("Gemini key rate-limited (429) on %s, rotating to next key...", m_name)
+                        break
+                    elif response.status_code in (503, 404):
+                        logger.warning("Gemini model %s returned %d, trying fallback model...", m_name, response.status_code)
+                        continue
+                    else:
+                        logger.warning("Gemini API returned status %d: %s", response.status_code, response.text[:200])
+                        continue
+            except Exception as exc:
+                logger.warning("Gemini extraction attempt failed on %s: %s", m_name, exc)
+                continue
+
+    logger.error("All Gemini API keys and models in pool failed or exhausted.")
+    return None

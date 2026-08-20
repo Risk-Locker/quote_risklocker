@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 
 type TooltipProps = {
   children: ReactNode;
-  content: string;
+  content: ReactNode;
 };
 
 export function Tooltip({ children, content }: TooltipProps) {

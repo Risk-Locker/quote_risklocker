@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowClockwise, ImageSquare, MagnifyingGlass, Plus, ShieldCheck, Tag, X } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
 import { BuilderNav } from "@/components/builder-nav";
+import { GuidedTour } from "@/components/guided-tour";
 import { TagEditor } from "@/components/tag-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -224,15 +225,29 @@ export default function GlobalBenefitsPage() {
     <AppShell>
       <section className="grid gap-5 max-w-6xl mx-auto pb-16">
         <header>
-          <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--rl-red)]">
-            Builder & Catalog
-          </p>
-          <h1 className="m-0 font-[var(--font-manrope)] text-[30px] font-bold text-[var(--rl-text-strong)]">
-            Benefit Library & Categories
-          </h1>
-          <p className="mt-1 text-[14px] text-[var(--rl-text-muted)]">
-            The canonical catalog of 11 Default / Global Benefits and 23 Unique Add-ons. Multi-plan add-ons maintain internal plan variations without polluting the catalog list.
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--rl-red)]">
+                Builder & Catalog
+              </p>
+              <h1 className="m-0 font-[var(--font-manrope)] text-[30px] font-bold text-[var(--rl-text-strong)]">
+                Benefit Library & Categories
+              </h1>
+              <p className="mt-1 text-[14px] text-[var(--rl-text-muted)]">
+                The canonical catalog of 11 Default / Global Benefits and 23 Unique Add-ons. Multi-plan add-ons maintain internal plan variations without polluting the catalog list.
+              </p>
+            </div>
+            <GuidedTour
+              storageKey="tour:global-benefits"
+              title="Benefit Library & Categories"
+              description="This is the master dictionary of every benefit that exists across all insurers. Each benefit (Towing, Windscreen, LLP…) is defined once here with its detection words, artwork, and value type. The builder/benefits page then assigns these to each company's product."
+              steps={[
+                { target: "header", title: "Page purpose", body: "The master benefit dictionary. Every benefit concept across all insurers lives here — create, rename, categorize, and maintain them. Nothing here is company-specific." },
+                { target: ".rl-tour-list", title: "Benefit list", body: "All global benefits, filterable by category (Default vs Add-on) and status. Click one to edit its definition." },
+                { target: ".rl-tour-form", title: "Benefit definition", body: "Set the label, category, detection words (match_dataset), artwork, and value type. These drive AI extraction and rendering everywhere." },
+              ]}
+            />
+          </div>
         </header>
         <BuilderNav />
 
@@ -249,33 +264,30 @@ export default function GlobalBenefitsPage() {
             <button
               type="button"
               onClick={() => setCategoryFilter("all")}
-              className={`rounded-md px-3 py-1.5 text-xs font-bold transition-all ${
-                categoryFilter === "all"
+              className={`rounded-md px-3 py-1.5 text-xs font-bold transition-all ${categoryFilter === "all"
                   ? "bg-[var(--rl-black)] text-white shadow-xs"
                   : "bg-white border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-              }`}
+                }`}
             >
               All Library ({benefits.length})
             </button>
             <button
               type="button"
               onClick={() => setCategoryFilter("default")}
-              className={`rounded-md px-3 py-1.5 text-xs font-bold transition-all ${
-                categoryFilter === "default"
+              className={`rounded-md px-3 py-1.5 text-xs font-bold transition-all ${categoryFilter === "default"
                   ? "bg-[var(--rl-black)] text-white shadow-xs"
                   : "bg-white border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-              }`}
+                }`}
             >
               Default / Global Benefits ({defaultCount})
             </button>
             <button
               type="button"
               onClick={() => setCategoryFilter("addon")}
-              className={`rounded-md px-3 py-1.5 text-xs font-bold transition-all ${
-                categoryFilter === "addon"
+              className={`rounded-md px-3 py-1.5 text-xs font-bold transition-all ${categoryFilter === "addon"
                   ? "bg-[var(--rl-black)] text-white shadow-xs"
                   : "bg-white border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-              }`}
+                }`}
             >
               Unique Add-ons ({addonCount})
             </button>
@@ -288,7 +300,7 @@ export default function GlobalBenefitsPage() {
 
         <div className="min-h-[680px] overflow-hidden border border-[var(--rl-border)] bg-[var(--rl-surface)] shadow-card xl:grid xl:grid-cols-[330px_minmax(400px,1fr)]">
           {/* SIDEBAR LIST */}
-          <aside className="border-b border-[var(--rl-border)] bg-[#fafafa] xl:border-b-0 xl:border-r" aria-label="Global benefits list">
+          <aside className="rl-tour-list border-b border-[var(--rl-border)] bg-[#fafafa] xl:border-b-0 xl:border-r" aria-label="Global benefits list">
             <div className="border-b border-[var(--rl-border)] p-3">
               <div className="grid gap-2">
                 <label className="relative block">
@@ -314,11 +326,10 @@ export default function GlobalBenefitsPage() {
                     key={item.id}
                     type="button"
                     onClick={() => selectBenefit(item)}
-                    className={`mb-1.5 grid w-full grid-cols-[36px_1fr] items-center gap-2.5 rounded border-l-2 p-2 text-left transition ${
-                      active
+                    className={`mb-1.5 grid w-full grid-cols-[36px_1fr] items-center gap-2.5 rounded border-l-2 p-2 text-left transition ${active
                         ? "border-[var(--rl-red)] bg-white shadow-xs ring-1 ring-[var(--rl-border)]"
                         : "border-transparent hover:bg-white"
-                    }`}
+                      }`}
                   >
                     <span className="grid h-9 w-9 place-items-center rounded border border-[var(--rl-border)] bg-[var(--rl-bg)]">
                       {item.default_asset ? (
@@ -353,7 +364,7 @@ export default function GlobalBenefitsPage() {
           </aside>
 
           {/* MAIN EDIT PANEL */}
-          <main className="min-w-0 p-5 bg-white">
+          <main className="rl-tour-form min-w-0 p-5 bg-white">
             {isNew || selected ? (
               <div className="grid gap-5">
                 <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--rl-border)] pb-4">

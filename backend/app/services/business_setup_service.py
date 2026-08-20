@@ -814,7 +814,7 @@ def _package(item: BenefitPackage) -> dict:
 
 
 def _revision_content_payload(db, revision: BenefitCatalogRevision) -> dict:
-    """Canonical revision content: offerings + packages + package-scoped aliases."""
+    """Canonical revision content: offerings + packages + plans + package-scoped aliases."""
     offerings = [
         _offering(row)
         for row in db.scalars(
@@ -832,6 +832,35 @@ def _revision_content_payload(db, revision: BenefitCatalogRevision) -> dict:
         ).all()
     ]
     package_ids = {item["id"] for item in packages}
+    plans = [
+        {
+            "id": item.id,
+            "package_id": item.package_id,
+            "plan_key": item.plan_key,
+            "name": item.name,
+            "sort_order": item.sort_order,
+            "status": item.status,
+        }
+        for item in db.scalars(
+            select(BenefitPackagePlan)
+            .where(BenefitPackagePlan.package_id.in_(package_ids))
+            .order_by(BenefitPackagePlan.sort_order, BenefitPackagePlan.plan_key)
+        ).all()
+    ] if package_ids else []
+    plan_ids = {item["id"] for item in plans}
+    plan_items = [
+        {
+            "plan_id": item.plan_id,
+            "offering_id": item.offering_id,
+            "typed_value_override": item.typed_value_override,
+            "sort_order": item.sort_order,
+        }
+        for item in db.scalars(
+            select(BenefitPackagePlanItem)
+            .where(BenefitPackagePlanItem.plan_id.in_(plan_ids))
+            .order_by(BenefitPackagePlanItem.plan_id, BenefitPackagePlanItem.sort_order)
+        ).all()
+    ] if plan_ids else []
     from app.models.tables import BenefitAlias
 
     aliases = [
@@ -847,7 +876,13 @@ def _revision_content_payload(db, revision: BenefitCatalogRevision) -> dict:
         if item.package_id and str(item.package_id) in package_ids
     ]
     aliases.sort(key=lambda item: (item["scope"], item["normalized_phrase"], str(item["package_id"])))
-    return {"offerings": offerings, "packages": packages, "aliases": aliases}
+    return {
+        "offerings": offerings,
+        "packages": packages,
+        "plans": plans,
+        "plan_items": plan_items,
+        "aliases": aliases,
+    }
 
 
 def _validate_assignment_context(db, catalog: BenefitCatalog, revision: BenefitCatalogRevision, payload: dict) -> dict:

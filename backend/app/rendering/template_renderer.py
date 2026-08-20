@@ -6,6 +6,7 @@ from html import escape
 from typing import Any
 
 from app.rendering.grid_layout import GridBounds, GridSpec, pack_fixed_grid
+from app.rendering.render_context import format_money_amount
 from app.services.template_assets import asset_data_uri, find_asset_by_hint
 from app.services.template_config import default_template_config, normalize_template_config
 
@@ -177,6 +178,17 @@ def _dynamic_benefit_grid(
     if kind not in {"current_benefits", "available_addons"}:
         return ""
     cards = list(render_context.get(kind) or [])
+    groups = list(render_context.get("groups") or []) if kind == "current_benefits" else []
+    group_by_id = {str(item.get("plan_id")): item for item in groups if item.get("plan_id")}
+    ordered = cards
+    if groups:
+        free = [card for card in cards if not str(card.get("group_id") or "")]
+        members: dict[str, list[dict]] = {}
+        for card in cards:
+            group_id = str(card.get("group_id") or "")
+            if group_id and group_id in group_by_id:
+                members.setdefault(group_id, []).append(card)
+        ordered = free + [card for group in groups for card in members.get(str(group.get("plan_id")), [])]
     packing = element.get("packing") or {}
     bounds = GridBounds(
         x=float(element.get("x") or 0),
@@ -195,8 +207,8 @@ def _dynamic_benefit_grid(
         stagger_ratio=float(packing.get("staggerRatio") if packing.get("staggerRatio") is not None else 0.5),
         empty_state=str(element.get("emptyState") or "hide"),
     )
-    layout = pack_fixed_grid(len(cards), bounds, spec)
-    if not cards:
+    layout = pack_fixed_grid(len(ordered), bounds, spec)
+    if not ordered:
         empty_message = escape(str(element.get("emptyMessage") or "")) if layout.empty_state == "message" else ""
         return (
             f'<div data-grid-kind="{escape(kind)}" data-grid-empty="{escape(layout.empty_state or "hide")}" '
@@ -208,7 +220,11 @@ def _dynamic_benefit_grid(
     density_name = str(element.get("textDensity") or "normal")
     density = GRID_TEXT_DENSITIES.get(density_name, GRID_TEXT_DENSITIES["normal"])
     output: list[str] = []
-    for packed, card in zip(layout.cards, cards, strict=True):
+    group_rects: dict[str, list[tuple[float, float, float, float]]] = {}
+    for packed, card in zip(layout.cards, ordered, strict=True):
+        group_id = str(card.get("group_id") or "")
+        if group_id and group_id in group_by_id:
+            group_rects.setdefault(group_id, []).append((packed.x, packed.y, packed.width, packed.height))
         label = escape(str(card.get("label") or ""))
         value = escape(str(card.get("value") or ""))
         cost = str(card.get("cost_status") or "")
@@ -238,11 +254,83 @@ def _dynamic_benefit_grid(
             f'{value_html}{cost_html}</div></div></article>'
         )
     warning = escape(layout.warning or "")
+    borders: list[str] = []
+    for group_id, rects in group_rects.items():
+        if not rects:
+            continue
+        group = group_by_id.get(group_id)
+        min_x = min(item[0] for item in rects)
+        min_y = min(item[1] for item in rects)
+        max_x = max(item[0] + item[2] for item in rects)
+        max_y = max(item[1] + item[3] for item in rects)
+        pad = 7.0
+        box_x = max(bounds.x, min_x - pad)
+        box_y = max(bounds.y, min_y - pad)
+        box_x2 = min(bounds.x + bounds.width, max_x + pad)
+        box_y2 = min(bounds.y + bounds.height, max_y + pad)
+        plan_label = escape(str((group or {}).get("plan_label") or "Package plan"))
+        borders.append(
+            f'<div data-benefit-group="1" style="position:absolute;left:{box_x:.8f}px;top:{box_y:.8f}px;'
+            f'width:{box_x2 - box_x:.8f}px;height:{box_y2 - box_y:.8f}px;'
+            f'border:2px solid #E51C2A;border-radius:10px;background:rgba(229,28,42,0.025);pointer-events:none">'
+            f'<span style="position:absolute;left:8px;top:-11px;background:#E51C2A;color:#fff;'
+            f'font-size:10px;font-weight:800;line-height:1;padding:4px 8px;border-radius:4px;'
+            f'white-space:nowrap">{plan_label}</span></div>'
+        )
     return (
         f'<section data-grid-kind="{escape(kind)}" data-density-warning="{warning}" '
         f'style="position:absolute;left:0;top:0;width:100%;height:100%;overflow:hidden">'
-        f'{"".join(output)}</section>'
+        f'{"".join(borders)}{"".join(output)}</section>'
     )
+
+
+def _premium_info_block(element: dict[str, Any], fields: dict, render_context: dict[str, Any]) -> str:
+    """Dynamic coverage-card rows: extras, premium, roadtax, runner fee, total.
+
+    Extras are staff-added priced add-ons shown above the coverage premium;
+    the total row adds their sum onto the extracted total premium.
+    """
+    x = float(element.get("x") or 0)
+    y = float(element.get("y") or 0)
+    width = float(element.get("w") or 0)
+    row_height = float(element.get("rowHeight") or 14)
+    labels = element.get("labels") or {}
+    extras = list((render_context or {}).get("extras") or [])
+    rows: list[tuple[str, str, str]] = []
+    for extra in extras[:3]:
+        rows.append(("extra", str(extra.get("label") or ""), format_money_amount(extra.get("price"))))
+    if len(extras) > 3:
+        rows.append(("extra", f"+{len(extras) - 3} more", ""))
+    rows.append(("premium", str(labels.get("premium") or "Coverage Premium"), _format_value(_value(fields, "premium"), "RM ")))
+    rows.append(("divider", "", ""))
+    rows.append(("roadtax", str(labels.get("roadtax") or "Roadtax"), _format_value(_value(fields, "roadtax"), "RM ")))
+    rows.append(("runner", str(labels.get("runner") or "Runner Fee"), _format_value(_value(fields, "service_fee"), "RM ")))
+    total = _value(fields, "total_premium_adjusted") or _value(fields, "total_amount")
+    rows.append(("total", str(labels.get("total") or "Total Premium"), _format_value(total, "RM ")))
+    html: list[str] = []
+    for index, (kind, label, value) in enumerate(rows):
+        row_y = y + index * row_height
+        if kind == "divider":
+            html.append(
+                f'<div style="position:absolute;left:{x}px;top:{row_y}px;width:{width}px;height:1px;background:#E2E8F0"></div>'
+            )
+            continue
+        if kind == "total":
+            label_style = "font-size:11px;font-weight:800;color:#0F172A"
+            value_style = "font-size:13px;font-weight:800;color:#DC2626"
+        elif kind == "extra":
+            label_style = "font-size:9.5px;font-weight:600;color:#B91C1C"
+            value_style = "font-size:10px;font-weight:700;color:#0F172A"
+        else:
+            label_style = "font-size:9.5px;font-weight:600;color:#334155"
+            value_style = "font-size:10px;font-weight:700;color:#0F172A"
+        html.append(
+            f'<div style="position:absolute;left:{x}px;top:{row_y}px;width:{width}px;height:{row_height}px;'
+            f'display:flex;align-items:center;justify-content:space-between">'
+            f'<span style="{label_style}">{escape(label)}</span>'
+            f'<span style="{value_style}">{escape(value)}</span></div>'
+        )
+    return "".join(html)
 
 
 def _section_variants(db: Any, section: str | None) -> list[Any]:
@@ -382,6 +470,8 @@ def _element_html(
         return _benefit_section(element, db)
     if element_type == "benefit-grid":
         return _dynamic_benefit_grid(element, render_context or {}, resolved_assets or {})
+    if element_type == "premium-info-block":
+        return _premium_info_block(element, fields, render_context or {})
     if element_type == "special":
         return _special_html(element, config)
     text = str(element.get("text") or "")

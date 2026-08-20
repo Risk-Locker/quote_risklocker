@@ -22,6 +22,7 @@ import {
   MagnifyingGlass,
   MagnifyingGlassMinus,
   MagnifyingGlassPlus,
+  Package as PackageIcon,
   Plus,
   Sparkle,
   X,
@@ -30,7 +31,9 @@ import { toBlob, toPng } from "html-to-image";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { GuidedTour } from "@/components/guided-tour";
 import { Card } from "@/components/ui/card";
+import { GeminiQuotaInfoButton, type GeminiQuota } from "@/components/gemini-quota-meter";
 import { Input } from "@/components/ui/input";
 import { PageLoading } from "@/components/ui/page-loading";
 import { Select } from "@/components/ui/select";
@@ -276,7 +279,10 @@ function IncludedCard({
   const pending = !selectionId || selectionId.startsWith("pending:");
 
   return (
-    <article className="flex items-center justify-between gap-2.5 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-2.5 shadow-xs transition-all hover:border-[var(--rl-border-strong)]">
+    <article className={`flex items-center justify-between gap-2.5 rounded-[var(--rl-radius-sm)] border p-2.5 shadow-xs transition-all ${card.is_detected
+      ? "border-amber-300 bg-amber-50/50 ring-1 ring-amber-300/60"
+      : "border-[var(--rl-border)] bg-[var(--rl-surface)] hover:border-[var(--rl-border-strong)]"
+      }`}>
       <div className="flex items-center gap-2.5 min-w-0">
         <span className="shrink-0 flex h-6 w-6 items-center justify-center rounded bg-neutral-100 font-mono text-[10px] font-bold text-[var(--rl-text-muted)]">
           #{index + 1}
@@ -292,7 +298,13 @@ function IncludedCard({
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <h3 className="truncate text-xs font-bold text-[var(--rl-text-strong)]">{card.label}</h3>
-            <span className="rounded bg-emerald-50 px-1 py-0.2 text-[9px] font-bold text-emerald-700">Default/FOC</span>
+            {card.is_detected ? (
+              <span className="rounded bg-amber-100 px-1 py-0.2 text-[9px] font-bold text-amber-800 ring-1 ring-amber-400/50">
+                ★ Detected
+              </span>
+            ) : (
+              <span className="rounded bg-emerald-50 px-1 py-0.2 text-[9px] font-bold text-emerald-700">Default/FOC</span>
+            )}
           </div>
           <p className="truncate text-[11px] text-[var(--rl-text-muted)] font-medium">{card.value || "Included standard cover"}</p>
         </div>
@@ -361,7 +373,10 @@ function AddonCard({
   };
 
   return (
-    <article className="group flex items-center justify-between gap-2.5 rounded-[var(--rl-radius-sm)] border border-dashed border-[var(--rl-border)] bg-[var(--rl-surface)] p-2.5 transition-all hover:border-[var(--rl-black)] hover:bg-white">
+    <article className={`group flex items-center justify-between gap-2.5 rounded-[var(--rl-radius-sm)] border border-dashed p-2.5 transition-all ${card.is_detected
+      ? "border-amber-400 bg-amber-50/50 ring-1 ring-amber-300/60"
+      : "border-[var(--rl-border)] bg-[var(--rl-surface)] hover:border-[var(--rl-black)] hover:bg-white"
+      }`}>
       <div className="flex items-center gap-2.5 min-w-0">
         <span className="shrink-0 flex h-6 w-6 items-center justify-center rounded bg-neutral-100 font-mono text-[10px] font-bold text-[var(--rl-text-muted)]">
           #{index + 1}
@@ -371,13 +386,17 @@ function AddonCard({
             // eslint-disable-next-line @next/next/no-img-element
             <img src={fileUrl(assetUrl)} alt={card.label} className="h-full w-full object-contain" />
           ) : (
-            <Plus size={16} className="text-[var(--rl-text-muted)]" />
+            <Sparkle size={16} className="text-[var(--rl-text-muted)]" />
           )}
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <h3 className="truncate text-xs font-bold text-[var(--rl-text-strong)]">{card.label}</h3>
-            <span className="rounded bg-gray-100 px-1 py-0.2 text-[9px] font-bold text-[var(--rl-text-muted)]">Add-on</span>
+            {card.is_detected ? (
+              <span className="rounded bg-amber-100 px-1 py-0.2 text-[9px] font-bold text-amber-800 ring-1 ring-amber-400/50">
+                ★ Detected
+              </span>
+            ) : null}
           </div>
           <p className="truncate text-[11px] text-[var(--rl-text-muted)] font-medium">{card.value || "Optional payable add-on"}</p>
         </div>
@@ -434,6 +453,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [benefitsCollapsed, setBenefitsCollapsed] = useState(false);
 
+  // Benefit Pack (bundle plan) manager state
+  const [packPlanSelections, setPackPlanSelections] = useState<Record<string, string>>({});
+  const [customPrice, setCustomPrice] = useState("");
+
   // Quick Action Export States (PNG / PDF)
   const canvasExportRef = useRef<HTMLDivElement>(null);
   const [copyingPng, setCopyingPng] = useState(false);
@@ -442,6 +465,37 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [pdfLoading, setPdfLoading] = useState(false);
   const [viewLoading, setViewLoading] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Gemini AI Extraction & Quota State
+  const [geminiExtracting, setGeminiExtracting] = useState(false);
+  const [geminiQuotaInfo, setGeminiQuotaInfo] = useState<GeminiQuota | null>(null);
+
+  useEffect(() => {
+    api<{ gemini?: GeminiQuota }>("/settings/limits")
+      .then((res) => {
+        if (res.gemini) setGeminiQuotaInfo(res.gemini);
+      })
+      .catch(() => { });
+  }, []);
+
+  async function triggerGeminiExtraction() {
+    setGeminiExtracting(true);
+    try {
+      const res = await api<{
+        success: boolean;
+        message: string;
+        quota: GeminiQuota;
+        gemini_result: Record<string, unknown>;
+      }>(`/sessions/${id}/extract-gemini`, { method: "POST" });
+      setGeminiQuotaInfo(res.quota);
+      setToastMessage(res.message || "Gemini AI extracted values successfully!");
+      await reload();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Gemini extraction failed. Check your API key in .env.");
+    } finally {
+      setGeminiExtracting(false);
+    }
+  }
 
   useEffect(() => {
     if (!toastMessage) return;
@@ -753,8 +807,9 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       fields["insurance_name"] = effectiveCompany;
       fields["company_name"] = effectiveCompany;
     }
+    fields["total_premium_adjusted"] = workspace?.total_premium_adjusted || fields["total_amount"] || "";
     return fields;
-  }, [workspace?.fields, formValues, companyName]);
+  }, [workspace?.fields, workspace?.total_premium_adjusted, formValues, companyName]);
 
   function commitField(field: FormField) {
     const current = formValues[field.name];
@@ -817,6 +872,25 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     }
   }
 
+  // Pin a specific package tier (package-system insurers) by its catalog.
+  async function pinPackageTier(catalogId: string) {
+    if (!workspace?.pinned.company_id) return;
+    setPinLoading(true);
+    queueOperation({
+      op: "pin_catalog",
+      company_id: workspace.pinned.company_id,
+      catalog_id: catalogId,
+      company_name: workspace.pinned_names.company_name,
+    }, "catalog");
+    try {
+      await save();
+    } catch {
+      // Best effort
+    } finally {
+      setPinLoading(false);
+    }
+  }
+
   function addConceptAsBenefit(concept: GlobalConcept, state: "current" | "available_addon" = "current") {
     const key = `concept:${concept.concept_key}:${crypto.randomUUID().slice(0, 8)}`;
     queueOperation({
@@ -849,6 +923,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     if (!label) return;
     const isAddon = targetState === "available_addon";
     const key = `custom:${crypto.randomUUID()}`;
+    const priceText = customPrice.trim();
+    const price = priceText
+      ? { amount: priceText.replace(/,/g, ""), currency: "MYR" }
+      : undefined;
     queueOperation({
       op: "create_custom_benefit",
       selection_key: key,
@@ -856,9 +934,28 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       typed_value: customValue.trim() ? { type: "custom", display_text: customValue.trim() } : { type: "custom", display_text: label },
       cost_status: isAddon ? "paid" : "included",
       state: targetState,
+      ...(price ? { price } : {}),
     }, `benefits.${key}`);
     setCustomLabel("");
     setCustomValue("");
+    setCustomPrice("");
+  }
+
+  // ── Benefit Pack (bundle plan) actions ─────────────────────────────────
+  function addPack(pack: { package_id: string; name: string }, planId: string) {
+    if (!planId) return;
+    queueOperation({
+      op: "select_package_plan",
+      package_id: pack.package_id,
+      plan_id: planId,
+      cost_status: "paid",
+    }, `benefits.plan.${planId}`);
+    save().catch(() => undefined);
+  }
+
+  function removePack(planId: string) {
+    queueOperation({ op: "remove_package_plan", plan_id: planId }, `benefits.plan.${planId}`);
+    save().catch(() => undefined);
   }
 
   async function saveAndCheckLearning() {
@@ -1076,6 +1173,17 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <GuidedTour
+              storageKey="tour:session-workspace"
+              title="Quotation Workspace"
+              description="Review the AI-extracted values, pin the insurer catalog (and package tier), manage benefits and add-ons, preview the quotation live, and generate the official PDF."
+              steps={[
+                { target: ".rl-tour-template", title: "Master template & catalog", body: "Pin the published template, the insurer catalog, and (for package-system insurers) the package tier. Switching a tier re-pins that catalog's benefits." },
+                { target: ".rl-tour-fields", title: "Extracted values", body: "AI-extracted policy and vehicle values. Review each — anything uncertain is marked 'Check value'. You can edit and confirm them here." },
+                { target: ".rl-tour-benefits", title: "Benefits & add-ons", body: "Defaults are the included covers; add-ons are payable extras. Add a Benefit Pack (e.g. Driver Protection Pack) to add several benefits at once and upgrade existing ones in place." },
+                { target: ".rl-tour-preview", title: "Live preview", body: "Real-time preview of the quotation on the pinned template. Export as PNG or generate the official PDF from here." },
+              ]}
+            />
             <Button
               variant="secondary"
               size="sm"
@@ -1095,11 +1203,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
             {/* PNG Actions Button (Copy as PNG | Download as PNG with Hover Reveal) */}
             <div
-              className={`relative flex items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white p-0.5 shadow-xs transition-all ${
-                mutation.dirty || mutation.saving
-                  ? "opacity-60 bg-neutral-50 cursor-not-allowed"
-                  : "hover:border-[var(--rl-border-strong)] hover:shadow-sm"
-              }`}
+              className={`relative flex items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white p-0.5 shadow-xs transition-all ${mutation.dirty || mutation.saving
+                ? "opacity-60 bg-neutral-50 cursor-not-allowed"
+                : "hover:border-[var(--rl-border-strong)] hover:shadow-sm"
+                }`}
             >
               {/* Copy as PNG */}
               <button
@@ -1141,11 +1248,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
             {/* PDF Actions Button (View as PDF / in new tab | Download PDF with Hover Reveal) */}
             <div
-              className={`relative flex items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white p-0.5 shadow-xs transition-all ${
-                mutation.dirty || mutation.saving
-                  ? "opacity-60 bg-neutral-50 cursor-not-allowed"
-                  : "hover:border-[var(--rl-border-strong)] hover:shadow-sm"
-              }`}
+              className={`relative flex items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white p-0.5 shadow-xs transition-all ${mutation.dirty || mutation.saving
+                ? "opacity-60 bg-neutral-50 cursor-not-allowed"
+                : "hover:border-[var(--rl-border-strong)] hover:shadow-sm"
+                }`}
             >
               {/* View as PDF in New Tab */}
               <button
@@ -1243,7 +1349,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         >
           <section aria-label="Template configuration and extracted values" className="grid grid-cols-1 gap-4 content-start">
             {/* Row 1: Master Template Selection */}
-            <Card className="grid gap-3 p-4 border border-[var(--rl-border)] bg-white shadow-xs">
+            <Card className="rl-tour-template grid gap-3 p-4 border border-[var(--rl-border)] bg-white shadow-xs">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-sm font-bold text-[var(--rl-text-strong)]">Master template</h2>
@@ -1262,7 +1368,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                   </button>
                 </div>
               </div>
-              
+
               {templateCollapsed ? (
                 <div className="flex flex-wrap items-center justify-between text-xs text-[var(--rl-text-muted)] pt-2 border-t border-[var(--rl-border)]">
                   <span>Template: <strong className="text-[var(--rl-text-strong)] font-semibold">{publishedTemplates.find((t) => t.template_revision_id === workspace.pinned.template_revision_id)?.name || "Master Template"}</strong></span>
@@ -1325,23 +1431,87 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                       </Select>
                     </label>
                   </div>
+
+                  {/* Package Tier Ladder (package-system insurers) */}
+                  {workspace.package_tiers.length > 1 ? (
+                    <div className="grid gap-2 pt-1 border-t border-[var(--rl-border)]">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
+                          Package tier
+                        </span>
+                        <span className="text-[10px] text-[var(--rl-text-muted)]">
+                          {workspace.package_tiers.length} tiers · click to switch
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        {workspace.package_tiers.map((tier, idx) => {
+                          const active = tier.is_current;
+                          const isTop = idx === workspace.package_tiers.length - 1;
+                          return (
+                            <button
+                              key={tier.catalog_id}
+                              type="button"
+                              disabled={pinLoading}
+                              onClick={() => pinPackageTier(tier.catalog_id)}
+                              className={`flex flex-col justify-between rounded-[var(--rl-radius-sm)] border p-2.5 text-left transition-all ${active
+                                  ? "border-[var(--rl-black)] bg-[var(--rl-bg)] shadow-sm ring-1 ring-[var(--rl-black)]"
+                                  : "border-[var(--rl-border)] bg-white hover:border-[var(--rl-text-muted)]"
+                                }`}
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="rounded-[4px] bg-[var(--rl-surface)] border border-[var(--rl-border)] px-1.5 py-0.5 text-[9px] font-bold text-[var(--rl-text-muted)]">
+                                  Tier {idx + 1} {isTop ? "· Top" : ""}
+                                </span>
+                                {active ? (
+                                  <span className="flex items-center gap-0.5 text-[10px] font-bold text-[var(--rl-black)]">
+                                    <Check size={11} weight="bold" /> Active
+                                  </span>
+                                ) : null}
+                              </div>
+                              <span className="mt-1.5 text-[11px] font-bold leading-tight text-[var(--rl-text-strong)]">
+                                {tier.name}
+                              </span>
+                              <span className="mt-1 text-[10px] text-[var(--rl-text-muted)]">
+                                {tier.defaults_count} defaults · {tier.addons_count} add-ons
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
                 </>
               )}
             </Card>
 
             {/* Row 2: Extracted Policy & Vehicle Values */}
-            <Card className="grid gap-3 p-4 border border-[var(--rl-border)] bg-white shadow-xs">
-              <div className="flex items-center justify-between border-b border-[var(--rl-border)] pb-2">
+            <Card className="rl-tour-fields grid gap-3 p-4 border border-[var(--rl-border)] bg-white shadow-xs">
+              <div className="flex flex-wrap items-center justify-between border-b border-[var(--rl-border)] pb-2 gap-2">
                 <div>
-                  <h2 className="text-sm font-bold text-[var(--rl-text-strong)]">Extracted values</h2>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm font-bold text-[var(--rl-text-strong)]">Extracted values</h2>
+                    <Badge variant="success">Gemini AI Active</Badge>
+                  </div>
                   <p className="text-xs text-[var(--rl-text-muted)]">Verified quotation details formatted for the master template.</p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={geminiExtracting}
+                    onClick={triggerGeminiExtraction}
+                    className="h-7 text-xs font-semibold gap-1.5"
+                    title="Run Gemini Multimodal AI extraction to auto-detect customer name, coverage, car model, and benefits"
+                  >
+                    <Sparkle size={13} weight="fill" className={geminiExtracting ? "animate-spin text-[var(--rl-black)]" : "text-[var(--rl-text-strong)]"} />
+                    <span>{geminiExtracting ? "Extracting with AI..." : "Re-Extract with AI"}</span>
+                  </Button>
+                  <GeminiQuotaInfoButton quota={geminiQuotaInfo} />
                   <Badge variant="default">{FORM_FIELDS.length} fields</Badge>
                   <button
                     type="button"
                     onClick={() => setExtractedValuesCollapsed((v) => !v)}
-                    className="flex items-center gap-1 rounded px-2 py-0.5 text-xs font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors"
+                    className="flex items-center gap-1 rounded-[var(--rl-radius-sm)] px-2 py-0.5 text-xs font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors"
                     title={extractedValuesCollapsed ? "Expand Extracted Values" : "Collapse Extracted Values"}
                   >
                     {extractedValuesCollapsed ? <CaretDown size={14} weight="bold" /> : <CaretUp size={14} weight="bold" />}
@@ -1461,7 +1631,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         >
           <section aria-label="Live preview and benefits manager" className="grid grid-cols-1 gap-4 content-start">
             {/* Row 1: Real-time Live Preview Canvas */}
-            <Card className="grid gap-2.5 p-3.5 border border-[var(--rl-border)] bg-white shadow-xs overflow-hidden">
+            <Card className="rl-tour-preview grid gap-2.5 p-3.5 border border-[var(--rl-border)] bg-white shadow-xs overflow-hidden">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <h2 className="text-sm font-bold text-[var(--rl-text-strong)]">Live Quotation Preview</h2>
@@ -1563,7 +1733,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                             element={element}
                             selected={false}
                             readOnly={true}
-                            onPointerDown={() => {}}
+                            onPointerDown={() => { }}
                             variableValues={previewFields}
                             benefitData={workspace.benefit_cards}
                             conceptAssets={conceptAssets}
@@ -1586,7 +1756,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
             </Card>
 
             {/* Row 2: Interactive Benefits & Add-ons Manager with Tabs */}
-            <div className="grid gap-4 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-4 shadow-card transition-all">
+            <div className="rl-tour-benefits grid gap-4 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-4 shadow-card transition-all">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="text-base font-bold text-[var(--rl-text-strong)]">
@@ -1596,18 +1766,17 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                     Manage policy defaults and payable add-ons with automatic canvas and PDF slot alignment.
                   </p>
                 </div>
-                
+
                 <div className="flex items-center gap-2">
                   {!benefitsCollapsed ? (
                     <div className="flex items-center gap-1 rounded-md border border-[var(--rl-border)] bg-gray-100 p-1">
                       <button
                         type="button"
                         onClick={() => setBenefitsViewMode("defaults")}
-                        className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-semibold transition-all ${
-                          benefitsViewMode === "defaults"
-                            ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
-                            : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                        }`}
+                        className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-semibold transition-all ${benefitsViewMode === "defaults"
+                          ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
+                          : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                          }`}
                       >
                         <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-100 text-[10px] font-bold text-emerald-800">
                           {currentCards.length}
@@ -1618,11 +1787,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                       <button
                         type="button"
                         onClick={() => setBenefitsViewMode("addons")}
-                        className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-semibold transition-all ${
-                          benefitsViewMode === "addons"
-                            ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
-                            : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                        }`}
+                        className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-semibold transition-all ${benefitsViewMode === "addons"
+                          ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
+                          : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                          }`}
                       >
                         <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-800">
                           {addonCards.length}
@@ -1633,11 +1801,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                       <button
                         type="button"
                         onClick={() => setBenefitsViewMode("both")}
-                        className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-semibold transition-all ${
-                          benefitsViewMode === "both"
-                            ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
-                            : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                        }`}
+                        className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-semibold transition-all ${benefitsViewMode === "both"
+                          ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
+                          : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                          }`}
                       >
                         Side by Side
                       </button>
@@ -1794,6 +1961,68 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                           </div>
                         </div>
 
+                        {workspace.packs.length > 0 ? (
+                          <div className="grid gap-2">
+                            <div className="flex items-center gap-1.5">
+                              <PackageIcon size={15} weight="fill" className="text-[var(--rl-red)]" />
+                              <h4 className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-strong)]">
+                                Add-on Packs
+                              </h4>
+                            </div>
+                            <p className="text-[10px] text-[var(--rl-text-muted)] -mt-1">
+                              Bundled add-on plans (e.g. Driver Protection Pack). Adding one adds several benefits at once and upgrades existing defaults in place.
+                            </p>
+                            {workspace.packs.map((pack) => {
+                              const activeGroup = workspace.benefit_cards.groups?.find((g) =>
+                                pack.plans.some((p) => p.plan_id === g.plan_id)
+                              );
+                              const selectedPlanId = packPlanSelections[pack.package_id] || pack.plans[0]?.plan_id || "";
+                              const selectedPlan = pack.plans.find((p) => p.plan_id === selectedPlanId);
+                              return (
+                                <div key={pack.package_id} className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-red)]/30 bg-white p-2.5">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="flex items-center gap-1.5">
+                                      <PackageIcon size={14} weight="fill" className="text-[var(--rl-red)]" />
+                                      <span className="text-xs font-bold text-[var(--rl-text-strong)]">{pack.name}</span>
+                                      {activeGroup ? (
+                                        <span className="rounded bg-[var(--rl-red-light)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--rl-red)]">
+                                          Added · {activeGroup.plan_label}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    {activeGroup ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => removePack(activeGroup.plan_id)}
+                                        className="rounded px-2 py-1 text-[11px] font-semibold text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] transition-colors"
+                                      >
+                                        Remove pack
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <select
+                                      value={selectedPlanId}
+                                      onChange={(e) => setPackPlanSelections((prev) => ({ ...prev, [pack.package_id]: e.target.value }))}
+                                      className="min-w-0 flex-1 rounded border border-[var(--rl-border)] bg-white px-2 py-1.5 text-xs text-[var(--rl-text-strong)]"
+                                    >
+                                      {pack.plans.map((plan) => (
+                                        <option key={plan.plan_id} value={plan.plan_id}>{plan.name}</option>
+                                      ))}
+                                    </select>
+                                    <Button size="sm" onClick={() => addPack(pack, selectedPlanId)} disabled={!selectedPlanId} className="text-xs">
+                                      {activeGroup ? "Upgrade plan" : "Add pack"}
+                                    </Button>
+                                  </div>
+                                  <p className="mt-1.5 text-[10px] text-[var(--rl-text-muted)]">
+                                    {selectedPlan?.members.map((m) => m.label).join(" · ") || "No members configured"}
+                                  </p>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+
                         <div className="grid gap-2 max-h-[380px] overflow-y-auto pr-1">
                           {addonCards.length === 0 ? (
                             <div className="flex flex-col items-center justify-center p-6 text-center text-xs text-[var(--rl-text-muted)]">
@@ -1852,6 +2081,15 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                         placeholder="Value (e.g. FOC, RM 500)"
                         onChange={(e) => setCustomValue(e.target.value)}
                         className="text-xs font-medium"
+                      />
+                    </div>
+                    <div className="w-28">
+                      <Input
+                        value={customPrice}
+                        placeholder="Price RM (add-ons)"
+                        onChange={(e) => setCustomPrice(e.target.value)}
+                        className="text-xs font-medium"
+                        title="Optional price shown in the Extras section and added to the total premium"
                       />
                     </div>
                     <Button
@@ -1979,7 +2217,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 </div>
               ))}
             </div>
-            
+
             <div className="flex justify-end border-t border-[var(--rl-border)] p-3 bg-gray-50">
               <Button variant="secondary" size="sm" onClick={() => setShowGlobalModal(false)}>
                 Close
@@ -2019,7 +2257,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 element={element}
                 selected={false}
                 readOnly={true}
-                onPointerDown={() => {}}
+                onPointerDown={() => { }}
                 variableValues={previewFields}
                 benefitData={workspace.benefit_cards}
                 conceptAssets={conceptAssets}

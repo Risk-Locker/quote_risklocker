@@ -24,6 +24,7 @@ class ExtractionOrchestrator:
         db_models: list[str] | None = None,
         db_companies: list[dict] | None = None,
         db_benefit_concepts: list[dict] | None = None,
+        prompt_override: str | None = None,
     ) -> dict:
         native = extract_native(file_path)
         ocr_text = ""
@@ -52,6 +53,110 @@ class ExtractionOrchestrator:
             db_models=db_models,
             db_companies=db_companies,
         )
+        benefit_lines: list[dict] = []
+        # Check Gemini Multimodal Extraction (Free Tier / Multi-Key Pool)
+        gemini_res = None
+        try:
+            from app.extraction.gemini_extractor import extract_with_gemini_sync, get_key_pool
+            pdf_bytes = file_path.read_bytes()
+            if get_key_pool().get_all_keys() and len(pdf_bytes) > 500:
+                gemini_res = extract_with_gemini_sync(
+                    pdf_bytes,
+                    document_text=combined_text,
+                    db_companies=db_companies,
+                    db_benefit_concepts=db_benefit_concepts,
+                    db_aliases=db_aliases,
+                    prompt_override=prompt_override,
+                )
+            else:
+                gemini_res = None
+            if gemini_res:
+                method_summary.append("Gemini 3.6 Flash AI Extraction")
+                for key, val in gemini_res.items():
+                    if key in {"detected_benefits", "detected_package_name"} or val is None or str(val).strip() == "":
+                        continue
+                    clean_val = str(val).strip()
+                    gemini_candidate = CandidateValue(
+                        field=key,
+                        value=clean_val,
+                        source_method="gemini_vision",
+                        score=0.99,
+                        page=1,
+                        evidence=f"Gemini multimodal extraction: {clean_val}",
+                    )
+                    if key in candidates:
+                        candidates[key].insert(0, gemini_candidate)
+                    else:
+                        candidates[key] = [gemini_candidate]
+
+                # If package detected, record as candidate
+                pkg_name = str(gemini_res.get("detected_package_name") or "").strip()
+                if pkg_name:
+                    pkg_candidate = CandidateValue(
+                        field="product_tier",
+                        value=pkg_name,
+                        source_method="gemini_vision",
+                        score=0.99,
+                        page=1,
+                        evidence=f"Gemini detected package: {pkg_name}",
+                    )
+                    candidates["product_tier"] = [pkg_candidate]
+                    candidates["tier_name"] = [pkg_candidate]
+
+                # Map Gemini detected benefits
+                gemini_benefits = gemini_res.get("detected_benefits") or []
+                for b_item in gemini_benefits:
+                    b_label = str(b_item.get("label") or "").strip()
+                    b_val = str(b_item.get("value") or "").strip()
+                    b_key = str(b_item.get("concept_key") or "").strip()
+                    b_raw = str(b_item.get("raw_text") or f"{b_label}: {b_val}").strip()
+                    if b_label:
+                        # Find matching concept
+                        matched_concept = None
+                        for c in (db_benefit_concepts or []):
+                            if b_key and c.get("key") == b_key:
+                                matched_concept = c
+                                break
+                            if c.get("name", "").lower() == b_label.lower():
+                                matched_concept = c
+                                break
+
+                        concept_id = matched_concept.get("id") if matched_concept else None
+                        c_key = matched_concept.get("key") if matched_concept else (b_key or b_label.lower().replace(" ", "_"))
+
+                        benefit_lines.append({
+                            "line_id": f"gemini_{len(benefit_lines) + 1}",
+                            "raw_label": b_label,
+                            "raw_text": b_raw or b_label,
+                            "normalized_label": b_label.lower(),
+                            "normalized_text": b_label.lower(),
+                            "page_number": 1,
+                            "page": 1,
+                            "section": "Selected Benefits",
+                            "source_scope": "selected",
+                            "line_kind": "benefit_candidate",
+                            "heading_category": "selected",
+                            "inclusion_state": "selected",
+                            "confidence": 1.0,
+                            "source_disposition": "auto_apply",
+                            "is_detected": True,
+                            "candidate_mappings": [
+                                {
+                                    "concept_id": concept_id,
+                                    "concept_key": c_key,
+                                    "name": b_label,
+                                    "matched_alias": b_label,
+                                    "score": 100,
+                                    "match_type": "gemini_multimodal",
+                                    "evidence": b_val,
+                                    "shaped_description": f"{b_label} ({b_val})" if b_val and b_val.lower() != "included" else b_label,
+                                    "is_detected": True,
+                                }
+                            ] if concept_id or c_key else [],
+                        })
+        except Exception as exc:
+            warnings.append(f"Gemini multimodal extraction note: {exc}")
+
         fields, draft_warnings, draft_status = build_draft(candidates)
         warnings.extend(draft_warnings)
 
@@ -59,8 +164,13 @@ class ExtractionOrchestrator:
             field: [candidate.to_dict() for candidate in field_candidates]
             for field, field_candidates in candidates.items()
         }
+        if gemini_res:
+            detected_packs = gemini_res.get("detected_packs") or []
+            if detected_packs:
+                candidate_payload["detected_packs"] = detected_packs
         reading_quality = "ready" if draft_status == "Ready" else "cannot_read" if draft_status == "Cannot Read" else "check_needed"
-        benefit_lines = extract_benefit_lines(combined_page_text, concepts=db_benefit_concepts or [])
+        if not benefit_lines:
+            benefit_lines = extract_benefit_lines(combined_page_text, concepts=db_benefit_concepts or [])
 
         return {
             "full_record": {
@@ -88,7 +198,17 @@ class ExtractionOrchestrator:
 
 
 def candidate_values_from_payload(payload: dict) -> dict[str, list[CandidateValue]]:
-    return {
-        field: [CandidateValue(**candidate) for candidate in candidates]
-        for field, candidates in payload.items()
-    }
+    result: dict[str, list[CandidateValue]] = {}
+    for field, candidates in payload.items():
+        if not isinstance(candidates, list):
+            continue
+        parsed: list[CandidateValue] = []
+        for candidate in candidates:
+            if not isinstance(candidate, dict) or "field" not in candidate:
+                continue
+            try:
+                parsed.append(CandidateValue(**candidate))
+            except (TypeError, ValueError):
+                continue
+        result[field] = parsed
+    return result

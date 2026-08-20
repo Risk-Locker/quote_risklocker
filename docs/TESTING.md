@@ -38,7 +38,7 @@ On 2026-08-16 after the Python 3.12 venv rebuild and migration-ledger repair: 40
 
 - Authentication has focused HTTP route coverage, but non-authentication routes still lack broad HTTP/RBAC integration coverage.
 - Browser E2E exists only for the template builder (groups/marquee); login, upload, review, generation, history, trash, and admin flows still lack E2E scripts.
-- The repository has no checked-in CI workflow that runs the test and build checks remotely.
+- CI/CD: `.github/workflows/deploy.yml` runs backend pytest + frontend `tsc --noEmit` + `next build` on GitHub, then deploys to the VPS on push to `main` (see `docs/SETUP.md`).
 - The existing suite is valuable unit/regression coverage, but a passing result does not prove production deployment controls, browser behavior, or full authorization paths.
 
 ## Change Expectations

@@ -18,6 +18,11 @@ def select_field(field: str, candidates: list[CandidateValue]) -> FieldSelection
     if not candidates:
         return FieldSelection(None, "check_needed" if field in REQUIRED_FIELDS else "ready", [], ["Missing value."])
 
+    # Prioritize Gemini Multimodal AI extraction directly over heuristic candidates
+    gemini_cand = next((c for c in candidates if getattr(c, "source_method", "") == "gemini_vision" and c.value and str(c.value).strip()), None)
+    if gemini_cand:
+        return FieldSelection(gemini_cand.value, "ready", candidates, [])
+
     ranked = sorted(candidates, key=lambda candidate: candidate.score, reverse=True)
     best_by_score = ranked[0]
     high_confidence = [candidate for candidate in ranked if candidate.score >= 0.93]

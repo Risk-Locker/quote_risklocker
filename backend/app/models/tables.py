@@ -893,6 +893,8 @@ class DraftBenefitSelection(Base, TimestampMixin):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     selected_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     superseded_by_id: Mapped[str | None] = mapped_column(ForeignKey("draft_benefit_selections.id", ondelete="SET NULL"), nullable=True)
+    package_plan_id: Mapped[str | None] = mapped_column(ForeignKey("benefit_package_plans.id", ondelete="SET NULL"), nullable=True, index=True)
+    price: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class TemplatePageProfile(Base, TimestampMixin):

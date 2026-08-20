@@ -28,6 +28,8 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tooltip } from "@/components/ui/tooltip";
 import { PageLoading } from "@/components/ui/page-loading";
+import { CanvasElementView, type CanvasElement } from "@/components/template-canvas/shared";
+import { GuidedTour, type TourStep } from "@/components/guided-tour";
 import { api, fileUrl } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 import type {
@@ -46,19 +48,6 @@ import type {
   TierSummary as Tier,
 } from "@/types/benefits";
 type Source = { id: string; title: string; issuer: string; verification_status: string };
-type CanvasElement = {
-  id: string;
-  type: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  text?: string;
-  variableId?: string;
-  gridKind?: string;
-  shapeKind?: string;
-  style?: { background?: string; color?: string; borderColor?: string; borderWidth?: number; fontSize?: number; fontWeight?: string | number };
-};
 type TemplateRecord = {
   id: string;
   name: string;
@@ -67,6 +56,7 @@ type TemplateRecord = {
   fixed_fields: {
     canvas?: { width?: number; height?: number; elements?: CanvasElement[] };
     page_profile?: { name?: string; width?: number; height?: number; unit?: string };
+    assets?: Record<string, string>;
   };
 };
 
@@ -76,6 +66,49 @@ const ROLE_FALLBACK: Record<string, string> = {
   package_component: "bundle_component",
   upgrade: "upgrade",
 };
+
+const BENEFITS_TOUR_STEPS: TourStep[] = [
+  {
+    target: "header",
+    title: "Page purpose",
+    body: "This is the Benefits & Add-ons cockpit. It assigns the global benefit library to one insurer's product, builds package tiers (package-system insurers), and configures add-on bundles. Nothing here is hardcoded — everything is saved to the database.",
+  },
+  {
+    target: ".rl-tour-companies",
+    title: "1. Insurance companies",
+    body: "Pick an insurer to manage its products and benefits. The badge shows whether it uses a Package System (tier ladder) or a simple Add-on System.",
+  },
+  {
+    target: ".rl-tour-product",
+    title: "5. Product / configuration",
+    body: "Choose the product configuration (or package tier) you want to edit. Each chip is one catalog.",
+  },
+  {
+    target: ".rl-tour-ladder",
+    title: "Package tier ladder",
+    body: "For package-system insurers, this ladder shows every tier (Lite → Plus → Premier → All-Inclusive). Click a tier to switch which benefits you're editing. Higher tiers include more defaults and fewer add-ons.",
+  },
+  {
+    target: ".rl-tour-defaults",
+    title: "Default benefits",
+    body: "Click any tile to toggle a benefit as an included default for this tier. These appear in the 'Your Benefits' grid of the final quotation.",
+  },
+  {
+    target: ".rl-tour-addons",
+    title: "Available add-ons",
+    body: "Click any tile to offer a benefit as a payable add-on. These appear in the 'Available Add-ons' grid.",
+  },
+  {
+    target: ".rl-tour-bundles",
+    title: "Bundles & plans",
+    body: "Create add-on bundles (e.g. Driver Protection Pack) and their plan levels A/B/C/D here. Each plan can upgrade existing benefits — adding the pack in a session upgrades them in place.",
+  },
+  {
+    target: ".rl-tour-publish",
+    title: "Save & Publish",
+    body: "Publishing freezes this catalog revision (immutable). Quotations can only pin published revisions. Use 'New draft' to edit a published catalog again.",
+  },
+];
 
 function effectiveRole(offering: Offering): string {
   return offering.role || ROLE_FALLBACK[offering.offering_kind] || "included";
@@ -113,6 +146,13 @@ function BenefitsPageContent() {
   const [formPackageName, setFormPackageName] = useState("");
   const [formAsPackage, setFormAsPackage] = useState(false);
   const [formPackageKey, setFormPackageKey] = useState("");
+
+  // Plan manager states
+  const [planFormName, setPlanFormName] = useState("");
+  const [expandedPlanId, setExpandedPlanId] = useState<string>("");
+  const [planMemberOfferingId, setPlanMemberOfferingId] = useState<string>("");
+  const [planMemberOverride, setPlanMemberOverride] = useState<string>("");
+  const [planSaving, setPlanSaving] = useState(false);
 
   // ── 1. Callbacks ───────────────────────────────────────────────────────
   const syncUrl = useCallback((company: string, product = "", config = "") => {
@@ -294,6 +334,48 @@ function BenefitsPageContent() {
   const selectedSegment = useMemo(() => segments.find((item) => item.id === selectedSegmentId) || null, [segments, selectedSegmentId]);
   const selectedVehicle = useMemo(() => vehicles.find((item) => item.id === selectedVehicleId) || null, [vehicles, selectedVehicleId]);
   const activeTemplate = useMemo(() => templates.find((t) => t.id === selectedTemplateId) || templates[0] || null, [templates, selectedTemplateId]);
+
+  // Real template preview data (mirrors the sessions workspace benefit cards)
+  const previewBenefitData = useMemo(
+    () => ({
+      current_benefits: defaultOfferings.map((o) => ({
+        label: o.label_override || o.concept?.label || o.offering_key,
+        value: o.display_value || "Included",
+        asset_id: o.concept?.default_asset?.id || null,
+        concept_key: o.concept?.concept_key || "",
+        is_detected: false,
+      })),
+      available_addons: addonOfferings.map((o) => ({
+        label: o.label_override || o.concept?.label || o.offering_key,
+        value: o.display_value || "Optional",
+        asset_id: o.concept?.default_asset?.id || null,
+        concept_key: o.concept?.concept_key || "",
+        is_detected: false,
+      })),
+    }),
+    [defaultOfferings, addonOfferings]
+  );
+
+  const previewConceptAssets = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const c of concepts) {
+      const url = c.default_asset?.url || (c.default_asset?.id ? `/business/assets/${c.default_asset.id}/content?profile=ui` : null);
+      if (url) {
+        if (c.concept_key) map[c.concept_key] = url;
+        if (c.id) map[c.id] = url;
+        if (c.label) {
+          map[c.label.toLowerCase()] = url;
+          map[c.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] = url;
+        }
+      }
+    }
+    return map;
+  }, [concepts]);
+
+  const previewTemplateElements = useMemo(
+    () => (activeTemplate?.fixed_fields?.canvas?.elements || []).slice().sort((a, b) => (a.z || 1) - (b.z || 1)),
+    [activeTemplate]
+  );
 
   // ── 3. Effects ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -599,6 +681,159 @@ function BenefitsPageContent() {
     }
   }
 
+  // ── Package Plan Manager (ladder variants of an add-on bundle) ────────
+  async function createPlan(bundle: Package) {
+    if (!selectedCatalog) return;
+    const name = planFormName.trim();
+    if (!name) {
+      setError("Enter a plan name (e.g. Driver Protection Plan A).");
+      return;
+    }
+    setPlanSaving(true);
+    setError("");
+    try {
+      await api(`/business/catalogs/${selectedCatalog.id}/packages/${bundle.id}/plans`, {
+        method: "POST",
+        body: JSON.stringify({ base_revision: selectedCatalog.revision, name }),
+      });
+      setPlanFormName("");
+      setExpandedPlanId(bundle.id);
+      await loadCatalog(selectedCatalog.id, true);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setPlanSaving(false);
+    }
+  }
+
+  async function retirePlan(bundle: Package, plan: Record<string, unknown>) {
+    if (!selectedCatalog) return;
+    if (!window.confirm(`Retire plan "${plan.name}"? Existing quotations keep their pinned revision.`)) return;
+    setPlanSaving(true);
+    setError("");
+    try {
+      await api(`/business/catalogs/${selectedCatalog.id}/packages/${bundle.id}/plans/${plan.id}`, { method: "DELETE" });
+      await loadCatalog(selectedCatalog.id, true);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setPlanSaving(false);
+    }
+  }
+
+  async function addPlanItem(bundle: Package, plan: Record<string, unknown>) {
+    if (!selectedCatalog) return;
+    if (!planMemberOfferingId) {
+      setError("Choose a benefit offering to add to this plan.");
+      return;
+    }
+    setPlanSaving(true);
+    setError("");
+    try {
+      const items = planItemsFor(plan).map((item) => ({
+        offering_id: item.offering_id,
+        typed_value_override: item.typed_value_override || null,
+        sort_order: item.sort_order || 0,
+      }));
+      items.push({ offering_id: planMemberOfferingId, typed_value_override: parseOverride(), sort_order: items.length });
+      await api(`/business/catalogs/${selectedCatalog.id}/packages/${bundle.id}/plans/${plan.id}/items`, {
+        method: "PUT",
+        body: JSON.stringify({ base_revision: selectedCatalog.revision, items }),
+      });
+      setPlanMemberOfferingId("");
+      setPlanMemberOverride("");
+      await loadCatalog(selectedCatalog.id, true);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setPlanSaving(false);
+    }
+  }
+
+  async function removePlanItem(bundle: Package, plan: Record<string, unknown>, item: Record<string, unknown>) {
+    if (!selectedCatalog) return;
+    setPlanSaving(true);
+    setError("");
+    try {
+      const items = planItemsFor(plan)
+        .filter((entry) => entry.id !== item.id)
+        .map((entry, index) => ({
+          offering_id: entry.offering_id,
+          typed_value_override: entry.typed_value_override || null,
+          sort_order: index,
+        }));
+      await api(`/business/catalogs/${selectedCatalog.id}/packages/${bundle.id}/plans/${plan.id}/items`, {
+        method: "PUT",
+        body: JSON.stringify({ base_revision: selectedCatalog.revision, items }),
+      });
+      await loadCatalog(selectedCatalog.id, true);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setPlanSaving(false);
+    }
+  }
+
+  async function updatePlanItemOverride(bundle: Package, plan: Record<string, unknown>, item: Record<string, unknown>, override: string) {
+    if (!selectedCatalog) return;
+    setPlanSaving(true);
+    setError("");
+    try {
+      const items = planItemsFor(plan).map((entry) => ({
+        offering_id: entry.offering_id,
+        typed_value_override: entry.id === item.id ? parseOverride(override) : entry.typed_value_override || null,
+        sort_order: entry.sort_order || 0,
+      }));
+      await api(`/business/catalogs/${selectedCatalog.id}/packages/${bundle.id}/plans/${plan.id}/items`, {
+        method: "PUT",
+        body: JSON.stringify({ base_revision: selectedCatalog.revision, items }),
+      });
+      await loadCatalog(selectedCatalog.id, true);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setPlanSaving(false);
+    }
+  }
+
+  function parseOverride(raw?: string): Record<string, unknown> | null {
+    const text = (raw ?? planMemberOverride).trim();
+    if (!text) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      setError("The benefit value override must be valid JSON (or empty).");
+      return null;
+    }
+  }
+
+  function plansFor(bundle: Package): Array<Record<string, any>> {
+    return (catalogWorkspace?.plans || [])
+      .filter((plan) => plan.package_id === bundle.id && plan.status !== "retired")
+      .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0));
+  }
+
+  function planItemsFor(plan: Record<string, any>): Array<Record<string, any>> {
+    return (catalogWorkspace?.plan_items || [])
+      .filter((item) => item.plan_id === plan.id)
+      .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0));
+  }
+
+  function offeringLabel(offeringId: string): string {
+    const offering = (catalogWorkspace?.offerings || []).find((item) => item.id === offeringId);
+    if (!offering) return offeringId;
+    const concept = (catalogWorkspace?.offerings || []).find((item) => item.id === offeringId)?.concept;
+    return offering.label_override || concept?.label || offering.offering_key || offeringId;
+  }
+
+  function bundleMemberOptions(bundle: Package): Offering[] {
+    return (catalogWorkspace?.offerings || []).filter((item) => {
+      if (!item || item.status === "retired") return false;
+      if (item.applies_to_id === bundle.id) return true;
+      return item.applies_to_type === "bundle" || item.role === "bundle_component";
+    });
+  }
+
   async function clonePackage() {
     if (!selectedCatalog) return;
     setSaving(true);
@@ -728,6 +963,12 @@ function BenefitsPageContent() {
               <PackageIcon size={14} />
               New bundle
             </Button>
+            <GuidedTour
+              storageKey="tour:builder-benefits"
+              title="Benefits & Add-ons Architecture"
+              description="Configure which global benefits each insurer product includes by default and offers as add-ons, build package tiers, and create add-on bundles with plan levels."
+              steps={BENEFITS_TOUR_STEPS}
+            />
             {selectedCatalog && (
               selectedCatalog.revisions?.[0]?.state === "published" ? (
                 <Button variant="secondary" size="sm" onClick={openNewDraft} disabled={saving} className="gap-1.5">
@@ -756,7 +997,7 @@ function BenefitsPageContent() {
         {/* ── Apple-Style Step Flow Navigator ─────────────────────────── */}
         <div className="mt-4 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3.5 space-y-3.5">
           {/* Row 1: Insurance companies (Full-width, scalable for many companies) */}
-          <div className="flex flex-col gap-1.5">
+          <div className="rl-tour-companies flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
                 1. Insurance companies ({companies.length})
@@ -773,11 +1014,10 @@ function BenefitsPageContent() {
                   <button
                     key={c.id}
                     onClick={() => loadCompany(c.id)}
-                    className={`flex items-center gap-2.5 rounded-[var(--rl-radius-sm)] px-3.5 py-2 text-left font-medium transition-all ${
-                      active
-                        ? "bg-[var(--rl-black)] text-white shadow-sm"
-                        : "border border-[var(--rl-border)] bg-[var(--rl-surface)] text-[var(--rl-text-strong)] hover:border-[var(--rl-text-muted)]"
-                    }`}
+                    className={`flex items-center gap-2.5 rounded-[var(--rl-radius-sm)] px-3.5 py-2 text-left font-medium transition-all ${active
+                      ? "bg-[var(--rl-black)] text-white shadow-sm"
+                      : "border border-[var(--rl-border)] bg-[var(--rl-surface)] text-[var(--rl-text-strong)] hover:border-[var(--rl-text-muted)]"
+                      }`}
                   >
                     {c.logo?.url ? (
                       <img src={fileUrl(c.logo.url)} alt={c.name} className="h-4 w-4 rounded-[2px] object-contain bg-white" />
@@ -786,11 +1026,10 @@ function BenefitsPageContent() {
                     )}
                     <span className="text-xs font-semibold">{c.name}</span>
                     <span
-                      className={`rounded-[4px] px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
-                        active
-                          ? "bg-white/20 text-white"
-                          : "bg-[var(--rl-bg)] text-[var(--rl-text-muted)] border border-[var(--rl-border)]"
-                      }`}
+                      className={`rounded-[4px] px-1.5 py-0.5 text-[10px] font-semibold uppercase ${active
+                        ? "bg-white/20 text-white"
+                        : "bg-[var(--rl-bg)] text-[var(--rl-text-muted)] border border-[var(--rl-border)]"
+                        }`}
                     >
                       {isPkgSystem ? "Package System" : "Add-on System"}
                     </span>
@@ -819,11 +1058,10 @@ function BenefitsPageContent() {
                     <button
                       key={seg.id}
                       onClick={() => setSelectedSegmentId(seg.id)}
-                      className={`rounded-[var(--rl-radius-sm)] px-2.5 py-1 text-xs font-medium transition-all ${
-                        active
-                          ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] border border-[var(--rl-border)] shadow-sm font-semibold"
-                          : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                      }`}
+                      className={`rounded-[var(--rl-radius-sm)] px-2.5 py-1 text-xs font-medium transition-all ${active
+                        ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] border border-[var(--rl-border)] shadow-sm font-semibold"
+                        : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                        }`}
                     >
                       {seg.key === "private" ? "Private" : "Company / Commercial"}
                     </button>
@@ -846,11 +1084,10 @@ function BenefitsPageContent() {
                     <button
                       key={v.id}
                       onClick={() => setSelectedVehicleId(v.id)}
-                      className={`rounded-[var(--rl-radius-sm)] px-2.5 py-1 text-xs font-medium transition-all ${
-                        active
-                          ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] border border-[var(--rl-border)] shadow-sm font-semibold"
-                          : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                      }`}
+                      className={`rounded-[var(--rl-radius-sm)] px-2.5 py-1 text-xs font-medium transition-all ${active
+                        ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] border border-[var(--rl-border)] shadow-sm font-semibold"
+                        : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                        }`}
                     >
                       {v.name}
                     </button>
@@ -876,7 +1113,7 @@ function BenefitsPageContent() {
           </div>
 
           {/* Row 3: Product / Configuration Selection */}
-          <div className="flex flex-wrap items-center gap-2 border-t border-[var(--rl-border)] pt-3">
+          <div className="rl-tour-product flex flex-wrap items-center gap-2 border-t border-[var(--rl-border)] pt-3">
             <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
               5. Product:
             </span>
@@ -891,11 +1128,10 @@ function BenefitsPageContent() {
                   <button
                     key={config.id}
                     onClick={() => loadCatalog(config.id)}
-                    className={`flex items-center gap-2 rounded-[var(--rl-radius-sm)] px-3 py-1.5 text-xs font-semibold transition-all ${
-                      active
-                        ? "bg-[var(--rl-black)] text-white shadow-sm"
-                        : "border border-[var(--rl-border)] bg-[var(--rl-surface)] text-[var(--rl-text-strong)] hover:border-[var(--rl-text-muted)]"
-                    }`}
+                    className={`flex items-center gap-2 rounded-[var(--rl-radius-sm)] px-3 py-1.5 text-xs font-semibold transition-all ${active
+                      ? "bg-[var(--rl-black)] text-white shadow-sm"
+                      : "border border-[var(--rl-border)] bg-[var(--rl-surface)] text-[var(--rl-text-strong)] hover:border-[var(--rl-text-muted)]"
+                      }`}
                   >
                     <TreeStructure size={14} className={active ? "text-white" : "text-[var(--rl-text-muted)]"} />
                     <span>{displayName}</span>
@@ -930,7 +1166,7 @@ function BenefitsPageContent() {
           <div className="space-y-6">
             {/* ── Package Tier Ladder (For Package System) ────────────────── */}
             {isPackaged && comprehensivePackages.length > 0 && (
-              <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm space-y-3">
+              <div className="rl-tour-ladder rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-strong)]">
@@ -957,11 +1193,10 @@ function BenefitsPageContent() {
                       <button
                         key={pkg.id}
                         onClick={() => setSelectedPackageId(pkg.id)}
-                        className={`flex flex-col justify-between rounded-[var(--rl-radius-sm)] border p-3.5 text-left transition-all ${
-                          isCurrent
-                            ? "border-[var(--rl-black)] bg-[var(--rl-bg)] shadow-md ring-2 ring-[var(--rl-black)]"
-                            : "border-[var(--rl-border)] bg-[var(--rl-surface)] opacity-80 hover:opacity-100 hover:border-[var(--rl-text-muted)]"
-                        }`}
+                        className={`flex flex-col justify-between rounded-[var(--rl-radius-sm)] border p-3.5 text-left transition-all ${isCurrent
+                          ? "border-[var(--rl-black)] bg-[var(--rl-bg)] shadow-md ring-2 ring-[var(--rl-black)]"
+                          : "border-[var(--rl-border)] bg-[var(--rl-surface)] opacity-80 hover:opacity-100 hover:border-[var(--rl-text-muted)]"
+                          }`}
                       >
                         <div>
                           <div className="flex items-center justify-between">
@@ -1024,6 +1259,17 @@ function BenefitsPageContent() {
                     Saving...
                   </span>
                 )}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowLiveTemplate(true)}
+                  disabled={showLiveTemplate}
+                  className="gap-1.5"
+                  title="Open the live template preview"
+                >
+                  <Eye size={14} />
+                  {showLiveTemplate ? "Preview open" : "Show preview"}
+                </Button>
                 <Button
                   variant="secondary"
                   size="sm"
@@ -1148,210 +1394,56 @@ function BenefitsPageContent() {
                     </div>
                   </div>
 
-                  {/* Right (8 cols): Complete High-Fidelity SVG Quotation Canvas */}
+                  {/* Right (8 cols): Real Template Canvas Preview */}
                   <div className="lg:col-span-8 grid place-items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[#ececee] p-6 shadow-inner min-h-[580px]">
-                    <div className="w-full max-w-[620px] bg-white shadow-card rounded-[4px] overflow-hidden border border-neutral-300">
-                      <svg
-                        viewBox={`0 0 ${canvasW} ${canvasH}`}
-                        className="w-full h-auto bg-white"
-                        role="img"
-                        aria-label={`Preview of ${activeTemplate?.name || "Template"}`}
+                    {previewTemplateElements.length === 0 ? (
+                      <div className="grid h-full min-h-[420px] w-full place-items-center text-center text-xs text-[var(--rl-text-muted)]">
+                        <div>
+                          <p className="font-semibold text-[var(--rl-text-strong)]">No template canvas elements</p>
+                          <p className="mt-1">This template has no renderable elements. Pick another template above.</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        className="relative w-full max-w-[620px] bg-white shadow-card rounded-[4px] overflow-hidden border border-neutral-300"
+                        style={{ aspectRatio: `${canvasW} / ${canvasH}` }}
                       >
-                        {/* A4 White Page Background */}
-                        <rect x="0" y="0" width={canvasW} height={canvasH} fill="#ffffff" />
-
-                        {/* Top Logo / Header Section */}
-                        <rect x="32" y="32" width="140" height="40" fill="#f0f0f2" rx="4" />
-                        <text x="44" y="56" fontSize="13" fontWeight="bold" fill="#1b1717" fontFamily="Inter, sans-serif">
-                          RISK LOCKER
-                        </text>
-
-                        {/* Insurer Badge */}
-                        <rect x="622" y="32" width="140" height="40" fill="#f0f0f2" rx="4" />
-                        <text x="692" y="56" fontSize="12" fontWeight="bold" fill="#1b1717" textAnchor="middle" fontFamily="Inter, sans-serif">
-                          {selectedCompany?.name || "Insurer"}
-                        </text>
-
-                        {/* Red Divider Line */}
-                        <line x1="32" y1="88" x2="762" y2="88" stroke="#ed1c24" strokeWidth="2.5" />
-
-                        {/* Quotation Title and Total Premium */}
-                        <text x="32" y="120" fontSize="18" fontWeight="bold" fill="#1b1717" fontFamily="Manrope, sans-serif">
-                          Motor Insurance Quotation
-                        </text>
-                        <text x="762" y="108" fontSize="10" fontWeight="bold" fill="#6e6e73" textAnchor="end" fontFamily="Inter, sans-serif">
-                          TOTAL PREMIUM
-                        </text>
-                        <text x="762" y="126" fontSize="18" fontWeight="bold" fill="#ed1c24" textAnchor="end" fontFamily="Inter, sans-serif">
-                          RM 1,850.00
-                        </text>
-
-                        {/* Policy Details Grid Box */}
-                        <rect x="32" y="140" width="730" height="70" fill="#fafafc" stroke="#e5e5ea" strokeWidth="1" rx="4" />
-                        
-                        {/* Details Columns */}
-                        <text x="44" y="160" fontSize="9" fontWeight="bold" fill="#8e8e93" fontFamily="Inter, sans-serif">CUSTOMER</text>
-                        <text x="44" y="174" fontSize="11" fontWeight="bold" fill="#ed1c24" fontFamily="Inter, sans-serif">Ahmad Bin Abdullah</text>
-                        <text x="44" y="196" fontSize="9" fontWeight="bold" fill="#8e8e93" fontFamily="Inter, sans-serif">COVERAGE</text>
-                        <text x="44" y="206" fontSize="10" fontWeight="600" fill="#ed1c24" fontFamily="Inter, sans-serif">Comprehensive Private</text>
-
-                        <text x="290" y="160" fontSize="9" fontWeight="bold" fill="#8e8e93" fontFamily="Inter, sans-serif">VEHICLE</text>
-                        <text x="290" y="174" fontSize="11" fontWeight="bold" fill="#ed1c24" fontFamily="Inter, sans-serif">HONDA CIVIC 1.5 VTEC</text>
-                        <text x="290" y="196" fontSize="9" fontWeight="bold" fill="#8e8e93" fontFamily="Inter, sans-serif">PERIOD</text>
-                        <text x="290" y="206" fontSize="10" fontWeight="600" fill="#ed1c24" fontFamily="Inter, sans-serif">04/04/2025 - 03/04/2026</text>
-
-                        <text x="560" y="160" fontSize="9" fontWeight="bold" fill="#8e8e93" fontFamily="Inter, sans-serif">REGISTRATION</text>
-                        <text x="560" y="174" fontSize="11" fontWeight="bold" fill="#ed1c24" fontFamily="Inter, sans-serif">VCC 655</text>
-                        <text x="560" y="196" fontSize="9" fontWeight="bold" fill="#8e8e93" fontFamily="Inter, sans-serif">SUM INSURED</text>
-                        <text x="560" y="206" fontSize="10" fontWeight="600" fill="#ed1c24" fontFamily="Inter, sans-serif">RM 118,000.00</text>
-
-                        {/* ── SLOT 1: YOUR BENEFITS (Dashed Red Box) ───────── */}
-                        <text x="32" y="240" fontSize="14" fontWeight="bold" fill="#1b1717" fontFamily="Manrope, sans-serif">
-                          Your Benefits ({defaultOfferings.length} Included)
-                        </text>
-                        
-                        <rect
-                          x="32"
-                          y="250"
-                          width="730"
-                          height="440"
-                          fill="#ffffff"
-                          stroke="#ed1c24"
-                          strokeWidth="1.5"
-                          strokeDasharray="6 4"
-                          rx="6"
-                        />
-
-                        {/* Dynamic Default Benefit Cards inside Slot 1 */}
-                        {defaultOfferings.slice(0, 11).map((item, idx) => {
-                          const cols = 2;
-                          const colW = (730 - 24) / cols;
-                          const rowH = 68;
-                          const col = idx % cols;
-                          const row = Math.floor(idx / cols);
-                          const x = 32 + 8 + col * (colW + 8);
-                          const y = 250 + 8 + row * rowH;
-                          const label = item.label_override || item.concept?.label || item.offering_key;
-                          const val = item.display_value || "Included";
-                          const assetUrl = item.concept?.default_asset?.url;
-
-                          return (
-                            <g key={item.id} transform={`translate(${x}, ${y})`}>
-                              {/* Card Container */}
-                              <rect x="0" y="0" width={colW} height={rowH - 8} fill="#ffffff" stroke="#e5e5ea" strokeWidth="1" rx="8" />
-                              
-                              {/* Icon Container */}
-                              <rect x="8" y="8" width="44" height="44" fill="#f4f4f6" rx="6" />
-                              {assetUrl ? (
-                                <image href={fileUrl(assetUrl)} x="10" y="10" width="40" height="40" preserveAspectRatio="xMidYMid meet" />
-                              ) : (
-                                <g transform="translate(20, 20)">
-                                  <polygon points="10,0 12,7 19,7 13,11 15,18 10,14 5,18 7,11 1,7 8,7" fill="#8e8e93" />
-                                </g>
-                              )}
-
-                              {/* Benefit Title */}
-                              <text x="60" y="27" fontSize="12" fontWeight="bold" fill="#1b1717" fontFamily="Inter, sans-serif">
-                                {label.length > 30 ? `${label.slice(0, 30)}...` : label}
-                              </text>
-                              {/* Benefit Value */}
-                              <text x="60" y="44" fontSize="10" fontWeight="600" fill="#2f7d32" fontFamily="Inter, sans-serif">
-                                {val}
-                              </text>
-                              {/* Included Badge */}
-                              <rect x={colW - 68} y="20" width="60" height="20" fill="#e8f5e9" rx="4" />
-                              <text x={colW - 38} y="34" fontSize="9" fontWeight="bold" fill="#2e7d32" textAnchor="middle" fontFamily="Inter, sans-serif">
-                                Included
-                              </text>
-                            </g>
-                          );
-                        })}
-
-                        {defaultOfferings.length === 0 && (
-                          <text x="397" y="470" fontSize="13" fill="#a1a1aa" textAnchor="middle" fontStyle="italic" fontFamily="Inter, sans-serif">
-                            No default benefits included for this package. Click tiles below to allocate.
-                          </text>
-                        )}
-
-                        {/* ── SLOT 2: AVAILABLE ADD-ONS (Dashed Red Box) ───── */}
-                        <text x="32" y="720" fontSize="14" fontWeight="bold" fill="#1b1717" fontFamily="Manrope, sans-serif">
-                          Available Add-ons ({addonOfferings.length} Selected)
-                        </text>
-
-                        <rect
-                          x="32"
-                          y="730"
-                          width="730"
-                          height="280"
-                          fill="#ffffff"
-                          stroke="#ed1c24"
-                          strokeWidth="1.5"
-                          strokeDasharray="6 4"
-                          rx="6"
-                        />
-
-                        {/* Dynamic Add-on Cards inside Slot 2 */}
-                        {addonOfferings.slice(0, 10).map((item, idx) => {
-                          const cols = 2;
-                          const colW = (730 - 24) / cols;
-                          const rowH = 56;
-                          const col = idx % cols;
-                          const row = Math.floor(idx / cols);
-                          const x = 32 + 8 + col * (colW + 8);
-                          const y = 730 + 8 + row * rowH;
-                          const label = item.label_override || item.concept?.label || item.offering_key;
-                          const val = item.display_value || "Optional";
-                          const assetUrl = item.concept?.default_asset?.url;
-
-                          return (
-                            <g key={item.id} transform={`translate(${x}, ${y})`}>
-                              <rect x="0" y="0" width={colW} height={rowH - 6} fill="#ffffff" stroke="#e5e5ea" strokeWidth="1" rx="8" />
-                              
-                              {/* Icon Container */}
-                              <rect x="6" y="6" width="38" height="38" fill="#f4f4f6" rx="6" />
-                              {assetUrl ? (
-                                <image href={fileUrl(assetUrl)} x="8" y="8" width="34" height="34" preserveAspectRatio="xMidYMid meet" />
-                              ) : (
-                                <g transform="translate(15, 15)">
-                                  <polygon points="10,0 12,7 19,7 13,11 15,18 10,14 5,18 7,11 1,7 8,7" fill="#ed1c24" />
-                                </g>
-                              )}
-
-                              <text x="52" y="24" fontSize="11" fontWeight="bold" fill="#1b1717" fontFamily="Inter, sans-serif">
-                                {label.length > 28 ? `${label.slice(0, 28)}...` : label}
-                              </text>
-                              <text x="52" y="38" fontSize="9" fontWeight="600" fill="#6e6e73" fontFamily="Inter, sans-serif">
-                                {val}
-                              </text>
-                              <rect x={colW - 64} y="15" width="56" height="18" fill="#f0f0f2" rx="4" />
-                              <text x={colW - 36} y="28" fontSize="9" fontWeight="bold" fill="#6e6e73" textAnchor="middle" fontFamily="Inter, sans-serif">
-                                Optional
-                              </text>
-                            </g>
-                          );
-                        })}
-
-                        {addonOfferings.length === 0 && (
-                          <text x="397" y="870" fontSize="13" fill="#a1a1aa" textAnchor="middle" fontStyle="italic" fontFamily="Inter, sans-serif">
-                            {defaultOfferings.length === 11
-                              ? "All 11 benefits are included by default in this package tier. Add-ons list is empty."
-                              : "No optional add-ons selected. Click tiles below to add endorsements."}
-                          </text>
-                        )}
-
-                        {/* Footer Disclaimer */}
-                        <text x="32" y="1050" fontSize="8" fill="#8e8e93" fontFamily="Inter, sans-serif">
-                          This summary is based on the reviewed quotation. Refer to the insurer policy document for full terms and conditions.
-                        </text>
-                      </svg>
-                    </div>
+                        <div
+                          className="absolute left-0 top-0"
+                          style={{
+                            width: canvasW,
+                            height: canvasH,
+                            transform: `scale(${Math.min(1, 620 / canvasW)})`,
+                            transformOrigin: "top left",
+                          }}
+                        >
+                          {previewTemplateElements.map((element) => (
+                            <CanvasElementView
+                              key={element.id}
+                              element={element}
+                              selected={false}
+                              readOnly={true}
+                              onPointerDown={() => { }}
+                              variableValues={{}}
+                              benefitData={previewBenefitData}
+                              conceptAssets={previewConceptAssets}
+                              assets={Object.entries(activeTemplate?.fixed_fields?.assets || {}).map(([key, id]) => ({
+                                id,
+                                label: key,
+                                url: `/template-assets/${id}`,
+                              }))}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
             )}
 
             {/* ── Fast Bulk Clicker: Category 1 (Default Benefits) ──────── */}
-            <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm">
+            <div className="rl-tour-defaults rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm">
               <div className="mb-4 flex items-center justify-between border-b border-[var(--rl-border)] pb-3">
                 <div>
                   <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">
@@ -1375,20 +1467,18 @@ function BenefitsPageContent() {
                     <div
                       key={concept.id}
                       onClick={() => toggleConceptFast(concept, "included")}
-                      className={`group relative flex flex-col justify-between rounded-[var(--rl-radius-sm)] border p-3 cursor-pointer transition-all ${
-                        isActive
-                          ? "border-[var(--rl-black)] bg-[var(--rl-bg)] shadow-sm ring-1 ring-[var(--rl-black)]"
-                          : "border-[var(--rl-border)] bg-[var(--rl-surface)] opacity-70 hover:opacity-100 hover:border-[var(--rl-text-muted)]"
-                      }`}
+                      className={`group relative flex flex-col justify-between rounded-[var(--rl-radius-sm)] border p-3 cursor-pointer transition-all ${isActive
+                        ? "border-[var(--rl-black)] bg-[var(--rl-bg)] shadow-sm ring-1 ring-[var(--rl-black)]"
+                        : "border-[var(--rl-border)] bg-[var(--rl-surface)] opacity-70 hover:opacity-100 hover:border-[var(--rl-text-muted)]"
+                        }`}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-2.5 min-w-0">
                           <div
-                            className={`grid h-7 w-7 shrink-0 place-items-center rounded-[4px] border ${
-                              isActive
-                                ? "bg-[var(--rl-black)] text-white border-[var(--rl-black)]"
-                                : "bg-[var(--rl-bg)] text-[var(--rl-text-muted)] border-[var(--rl-border)]"
-                            }`}
+                            className={`grid h-7 w-7 shrink-0 place-items-center rounded-[4px] border ${isActive
+                              ? "bg-[var(--rl-black)] text-white border-[var(--rl-black)]"
+                              : "bg-[var(--rl-bg)] text-[var(--rl-text-muted)] border-[var(--rl-border)]"
+                              }`}
                           >
                             {concept.default_asset?.url ? (
                               <img src={fileUrl(concept.default_asset.url)} alt={concept.label} className="h-4 w-4 object-contain" />
@@ -1402,11 +1492,10 @@ function BenefitsPageContent() {
                         </div>
 
                         <div
-                          className={`h-4 w-4 rounded-[4px] border grid place-items-center ${
-                            isActive
-                              ? "bg-[var(--rl-black)] border-[var(--rl-black)] text-white"
-                              : "border-[var(--rl-border)] bg-[var(--rl-surface)]"
-                          }`}
+                          className={`h-4 w-4 rounded-[4px] border grid place-items-center ${isActive
+                            ? "bg-[var(--rl-black)] border-[var(--rl-black)] text-white"
+                            : "border-[var(--rl-border)] bg-[var(--rl-surface)]"
+                            }`}
                         >
                           {isActive && <Check size={12} weight="bold" />}
                         </div>
@@ -1436,7 +1525,7 @@ function BenefitsPageContent() {
             </div>
 
             {/* ── Fast Bulk Clicker: Category 2 (Unique Add-ons) ─────────── */}
-            <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm">
+            <div className="rl-tour-addons rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm">
               <div className="mb-4 flex items-center justify-between border-b border-[var(--rl-border)] pb-3">
                 <div>
                   <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">
@@ -1461,21 +1550,19 @@ function BenefitsPageContent() {
                     <div
                       key={concept.id}
                       onClick={() => toggleConceptFast(concept, "addon_option")}
-                      className={`group relative flex flex-col justify-between rounded-[var(--rl-radius-sm)] border p-3 cursor-pointer transition-all ${
-                        isActive
-                          ? "border-[var(--rl-black)] bg-[var(--rl-bg)] shadow-sm ring-1 ring-[var(--rl-black)]"
-                          : "border-[var(--rl-border)] bg-[var(--rl-surface)] opacity-70 hover:opacity-100 hover:border-[var(--rl-text-muted)]"
-                      }`}
+                      className={`group relative flex flex-col justify-between rounded-[var(--rl-radius-sm)] border p-3 cursor-pointer transition-all ${isActive
+                        ? "border-[var(--rl-black)] bg-[var(--rl-bg)] shadow-sm ring-1 ring-[var(--rl-black)]"
+                        : "border-[var(--rl-border)] bg-[var(--rl-surface)] opacity-70 hover:opacity-100 hover:border-[var(--rl-text-muted)]"
+                        }`}
                     >
                       <div>
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center gap-2.5 min-w-0">
                             <div
-                              className={`grid h-7 w-7 shrink-0 place-items-center rounded-[4px] border ${
-                                isActive
-                                  ? "bg-[var(--rl-black)] text-white border-[var(--rl-black)]"
-                                  : "bg-[var(--rl-bg)] text-[var(--rl-text-muted)] border-[var(--rl-border)]"
-                              }`}
+                              className={`grid h-7 w-7 shrink-0 place-items-center rounded-[4px] border ${isActive
+                                ? "bg-[var(--rl-black)] text-white border-[var(--rl-black)]"
+                                : "bg-[var(--rl-bg)] text-[var(--rl-text-muted)] border-[var(--rl-border)]"
+                                }`}
                             >
                               {concept.default_asset?.url ? (
                                 <img src={fileUrl(concept.default_asset.url)} alt={concept.label} className="h-4 w-4 object-contain" />
@@ -1489,11 +1576,10 @@ function BenefitsPageContent() {
                           </div>
 
                           <div
-                            className={`h-4 w-4 rounded-[4px] border grid place-items-center ${
-                              isActive
-                                ? "bg-[var(--rl-black)] border-[var(--rl-black)] text-white"
-                                : "border-[var(--rl-border)] bg-[var(--rl-surface)]"
-                            }`}
+                            className={`h-4 w-4 rounded-[4px] border grid place-items-center ${isActive
+                              ? "bg-[var(--rl-black)] border-[var(--rl-black)] text-white"
+                              : "border-[var(--rl-border)] bg-[var(--rl-surface)]"
+                              }`}
                           >
                             {isActive && <Check size={12} weight="bold" />}
                           </div>
@@ -1517,11 +1603,10 @@ function BenefitsPageContent() {
                                       toggleConceptFast(concept, "addon_option");
                                     }
                                   }}
-                                  className={`rounded-[4px] px-1.5 py-0.5 text-[10px] font-semibold transition-all ${
-                                    isVariantActive
-                                      ? "bg-[var(--rl-black)] text-white"
-                                      : "bg-[var(--rl-surface)] border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                                  }`}
+                                  className={`rounded-[4px] px-1.5 py-0.5 text-[10px] font-semibold transition-all ${isVariantActive
+                                    ? "bg-[var(--rl-black)] text-white"
+                                    : "bg-[var(--rl-surface)] border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                                    }`}
                                 >
                                   {variant}
                                 </button>
@@ -1555,51 +1640,172 @@ function BenefitsPageContent() {
             </div>
 
             {/* ── Revisions & Bundles Overview ─────────────────────────── */}
-            <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5">
+            <div className="rl-tour-bundles rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5">
               <div className="flex items-center gap-4 border-b border-[var(--rl-border)] pb-3 text-xs">
                 <button
                   onClick={() => setActiveTab("structure")}
-                  className={`font-semibold transition-colors ${
-                    activeTab === "structure"
-                      ? "text-[var(--rl-text-strong)] border-b-2 border-[var(--rl-black)] pb-1"
-                      : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                  }`}
+                  className={`font-semibold transition-colors ${activeTab === "structure"
+                    ? "text-[var(--rl-text-strong)] border-b-2 border-[var(--rl-black)] pb-1"
+                    : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                    }`}
                 >
                   Structure Overview
                 </button>
                 <button
                   onClick={() => setActiveTab("bundles")}
-                  className={`font-semibold transition-colors ${
-                    activeTab === "bundles"
-                      ? "text-[var(--rl-text-strong)] border-b-2 border-[var(--rl-black)] pb-1"
-                      : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                  }`}
+                  className={`font-semibold transition-colors ${activeTab === "bundles"
+                    ? "text-[var(--rl-text-strong)] border-b-2 border-[var(--rl-black)] pb-1"
+                    : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                    }`}
                 >
                   Bundles ({bundles.length})
                 </button>
                 <button
                   onClick={() => setActiveTab("revisions")}
-                  className={`font-semibold transition-colors ${
-                    activeTab === "revisions"
-                      ? "text-[var(--rl-text-strong)] border-b-2 border-[var(--rl-black)] pb-1"
-                      : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                  }`}
+                  className={`font-semibold transition-colors ${activeTab === "revisions"
+                    ? "text-[var(--rl-text-strong)] border-b-2 border-[var(--rl-black)] pb-1"
+                    : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                    }`}
                 >
                   Revisions ({selectedCatalog.revisions?.length || 1})
                 </button>
               </div>
 
               {activeTab === "bundles" && (
-                <div className="mt-4 space-y-2 text-xs">
+                <div className="mt-4 space-y-3 text-xs">
                   {bundles.length === 0 ? (
-                    <p className="text-[var(--rl-text-muted)]">No addon bundles configured for this product.</p>
+                    <p className="text-[var(--rl-text-muted)]">
+                      No addon bundles configured for this product. Use &quot;New bundle&quot; to create a pack (e.g. Driver Protection Pack), then add plan levels A/B/C/D below.
+                    </p>
                   ) : (
-                    bundles.map((b) => (
-                      <div key={b.id} className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] p-3 bg-[var(--rl-bg)]">
-                        <span className="font-bold text-[var(--rl-text-strong)]">{b.name}</span>
-                        <span className="ml-2 text-[var(--rl-text-muted)]">({b.package_key})</span>
-                      </div>
-                    ))
+                    bundles.map((b) => {
+                      const plans = plansFor(b);
+                      const expanded = expandedPlanId === b.id;
+                      return (
+                        <div key={b.id} className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)]">
+                          <div className="flex flex-wrap items-center justify-between gap-2 p-3">
+                            <div className="flex items-center gap-2">
+                              <PackageIcon size={16} weight="fill" className="text-[var(--rl-red)]" />
+                              <span className="font-bold text-[var(--rl-text-strong)]">{b.name}</span>
+                              <span className="text-[var(--rl-text-muted)]">({b.package_key})</span>
+                              <span className="rounded-[4px] bg-[var(--rl-surface)] border border-[var(--rl-border)] px-2 py-0.5 text-[10px] font-bold text-[var(--rl-text-muted)]">
+                                {plans.length} plan{plans.length === 1 ? "" : "s"}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setExpandedPlanId(expanded ? "" : b.id)}
+                              className="flex items-center gap-1 rounded px-2 py-1 font-semibold text-[var(--rl-text-muted)] hover:bg-[var(--rl-surface)] hover:text-[var(--rl-text-strong)] transition-colors"
+                            >
+                              {expanded ? <EyeSlash size={14} weight="bold" /> : <Eye size={14} weight="bold" />}
+                              {expanded ? "Collapse" : "Manage plans"}
+                            </button>
+                          </div>
+
+                          {expanded && (
+                            <div className="grid gap-3 border-t border-[var(--rl-border)] p-3">
+                              {/* Create plan */}
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Input
+                                  value={planFormName}
+                                  onChange={(e) => setPlanFormName(e.target.value)}
+                                  placeholder="Plan name, e.g. Driver Protection Plan A"
+                                  className="max-w-xs text-xs"
+                                  onKeyDown={(e) => { if (e.key === "Enter") createPlan(b); }}
+                                />
+                                <Button size="sm" onClick={() => createPlan(b)} disabled={planSaving} icon={<Plus size={14} weight="bold" />}>
+                                  Add plan level
+                                </Button>
+                              </div>
+
+                              {plans.length === 0 ? (
+                                <p className="text-[var(--rl-text-muted)]">No plan levels yet. Add Plan A first, then B/C/D as upgrades.</p>
+                              ) : (
+                                plans.map((plan) => {
+                                  const items = planItemsFor(plan);
+                                  const memberOptions = bundleMemberOptions(b);
+                                  return (
+                                    <div key={plan.id} className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-3">
+                                      <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2">
+                                          <span className="font-bold text-[var(--rl-text-strong)]">{plan.name}</span>
+                                          <span className="font-mono text-[10px] text-[var(--rl-text-muted)]">({plan.plan_key})</span>
+                                          <span className="rounded-[4px] bg-[var(--rl-bg)] border border-[var(--rl-border)] px-2 py-0.5 text-[10px] font-bold text-[var(--rl-text-muted)]">
+                                            {items.length} member{items.length === 1 ? "" : "s"}
+                                          </span>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => retirePlan(b, plan)}
+                                          disabled={planSaving}
+                                          className="rounded px-2 py-1 text-[11px] font-semibold text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] transition-colors"
+                                        >
+                                          Retire
+                                        </button>
+                                      </div>
+
+                                      {/* Members */}
+                                      <div className="mt-3 grid gap-2">
+                                        {items.map((item) => (
+                                          <div key={item.id} className="flex flex-wrap items-center gap-2 rounded-[4px] border border-[var(--rl-border)] bg-white px-2 py-1.5">
+                                            <span className="min-w-0 flex-1 truncate font-semibold text-[var(--rl-text-strong)]">
+                                              {offeringLabel(String(item.offering_id))}
+                                            </span>
+                                            <input
+                                              value={item.typed_value_override ? JSON.stringify(item.typed_value_override) : ""}
+                                              onChange={(e) => updatePlanItemOverride(b, plan, item, e.target.value)}
+                                              placeholder="Value override (JSON) — e.g. unlimited towing"
+                                              className="min-w-0 flex-1 rounded border border-[var(--rl-border)] bg-[var(--rl-bg)] px-2 py-1 font-mono text-[10px] text-[var(--rl-text-strong)]"
+                                            />
+                                            <button
+                                              type="button"
+                                              onClick={() => removePlanItem(b, plan, item)}
+                                              disabled={planSaving}
+                                              className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)]"
+                                              title="Remove member"
+                                            >
+                                              <X size={14} weight="bold" />
+                                            </button>
+                                          </div>
+                                        ))}
+                                      </div>
+
+                                      {/* Add member */}
+                                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                                        <select
+                                          value={planMemberOfferingId}
+                                          onChange={(e) => setPlanMemberOfferingId(e.target.value)}
+                                          className="min-w-0 flex-1 rounded border border-[var(--rl-border)] bg-white px-2 py-1.5 text-xs text-[var(--rl-text-strong)]"
+                                        >
+                                          <option value="">Choose a benefit offering…</option>
+                                          {memberOptions.map((off) => (
+                                            <option key={off.id} value={off.id}>
+                                              {off.label_override || off.concept?.label || off.offering_key}
+                                            </option>
+                                          ))}
+                                        </select>
+                                        <Input
+                                          value={planMemberOverride}
+                                          onChange={(e) => setPlanMemberOverride(e.target.value)}
+                                          placeholder='Override JSON, e.g. {"type":"distance","unlimited":true,"unit":"km"}'
+                                          className="min-w-0 flex-1 text-xs font-mono"
+                                        />
+                                        <Button size="sm" variant="secondary" onClick={() => addPlanItem(b, plan)} disabled={planSaving} icon={<Plus size={14} weight="bold" />}>
+                                          Add
+                                        </Button>
+                                      </div>
+                                      <p className="mt-2 text-[10px] text-[var(--rl-text-muted)]">
+                                        Tip: leave the override empty to use the offering&apos;s catalog value; set it to upgrade the benefit for this plan level (e.g. Towing 50 km → Unlimited).
+                                      </p>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               )}

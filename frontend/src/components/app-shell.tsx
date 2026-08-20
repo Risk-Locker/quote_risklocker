@@ -4,7 +4,7 @@ import Link from "next/link";
 import type { Route } from "next";
 import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Upload, Wrench, Gear, Users, Bell, Trash, SignOut, SquaresFour, FunnelSimple, Buildings } from "@phosphor-icons/react";
+import { Upload, Wrench, Gear, Users, Bell, Trash, SignOut, SquaresFour, FunnelSimple, Buildings, Brain } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
 import { useAuth, clearAuthCache } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ const nav: Array<{ href: Route; label: string; icon: typeof Upload }> = [
   { href: "/sessions", label: "Sessions", icon: SquaresFour },
   { href: "/builder/templates", label: "Builder", icon: Wrench },
   { href: "/extraction/company-detection" as Route, label: "Extraction & Aliases", icon: FunnelSimple },
+  { href: "/ai-context" as Route, label: "AI Grounding", icon: Brain },
   { href: "/settings/system-checks", label: "Settings", icon: Gear },
   { href: "/client-records", label: "Records", icon: Users },
   { href: "/inbox", label: "Inbox", icon: Bell },
@@ -107,28 +108,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               return true;
             })
             .map((item) => {
-            const Icon = item.icon;
-            const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`relative flex items-center gap-3 rounded-[var(--rl-radius-sm)] px-3 py-2.5 text-[14px] font-medium transition-colors
+              const Icon = item.icon;
+              const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`relative flex items-center gap-3 rounded-[var(--rl-radius-sm)] px-3 py-2.5 text-[14px] font-medium transition-colors
                 ${active
-                    ? "bg-[var(--rl-black)] text-white shadow-card"
-                    : "text-[var(--rl-text)] hover:bg-[var(--rl-surface)] hover:text-[var(--rl-text-strong)]"
-                }`}
-              >
-                <Icon aria-hidden="true" size={18} weight={active ? "fill" : "regular"} />
-                <span>{item.label}</span>
-                {item.href === "/inbox" && unreadCount > 0 ? (
-                  <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[var(--rl-red)] px-1.5 text-[11px] font-bold text-white">
-                    {unreadCount}
-                  </span>
-                ) : null}
-              </Link>
-            );
-          })}
+                      ? "bg-[var(--rl-black)] text-white shadow-card"
+                      : "text-[var(--rl-text)] hover:bg-[var(--rl-surface)] hover:text-[var(--rl-text-strong)]"
+                    }`}
+                >
+                  <Icon aria-hidden="true" size={18} weight={active ? "fill" : "regular"} />
+                  <span>{item.label}</span>
+                  {item.href === "/inbox" && unreadCount > 0 ? (
+                    <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[var(--rl-red)] px-1.5 text-[11px] font-bold text-white">
+                      {unreadCount}
+                    </span>
+                  ) : null}
+                </Link>
+              );
+            })}
         </nav>
         <main className="min-w-0 animate-fade-in">{children}</main>
       </div>

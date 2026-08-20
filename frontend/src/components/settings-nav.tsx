@@ -24,7 +24,7 @@ export function SettingsNav() {
             ${active
                 ? "border-[var(--rl-red)] text-[var(--rl-text-strong)]"
                 : "border-transparent text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-            }`}
+              }`}
           >
             {item.label}
           </Link>

@@ -74,7 +74,7 @@ MONEY_FIELDS = {
 }
 
 DEFAULT_ALIASES = {
-    "customer_name": ["insured name", "name", "customer", "client name", "policyholder", "owner name"],
+    "customer_name": ["insured name", "the insured", "customer name", "client name", "policyholder", "owner name", "pihak diinsuranskan", "participant"],
     "vehicle_no": ["vehicle no", "registration no", "reg no", "car no", "plate no", "vehicle registration"],
     "cover_start_date": ["cover start", "period from", "from date", "effective date"],
     "cover_end_date": ["cover end", "period to", "to date", "expiry date"],
@@ -90,7 +90,7 @@ DEFAULT_ALIASES = {
     "total_amount": ["total payable", "total amount", "amount payable", "gross amount"],
     "roadtax": ["road tax", "roadtax"],
     "service_fee": ["service fee", "runner fee"],
-    "ncd_percent": ["ncd", "no claim discount"],
+    "ncd_percent": ["ncd", "ncb", "no claim discount", "no claim bonus"],
     "windscreen": ["windscreen"],
     "towing": ["towing"],
 }
@@ -123,6 +123,10 @@ def _add(results: dict[str, list[CandidateValue]], field: str, value: str | None
     cleaned = re.sub(r"\s+", " ", str(value)).strip(" :;-")
     if not cleaned:
         return
+    if field == "customer_name":
+        upper_c = cleaned.upper()
+        if any(bad in upper_c for bad in ["NAMA EJEN", "AGENT", "NO. AKAUN", "ACCOUNT NO", "RISKLOCKER", "BROKER", "AGENCY", "INSURANCE", "TAKAFUL", "SUM INSURED"]):
+            return
     if field == "vehicle_no":
         cleaned = re.sub(r"\s+", "", cleaned).strip(" .:;-")
         if not cleaned or len(cleaned) < 2 or cleaned.startswith("RM") or "UNREGISTERED" in cleaned.upper():
@@ -139,11 +143,13 @@ def _add(results: dict[str, list[CandidateValue]], field: str, value: str | None
         ncd_match = re.search(r"\d{1,2}(?:\.\d+)?", cleaned)
         cleaned = ncd_match.group(0) if ncd_match else cleaned
     if field == "coverage_type":
-        cleaned = cleaned.replace("Cover Type", "").strip(" :-")
+        cleaned = cleaned.replace("Cover Type", "").replace("Jenis Perlindungan", "").strip(" :/-")
+        matched_cov = None
         for item in CANONICAL_COVERAGE_TYPES:
             if item in cleaned.upper():
-                cleaned = item.title() if item != "COMPREHENSIVE" else "Comprehensive"
+                matched_cov = item.title() if item != "COMPREHENSIVE" else "Comprehensive"
                 break
+        cleaned = matched_cov or ("Comprehensive" if not cleaned or "PERLINDUNGAN" in cleaned.upper() else cleaned)
     if field == "engine_cc":
         cc_match = re.search(r"\d{3,5}", cleaned)
         cleaned = cc_match.group(0) if cc_match else cleaned

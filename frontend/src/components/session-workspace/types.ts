@@ -22,6 +22,11 @@ export type BenefitCardSummary = {
   branch_key?: string | null;
   asset_id?: string | null;
   asset_url?: string | null;
+  is_detected?: boolean;
+  group_id?: string | null;
+  sort_order?: number;
+  typed_value?: Record<string, unknown> | null;
+  price?: { amount?: number | string; currency?: string } | null;
 };
 
 export type WorkspaceCapabilities = {
@@ -48,7 +53,36 @@ export type WorkspaceSnapshot = {
   status: string;
   fields: Record<string, WorkspaceField>;
   benefits: Array<Record<string, unknown> & { id: string; selection_key: string; label?: string | null; state: string; cost_status: string }>;
-  benefit_cards: { current_benefits: BenefitCardSummary[]; available_addons: BenefitCardSummary[] };
+  benefit_cards: {
+    current_benefits: BenefitCardSummary[];
+    available_addons: BenefitCardSummary[];
+    groups?: Array<{ plan_id: string; plan_key: string; plan_label: string; cards: BenefitCardSummary[] }>;
+  };
+  extras: Array<{ selection_id: string; label: string; price?: { amount?: number | string; currency?: string } }>;
+  total_premium_adjusted: string;
+  packs: Array<{
+    package_id: string;
+    package_key: string;
+    name: string;
+    plans: Array<{
+      plan_id: string;
+      plan_key: string;
+      name: string;
+      sort_order: number;
+      members: Array<{ offering_id: string; label: string; typed_value_override?: Record<string, unknown> | null }>;
+    }>;
+  }>;
+  package_tiers: Array<{
+    package_id: string;
+    package_key: string;
+    name: string;
+    sort_order: number;
+    catalog_id: string;
+    catalog_revision_id: string;
+    defaults_count: number;
+    addons_count: number;
+    is_current: boolean;
+  }>;
   source_lines: Array<Record<string, unknown> & {
     source_line_id: string;
     raw_label: string;

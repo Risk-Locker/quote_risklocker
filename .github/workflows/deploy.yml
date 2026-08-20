@@ -1,0 +1,201 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: quote-risklocker-production
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: 22
+  DEPLOY_PATH: /var/www/html/quote_risklocker
+
+jobs:
+  test-and-build:
+    name: Test backend and build frontend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install backend dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run backend tests
+        env:
+          # Tests replace the environment themselves (patch.dict clear=True);
+          # these dummies only satisfy import-time get_settings() calls.
+          APP_ENV: production
+          DATABASE_URL: postgresql://postgres:ci@db.ci.supabase.co:5432/postgres?sslmode=require
+          AUTH_HASH_SECRET: ci_test_secret_at_least_32_characters_long
+        run: python -m pytest -q
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type-check frontend
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+  deploy:
+    name: Deploy main to VPS
+    runs-on: ubuntu-latest
+    needs: test-and-build
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_SSH_KEY_B64: ${{ secrets.VPS_SSH_KEY_B64 }}
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Check deployment secrets
+        id: secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in VPS_HOST VPS_USER; do
+            if [ -z "${!name:-}" ]; then
+              echo "::warning::$name is not configured. Deployment will be skipped."
+              missing=1
+            fi
+          done
+
+          if [ -z "${VPS_SSH_KEY_B64:-}" ]; then
+            echo "::warning::VPS_SSH_KEY_B64 is not configured. Deployment will be skipped."
+            missing=1
+          fi
+
+          if [ "$missing" -eq 1 ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install rsync
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rsync
+
+      - name: Configure SSH
+        if: steps.secrets.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s' "$VPS_SSH_KEY_B64" | tr -d '\r\n ' | base64 -d > ~/.ssh/quote_deploy_key
+          chmod 600 ~/.ssh/quote_deploy_key
+          ssh-keygen -y -f ~/.ssh/quote_deploy_key > /dev/null
+          ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Prepare deploy directory
+        if: steps.secrets.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/quote_deploy_key -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" <<EOF
+            set -euo pipefail
+            mkdir -p '${DEPLOY_PATH}'
+            if [ ! -f '${DEPLOY_PATH}/.env' ]; then
+              echo "::error::Missing ${DEPLOY_PATH}/.env on the VPS. Create it once manually from .env.example; GitHub Actions will never upload secrets."
+              exit 1
+            fi
+          EOF
+
+      - name: Mirror main branch to VPS
+        if: steps.secrets.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/quote_deploy_key -p ${VPS_PORT:-22}" \
+            --exclude ".git/" \
+            --exclude ".env" \
+            --exclude "node_modules/" \
+            --exclude "frontend/node_modules/" \
+            --exclude ".venv/" \
+            --exclude "frontend/.next/" \
+            --exclude ".qc-tmp/" \
+            --exclude ".pytest_cache/" \
+            --exclude ".agents/" \
+            --exclude ".copilot/" \
+            --exclude ".skill-sources/" \
+            --exclude "/fix/" \
+            --exclude "*.log" \
+            --exclude "*.db" \
+            ./ "$VPS_USER@$VPS_HOST:${DEPLOY_PATH}/"
+
+      - name: Install, build, migrate, and reload PM2
+        if: steps.secrets.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/quote_deploy_key -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" <<'EOF'
+            set -euo pipefail
+            cd /var/www/html/quote_risklocker
+
+            test -f .env || {
+              echo "Missing /var/www/html/quote_risklocker/.env. Create it once on the VPS; CI never writes secrets."
+              exit 1
+            }
+
+            # Backend: ensure the Python 3.12 venv exists and deps are current
+            if [ ! -d .venv ]; then
+              python3.12 -m venv .venv
+            fi
+            .venv/bin/pip install -r requirements.txt
+
+            # Chromium for extraction + deterministic PDF rendering.
+            # No-op when already installed; system deps are handled once by
+            # deploy/setup-vps.sh (playwright install --with-deps chromium).
+            .venv/bin/playwright install chromium
+
+            # Frontend
+            cd frontend
+            npm ci
+            npm run build
+
+            # Database migrations (ledger-based + checksummed; safe every deploy)
+            cd ..
+            PYTHONPATH=backend .venv/bin/python -m app.db.migrations
+
+            # Reload all three processes
+            RL_DEPLOY_PATH=/var/www/html/quote_risklocker pm2 startOrReload ecosystem.config.cjs --update-env
+            pm2 save
+            pm2 status
+          EOF

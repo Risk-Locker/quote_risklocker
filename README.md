@@ -105,6 +105,15 @@ SharePoint/OneDrive is an optional permanent archive. Supabase Storage works wit
 
 To activate the Microsoft connection, an administrator must first register a Microsoft Entra application and provide backend deployment credentials. The preferred permission model is `Sites.Selected` for the isolated Risklocker SharePoint site, with admin consent. The Admin Storage page intentionally reports setup required until those credentials and the Microsoft Graph archive worker are configured.
 
+## Deployment
+
+Production runs on a VPS under PM2 + nginx (full runbook in `docs/SETUP.md`):
+
+- Three PM2 processes (`ecosystem.config.cjs`): `rl-quote-api` (uvicorn :8100), `rl-quote-worker` (extraction + PDF render), `rl-quote-frontend` (Next.js :3000).
+- nginx reverse proxy for `quote.risklocker.com` (`deploy/nginx-quote-risklocker.conf`), HTTPS via certbot.
+- CI/CD: `.github/workflows/deploy.yml` runs tests + build on GitHub and auto-deploys to the VPS on every push to `main`.
+- One-time VPS bootstrap: `deploy/setup-vps.sh`.
+
 ## Repository Guide
 
 Codex, other repository-capable AI agents, and maintainers start with [docs/START-HERE.md](docs/START-HERE.md). Product behavior, design rules, code mapping, template references, and operational guidance live under `docs/`. Operational scripts live under `commands/`.

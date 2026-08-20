@@ -38,6 +38,8 @@ from app.api.schemas import (
     OurSpecialSaveRequest,
     OurSpecialVariantSaveRequest,
     PackageCloneRequest,
+    PackagePlanItemsRequest,
+    PackagePlanSaveRequest,
     PackageSaveRequest,
     RoadTaxRuleSaveRequest,
     RecordBulkActionRequest,
@@ -67,6 +69,7 @@ from app.core.errors import AppError
 from app.db.session import get_db
 from app.models.enums import Role, StorageStatus
 from app.models.tables import (
+    AuditEvent,
     FieldAlias,
     BusinessAsset,
     GeneratedPdfVersion,
@@ -224,12 +227,15 @@ from app.services.benefit_setup_service import (
     retire_benefit_alias,
     retire_coverage_type,
     retire_package,
+    retire_plan,
     retire_segment,
     retire_vehicle_category,
     retire_vehicle_subcategory,
     save_benefit_alias,
     save_coverage_type,
     save_package,
+    save_plan,
+    save_plan_items,
     save_segment,
     save_vehicle_category,
     save_vehicle_subcategory,
@@ -562,6 +568,131 @@ def session_template_config(
         if err.status_code == 409:
             return {"template": None}
         raise
+
+
+@router.post("/sessions/{session_id}/extract-gemini")
+def session_extract_gemini(
+    session_id: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.extraction.gemini_extractor import extract_with_gemini_sync, get_key_pool
+    from app.services.catalog_review_service import initialize_catalog_review
+    from app.models.tables import AppSetting, InsuranceCompany, BenefitConcept
+
+    session = get_session(db, session_id)
+    if not session or not can_view_owner_record(db, user, session.owner_id):
+        raise AppError("Session not found.", 404)
+    draft = db.get(QuotationDraft, session.draft_id)
+    if not draft:
+        raise AppError("Quotation draft not found.", 404)
+    uploaded = db.get(UploadedFile, session.uploaded_file_id)
+    if not uploaded:
+        raise AppError("Uploaded file not found.", 404)
+
+    pdf_bytes = load_pdf_bytes(uploaded, settings)
+
+    db_companies = [
+        {
+            "company_id": company.id,
+            "name": company.name,
+            "aliases": list(company.detection_phrases or []),
+        }
+        for company in db.scalars(select(InsuranceCompany)).all()
+    ]
+    db_benefit_concepts = [
+        {
+            "concept_id": concept.id,
+            "concept_key": concept.concept_key,
+            "label": concept.label,
+        }
+        for concept in db.scalars(select(BenefitConcept)).all()
+    ]
+
+    from app.extraction.native_pdf import extract_native
+    from app.core.workspace import qc_temp_directory
+
+    doc_text = None
+    try:
+        with qc_temp_directory("gemini-re-extract-") as td:
+            temp_pdf = td / "doc.pdf"
+            temp_pdf.write_bytes(pdf_bytes)
+            native = extract_native(temp_pdf)
+            doc_text = native.raw_text
+    except Exception:
+        doc_text = None
+
+    prompt_override = None
+    setting = db.get(AppSetting, "ai_system_prompt")
+    if setting and isinstance(setting.value, dict) and str(setting.value.get("text") or "").strip():
+        prompt_override = str(setting.value["text"]).strip()
+
+    gemini_res = extract_with_gemini_sync(
+        pdf_bytes,
+        document_text=doc_text,
+        db_companies=db_companies,
+        db_benefit_concepts=db_benefit_concepts,
+        prompt_override=prompt_override,
+    )
+    if not gemini_res:
+        keys_pool = get_key_pool()
+        if not keys_pool.get_all_keys():
+            raise AppError("No GEMINI_API_KEY set in .env. Add your free Google AI Studio key to enable AI extraction.", 400)
+        raise AppError("Gemini AI extraction attempt failed or returned empty result. Check your API key or network.", 502)
+
+    # Apply extracted fields to draft
+    fields = dict(draft.fields or {})
+    for key, val in gemini_res.items():
+        if key in {"detected_benefits", "detected_package_name"} or val is None:
+            continue
+        clean_val = str(val).strip()
+        if clean_val:
+            fields[key] = {"value": clean_val, "status": "ready", "message": ""}
+
+    # Period
+    start_d = str(gemini_res.get("cover_start_date") or "").strip()
+    end_d = str(gemini_res.get("cover_end_date") or "").strip()
+    if start_d and end_d:
+        fields["cover_period"] = {"value": f"{start_d} to {end_d}", "status": "ready", "message": ""}
+
+    draft.fields = fields
+
+    # Sync company if detected
+    comp_name = str(gemini_res.get("insurance_company") or "").strip()
+    if comp_name:
+        for c in db_companies:
+            if c["name"].lower() == comp_name.lower() or comp_name.lower() in [a.lower() for a in c.get("aliases", [])]:
+                draft.company_id = c["company_id"]
+                draft.fields["insurance_company"] = {"value": c["name"], "status": "ready", "message": ""}
+                session.detected_company = c["name"]
+                initialize_catalog_review(db, draft)
+                break
+
+    db.commit()
+
+    pool = get_key_pool()
+    stats = pool.get_quota_stats()
+    return {
+        "success": True,
+        "message": f"Gemini AI extracted {len(fields)} fields successfully.",
+        "quota": {
+            "model": getattr(settings, "gemini_model", "gemini-3.1-flash-lite-preview") or "gemini-3.1-flash-lite-preview",
+            "keys_count": stats["keys_count"],
+            "rpm_limit": stats["rpm_limit"],
+            "rpm_used": stats["rpm_used"],
+            "rpm_remaining": stats["rpm_remaining"],
+            "rpd_limit": stats["rpd_limit"],
+            "rpd_used": stats["rpd_used"],
+            "rpd_remaining": stats["rpd_remaining"],
+            "percent_rpd_remaining": stats["percent_rpd_remaining"],
+            "rpm_per_key": 15,
+            "rpd_per_key": 1500,
+            "total_rpd": stats["rpd_limit"],
+            "active": True,
+        },
+        "gemini_result": gemini_res,
+    }
 
 
 @router.patch("/drafts/{draft_id}/workspace")
@@ -1346,6 +1477,41 @@ def business_catalog_package_retire(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.post("/business/catalogs/{catalog_id}/packages/{package_id}/plans")
+def business_catalog_plan_save(
+    catalog_id: str,
+    package_id: str,
+    payload: PackagePlanSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"plan": save_plan(db, user, catalog_id, package_id, payload.model_dump(exclude_none=True))}
+
+
+@router.delete("/business/catalogs/{catalog_id}/packages/{package_id}/plans/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
+def business_catalog_plan_retire(
+    catalog_id: str,
+    package_id: str,
+    plan_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> Response:
+    retire_plan(db, user, catalog_id, package_id, plan_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.put("/business/catalogs/{catalog_id}/packages/{package_id}/plans/{plan_id}/items")
+def business_catalog_plan_items(
+    catalog_id: str,
+    package_id: str,
+    plan_id: str,
+    payload: PackagePlanItemsRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return save_plan_items(db, user, catalog_id, package_id, plan_id, payload.model_dump(exclude_none=True))
+
+
 @router.post("/business/catalogs/{catalog_id}/publish")
 def business_catalog_publish(
     catalog_id: str,
@@ -1781,11 +1947,183 @@ def settings_limits(
     settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
 ) -> dict:
+    from app.extraction.gemini_extractor import get_key_pool
+    pool = get_key_pool()
+    stats = pool.get_quota_stats()
+    count = stats["keys_count"]
     return {
         "max_upload_files": 1,
         "max_upload_bytes": settings.max_upload_bytes,
         "max_source_pdf_bytes": settings.max_source_pdf_bytes,
+        "gemini": {
+            "active": bool(count > 0),
+            "model": getattr(settings, "gemini_model", "gemini-3.1-flash-lite-preview") or "gemini-3.1-flash-lite-preview",
+            "key_count": count,
+            "rpm_limit": stats["rpm_limit"],
+            "rpm_used": stats["rpm_used"],
+            "rpm_remaining": stats["rpm_remaining"],
+            "rpd_limit": stats["rpd_limit"],
+            "rpd_used": stats["rpd_used"],
+            "rpd_remaining": stats["rpd_remaining"],
+            "percent_rpd_remaining": stats["percent_rpd_remaining"],
+            "rpm_per_key": 15,
+            "rpd_per_key": 1500,
+            "total_rpd": stats["rpd_limit"],
+            "message": f"Connected ({count} key{'s' if count > 1 else ''} in pool, {stats['rpd_remaining']:,} / {stats['rpd_limit']:,} RPD remaining today)" if count else "No GEMINI_API_KEY set in .env",
+        },
     }
+
+
+@router.get("/settings/ai-context")
+def settings_ai_context(
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.extraction.gemini_extractor import get_key_pool, build_rag_system_prompt
+    from app.models.tables import InsuranceCompany, BenefitConcept, FieldAlias
+
+    pool = get_key_pool()
+    quota = pool.get_quota_stats()
+
+    companies = [
+        {
+            "id": c.id,
+            "name": c.name,
+            "code": getattr(c, "code", "") or "",
+            "aliases": list(c.detection_phrases or []),
+            "aliases_count": len(c.detection_phrases or []),
+            "has_packages": "amassurance" in c.name.lower(),
+        }
+        for c in db.scalars(select(InsuranceCompany).order_by(InsuranceCompany.name)).all()
+    ]
+
+    concepts = [
+        {
+            "id": b.id,
+            "key": b.concept_key,
+            "name": b.label,
+            "category": getattr(b, "category", "") or "Add-on",
+            "aliases_count": len(b.aliases or []) if hasattr(b, "aliases") and b.aliases else 0,
+        }
+        for b in db.scalars(select(BenefitConcept).order_by(BenefitConcept.label)).all()
+    ]
+
+    field_aliases_db = db.scalars(select(FieldAlias).order_by(FieldAlias.field_name)).all()
+    field_aliases = [
+        {
+            "field_name": fa.field_name,
+            "aliases": list(fa.aliases or []),
+            "count": len(fa.aliases or []),
+        }
+        for fa in field_aliases_db
+    ]
+
+    rag_companies = [{"name": c["name"], "aliases": c["aliases"]} for c in companies]
+    rag_concepts = [{"key": c["key"], "name": c["name"]} for c in concepts]
+    live_prompt = build_rag_system_prompt(db_companies=rag_companies, db_benefit_concepts=rag_concepts)
+
+    negative_rules = [
+        {
+            "target": "Customer / Insured Name",
+            "rule": "Strict Exclusion of Agent & Broker details",
+            "patterns": ["Nama Ejen", "Agent Name", "No. Akaun", "Account No.", "RISKLOCKER", "Agency Name", "Agent Code"],
+            "explanation": "Prevents agent, broker, and agency header data from corrupting the customer policyholder name field."
+        },
+        {
+            "target": "Customer / Insured Name",
+            "rule": "Strict Exclusion of Assistance Marketing",
+            "patterns": ["24 hours Road & Breakdown Assist", "Toll free number", "Roadside Assist", "Call the toll free", "Hotline"],
+            "explanation": "Prevents breakdown service blurbs printed at the top of quotations from being misdetected as the insured's name."
+        },
+        {
+            "target": "Coverage Type",
+            "rule": "Normalization & Translation Exclusion",
+            "patterns": ["Jenis Perlindungan"],
+            "explanation": "Forces output to standard 'Comprehensive', 'Third Party Fire & Theft', or 'Third Party' instead of echoing Malay label headers."
+        },
+        {
+            "target": "Vehicle Model",
+            "rule": "Preserve Full Specification String",
+            "patterns": ["Do not truncate to brand or single word"],
+            "explanation": "Captures complete variant, transmission (CVT/Auto/Manual), body type, and year specification."
+        }
+    ]
+
+    return {
+        "gemini": {
+            "active": quota["keys_count"] > 0,
+            "model": getattr(settings, "gemini_model", "gemini-3.1-flash-lite-preview") or "gemini-3.1-flash-lite-preview",
+            "key_count": quota["keys_count"],
+            "rpm_limit": quota["rpm_limit"],
+            "rpm_used": quota["rpm_used"],
+            "rpd_limit": quota["rpd_limit"],
+            "rpd_used": quota["rpd_used"],
+            "rpd_remaining": quota["rpd_remaining"],
+            "percent_rpd_remaining": quota["percent_rpd_remaining"],
+        },
+        "companies": companies,
+        "benefit_concepts": concepts,
+        "field_aliases": field_aliases,
+        "negative_rules": negative_rules,
+        "live_system_prompt": live_prompt,
+    }
+
+
+@router.get("/settings/ai-prompt")
+def settings_ai_prompt_get(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Return the global AI system-prompt override and the effective prompt."""
+    from app.extraction.gemini_extractor import build_rag_system_prompt
+    from app.models.tables import AppSetting, InsuranceCompany, BenefitConcept
+
+    setting = db.get(AppSetting, "ai_system_prompt")
+    override = str((setting.value or {}).get("text") or "") if setting and isinstance(setting.value, dict) else ""
+    companies = [{"name": c.name} for c in db.scalars(select(InsuranceCompany).order_by(InsuranceCompany.name)).all()]
+    concepts = [{"key": c.concept_key, "name": c.label} for c in db.scalars(select(BenefitConcept).order_by(BenefitConcept.label)).all()]
+    effective = build_rag_system_prompt(
+        db_companies=companies,
+        db_benefit_concepts=concepts,
+        prompt_override=override or None,
+    )
+    return {
+        "override": override,
+        "effective_prompt": effective,
+        "is_override_active": bool(override.strip()),
+    }
+
+
+@router.put("/settings/ai-prompt")
+def settings_ai_prompt_put(
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Set (or clear) the global AI system-prompt override. Admin/super_admin only."""
+    if user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value}:
+        raise AppError("Only administrators can change the AI system prompt.", 403)
+    from app.models.tables import AppSetting
+
+    text = str(payload.get("text") or "").strip()
+    if len(text) > 12_000:
+        raise AppError("The AI system prompt is too long (max 12,000 characters).", 422)
+    setting = db.get(AppSetting, "ai_system_prompt")
+    if not setting:
+        setting = AppSetting(key="ai_system_prompt", value={"text": text})
+        db.add(setting)
+    else:
+        setting.value = {"text": text}
+    db.add(AuditEvent(
+        actor_id=user.id,
+        action="settings.ai_prompt.update",
+        entity_type="app_settings",
+        entity_id="ai_system_prompt",
+        details={"characters": len(text), "active": bool(text)},
+    ))
+    db.commit()
+    return {"override": text, "is_override_active": bool(text)}
 
 
 @router.get("/admin/storage")

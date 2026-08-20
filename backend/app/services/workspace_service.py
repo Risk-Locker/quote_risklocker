@@ -16,14 +16,20 @@ from app.core.errors import AppError
 from app.domain.benefits import (
     BenefitValue,
     CostStatus,
+    MoneyAmount,
     ReviewedBenefitState,
     SourceLineDisposition,
 )
 from app.models.enums import RecordStatus, Role
 from app.models.tables import (
     AuditEvent,
+    BenefitCatalog,
+    BenefitCatalogRevision,
     BenefitConcept,
     BenefitFacet,
+    BenefitPackage,
+    BenefitPackagePlan,
+    BenefitPackagePlanItem,
     BenefitRelation,
     CatalogOffering,
     CorrectionMemory,
@@ -41,8 +47,14 @@ from app.models.tables import (
     UploadedFile,
     new_id,
 )
-from app.rendering.render_context import RenderContextError, format_benefit_value, resolve_benefit_cards
-from app.services.catalog_review_service import auto_apply_extracted_benefits, initialize_catalog_review
+from app.rendering.render_context import (
+    RenderContextError,
+    adjusted_total_text,
+    build_extras,
+    format_benefit_value,
+    resolve_benefit_cards,
+)
+from app.services.catalog_review_service import auto_apply_extracted_benefits, initialize_catalog_review, seed_base_benefits
 from app.extraction.validators import normalize_date, normalize_money
 
 
@@ -225,9 +237,11 @@ def _catalog_overview(db, draft: QuotationDraft) -> dict:
         except RenderContextError:
             value = ""
         entry = {"offering_id": offering.id, "label": label, "value": value}
-        if offering.offering_kind == "base":
+        role = offering.role
+        is_default = role == "included" or (role is None and offering.offering_kind == "base")
+        if is_default:
             overview["defaults"].append(entry)
-        elif offering.offering_kind in {"upgrade", "optional", "package_component"}:
+        else:
             overview["addons"].append(entry)
     return overview
 
@@ -259,6 +273,8 @@ def _selection_summary(selection: DraftBenefitSelection) -> dict:
         "typed_value": selection.typed_value_override,
         "sort_order": selection.sort_order,
         "superseded_by_id": selection.superseded_by_id,
+        "package_plan_id": selection.package_plan_id,
+        "price": selection.price,
     }
 
 
@@ -285,6 +301,7 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
         offerings: list = []
         relations: list = []
         facets: list = []
+        plans: list = []
         valid_selections = [s for s in selections if s.item_kind != "catalog"]
     else:
         offerings = [
@@ -299,12 +316,22 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
             and item.from_offering_id in offering_ids and item.to_offering_id in offering_ids
         ]
         facets = [item for item in db.scalars(select(BenefitFacet)).all() if item.parent_concept_id in concept_ids]
+        package_ids = {
+            item.id
+            for item in db.scalars(select(BenefitPackage)).all()
+            if item.catalog_revision_id == draft.catalog_revision_id
+        }
+        plans = [
+            item for item in db.scalars(select(BenefitPackagePlan)).all()
+            if item.package_id in package_ids
+        ]
         valid_selections = [
             s for s in selections
             if s.item_kind != "catalog" or s.catalog_offering_id in offering_ids
         ]
     return resolve_benefit_cards(
         selections=valid_selections, offerings=offerings, concepts=concepts, relations=relations, facets=facets,
+        plans=plans,
     )
 
 
@@ -343,6 +370,9 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
     product = db.get(InsuranceProduct, draft.product_id) if draft.product_id else None
     tier = db.get(InsuranceProductTier, draft.tier_id) if draft.tier_id else None
     catalog_overview = _catalog_overview(db, draft)
+    concepts = list(db.scalars(select(BenefitConcept)).all())
+    extras = build_extras(selections, concepts)
+    adjusted_total = adjusted_total_text(draft.fields or {}, extras)
     return {
         "session_id": session.id,
         "draft_id": draft.id,
@@ -352,6 +382,10 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
         "fields": _field_summary(draft),
         "benefits": [_selection_summary(item) for item in sorted(selections, key=lambda item: (item.sort_order, item.selection_key))],
         "benefit_cards": benefit_cards,
+        "extras": extras,
+        "total_premium_adjusted": adjusted_total,
+        "packs": _workspace_packs(db, draft),
+        "package_tiers": _workspace_package_tiers(db, draft),
         "source_lines": [_decision_summary(db, item) for item in decisions],
         "pinned": {
             "company_id": draft.company_id,
@@ -391,6 +425,122 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
         ],
         "capabilities": workspace_capabilities(user),
     }
+
+
+def _workspace_packs(db, draft: QuotationDraft) -> list[dict]:
+    """Add-on bundles with their plan ladder, for the sessions add-ons manager."""
+    if not draft.catalog_revision_id:
+        return []
+    packages = [
+        item for item in db.scalars(select(BenefitPackage)).all()
+        if item.catalog_revision_id == draft.catalog_revision_id
+        and item.package_kind == "addon_bundle" and item.status == "active"
+    ]
+    package_ids = {item.id for item in packages}
+    plans = [
+        item for item in db.scalars(select(BenefitPackagePlan)).all()
+        if item.package_id in package_ids and item.status == "active"
+    ]
+    plan_ids = {item.id for item in plans}
+    items = [
+        item for item in db.scalars(select(BenefitPackagePlanItem)).all()
+        if item.plan_id in plan_ids
+    ]
+    offerings = {
+        item.id: item for item in db.scalars(select(CatalogOffering)).all()
+        if item.catalog_revision_id == draft.catalog_revision_id
+    }
+    concepts = {item.id: item for item in db.scalars(select(BenefitConcept)).all()}
+    result: list[dict] = []
+    for package in sorted(packages, key=lambda item: (int(item.sort_order or 0), str(item.id))):
+        plan_rows = []
+        for plan in sorted(plans, key=lambda item: (int(item.sort_order or 0), str(item.id))):
+            if plan.package_id != package.id:
+                continue
+            members = []
+            for item in sorted(items, key=lambda row: (int(row.sort_order or 0), str(row.id))):
+                if item.plan_id != plan.id:
+                    continue
+                offering = offerings.get(item.offering_id)
+                label = None
+                if offering:
+                    label = offering.label_override or (concepts.get(offering.concept_id).label if offering.concept_id in concepts else None)
+                members.append({
+                    "offering_id": item.offering_id,
+                    "label": label or "Benefit",
+                    "typed_value_override": item.typed_value_override,
+                })
+            plan_rows.append({
+                "plan_id": plan.id,
+                "plan_key": plan.plan_key,
+                "name": plan.name,
+                "sort_order": plan.sort_order,
+                "members": members,
+            })
+        result.append({
+            "package_id": package.id,
+            "package_key": package.package_key,
+            "name": package.name,
+            "plans": plan_rows,
+        })
+    return result
+
+
+def _workspace_package_tiers(db, draft: QuotationDraft) -> list[dict]:
+    """Comprehensive package tiers for the pinned company/product (AmAssurance-style).
+
+    Each tier is a catalog whose ``package_id`` points to a comprehensive
+    package. Used by the sessions page to render compact tier chips.
+    """
+    if not draft.company_id:
+        return []
+    catalogs = [
+        item for item in db.scalars(select(BenefitCatalog)).all()
+        if item.company_id == draft.company_id and item.status in {"active", "published"}
+    ]
+    if draft.product_id:
+        catalogs = [item for item in catalogs if not item.product_id or item.product_id == draft.product_id]
+    if not catalogs:
+        return []
+    packages = {
+        item.id: item for item in db.scalars(select(BenefitPackage)).all()
+        if item.package_kind == "comprehensive" and item.status == "active"
+    }
+    revisions = {
+        item.catalog_id: item for item in db.scalars(select(BenefitCatalogRevision)).all()
+        if item.state == "published"
+    }
+    offerings_by_revision: dict[str, list] = {}
+    for item in db.scalars(select(CatalogOffering)).all():
+        offerings_by_revision.setdefault(item.catalog_revision_id, []).append(item)
+    tiers: list[dict] = []
+    for catalog in catalogs:
+        package = packages.get(catalog.package_id) if catalog.package_id else None
+        if package is None:
+            continue
+        revision = revisions.get(catalog.id)
+        if revision is None:
+            continue
+        offerings = offerings_by_revision.get(revision.id, [])
+        active = [item for item in offerings if item.status in {"active", "compatibility"}]
+        def_count = sum(
+            1 for item in active
+            if item.role == "included" or (item.role is None and item.offering_kind == "base")
+        )
+        add_count = sum(1 for item in active if item.role in {"addon_option", "bundle_component"})
+        tiers.append({
+            "package_id": package.id,
+            "package_key": package.package_key,
+            "name": package.name,
+            "sort_order": int(package.sort_order or 0),
+            "catalog_id": catalog.id,
+            "catalog_revision_id": revision.id,
+            "defaults_count": def_count,
+            "addons_count": add_count,
+            "is_current": draft.catalog_revision_id == revision.id,
+        })
+    tiers.sort(key=lambda item: (item["sort_order"], item["name"].casefold()))
+    return tiers
 
 
 def _locked_draft(db, user, draft_id: str) -> QuotationDraft:
@@ -636,6 +786,7 @@ def _apply_pin_catalog(db, draft: QuotationDraft, user, operation: dict) -> str:
     company_id = str(operation.get("company_id") or "").strip() or None
     product_id = str(operation.get("product_id") or "").strip() or None
     tier_id = str(operation.get("tier_id") or "").strip() or None
+    catalog_id = str(operation.get("catalog_id") or "").strip() or None
     if not company_id:
         raise AppError("Choose the insurance company to pin its catalog.", 422)
     company = db.get(InsuranceCompany, company_id)
@@ -664,7 +815,28 @@ def _apply_pin_catalog(db, draft: QuotationDraft, user, operation: dict) -> str:
         if tier is None or tier.product_id != draft.product_id or tier.status != "active":
             raise AppError("That tier does not belong to the pinned product.", 422)
         draft.tier_id = tier.id
-    initialize_catalog_review(db, draft)
+    if catalog_id:
+        # Direct catalog pin (package-tier switch): bypass ambiguous resolution.
+        catalog = db.get(BenefitCatalog, catalog_id)
+        if catalog is None or catalog.company_id != company.id or catalog.status not in {"active", "published"}:
+            raise AppError("That catalog does not belong to the pinned company.", 422)
+        if product_id and catalog.product_id and catalog.product_id != product_id:
+            raise AppError("That catalog does not belong to the pinned product.", 422)
+        if catalog.product_id:
+            draft.product_id = catalog.product_id
+        if catalog.tier_id:
+            draft.tier_id = catalog.tier_id
+        revisions = [
+            item for item in db.scalars(select(BenefitCatalogRevision)).all()
+            if item.catalog_id == catalog.id and item.state == "published"
+        ]
+        if not revisions:
+            raise AppError("That catalog has no published revision.", 409)
+        revision = max(revisions, key=lambda item: (int(item.revision_number), str(item.id)))
+        draft.catalog_revision_id = revision.id
+        seed_base_benefits(db, draft, revision)
+    else:
+        initialize_catalog_review(db, draft)
     auto_apply_extracted_benefits(db, draft)
     draft.fields["insurance_company"] = {"value": company.name, "status": "ready", "message": ""}
     draft.scalar_decisions["insurance_company"] = {
@@ -700,6 +872,12 @@ def _apply_custom_benefit(db, draft: QuotationDraft, user, operation: dict) -> t
         cost_status = CostStatus(str(operation.get("cost_status") or "unknown")).value
     except (ValidationError, ValueError) as exc:
         raise AppError("Custom benefit state, cost, or typed value is invalid.", 422) from exc
+    price = operation.get("price")
+    if price is not None:
+        try:
+            price = MoneyAmount.model_validate(price).model_dump(mode="json", exclude_none=True)
+        except ValidationError as exc:
+            raise AppError("Custom benefit price is invalid.", 422) from exc
     if state not in {ReviewedBenefitState.CURRENT.value, ReviewedBenefitState.AVAILABLE_ADDON.value}:
         raise AppError("A new custom benefit must be current or an available add-on.", 422)
     source_line_id = operation.get("source_line_id")
@@ -729,6 +907,7 @@ def _apply_custom_benefit(db, draft: QuotationDraft, user, operation: dict) -> t
         evidence_snapshot={},
         sort_order=int(operation.get("sort_order") or 0),
         selected_by=user.id,
+        price=price,
     )
     db.add(selection)
     return f"benefits.{selection.id}", selection
@@ -858,6 +1037,168 @@ def _apply_revert_benefit(db, draft: QuotationDraft, user, operation: dict) -> s
     return f"benefits.{selection.id}"
 
 
+def _drop_plan_selection(db, selections: list[DraftBenefitSelection], selection: DraftBenefitSelection, user) -> None:
+    """Remove one plan member and restore its superseded default, if any.
+
+    Selections the plan merely adopted (staff/AI custom values) are untagged
+    and stay current; only selections created by the plan are removed.
+    """
+    source = str((selection.evidence_snapshot or {}).get("source") or "")
+    if source != "package_plan":
+        selection.package_plan_id = None
+        return
+    predecessors = [
+        item for item in selections
+        if item.superseded_by_id == selection.id and item.state == ReviewedBenefitState.SUPERSEDED.value
+    ]
+    if len(predecessors) > 1:
+        raise AppError("This upgrade history is ambiguous and must be reviewed manually.", 409)
+    selection.state = ReviewedBenefitState.REMOVED.value
+    selection.superseded_by_id = None
+    selection.package_plan_id = None
+    selection.selected_by = user.id
+    if predecessors:
+        predecessors[0].state = ReviewedBenefitState.CURRENT.value
+        predecessors[0].superseded_by_id = None
+        predecessors[0].package_plan_id = None
+        predecessors[0].selected_by = user.id
+
+
+def _apply_select_package_plan(db, draft: QuotationDraft, user, operation: dict) -> str:
+    """Atomically add (or switch) an add-on bundle plan.
+
+    Plan members supersede untouched catalog defaults in place; a staff- or
+    AI-customized value is preserved and only adopted into the group border.
+    A previous plan of the same bundle is dropped first so ladder upgrades
+    never create duplicate cards.
+    """
+    if not draft.catalog_revision_id:
+        raise AppError("Pin the insurance catalog before adding a package plan.", 422)
+    plan_id = str(operation.get("plan_id") or "")
+    package_id = str(operation.get("package_id") or "")
+    plan = db.get(BenefitPackagePlan, plan_id)
+    if plan is None or plan.status != "active":
+        raise AppError("Package plan not found.", 404)
+    if package_id and str(plan.package_id) != package_id:
+        raise AppError("That plan does not belong to the chosen package.", 422)
+    package = db.get(BenefitPackage, plan.package_id)
+    if package is None or package.catalog_revision_id != draft.catalog_revision_id or package.package_kind != "addon_bundle":
+        raise AppError("Choose an add-on bundle plan from this quotation's pinned catalog.", 422)
+    try:
+        cost_status = CostStatus(str(operation.get("cost_status") or "paid")).value
+    except ValueError as exc:
+        raise AppError("Benefit cost must be included, paid, FOC, or unknown.", 422) from exc
+    items = list(
+        db.scalars(
+            select(BenefitPackagePlanItem)
+            .where(BenefitPackagePlanItem.plan_id == plan.id)
+            .order_by(BenefitPackagePlanItem.sort_order)
+        ).all()
+    )
+    selections = _draft_selections_with_pending(db, draft.id)
+
+    # 1. Drop members of other plans of the same bundle (clean ladder switch).
+    sibling_plan_ids = {
+        str(item.id)
+        for item in db.scalars(
+            select(BenefitPackagePlan).where(BenefitPackagePlan.package_id == package.id)
+        ).all()
+    } - {str(plan.id)}
+    for sel in [s for s in selections if s.package_plan_id and str(s.package_plan_id) in sibling_plan_ids]:
+        _drop_plan_selection(db, selections, sel, user)
+    selections = _draft_selections_with_pending(db, draft.id)
+
+    # 2. Apply each plan item against the single-current-per-concept rule.
+    offerings_by_id = {
+        str(item.id): item
+        for item in db.scalars(
+            select(CatalogOffering).where(CatalogOffering.catalog_revision_id == draft.catalog_revision_id)
+        ).all()
+    }
+    for item in items:
+        offering = offerings_by_id.get(str(item.offering_id))
+        if offering is None or offering.status not in {"active", "compatibility"}:
+            raise AppError("A plan item offering is unavailable from the pinned catalog revision.", 422)
+        current = [
+            s for s in selections
+            if s.concept_id == offering.concept_id and s.state == ReviewedBenefitState.CURRENT.value
+        ]
+        if len(current) > 1:
+            raise AppError("This benefit concept has conflicting current selections.", 409)
+        if current:
+            sel = current[0]
+            if sel.package_plan_id and str(sel.package_plan_id) == plan.id:
+                continue
+            if sel.typed_value_override is not None:
+                # Custom value already reviewed: keep it, adopt the card into the group.
+                sel.package_plan_id = plan.id
+                continue
+            selection_id = new_id()
+            sel.state = ReviewedBenefitState.SUPERSEDED.value
+            sel.superseded_by_id = selection_id
+            replacement = DraftBenefitSelection(
+                id=selection_id,
+                draft_id=draft.id,
+                selection_key=f"plan:{plan.plan_key}:{offering.offering_key}"[:160],
+                catalog_offering_id=offering.id,
+                concept_id=offering.concept_id,
+                item_kind="catalog",
+                state=ReviewedBenefitState.CURRENT.value,
+                cost_status=cost_status,
+                label_override=offering.label_override,
+                typed_value_override=deepcopy(item.typed_value_override),
+                evidence_snapshot={
+                    "package_id": package.id,
+                    "plan_id": plan.id,
+                    "plan_key": plan.plan_key,
+                    "source": "package_plan",
+                },
+                sort_order=int(item.sort_order or 0),
+                package_plan_id=plan.id,
+                selected_by=user.id,
+            )
+            db.add(replacement)
+            selections.append(replacement)
+        else:
+            member = DraftBenefitSelection(
+                id=new_id(),
+                draft_id=draft.id,
+                selection_key=f"plan:{plan.plan_key}:{offering.offering_key}"[:160],
+                catalog_offering_id=offering.id,
+                concept_id=offering.concept_id,
+                item_kind="catalog",
+                state=ReviewedBenefitState.CURRENT.value,
+                cost_status=cost_status,
+                label_override=offering.label_override,
+                typed_value_override=deepcopy(item.typed_value_override),
+                evidence_snapshot={
+                    "package_id": package.id,
+                    "plan_id": plan.id,
+                    "plan_key": plan.plan_key,
+                    "source": "package_plan",
+                },
+                sort_order=int(item.sort_order or 0),
+                package_plan_id=plan.id,
+                selected_by=user.id,
+            )
+            db.add(member)
+            selections.append(member)
+    return f"benefits.plan.{plan.id}"
+
+
+def _apply_remove_package_plan(db, draft: QuotationDraft, user, operation: dict) -> str:
+    plan_id = str(operation.get("plan_id") or "")
+    if not plan_id:
+        raise AppError("Choose the plan to remove.", 422)
+    plan = db.get(BenefitPackagePlan, plan_id)
+    if plan is None:
+        raise AppError("Package plan not found.", 404)
+    selections = _draft_selections_with_pending(db, draft.id)
+    for sel in [s for s in selections if s.package_plan_id and str(s.package_plan_id) == plan.id]:
+        _drop_plan_selection(db, selections, sel, user)
+    return f"benefits.plan.{plan.id}"
+
+
 def _apply_source_disposition(db, draft: QuotationDraft, user, operation: dict) -> str:
     source_line_id = str(operation.get("source_line_id") or "")
     _line_belongs_to_draft(db, draft, source_line_id)
@@ -964,6 +1305,10 @@ def apply_workspace_patch(
                 changed_paths.append(_apply_source_disposition(db, draft, user, operation))
             elif operation_name == "select_catalog_offering":
                 changed_paths.append(_apply_select_catalog_offering(db, draft, user, operation))
+            elif operation_name == "select_package_plan":
+                changed_paths.append(_apply_select_package_plan(db, draft, user, operation))
+            elif operation_name == "remove_package_plan":
+                changed_paths.append(_apply_remove_package_plan(db, draft, user, operation))
             elif operation_name == "benefit_update":
                 changed_paths.append(_apply_benefit_update(db, draft, user, operation))
             elif operation_name == "revert_benefit":

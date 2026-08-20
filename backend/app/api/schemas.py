@@ -335,6 +335,26 @@ class PackageCloneRequest(StrictRequest):
     sort_order: int = Field(default=0, ge=0)
 
 
+class PackagePlanSaveRequest(StrictRequest):
+    id: str | None = None
+    base_revision: int = Field(ge=1)
+    plan_key: str | None = Field(default=None, max_length=160)
+    name: str = Field(min_length=1, max_length=255)
+    sort_order: int = Field(default=0, ge=0)
+    status: str = "active"
+
+
+class PackagePlanItemEntry(StrictRequest):
+    offering_id: str
+    typed_value_override: BenefitValue | None = None
+    sort_order: int = Field(default=0, ge=0)
+
+
+class PackagePlanItemsRequest(StrictRequest):
+    base_revision: int = Field(ge=1)
+    items: list[PackagePlanItemEntry] = Field(default_factory=list, max_length=100)
+
+
 class TemplatePublishRequest(StrictRequest):
     base_revision: int = Field(ge=1)
 

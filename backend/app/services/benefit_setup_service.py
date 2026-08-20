@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import re
 
+from pydantic import ValidationError
 from sqlalchemy import func, or_, select
 
 from app.core.errors import AppError
+from app.domain.benefits import BenefitValue
 from app.models.enums import Role
 from app.models.tables import (
     AuditEvent,
@@ -24,6 +26,8 @@ from app.models.tables import (
     BenefitCatalogRevision,
     BenefitConcept,
     BenefitPackage,
+    BenefitPackagePlan,
+    BenefitPackagePlanItem,
     CatalogOffering,
     CoverageType,
     InsuranceCompany,
@@ -650,3 +654,168 @@ def retire_package(db, user, catalog_id: str, package_id: str) -> None:
     item.status = "retired"
     _audit(db, user, "business.package.retire", "benefit_package", item.id, {"catalog_id": catalog.id})
     db.commit()
+
+
+# --- Package plans: ladder variants of an add-on bundle ---
+
+
+def _plan(item: BenefitPackagePlan) -> dict:
+    return {
+        "id": item.id,
+        "package_id": item.package_id,
+        "plan_key": item.plan_key,
+        "name": item.name,
+        "sort_order": item.sort_order,
+        "status": item.status,
+    }
+
+
+def _plan_item(item: BenefitPackagePlanItem) -> dict:
+    return {
+        "id": item.id,
+        "plan_id": item.plan_id,
+        "offering_id": item.offering_id,
+        "typed_value_override": item.typed_value_override,
+        "sort_order": item.sort_order,
+    }
+
+
+def _locked_bundle_package(db, catalog_id: str, package_id: str, base_revision: int) -> tuple[BenefitCatalog, BenefitCatalogRevision, BenefitPackage]:
+    catalog, revision = _locked_catalog_with_draft(db, catalog_id, base_revision)
+    package = db.get(BenefitPackage, package_id)
+    if package is None or package.catalog_revision_id != revision.id:
+        raise AppError("Package not found in this draft revision.", 404)
+    if package.package_kind != "addon_bundle":
+        raise AppError("Plans require an add-on bundle package.", 422)
+    return catalog, revision, package
+
+
+def save_plan(db, user, catalog_id: str, package_id: str, payload: dict) -> dict:
+    _require_business(user)
+    catalog, revision, package = _locked_bundle_package(db, catalog_id, package_id, payload.get("base_revision"))
+    name = str(payload["name"]).strip()
+    if not name or len(name) > 255:
+        raise AppError("Plans require a name of at most 255 characters.", 422)
+    plan_key = _slug(payload.get("plan_key") or name)
+    if not plan_key:
+        raise AppError("Plan key is invalid.", 422)
+    status = payload.get("status", "active")
+    if status not in STATUSES:
+        raise AppError("Plan status is invalid.", 422)
+    item = None
+    if payload.get("id"):
+        item = db.get(BenefitPackagePlan, payload["id"])
+        if item is None or item.package_id != package.id:
+            raise AppError("Plan not found in this package.", 404)
+    duplicate = db.scalar(
+        select(BenefitPackagePlan).where(
+            BenefitPackagePlan.package_id == package.id,
+            BenefitPackagePlan.plan_key == plan_key,
+            BenefitPackagePlan.id != (item.id if item else "00000000-0000-0000-0000-000000000000"),
+        )
+    )
+    if duplicate:
+        raise AppError("A plan already uses this key in this package.", 409)
+    if item is None:
+        item = BenefitPackagePlan(
+            id=new_id(),
+            package_id=package.id,
+            plan_key=plan_key,
+            name=name,
+            sort_order=max(0, int(payload.get("sort_order") or 0)),
+        )
+        db.add(item)
+    else:
+        item.plan_key = plan_key
+        item.name = name
+        item.sort_order = max(0, int(payload.get("sort_order") or 0))
+        item.status = status
+    catalog.revision += 1
+    revision.content_hash = canonical_context_hash(_revision_content_payload(db, revision))
+    _audit(db, user, "business.plan.save", "benefit_package_plan", item.id, {
+        "catalog_id": catalog.id, "package_id": package.id, "new_revision": catalog.revision,
+    })
+    db.commit()
+    db.refresh(item)
+    return _plan(item)
+
+
+def retire_plan(db, user, catalog_id: str, package_id: str, plan_id: str) -> None:
+    _require_business(user)
+    catalog = db.scalar(select(BenefitCatalog).where(BenefitCatalog.id == catalog_id).with_for_update())
+    if catalog is None:
+        raise AppError("Catalog not found.", 404)
+    revision = db.scalar(
+        select(BenefitCatalogRevision)
+        .where(BenefitCatalogRevision.catalog_id == catalog.id, BenefitCatalogRevision.state == "draft")
+    )
+    if revision is None:
+        raise AppError("Create a new draft revision before editing this published catalog.", 409)
+    package = db.get(BenefitPackage, package_id)
+    if package is None or package.catalog_revision_id != revision.id:
+        raise AppError("Package not found in this draft revision.", 404)
+    if package.package_kind != "addon_bundle":
+        raise AppError("Plans belong to add-on bundle packages.", 422)
+    item = db.get(BenefitPackagePlan, plan_id)
+    if item is None or item.package_id != package.id:
+        raise AppError("Plan not found in this package.", 404)
+    item.status = "retired"
+    catalog.revision += 1
+    revision.content_hash = canonical_context_hash(_revision_content_payload(db, revision))
+    _audit(db, user, "business.plan.retire", "benefit_package_plan", item.id, {"catalog_id": catalog.id})
+    db.commit()
+
+
+def save_plan_items(db, user, catalog_id: str, package_id: str, plan_id: str, payload: dict) -> dict:
+    _require_business(user)
+    catalog, revision, package = _locked_bundle_package(db, catalog_id, package_id, payload.get("base_revision"))
+    plan = db.get(BenefitPackagePlan, plan_id)
+    if plan is None or plan.package_id != package.id:
+        raise AppError("Plan not found in this package.", 404)
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list) or len(raw_items) > 100:
+        raise AppError("Submit between 0 and 100 plan items.", 422)
+    validated: list[tuple[str, dict | None, int]] = []
+    seen: set[str] = set()
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            raise AppError("Plan items must be objects.", 422)
+        offering_id = str(raw.get("offering_id") or "")
+        offering = db.get(CatalogOffering, offering_id)
+        if offering is None or offering.catalog_revision_id != revision.id:
+            raise AppError("Each plan item must use an offering from this catalog's draft revision.", 422)
+        if offering_id in seen:
+            raise AppError("A plan cannot contain the same offering twice.", 422)
+        seen.add(offering_id)
+        override = raw.get("typed_value_override")
+        if override is not None:
+            try:
+                override = BenefitValue.model_validate(override).model_dump(mode="json", exclude_none=True)
+            except ValidationError as exc:
+                raise AppError("A plan item override value is invalid.", 422) from exc
+        validated.append((offering_id, override, max(0, int(raw.get("sort_order") or 0))))
+    for existing in db.scalars(
+        select(BenefitPackagePlanItem).where(BenefitPackagePlanItem.plan_id == plan.id)
+    ).all():
+        db.delete(existing)
+    db.flush()
+    for offering_id, override, sort_order in validated:
+        db.add(BenefitPackagePlanItem(
+            id=new_id(),
+            plan_id=plan.id,
+            offering_id=offering_id,
+            typed_value_override=override,
+            sort_order=sort_order,
+        ))
+    catalog.revision += 1
+    revision.content_hash = canonical_context_hash(_revision_content_payload(db, revision))
+    _audit(db, user, "business.plan.items", "benefit_package_plan", plan.id, {
+        "catalog_id": catalog.id, "item_count": len(validated),
+    })
+    db.commit()
+    items = db.scalars(
+        select(BenefitPackagePlanItem)
+        .where(BenefitPackagePlanItem.plan_id == plan.id)
+        .order_by(BenefitPackagePlanItem.sort_order)
+    ).all()
+    return {"plan": _plan(plan), "items": [_plan_item(item) for item in items]}

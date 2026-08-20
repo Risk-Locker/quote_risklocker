@@ -13,7 +13,7 @@ from app.core.config import Settings
 from app.core.errors import AppError
 from app.extraction.sandbox import extract_with_limits
 from app.models.enums import RecordStatus, StorageStatus
-from app.models.tables import Batch, ExtractionRecord, FieldAlias, QuotationDraft, UploadedFile, new_id, VehicleBrand, VehicleModel
+from app.models.tables import AppSetting, Batch, BenefitConcept, ExtractionRecord, FieldAlias, InsuranceCompany, QuotationDraft, UploadedFile, VehicleBrand, VehicleModel, new_id
 from app.services.document_security import quarantined_pdf
 from app.services.file_validation import display_filename, validate_upload_bytes
 from app.services.session_service import create_session
@@ -154,6 +154,30 @@ async def create_batch_from_uploads(
         db_models.append(m.name)
         db_models.extend(m.aliases or [])
 
+    db_companies = [
+        {
+            "company_id": company.id,
+            "name": company.name,
+            "aliases": list(company.detection_phrases or []),
+        }
+        for company in db.scalars(select(InsuranceCompany)).all()
+    ] if db else None
+
+    db_benefit_concepts = [
+        {
+            "concept_id": concept.id,
+            "concept_key": concept.concept_key,
+            "label": concept.label,
+        }
+        for concept in db.scalars(select(BenefitConcept)).all()
+    ] if db else None
+
+    prompt_override = None
+    if db:
+        setting = db.get(AppSetting, "ai_system_prompt")
+        if setting and isinstance(setting.value, dict) and str(setting.value.get("text") or "").strip():
+            prompt_override = str(setting.value["text"]).strip()
+
     upload_failures: list[dict] = []
     for file in files:
         filename = display_filename(file.filename)
@@ -172,6 +196,9 @@ async def create_batch_from_uploads(
                         db_aliases=db_aliases,
                         db_brands=db_brands,
                         db_models=db_models,
+                        db_companies=db_companies,
+                        db_benefit_concepts=db_benefit_concepts,
+                        prompt_override=prompt_override,
                     )
                 except Exception as exc:
                     logger.warning("Extraction failed for %s: %s", filename, exc)

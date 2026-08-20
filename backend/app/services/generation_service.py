@@ -7,6 +7,7 @@ import hashlib
 import mimetypes
 from copy import deepcopy
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from sqlalchemy import select, text
@@ -16,6 +17,8 @@ from app.models.tables import (
     AuditEvent,
     BenefitConcept,
     BenefitFacet,
+    BenefitPackage,
+    BenefitPackagePlan,
     BenefitRelation,
     BusinessAsset,
     CatalogOffering,
@@ -35,7 +38,10 @@ from app.models.tables import (
 )
 from app.rendering.render_context import (
     RenderContextError,
+    adjusted_total_text,
+    build_extras,
     canonical_context_hash,
+    format_money_amount,
     resolve_benefit_cards,
 )
 from app.services.template_assets import resolve_template_asset
@@ -58,6 +64,12 @@ def _rows(db, model) -> list:
 
 def _for_draft(db, model, draft_id: str) -> list:
     return [item for item in _rows(db, model) if item.draft_id == draft_id]
+
+
+def _field_text(fields: dict, name: str) -> str:
+    raw = (fields or {}).get(name)
+    value = raw.get("value") if isinstance(raw, dict) else raw
+    return str(value or "").strip()
 
 
 def _idempotency_key(value: str) -> str:
@@ -118,9 +130,9 @@ def _template_config(draft: QuotationDraft, revision: TemplateRevision, page: Te
         raise AppError(f"The selected template revision is invalid: {exc}", 409) from exc
 
 
-def _catalog_rows(db, draft: QuotationDraft) -> tuple[list, list, list, list]:
+def _catalog_rows(db, draft: QuotationDraft) -> tuple[list, list, list, list, list]:
     if not draft.catalog_revision_id:
-        return [], [], [], []
+        return [], [], [], [], []
     offerings = [
         item for item in _rows(db, CatalogOffering)
         if item.catalog_revision_id == draft.catalog_revision_id
@@ -135,7 +147,12 @@ def _catalog_rows(db, draft: QuotationDraft) -> tuple[list, list, list, list]:
         and item.to_offering_id in offering_ids
     ]
     facets = [item for item in _rows(db, BenefitFacet) if item.parent_concept_id in concept_ids]
-    return offerings, concepts, relations, facets
+    plans = [
+        item for item in _rows(db, BenefitPackagePlan)
+        if item.package_id
+        in {p.id for p in _rows(db, BenefitPackage) if p.catalog_revision_id == draft.catalog_revision_id}
+    ]
+    return offerings, concepts, relations, facets, plans
 
 
 def _referenced_asset_ids(config: dict, cards: dict) -> set[str]:
@@ -204,7 +221,7 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
     if not uploaded:
         raise AppError("The quotation source record is unavailable.", 409)
     selections = _for_draft(db, DraftBenefitSelection, draft.id)
-    offerings, concepts, relations, facets = _catalog_rows(db, draft)
+    offerings, concepts, relations, facets, plans = _catalog_rows(db, draft)
     try:
         cards = resolve_benefit_cards(
             selections=selections,
@@ -212,11 +229,20 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
             concepts=concepts,
             relations=relations,
             facets=facets,
+            plans=plans,
         )
     except RenderContextError as exc:
         raise AppError(str(exc), 409) from exc
     config = _template_config(draft, revision, page)
     config, assets, asset_hashes = _snapshot_assets(db, config, cards, draft)
+    extras = build_extras(selections, concepts)
+    fields = deepcopy(draft.fields or {})
+    adjusted_total = adjusted_total_text(fields, extras)
+    fields["total_premium_adjusted"] = {
+        "value": adjusted_total if adjusted_total else _field_text(fields, "total_amount"),
+        "status": "ready",
+        "message": "",
+    }
     context = {
         "schema_version": 1,
         "renderer_version": RENDERER_VERSION,
@@ -227,11 +253,13 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
         "template_revision_number": revision.revision_number,
         "template_name": template.name,
         "source_filename": uploaded.original_filename,
-        "fields": deepcopy(draft.fields or {}),
+        "fields": fields,
         "template_config": config,
         "page_profile": deepcopy(config["page_profile"]),
         "current_benefits": cards["current_benefits"],
         "available_addons": cards["available_addons"],
+        "groups": cards.get("groups", []),
+        "extras": extras,
         "assets": assets,
     }
     return context, asset_hashes

@@ -1,60 +1,71 @@
-# Setup and Deployment Runbook (Universal)
+# Setup and Deployment Runbook
 
-Template for deploying this project (and any project this folder is copied into). All hosts, domains, IPs, and credentials are PLACEHOLDERS — never write real values into this file. Update this file whenever infrastructure changes (new subdomain, database move, new service, monitoring change).
+Production deployment for the Risklocker Quotation Converter on the VPS. This file records the real, chosen infrastructure (nginx + PM2 + certbot on one VPS, Supabase cloud). Update it whenever infrastructure changes.
 
 ## 1. Hosting and Domain
 
-- Provision a VPS (placeholder: `vps.example.com`, OS placeholder: Ubuntu 24.04 LTS).
-- Create a DNS A record: `app.example.com -> <VPS_IP>` (placeholder).
-- Add a subdomain per environment: `staging.app.example.com`, `prod.app.example.com` (placeholders).
-- Terminate HTTPS at the edge (Caddy / Nginx / cloud LB — placeholder choice). Both frontend and backend cookies require HTTPS.
+- VPS: Ubuntu 24.04 LTS (ships Python 3.12, required by the pinned requirements).
+- DNS A record: `quote.risklocker.com -> <VPS_IP>`.
+- HTTPS is terminated at nginx with a Let's Encrypt certificate (certbot). The app REQUIRES HTTPS: `SESSION_COOKIE_SECURE=true` and trusted-host validation fail over plain HTTP.
 
-## 2. Reverse Proxy Layout
+## 2. Runtime Processes (PM2)
 
-- Frontend: Next.js standalone on `127.0.0.1:3000` (started via `commands/start-frontend.ps1` or the equivalent production runner).
-- Backend: FastAPI/uvicorn on `127.0.0.1:8100` (`commands/start-backend.ps1`).
-- Proxy rules: `/ -> :3000`, `/api -> :8100` on one HTTPS origin. A separate public backend origin is not supported by v7.
+Three processes run under PM2 (see `ecosystem.config.cjs`; paths derive from `RL_DEPLOY_PATH`):
 
-## 3. Environment Configuration
+| PM2 app | What it runs | Port |
+| --- | --- | --- |
+| `rl-quote-api` | FastAPI/uvicorn (`app.main:app`) | 127.0.0.1:8100 |
+| `rl-quote-worker` | `commands/run-worker.py` (extraction + Playwright PDF render) | — |
+| `rl-quote-frontend` | Next.js `next start` | 127.0.0.1:3000 |
 
-- Copy `.env.example` to `.env`; every variable table lives in `docs/OPERATIONS.md` (env matrix).
-- Secrets stay backend-only: `AUTH_HASH_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, and any optional mail-provider secret. Core defaults `EMAIL_PROVIDER=disabled`; live Resend and authentication use remain post-core work.
-- The browser always uses relative `/api`; `BACKEND_API_ORIGIN` is a server-only Next.js proxy setting.
+- The API runs with `ENABLE_EMBEDDED_WORKER=0`; exactly one dedicated worker claims jobs.
+- The backend reads the root `.env` itself (python-dotenv walks up from `backend/app/core/config.py`); no secrets are passed via PM2.
 
-## 4. Database
+## 3. Reverse Proxy Layout (nginx)
 
-- CURRENT: Supabase/Postgres (`DATABASE_URL` points at Supabase).
-- MIGRATION PATH (if Supabase is replaced by self-hosted Postgres on the VPS):
-  1. Install PostgreSQL on the VPS; create a database and an app user with least privilege.
-  2. Point `DATABASE_URL` at the self-hosted server (placeholder connection string, sslmode as configured).
-  3. Apply ordered migrations with `commands/apply-migrations.ps1`; the runner hashes, ledgers, locks, and transactionally applies SQL.
-  4. Initialize non-credential defaults explicitly and bootstrap Primary Admin once with `python commands/create_admin.py first.last@risklocker.com` (interactive password prompts).
-  5. Schedule backups: `pg_dump` nightly to off-server storage; test a restore at least monthly.
-- Web workers run no retention/purge job. Source/generated PDFs remain until manual deletion and Trash is manually purged.
+- `deploy/nginx-quote-risklocker.conf` is the checked-in template (port 80). certbot adds the 443 block + redirect.
+- Proxy rules: `/api/ -> 127.0.0.1:8100/api/`, `/ -> 127.0.0.1:3000`. The browser always uses same-origin `/api`; a separate public backend origin is not supported.
+- `client_max_body_size 25m` (uploads cap at 20MB).
+- Security headers incl. a pragmatic CSP for Next.js (inline scripts/styles for hydration; `img-src data: blob:` for the canvas renderer).
 
-## 5. PDF Storage
+## 4. Environment Configuration
 
-- CURRENT: private Supabase Storage bucket, created/checked at backend startup.
-- The bucket is private; the backend uses the service-role key only.
-- If self-hosting everything, storage must remain private and HTTPS-only; never persist PDFs in repo or public directories.
+- Copy `.env.example` to `.env` on the VPS; the variable matrix lives in `docs/OPERATIONS.md`.
+- Production values: `APP_ORIGIN`/`TRUSTED_HOSTS`/`CORS_ORIGINS=https://quote.risklocker.com`, `TRUSTED_PROXY_IPS=127.0.0.1` (nginx is on the same host), `SESSION_COOKIE_SECURE=true`.
+- Secrets stay backend-only: `AUTH_HASH_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`. CI never writes secrets; `.env` exists only on the VPS.
 
-## 6. PDF Rendering Runtime
+## 5. Database
 
-- Production images pin Playwright and Chromium. Renderer unavailability is retryable failure; no fallback PDF is allowed.
+- Supabase/Postgres (`DATABASE_URL` points at Supabase). No local Postgres on the VPS.
+- Migrations are applied with `PYTHONPATH=backend .venv/bin/python -m app.db.migrations` (ledger-based, checksummed, idempotent — safe on every deploy).
+- Bootstrap Primary Admin once: `PYTHONPATH=backend .venv/bin/python commands/create_admin.py first.last@risklocker.com` (interactive password).
+- Backups: `pg_dump` nightly to off-server storage; test a restore at least monthly.
 
-## 7. Optional Integrations
+## 6. PDF Storage
 
-- Microsoft 365 archive: optional, backend-only. Requires an app registration + delegated permission flow (placeholders for tenant/app IDs). Keep disabled until credentials and the archive worker are deliberately configured.
-- Core may ship a disabled/test/Resend provider adapter that is not called by authentication. Real delivery, domain setup, OTP, and onboarding remain post-core work.
+- Private Supabase Storage bucket, created/checked at backend startup; backend uses the service-role key only. Never persist PDFs in the repo or public directories.
 
-## 8. Monitoring and Alerts
+## 7. PDF Rendering Runtime
 
-- Health endpoints live under `/api`; readiness includes schema-ledger validation and is expanded in WP11.
-- Options (choose per environment): Uptime Kuma, Prometheus + Grafana, or platform built-ins (placeholders).
-- Alert on: readiness failure, queue age, repeated render/scanner/storage failures, backup failure, and database exhaustion.
-- Logging: capture backend and frontend stdout to files; rotate weekly; keep at least 30 days.
+- Playwright + Chromium are pinned in `requirements.txt`. `deploy/setup-vps.sh` installs Chromium with system deps once (`playwright install --with-deps chromium`); deploys run plain `playwright install chromium` (no-op when present). Renderer unavailability is a retryable failure; no fallback PDF is allowed.
 
-## 9. When to Update This File
+## 8. CI/CD (GitHub Actions)
 
-- Any infrastructure change: new subdomain, VPS move, database provider change (e.g., Supabase -> self-hosted Postgres), storage provider change, monitoring tool change, HTTPS/termination change.
-- Update `docs/OPERATIONS.md` env tables in the same change, and log it in `docs/MEMORY.md`.
+- `.github/workflows/deploy.yml`: on push to `main` (or manual dispatch) it runs backend tests + frontend type-check/build on GitHub, then SSHes to the VPS, rsync-mirrors the repo (excluding `.env`, `.venv`, `node_modules`, `.next`, `.qc-tmp`, etc.), installs deps, builds, runs migrations, and `pm2 startOrReload`.
+- Secrets required in the repo: `VPS_HOST`, `VPS_PORT`, `VPS_USER`, `VPS_SSH_KEY_B64` (base64 of the deploy SSH private key).
+
+## 9. One-Time VPS Setup
+
+Run `deploy/setup-vps.sh` (as root, from the cloned repo at `/var/www/html/quote_risklocker`). It installs nginx/git/python3.12-venv/Node 22/PM2/certbot, creates the venv, installs deps + Chromium, builds the frontend, applies migrations, installs the nginx site, requests the TLS cert (if `RL_CERTBOT_EMAIL` is set), and configures `pm2 startup`. Full manual steps are in the script header.
+
+## 10. Monitoring and Alerts
+
+- Health: `curl http://127.0.0.1:8100/health` (backend readiness incl. schema-ledger validation).
+- Options: Uptime Kuma, Prometheus + Grafana, or platform built-ins.
+- Alert on: readiness failure, queue age, repeated render/scanner/storage failures, backup failure, database exhaustion.
+- Logging: PM2 writes stdout/stderr to `~/.pm2/logs/`; optionally `pm2 install pm2-logrotate`; keep at least 30 days.
+
+## 11. When to Update This File
+
+- Any infrastructure change: new subdomain, VPS move, database/storage provider change, monitoring/HTTPS change.
+- Update `docs/OPERATIONS.md` env tables in the same change and log it in `docs/MEMORY.md`.

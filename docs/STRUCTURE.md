@@ -11,6 +11,9 @@
 | `commands/` | Local run, migration, maintenance, smoke-test, and code-map scripts |
 | `docs/` | Governed project knowledge base, logbook, and generated code map |
 | `.qc-tmp/` | Gitignored in-project scratch space: QA/E2E scripts, logs, screenshots, port file (see OPERATIONS.md) |
+| `.github/workflows/` | CI/CD: test + build gate and SSH deploy to the VPS (`deploy.yml`) |
+| `deploy/` | Production deployment assets: nginx site config, one-time VPS bootstrap script |
+| `ecosystem.config.cjs` | PM2 process definitions (api, worker, frontend) |
 
 The repository root holds only `AGENTS.md`, `README.md`, config files, and the doc system — no stray Markdown files. Any temporary file or folder goes into `/.qc-tmp/` (append its name to `.gitignore` only if a new folder is needed).
 
@@ -32,6 +35,30 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Persistent session workspace: `frontend/src/app/sessions/[id]/layout.tsx`, `frontend/src/components/session-workspace/`.
 - Template publication coverage: `tests/test_template_publication.py`, `tests/test_template_revision_validation.py`, `tests/test_dynamic_grid_renderer.py`, `tests/test_frontend_template_publication_contract.py`.
 - DB recovery for pre-ledger databases: `commands/backfill-ledger.py` (records already-applied migrations into `schema_migrations`; runner executes SQL via raw DBAPI cursor for psycopg3 `%I`/JSON-literal compatibility).
+
+## Benefit Packs (v8) Additions
+
+- Migration `migrations/036_package_plans.sql`: `draft_benefit_selections.package_plan_id` + `price` columns (plan tables already exist from 024).
+- Plan CRUD: `backend/app/services/benefit_setup_service.py` (`save_plan`, `retire_plan`, `save_plan_items`), routes in `backend/app/api/routes.py`, schemas in `backend/app/api/schemas.py`.
+- Workspace ops: `select_package_plan` / `remove_package_plan` in `backend/app/services/workspace_service.py`; AI auto-apply in `backend/app/services/catalog_review_service.py` (`_apply_detected_packs`).
+- Rendering: group borders + corner badge in `backend/app/rendering/template_renderer.py`; new `premium-info-block` element type; extras/adjusted-total helpers in `backend/app/rendering/render_context.py`.
+- Frontend: plan manager in `frontend/src/app/builder/benefits/page.tsx` (Bundles tab); pack selector + custom-addon price in `frontend/src/components/session-workspace/review-phase.tsx`; group border + premium block in `frontend/src/components/template-canvas/shared.tsx`.
+- AI Grounding page moved to `frontend/src/app/ai-context/page.tsx` (own left-sidebar tab, admin/super_admin only).
+- Tests: `tests/test_package_plans.py`.
+
+## Builder UX & Onboarding (v8) Additions
+
+- Editable AI system prompt: `GET/PUT /settings/ai-prompt` in `backend/app/api/routes.py`; `prompt_override` support in `backend/app/extraction/gemini_extractor.py`, threaded through `orchestrator.py`, `sandbox.py`, `upload_service.py`, and the re-extract route. Editor tab in `frontend/src/app/ai-context/page.tsx`.
+- Sessions package tiers: `package_tiers` in the workspace snapshot (`backend/app/services/workspace_service.py`), `catalog_id` support in `_apply_pin_catalog`, role-based `_catalog_overview`, compact tier chips in `frontend/src/components/session-workspace/review-phase.tsx`.
+- Builder preview: real template renderer via `CanvasElementView` in `frontend/src/app/builder/benefits/page.tsx` + inline "Show preview" button.
+- Guided tours: reusable `frontend/src/components/guided-tour.tsx` added to builder/benefits, builder/global-benefits, sessions workspace, upload, and AI Grounding.
+
+## Deployment Additions
+
+- `.github/workflows/deploy.yml` — on push to `main`: backend pytest + frontend `tsc --noEmit` + `next build` on GitHub, then rsync to the VPS, install deps, run migrations, `pm2 startOrReload`.
+- `ecosystem.config.cjs` — PM2 apps `rl-quote-api`, `rl-quote-worker`, `rl-quote-frontend`; paths from `RL_DEPLOY_PATH`.
+- `deploy/nginx-quote-risklocker.conf` — nginx reverse proxy template for `quote.risklocker.com` (certbot adds TLS).
+- `deploy/setup-vps.sh` — idempotent one-time VPS bootstrap (system packages, venv, Chromium, build, migrations, nginx, certbot, PM2 startup).
 
 ## Navigation
 

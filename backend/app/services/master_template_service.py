@@ -57,7 +57,7 @@ def _identity_header(*, compact: bool = False) -> list[dict]:
         _line("header_rule", 32, 92 if compact else 104, 730, 3, height=3),
         _text("document_title", "Motor Insurance Quotation", 32, 108 if compact else 122, 430, 38, 5, size=24 if compact else 27, weight="800"),
         _text("premium_label", "TOTAL PREMIUM", 522, 111 if compact else 125, 240, 18, 5, size=10, weight="800", color=MUTED, align="right"),
-        _variable("premium_value", "total_amount", 500, 130 if compact else 146, 262, 42, 5, size=25 if compact else 29, weight="800", color=RED, align="right", prefix="RM "),
+        _variable("premium_value", "total_premium_adjusted", 500, 130 if compact else 146, 262, 42, 5, size=25 if compact else 29, weight="800", color=RED, align="right", prefix="RM "),
     ]
 
 
@@ -162,24 +162,24 @@ def _agency_bilingual_config() -> dict:
         _text("lbl_period", "Coverage Period / 保单期限", 52, 236, 160, 16, 5, size=9.5, weight="600", color=LABEL_COLOR),
         _variable("val_period", "cover_period", 216, 236, 266, 16, 5, size=10, weight="700", color=DARK),
 
-        # Row 5: Coverage Premium
-        _text("lbl_premium", "Coverage Premium / 保费", 52, 256, 160, 16, 5, size=9.5, weight="600", color=LABEL_COLOR),
-        _variable("val_premium", "premium", 216, 256, 266, 16, 5, size=10, weight="700", color=DARK, prefix="RM "),
-
-        # Table inner divider
-        _line("cov_table_div", 52, 278, 430, 2, color=BORDER_COLOR, height=1),
-
-        # Row 6: Roadtax
-        _text("lbl_roadtax", "Roadtax", 52, 286, 160, 16, 5, size=9.5, weight="600", color=LABEL_COLOR),
-        _variable("val_roadtax", "roadtax", 216, 286, 266, 16, 5, size=10, weight="700", color=DARK, prefix="RM "),
-
-        # Row 7: Runner Fee
-        _text("lbl_runner", "Runner Fee", 52, 306, 160, 16, 5, size=9.5, weight="600", color=LABEL_COLOR),
-        _variable("val_runner", "service_fee", 216, 306, 266, 16, 5, size=10, weight="700", color=DARK, prefix="RM "),
-
-        # Row 8: Total Premium
-        _text("lbl_total", "Total Premium 总额", 52, 332, 160, 20, 5, size=11, weight="800", color=DARK),
-        _variable("val_total", "total_amount", 216, 332, 266, 20, 5, size=13, weight="800", color=RED_COLOR, prefix="RM "),
+        # Rows 5+: dynamic premium card rows — Extras (staff-added priced add-ons)
+        # above Coverage Premium, then Roadtax, Runner Fee, and the adjusted Total Premium.
+        {
+            "id": "premium_info_block",
+            "type": "premium-info-block",
+            "x": 52,
+            "y": 252,
+            "w": 430,
+            "h": 130,
+            "z": 5,
+            "rowHeight": 14,
+            "labels": {
+                "premium": "Coverage Premium / 保费",
+                "roadtax": "Roadtax",
+                "runner": "Runner Fee",
+                "total": "Total Premium 总额",
+            },
+        },
 
         # 5. Right Column: Payment Method Card (x=508, w=246, y=140, h=248)
         _rectangle("pay_card_bg", 508, 140, 246, 248, 2, background="#FFFFFF", border=BORDER_COLOR, radius=6),
