@@ -11,9 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.core.errors import AppError
+from app.extraction.company_resolution import build_companies_payload
 from app.extraction.sandbox import extract_with_limits
-from app.models.enums import RecordStatus, StorageStatus
-from app.models.tables import AppSetting, Batch, BenefitConcept, ExtractionRecord, FieldAlias, InsuranceCompany, QuotationDraft, UploadedFile, VehicleBrand, VehicleModel, new_id
+from app.models.enums import AccountStatus, RecordStatus, StorageStatus
+from app.models.tables import AppSetting, Batch, BenefitConcept, CompanyAlias, ExtractionRecord, FieldAlias, InsuranceCompany, QuotationDraft, UploadedFile, VehicleBrand, VehicleModel, new_id
 from app.services.document_security import quarantined_pdf
 from app.services.file_validation import display_filename, validate_upload_bytes
 from app.services.session_service import create_session
@@ -154,14 +155,15 @@ async def create_batch_from_uploads(
         db_models.append(m.name)
         db_models.extend(m.aliases or [])
 
-    db_companies = [
-        {
-            "company_id": company.id,
-            "name": company.name,
-            "aliases": list(company.detection_phrases or []),
-        }
-        for company in db.scalars(select(InsuranceCompany)).all()
-    ] if db else None
+    db_companies = None
+    if db:
+        company_rows = db.scalars(
+            select(InsuranceCompany).where(InsuranceCompany.status == AccountStatus.ACTIVE.value)
+        ).all()
+        alias_rows = db.scalars(
+            select(CompanyAlias).where(CompanyAlias.status == AccountStatus.ACTIVE.value)
+        ).all()
+        db_companies = build_companies_payload(company_rows, alias_rows)
 
     db_benefit_concepts = [
         {

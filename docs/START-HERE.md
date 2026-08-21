@@ -25,6 +25,7 @@ External chat tools cannot be forced to follow repository instructions. Give the
 | Extraction or review values | `BUSINESS-RULES.md`, `ARCHITECTURE.md` | extraction modules, fixtures, regression tests |
 | Templates or PDF generation | `BUSINESS-RULES.md`, `ARCHITECTURE.md`, `REFERENCES.md` | renderer, template config, builder, assets |
 | Database, Supabase, storage, migrations | `ARCHITECTURE.md`, `OPERATIONS.md` | models, migrations, storage services |
+| Insurer benefit/add-on catalogs, packages, coverage | `BENEFITS-CONFIGURATION.md`, `BUSINESS-RULES.md` | seed scripts, benefit_setup_service, builder |
 | Testing, failures, regression coverage | `TESTING.md` | relevant tests and implementation |
 | Environment, local run, deployment, retention | `OPERATIONS.md`, `SETUP.md` | config and command scripts |
 | Deployment, VPS, subdomains, infrastructure | `SETUP.md` | `OPERATIONS.md` env tables |
@@ -51,6 +52,7 @@ External chat tools cannot be forced to follow repository instructions. Give the
 | `SETUP.md` | Deployment runbook (VPS, subdomain, DB, storage, monitoring) | any infrastructure change; always placeholders only |
 | `SKILLS.md` | Agent skill routing | skills installed, removed, or routing policy changes |
 | `REFERENCES.md` | Runtime asset and private-reference policy | reference locations or asset policy changes |
+| `BENEFITS-CONFIGURATION.md` | Canonical per-insurer benefit/add-on configuration matrix (company × coverage × vehicle × add-on system) | any insurer catalog, coverage type, or vehicle config changes |
 | `generated/CODEBASE-MAP.md` | Detailed generated source map | structure, routes, schema, environment, or major behavior changes |
 
 Do not add a Markdown document unless it has a distinct long-term purpose that cannot be incorporated into a registered document. Add it to this registry in the same change. Generated documentation belongs in `docs/generated/` and must identify its generator.

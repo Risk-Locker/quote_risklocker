@@ -44,6 +44,10 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Rendering: group borders + corner badge in `backend/app/rendering/template_renderer.py`; new `premium-info-block` element type; extras/adjusted-total helpers in `backend/app/rendering/render_context.py`.
 - Frontend: plan manager in `frontend/src/app/builder/benefits/page.tsx` (Bundles tab); pack selector + custom-addon price in `frontend/src/components/session-workspace/review-phase.tsx`; group border + premium block in `frontend/src/components/template-canvas/shared.tsx`.
 
+## Benefit Configuration Matrix
+
+- `docs/BENEFITS-CONFIGURATION.md` — canonical per-insurer benefits/add-on matrix: global benefit library (34 concepts), dimensions, and every company × coverage type × vehicle category row including add-on system (`single` vs `package`), package tiers, and seed status (seeded / draft / pending). Registered in `docs/START-HERE.md`.
+
 ## Company Seeding (v8)
 
 - `commands/seed-companies.py` (idempotent, dry-run/apply): creates the 3 additional insurers (Lonpac, Berjaya Sompo, Tune Protect) as active with linked company-logo assets and detection aliases. Alias map is loaded from `commands/seed-demo.py` (`COMPANY_ALIASES_MAP`) via importlib because the hyphenated filename cannot be imported by name.

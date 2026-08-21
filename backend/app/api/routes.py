@@ -66,10 +66,12 @@ from app.auth.cookies import clear_auth_cookies, set_auth_cookies
 from app.auth.rbac import can_view_owner_record, require_role
 from app.core.config import Settings
 from app.core.errors import AppError
+from app.extraction.company_resolution import build_companies_payload, resolve_company
 from app.db.session import get_db
-from app.models.enums import Role, StorageStatus
+from app.models.enums import AccountStatus, Role, StorageStatus
 from app.models.tables import (
     AuditEvent,
+    CompanyAlias,
     FieldAlias,
     BusinessAsset,
     GeneratedPdfVersion,
@@ -593,14 +595,13 @@ def session_extract_gemini(
 
     pdf_bytes = load_pdf_bytes(uploaded, settings)
 
-    db_companies = [
-        {
-            "company_id": company.id,
-            "name": company.name,
-            "aliases": list(company.detection_phrases or []),
-        }
-        for company in db.scalars(select(InsuranceCompany)).all()
-    ]
+    company_rows = db.scalars(
+        select(InsuranceCompany).where(InsuranceCompany.status == AccountStatus.ACTIVE.value)
+    ).all()
+    alias_rows = db.scalars(
+        select(CompanyAlias).where(CompanyAlias.status == AccountStatus.ACTIVE.value)
+    ).all()
+    db_companies = build_companies_payload(company_rows, alias_rows)
     db_benefit_concepts = [
         {
             "concept_id": concept.id,
@@ -658,16 +659,17 @@ def session_extract_gemini(
 
     draft.fields = fields
 
-    # Sync company if detected
+    # Sync company if detected — alias-aware so Gemini variants like
+    # "AmGeneral" / "AmGen" / "AM General Insurance Berhad" map to AmAssurance.
     comp_name = str(gemini_res.get("insurance_company") or "").strip()
-    if comp_name:
-        for c in db_companies:
-            if c["name"].lower() == comp_name.lower() or comp_name.lower() in [a.lower() for a in c.get("aliases", [])]:
-                draft.company_id = c["company_id"]
-                draft.fields["insurance_company"] = {"value": c["name"], "status": "ready", "message": ""}
-                session.detected_company = c["name"]
-                initialize_catalog_review(db, draft)
-                break
+    resolved = resolve_company(comp_name, db_companies)
+    if resolved["status"] == "matched":
+        company = next((c for c in db_companies if c["company_id"] == resolved["company_id"]), None)
+        if company:
+            draft.company_id = company["company_id"]
+            draft.fields["insurance_company"] = {"value": company["name"], "status": "ready", "message": ""}
+            session.detected_company = company["name"]
+            initialize_catalog_review(db, draft)
 
     db.commit()
 

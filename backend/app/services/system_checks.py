@@ -112,13 +112,12 @@ def get_system_checks(settings: Settings, db: Session) -> list[dict]:
         }
     )
     scan_ready, scan_message = scanner_status()
-    scanner_required = settings.require_malware_scanner
     checks.append(
         {
             "name": "PDF malware scanner",
-            "status": "Ready" if scan_ready else "Needs Setup" if scanner_required else "Unavailable",
+            "status": "Ready" if scan_ready else "Needs Setup",
             "message": scan_message,
-            "group": "Required Setup" if scanner_required else "Advanced Enhanced Reading",
+            "group": "Required Setup",
         }
     )
 

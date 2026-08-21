@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from app.core.workspace import qc_temp_directory
+from app.extraction.company_resolution import build_companies_payload, resolve_company
 from app.extraction.sandbox import extract_with_limits
 from app.models.enums import AccountStatus, RecordStatus
 from app.models.tables import (
@@ -69,23 +70,7 @@ def load_extraction_context(db) -> dict:
     company_alias_rows = db.scalars(
         select(CompanyAlias).where(CompanyAlias.status == AccountStatus.ACTIVE.value)
     ).all()
-    aliases_by_company: dict[str, list[str]] = {}
-    for item in company_alias_rows:
-        aliases_by_company.setdefault(item.company_id, []).append(item.alias)
-    companies = [
-        {
-            "company_id": company.id,
-            "name": company.name,
-            "source_template_category": company.source_template_category,
-            "aliases": list(
-                dict.fromkeys([
-                    *(company.detection_phrases or []),
-                    *aliases_by_company.get(company.id, []),
-                ])
-            ),
-        }
-        for company in company_rows
-    ]
+    companies = build_companies_payload(company_rows, company_alias_rows)
 
     benefit_alias_rows = db.scalars(
         select(BenefitAlias).where(BenefitAlias.status == AccountStatus.ACTIVE.value)
@@ -127,14 +112,7 @@ def load_extraction_context(db) -> dict:
 
 def _company_resolution(fields: dict, companies: list[dict]) -> dict:
     selected = str((fields.get("insurance_company") or {}).get("value") or "").strip()
-    matches = [item for item in companies if str(item.get("name") or "").casefold() == selected.casefold()]
-    if len(matches) == 1:
-        return {"status": "matched", "company_id": matches[0].get("company_id"), "display_name": selected}
-    return {
-        "status": "ambiguous" if len(matches) > 1 else "unresolved",
-        "company_id": None,
-        "display_name": selected or None,
-    }
+    return resolve_company(selected, companies)
 
 
 def _record_values(full: dict) -> dict:

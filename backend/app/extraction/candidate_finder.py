@@ -565,23 +565,12 @@ def _add_company_detection(
 ) -> None:
     """Resolve companies exclusively from active database records and aliases."""
 
-    normalized_filename = f" {_normalized_detection_text(source_filename)} "
-    normalized_text = f" {_normalized_detection_text(text)} "
+    from app.extraction.company_resolution import company_alias_matches
+
     matches: list[tuple[int, str, dict, str]] = []
-    for company in companies:
-        name = str(company.get("name") or "").strip()
-        if not name:
-            continue
-        aliases = [name, *(company.get("aliases") or [])]
-        for raw_alias in aliases:
-            alias = _normalized_detection_text(str(raw_alias))
-            if not alias:
-                continue
-            needle = f" {alias} "
-            if needle in normalized_filename:
-                matches.append((len(alias), "database_company_filename", company, str(raw_alias)))
-            elif needle in normalized_text:
-                matches.append((len(alias), "database_company_text", company, str(raw_alias)))
+    for source, method in ((source_filename, "database_company_filename"), (text, "database_company_text")):
+        for match in company_alias_matches(source, companies):
+            matches.append((match["length"], method, match["company"], str(match["alias"])))
 
     if not matches:
         return

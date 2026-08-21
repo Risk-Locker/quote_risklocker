@@ -59,7 +59,8 @@ fi
 # 4. .env --------------------------------------------------------------------
 if [ ! -f "$ROOT/.env" ]; then
   warn "No .env found. Create it first, then re-run this script:"
-  echo "  cp $ROOT/.env.example $ROOT/.env"
+  echo "  cp $ROOT/.env.example $ROOT/.env   # then edit to production values,"
+  echo "  # or copy the project .env.production from a trusted machine (gitignored, not rsynced)."
   echo "  nano $ROOT/.env"
   echo "  # Required: DATABASE_URL, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,"
   echo "  # AUTH_HASH_SECRET, GEMINI_API_KEY, APP_ORIGIN/TRUSTED_HOSTS/CORS_ORIGINS=https://$DOMAIN,"

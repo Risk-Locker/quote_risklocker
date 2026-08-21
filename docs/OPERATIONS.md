@@ -5,16 +5,21 @@
 | Category | Variables |
 | --- | --- |
 | Active application settings | `APP_ENV`, `APP_NAME`, `APP_ORIGIN`, `CORS_ORIGINS`, `TRUSTED_HOSTS`, `TRUSTED_PROXY_IPS` |
-| Active database settings | `DATABASE_URL` (any Postgres URI — Supabase or self-hosted VPS), optional `DATABASE_PROVIDER` (auto-detected from the URL: `supabase_postgres` when the host contains "supabase", else `postgres`), optional `TEST_DATABASE_URL` |
+| Active database settings | `DATABASE_URL` (any Postgres URI — Supabase or self-hosted VPS; prefer the Supabase pooler host, which is IPv4-reachable), optional `DATABASE_PROVIDER` (auto-detected from the URL: `supabase_postgres` when the host contains "supabase", else `postgres`), optional `TEST_DATABASE_URL` |
 | Temporary authentication settings | `AUTH_HASH_SECRET`, `SESSION_IDLE_HOURS`, `SESSION_MAX_DAYS`, `SESSION_COOKIE_NAME`, `CSRF_COOKIE_NAME`, `SESSION_COOKIE_SECURE` |
 | Dormant mail seam | `EMAIL_PROVIDER=disabled|test|resend`, optional `RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_REPLY_TO`, `EMAIL_REQUEST_TIMEOUT_SECONDS`, `RESEND_WEBHOOK_SECRET`; current password auth never invokes mail |
 | Active Supabase Storage settings | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `STORAGE_DRIVER`, `SUPABASE_STORAGE_BUCKET` |
-| Active resource limits | `MAX_UPLOAD_FILES=1`, `MAX_SOURCE_PDF_BYTES`, `MAX_PDF_PAGES`, `MAX_GENERATED_PDF_BYTES`, `MAX_ASSET_BYTES`, `MAX_ASSET_PIXELS`, `MAX_CATALOG_IMPORT_BYTES`, `MAX_CATALOG_IMPORT_ROWS`, `MAX_TEMPLATE_JSON_BYTES`, `MAX_TEMPLATE_ELEMENTS`, `REQUIRE_MALWARE_SCANNER` |
+| Active resource limits | `MAX_UPLOAD_FILES=1`, `MAX_SOURCE_PDF_BYTES`, `MAX_PDF_PAGES`, `MAX_GENERATED_PDF_BYTES`, `MAX_ASSET_BYTES`, `MAX_ASSET_PIXELS`, `MAX_CATALOG_IMPORT_BYTES`, `MAX_CATALOG_IMPORT_ROWS`, `MAX_TEMPLATE_JSON_BYTES`, `MAX_TEMPLATE_ELEMENTS` |
 | Active abuse limits | `RATE_LIMIT_LOGIN_*`, `RATE_LIMIT_UPLOAD_*`, `RATE_LIMIT_PREVIEW_*`, `RATE_LIMIT_GENERATION_*`, `RATE_LIMIT_DOWNLOAD_*`, `RATE_LIMIT_IMPORT_*` |
+| Frontend proxy settings | `BACKEND_API_ORIGIN` (required when `next start` runs with `NODE_ENV=production`), `SESSION_COOKIE_NAME` (must match the backend) |
 | Defined but currently inactive settings | `ENHANCED_READING_ENABLED`, `STRICT_NO_GUESSING`, `AUTO_DOWNLOAD_GENERATED_PDF` |
 | Initial local setup | `INITIAL_ADMIN_EMAIL` |
 
-Use `.env.example` as a variable-name template. Never commit live credentials or expose backend-only values in frontend environment variables.
+Use `.env.example` (local development values) or `.env.production` (production VPS values) as the variable-name templates. Never commit live credentials or expose backend-only values in frontend environment variables.
+
+**The project `.env` is the source of truth:** `backend/app/core/config.py` loads it with `load_dotenv(override=True)`, so variables inherited from the shell (e.g. a stray `APP_ENV=production` in a terminal) can never shadow the project config. Reset a poisoned terminal with `Remove-Item Env:APP_ENV` or open a new one.
+
+**Malware scanner is always required:** the `REQUIRE_MALWARE_SCANNER` env toggle no longer exists (`backend/app/core/config.py` hardcodes it on). Every PDF upload runs the scanner; uploads refuse when no scanner is present. Do not restore the toggle.
 
 **Switching database servers:** the app uses one Postgres database. To move between Supabase and a self-hosted VPS Postgres, change only `DATABASE_URL` in `.env` (and run migrations against the new server). `DATABASE_PROVIDER` is optional and auto-detected from the URL, so no other variable needs to change.
 
@@ -24,7 +29,7 @@ The three inactive settings are loaded by backend configuration but do not chang
 
 1. Create the Python **3.12** environment (`py -3.12 -m venv .venv`; the pinned requirements predate Python 3.14 wheels), install `requirements.txt` and optional requirements (`.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-optional.txt`), then install Playwright Chromium (`.\.venv\Scripts\python.exe -m playwright install chromium`).
 2. Install frontend dependencies in `frontend/`.
-3. Configure `.env` from `.env.example`; production requires HTTPS origin, exact hosts/proxies, a long hash secret, Supabase credentials, and scanning.
+3. Configure `.env` from `.env.example` (local) or `.env.production` (production); production requires HTTPS origin, exact hosts/proxies, a long hash secret, and Supabase credentials. Malware scanning is always required on uploads — there is no toggle.
 4. Apply migrations with `commands/apply-migrations.ps1`, initialize non-credential defaults explicitly, and bootstrap Primary Admin once with `python commands/create_admin.py first.last@risklocker.com`.
 5. Use `npm run backend`, `npm run frontend`, or `npm run full` to start development services. `npm run full` starts the API, frontend, and exactly one extraction/render worker. Use `npm run stop` to stop project servers.
 6. Port coordination: `commands/start-backend.ps1` writes the chosen port to `.qc-tmp\backend-port.txt`; `start-frontend.ps1` and `start-full.ps1` read it. Backend :8100, frontend :3000.

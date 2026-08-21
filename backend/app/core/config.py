@@ -10,7 +10,9 @@ from urllib.parse import urlsplit
 from dotenv import load_dotenv
 
 
-load_dotenv()
+# The project .env is the source of truth: override process-inherited variables
+# so a stray shell APP_ENV (or any variable) can never shadow the project config.
+load_dotenv(override=True)
 
 
 @dataclass(frozen=True)
@@ -233,7 +235,9 @@ def get_settings() -> Settings:
     session_idle_hours = _int("SESSION_IDLE_HOURS", 8)
     session_max_days = _int("SESSION_MAX_DAYS", 30)
     session_cookie_secure = _bool("SESSION_COOKIE_SECURE", app_env == "production")
-    require_malware_scanner = _bool("REQUIRE_MALWARE_SCANNER", app_env == "production")
+    # RL-DISABLED REQUIRE_MALWARE_SCANNER env toggle — disabled 2026-08-21; the malware
+    # scanner is unconditionally required on every upload and cannot be turned off.
+    require_malware_scanner = True
     if retention_days < 1 or retention_days > 365:
         raise RuntimeError("PDF_RETENTION_DAYS must be between 1 and 365.")
     if max_upload_files != 1:
@@ -242,8 +246,6 @@ def get_settings() -> Settings:
         raise RuntimeError("Risklocker sessions require SESSION_IDLE_HOURS=8 and SESSION_MAX_DAYS=30.")
     if app_env == "production" and not session_cookie_secure:
         raise RuntimeError("SESSION_COOKIE_SECURE must be enabled in production.")
-    if app_env == "production" and not require_malware_scanner:
-        raise RuntimeError("REQUIRE_MALWARE_SCANNER must be enabled in production.")
     return Settings(
         app_name=os.getenv("APP_NAME", "Risklocker Quotation Converter"),
         app_env=app_env,

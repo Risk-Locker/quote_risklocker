@@ -251,7 +251,17 @@ def build_rag_system_prompt(
     block; the live grounding sections (companies, concepts, packs) are always
     appended so the model still has authoritative database context.
     """
-    companies_str = ", ".join(c.get("name", "") for c in (db_companies or []) if c.get("name")) or "QBE, Etiqa, AmAssurance, Lonpac, Allianz, Zurich, Liberty"
+    company_hints: list[str] = []
+    for c in (db_companies or []):
+        name = c.get("name", "")
+        if not name:
+            continue
+        aliases = [a for a in (c.get("aliases") or []) if a and a != name]
+        if aliases:
+            company_hints.append(f"{name} (aliases: {', '.join(aliases)})")
+        else:
+            company_hints.append(name)
+    companies_str = "; ".join(company_hints) or "QBE, Etiqa, AmAssurance, Lonpac, Allianz, Zurich, Liberty"
     
     concepts_list = []
     for c in (db_benefit_concepts or []):
