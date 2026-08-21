@@ -5,12 +5,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
-
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
 DOCX_CANDIDATES = [
+    ROOT / "tests" / "fixtures" / "RiskLocker_Malaysia_Motor_Comprehensive_Packages_Benefits_Addons_2026.docx",
     ROOT / "fix" / "RiskLocker_Malaysia_Motor_Comprehensive_Packages_Benefits_Addons_2026.docx",
     ROOT / "Malaysia_Motor_Insurance_Quick_Benefits_Addons_2026.docx",
 ]
@@ -20,12 +19,6 @@ if str(BACKEND) not in sys.path:
 
 from app.models.tables import SourceDocument
 from app.services.reference_intake import build_docx_reference, register_docx_reference
-
-# The owner DOCX is private, gitignored, and not a runtime dependency. When it
-# is absent from the working tree, the owner-material tests skip instead of failing.
-needs_owner_docx = pytest.mark.skipif(
-    not DOCX.is_file(), reason=f"owner reference document missing: {DOCX.name}"
-)
 
 
 class FakeDb:
@@ -44,7 +37,6 @@ class FakeDb:
         self.commits += 1
 
 
-@needs_owner_docx
 def test_owner_docx_is_extracted_as_unverified_reference_only():
     reference = build_docx_reference(DOCX)
 
@@ -60,7 +52,6 @@ def test_owner_docx_is_extracted_as_unverified_reference_only():
     assert "catalog_offerings" not in reference
 
 
-@needs_owner_docx
 def test_registering_reference_is_idempotent_by_checksum():
     db = FakeDb()
     document, created = register_docx_reference(db, DOCX)

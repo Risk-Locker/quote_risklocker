@@ -24,6 +24,9 @@
 - Run the code-map validation with `npm run code-map:check`.
 - Run the smoke workflow with `./.venv/Scripts/python.exe commands/smoke-test.py` when exercising configured local services.
 - Backend suite only: `.\.venv\Scripts\python.exe -m pytest -q` from the repo root.
+- `tests/conftest.py` bootstraps `.qc-tmp/pytest` (the `--basetemp` from `pytest.ini`) at import time — pytest 7.x creates the basetemp with `Path.mkdir()` without parents, so the parent `.qc-tmp` must exist first, especially on clean checkouts and CI runners.
+- `tests/fixtures/RiskLocker_Malaysia_Motor_Comprehensive_Packages_Benefits_Addons_2026.docx` is the tracked reference DOCX fixture for `tests/test_reference_docx_intake.py` (owner intake stays `unverified`, never catalog truth).
+- The CI test job installs Playwright Chromium so `test_pdf_generation_smoke` runs instead of skipping.
 - Frontend static: `npx tsc --noEmit` and `npm run build` in `frontend/`.
 
 ## Browser E2E (in-repo QA tooling)
@@ -33,7 +36,7 @@
 
 ## Verified Baseline
 
-On 2026-08-16 after the Python 3.12 venv rebuild and migration-ledger repair: 401 passed, 2 skipped (owner DOCX absent), `npx tsc --noEmit` clean, Next.js production build green, code map current. Re-run the final checks after any subsequent code or generated-map change.
+On 2026-08-21 after the clean-runner fix (conftest `.qc-tmp/pytest` bootstrap, tracked DOCX fixture, CI Chromium install): 498 passed, 0 skipped, 0 errors, `npx tsc --noEmit` clean, Next.js production build green, code map current. Re-run the final checks after any subsequent code or generated-map change.
 
 ## Known Coverage Gaps
 
@@ -47,5 +50,5 @@ On 2026-08-16 after the Python 3.12 venv rebuild and migration-ledger repair: 40
 - Use focused tests for the subsystem changed, then run the required build or end-to-end check proportionate to risk.
 - Add only anonymized, deterministic fixtures under `tests/fixtures/` for extraction regressions.
 - Never depend on private customer PDFs, external process folders, generated PDFs, caches, or runtime secrets in tests.
-- The two owner-material tests in `tests/test_reference_docx_intake.py` skip when `Malaysia_Motor_Insurance_Quick_Benefits_Addons_2026.docx` is absent from the repo root (owner-private, gitignored, not a runtime dependency); restore that file to re-enable them.
+- The two owner-material tests in `tests/test_reference_docx_intake.py` run unconditionally against the tracked fixture `tests/fixtures/RiskLocker_Malaysia_Motor_Comprehensive_Packages_Benefits_Addons_2026.docx` (previously skipped when the private owner DOCX was absent from the working tree).
 - Update tests when API behavior, extraction behavior, security validation, rendering behavior, storage behavior, or business rules change.

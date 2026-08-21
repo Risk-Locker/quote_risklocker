@@ -52,6 +52,7 @@ Three processes run under PM2 (see `ecosystem.config.cjs`; paths derive from `RL
 ## 8. CI/CD (GitHub Actions)
 
 - `.github/workflows/deploy.yml`: on push to `main` (or manual dispatch) it runs backend tests + frontend type-check/build on GitHub, then SSHes to the VPS, rsync-mirrors the repo (excluding `.env`, `.venv`, `node_modules`, `.next`, `.qc-tmp`, etc.), installs deps, builds, runs migrations, and `pm2 startOrReload`.
+- The test job installs Playwright Chromium (`python -m playwright install --with-deps chromium`) so `test_pdf_generation_smoke` renders a real PDF instead of skipping; `tests/conftest.py` creates `.qc-tmp/pytest` (the pytest `--basetemp`) because the gitignored folder does not exist on a clean runner.
 - Secrets required in the repo: `VPS_HOST`, `VPS_PORT`, `VPS_USER`, `VPS_SSH_KEY_B64` (base64 of the deploy SSH private key).
 
 ## 9. One-Time VPS Setup

@@ -453,3 +453,8 @@ Asked: fix 409 Conflict when saving offerings on published or new catalogs in bu
 Done: in `backend/app/services/business_setup_service.py`, resolved 409 Conflict by auto-creating draft revision 1 when revisions is empty in `save_catalog_offering` and `remove_catalog_offering`; updated `MAX_UPLOAD_BYTES` and `MAX_SOURCE_PDF_BYTES` in `.env` to 25MB (26214400); removed `pdf.is_encrypted` false-positive in `backend/app/services/document_security.py`; added `"text"` type to `BenefitValue` in `backend/app/domain/benefits.py`; rendered real benefit image assets in `frontend/src/app/builder/benefits/page.tsx` canvas preview; verified 462/462 pytest green and Next.js production build clean (34/34 routes).
 Pending: restart backend and frontend dev servers to run with latest build. Verified: 462/462 pytest green, Next.js build clean.
 
+
+## 2026-08-21 · opencode (deepseek-v4-pro) — CI green fix: clean-runner basetemp + DOCX fixture + Chromium
+Asked: GitHub Actions failing (23 errors, 2 skipped) because .qc-tmp/pytest does not exist on a clean runner; make the 2 skipped DOCX intake tests run in CI; target 0 errors / 0 skipped / all passed.
+Done: new 	ests/conftest.py creates .qc-tmp/pytest at import time (pytest 7.4.3 basetemp mkdir lacks parents); DOCX copied to tracked 	ests/fixtures/RiskLocker_..._2026.docx and 	ests/test_reference_docx_intake.py skip markers removed; .github/workflows/deploy.yml test job now installs Playwright Chromium so 	est_pdf_generation_smoke passes; docs TESTING/SETUP/MEMORY updated, code map regenerated. Verified locally incl. clean-.qc-tmp simulation: 498 passed, 0 skipped, 0 errors.
+Pending: commit + push to main, watch the GitHub Actions run, iterate only if red.
