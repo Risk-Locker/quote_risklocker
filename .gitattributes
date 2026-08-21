@@ -1,3 +1,4 @@
-# Migration files must always be LF on disk: the schema_migrations ledger
-# checksums sha256 of the raw file bytes, so line-ending drift would block backend startup.
+# Migration files stay LF on disk for deterministic diffs. Ledger checksums are
+# computed from line-ending-normalized bytes (see app/db/migrations.py), so
+# CRLF/LF checkout differences can no longer cause checksum drift.
 migrations/*.sql text eol=lf

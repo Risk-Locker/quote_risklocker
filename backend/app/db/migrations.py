@@ -28,6 +28,7 @@ class Migration:
     name: str
     path: Path
     checksum: str
+    equivalent_checksums: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,28 @@ class AppliedMigration:
     version: int
     name: str
     checksum: str
+
+
+def _normalize_line_endings(data: bytes) -> bytes:
+    """Normalize CRLF and lone CR line endings to LF (stable cross-platform checksums)."""
+    return re.sub(rb"\r\n|\r", b"\n", data)
+
+
+def migration_checksums(data: bytes) -> tuple[str, frozenset[str]]:
+    """Return (canonical line-ending-normalized checksum, equivalent checksums).
+
+    The canonical checksum is hashed from line-ending-normalized bytes, so the
+    same SQL yields the same checksum on Windows/Linux/macOS and under any git
+    checkout style. The equivalence set additionally contains the CRLF byte
+    representation, which is what older ledgers recorded when migrations were
+    applied from CRLF checkouts. Only line-ending variants of the identical
+    content are accepted; any genuine content change produces a new canonical
+    hash and therefore fails drift detection.
+    """
+    canonical = _normalize_line_endings(data)
+    canonical_hash = hashlib.sha256(canonical).hexdigest()
+    crlf_hash = hashlib.sha256(canonical.replace(b"\n", b"\r\n")).hexdigest()
+    return canonical_hash, frozenset({canonical_hash, crlf_hash})
 
 
 def discover_migrations(root: Path) -> list[Migration]:
@@ -48,12 +71,15 @@ def discover_migrations(root: Path) -> list[Migration]:
         if version in versions:
             raise MigrationError(f"Migration version {version:03d} is duplicate.")
         versions.add(version)
+        data = path.read_bytes()
+        checksum, equivalent_checksums = migration_checksums(data)
         migrations.append(
             Migration(
                 version=version,
                 name=path.name,
                 path=path,
-                checksum=hashlib.sha256(path.read_bytes()).hexdigest(),
+                checksum=checksum,
+                equivalent_checksums=equivalent_checksums,
             )
         )
     expected = list(range(1, len(migrations) + 1))
@@ -71,7 +97,9 @@ def build_plan(migrations: list[Migration], applied: list[AppliedMigration]) -> 
             raise MigrationError(
                 f"Database migration {history.version:03d} is newer than this release or unknown to it."
             )
-        if history.name != source.name or history.checksum != source.checksum:
+        if history.name != source.name:
+            raise MigrationError(f"Migration {history.version:03d} checksum/name drift detected.")
+        if history.checksum not in source.equivalent_checksums:
             raise MigrationError(f"Migration {history.version:03d} checksum/name drift detected.")
     applied_versions = {item.version for item in applied}
     return [item for item in migrations if item.version not in applied_versions]

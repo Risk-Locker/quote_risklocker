@@ -12,7 +12,7 @@
 | Authentication HTTP contract, secure cookie, login/logout, revoked and disabled sessions | `tests/test_auth_http.py` |
 | Notifications, invitations, role/status notices, recipient isolation, mark-read, and Admin mail test RBAC | `tests/test_notifications.py` |
 | Lifecycle mutation safety, headers, CSRF, trusted proxies, and durable rate limits | `tests/test_app_lifecycle.py`, `tests/test_http_security.py`, `tests/test_rate_limits.py` |
-| Migration ordering, checksums, drift, and readiness | `tests/test_migration_runner.py` |
+| Migration ordering, checksums, drift, and readiness, incl. CRLF/LF normalization and historical (CRLF-bytes) ledger acceptance | `tests/test_migration_runner.py` |
 | Shared Staff quotation/customer access | `tests/test_shared_access.py` |
 | Immutable template publication, fixed profiles, template switching, and dynamic-grid schema/rendering | `tests/test_template_publication.py`, `tests/test_template_revision_validation.py`, `tests/test_dynamic_grid_renderer.py`, `tests/test_workspace_service.py` |
 | Builder publication/gesture and Check Values integration contract | `tests/test_frontend_template_publication_contract.py`, `tests/test_frontend_workspace_contract.py` |
