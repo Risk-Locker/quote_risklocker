@@ -5,7 +5,7 @@
 | Category | Variables |
 | --- | --- |
 | Active application settings | `APP_ENV`, `APP_NAME`, `APP_ORIGIN`, `CORS_ORIGINS`, `TRUSTED_HOSTS`, `TRUSTED_PROXY_IPS` |
-| Active database settings | `DATABASE_PROVIDER`, `DATABASE_URL`, optional `TEST_DATABASE_URL` |
+| Active database settings | `DATABASE_URL` (any Postgres URI — Supabase or self-hosted VPS), optional `DATABASE_PROVIDER` (auto-detected from the URL: `supabase_postgres` when the host contains "supabase", else `postgres`), optional `TEST_DATABASE_URL` |
 | Temporary authentication settings | `AUTH_HASH_SECRET`, `SESSION_IDLE_HOURS`, `SESSION_MAX_DAYS`, `SESSION_COOKIE_NAME`, `CSRF_COOKIE_NAME`, `SESSION_COOKIE_SECURE` |
 | Dormant mail seam | `EMAIL_PROVIDER=disabled|test|resend`, optional `RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_REPLY_TO`, `EMAIL_REQUEST_TIMEOUT_SECONDS`, `RESEND_WEBHOOK_SECRET`; current password auth never invokes mail |
 | Active Supabase Storage settings | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `STORAGE_DRIVER`, `SUPABASE_STORAGE_BUCKET` |
@@ -15,6 +15,8 @@
 | Initial local setup | `INITIAL_ADMIN_EMAIL` |
 
 Use `.env.example` as a variable-name template. Never commit live credentials or expose backend-only values in frontend environment variables.
+
+**Switching database servers:** the app uses one Postgres database. To move between Supabase and a self-hosted VPS Postgres, change only `DATABASE_URL` in `.env` (and run migrations against the new server). `DATABASE_PROVIDER` is optional and auto-detected from the URL, so no other variable needs to change.
 
 The three inactive settings are loaded by backend configuration but do not change runtime behavior. Do not rely on them, add them to deployment configuration, or describe them as feature controls until they are wired into behavior or removed.
 

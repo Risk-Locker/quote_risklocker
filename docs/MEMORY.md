@@ -15,6 +15,17 @@
 - Benefits & Package refactor: ALL WORKSTREAMS COMPLETED (WS0 through WS8). Master run log at `docs/superpowers/plans/2026-08-16-benefits-package-refactor/RUN-LOG.md`. Full test suite: 461 passed, 0 failed, 0 skipped. Frontend tsc clean, Next.js build green.
 - Database state 2026-08-17: full v7 schema, migrations 001-035 applied & checksummed in PostgreSQL, seed-demo.py verified idempotent.
 - Database state 2026-08-20: migrations 001-036 applied & checksummed (036 adds `draft_benefit_selections.package_plan_id` + `price`).
+- Database state 2026-08-20 (companies): 7 active companies — QBE, Etiqa, Takaful Malaysia, AmAssurance, Lonpac, Berjaya Sompo, Tune Protect. `commands/seed-companies.py` is idempotent (dry-run/apply).
+
+## 2026-08-21 · Copilot (opencode-go/deepseek-v4-flash) — Organized .env + Swappable Postgres DB
+Asked: arrange the messy `.env` into clear sections; make the DB swappable so changing `DATABASE_URL` to any Postgres (Supabase or VPS) just works; keep Supabase for PDFs (no storage changes).
+Done: reorganized `.env.example` into 9 commented sections (Application, Database, Network/CORS, Auth/Sessions, PDF Storage, Upload Limits, Retention/Trash, Rate Limits, AI/Gemini); made `DATABASE_PROVIDER` optional + auto-detected from the URL in `backend/app/core/config.py` (`_database_provider` L175-183 — `supabase_postgres` when host contains "supabase", else `postgres`); updated `docs/OPERATIONS.md` env table + added a "Switching database servers" note. No storage changes — Supabase Storage kept for PDFs.
+Pending: none.
+
+## 2026-08-20 · Copilot (opencode-go/deepseek-v4-flash) — Seed 3 Insurance Companies (LonPac, Berjaya Sompo, Tune Protect)
+Asked: create 3 more insurance companies (LonPac, Berjaya Sompo, Tune Protect) and seed them properly with no hardcoded values, using relevant assets; analyze the benefits/packages system first.
+Done: new `commands/seed-companies.py` (idempotent, dry-run/apply) creates the 3 companies as active with linked company-logo assets (`company-logo:lonpac`, `company-logo:berjaya-sompo`, `company-logo:tune-protect`) + detection aliases loaded from `seed-demo.py`'s `COMPANY_ALIASES_MAP` via importlib (hyphenated filename can't be imported by name). DB now has 7 active companies. Verification: 472/472 backend pytest green.
+Pending: user directs next step — seed products/catalogs/packages/offerings for the 3 companies from the DOCX reference (`commands/seed-docx-draft.py` already holds their DRAFT_CONFIGURATIONS).
 
 ## 2026-08-20 · Copilot (opencode-go/deepseek-v4-flash) — v8 branch: commit + push everything to v8 & main
 Asked: create branch v8, commit and push everything to origin/v8, then push the same to origin/main.

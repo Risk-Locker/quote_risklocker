@@ -43,6 +43,10 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Workspace ops: `select_package_plan` / `remove_package_plan` in `backend/app/services/workspace_service.py`; AI auto-apply in `backend/app/services/catalog_review_service.py` (`_apply_detected_packs`).
 - Rendering: group borders + corner badge in `backend/app/rendering/template_renderer.py`; new `premium-info-block` element type; extras/adjusted-total helpers in `backend/app/rendering/render_context.py`.
 - Frontend: plan manager in `frontend/src/app/builder/benefits/page.tsx` (Bundles tab); pack selector + custom-addon price in `frontend/src/components/session-workspace/review-phase.tsx`; group border + premium block in `frontend/src/components/template-canvas/shared.tsx`.
+
+## Company Seeding (v8)
+
+- `commands/seed-companies.py` (idempotent, dry-run/apply): creates the 3 additional insurers (Lonpac, Berjaya Sompo, Tune Protect) as active with linked company-logo assets and detection aliases. Alias map is loaded from `commands/seed-demo.py` (`COMPANY_ALIASES_MAP`) via importlib because the hyphenated filename cannot be imported by name.
 - AI Grounding page moved to `frontend/src/app/ai-context/page.tsx` (own left-sidebar tab, admin/super_admin only).
 - Tests: `tests/test_package_plans.py`.
 

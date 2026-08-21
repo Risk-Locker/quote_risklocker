@@ -26,7 +26,7 @@ Generated file map. Line spans are navigational hints and are refreshed by the m
 - `backend/app/core/__init__.py` L1-1: runtime configuration security and API errors.
 - `backend/app/core/audit.py` L1-30: runtime configuration security and API errors. Symbols: `record_audit_event` L13-30.
 - `backend/app/core/client_address.py` L1-21: runtime configuration security and API errors. Symbols: `resolve_client_ip` L8-21.
-- `backend/app/core/config.py` L1-293: runtime configuration security and API errors. Symbols: `Settings` L17-69; `_bool` L72-81; `_int` L84-91; `_bounded_int` L94-98; `_app_environment` L101-106; `_app_network_settings` L109-157; `_database_url` L160-172; `_database_provider` L175-179; `_auth_hash_secret` L182-189; `_required` L192-196; `_storage_settings` L199-210; `get_settings` L213-293.
+- `backend/app/core/config.py` L1-296: runtime configuration security and API errors. Symbols: `Settings` L17-69; `_bool` L72-81; `_int` L84-91; `_bounded_int` L94-98; `_app_environment` L101-106; `_app_network_settings` L109-157; `_database_url` L160-172; `_database_provider` L175-182; `_auth_hash_secret` L185-192; `_required` L195-199; `_storage_settings` L202-213; `get_settings` L216-296.
 - `backend/app/core/errors.py` L1-109: runtime configuration security and API errors. Symbols: `AppError` L15-19; `_integrity_message` L55-69; `register_error_handlers` L72-109.
 - `backend/app/core/http_security.py` L1-80: runtime configuration security and API errors. Symbols: `RequestSecurityMiddleware` L19-55; `SecurityHeadersMiddleware` L58-80.
 - `backend/app/core/rate_limit.py` L1-126: runtime configuration security and API errors. Symbols: `RateLimitPolicy` L23-27; `RateLimitResult` L31-35; `policy_for_request` L38-52; `consume_rate_limit` L55-87; `RateLimitMiddleware` L90-126.
@@ -321,6 +321,7 @@ Generated file map. Line spans are navigational hints and are refreshed by the m
 - `commands/run-full.cmd` L1-4: developer operations and maintenance command.
 - `commands/run-stop.cmd` L1-3: developer operations and maintenance command.
 - `commands/run-worker.py` L1-62: developer operations and maintenance command. Symbols: `main` L25-58.
+- `commands/seed-companies.py` L1-166: developer operations and maintenance command. Symbols: `_load_canonical_alias_map` L38-48; `_normalize_alias` L76-77; `seed_companies` L80-134; `main` L137-162.
 - `commands/seed-demo.py` L1-1247: developer operations and maintenance command. Symbols: `_normalize_phrase` L48-49; `cleanup_junk` L459-612; `seed_global_benefits` L615-687; `seed_company_package_chains` L690-1122; `seed_company_aliases` L1181-1204; `main` L1207-1243.
 - `commands/seed-docx-draft.py` L1-643: developer operations and maintenance command. Symbols: `seed_docx_drafts` L443-606; `main` L609-639.
 - `commands/smoke-test.py` L1-172: developer operations and maintenance command. Symbols: `create_smoke_pdf` L37-60; `cleanup` L63-91; `run` L94-165.

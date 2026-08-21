@@ -172,11 +172,14 @@ def _database_url(app_env: str) -> str:
     return database_url
 
 
-def _database_provider() -> str:
-    provider = os.getenv("DATABASE_PROVIDER", "supabase_postgres").strip()
-    if provider not in {"supabase_postgres", "postgres"}:
-        raise RuntimeError("DATABASE_PROVIDER must be either 'supabase_postgres' or 'postgres'.")
-    return provider
+def _database_provider(database_url: str) -> str:
+    provider = os.getenv("DATABASE_PROVIDER", "").strip().lower()
+    if provider:
+        if provider not in {"supabase_postgres", "postgres"}:
+            raise RuntimeError("DATABASE_PROVIDER must be either 'supabase_postgres' or 'postgres'.")
+        return provider
+    # Auto-detect from the connection string so switching DB servers is just a DATABASE_URL change.
+    return "supabase_postgres" if "supabase" in database_url.lower() else "postgres"
 
 
 def _auth_hash_secret(app_env: str) -> str:
@@ -247,7 +250,7 @@ def get_settings() -> Settings:
         app_origin=app_origin,
         trusted_hosts=trusted_hosts,
         trusted_proxy_ips=trusted_proxy_ips,
-        database_provider=_database_provider(),
+        database_provider=_database_provider(database_url),
         database_url=database_url,
         storage_driver=storage_driver,
         supabase_url=supabase_url,
