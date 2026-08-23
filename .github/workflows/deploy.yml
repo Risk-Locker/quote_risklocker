@@ -165,23 +165,37 @@ jobs:
           ssh -i ~/.ssh/quote_deploy_key -o ServerAliveInterval=30 -o ServerAliveCountMax=8 -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" <<'EOF'
             set -euo pipefail
             export DEBIAN_FRONTEND=noninteractive
-            if ! dpkg -s clamav clamav-daemon >/dev/null 2>&1; then
-              apt-get update -y >/dev/null
-              apt-get install -y clamav clamav-daemon >/dev/null
+            echo "== dpkg check"
+            if dpkg -s clamav clamav-daemon >/dev/null 2>&1; then
+              echo "clamav + clamav-daemon already installed"
+            else
+              echo "installing clamav + clamav-daemon"
+              apt-get update -y
+              apt-get install -y clamav clamav-daemon
             fi
-            systemctl enable --now clamav-freshclam >/dev/null 2>&1 || true
-            systemctl enable --now clamav-daemon >/dev/null 2>&1 || true
+            echo "== services"
+            systemctl enable --now clamav-freshclam || true
+            systemctl enable --now clamav-daemon || true
+            systemctl is-enabled clamav-freshclam clamav-daemon || true
+            echo "== signature database"
             for i in $(seq 1 30); do
-              [ -f /var/lib/clamav/daily.cvd ] && break
+              if [ -f /var/lib/clamav/daily.cvd ] || [ -f /var/lib/clamav/daily.cld ]; then
+                echo "signature db present"
+                break
+              fi
               sleep 10
             done
-            if [ ! -f /var/lib/clamav/daily.cvd ]; then
+            if ! ls /var/lib/clamav/daily.cvd /var/lib/clamav/daily.cld >/dev/null 2>&1; then
               echo "::error::ClamAV signature database missing after 300s."
               exit 1
             fi
-            if ! clamscan --no-summary /etc/hosts >/dev/null 2>&1; then
-              echo "::error::ClamAV smoke scan failed."
-              exit 1
+            echo "== smoke scan"
+            if command -v clamscan >/dev/null 2>&1; then
+              clamscan --version || true
+              clamscan --no-summary /etc/hosts
+            else
+              echo "clamscan not found; falling back to clamdscan"
+              clamdscan /etc/hosts
             fi
           EOF
 
