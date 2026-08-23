@@ -17,10 +17,10 @@
 - Database state 2026-08-23: migrations 001-037 applied & checksummed (037 adds `quotation_drafts.package_id` + index).
 - Database state 2026-08-20 (companies): 7 active companies — QBE, Etiqa, Takaful Malaysia, AmAssurance, Lonpac, Berjaya Sompo, Tune Protect. `commands/seed-companies.py` is idempotent (dry-run/apply).
 
-## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Deployment /health 400 Root Cause & Fix
-Asked: Diagnose deployment failure "Backend /health did not return 200 after deploy (last: 400)".
-Done: Identified root causes: (1) Starlette `TrustedHostMiddleware` (`main.py:88`) returns 400 Bad Request when loopback `curl http://127.0.0.1:8100` sends `Host: 127.0.0.1:8100` not in `TRUSTED_HOSTS`; (2) production mounts routes exclusively under `/api` (`main.py:91-93`), making the live health route `/api/health` rather than `/health`. Provided immediate VPS `.env` fix (`TRUSTED_HOSTS`) and repository fixes (`deploy.yml`, `setup-vps.sh`, `SETUP.md`).
-Pending: apply repo / workflow fixes if user requests.
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Deployment /health 400 Root Cause & Fix (Deployed Successfully)
+Asked: Fix deployment failure "Backend /health did not return 200 after deploy (last: 400)", commit, push, and verify green deployment.
+Done: Fixed `config.py` (`trusted_hosts` automatically includes `127.0.0.1`, `localhost`, `testserver` so local loopback probes & proxying always succeed without manual VPS `.env` edits), updated `deploy.yml` health check gate to `/api/health` with diagnostics, updated `setup-vps.sh` + `SETUP.md`. Verified 512/512 pytest green, tsc clean, next build green, code map current. Committed (`10988a4`), pushed to `main` + `v8`. GitHub Actions workflow `32658768755` completed with both jobs green (`Test backend and build frontend` 2m52s, `Deploy main to VPS` 3m3s).
+Pending: none.
 
 ## 2026-08-23 · Antigravity (Gemini 3.7 Flash) — Package Tier Resolution, Draft Package Pinning & AmAssurance Session Repair
 Asked: Fix tier data model mismatch where benefit packages inside 1 catalog revision didn't render as tiers, add migration 037 for quotation_drafts.package_id, implement select_package_tier op, and repin AmAssurance sessions.
