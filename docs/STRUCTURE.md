@@ -35,14 +35,19 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Persistent session workspace: `frontend/src/app/sessions/[id]/layout.tsx`, `frontend/src/components/session-workspace/`.
 - Template publication coverage: `tests/test_template_publication.py`, `tests/test_template_revision_validation.py`, `tests/test_dynamic_grid_renderer.py`, `tests/test_frontend_template_publication_contract.py`.
 - DB recovery for pre-ledger databases: `commands/backfill-ledger.py` (records already-applied migrations into `schema_migrations`; runner executes SQL via raw DBAPI cursor for psycopg3 `%I`/JSON-literal compatibility).
+- Company detection (alias-aware, AMGEN/AmGeneral/auto365 → AmAssurance): `backend/app/extraction/company_resolution.py` (normalize + compact matching + db_companies payload), wired in `candidate_finder.py`, `upload_service.py`, `routes.py`, `extraction_worker.py`; tests in `tests/test_company_resolution.py`.
+- Package catalog repair (one-off, idempotent): `commands/repair-amassurance-catalog.py` — publishes the AmAssurance draft revision and aligns `catalog.package_id` to the Lite tier (dry-run by default).
+- Package tier edits: `PUT /business/catalogs/{id}/packages/{pid}` rename route; tier-scoped add-on assignment fix in `business_setup_service.py:_validate_assignment_context`; tests in `tests/test_benefit_setup_api.py`, `tests/test_catalog_review_initialization.py`.
 
 ## Benefit Packs (v8) Additions
 
 - Migration `migrations/036_package_plans.sql`: `draft_benefit_selections.package_plan_id` + `price` columns (plan tables already exist from 024).
+- Migration `migrations/037_draft_package_pin.sql`: `quotation_drafts.package_id` column + index for persisting active comprehensive package tier per draft.
 - Plan CRUD: `backend/app/services/benefit_setup_service.py` (`save_plan`, `retire_plan`, `save_plan_items`), routes in `backend/app/api/routes.py`, schemas in `backend/app/api/schemas.py`.
-- Workspace ops: `select_package_plan` / `remove_package_plan` in `backend/app/services/workspace_service.py`; AI auto-apply in `backend/app/services/catalog_review_service.py` (`_apply_detected_packs`).
+- Workspace ops: `select_package_plan` / `remove_package_plan` / `select_package_tier` in `backend/app/services/workspace_service.py`; multi-package revision tier resolution in `_workspace_package_tiers`; AI auto-apply in `backend/app/services/catalog_review_service.py` (`_apply_detected_packs`).
 - Rendering: group borders + corner badge in `backend/app/rendering/template_renderer.py`; new `premium-info-block` element type; extras/adjusted-total helpers in `backend/app/rendering/render_context.py`.
-- Frontend: plan manager in `frontend/src/app/builder/benefits/page.tsx` (Bundles tab); pack selector + custom-addon price in `frontend/src/components/session-workspace/review-phase.tsx`; group border + premium block in `frontend/src/components/template-canvas/shared.tsx`.
+- Frontend: plan manager in `frontend/src/app/builder/benefits/page.tsx` (Bundles tab); pack selector + tier switcher (`pinPackageTier` via `select_package_tier`) + custom-addon price in `frontend/src/components/session-workspace/review-phase.tsx`; group border + premium block in `frontend/src/components/template-canvas/shared.tsx`.
+- Data repair command: `commands/repin-amassurance-sessions.py` (idempotent, dry-run default, `--apply`) — re-pins drafts with stale revisions or missing `package_id` to the latest published revision (e.g. rev 3) and re-seeds tier defaults.
 
 ## Benefit Configuration Matrix
 

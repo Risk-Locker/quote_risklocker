@@ -235,3 +235,12 @@ def test_crlf_migrations_still_require_contiguous_versions(tmp_path: Path):
 
     with pytest.raises(MigrationError, match="contiguous"):
         discover_migrations(tmp_path)
+
+
+def test_real_037_discovery_and_planning():
+    migrations = discover_migrations(ROOT / "migrations")
+    assert len(migrations) >= 37
+    m37 = next(item for item in migrations if item.version == 37)
+    assert m37.name == "037_draft_package_pin.sql"
+    assert len(m37.checksum) == 64
+

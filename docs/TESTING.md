@@ -14,6 +14,7 @@
 | Lifecycle mutation safety, headers, CSRF, trusted proxies, and durable rate limits | `tests/test_app_lifecycle.py`, `tests/test_http_security.py`, `tests/test_rate_limits.py` |
 | Migration ordering, checksums, drift, and readiness, incl. CRLF/LF normalization and historical (CRLF-bytes) ledger acceptance | `tests/test_migration_runner.py` |
 | Alias-aware insurance company resolution (AMGEN/AmGeneral/AM General Insurance Berhad/Kurnia/auto365 → AmAssurance; no false positives on AmBank etc.) | `tests/test_company_resolution.py` |
+| Package tiers: multi-package revision resolution, `select_package_tier` op, tier-scoped seeding with `draft.package_id`, rename endpoint, tier add-on scoping, stale seed fallback | `tests/test_package_plans.py`, `tests/test_benefit_setup_api.py`, `tests/test_catalog_review_initialization.py` |
 | Shared Staff quotation/customer access | `tests/test_shared_access.py` |
 | Immutable template publication, fixed profiles, template switching, and dynamic-grid schema/rendering | `tests/test_template_publication.py`, `tests/test_template_revision_validation.py`, `tests/test_dynamic_grid_renderer.py`, `tests/test_workspace_service.py` |
 | Builder publication/gesture and Check Values integration contract | `tests/test_frontend_template_publication_contract.py`, `tests/test_frontend_workspace_contract.py` |

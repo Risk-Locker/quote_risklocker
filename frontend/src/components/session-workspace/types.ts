@@ -91,7 +91,7 @@ export type WorkspaceSnapshot = {
     extracted_value: Record<string, unknown> | null;
   }>;
   pinned: Record<string, string | null>;
-  pinned_names: { company_name: string | null; product_name: string | null; tier_name: string | null };
+  pinned_names: { company_name: string | null; product_name: string | null; tier_name: string | null; package_name?: string | null };
   catalog: {
     defaults: Array<{ offering_id: string; label: string; value: string }>;
     addons: Array<{ offering_id: string; label: string; value: string }>;

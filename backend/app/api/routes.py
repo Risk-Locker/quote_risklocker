@@ -206,14 +206,18 @@ from app.services.business_setup_service import (
     list_company_aliases,
     list_source_documents,
     save_benefit_concept,
+    retire_benefit_concept,
     save_business_company,
     delete_business_company,
     save_business_product,
+    delete_business_product,
     save_business_tier,
+    delete_business_tier,
     save_company_alias,
     save_catalog_offering,
     remove_catalog_offering,
     publish_catalog_revision,
+    retire_benefit_catalog,
     update_catalog_context,
     upload_business_asset,
     retire_company_alias,
@@ -1085,6 +1089,18 @@ def business_company_alias_save(
     return {"company_alias": save_company_alias(db, user, payload.model_dump(exclude_none=True))}
 
 
+@router.put("/business/company-aliases/{alias_id}")
+def business_company_alias_update(
+    alias_id: str,
+    payload: CompanyAliasSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    body = payload.model_dump(exclude_none=True)
+    body["id"] = alias_id
+    return {"company_alias": save_company_alias(db, user, body)}
+
+
 @router.delete("/business/company-aliases/{alias_id}", status_code=status.HTTP_204_NO_CONTENT)
 def business_company_alias_retire(
     alias_id: str,
@@ -1132,6 +1148,28 @@ def business_product_save(
     return {"product": save_business_product(db, user, payload.model_dump(exclude_none=True))}
 
 
+@router.put("/business/products/{product_id}")
+def business_product_update(
+    product_id: str,
+    payload: BusinessProductSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    body = payload.model_dump(exclude_none=True)
+    body["id"] = product_id
+    return {"product": save_business_product(db, user, body)}
+
+
+@router.delete("/business/products/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
+def business_product_delete(
+    product_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> Response:
+    delete_business_product(db, user, product_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/business/tiers")
 def business_tier_save(
     payload: BusinessTierSaveRequest,
@@ -1139,6 +1177,28 @@ def business_tier_save(
     user: User = Depends(current_user),
 ) -> dict:
     return {"tier": save_business_tier(db, user, payload.model_dump(exclude_none=True))}
+
+
+@router.put("/business/tiers/{tier_id}")
+def business_tier_update(
+    tier_id: str,
+    payload: BusinessTierSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    body = payload.model_dump(exclude_none=True)
+    body["id"] = tier_id
+    return {"tier": save_business_tier(db, user, body)}
+
+
+@router.delete("/business/tiers/{tier_id}", status_code=status.HTTP_204_NO_CONTENT)
+def business_tier_delete(
+    tier_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> Response:
+    delete_business_tier(db, user, tier_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/business/benefit-concepts")
@@ -1167,6 +1227,16 @@ def business_benefit_concept_save(
     user: User = Depends(current_user),
 ) -> dict:
     return {"benefit_concept": save_benefit_concept(db, user, payload.model_dump(exclude_none=True))}
+
+
+@router.delete("/business/benefit-concepts/{concept_id}", status_code=status.HTTP_204_NO_CONTENT)
+def business_benefit_concept_retire(
+    concept_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> Response:
+    retire_benefit_concept(db, user, concept_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/business/segments")
@@ -1314,6 +1384,18 @@ def business_benefit_alias_save(
     return {"benefit_alias": save_benefit_alias(db, user, payload.model_dump(exclude_none=True))}
 
 
+@router.put("/business/benefit-aliases/{alias_id}")
+def business_benefit_alias_update(
+    alias_id: str,
+    payload: BenefitAliasSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    body = payload.model_dump(exclude_none=True)
+    body["id"] = alias_id
+    return {"benefit_alias": save_benefit_alias(db, user, body)}
+
+
 @router.delete("/business/benefit-aliases/{alias_id}", status_code=status.HTTP_204_NO_CONTENT)
 def business_benefit_alias_retire(
     alias_id: str,
@@ -1457,6 +1539,19 @@ def business_catalog_package_save(
     return {"package": save_package(db, user, catalog_id, payload.model_dump(exclude_none=True))}
 
 
+@router.put("/business/catalogs/{catalog_id}/packages/{package_id}")
+def business_catalog_package_update(
+    catalog_id: str,
+    package_id: str,
+    payload: PackageSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    body = payload.model_dump(exclude_none=True)
+    body["id"] = package_id
+    return {"package": save_package(db, user, catalog_id, body)}
+
+
 @router.post("/business/catalogs/{catalog_id}/packages/{package_id}/clone")
 def business_catalog_package_clone(
     catalog_id: str,
@@ -1488,6 +1583,20 @@ def business_catalog_plan_save(
     user: User = Depends(current_user),
 ) -> dict:
     return {"plan": save_plan(db, user, catalog_id, package_id, payload.model_dump(exclude_none=True))}
+
+
+@router.put("/business/catalogs/{catalog_id}/packages/{package_id}/plans/{plan_id}")
+def business_catalog_plan_update(
+    catalog_id: str,
+    package_id: str,
+    plan_id: str,
+    payload: PackagePlanSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    body = payload.model_dump(exclude_none=True)
+    body["id"] = plan_id
+    return {"plan": save_plan(db, user, catalog_id, package_id, body)}
 
 
 @router.delete("/business/catalogs/{catalog_id}/packages/{package_id}/plans/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1541,6 +1650,16 @@ def business_catalog_workspace(
     user: User = Depends(current_user),
 ) -> dict:
     return {"workspace": get_catalog_workspace(db, user, catalog_id)}
+
+
+@router.delete("/business/catalogs/{catalog_id}", status_code=status.HTTP_204_NO_CONTENT)
+def business_catalog_retire(
+    catalog_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> Response:
+    retire_benefit_catalog(db, user, catalog_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/business/sources")

@@ -875,3 +875,79 @@ def test_catalog_offering_delete_route_returns_204(monkeypatch):
     assert response.status_code == 204
     assert called == {"catalog_id": "cat-1", "offering_id": "off-1", "base_revision": 2}
 
+
+def test_save_package_update_renames_existing_tier():
+    from app.services.benefit_setup_service import save_package
+
+    pkg = BenefitPackage(id="pkg1", catalog_revision_id="revision-1", package_key="lite", name="Lite", package_kind="comprehensive", sort_order=1)
+    catalog = _catalog_row(package_id="pkg1")
+    revision = _revision_row()
+    db = FakeDb(rows={BenefitCatalog: [catalog], BenefitCatalogRevision: [revision], BenefitPackage: [pkg]})
+
+    updated = save_package(
+        db,
+        _staff(),
+        "catalog-1",
+        {"base_revision": 5, "id": "pkg1", "name": "auto365 Comprehensive Lite", "package_key": "auto365-comprehensive-lite", "package_kind": "comprehensive", "sort_order": 1},
+    )
+
+    assert updated["name"] == "auto365 Comprehensive Lite"
+    assert updated["package_key"] == "auto365-comprehensive-lite"
+    assert pkg.name == "auto365 Comprehensive Lite"
+    assert pkg.package_kind == "comprehensive"
+    assert db.commits == 1
+
+
+def test_package_update_route_wires_service_with_id(monkeypatch):
+    captured = {}
+
+    def fake_save(db, user, catalog_id, payload):
+        captured.update(payload)
+        return {"id": payload.get("id"), "name": payload.get("name")}
+
+    monkeypatch.setattr(routes, "save_package", fake_save)
+    response = client().put(
+        "/api/business/catalogs/cat-1/packages/pkg-9",
+        json={"base_revision": 2, "name": "Renamed Tier"},
+    )
+
+    assert response.status_code == 200
+    assert captured["id"] == "pkg-9"
+    assert captured["name"] == "Renamed Tier"
+
+
+def test_assignment_context_keeps_explicit_package_target_for_other_tiers():
+    from app.services.business_setup_service import _validate_assignment_context
+
+    lite = BenefitPackage(id="package-1", catalog_revision_id="revision-1", package_key="lite", name="Lite", package_kind="comprehensive", sort_order=1)
+    plus = BenefitPackage(id="package-2", catalog_revision_id="revision-1", package_key="plus", name="Plus", package_kind="comprehensive", sort_order=2)
+    catalog = _catalog_row(package_id="package-1")
+    revision = _revision_row()
+    db = FakeDb(rows={BenefitCatalog: [catalog], BenefitCatalogRevision: [revision], BenefitPackage: [lite, plus]})
+
+    payload = _validate_assignment_context(
+        db,
+        catalog,
+        revision,
+        {"applies_to_type": "package", "applies_to_id": "package-2", "role": "addon_option"},
+    )
+
+    assert payload["applies_to_id"] == "package-2"
+
+
+def test_assignment_context_rejects_package_from_another_revision():
+    from app.services.business_setup_service import _validate_assignment_context
+
+    lite = BenefitPackage(id="package-1", catalog_revision_id="revision-1", package_key="lite", name="Lite", package_kind="comprehensive", sort_order=1)
+    foreign = BenefitPackage(id="package-foreign", catalog_revision_id="revision-other", package_key="stray", name="Stray", package_kind="comprehensive", sort_order=1)
+    catalog = _catalog_row(package_id="package-1")
+    revision = _revision_row()
+    db = FakeDb(rows={BenefitCatalog: [catalog], BenefitCatalogRevision: [revision], BenefitPackage: [lite, foreign]})
+
+    try:
+        _validate_assignment_context(db, catalog, revision, {"applies_to_type": "package", "applies_to_id": "package-foreign", "role": "addon_option"})
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 422
+    else:
+        raise AssertionError("A package from another revision must be rejected")
+

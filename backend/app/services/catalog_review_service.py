@@ -16,6 +16,7 @@ from app.models.tables import (
     BenefitPackagePlanItem,
     BenefitRelation,
     CatalogOffering,
+    CoverageType,
     DraftBenefitSelection,
     DraftSourceLineDecision,
     ExtractionBenefitLine,
@@ -23,6 +24,9 @@ from app.models.tables import (
     InsuranceProduct,
     InsuranceProductTier,
     QuotationDraft,
+    Segment,
+    VehicleCategory,
+    VehicleSubcategory,
     new_id,
 )
 
@@ -49,8 +53,54 @@ def _single_exact(rows: list, name: str) -> object | None:
     return matches[0] if len(matches) == 1 else None
 
 
+def _resolve_vehicle_category(db, text_val: str) -> str | None:
+    if not text_val:
+        return None
+    normalized = _norm(text_val)
+    categories = _rows(db, VehicleCategory)
+    if any(w in normalized for w in ("motorcycle", "motor cycle", "motor", "bike", "kapcai", "scooter")):
+        for cat in categories:
+            if cat.category_key == "motorcycle":
+                return cat.id
+    if any(w in normalized for w in ("lorry", "truck", "commercial", "rigid", "trailer", "tipper", "van", "bus", "prime mover")):
+        for cat in categories:
+            if cat.category_key == "commercial_vehicle":
+                return cat.id
+    if any(w in normalized for w in ("car", "private car", "saloon", "sedan", "suv", "mpv", "hatchback", "coupe", "wagon", "passenger")):
+        for cat in categories:
+            if cat.category_key in {"car", "private_car"}:
+                return cat.id
+    for cat in categories:
+        if _norm(cat.name) in normalized or _norm(cat.category_key) in normalized:
+            return cat.id
+    return None
+
+
+def _resolve_coverage_type(db, text_val: str) -> str | None:
+    if not text_val:
+        return None
+    normalized = _norm(text_val)
+    coverages = _rows(db, CoverageType)
+    if any(w in normalized for w in ("third party fire", "tpft", "fire and theft", "fire theft")):
+        for cov in coverages:
+            if cov.coverage_key == "third_party_fire_theft":
+                return cov.id
+    if any(w in normalized for w in ("third party", "tp", "third party only", "tpo")):
+        for cov in coverages:
+            if cov.coverage_key == "third_party":
+                return cov.id
+    if "comprehensive" in normalized or "comp" in normalized:
+        for cov in coverages:
+            if cov.coverage_key == "comprehensive":
+                return cov.id
+    for cov in coverages:
+        if _norm(cov.name) in normalized or _norm(cov.coverage_key) in normalized:
+            return cov.id
+    return None
+
+
 def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | None:
-    """Pin only an exact, unambiguous catalog context; never guess an arbitrary catalog."""
+    """Pin only an exact or best-dimension matching published catalog; never guess arbitrarily."""
 
     if not draft.company_id:
         return None
@@ -79,7 +129,13 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
     if not draft.tier_id and not tier_name and len(tiers) == 1:
         draft.tier_id = tiers[0].id
 
-    # 3. Find candidate catalogs
+    # 3. Resolve vehicle & coverage dimensions
+    raw_vehicle = _field_value(draft.fields or {}, "vehicle_type", "vehicle_category", "car_model", "vehicle_description", "vehicle_model", "make_model")
+    resolved_vehicle_cat_id = _resolve_vehicle_category(db, raw_vehicle)
+    raw_coverage = _field_value(draft.fields or {}, "coverage_type", "coverage", "policy_type")
+    resolved_coverage_id = _resolve_coverage_type(db, raw_coverage)
+
+    # 4. Find candidate catalogs for this company
     catalogs = [
         item for item in _rows(db, BenefitCatalog)
         if item.company_id == draft.company_id
@@ -87,15 +143,38 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
     ]
     if draft.product_id:
         catalogs = [item for item in catalogs if item.product_id == draft.product_id]
-    if tiers:
-        if not draft.tier_id:
-            # Ambiguous tier required
-            draft.catalog_revision_id = None
-            return None
+    if draft.tier_id:
         catalogs = [item for item in catalogs if item.tier_id == draft.tier_id]
 
-    if not catalogs or len(catalogs) != 1:
-        # If no single catalog found, check if there is exactly 1 catalog for this company
+    # Filter candidate catalogs by vehicle category if available
+    if resolved_vehicle_cat_id and len(catalogs) > 1:
+        matching_v = [item for item in catalogs if item.vehicle_category_id == resolved_vehicle_cat_id]
+        if matching_v:
+            catalogs = matching_v
+
+    # Filter candidate catalogs by coverage type if available
+    if resolved_coverage_id and len(catalogs) > 1:
+        matching_c = [item for item in catalogs if item.coverage_type_id == resolved_coverage_id]
+        if matching_c:
+            catalogs = matching_c
+
+    # If still multiple catalogs (e.g. multi-tier ladder catalogs for the same vehicle/coverage):
+    # Default to the lowest tier / base catalog
+    target_catalog = None
+    if len(catalogs) == 1:
+        target_catalog = catalogs[0]
+    elif len(catalogs) > 1:
+        # Sort by tier sort_order if available, otherwise by name / creation
+        def _cat_sort_key(c):
+            if c.tier_id:
+                t = next((tr for tr in tiers if tr.id == c.tier_id), None)
+                if t:
+                    return (0, int(t.sort_order), t.name)
+            return (1, 0, c.name)
+        sorted_catalogs = sorted(catalogs, key=_cat_sort_key)
+        target_catalog = sorted_catalogs[0]
+    else:
+        # Fall back to single active/published company catalog
         company_catalogs = [
             item for item in _rows(db, BenefitCatalog)
             if item.company_id == draft.company_id and item.status in {"active", "published"}
@@ -107,8 +186,6 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
         else:
             draft.catalog_revision_id = None
             return None
-    else:
-        target_catalog = catalogs[0]
 
     revisions = [
         item for item in _rows(db, BenefitCatalogRevision)
@@ -120,6 +197,8 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
 
     revision = max(revisions, key=lambda item: (int(item.revision_number), str(item.id)))
     draft.catalog_revision_id = revision.id
+    if target_catalog.product_id and not draft.product_id:
+        draft.product_id = target_catalog.product_id
     if target_catalog.tier_id and not draft.tier_id:
         draft.tier_id = target_catalog.tier_id
     return revision
@@ -130,9 +209,31 @@ def seed_base_benefits(db, draft: QuotationDraft, revision: BenefitCatalogRevisi
     existing_offerings = {item.catalog_offering_id for item in existing if item.catalog_offering_id}
     existing_concepts = {item.concept_id for item in existing if item.state == "current" and item.concept_id}
 
-    # Find catalog to check primary package
+    # Find primary package for this draft:
+    # 1. draft.package_id if set and valid in revision
+    # 2. catalog.package_id if set and valid in revision
+    # 3. Lowest-sort active comprehensive package in revision
     catalogs = [item for item in _rows(db, BenefitCatalog) if item.id == revision.catalog_id]
-    primary_pkg_id = catalogs[0].package_id if catalogs else None
+    catalog_pkg_id = catalogs[0].package_id if catalogs else None
+
+    revision_packages = [
+        item for item in _rows(db, BenefitPackage)
+        if item.catalog_revision_id == revision.id
+        and item.package_kind == "comprehensive"
+        and item.status == "active"
+    ]
+    primary_pkg_id = None
+    if revision_packages:
+        valid_ids = {str(item.id) for item in revision_packages}
+        if getattr(draft, "package_id", None) and str(draft.package_id) in valid_ids:
+            primary_pkg_id = str(draft.package_id)
+        elif catalog_pkg_id and str(catalog_pkg_id) in valid_ids:
+            primary_pkg_id = str(catalog_pkg_id)
+        else:
+            primary_pkg_id = str(min(revision_packages, key=lambda item: (int(item.sort_order or 0), item.name)).id)
+
+        if not getattr(draft, "package_id", None):
+            draft.package_id = primary_pkg_id
 
     # Filter offerings belonging to this revision that are included/base
     all_offerings = [

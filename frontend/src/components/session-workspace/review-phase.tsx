@@ -872,16 +872,14 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     }
   }
 
-  // Pin a specific package tier (package-system insurers) by its catalog.
-  async function pinPackageTier(catalogId: string) {
+  // Pin a specific package tier (package-system insurers) by its package_id.
+  async function pinPackageTier(packageId: string) {
     if (!workspace?.pinned.company_id) return;
     setPinLoading(true);
     queueOperation({
-      op: "pin_catalog",
-      company_id: workspace.pinned.company_id,
-      catalog_id: catalogId,
-      company_name: workspace.pinned_names.company_name,
-    }, "catalog");
+      op: "select_package_tier",
+      package_id: packageId,
+    }, "package_tier");
     try {
       await save();
     } catch {
@@ -1449,10 +1447,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                           const isTop = idx === workspace.package_tiers.length - 1;
                           return (
                             <button
-                              key={tier.catalog_id}
+                              key={tier.package_id}
                               type="button"
                               disabled={pinLoading}
-                              onClick={() => pinPackageTier(tier.catalog_id)}
+                              onClick={() => pinPackageTier(tier.package_id)}
                               className={`flex flex-col justify-between rounded-[var(--rl-radius-sm)] border p-2.5 text-left transition-all ${active
                                   ? "border-[var(--rl-black)] bg-[var(--rl-bg)] shadow-sm ring-1 ring-[var(--rl-black)]"
                                   : "border-[var(--rl-border)] bg-white hover:border-[var(--rl-text-muted)]"

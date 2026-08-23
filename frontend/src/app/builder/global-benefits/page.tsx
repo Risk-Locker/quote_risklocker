@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowClockwise, ImageSquare, MagnifyingGlass, Plus, ShieldCheck, Tag, X } from "@phosphor-icons/react";
+import { ArrowClockwise, ImageSquare, MagnifyingGlass, Plus, ShieldCheck, Tag, Trash, X } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
 import { BuilderNav } from "@/components/builder-nav";
 import { GuidedTour } from "@/components/guided-tour";
 import { TagEditor } from "@/components/tag-editor";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { PageLoading } from "@/components/ui/page-loading";
 import { Select } from "@/components/ui/select";
@@ -217,6 +218,26 @@ export default function GlobalBenefitsPage() {
     }
   }
 
+  const [retiring, setRetiring] = useState(false);
+  const [showRetireConfirm, setShowRetireConfirm] = useState(false);
+
+  async function handleRetireConcept() {
+    if (!selected) return;
+    setRetiring(true);
+    setError("");
+    try {
+      await api(`/business/benefit-concepts/${selected.id}`, { method: "DELETE" });
+      setShowRetireConfirm(false);
+      await refresh(false);
+      setSelectedId("");
+      setIsNew(false);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setRetiring(false);
+    }
+  }
+
   if (loading) {
     return <AppShell><PageLoading /></AppShell>;
   }
@@ -381,6 +402,17 @@ export default function GlobalBenefitsPage() {
                     <Link href="/extraction/benefit-aliases" className="inline-flex h-8 items-center gap-1.5 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] px-3 text-xs font-semibold text-[var(--rl-text-muted)] hover:border-[var(--rl-black)] hover:text-[var(--rl-text-strong)]">
                       Manage aliases
                     </Link>
+                    {!isNew && selected && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)]"
+                        onClick={() => setShowRetireConfirm(true)}
+                        icon={<Trash size={14} />}
+                      >
+                        Retire
+                      </Button>
+                    )}
                     <Button variant="secondary" size="sm" onClick={newBenefit} icon={<Plus size={14} />}>New</Button>
                     <Button size="sm" loading={saving} onClick={saveBenefit}>Save Benefit</Button>
                   </div>
@@ -535,6 +567,16 @@ export default function GlobalBenefitsPage() {
           </main>
         </div>
       </section>
+
+      <ConfirmDialog
+        open={showRetireConfirm}
+        onOpenChange={setShowRetireConfirm}
+        title="Retire Benefit Concept"
+        message={`Are you sure you want to retire "${selected?.label}"? It will be marked as retired and hidden from new catalogs.`}
+        confirmLabel="Retire Concept"
+        loading={retiring}
+        onConfirm={handleRetireConcept}
+      />
     </AppShell>
   );
 }

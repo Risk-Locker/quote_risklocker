@@ -161,3 +161,55 @@ def test_company_detection_aliases_live_under_business_api(monkeypatch):
     )
     assert saved.status_code == 200
     assert saved.json()["company_alias"]["normalized_alias"] == "qbe insurance"
+
+
+def test_crud_lifecycle_operations_contract(monkeypatch):
+    monkeypatch.setattr(routes, "save_business_product", lambda _db, _user, payload: {"id": payload.get("id", "p1"), "name": payload["name"]})
+    monkeypatch.setattr(routes, "delete_business_product", lambda _db, _user, product_id: None)
+    monkeypatch.setattr(routes, "save_business_tier", lambda _db, _user, payload: {"id": payload.get("id", "t1"), "name": payload["name"]})
+    monkeypatch.setattr(routes, "delete_business_tier", lambda _db, _user, tier_id: None)
+    monkeypatch.setattr(routes, "retire_benefit_concept", lambda _db, _user, concept_id: None)
+    monkeypatch.setattr(routes, "save_company_alias", lambda _db, _user, payload: {"id": payload.get("id", "a1"), "alias": payload["alias"]})
+    monkeypatch.setattr(routes, "save_benefit_alias", lambda _db, _user, payload: {"id": payload.get("id", "ba1"), "phrase": payload["phrase"]})
+    monkeypatch.setattr(routes, "retire_benefit_catalog", lambda _db, _user, catalog_id: None)
+    monkeypatch.setattr(routes, "save_plan", lambda _db, _user, cat_id, pkg_id, payload: {"id": payload.get("id", "pl1"), "name": payload["name"]})
+
+    # 1. Product PUT & DELETE
+    put_prod = client().put("/api/business/products/p1", json={"name": "Motor Plus Updated"})
+    assert put_prod.status_code == 200
+    assert put_prod.json()["product"]["id"] == "p1"
+    assert put_prod.json()["product"]["name"] == "Motor Plus Updated"
+
+    del_prod = client().delete("/api/business/products/p1")
+    assert del_prod.status_code == 204
+
+    # 2. Tier PUT & DELETE
+    put_tier = client().put("/api/business/tiers/t1", json={"name": "Premier Plus"})
+    assert put_tier.status_code == 200
+    assert put_tier.json()["tier"]["id"] == "t1"
+
+    del_tier = client().delete("/api/business/tiers/t1")
+    assert del_tier.status_code == 204
+
+    # 3. Concept DELETE (retire)
+    del_concept = client().delete("/api/business/benefit-concepts/b1")
+    assert del_concept.status_code == 204
+
+    # 4. Company alias PUT
+    put_alias = client().put("/api/business/company-aliases/a1", json={"alias": "QBE Malaysia"})
+    assert put_alias.status_code == 200
+    assert put_alias.json()["company_alias"]["alias"] == "QBE Malaysia"
+
+    # 5. Benefit alias PUT
+    put_balias = client().put("/api/business/benefit-aliases/ba1", json={"benefit_id": "b1", "phrase": "24/7 Towing"})
+    assert put_balias.status_code == 200
+    assert put_balias.json()["benefit_alias"]["phrase"] == "24/7 Towing"
+
+    # 6. Catalog DELETE (retire)
+    del_catalog = client().delete("/api/business/catalogs/cat-1")
+    assert del_catalog.status_code == 204
+
+    # 7. Plan PUT
+    put_plan = client().put("/api/business/catalogs/cat-1/packages/pkg-1/plans/pl1", json={"name": "Plan B", "base_revision": 1})
+    assert put_plan.status_code == 200
+    assert put_plan.json()["plan"]["id"] == "pl1"

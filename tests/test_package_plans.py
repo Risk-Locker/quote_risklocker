@@ -42,7 +42,7 @@ from app.rendering.render_context import (
 )
 from app.services.benefit_setup_service import save_plan, save_plan_items, retire_plan
 from app.services.business_setup_service import _revision_content_payload
-from app.services.catalog_review_service import auto_apply_extracted_benefits
+from app.services.catalog_review_service import auto_apply_extracted_benefits, seed_base_benefits
 from app.services.workspace_service import _workspace_package_tiers, apply_workspace_patch
 from app.extraction.gemini_extractor import build_rag_system_prompt
 
@@ -427,11 +427,58 @@ def test_rag_prompt_override_replaces_instructions_but_keeps_grounding():
     assert "Towing" in custom
 
 
-def test_workspace_package_tiers_lists_comprehensive_tiers_with_current_flag():
+def test_workspace_package_tiers_lists_comprehensive_tiers_in_single_revision():
     values = plan_fixture_values()
     draft = next(item for item in values if isinstance(item, QuotationDraft))
     draft.company_id = "company-1"
-    # Add a second comprehensive package/catalog to simulate a package ladder.
+    draft.catalog_revision_id = "catalog-revision-1"
+    draft.package_id = None
+
+    # Add second and third comprehensive packages into the SAME catalog revision
+    pkg_plus = BenefitPackage(
+        id="package-plus", catalog_revision_id="catalog-revision-1", package_key="plus", name="Plus",
+        package_kind="comprehensive", sort_order=1, revision=1, status="active",
+    )
+    pkg_premier = BenefitPackage(
+        id="package-premier", catalog_revision_id="catalog-revision-1", package_key="premier", name="Premier",
+        package_kind="comprehensive", sort_order=2, revision=1, status="active",
+    )
+    # Add an offering tied specifically to package-plus
+    offering_plus = CatalogOffering(
+        id="offering-plus-spec", catalog_revision_id="catalog-revision-1", offering_key="plus-spec",
+        concept_id="concept-spec", offering_kind="base", role="included",
+        applies_to_type="package", applies_to_id="package-plus", status="active",
+    )
+    values.extend([pkg_plus, pkg_premier, offering_plus])
+    db = FakeDb(values)
+
+    tiers = _workspace_package_tiers(db, draft)
+    assert len(tiers) == 3
+    by_key = {item["package_key"]: item for item in tiers}
+    assert [item["package_key"] for item in tiers] == ["main", "plus", "premier"]
+    # Main is current by default because catalog.package_id points to package-main
+    assert by_key["main"]["is_current"] is True
+    assert by_key["plus"]["is_current"] is False
+    assert by_key["premier"]["is_current"] is False
+    assert by_key["main"]["catalog_revision_id"] == "catalog-revision-1"
+    assert by_key["plus"]["defaults_count"] >= by_key["main"]["defaults_count"]
+
+    # When draft.package_id is explicitly set to plus:
+    draft.package_id = "package-plus"
+    tiers_updated = _workspace_package_tiers(db, draft)
+    by_key_updated = {item["package_key"]: item for item in tiers_updated}
+    assert by_key_updated["main"]["is_current"] is False
+    assert by_key_updated["plus"]["is_current"] is True
+    assert by_key_updated["premier"]["is_current"] is False
+
+
+def test_workspace_package_tiers_legacy_multicatalog_fallback():
+    values = plan_fixture_values()
+    draft = next(item for item in values if isinstance(item, QuotationDraft))
+    draft.company_id = "company-1"
+    draft.catalog_revision_id = None
+    draft.package_id = None
+
     catalog2 = BenefitCatalog(
         id="catalog-2", company_id="company-1", product_id=None, tier_id=None, package_id="package-main2",
         name="Nova Catalog 2", revision=1, status="published",
@@ -450,7 +497,90 @@ def test_workspace_package_tiers_lists_comprehensive_tiers_with_current_flag():
     tiers = _workspace_package_tiers(db, draft)
     assert len(tiers) == 2
     by_key = {item["package_key"]: item for item in tiers}
-    assert by_key["main"]["is_current"] is True
-    assert by_key["main2"]["is_current"] is False
     assert by_key["main"]["catalog_id"] == "catalog-1"
-    assert by_key["main"]["defaults_count"] >= 1
+    assert by_key["main2"]["catalog_id"] == "catalog-2"
+
+
+def test_apply_select_package_tier_operation():
+    values = plan_fixture_values()
+    draft = next(item for item in values if isinstance(item, QuotationDraft))
+    draft.company_id = "company-1"
+    draft.catalog_revision_id = "catalog-revision-1"
+    draft.package_id = "package-main"
+
+    pkg_plus = BenefitPackage(
+        id="package-plus", catalog_revision_id="catalog-revision-1", package_key="plus", name="Plus",
+        package_kind="comprehensive", sort_order=1, revision=1, status="active",
+    )
+    offering_plus = CatalogOffering(
+        id="offering-plus-spec", catalog_revision_id="catalog-revision-1", offering_key="plus-spec",
+        concept_id="concept-spec", offering_kind="base", role="included",
+        applies_to_type="package", applies_to_id="package-plus", status="active",
+    )
+    # Foreign package in different revision
+    pkg_foreign = BenefitPackage(
+        id="package-foreign", catalog_revision_id="other-revision", package_key="foreign", name="Foreign",
+        package_kind="comprehensive", sort_order=1, revision=1, status="active",
+    )
+    values.extend([pkg_plus, offering_plus, pkg_foreign])
+    db = FakeDb(values)
+
+    # 1. Switch to package-plus
+    res = apply_workspace_patch(
+        db, user(), draft.id,
+        base_revision=draft.revision,
+        operations=[{"op": "select_package_tier", "package_id": "package-plus"}],
+    )
+    assert res["revision"] == 4
+    assert draft.package_id == "package-plus"
+    selections = [s for s in db.values.values() if isinstance(s, DraftBenefitSelection) and s.draft_id == draft.id]
+    assert any(s.catalog_offering_id == "offering-plus-spec" for s in selections)
+
+    # 2. Foreign package rejected
+    with pytest.raises(AppError, match="does not belong"):
+        apply_workspace_patch(
+            db, user(), draft.id,
+            base_revision=draft.revision,
+            operations=[{"op": "select_package_tier", "package_id": "package-foreign"}],
+        )
+
+    # 3. Same package tier select is a clean no-op
+    res_noop = apply_workspace_patch(
+        db, user(), draft.id,
+        base_revision=draft.revision,
+        operations=[{"op": "select_package_tier", "package_id": "package-plus"}],
+    )
+    assert res_noop["revision"] == 5
+
+
+def test_seed_base_benefits_honors_draft_package_id():
+    values = plan_fixture_values(with_base_selection=False)
+    draft = next(item for item in values if isinstance(item, QuotationDraft))
+    draft.company_id = "company-1"
+    draft.catalog_revision_id = "catalog-revision-1"
+    revision = next(item for item in values if isinstance(item, BenefitCatalogRevision))
+
+    pkg_plus = BenefitPackage(
+        id="package-plus", catalog_revision_id=revision.id, package_key="plus", name="Plus",
+        package_kind="comprehensive", sort_order=1, revision=1, status="active",
+    )
+    offering_main_only = CatalogOffering(
+        id="offering-main-only", catalog_revision_id=revision.id, offering_key="main-only",
+        concept_id="concept-main-only", offering_kind="base", role="included",
+        applies_to_type="package", applies_to_id="package-main", status="active",
+    )
+    offering_plus_only = CatalogOffering(
+        id="offering-plus-only", catalog_revision_id=revision.id, offering_key="plus-only",
+        concept_id="concept-plus-only", offering_kind="base", role="included",
+        applies_to_type="package", applies_to_id="package-plus", status="active",
+    )
+    values.extend([pkg_plus, offering_main_only, offering_plus_only])
+    db = FakeDb(values)
+
+    draft.package_id = "package-plus"
+    created = seed_base_benefits(db, draft, revision)
+    assert created >= 1
+    added_offering_ids = {item.catalog_offering_id for item in db.added if isinstance(item, DraftBenefitSelection)}
+    assert "offering-plus-only" in added_offering_ids
+    assert "offering-main-only" not in added_offering_ids
+

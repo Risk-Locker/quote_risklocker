@@ -18,6 +18,7 @@ import {
   Plus,
   ShieldCheck,
   Sparkle,
+  Trash,
   TreeStructure,
   X,
 } from "@phosphor-icons/react";
@@ -867,6 +868,86 @@ function BenefitsPageContent() {
     }
   }
 
+  async function renamePackage(pkg: Package) {
+    if (!selectedCatalog) return;
+    const next = window.prompt("Rename bundle / package", pkg.name);
+    if (!next || !next.trim() || next.trim() === pkg.name) return;
+    setSaving(true);
+    setError("");
+    try {
+      await api(`/business/catalogs/${selectedCatalog.id}/packages/${pkg.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          base_revision: selectedCatalog.revision,
+          name: next.trim(),
+          package_key: pkg.package_key || undefined,
+          package_kind: pkg.package_kind,
+          sort_order: pkg.sort_order || 0,
+          status: pkg.status || "active",
+        }),
+      });
+      await loadCatalog(selectedCatalog.id, true);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function retireBundle(bundle: Package) {
+    if (!selectedCatalog) return;
+    if (!window.confirm(`Retire bundle "${bundle.name}" and all its plans? Existing quotations keep their pinned revision.`)) return;
+    setSaving(true);
+    setError("");
+    try {
+      await api(`/business/catalogs/${selectedCatalog.id}/packages/${bundle.id}`, { method: "DELETE" });
+      await loadCatalog(selectedCatalog.id, true);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function renamePlan(bundle: Package, plan: Record<string, any>) {
+    if (!selectedCatalog) return;
+    const next = window.prompt("Rename plan", plan.name);
+    if (!next || !next.trim() || next.trim() === plan.name) return;
+    setPlanSaving(true);
+    setError("");
+    try {
+      await api(`/business/catalogs/${selectedCatalog.id}/packages/${bundle.id}/plans/${plan.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          base_revision: selectedCatalog.revision,
+          name: next.trim(),
+          plan_key: plan.plan_key || undefined,
+          sort_order: plan.sort_order || 0,
+          status: plan.status || "active",
+        }),
+      });
+      await loadCatalog(selectedCatalog.id, true);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setPlanSaving(false);
+    }
+  }
+
+  async function retireCatalog(catalog: Catalog) {
+    if (!window.confirm(`Retire catalog "${catalog.name}"? It will be archived and hidden from the active builder.`)) return;
+    setSaving(true);
+    setError("");
+    try {
+      await api(`/business/catalogs/${catalog.id}`, { method: "DELETE" });
+      await loadCompany(selectedCompanyId, selectedProductId);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (loading) {
     return (
       <AppShell>
@@ -1244,6 +1325,16 @@ function BenefitsPageContent() {
                         Tier {comprehensivePackages.findIndex((p) => p.id === activePackage.id) + 1} of {comprehensivePackages.length}
                       </span>
                     )}
+                    {isPackaged && activePackage && (
+                      <button
+                        type="button"
+                        onClick={() => renamePackage(activePackage)}
+                        className="flex items-center gap-1 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--rl-text-muted)] hover:bg-[var(--rl-bg)] hover:text-[var(--rl-text-strong)]"
+                        title="Rename this tier"
+                      >
+                        <PencilSimple size={12} weight="bold" /> Rename
+                      </button>
+                    )}
                   </div>
                   <p className="text-xs text-[var(--rl-text-muted)]">
                     {selectedCompany?.name} · {selectedSegment?.name || "Private"} · {selectedVehicle?.name || "Car"} ·{" "}
@@ -1279,6 +1370,17 @@ function BenefitsPageContent() {
                 >
                   <ArrowCounterClockwise size={14} />
                   Reset to Default
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => retireCatalog(selectedCatalog)}
+                  disabled={saving}
+                  className="gap-1.5 text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)]"
+                  title="Retire this entire catalog"
+                >
+                  <Trash size={14} />
+                  Retire Catalog
                 </Button>
                 <Button size="sm" onClick={publishConfig} disabled={saving} className="gap-1.5">
                   <Check size={14} weight="bold" />
@@ -1692,14 +1794,34 @@ function BenefitsPageContent() {
                                 {plans.length} plan{plans.length === 1 ? "" : "s"}
                               </span>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => setExpandedPlanId(expanded ? "" : b.id)}
-                              className="flex items-center gap-1 rounded px-2 py-1 font-semibold text-[var(--rl-text-muted)] hover:bg-[var(--rl-surface)] hover:text-[var(--rl-text-strong)] transition-colors"
-                            >
-                              {expanded ? <EyeSlash size={14} weight="bold" /> : <Eye size={14} weight="bold" />}
-                              {expanded ? "Collapse" : "Manage plans"}
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => renamePackage(b)}
+                                className="flex items-center gap-1 rounded px-2 py-1 font-semibold text-[var(--rl-text-muted)] hover:bg-[var(--rl-surface)] hover:text-[var(--rl-text-strong)] transition-colors"
+                                title="Rename bundle"
+                              >
+                                <PencilSimple size={13} weight="bold" />
+                                Rename
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => retireBundle(b)}
+                                className="flex items-center gap-1 rounded px-2 py-1 font-semibold text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] transition-colors"
+                                title="Retire bundle"
+                              >
+                                <Trash size={13} weight="bold" />
+                                Retire
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setExpandedPlanId(expanded ? "" : b.id)}
+                                className="flex items-center gap-1 rounded px-2 py-1 font-semibold text-[var(--rl-text-muted)] hover:bg-[var(--rl-surface)] hover:text-[var(--rl-text-strong)] transition-colors"
+                              >
+                                {expanded ? <EyeSlash size={14} weight="bold" /> : <Eye size={14} weight="bold" />}
+                                {expanded ? "Collapse" : "Manage plans"}
+                              </button>
+                            </div>
                           </div>
 
                           {expanded && (
@@ -1734,14 +1856,25 @@ function BenefitsPageContent() {
                                             {items.length} member{items.length === 1 ? "" : "s"}
                                           </span>
                                         </div>
-                                        <button
-                                          type="button"
-                                          onClick={() => retirePlan(b, plan)}
-                                          disabled={planSaving}
-                                          className="rounded px-2 py-1 text-[11px] font-semibold text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] transition-colors"
-                                        >
-                                          Retire
-                                        </button>
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            type="button"
+                                            onClick={() => renamePlan(b, plan)}
+                                            disabled={planSaving}
+                                            className="rounded px-2 py-1 text-[11px] font-semibold text-[var(--rl-text-muted)] hover:bg-[var(--rl-bg)] hover:text-[var(--rl-text-strong)] transition-colors flex items-center gap-1"
+                                            title="Rename plan"
+                                          >
+                                            <PencilSimple size={12} weight="bold" /> Rename
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => retirePlan(b, plan)}
+                                            disabled={planSaving}
+                                            className="rounded px-2 py-1 text-[11px] font-semibold text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] transition-colors flex items-center gap-1"
+                                          >
+                                            <Trash size={12} weight="bold" /> Retire
+                                          </button>
+                                        </div>
                                       </div>
 
                                       {/* Members */}

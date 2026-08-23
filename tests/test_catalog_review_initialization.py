@@ -13,8 +13,10 @@ if str(BACKEND) not in sys.path:
 from app.models.tables import (  # noqa: E402
     BenefitCatalog,
     BenefitCatalogRevision,
+    BenefitPackage,
     BenefitRelation,
     CatalogOffering,
+    CoverageType,
     DraftBenefitSelection,
     DraftSourceLineDecision,
     ExtractionBenefitLine,
@@ -22,6 +24,7 @@ from app.models.tables import (  # noqa: E402
     InsuranceProduct,
     InsuranceProductTier,
     QuotationDraft,
+    VehicleCategory,
 )
 from app.services.catalog_review_service import (  # noqa: E402
     auto_apply_extracted_benefits,
@@ -202,6 +205,25 @@ def test_package_based_catalog_pinning_and_primary_package_seeding():
     assert selections[0].catalog_offering_id == lite_towing.id
 
 
+def test_stale_primary_package_falls_back_to_revision_lite_package():
+    product = InsuranceProduct(id="prod-am", company_id="comp-am", name="Private Car Comprehensive", status="active")
+    catalog = BenefitCatalog(id="cat-am", company_id="comp-am", product_id=product.id, name="Private Car Comprehensive", status="published", package_id="pkg-stale-other-revision")
+    revision = BenefitCatalogRevision(id="rev-am", catalog_id=catalog.id, revision_number=2, state="published", content_hash="f" * 64)
+    lite = BenefitPackage(id="pkg-lite", catalog_revision_id=revision.id, package_key="lite", name="auto365 Comprehensive Lite", package_kind="comprehensive", sort_order=1, status="active")
+    top = BenefitPackage(id="pkg-top", catalog_revision_id=revision.id, package_key="top", name="Private Car Comprehensive", package_kind="comprehensive", sort_order=4, status="active")
+    lite_towing = CatalogOffering(id="off-lite-tow", catalog_revision_id=revision.id, offering_key="lite-tow", concept_id="c-tow", offering_kind="base", role="included", applies_to_type="package", applies_to_id=lite.id, status="active")
+    top_towing = CatalogOffering(id="off-top-tow", catalog_revision_id=revision.id, offering_key="top-tow", concept_id="c-tow", offering_kind="base", role="included", applies_to_type="package", applies_to_id=top.id, status="active")
+
+    draft = QuotationDraft(id="draft-am", uploaded_file_id="f-am", owner_id="u-1", company_id="comp-am", fields={"product_name": {"value": "Private Car Comprehensive"}}, scalar_decisions={}, warnings=[])
+    db = FakeDb([product, catalog, revision, lite, top, lite_towing, top_towing])
+
+    res = initialize_catalog_review(db, draft)
+
+    assert res["catalog_revision_id"] == revision.id
+    selections = [item for item in db.added if isinstance(item, DraftBenefitSelection)]
+    assert [item.catalog_offering_id for item in selections] == [lite_towing.id]
+
+
 def test_same_concept_addon_upgrade_supersedes_without_relations_edge():
     product = InsuranceProduct(id="prod-1", company_id="comp-1", name="Product", status="active")
     catalog = BenefitCatalog(id="cat-1", company_id="comp-1", product_id=product.id, name="Product", status="published")
@@ -225,4 +247,56 @@ def test_same_concept_addon_upgrade_supersedes_without_relations_edge():
     assert new_sel.catalog_offering_id == upgrade_towing.id
     assert new_sel.state == "current"
     assert decision.disposition == "mapped"
+
+
+def test_multi_catalog_vehicle_dimension_resolution():
+    v_car = VehicleCategory(id="v-car", category_key="car", name="Private Car")
+    v_lorry = VehicleCategory(id="v-lorry", category_key="commercial_vehicle", name="Commercial Vehicle")
+
+    cat_car = BenefitCatalog(id="cat-car", company_id="comp-qbe", name="Private Car Protector", vehicle_category_id=v_car.id, status="published")
+    rev_car = BenefitCatalogRevision(id="rev-car", catalog_id=cat_car.id, revision_number=1, state="published", content_hash="1" * 64)
+
+    cat_lorry = BenefitCatalog(id="cat-lorry", company_id="comp-qbe", name="Commercial Vehicle Protector", vehicle_category_id=v_lorry.id, status="published")
+    rev_lorry = BenefitCatalogRevision(id="rev-lorry", catalog_id=cat_lorry.id, revision_number=1, state="published", content_hash="2" * 64)
+
+    # Draft with vehicle_type = "Lorry"
+    draft_lorry = QuotationDraft(
+        id="draft-l", uploaded_file_id="f-1", owner_id="u-1", company_id="comp-qbe",
+        fields={"vehicle_type": {"value": "ISUZU LORRY 3 TON"}}, scalar_decisions={}, warnings=[],
+    )
+    db = FakeDb([v_car, v_lorry, cat_car, rev_car, cat_lorry, rev_lorry])
+
+    res = initialize_catalog_review(db, draft_lorry)
+    assert res["catalog_revision_id"] == rev_lorry.id
+    assert draft_lorry.catalog_revision_id == rev_lorry.id
+
+    # Draft with car_model = "HONDA CIVIC"
+    draft_car = QuotationDraft(
+        id="draft-c", uploaded_file_id="f-2", owner_id="u-1", company_id="comp-qbe",
+        fields={"car_model": {"value": "HONDA CIVIC 1.5 SEDAN"}}, scalar_decisions={}, warnings=[],
+    )
+    res_car = initialize_catalog_review(db, draft_car)
+    assert res_car["catalog_revision_id"] == rev_car.id
+    assert draft_car.catalog_revision_id == rev_car.id
+
+
+def test_multi_catalog_coverage_dimension_resolution():
+    c_comp = CoverageType(id="c-comp", coverage_key="comprehensive", name="Comprehensive")
+    c_tpft = CoverageType(id="c-tpft", coverage_key="third_party_fire_theft", name="Third Party, Fire and Theft")
+
+    cat_comp = BenefitCatalog(id="cat-comp", company_id="comp-etiqa", name="Etiqa Comprehensive", coverage_type_id=c_comp.id, status="published")
+    rev_comp = BenefitCatalogRevision(id="rev-comp", catalog_id=cat_comp.id, revision_number=1, state="published", content_hash="3" * 64)
+
+    cat_tpft = BenefitCatalog(id="cat-tpft", company_id="comp-etiqa", name="Etiqa TPFT", coverage_type_id=c_tpft.id, status="published")
+    rev_tpft = BenefitCatalogRevision(id="rev-tpft", catalog_id=cat_tpft.id, revision_number=1, state="published", content_hash="4" * 64)
+
+    draft_tpft = QuotationDraft(
+        id="draft-tpft", uploaded_file_id="f-3", owner_id="u-1", company_id="comp-etiqa",
+        fields={"coverage_type": {"value": "Third Party Fire & Theft"}}, scalar_decisions={}, warnings=[],
+    )
+    db = FakeDb([c_comp, c_tpft, cat_comp, rev_comp, cat_tpft, rev_tpft])
+
+    res = initialize_catalog_review(db, draft_tpft)
+    assert res["catalog_revision_id"] == rev_tpft.id
+    assert draft_tpft.catalog_revision_id == rev_tpft.id
 

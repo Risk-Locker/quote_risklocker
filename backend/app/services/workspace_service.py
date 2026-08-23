@@ -369,6 +369,7 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
     company = db.get(InsuranceCompany, draft.company_id) if draft.company_id else None
     product = db.get(InsuranceProduct, draft.product_id) if draft.product_id else None
     tier = db.get(InsuranceProductTier, draft.tier_id) if draft.tier_id else None
+    package = db.get(BenefitPackage, draft.package_id) if getattr(draft, "package_id", None) else None
     catalog_overview = _catalog_overview(db, draft)
     concepts = list(db.scalars(select(BenefitConcept)).all())
     extras = build_extras(selections, concepts)
@@ -391,6 +392,7 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
             "company_id": draft.company_id,
             "product_id": draft.product_id,
             "tier_id": draft.tier_id,
+            "package_id": draft.package_id,
             "catalog_revision_id": draft.catalog_revision_id,
             "template_revision_id": draft.template_revision_id,
         },
@@ -398,6 +400,7 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
             "company_name": company.name if company else None,
             "product_name": product.name if product else None,
             "tier_name": tier.name if tier else None,
+            "package_name": package.name if package else None,
         },
         "catalog": catalog_overview,
         "template": template,
@@ -487,11 +490,65 @@ def _workspace_packs(db, draft: QuotationDraft) -> list[dict]:
 
 
 def _workspace_package_tiers(db, draft: QuotationDraft) -> list[dict]:
-    """Comprehensive package tiers for the pinned company/product (AmAssurance-style).
+    """Comprehensive package tiers for the pinned catalog revision / company (AmAssurance-style).
 
-    Each tier is a catalog whose ``package_id`` points to a comprehensive
-    package. Used by the sessions page to render compact tier chips.
+    When a catalog revision is pinned on the draft, tiers are the active comprehensive
+    packages belonging to that revision. When no revision is pinned yet, falls back
+    to iterating company catalogs and picking their newest published revision.
     """
+    if draft.catalog_revision_id:
+        revision = db.get(BenefitCatalogRevision, draft.catalog_revision_id)
+        if revision is not None:
+            catalog = db.get(BenefitCatalog, revision.catalog_id)
+            packages = [
+                item for item in db.scalars(select(BenefitPackage)).all()
+                if item.catalog_revision_id == revision.id
+                and item.package_kind == "comprehensive"
+                and item.status == "active"
+            ]
+            if packages:
+                packages.sort(key=lambda item: (int(item.sort_order or 0), item.name.casefold()))
+                valid_ids = {item.id for item in packages}
+                current_pkg_id = None
+                if getattr(draft, "package_id", None) and draft.package_id in valid_ids:
+                    current_pkg_id = draft.package_id
+                elif catalog and catalog.package_id and catalog.package_id in valid_ids:
+                    current_pkg_id = catalog.package_id
+                else:
+                    current_pkg_id = packages[0].id
+
+                offerings = [
+                    item for item in db.scalars(select(CatalogOffering)).all()
+                    if item.catalog_revision_id == revision.id
+                    and item.status in {"active", "compatibility"}
+                ]
+                tiers: list[dict] = []
+                for package in packages:
+                    pkg_offerings = [
+                        item for item in offerings
+                        if item.applies_to_type != "package" or item.applies_to_id == package.id
+                    ]
+                    def_count = sum(
+                        1 for item in pkg_offerings
+                        if item.role == "included" or (item.role is None and item.offering_kind == "base")
+                    )
+                    add_count = sum(
+                        1 for item in pkg_offerings
+                        if item.role in {"addon_option", "bundle_component"}
+                    )
+                    tiers.append({
+                        "package_id": package.id,
+                        "package_key": package.package_key,
+                        "name": package.name,
+                        "sort_order": int(package.sort_order or 0),
+                        "catalog_id": catalog.id if catalog else "",
+                        "catalog_revision_id": revision.id,
+                        "defaults_count": def_count,
+                        "addons_count": add_count,
+                        "is_current": package.id == current_pkg_id,
+                    })
+                return tiers
+
     if not draft.company_id:
         return []
     catalogs = [
@@ -502,32 +559,49 @@ def _workspace_package_tiers(db, draft: QuotationDraft) -> list[dict]:
         catalogs = [item for item in catalogs if not item.product_id or item.product_id == draft.product_id]
     if not catalogs:
         return []
-    packages = {
-        item.id: item for item in db.scalars(select(BenefitPackage)).all()
-        if item.package_kind == "comprehensive" and item.status == "active"
-    }
-    revisions = {
-        item.catalog_id: item for item in db.scalars(select(BenefitCatalogRevision)).all()
-        if item.state == "published"
-    }
-    offerings_by_revision: dict[str, list] = {}
-    for item in db.scalars(select(CatalogOffering)).all():
-        offerings_by_revision.setdefault(item.catalog_revision_id, []).append(item)
-    tiers: list[dict] = []
+
+    tiers = []
     for catalog in catalogs:
-        package = packages.get(catalog.package_id) if catalog.package_id else None
+        revs = [
+            item for item in db.scalars(select(BenefitCatalogRevision)).all()
+            if item.catalog_id == catalog.id and item.state == "published"
+        ]
+        if not revs:
+            continue
+        revision = max(revs, key=lambda item: (int(item.revision_number), str(item.id)))
+        rev_packages = [
+            item for item in db.scalars(select(BenefitPackage)).all()
+            if item.catalog_revision_id == revision.id
+            and item.package_kind == "comprehensive"
+            and item.status == "active"
+        ]
+        package = None
+        if catalog.package_id:
+            package = next((p for p in rev_packages if p.id == catalog.package_id), None)
+            if package is None:
+                package = db.get(BenefitPackage, catalog.package_id)
+        elif rev_packages:
+            package = min(rev_packages, key=lambda p: (int(p.sort_order or 0), p.name.casefold()))
         if package is None:
             continue
-        revision = revisions.get(catalog.id)
-        if revision is None:
-            continue
-        offerings = offerings_by_revision.get(revision.id, [])
-        active = [item for item in offerings if item.status in {"active", "compatibility"}]
+
+        offerings = [
+            item for item in db.scalars(select(CatalogOffering)).all()
+            if item.catalog_revision_id == revision.id
+            and item.status in {"active", "compatibility"}
+        ]
+        pkg_offerings = [
+            item for item in offerings
+            if item.applies_to_type != "package" or item.applies_to_id == package.id
+        ]
         def_count = sum(
-            1 for item in active
+            1 for item in pkg_offerings
             if item.role == "included" or (item.role is None and item.offering_kind == "base")
         )
-        add_count = sum(1 for item in active if item.role in {"addon_option", "bundle_component"})
+        add_count = sum(
+            1 for item in pkg_offerings
+            if item.role in {"addon_option", "bundle_component"}
+        )
         tiers.append({
             "package_id": package.id,
             "package_key": package.package_key,
@@ -747,6 +821,7 @@ def _reset_catalog_pin(draft: QuotationDraft, *, clear_company: bool = True) -> 
         draft.company_id = None
     draft.product_id = None
     draft.tier_id = None
+    draft.package_id = None
     draft.catalog_revision_id = None
 
 
@@ -768,8 +843,9 @@ def _reconcile_catalog_pin(db, draft: QuotationDraft, *, changed_field: str) -> 
                 _reset_catalog_pin(draft, clear_company=True)
     elif changed_field in {"product_name", "product"}:
         _reset_catalog_pin(draft, clear_company=False)
-    elif changed_field in {"tier_name", "product_tier", "plan_name"}:
+    elif changed_field in {"tier_name", "product_tier", "plan_name", "vehicle_type", "vehicle_category", "car_model", "coverage_type", "coverage"}:
         draft.tier_id = None
+        draft.package_id = None
         draft.catalog_revision_id = None
 
     if prev_company_id != draft.company_id:
@@ -802,6 +878,7 @@ def _apply_pin_catalog(db, draft: QuotationDraft, user, operation: dict) -> str:
     draft.company_id = company.id
     draft.product_id = None
     draft.tier_id = None
+    draft.package_id = None
     draft.catalog_revision_id = None
     if product_id:
         product = db.get(InsuranceProduct, product_id)
@@ -846,6 +923,36 @@ def _apply_pin_catalog(db, draft: QuotationDraft, user, operation: dict) -> str:
     }
     _sync_detected_company(db, draft)
     return "catalog"
+
+
+def _apply_select_package_tier(db, draft: QuotationDraft, user, operation: dict) -> str:
+    if not draft.catalog_revision_id:
+        raise AppError("No catalog revision is pinned for this quotation.", 422)
+    package_id = str(operation.get("package_id") or "").strip() or None
+    if not package_id:
+        raise AppError("Choose a package tier to select.", 422)
+    package = db.get(BenefitPackage, package_id)
+    if (
+        package is None
+        or package.catalog_revision_id != draft.catalog_revision_id
+        or package.package_kind != "comprehensive"
+        or package.status != "active"
+    ):
+        raise AppError("That package tier does not belong to the pinned catalog revision.", 422)
+
+    if draft.package_id == package.id:
+        return "package_tier"
+
+    draft.package_id = package.id
+    for s in _rows_for_draft(db, DraftBenefitSelection, draft.id):
+        if s.item_kind == "catalog":
+            db.delete(s)
+
+    revision = db.get(BenefitCatalogRevision, draft.catalog_revision_id)
+    if revision:
+        seed_base_benefits(db, draft, revision)
+    auto_apply_extracted_benefits(db, draft)
+    return "package_tier"
 
 
 def _apply_reset_benefits(db, draft: QuotationDraft, user, operation: dict) -> str:
@@ -1317,6 +1424,8 @@ def apply_workspace_patch(
                 changed_paths.append(_apply_layout_override(db, draft, operation))
             elif operation_name == "pin_catalog":
                 changed_paths.append(_apply_pin_catalog(db, draft, user, operation))
+            elif operation_name == "select_package_tier":
+                changed_paths.append(_apply_select_package_tier(db, draft, user, operation))
             elif operation_name == "reset_benefits":
                 changed_paths.append(_apply_reset_benefits(db, draft, user, operation))
             elif operation_name == "template_selection":

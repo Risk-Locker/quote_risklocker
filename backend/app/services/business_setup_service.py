@@ -168,7 +168,15 @@ def list_company_aliases(db, user, *, search: str, page: int, page_size: int) ->
 
 def save_company_alias(db, user, payload: dict) -> dict:
     _require_business(user)
-    company = db.get(InsuranceCompany, payload["company_id"])
+    item = None
+    if payload.get("id"):
+        item = db.scalar(select(CompanyAlias).where(CompanyAlias.id == payload["id"]).with_for_update())
+        if item is None:
+            raise AppError("Company alias not found.", 404)
+    company_id = payload.get("company_id") or (item.company_id if item else None)
+    if not company_id:
+        raise AppError("Company is required.", 422)
+    company = db.get(InsuranceCompany, company_id)
     if company is None:
         raise AppError("Company not found.", 404)
     alias = str(payload["alias"]).strip()
@@ -178,11 +186,6 @@ def save_company_alias(db, user, payload: dict) -> dict:
     kind = payload.get("alias_kind", "detection")
     if kind not in ALIAS_KINDS:
         raise AppError("Alias type is invalid.", 422)
-    item = None
-    if payload.get("id"):
-        item = db.scalar(select(CompanyAlias).where(CompanyAlias.id == payload["id"]).with_for_update())
-        if item is None:
-            raise AppError("Company alias not found.", 404)
     duplicate = db.scalar(
         select(CompanyAlias).where(
             CompanyAlias.normalized_alias == normalized,
@@ -401,18 +404,21 @@ def delete_business_company(db, user, company_id: str) -> None:
 
 def save_business_product(db, user, payload: dict) -> dict:
     _require_business(user)
-    if db.get(InsuranceCompany, payload["company_id"]) is None:
-        raise AppError("Company not found.", 404)
     product = None
     if payload.get("id"):
         product = db.scalar(select(InsuranceProduct).where(InsuranceProduct.id == payload["id"]).with_for_update())
         if product is None:
             raise AppError("Product not found.", 404)
         _require_revision(product, payload.get("base_revision"), "product")
+    company_id = payload.get("company_id") or (product.company_id if product else None)
+    if not company_id:
+        raise AppError("Company is required.", 422)
+    if db.get(InsuranceCompany, company_id) is None:
+        raise AppError("Company not found.", 404)
     if product is None:
-        product = InsuranceProduct(id=new_id(), company_id=payload["company_id"], product_key="", name=payload["name"])
+        product = InsuranceProduct(id=new_id(), company_id=company_id, product_key="", name=payload["name"])
         db.add(product)
-    product.company_id = payload["company_id"]
+    product.company_id = company_id
     product.product_key = _slug(payload.get("product_key") or payload["name"])
     product.name = payload["name"].strip()
     product.channel = payload.get("channel")
@@ -425,20 +431,57 @@ def save_business_product(db, user, payload: dict) -> dict:
     return _product(product)
 
 
+def delete_business_product(db, user, product_id: str) -> None:
+    _require_business(user)
+    product = db.get(InsuranceProduct, product_id)
+    if product is None:
+        raise AppError("Product not found.", 404)
+    # Delete associated tiers
+    db.execute(delete(InsuranceProductTier).where(InsuranceProductTier.product_id == product.id))
+    # Delete associated benefit aliases
+    db.execute(delete(BenefitAlias).where(BenefitAlias.product_id == product.id))
+    # Delete associated catalogs, revisions, packages, plans, plan items, offerings
+    catalogs = db.scalars(select(BenefitCatalog).where(BenefitCatalog.product_id == product.id)).all()
+    cat_ids = [c.id for c in catalogs]
+    if cat_ids:
+        revisions = db.scalars(select(BenefitCatalogRevision).where(BenefitCatalogRevision.catalog_id.in_(cat_ids))).all()
+        rev_ids = [r.id for r in revisions]
+        if rev_ids:
+            packages = db.scalars(select(BenefitPackage).where(BenefitPackage.catalog_revision_id.in_(rev_ids))).all()
+            pkg_ids = [p.id for p in packages]
+            if pkg_ids:
+                plans = db.scalars(select(BenefitPackagePlan).where(BenefitPackagePlan.package_id.in_(pkg_ids))).all()
+                plan_ids = [pl.id for pl in plans]
+                if plan_ids:
+                    db.execute(delete(BenefitPackagePlanItem).where(BenefitPackagePlanItem.plan_id.in_(plan_ids)))
+                    db.execute(delete(BenefitPackagePlan).where(BenefitPackagePlan.id.in_(plan_ids)))
+                db.execute(delete(BenefitPackage).where(BenefitPackage.id.in_(pkg_ids)))
+            db.execute(delete(CatalogOffering).where(CatalogOffering.catalog_revision_id.in_(rev_ids)))
+            db.execute(delete(BenefitCatalogRevision).where(BenefitCatalogRevision.id.in_(rev_ids)))
+        db.execute(delete(BenefitCatalog).where(BenefitCatalog.id.in_(cat_ids)))
+    db.execute(text("UPDATE quotation_drafts SET product_id = NULL WHERE product_id = :pid"), {"pid": product.id})
+    _audit(db, user, "business.product.delete", "insurance_product", product.id, {"product_name": product.name})
+    db.delete(product)
+    db.commit()
+
+
 def save_business_tier(db, user, payload: dict) -> dict:
     _require_business(user)
-    if db.get(InsuranceProduct, payload["product_id"]) is None:
-        raise AppError("Product not found.", 404)
     tier = None
     if payload.get("id"):
         tier = db.scalar(select(InsuranceProductTier).where(InsuranceProductTier.id == payload["id"]).with_for_update())
         if tier is None:
             raise AppError("Tier not found.", 404)
         _require_revision(tier, payload.get("base_revision"), "tier")
+    product_id = payload.get("product_id") or (tier.product_id if tier else None)
+    if not product_id:
+        raise AppError("Product is required.", 422)
+    if db.get(InsuranceProduct, product_id) is None:
+        raise AppError("Product not found.", 404)
     if tier is None:
-        tier = InsuranceProductTier(id=new_id(), product_id=payload["product_id"], tier_key="", name=payload["name"])
+        tier = InsuranceProductTier(id=new_id(), product_id=product_id, tier_key="", name=payload["name"])
         db.add(tier)
-    tier.product_id = payload["product_id"]
+    tier.product_id = product_id
     tier.tier_key = _slug(payload.get("tier_key") or payload["name"])
     tier.name = payload["name"].strip()
     tier.sort_order = payload.get("sort_order", 0)
@@ -449,6 +492,35 @@ def save_business_tier(db, user, payload: dict) -> dict:
     db.commit()
     db.refresh(tier)
     return _tier(tier)
+
+
+def delete_business_tier(db, user, tier_id: str) -> None:
+    _require_business(user)
+    tier = db.get(InsuranceProductTier, tier_id)
+    if tier is None:
+        raise AppError("Tier not found.", 404)
+    catalogs = db.scalars(select(BenefitCatalog).where(BenefitCatalog.tier_id == tier.id)).all()
+    cat_ids = [c.id for c in catalogs]
+    if cat_ids:
+        revisions = db.scalars(select(BenefitCatalogRevision).where(BenefitCatalogRevision.catalog_id.in_(cat_ids))).all()
+        rev_ids = [r.id for r in revisions]
+        if rev_ids:
+            packages = db.scalars(select(BenefitPackage).where(BenefitPackage.catalog_revision_id.in_(rev_ids))).all()
+            pkg_ids = [p.id for p in packages]
+            if pkg_ids:
+                plans = db.scalars(select(BenefitPackagePlan).where(BenefitPackagePlan.package_id.in_(pkg_ids))).all()
+                plan_ids = [pl.id for pl in plans]
+                if plan_ids:
+                    db.execute(delete(BenefitPackagePlanItem).where(BenefitPackagePlanItem.plan_id.in_(plan_ids)))
+                    db.execute(delete(BenefitPackagePlan).where(BenefitPackagePlan.id.in_(plan_ids)))
+                db.execute(delete(BenefitPackage).where(BenefitPackage.id.in_(pkg_ids)))
+            db.execute(delete(CatalogOffering).where(CatalogOffering.catalog_revision_id.in_(rev_ids)))
+            db.execute(delete(BenefitCatalogRevision).where(BenefitCatalogRevision.id.in_(rev_ids)))
+        db.execute(delete(BenefitCatalog).where(BenefitCatalog.id.in_(cat_ids)))
+    db.execute(text("UPDATE quotation_drafts SET tier_id = NULL WHERE tier_id = :tid"), {"tid": tier.id})
+    _audit(db, user, "business.tier.delete", "insurance_product_tier", tier.id, {"tier_name": tier.name})
+    db.delete(tier)
+    db.commit()
 
 
 VARIANT_TYPES = frozenset({"money", "distance", "duration"})
@@ -625,6 +697,16 @@ def save_benefit_concept(db, user, payload: dict) -> dict:
     return serialize_concept(db, concept)
 
 
+def retire_benefit_concept(db, user, concept_id: str) -> None:
+    _require_business(user)
+    concept = db.scalar(select(BenefitConcept).where(BenefitConcept.id == concept_id).with_for_update())
+    if concept is None:
+        raise AppError("Benefit concept not found.", 404)
+    concept.status = "retired"
+    _audit(db, user, "business.benefit_concept.retire", "benefit_concept", concept.id, {"concept_key": concept.concept_key})
+    db.commit()
+
+
 def list_business_assets(db, user, *, search: str, kind: str | None, page: int, page_size: int) -> dict:
     _require_business(user)
     query = select(BusinessAsset)
@@ -737,6 +819,16 @@ def create_benefit_catalog(db, user, payload: dict) -> dict:
     db.commit()
     db.refresh(catalog)
     return _catalog(db, catalog)
+
+
+def retire_benefit_catalog(db, user, catalog_id: str) -> None:
+    _require_business(user)
+    catalog = db.scalar(select(BenefitCatalog).where(BenefitCatalog.id == catalog_id).with_for_update())
+    if catalog is None:
+        raise AppError("Catalog not found.", 404)
+    catalog.status = "retired"
+    _audit(db, user, "business.catalog.retire", "benefit_catalog", catalog.id, {"name": catalog.name})
+    db.commit()
 
 
 def _validate_catalog_context(db, payload: dict) -> dict:
@@ -894,8 +986,6 @@ def _validate_assignment_context(db, catalog: BenefitCatalog, revision: BenefitC
     if applies_type is None and not legacy:
         applies_type = "package" if catalog.package_id else "product"
         applies_id = catalog.package_id if catalog.package_id else None
-    elif applies_type == "package" and catalog.package_id:
-        applies_id = catalog.package_id
     if applies_type is not None and applies_type not in {"product", "package", "bundle"}:
         raise AppError("Assignment target type must be product, package, or bundle.", 422)
     if role is not None and role not in {"included", "addon_option", "bundle_component"}:
@@ -904,7 +994,12 @@ def _validate_assignment_context(db, catalog: BenefitCatalog, revision: BenefitC
         if applies_type == "package":
             if catalog.package_id is None:
                 raise AppError("This catalog has no package; assignments must be product-level.", 422)
-            applies_id = catalog.package_id
+            if applies_id is None:
+                applies_id = catalog.package_id
+            else:
+                package = db.get(BenefitPackage, applies_id)
+                if package is None or package.catalog_revision_id != revision.id or package.package_kind != "comprehensive":
+                    raise AppError("Choose a comprehensive package from this catalog's draft revision.", 422)
         elif applies_type == "bundle":
             if catalog.package_id is None:
                 raise AppError("Add-on bundles require a packaged catalog.", 422)

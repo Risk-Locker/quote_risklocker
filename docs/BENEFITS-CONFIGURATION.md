@@ -14,7 +14,7 @@ This document is the refill sheet: **you** correct/extend values here, and a fut
 
 ---
 
-## 1. Global Benefit Library (all 34 concepts)
+## 1. Global Benefit Library (all 45 concepts)
 
 The stable benefit facility. `category` = `default` (base/included family) or `addon` (available as an optional extra). `variants` = named plan variants offered by some insurers (e.g. Driver Passenger Protector Plan A–D); single-insurer concepts are still global but named after their home insurer.
 
@@ -27,14 +27,14 @@ The stable benefit facility. `category` = `default` (base/included family) or `a
 | 3 | `repair-workmanship-warranty` | Workmanship Warranty | Panel workshop body/paint warranty |
 | 4 | `all-drivers` | All Drivers | Named-driver waiver / any authorised driver |
 | 5 | `personal-accident` | Personal Accident | Includes AD / TPD |
-| 6 | `betterment-protection` | Betterment / New Parts Protection | Waiver of betterment |
+| 6 | `betterment-protection` | Betterment Protection | Waiver of betterment / new parts |
 | 7 | `total-loss-theft-allowance` | Total Loss / Theft Allowance | Lump-sum compassionate allowance |
 | 8 | `key-replacement` | Key Replacement | Smart/transmitter key reimburse |
 | 9 | `flood-relief-allowance` | Flood Relief Allowance | Immediate cash relief |
 | 10 | `personal-belongings-theft` | Personal Belongings Theft | Smash & grab / snatch theft |
 | 11 | `ambulance-fees` | Ambulance Fees | Emergency transport reimburse |
 
-### Add-ons (23)
+### Add-ons & Extended Concepts (34)
 
 | # | concept_key | Label | Variants |
 | --- | --- | --- | --- |
@@ -53,16 +53,25 @@ The stable benefit facility. `category` = `default` (base/included family) or `a
 | 24 | `child-car-seat` | Child Car Seat | — |
 | 25 | `replacement-cost` | Replacement Cost | — |
 | 26 | `vehicle-accessories` | Vehicle Accessories | — |
-| 27 | `e-hailing-extension` | E-Hailing / Private Hire Extension | — |
-| 28 | `agreed-value-market-value` | Agreed Value / Market Value | — |
-| 29 | `cashback-no-claim` | Cashback / No-Claim Cashback | — |
+| 27 | `e-hailing-extension` | E-Hailing Extension | — |
+| 28 | `agreed-value-market-value` | Agreed Value Settlement | — |
+| 29 | `cashback-no-claim` | No-Claim Cashback | — |
 | 30 | `out-of-pocket-allowance` | Out-of-Pocket Allowance | — |
-| 31 | `driver-passenger-protector` | Driver Passenger Protector | A, B, C, D |
+| 31 | `driver-passenger-protector` | Driver & Passenger Protector | A, B, C, D |
 | 32 | `private-car-365` | Private Car 365 Plan | 1, 2, 3, 4, Ezy |
 | 33 | `motor-pa-plus` | Motor PA Plus | 1, 2, 3 |
 | 34 | `oto-360` | OTO 360 | 1, 2, 3 |
-
-> Draft-only concept keys that are **not** in the 34 must be resolved before seeding `repair-allowance` — see [Lonpac caveat](#lonpac).
+| 35 | `repair-allowance` | Repair / CART Allowance | — |
+| 36 | `brand-new-spare-parts` | Brand New Spare Parts | — |
+| 37 | `compassionate-allowance` | Compassionate Allowance | — |
+| 38 | `document-replacement` | Document Replacement | — |
+| 39 | `hotel-accommodation` | Hotel Accommodation | — |
+| 40 | `legal-costs-defense` | Legal Defense Costs | — |
+| 41 | `daily-hospital-income` | Daily Hospital Income | — |
+| 42 | `tyre-rim-protection` | Tyre & Rim Protection | — |
+| 43 | `sunroof-glass-protection` | Sunroof Glass Protection | — |
+| 44 | `valet-theft-protection` | Valet / Service Theft | — |
+| 45 | `car-detailing-cleanup` | Car Detailing & Sanitisation | — |
 
 ---
 
@@ -180,18 +189,16 @@ The stable benefit facility. `category` = `default` (base/included family) or `a
 
 | Coverage type | Vehicle | Add-on system | Status |
 | --- | --- | --- | --- |
-| Comprehensive | Car | `package` (1 tier) | ⏳ draft |
+| Comprehensive | Car | `package` (1 tier) | ✅ seeded |
 
-**Product (draft):** `lonpac-private-car-secure` — "Lonpac Private Car Secure"
+**Product:** `lonpac-private-car-secure` — "Lonpac Private Car Secure"
 
 **Package — "Private Car Secure"**
 - Defaults (base / included):
-  - `repair-allowance` — "RM 75" daily allowance (⚠️ concept **not in the 34** — needs a new concept)
+  - `repair-allowance` — "RM 75" daily allowance
   - `all-drivers` — "Included"
   - `roadside-assistance` — "Included"
 - Add-ons (available): `windscreen` — "RM 1,000" · `special-perils` — "RM 50,000"
-
-> ⚠️ **Lonpac concept fix required before seeding:** the draft uses `repair-allowance` (daily repair allowance) which is not one of the 34 concepts. Either add `repair-allowance` to the global library or remap it to an existing concept.
 
 ---
 
@@ -199,9 +206,9 @@ The stable benefit facility. `category` = `default` (base/included family) or `a
 
 | Coverage type | Vehicle | Add-on system | Status |
 | --- | --- | --- | --- |
-| Comprehensive | Car | `package` (2 tiers) | ⏳ draft |
+| Comprehensive | Car | `package` (2 tiers) | ✅ seeded |
 
-**Product (draft):** `tune-protect-motor-easy` — "Tune Protect Motor Easy"
+**Product:** `tune-protect-motor-easy` — "Tune Protect Motor Easy"
 
 **Tier 1 — "Motor Easy"**
 - Defaults: `roadside-assistance` — "24/7" · `repair-workmanship-warranty` — "6 months"
@@ -217,9 +224,9 @@ The stable benefit facility. `category` = `default` (base/included family) or `a
 
 | Coverage type | Vehicle | Add-on system | Status |
 | --- | --- | --- | --- |
-| Comprehensive | Car | `package` (1 tier) | ⏳ draft |
+| Comprehensive | Car | `package` (1 tier) | ✅ seeded |
 
-**Product (draft):** `sompo-motor-comprehensive` — "SOMPO Motor Comprehensive"
+**Product:** `sompo-motor-comprehensive` — "SOMPO Motor Comprehensive"
 
 **Package — "SOMPO Motor Base"**
 - Defaults: `roadside-assistance` — "24/7" · `repair-workmanship-warranty` — "12 months" · `towing` — "RM 300"

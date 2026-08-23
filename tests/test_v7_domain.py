@@ -70,10 +70,10 @@ def test_v7_schema_migrations_are_additive_and_cover_every_new_table():
     v7_sql = "\n".join(
         item.path.read_text(encoding="utf-8").lower()
         for item in migrations
-        if item.version in {23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36}
+        if item.version in {23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37}
     )
 
-    assert [item.version for item in migrations][-14:] == [23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36]
+    assert [item.version for item in migrations][-15:] == [23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37]
     for table in V7_TABLES:
         assert f"{table}" in v7_sql
     assert "drop table" not in v7_sql
@@ -95,6 +95,7 @@ def test_v7_revision_and_snapshot_columns_are_part_of_the_orm_contract():
         "company_id",
         "product_id",
         "tier_id",
+        "package_id",
         "catalog_revision_id",
         "template_revision_id",
         "layout_override_template_id",

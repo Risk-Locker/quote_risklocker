@@ -186,7 +186,7 @@ class BusinessCompanySaveRequest(StrictRequest):
 class BusinessProductSaveRequest(StrictRequest):
     id: str | None = None
     base_revision: int | None = Field(default=None, ge=1)
-    company_id: str
+    company_id: str | None = None
     product_key: str | None = Field(default=None, max_length=160)
     name: str = Field(min_length=1, max_length=255)
     channel: str | None = Field(default=None, max_length=120)
@@ -196,7 +196,7 @@ class BusinessProductSaveRequest(StrictRequest):
 class BusinessTierSaveRequest(StrictRequest):
     id: str | None = None
     base_revision: int | None = Field(default=None, ge=1)
-    product_id: str
+    product_id: str | None = None
     tier_key: str | None = Field(default=None, max_length=160)
     name: str = Field(min_length=1, max_length=255)
     sort_order: int = Field(default=0, ge=0)
@@ -205,7 +205,7 @@ class BusinessTierSaveRequest(StrictRequest):
 
 class CompanyAliasSaveRequest(StrictRequest):
     id: str | None = None
-    company_id: str
+    company_id: str | None = None
     alias: str = Field(min_length=1, max_length=255)
     alias_kind: str = Field(default="detection", max_length=40)
     status: str = "active"

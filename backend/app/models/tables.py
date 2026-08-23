@@ -398,6 +398,7 @@ class QuotationDraft(Base, TimestampMixin, SoftDeleteMixin):
     company_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_companies.id", ondelete="SET NULL"), nullable=True, index=True)
     product_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_products.id", ondelete="SET NULL"), nullable=True, index=True)
     tier_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_product_tiers.id", ondelete="SET NULL"), nullable=True, index=True)
+    package_id: Mapped[str | None] = mapped_column(ForeignKey("benefit_packages.id", ondelete="SET NULL"), nullable=True, index=True)
     catalog_revision_id: Mapped[str | None] = mapped_column(ForeignKey("benefit_catalog_revisions.id", ondelete="SET NULL"), nullable=True, index=True)
     template_revision_id: Mapped[str | None] = mapped_column(ForeignKey("template_revisions.id", ondelete="SET NULL"), nullable=True, index=True)
     layout_override: Mapped[dict | None] = mapped_column(JSON, nullable=True)
