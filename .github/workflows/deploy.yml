@@ -185,7 +185,7 @@ jobs:
               fi
               sleep 10
             done
-            if ! ls /var/lib/clamav/daily.cvd /var/lib/clamav/daily.cld >/dev/null 2>&1; then
+            if [ ! -f /var/lib/clamav/daily.cvd ] && [ ! -f /var/lib/clamav/daily.cld ]; then
               echo "::error::ClamAV signature database missing after 300s."
               exit 1
             fi
