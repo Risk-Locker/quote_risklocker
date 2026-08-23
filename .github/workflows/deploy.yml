@@ -124,7 +124,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/quote_deploy_key -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" <<EOF
+          ssh -i ~/.ssh/quote_deploy_key -o ServerAliveInterval=30 -o ServerAliveCountMax=8 -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" <<EOF
             set -euo pipefail
             mkdir -p '${DEPLOY_PATH}'
             if [ ! -f '${DEPLOY_PATH}/.env' ]; then
@@ -139,7 +139,7 @@ jobs:
         run: |
           set -euo pipefail
           rsync -az --delete \
-            -e "ssh -i ~/.ssh/quote_deploy_key -p ${VPS_PORT:-22}" \
+            -e "ssh -i ~/.ssh/quote_deploy_key -o ServerAliveInterval=30 -o ServerAliveCountMax=8 -p ${VPS_PORT:-22}" \
             --exclude ".git/" \
             --exclude ".env" \
             --exclude "frontend/.env" \
@@ -162,7 +162,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/quote_deploy_key -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" <<'EOF'
+          ssh -i ~/.ssh/quote_deploy_key -o ServerAliveInterval=30 -o ServerAliveCountMax=8 -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" <<'EOF'
             set -euo pipefail
             export DEBIAN_FRONTEND=noninteractive
             if ! dpkg -s clamav clamav-daemon >/dev/null 2>&1; then
@@ -190,7 +190,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/quote_deploy_key -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "GITHUB_SHA='${GITHUB_SHA}' bash -s" <<'EOF'
+          ssh -i ~/.ssh/quote_deploy_key -o ServerAliveInterval=30 -o ServerAliveCountMax=8 -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "GITHUB_SHA='${GITHUB_SHA}' bash -s" <<'EOF'
             set -euo pipefail
             cd /var/www/html/quote_risklocker
 
@@ -212,7 +212,9 @@ jobs:
             # Frontend
             cd frontend
             npm ci
-            npm run build
+            # Heap cap: the VPS has 3.7GB RAM with clamd resident; without a
+            # cap the Next build can trip the OOM killer mid-deploy.
+            NODE_OPTIONS="--max-old-space-size=1536" npm run build
 
             # Database migrations (ledger-based + checksummed; safe every deploy).
             # Guarded: refuses to run when APP_ENV != production.
