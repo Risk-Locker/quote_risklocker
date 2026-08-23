@@ -90,23 +90,16 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-          for name in VPS_HOST VPS_USER; do
+          for name in VPS_HOST VPS_USER VPS_SSH_KEY_B64; do
             if [ -z "${!name:-}" ]; then
-              echo "::warning::$name is not configured. Deployment will be skipped."
+              echo "::error::$name is not configured. Deployment cannot run — add it under Settings > Secrets and variables > Actions."
               missing=1
             fi
           done
-
-          if [ -z "${VPS_SSH_KEY_B64:-}" ]; then
-            echo "::warning::VPS_SSH_KEY_B64 is not configured. Deployment will be skipped."
-            missing=1
-          fi
-
           if [ "$missing" -eq 1 ]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 1
           fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Install rsync
         if: steps.secrets.outputs.ready == 'true'
@@ -149,6 +142,7 @@ jobs:
             -e "ssh -i ~/.ssh/quote_deploy_key -p ${VPS_PORT:-22}" \
             --exclude ".git/" \
             --exclude ".env" \
+            --exclude "frontend/.env" \
             --exclude "node_modules/" \
             --exclude "frontend/node_modules/" \
             --exclude ".venv/" \
@@ -163,12 +157,40 @@ jobs:
             --exclude "*.db" \
             ./ "$VPS_USER@$VPS_HOST:${DEPLOY_PATH}/"
 
-      - name: Install, build, migrate, and reload PM2
+      - name: Provision ClamAV on the VPS
         if: steps.secrets.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/quote_deploy_key -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" <<'EOF'
+            set -euo pipefail
+            export DEBIAN_FRONTEND=noninteractive
+            if ! dpkg -s clamav clamav-daemon >/dev/null 2>&1; then
+              apt-get update -y >/dev/null
+              apt-get install -y clamav clamav-daemon >/dev/null
+            fi
+            systemctl enable --now clamav-freshclam >/dev/null 2>&1 || true
+            systemctl enable --now clamav-daemon >/dev/null 2>&1 || true
+            for i in $(seq 1 30); do
+              [ -f /var/lib/clamav/daily.cvd ] && break
+              sleep 10
+            done
+            if [ ! -f /var/lib/clamav/daily.cvd ]; then
+              echo "::error::ClamAV signature database missing after 300s."
+              exit 1
+            fi
+            if ! clamscan --no-summary /etc/hosts >/dev/null 2>&1; then
+              echo "::error::ClamAV smoke scan failed."
+              exit 1
+            fi
+          EOF
+
+      - name: Install, build, migrate, and reload PM2
+        if: steps.secrets.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/quote_deploy_key -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "GITHUB_SHA='${GITHUB_SHA}' bash -s" <<'EOF'
             set -euo pipefail
             cd /var/www/html/quote_risklocker
 
@@ -184,21 +206,43 @@ jobs:
             .venv/bin/pip install -r requirements.txt
 
             # Chromium for extraction + deterministic PDF rendering.
-            # No-op when already installed; system deps are handled once by
-            # deploy/setup-vps.sh (playwright install --with-deps chromium).
-            .venv/bin/playwright install chromium
+            # --with-deps self-heals a fresh box; no-op-ish when present.
+            .venv/bin/playwright install --with-deps chromium
 
             # Frontend
             cd frontend
             npm ci
             npm run build
 
-            # Database migrations (ledger-based + checksummed; safe every deploy)
+            # Database migrations (ledger-based + checksummed; safe every deploy).
+            # Guarded: refuses to run when APP_ENV != production.
             cd ..
             PYTHONPATH=backend .venv/bin/python -m app.db.migrations
 
-            # Reload all three processes
-            RL_DEPLOY_PATH=/var/www/html/quote_risklocker pm2 startOrReload ecosystem.config.cjs --update-env
+            # Pre-flight: confirm the schema matches this release before reload,
+            # so a drift fails the deploy loudly instead of crash-looping.
+            PYTHONPATH=backend .venv/bin/python -c "from app.db.session import verify_schema_version; verify_schema_version(); print('schema OK')"
+
+            # Reload all three processes; startOrReload alone does not revive
+            # apps that PM2 previously stopped (e.g. after a crash loop).
+            RL_DEPLOY_PATH=/var/www/html/quote_risklocker pm2 startOrReload ecosystem.config.cjs --update-env || true
+            pm2 start rl-quote-api rl-quote-worker rl-quote-frontend 2>/dev/null || true
             pm2 save
+
+            # Record the deployed commit for one-command drift checks.
+            echo "${GITHUB_SHA}" > .deployed-commit
+
+            # Health gate: the backend must answer /health within 60s or the
+            # deploy fails loudly (no more "succeeded" while prod is down).
+            code=000
+            for i in $(seq 1 12); do
+              code=$(curl -s -o /dev/null -w '%{http_code}' -m 5 http://127.0.0.1:8100/health || true)
+              [ "$code" = "200" ] && break
+              sleep 5
+            done
+            if [ "$code" != "200" ]; then
+              echo "::error::Backend /health did not return 200 after deploy (last: $code)."
+              exit 1
+            fi
             pm2 status
           EOF

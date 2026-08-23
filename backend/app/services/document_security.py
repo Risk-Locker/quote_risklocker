@@ -38,7 +38,10 @@ def _defender_command(path: Path) -> tuple[list[str], str] | None:
         executable = str(candidates[0]) if candidates else None
     if executable:
         return [executable, "-Scan", "-ScanType", "3", "-File", str(path), "-DisableRemediation"], "Microsoft Defender"
-    clamdscan = shutil.which("clamdscan") or shutil.which("clamscan")
+    clamscan = shutil.which("clamscan")
+    if clamscan:
+        return [clamscan, "--no-summary", str(path)], "ClamAV"
+    clamdscan = shutil.which("clamdscan")
     if clamdscan:
         return [clamdscan, "--no-summary", str(path)], "ClamAV"
     return None

@@ -174,8 +174,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Apply ordered Risklocker Postgres migrations safely.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--root", type=Path, default=default_migration_root())
+    parser.add_argument(
+        "--allow-local",
+        action="store_true",
+        help="Explicitly allow running against a non-production database (local development only).",
+    )
     args = parser.parse_args()
     settings = get_settings()
+    if settings.app_env != "production" and not args.allow_local:
+        raise SystemExit(
+            "Refusing to run migrations: APP_ENV=%s is not production. Migrations must run from the "
+            "production deploy (the VPS) so the database never drifts ahead of deployed code. "
+            "Re-run with --allow-local only when intentionally migrating a local/development database."
+            % settings.app_env
+        )
     engine = create_engine(_sqlalchemy_url(settings.database_url), pool_pre_ping=True)
     plan = apply_migrations(engine, discover_migrations(args.root), dry_run=args.dry_run)
     verb = "Would apply" if args.dry_run else "Applied"

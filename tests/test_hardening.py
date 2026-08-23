@@ -12,7 +12,7 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 from app.services.file_validation import display_filename, validate_upload_bytes
-from app.services.document_security import quarantined_pdf
+from app.services.document_security import _defender_command, quarantined_pdf
 from app.storage import supabase as supabase_module
 from app.storage.supabase import StorageError, SupabaseStorage
 
@@ -121,6 +121,32 @@ def test_supabase_bucket_reconciles_asset_mime_types():
     storage.ensure_bucket()
     assert seen == ["/storage/v1/bucket/risklocker-pdfs"]
     client.close()
+
+
+def test_scanner_prefers_clamscan_over_clamdscan(monkeypatch):
+    monkeypatch.setenv("ProgramData", r"C:\__no_such_programdata__")
+    monkeypatch.setattr(
+        "app.services.document_security.shutil.which",
+        lambda name: "/usr/bin/clamscan" if name == "clamscan" else ("/usr/bin/clamdscan" if name == "clamdscan" else None),
+    )
+    command = _defender_command(Path("sample.pdf"))
+    assert command is not None
+    args, engine = command
+    assert args[0] == "/usr/bin/clamscan"
+    assert engine == "ClamAV"
+
+
+def test_scanner_falls_back_to_clamdscan_when_clamscan_missing(monkeypatch):
+    monkeypatch.setenv("ProgramData", r"C:\__no_such_programdata__")
+    monkeypatch.setattr(
+        "app.services.document_security.shutil.which",
+        lambda name: "/usr/bin/clamdscan" if name == "clamdscan" else None,
+    )
+    command = _defender_command(Path("sample.pdf"))
+    assert command is not None
+    args, engine = command
+    assert args[0] == "/usr/bin/clamdscan"
+    assert engine == "ClamAV"
 
 
 def test_quarantine_rejects_active_pdf_content(monkeypatch, tmp_path):

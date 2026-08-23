@@ -19,7 +19,9 @@ Use `.env.example` (local development values) or `.env.production` (production V
 
 **The project `.env` is the source of truth:** `backend/app/core/config.py` loads it with `load_dotenv(override=True)`, so variables inherited from the shell (e.g. a stray `APP_ENV=production` in a terminal) can never shadow the project config. Reset a poisoned terminal with `Remove-Item Env:APP_ENV` or open a new one.
 
-**Malware scanner is always required:** the `REQUIRE_MALWARE_SCANNER` env toggle no longer exists (`backend/app/core/config.py` hardcodes it on). Every PDF upload runs the scanner; uploads refuse when no scanner is present. Do not restore the toggle.
+**Malware scanner is always required:** the `REQUIRE_MALWARE_SCANNER` env toggle no longer exists (`backend/app/core/config.py` hardcodes it on). Every PDF upload runs the scanner; uploads refuse when no scanner is present. Do not restore the toggle. On Linux the scanner is ClamAV — prefer `clamscan` (on-demand, runs as the app user, no daemon/permission issues); `clamdscan` remains the fallback (`backend/app/services/document_security.py`).
+
+**Migrations run only from the deploy:** `app.db.migrations` refuses to run when `APP_ENV != production` unless `--allow-local` is passed. Never run migrations from local dev against the shared database — that is how the database drifts ahead of deployed code and the schema guard refuses to boot.
 
 **Switching database servers:** the app uses one Postgres database. To move between Supabase and a self-hosted VPS Postgres, change only `DATABASE_URL` in `.env` (and run migrations against the new server). `DATABASE_PROVIDER` is optional and auto-detected from the URL, so no other variable needs to change.
 

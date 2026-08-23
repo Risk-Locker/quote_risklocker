@@ -17,7 +17,7 @@ if ($env:PYTHONPATH) {
 } else {
     $env:PYTHONPATH = $backend
 }
-& $python -m app.db.migrations
+& $python -m app.db.migrations --allow-local
 if ($LASTEXITCODE -ne 0) {
     throw "Migration runner failed."
 }

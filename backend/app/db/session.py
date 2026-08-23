@@ -24,7 +24,13 @@ def _sqlalchemy_url(database_url: str) -> str:
     return database_url
 
 
-engine = create_engine(_sqlalchemy_url(settings.database_url), pool_pre_ping=True)
+engine = create_engine(
+    _sqlalchemy_url(settings.database_url),
+    pool_pre_ping=True,
+    pool_size=3,
+    max_overflow=2,
+    pool_recycle=300,
+)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 
