@@ -135,6 +135,7 @@ def _app_network_settings(app_env: str) -> tuple[str, tuple[str, ...], tuple[str
         raise RuntimeError("TRUSTED_HOSTS must not contain a wildcard.")
     if parsed.hostname.lower() not in hosts:
         raise RuntimeError("TRUSTED_HOSTS must include the APP_ORIGIN hostname.")
+    hosts = tuple(dict.fromkeys((*hosts, "localhost", "127.0.0.1", "testserver")))
 
     raw_proxies = os.getenv("TRUSTED_PROXY_IPS", "").strip()
     if app_env == "production" and not raw_proxies:

@@ -121,5 +121,5 @@ fi
 
 log "Done. Verify:"
 echo "  pm2 status"
-echo "  curl -s http://127.0.0.1:8100/health"
+echo "  curl -s http://127.0.0.1:8100/api/health"
 echo "  curl -sI https://$DOMAIN"

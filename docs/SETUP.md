@@ -51,7 +51,7 @@ Three processes run under PM2 (see `ecosystem.config.cjs`; paths derive from `RL
 
 ## 8. CI/CD (GitHub Actions)
 
-- `.github/workflows/deploy.yml` is the single deploy path: every push to `main` (or `workflow_dispatch`) runs `test-and-build` (backend pytest + frontend tsc/build on GitHub), then `deploy` SSHes to the VPS and: mirrors the repo via rsync (excluding `.env`, `.env.production`, `.venv`, `node_modules`, `.next`, `.qc-tmp`, etc.), provisions ClamAV (installs `clamav clamav-daemon` when absent, enables `clamav-freshclam` + `clamav-daemon`, waits for `daily.cvd`, smoke-scans), installs Python deps + `playwright install --with-deps chromium`, builds the frontend, applies migrations, pre-flight-checks `verify_schema_version()`, reloads PM2 with `--update-env` (also restarting any stopped apps), writes `.deployed-commit`, and fails loudly if `/health` is not 200 within 60s.
+- `.github/workflows/deploy.yml` is the single deploy path: every push to `main` (or `workflow_dispatch`) runs `test-and-build` (backend pytest + frontend tsc/build on GitHub), then `deploy` SSHes to the VPS and: mirrors the repo via rsync (excluding `.env`, `.env.production`, `.venv`, `node_modules`, `.next`, `.qc-tmp`, etc.), provisions ClamAV (installs `clamav clamav-daemon` when absent, enables `clamav-freshclam` + `clamav-daemon`, waits for `daily.cvd`, smoke-scans), installs Python deps + `playwright install --with-deps chromium`, builds the frontend, applies migrations, pre-flight-checks `verify_schema_version()`, reloads PM2 with `--update-env` (also restarting any stopped apps), writes `.deployed-commit`, and fails loudly if `/api/health` is not 200 within 60s.
 - **Secrets (repository → Settings → Secrets and variables → Actions), exact names:** `VPS_HOST`, `VPS_PORT`, `VPS_USER`, `VPS_SSH_KEY_B64` (base64 of the deploy private key whose public half is in the VPS user's `~/.ssh/authorized_keys`). Missing secrets now FAIL the deploy loudly — they never silently skip.
 - **One-time VPS bootstrap (only this is manual; after it, the pipeline owns the box):** the deploy user + SSH key, the root `.env` (CI never writes secrets), nginx site + TLS cert, and an initial `deploy/setup-vps.sh` run for system packages. Everything after that comes from `main`.
 - **"Is the VPS on latest?" one command:** `cat /var/www/html/quote_risklocker/.deployed-commit` vs `git ls-remote https://github.com/Risk-Locker/quote_risklocker.git main` (the VPS `.git` is stale by design — deploys mirror files, not git).
@@ -64,7 +64,7 @@ Run `deploy/setup-vps.sh` (as root, from the cloned repo at `/var/www/html/quote
 
 ## 10. Monitoring and Alerts
 
-- Health: `curl http://127.0.0.1:8100/health` (backend readiness incl. schema-ledger validation).
+- Health: `curl http://127.0.0.1:8100/api/health` (backend readiness incl. schema-ledger validation).
 - Options: Uptime Kuma, Prometheus + Grafana, or platform built-ins.
 - Alert on: readiness failure, queue age, repeated render/scanner/storage failures, backup failure, database exhaustion.
 - Logging: PM2 writes stdout/stderr to `~/.pm2/logs/`; optionally `pm2 install pm2-logrotate`; keep at least 30 days.

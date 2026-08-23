@@ -17,6 +17,11 @@
 - Database state 2026-08-23: migrations 001-037 applied & checksummed (037 adds `quotation_drafts.package_id` + index).
 - Database state 2026-08-20 (companies): 7 active companies — QBE, Etiqa, Takaful Malaysia, AmAssurance, Lonpac, Berjaya Sompo, Tune Protect. `commands/seed-companies.py` is idempotent (dry-run/apply).
 
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Deployment /health 400 Root Cause & Fix
+Asked: Diagnose deployment failure "Backend /health did not return 200 after deploy (last: 400)".
+Done: Identified root causes: (1) Starlette `TrustedHostMiddleware` (`main.py:88`) returns 400 Bad Request when loopback `curl http://127.0.0.1:8100` sends `Host: 127.0.0.1:8100` not in `TRUSTED_HOSTS`; (2) production mounts routes exclusively under `/api` (`main.py:91-93`), making the live health route `/api/health` rather than `/health`. Provided immediate VPS `.env` fix (`TRUSTED_HOSTS`) and repository fixes (`deploy.yml`, `setup-vps.sh`, `SETUP.md`).
+Pending: apply repo / workflow fixes if user requests.
+
 ## 2026-08-23 · Antigravity (Gemini 3.7 Flash) — Package Tier Resolution, Draft Package Pinning & AmAssurance Session Repair
 Asked: Fix tier data model mismatch where benefit packages inside 1 catalog revision didn't render as tiers, add migration 037 for quotation_drafts.package_id, implement select_package_tier op, and repin AmAssurance sessions.
 Done: Added migration 037 (`migrations/037_draft_package_pin.sql`), added `package_id` to QuotationDraft (`tables.py:401`), rewrote `_workspace_package_tiers` + added `select_package_tier` op (`workspace_service.py:372-950,1427`), updated `seed_base_benefits` (`catalog_review_service.py:212-232`), wired frontend tier switching (`review-phase.tsx:876,1453`), added idempotent repair script `commands/repin-amassurance-sessions.py` (repinned 9 drafts live), and added comprehensive tests (`tests/test_package_plans.py:430-575`). Verified 510/510 pytest passed, tsc clean, Next.js build green, code map current.

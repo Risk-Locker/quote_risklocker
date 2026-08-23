@@ -248,16 +248,18 @@ jobs:
             # Record the deployed commit for one-command drift checks.
             echo "${GITHUB_SHA}" > .deployed-commit
 
-            # Health gate: the backend must answer /health within 60s or the
+            # Health gate: the backend must answer /api/health within 60s or the
             # deploy fails loudly (no more "succeeded" while prod is down).
             code=000
             for i in $(seq 1 12); do
-              code=$(curl -s -o /dev/null -w '%{http_code}' -m 5 http://127.0.0.1:8100/health || true)
+              code=$(curl -s -o /dev/null -w '%{http_code}' -m 5 http://127.0.0.1:8100/api/health || true)
               [ "$code" = "200" ] && break
               sleep 5
             done
             if [ "$code" != "200" ]; then
-              echo "::error::Backend /health did not return 200 after deploy (last: $code)."
+              echo "::error::Backend /api/health did not return 200 after deploy (last: $code)."
+              curl -sv -m 5 http://127.0.0.1:8100/api/health || true
+              pm2 logs rl-quote-api --nostream --lines 30 || true
               exit 1
             fi
             pm2 status
