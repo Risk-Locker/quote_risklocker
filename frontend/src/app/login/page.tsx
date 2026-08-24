@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Lock, Envelope, ShieldCheck } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { useAuth, clearAuthCache } from "@/lib/auth";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
@@ -26,6 +26,7 @@ export default function LoginPage() {
     setError("");
     try {
       await api("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+      clearAuthCache();
       router.replace("/upload");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not sign in.");

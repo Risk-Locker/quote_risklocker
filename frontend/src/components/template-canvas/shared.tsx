@@ -165,10 +165,24 @@ export function resolveVariableValue(
 export function formatVariableValue(value: string | null, prefix = "", suffix = ""): string {
   if (value === null || value === undefined || value === "") return "";
   let formatted = value.trim();
+
+  // If this is a money value without formatting (e.g. "2522.42" or "53000.00"), format with commas
+  if ((prefix.trim().toUpperCase() === "RM" || prefix.trim().toUpperCase() === "RM ") && /^\d+(?:\.\d+)?$/.test(formatted)) {
+    try {
+      const num = Number(formatted);
+      if (isFinite(num)) {
+        formatted = num.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+    } catch {
+      // Keep original
+    }
+  }
+
   if (prefix) {
     if (prefix.trim().toUpperCase() === "RM" || prefix.trim().toUpperCase() === "RM ") {
       if (!formatted.toUpperCase().startsWith("RM")) {
-        formatted = `${prefix}${formatted}`;
+        const space = prefix.endsWith(" ") ? " " : " ";
+        formatted = `RM${space}${formatted}`;
       }
     } else if (!formatted.startsWith(prefix)) {
       formatted = `${prefix}${formatted}`;
@@ -508,20 +522,30 @@ export function CanvasElementView({
                     (assets.find((a) => a.id === b.asset_id)?.url || null)
                     : null;
 
+                  const price = b?.price?.amount
+                    ? `RM ${Number(b.price.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
+                    : b?.is_detected && b?.detected_cost
+                      ? (b.detected_cost.startsWith("RM") ? b.detected_cost : `RM ${b.detected_cost}`)
+                      : null;
+
                   return (
-                    <article key={card.index} className="absolute grid place-items-center overflow-hidden" style={{ left: card.x, top: card.y, width: card.width, height: card.height }}>
+                    <article
+                      key={card.index}
+                      className="absolute p-0.5 box-border"
+                      style={{ left: card.x, top: card.y, width: card.width, height: card.height }}
+                    >
                       <div
-                        className={`${b?.is_detected
-                            ? "border-2 border-amber-400 bg-amber-50/40 shadow-sm ring-2 ring-amber-300/50"
+                        className={`w-full h-full flex items-center gap-2 rounded-[8px] px-2 py-1 transition-shadow ${
+                          b?.is_detected
+                            ? "border-2 border-amber-400 bg-amber-50/40 shadow-xs ring-1 ring-amber-300/50"
                             : element.cardStyle === "minimal"
-                              ? "bg-transparent"
+                              ? "bg-transparent border border-transparent"
                               : element.cardStyle === "soft"
-                                ? "bg-[#f3f0f0] shadow-sm"
-                                : "border border-[var(--rl-border)] bg-white"
-                          } grid grid-cols-[58px_minmax(0,1fr)] items-center rounded-[10px]`}
-                        style={{ width: element.packing?.referenceWidth || 180, height: element.packing?.referenceHeight || 124, transform: `scale(${card.scale})`, transformOrigin: "center", padding: density.padding, gap: density.gap }}
+                                ? "bg-[#f3f0f0] border border-gray-200 shadow-xs"
+                                : "border border-[var(--rl-border)] bg-white shadow-xs"
+                        }`}
                       >
-                        <div className="flex items-center justify-center overflow-hidden shrink-0" style={{ width: density.icon, height: density.icon }}>
+                        <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center overflow-hidden rounded">
                           {assetUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
@@ -533,29 +557,29 @@ export function CanvasElementView({
                               }}
                             />
                           ) : (
-                            <span
-                              className="grid place-items-center rounded-full bg-[var(--rl-red-light)] font-black text-[var(--rl-red)]"
-                              style={{ width: density.icon, height: density.icon, fontSize: Math.max(9, density.label - 4) }}
-                            >
+                            <span className="grid h-full w-full place-items-center rounded bg-[var(--rl-red-light)] text-[10px] font-black text-[var(--rl-red)]">
                               {label ? label.slice(0, 2).toUpperCase() : `B${card.index + 1}`}
                             </span>
                           )}
                         </div>
-                        <span className="min-w-0 flex flex-col justify-center">
+                        <div className="min-w-0 flex-1 flex flex-col justify-center">
                           <strong
-                            className="block font-bold leading-tight break-words text-[var(--rl-text-strong)]"
-                            style={{
-                              fontSize: label.length > 28 ? Math.max(10, density.label - 3) : label.length > 18 ? Math.max(11, density.label - 1.5) : density.label,
-                            }}
+                            className="block text-[11px] font-bold leading-tight text-[var(--rl-text-strong)] line-clamp-2"
+                            title={label}
                           >
                             {label}
                           </strong>
                           {val ? (
-                            <span className="block text-[var(--rl-text-muted)] leading-tight break-words mt-0.5" style={{ fontSize: density.value }}>
+                            <span className="block text-[10px] text-[var(--rl-text-muted)] leading-tight truncate mt-0.5">
                               {val}
                             </span>
                           ) : null}
-                        </span>
+                        </div>
+                        {price ? (
+                          <span className="shrink-0 rounded bg-red-50 border border-red-200 px-1 py-0.5 text-[9px] font-bold text-red-600 whitespace-nowrap">
+                            +{price}
+                          </span>
+                        ) : null}
                       </div>
                     </article>
                   );

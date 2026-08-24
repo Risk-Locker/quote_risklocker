@@ -86,12 +86,16 @@ DEFAULT_ALIASES = {
     "excess_amount": ["excess amount", "excess all claims", "excess", "policy excess", "ekses", "ekses polisi", "compulsory excess", "lebihan"],
     "valid_until": ["valid until", "validity period", "validity date", "validity", "this quotation will expire on", "quotation will expire on", "expire on", "expiry date", "tarikh luput", "sah sehingga"],
     "coverage_amount": ["sum insured", "coverage amount", "insured value", "market value", "agreed value", "sum covered"],
-    "premium": ["premium", "gross premium", "premium payable", "basic premium", "gross contribution", "premium kasar"],
+    "basic_premium": ["basic premium", "premium asas", "basic contribution", "sum covered basic"],
+    "gross_premium": ["gross premium", "premium kasar", "gross contribution", "jumlah premium kasar"],
+    "service_tax": ["service tax", "cukai perkhidmatan", "sst", "cukai servis"],
+    "stamp_duty": ["stamp duty", "duti setem"],
+    "premium": ["total premium", "premium payable", "jumlah premium", "total contribution", "jumlah caruman", "net premium", "gross premium", "premium kasar", "premium"],
     "total_amount": ["total payable", "total amount", "amount payable", "gross amount", "jumlah bayaran", "total / jumlah"],
     "optional_cover_amount": ["total optional cover amount", "total optional cover", "extra benefit", "manfaat tambahan", "optional cover amount"],
     "roadtax": ["road tax", "roadtax", "cukai jalan"],
-    "service_fee": ["service fee", "runner fee", "cukai perkhidmatan"],
-    "ncd_percent": ["ncd", "ncb", "no claim discount", "no claim bonus", "dtt"],
+    "service_fee": ["service fee", "runner fee", "runner charge", "upah runner"],
+    "ncd_percent": ["ncd", "ncb", "no claim discount", "no claim bonus", "dtt", "diskaun tanpa tuntutan"],
     "windscreen": ["windscreen", "cermin hadapan"],
     "towing": ["towing", "tunda"],
 }
@@ -121,7 +125,7 @@ def _page_for_offset(page_text: list[dict], offset: int) -> int | None:
 def _add(results: dict[str, list[CandidateValue]], field: str, value: str | None, source: str, score: float, text: str, start: int, end: int, page_text: list[dict]) -> None:
     if value is None:
         return
-    cleaned = re.sub(r"\s+", " ", str(value)).strip(" :;-")
+    cleaned = re.sub(r"\s+", " ", value).strip(" :;-")
     if not cleaned:
         return
     if field == "customer_name":
@@ -413,29 +417,38 @@ def _add_contribution_rows(text: str, page_text: list[dict], results: dict[str, 
         return None
 
     for index, line in enumerate(lines):
-        lower = line.lower()
+        lower = line.lower().strip(" :-")
         window = " ".join(lines[index : index + 5])
         money_values = _money(re.sub(r"\(\d+(?:\.\d+)?\s*%\)", "", window))
-        if "ncd" in lower or "no-claim-discount" in lower:
+        if "ncd" in lower or "no-claim-discount" in lower or "dtt" in lower or "diskaun tanpa tuntutan" in lower:
             percent = re.search(r"\((?P<ncd>\d{1,2}(?:\.\d+)?)\s*%\)|(?P<ncd2>\d{1,2}(?:\.\d+)?)\s*%", line)
             if percent:
                 _add_line_value(results, "ncd_percent", percent.group("ncd") or percent.group("ncd2"), "semantic_contribution_row", 0.96, line, text, page_text)
             if money_values:
                 _add_line_value(results, "ncd_amount", money_values[0], "semantic_contribution_row", 0.9, line, text, page_text)
-        if lower.startswith("gross contribution") or lower.startswith("gross premium"):
+        if lower.startswith("total payable") or lower.startswith("total amount") or lower.startswith("amount payable") or lower.startswith("total contribution payable") or lower.startswith("jumlah bayaran") or lower.startswith("jumlah perlu dibayar"):
             amount = row_amount(index)
             if amount:
-                _add_line_value(results, "premium", amount, "semantic_contribution_row", 0.95, line, text, page_text)
+                _add_line_value(results, "total_amount", amount, "semantic_contribution_row", 0.99, line, text, page_text)
+        elif lower.startswith("total premium") or lower.startswith("jumlah premium") or lower.startswith("total contribution") or lower.startswith("jumlah caruman"):
+            amount = row_amount(index)
+            if amount:
+                _add_line_value(results, "premium", amount, "semantic_contribution_row", 0.99, line, text, page_text)
+                _add_line_value(results, "total_amount", amount, "semantic_contribution_row", 0.94, line, text, page_text)
+        elif lower.startswith("basic premium") or lower.startswith("premium asas") or (lower.startswith("premium") and not lower.startswith("premium kasar") and not lower.startswith("premium payable")):
+            amount = row_amount(index)
+            if amount:
+                _add_line_value(results, "basic_premium_vehicle", amount, "semantic_contribution_row", 0.95, line, text, page_text)
+        if lower.startswith("gross contribution") or lower.startswith("gross premium") or lower.startswith("premium kasar"):
+            amount = row_amount(index)
+            if amount:
                 _add_line_value(results, "gross_premium", amount, "semantic_contribution_row", 0.95, line, text, page_text)
-        if lower.startswith("total contribution payable") or lower.startswith("total payable"):
+                _add_line_value(results, "premium", amount, "semantic_contribution_row", 0.92, line, text, page_text)
+        if lower.startswith("service tax") or lower.startswith("cukai perkhidmatan") or lower.startswith("sst"):
             amount = row_amount(index)
             if amount:
-                _add_line_value(results, "total_amount", amount, "semantic_contribution_row", 0.98, line, text, page_text)
-        if lower.startswith("service tax") or lower.startswith("sst"):
-            amount = row_amount(index)
-            if amount:
-                _add_line_value(results, "service_tax", amount, "semantic_contribution_row", 0.95, line, text, page_text)
-        if lower.startswith("stamp duty"):
+                _add_line_value(results, "service_tax", amount, "semantic_contribution_row", 0.97, line, text, page_text)
+        if lower.startswith("stamp duty") or lower.startswith("duti setem"):
             amount = row_amount(index)
             if amount:
                 _add_line_value(results, "stamp_duty", amount, "semantic_contribution_row", 0.95, line, text, page_text)

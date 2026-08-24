@@ -144,19 +144,41 @@ def build_draft(candidates: dict[str, list[CandidateValue]]) -> tuple[dict, list
                 fields["roadtax"]["value"] = f"{computed_rt:.2f}"
                 fields["roadtax"]["status"] = "ready"
 
-    # Calculate total amount from premium + roadtax + service_fee if total_amount is missing
-    if "total_amount" in fields and not fields["total_amount"].get("value"):
-        try:
-            from decimal import Decimal
-            p_val = fields.get("premium", {}).get("value")
-            r_val = fields.get("roadtax", {}).get("value")
-            s_val = fields.get("service_fee", {}).get("value")
-            if p_val:
-                tot = Decimal(str(p_val)) + Decimal(str(r_val or "0")) + Decimal(str(s_val or "0"))
-                fields["total_amount"]["value"] = f"{tot:.2f}"
-                fields["total_amount"]["status"] = "ready"
-        except Exception:
-            pass
+    # Ensure premium is the net payable insurance premium (after NCD, extras, and SST)
+    try:
+        from decimal import Decimal
+        p_val = fields.get("premium", {}).get("value")
+        t_val = fields.get("total_amount", {}).get("value")
+        gp_val = fields.get("gross_premium", {}).get("value")
+        st_val = fields.get("service_tax", {}).get("value")
+        bp_val = fields.get("basic_premium_vehicle", {}).get("value") or fields.get("basic_premium", {}).get("value")
+
+        # If gross_premium and service_tax are extracted, calculate total net insurance premium
+        if gp_val and st_val and "premium" in fields:
+            try:
+                calc_prem = Decimal(str(gp_val).replace(",", "")) + Decimal(str(st_val).replace(",", ""))
+                if not p_val or (bp_val and str(p_val) == str(bp_val)):
+                    fields["premium"]["value"] = f"{calc_prem:.2f}"
+                    fields["premium"]["status"] = "ready"
+                    p_val = f"{calc_prem:.2f}"
+            except Exception:
+                pass
+
+        # If total_amount in PDF was the insurer total premium (e.g. 2,522.42) and premium had basic premium
+        if t_val and bp_val and str(p_val) == str(bp_val) and str(t_val) != str(bp_val) and "premium" in fields:
+            fields["premium"]["value"] = str(t_val)
+            fields["premium"]["status"] = "ready"
+            p_val = str(t_val)
+
+        # Calculate Risklocker total amount if total_amount is not explicitly in the document
+        if "total_amount" in fields and (not fields["total_amount"].get("value") or fields["total_amount"].get("value") == "0") and p_val:
+            r_val = fields.get("roadtax", {}).get("value") or "0"
+            s_val = fields.get("service_fee", {}).get("value") or "0"
+            tot = Decimal(str(p_val).replace(",", "")) + Decimal(str(r_val).replace(",", "")) + Decimal(str(s_val).replace(",", ""))
+            fields["total_amount"]["value"] = f"{tot:.2f}"
+            fields["total_amount"]["status"] = "ready"
+    except Exception:
+        pass
 
     check_count = sum(1 for field in fields.values() if field.get("status") == "check_needed")
     if check_count:

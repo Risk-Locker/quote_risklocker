@@ -158,9 +158,21 @@ GEMINI_EXTRACTION_SCHEMA = {
             "type": "string",
             "description": "No Claim Discount percentage number without percent sign (e.g. '25.00' or '55'). Check 'NCD', 'NCB', 'No Claim Bonus', 'No Claim Discount', 'DTT'.",
         },
+        "basic_premium": {
+            "type": "string",
+            "description": "Basic insurance premium before NCD discount (e.g. '2,756.15' or '1,381.94'). Look for 'Basic Premium', 'Premium Asas', 'Premium'.",
+        },
+        "ncd_amount": {
+            "type": "string",
+            "description": "No Claim Discount amount deducted in RM (e.g. '1,515.88' or '345.50'). Look for 'NCD', 'DTT', 'No Claim Discount'.",
+        },
+        "gross_premium": {
+            "type": "string",
+            "description": "Gross premium after NCD deduction plus extra add-on riders (e.g. '2,335.57' or '1,036.44'). Look for 'Gross Premium', 'Premium Kasar', 'Gross Contribution'.",
+        },
         "premium": {
             "type": "string",
-            "description": "Gross or basic insurance premium payable before runner fees (e.g. '1,056.45' or '1,381.94').",
+            "description": "Total Insurance Premium payable to the insurer (e.g. '2,522.42' or '1,036.44'). Look for 'Total Premium', 'Jumlah Premium', 'Total Contribution', 'Premium Payable', 'Gross Premium'. If both basic premium and total premium are present, output the final Total Premium payable to the insurer.",
         },
         "total_optional_cover_amount": {
             "type": "string",
@@ -168,15 +180,15 @@ GEMINI_EXTRACTION_SCHEMA = {
         },
         "service_tax": {
             "type": "string",
-            "description": "SST / Service tax amount (e.g. '84.52').",
+            "description": "SST / Service tax amount (e.g. '186.85' or '84.52'). Look for 'Service Tax', 'Cukai Perkhidmatan', 'SST'.",
         },
         "stamp_duty": {
             "type": "string",
-            "description": "Stamp duty amount (e.g. '10.00').",
+            "description": "Stamp duty amount (e.g. '10.00' or '0.00'). Look for 'Stamp Duty', 'Duti Setem'.",
         },
         "total_amount": {
             "type": "string",
-            "description": "Final total quotation amount payable (e.g. '1,150.97').",
+            "description": "Final total quotation amount payable (e.g. '2,522.42' or '1,150.97').",
         },
         "roadtax": {
             "type": "string",
@@ -417,24 +429,28 @@ def extract_with_gemini_sync(
     }
 
     candidate_models = [
-        "gemini-3.1-flash-lite-preview",
-        "gemini-3.5-flash",
         "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.7-flash",
         model,
     ]
     seen_models: set[str] = set()
     models_to_try = [m for m in candidate_models if m and not (m in seen_models or seen_models.add(m))]
+    failed_models: set[str] = set()
 
     # Attempt keys in pool with round-robin + multi-model fallback
+    effective_timeout = min(timeout_seconds, 25.0)
     for attempt in range(len(all_keys)):
         api_key = pool.get_next_key()
         if not api_key:
             break
 
         for m_name in models_to_try:
+            if m_name in failed_models:
+                continue
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{m_name}:generateContent?key={api_key}"
             try:
-                with httpx.Client(timeout=timeout_seconds) as client:
+                with httpx.Client(timeout=effective_timeout, http2=False) as client:
                     response = client.post(url, json=payload)
                     if response.status_code == 200:
                         data = response.json()
@@ -450,8 +466,12 @@ def extract_with_gemini_sync(
                     elif response.status_code == 429:
                         logger.warning("Gemini key rate-limited (429) on %s, rotating to next key...", m_name)
                         break
-                    elif response.status_code in (503, 404):
-                        logger.warning("Gemini model %s returned %d, trying fallback model...", m_name, response.status_code)
+                    elif response.status_code == 404:
+                        logger.warning("Gemini model %s returned 404 (unavailable), skipping permanently...", m_name)
+                        failed_models.add(m_name)
+                        continue
+                    elif response.status_code == 503:
+                        logger.warning("Gemini model %s returned 503, trying fallback model...", m_name)
                         continue
                     else:
                         logger.warning("Gemini API returned status %d: %s", response.status_code, response.text[:200])

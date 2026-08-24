@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from html import escape
 from typing import Any
 
@@ -101,6 +102,12 @@ def _format_value(value: str, prefix: str = "", suffix: str = "") -> str:
     value = value.strip()
     if not value:
         return ""
+    if prefix and prefix.strip().upper() == "RM" and re.match(r"^\d+(?:\.\d+)?$", value):
+        try:
+            num = float(value)
+            value = f"{num:,.2f}"
+        except Exception:
+            pass
     if prefix and not value.upper().startswith(prefix.upper()):
         value = f"{prefix}{value}" if prefix.endswith(" ") else f"{prefix} {value}"
     if suffix and not value.endswith(suffix):

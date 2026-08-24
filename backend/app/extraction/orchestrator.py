@@ -31,7 +31,8 @@ class ExtractionOrchestrator:
         method_summary = list(native.method_summary)
         warnings = list(native.warnings)
 
-        if enhanced_reading or len(native.raw_text.strip()) < 80:
+        # Only run expensive OCR if native text is genuinely missing or sparse (< 80 chars)
+        if len(native.raw_text.strip()) < 80:
             enhanced_text, enhanced_methods, enhanced_warnings = run_enhanced_reading(file_path)
             ocr_text = enhanced_text
             method_summary.extend(enhanced_methods)
