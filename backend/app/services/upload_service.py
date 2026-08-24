@@ -14,7 +14,8 @@ from app.core.errors import AppError
 from app.extraction.company_resolution import build_companies_payload
 from app.extraction.sandbox import extract_with_limits
 from app.models.enums import AccountStatus, RecordStatus, StorageStatus
-from app.models.tables import AppSetting, Batch, BenefitConcept, CompanyAlias, ExtractionRecord, FieldAlias, InsuranceCompany, QuotationDraft, UploadedFile, VehicleBrand, VehicleModel, new_id
+from app.models.tables import AppSetting, Batch, BenefitConcept, CompanyAlias, DraftSourceLineDecision, ExtractionBenefitLine, ExtractionRecord, FieldAlias, InsuranceCompany, QuotationDraft, UploadedFile, VehicleBrand, VehicleModel, new_id
+from app.services.catalog_review_service import auto_apply_extracted_benefits, initialize_catalog_review, pin_catalog_context, seed_base_benefits
 from app.services.document_security import quarantined_pdf
 from app.services.file_validation import display_filename, validate_upload_bytes
 from app.services.session_service import create_session
@@ -29,6 +30,11 @@ def _source_key(now: datetime, batch_id: str, uploaded_file_id: str) -> str:
 
 
 def _cannot_read_result() -> dict:
+    draft_dict = {
+        "status": RecordStatus.CANNOT_READ.value,
+        "fields": {},
+        "warnings": ["PDF accepted; reading could not be completed"],
+    }
     return {
         "full_record": {
             "method_summary": ["PDF accepted; reading could not be completed"],
@@ -41,10 +47,13 @@ def _cannot_read_result() -> dict:
             "images": [],
             "regions": [],
             "candidates": {},
-            "warnings": ["Cannot Read"],
+            "warnings": ["PDF accepted; reading could not be completed"],
             "reading_quality": "cannot_read",
+            "benefit_lines": [],
+            "company_resolution": {"status": "unmatched", "company_id": None},
         },
-        "draft": {"status": RecordStatus.CANNOT_READ.value, "fields": {}, "warnings": ["Cannot Read"]},
+        "draft": draft_dict,
+        "draft_record": draft_dict,
     }
 
 
@@ -63,7 +72,7 @@ def _persist_upload(
     result: dict,
 ) -> None:
     full = result["full_record"]
-    draft_data = result["draft"]
+    draft_data = result["draft_record"]
     uploaded = UploadedFile(
         id=uploaded_id,
         batch_id=batch_id,
@@ -90,23 +99,22 @@ def _persist_upload(
     )
     db.add(uploaded)
     db.flush()
-    db.add(
-        ExtractionRecord(
-            uploaded_file_id=uploaded.id,
-            method_summary=full["method_summary"],
-            raw_text=full["raw_text"],
-            ocr_text=full["ocr_text"],
-            page_text=full["page_text"],
-            words=full["words"],
-            blocks=full["blocks"],
-            tables=full["tables"],
-            images=full["images"],
-            regions=full["regions"],
-            candidates=full["candidates"],
-            warnings=full["warnings"],
-            reading_quality=full["reading_quality"],
-        )
+    extraction_rec = ExtractionRecord(
+        uploaded_file_id=uploaded.id,
+        method_summary=full["method_summary"],
+        raw_text=full["raw_text"],
+        ocr_text=full["ocr_text"],
+        page_text=full["page_text"],
+        words=full["words"],
+        blocks=full["blocks"],
+        tables=full["tables"],
+        images=full["images"],
+        regions=full["regions"],
+        candidates=full["candidates"],
+        warnings=full["warnings"],
+        reading_quality=full["reading_quality"],
     )
+    db.add(extraction_rec)
     db.add(
         QuotationDraft(
             uploaded_file_id=uploaded.id,
@@ -120,7 +128,50 @@ def _persist_upload(
     detected = (draft_data.get("fields") or {}).get("insurance_company", {}).get("value")
     draft = db.scalar(select(QuotationDraft).where(QuotationDraft.uploaded_file_id == uploaded.id))
     if draft:
-        create_session(db, owner_id, uploaded.id, draft.id, detected)
+        session = create_session(db, owner_id, uploaded.id, draft.id, detected)
+        company_id = (full.get("company_resolution") or {}).get("company_id")
+        if company_id:
+            draft.company_id = company_id
+            uploaded.insurance_company_id = company_id
+            initialize_catalog_review(db, draft)
+
+        new_lines = []
+        for source in (full.get("benefit_lines") or []):
+            line_id = str(source.get("line_id") or "")
+            if not line_id:
+                continue
+            line = ExtractionBenefitLine(
+                id=new_id(),
+                extraction_record_id=extraction_rec.id,
+                line_id=line_id,
+                raw_label=str(source.get("raw_label") or ""),
+                normalized_label=str(source.get("normalized_label") or source.get("raw_label") or "")[:500],
+                page_number=source.get("page_number") or 1,
+                section=source.get("section"),
+                source_scope=str(source.get("source_scope") or "selected"),
+                line_kind=str(source.get("line_kind") or "benefit_candidate"),
+                inclusion_state=str(source.get("inclusion_state") or "selected"),
+                evidence=source.get("evidence") or {},
+                candidate_mappings=source.get("candidate_mappings") or [],
+                extracted_value=source.get("extracted_value"),
+            )
+            db.add(line)
+            new_lines.append(line)
+        if new_lines:
+            db.flush()
+            for line in new_lines:
+                db.add(DraftSourceLineDecision(
+                    id=new_id(),
+                    draft_id=draft.id,
+                    source_line_id=line.id,
+                    disposition="unresolved",
+                ))
+            db.flush()
+
+        revision = pin_catalog_context(db, draft)
+        if revision:
+            seed_base_benefits(db, draft, revision)
+        auto_apply_extracted_benefits(db, draft)
 
 
 async def create_batch_from_uploads(

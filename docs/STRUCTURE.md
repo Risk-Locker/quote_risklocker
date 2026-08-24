@@ -62,6 +62,8 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 ## Builder UX & Onboarding (v8) Additions
 
 - Editable AI system prompt: `GET/PUT /settings/ai-prompt` in `backend/app/api/routes.py`; `prompt_override` support in `backend/app/extraction/gemini_extractor.py`, threaded through `orchestrator.py`, `sandbox.py`, `upload_service.py`, and the re-extract route. Editor tab in `frontend/src/app/ai-context/page.tsx`.
+- AI Grounding Chatbot & Assistant: `backend/app/services/grounding_assistant.py` with `POST /settings/ai-grounding-chat` endpoint (targeted low-token DB retrieval for vehicles, insurers, concepts, and system stats) + Chatbot UI tab in `frontend/src/app/ai-context/page.tsx`. Tests in `tests/test_grounding_assistant.py`.
+- Collapsible Left Sidebar & Mobile Navigation: `frontend/src/components/app-shell.tsx` with collapsible 64px/220px desktop sidebar, `localStorage` persistence, tooltips on collapsed rail, and full slide-out mobile drawer navigation.
 - Sessions package tiers: `package_tiers` in the workspace snapshot (`backend/app/services/workspace_service.py`), `catalog_id` support in `_apply_pin_catalog`, role-based `_catalog_overview`, compact tier chips in `frontend/src/components/session-workspace/review-phase.tsx`.
 - Builder preview: real template renderer via `CanvasElementView` in `frontend/src/app/builder/benefits/page.tsx` + inline "Show preview" button.
 - Guided tours: reusable `frontend/src/components/guided-tour.tsx` added to builder/benefits, builder/global-benefits, sessions workspace, upload, and AI Grounding.

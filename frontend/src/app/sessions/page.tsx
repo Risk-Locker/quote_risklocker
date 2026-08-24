@@ -149,9 +149,9 @@ export default function SessionsPage() {
           ) : null}
         </div>
 
-        <form onSubmit={applySearch} className="flex items-center gap-2">
+        <form onSubmit={applySearch} className="flex flex-wrap items-center gap-2">
           <Input
-            className="max-w-sm"
+            className="max-w-sm flex-1 min-w-[200px]"
             placeholder="Search by file name or company…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}

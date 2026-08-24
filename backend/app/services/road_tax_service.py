@@ -29,7 +29,16 @@ def _eval_formula(formula: str, cc: int) -> float | None:
         return None
 
 
-_MOTORCYCLE_RATES = (
+_PRIVATE_MOTORCYCLE_RATES = (
+    (150, 2.00),
+    (200, 30.00),
+    (250, 50.00),
+    (500, 100.00),
+    (800, 250.00),
+    (float("inf"), 350.00),
+)
+
+_COMPANY_MOTORCYCLE_RATES = (
     (150, 2.00),
     (200, 30.00),
     (250, 50.00),
@@ -64,7 +73,7 @@ _PRIVATE_CAR_RATES = (
     (1800, 200.00, 0.40, 1600),
     (2000, 280.00, 0.50, 1800),
     (2500, 380.00, 1.00, 2000),
-    (3000, 880.00, 2.50, 2500),
+    (3000, 840.00, 2.50, 2500),
     (float("inf"), 2130.00, 4.50, 3000),
 )
 
@@ -81,10 +90,12 @@ def calculate_road_tax(
     engine_cc = round(cc)
     norm_vtype = (vehicle_type or "Car").strip().capitalize()
     norm_owner = (owner_type or "Individual").strip().capitalize()
+    is_company = norm_owner in {"Company", "Corporate", "Business"}
 
-    # Motorcycle (Private and Company use same scale)
+    # Motorcycle (Private vs Corporate scale)
     if norm_vtype in {"Motorcycle", "Bike", "Motor"}:
-        for max_cc, rate in _MOTORCYCLE_RATES:
+        rates = _COMPANY_MOTORCYCLE_RATES if is_company else _PRIVATE_MOTORCYCLE_RATES
+        for max_cc, rate in rates:
             if engine_cc <= max_cc:
                 return rate
 
@@ -95,8 +106,8 @@ def calculate_road_tax(
                 return rate
 
     # Car - Company vs Private Ownership
-    rates = _COMPANY_CAR_RATES if norm_owner in {"Company", "Corporate", "Business"} else _PRIVATE_CAR_RATES
-    for max_cc, base, per_cc, threshold in rates:
+    car_rates = _COMPANY_CAR_RATES if is_company else _PRIVATE_CAR_RATES
+    for max_cc, base, per_cc, threshold in car_rates:
         if engine_cc <= max_cc:
             if per_cc == 0.0:
                 return base
@@ -287,7 +298,7 @@ STANDARD_ROAD_TAX_RULES = [
     {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1601, "max_cc": 1800, "base_rate": 200.00, "formula": "200 + ((cc - 1600) * 0.40)", "source": "JPJ Schedule (Peninsular)"},
     {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1801, "max_cc": 2000, "base_rate": 280.00, "formula": "280 + ((cc - 1800) * 0.50)", "source": "JPJ Schedule (Peninsular)"},
     {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 2001, "max_cc": 2500, "base_rate": 380.00, "formula": "380 + ((cc - 2000) * 1.00)", "source": "JPJ Schedule (Peninsular)"},
-    {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 2501, "max_cc": 3000, "base_rate": 880.00, "formula": "880 + ((cc - 2500) * 2.50)", "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 2501, "max_cc": 3000, "base_rate": 840.00, "formula": "840 + ((cc - 2500) * 2.50)", "source": "JPJ Schedule (Peninsular)"},
     {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 3001, "max_cc": None, "base_rate": 2130.00, "formula": "2130 + ((cc - 3000) * 4.50)", "source": "JPJ Schedule (Peninsular)"},
 
     # Company Car (West Malaysia)
@@ -305,7 +316,7 @@ STANDARD_ROAD_TAX_RULES = [
     {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1, "max_cc": 150, "base_rate": 2.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
     {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 151, "max_cc": 200, "base_rate": 30.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
     {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 201, "max_cc": 250, "base_rate": 50.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
-    {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 251, "max_cc": 500, "base_rate": 180.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 251, "max_cc": 500, "base_rate": 100.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
     {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 501, "max_cc": 800, "base_rate": 250.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
     {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 801, "max_cc": None, "base_rate": 350.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
 

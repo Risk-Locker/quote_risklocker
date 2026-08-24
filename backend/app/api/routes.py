@@ -34,6 +34,7 @@ from app.api.schemas import (
     ExtractionSettingsRequest,
     FieldAliasSaveRequest,
     GenerateSelectedRequest,
+    GroundingChatRequest,
     LoginRequest,
     OurSpecialSaveRequest,
     OurSpecialVariantSaveRequest,
@@ -74,6 +75,10 @@ from app.models.tables import (
     CompanyAlias,
     FieldAlias,
     BusinessAsset,
+    DraftBenefitSelection,
+    DraftSourceLineDecision,
+    ExtractionBenefitLine,
+    ExtractionRecord,
     GeneratedPdfVersion,
     InsuranceCompany,
     Job,
@@ -663,6 +668,9 @@ def session_extract_gemini(
 
     draft.fields = fields
 
+    from app.services.catalog_review_service import auto_apply_extracted_benefits, initialize_catalog_review
+    from app.models.tables import ExtractionBenefitLine, DraftSourceLineDecision, new_id
+
     # Sync company if detected — alias-aware so Gemini variants like
     # "AmGeneral" / "AmGen" / "AM General Insurance Berhad" map to AmAssurance.
     comp_name = str(gemini_res.get("insurance_company") or "").strip()
@@ -673,8 +681,92 @@ def session_extract_gemini(
             draft.company_id = company["company_id"]
             draft.fields["insurance_company"] = {"value": company["name"], "status": "ready", "message": ""}
             session.detected_company = company["name"]
-            initialize_catalog_review(db, draft)
 
+    # Process extraction benefit lines & candidate mappings
+    extraction = db.scalar(select(ExtractionRecord).where(ExtractionRecord.uploaded_file_id == draft.uploaded_file_id))
+    if extraction:
+        candidates = dict(extraction.candidates or {})
+        if gemini_res.get("detected_packs"):
+            candidates["detected_packs"] = gemini_res["detected_packs"]
+        extraction.candidates = candidates
+
+        gemini_benefits = gemini_res.get("detected_benefits") or []
+        for b_item in gemini_benefits:
+            b_label = str(b_item.get("label") or "").strip()
+            b_val = str(b_item.get("value") or "").strip()
+            b_key = str(b_item.get("concept_key") or "").strip()
+            b_norm = b_label.lower().replace(" ", "-").replace("_", "-")
+            matched_concept = None
+            for c in (db_benefit_concepts or []):
+                c_k = (c.get("concept_key") or c.get("key") or "").lower().replace("_", "-")
+                c_lbl = (c.get("label") or c.get("name") or "").lower()
+                if b_key and c_k and (c_k == b_key.lower().replace("_", "-")):
+                    matched_concept = c
+                    break
+                if c_lbl and (c_lbl == b_label.lower() or c_lbl in b_label.lower() or b_label.lower() in c_lbl):
+                    matched_concept = c
+                    break
+                if b_norm and c_k and (c_k in b_norm or b_norm in c_k):
+                    matched_concept = c
+                    break
+
+            concept_id = (matched_concept.get("concept_id") or matched_concept.get("id")) if matched_concept else None
+            c_key = (matched_concept.get("concept_key") or matched_concept.get("key")) if matched_concept else (b_key or b_norm)
+            cov_limit = str(b_item.get("coverage_limit") or "").strip()
+            cost = str(b_item.get("premium_cost") or "").strip()
+            is_optional = bool(b_item.get("is_optional_cover", False))
+            limit_val = cov_limit or (b_val if b_val.lower() not in {"included", "standard", "yes", "true"} else "")
+            typed_val = None
+            if limit_val:
+                clean_limit = limit_val.upper().replace("RM", "").replace(",", "").strip()
+                typed_val = {
+                    "type": "money" if any(char.isdigit() for char in clean_limit) else "string",
+                    "value": clean_limit if any(char.isdigit() for char in clean_limit) else limit_val,
+                    "currency": "MYR",
+                    "display_text": limit_val if limit_val.startswith("RM") else f"RM {limit_val}" if any(char.isdigit() for char in clean_limit) else limit_val,
+                }
+            elif cost:
+                clean_cost = cost.upper().replace("RM", "").replace(",", "").strip()
+                typed_val = {"type": "money", "value": clean_cost, "currency": "MYR", "display_text": f"RM {clean_cost}"}
+
+            line = ExtractionBenefitLine(
+                id=new_id(),
+                extraction_record_id=extraction.id,
+                line_id=f"gemini_re_{new_id()[:8]}",
+                raw_label=b_label,
+                normalized_label=b_label.lower()[:500],
+                page_number=1,
+                section="Optional Covers" if is_optional else "Selected Benefits",
+                source_scope="selected",
+                line_kind="benefit_candidate",
+                inclusion_state="selected",
+                evidence={"value": b_val, "coverage_limit": cov_limit, "premium_cost": cost},
+                candidate_mappings=[{
+                    "concept_id": concept_id,
+                    "concept_key": c_key,
+                    "name": b_label,
+                    "matched_alias": b_label,
+                    "score": 100,
+                    "match_type": "gemini_multimodal",
+                    "evidence": b_val,
+                    "shaped_description": f"{b_label} ({b_val})" if b_val and b_val.lower() != "included" else b_label,
+                    "coverage_limit": cov_limit or b_val,
+                    "premium_cost": cost,
+                    "is_detected": True,
+                }] if concept_id or c_key else [],
+                extracted_value=typed_val,
+            )
+            db.add(line)
+            db.flush()
+            db.add(DraftSourceLineDecision(
+                id=new_id(),
+                draft_id=draft.id,
+                source_line_id=line.id,
+                disposition="unresolved",
+            ))
+
+    initialize_catalog_review(db, draft)
+    auto_apply_extracted_benefits(db, draft)
     db.commit()
 
     pool = get_key_pool()
@@ -1109,6 +1201,17 @@ def business_company_alias_retire(
 ) -> Response:
     retire_company_alias(db, user, alias_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/business/companies")
+def business_companies(
+    search: str = Query(default="", max_length=200),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"companies": list_business_companies(db, user, search=search, page=page, page_size=page_size)}
 
 
 @router.post("/business/companies")
@@ -1740,7 +1843,7 @@ async def admin_template_asset_upload(
 ) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
     data = await file.read()
-    filename = str(file.filename or "asset.png")
+    filename = file.filename or "asset.png"
     content_type = file.content_type or "application/octet-stream"
     try:
         record = upload_template_asset(db, settings, user, filename, content_type, data, label=label, folder=folder)
@@ -2102,7 +2205,7 @@ def settings_ai_context(
     user: User = Depends(current_user),
 ) -> dict:
     from app.extraction.gemini_extractor import get_key_pool, build_rag_system_prompt
-    from app.models.tables import InsuranceCompany, BenefitConcept, FieldAlias
+    from app.models.tables import InsuranceCompany, BenefitConcept, FieldAlias, ClientRecord, QuotationDraft
 
     pool = get_key_pool()
     quota = pool.get_quota_stats()
@@ -2140,36 +2243,12 @@ def settings_ai_context(
         for fa in field_aliases_db
     ]
 
+    saved_records_count = db.scalar(select(func.count(ClientRecord.id))) or 0
+    total_sessions_count = db.scalar(select(func.count(QuotationDraft.id))) or 0
+
     rag_companies = [{"name": c["name"], "aliases": c["aliases"]} for c in companies]
     rag_concepts = [{"key": c["key"], "name": c["name"]} for c in concepts]
     live_prompt = build_rag_system_prompt(db_companies=rag_companies, db_benefit_concepts=rag_concepts)
-
-    negative_rules = [
-        {
-            "target": "Customer / Insured Name",
-            "rule": "Strict Exclusion of Agent & Broker details",
-            "patterns": ["Nama Ejen", "Agent Name", "No. Akaun", "Account No.", "RISKLOCKER", "Agency Name", "Agent Code"],
-            "explanation": "Prevents agent, broker, and agency header data from corrupting the customer policyholder name field."
-        },
-        {
-            "target": "Customer / Insured Name",
-            "rule": "Strict Exclusion of Assistance Marketing",
-            "patterns": ["24 hours Road & Breakdown Assist", "Toll free number", "Roadside Assist", "Call the toll free", "Hotline"],
-            "explanation": "Prevents breakdown service blurbs printed at the top of quotations from being misdetected as the insured's name."
-        },
-        {
-            "target": "Coverage Type",
-            "rule": "Normalization & Translation Exclusion",
-            "patterns": ["Jenis Perlindungan"],
-            "explanation": "Forces output to standard 'Comprehensive', 'Third Party Fire & Theft', or 'Third Party' instead of echoing Malay label headers."
-        },
-        {
-            "target": "Vehicle Model",
-            "rule": "Preserve Full Specification String",
-            "patterns": ["Do not truncate to brand or single word"],
-            "explanation": "Captures complete variant, transmission (CVT/Auto/Manual), body type, and year specification."
-        }
-    ]
 
     return {
         "gemini": {
@@ -2183,12 +2262,30 @@ def settings_ai_context(
             "rpd_remaining": quota["rpd_remaining"],
             "percent_rpd_remaining": quota["percent_rpd_remaining"],
         },
+        "summary_stats": {
+            "active_companies_count": len(companies),
+            "benefit_concepts_count": len(concepts),
+            "field_aliases_count": len(field_aliases),
+            "saved_records_count": saved_records_count,
+            "total_sessions_count": total_sessions_count,
+        },
         "companies": companies,
         "benefit_concepts": concepts,
         "field_aliases": field_aliases,
-        "negative_rules": negative_rules,
         "live_system_prompt": live_prompt,
     }
+
+
+@router.post("/settings/ai-grounding-chat")
+def settings_ai_grounding_chat(
+    payload: GroundingChatRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Answer targeted grounding queries with ultra-low token context."""
+    from app.services.grounding_assistant import answer_grounding_query
+    return answer_grounding_query(db, query=payload.query, session_id=payload.session_id)
+
 
 
 @router.get("/settings/ai-prompt")

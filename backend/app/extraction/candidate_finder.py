@@ -81,18 +81,19 @@ DEFAULT_ALIASES = {
     "car_brand": ["make", "brand", "car"],
     "car_model": ["model", "vehicle model"],
     "vehicle_year": ["year", "manufacture year", "mfg year"],
-    "engine_cc": ["engine cc", "capacity", "cubic capacity", "engine capacity", "cc"],
-    "engine_no": ["engine/motor no", "engine no", "motor no"],
-    "chassis_no": ["chassis no", "chassis number"],
-    "excess_amount": ["excess amount", "excess"],
-    "coverage_amount": ["sum insured", "coverage amount", "insured value", "market value", "agreed value"],
-    "premium": ["premium", "gross premium", "premium payable", "basic premium"],
-    "total_amount": ["total payable", "total amount", "amount payable", "gross amount"],
-    "roadtax": ["road tax", "roadtax"],
-    "service_fee": ["service fee", "runner fee"],
-    "ncd_percent": ["ncd", "ncb", "no claim discount", "no claim bonus"],
-    "windscreen": ["windscreen"],
-    "towing": ["towing"],
+    "engine_cc": ["engine cc", "capacity", "cubic capacity", "engine capacity", "keupayaan enjin", "cc"],
+    "engine_no": ["engine/motor no", "engine no", "motor no", "no. enjin"],
+    "excess_amount": ["excess amount", "excess all claims", "excess", "policy excess", "ekses", "ekses polisi", "compulsory excess", "lebihan"],
+    "valid_until": ["valid until", "validity period", "validity date", "validity", "this quotation will expire on", "quotation will expire on", "expire on", "expiry date", "tarikh luput", "sah sehingga"],
+    "coverage_amount": ["sum insured", "coverage amount", "insured value", "market value", "agreed value", "sum covered"],
+    "premium": ["premium", "gross premium", "premium payable", "basic premium", "gross contribution", "premium kasar"],
+    "total_amount": ["total payable", "total amount", "amount payable", "gross amount", "jumlah bayaran", "total / jumlah"],
+    "optional_cover_amount": ["total optional cover amount", "total optional cover", "extra benefit", "manfaat tambahan", "optional cover amount"],
+    "roadtax": ["road tax", "roadtax", "cukai jalan"],
+    "service_fee": ["service fee", "runner fee", "cukai perkhidmatan"],
+    "ncd_percent": ["ncd", "ncb", "no claim discount", "no claim bonus", "dtt"],
+    "windscreen": ["windscreen", "cermin hadapan"],
+    "towing": ["towing", "tunda"],
 }
 
 DEFAULT_VEHICLE_BRANDS = ("PROTON", "PERODUA", "HONDA", "TOYOTA", "NISSAN", "BMW", "MERCEDES", "MERCEDES-BENZ", "MAZDA", "MITSUBISHI", "KIA", "HYUNDAI")
@@ -196,20 +197,50 @@ def _lines(text: str) -> list[str]:
     return [re.sub(r"\s+", " ", line).strip() for line in text.splitlines() if line.strip()]
 
 
+BILINGUAL_SUBTITLE_LABELS = {
+    "pihak diinsuranskan", "no pendaftaran kenderaan", "tahun diperbuat", "no enjin",
+    "no casis", "no casis treler", "lebihan", "ekses", "ekses polisi", "nilai yang dipersetujui",
+    "jumlah diinsuranskan", "jumlah treler diinsuranskan", "kelas kenderaan", "jenis perlindungan",
+    "sewa beli", "premium asas", "semua pemandu", "premium treler", "dtt", "tarikh berkuatkuasa dtt",
+    "manfaat tambahan", "buatan & jenis badan", "keupayaan enjin", "muatan tempat duduk termasuk pemandu",
+    "muatan tempat duduk", "premium kasar", "cukai perkhidmatan", "setem hasil", "pemandu yang diberi kuasa",
+    "jumlah", "akta", "tarikh dikeluarkan", "kawasan geografi", "perniagaan/pekerjaan",
+    "no k/p baru/no pendaftaran perniagaan", "no k/p", "no perakuan pendaftaran", "no perakuan",
+    "no treler", "no quotation", "no. quotation", "no. akaun / nama ejen", "no akaun", "nama ejen",
+    "dipersetujui", "nilai yang", "jumlah diinsuranskan nilai yang"
+}
+
+
+def _is_subtitle_label(text: str) -> bool:
+    norm = re.sub(r"[^\w\s/&]+", "", text.lower()).strip()
+    if norm in BILINGUAL_SUBTITLE_LABELS:
+        return True
+    return any(norm == l or norm.startswith(l + " ") or norm.endswith(" " + l) or l in norm for l in BILINGUAL_SUBTITLE_LABELS)
+
+
+def _clean_code_value(value: str) -> str:
+    cleaned = re.split(r"(?i)\s+(?:gross premium|premium kasar|service tax|cukai perkhidmatan|stamp duty|setem hasil|total|jumlah)\b", value)[0].strip()
+    return cleaned
+
+
 def _next_value(lines: list[str], index: int) -> str:
-    for candidate in lines[index + 1 : index + 6]:
+    for candidate in lines[index + 1 : index + 8]:
         stripped = candidate.strip()
-        if stripped and stripped not in {":", "-", "RM"}:
-            return stripped
+        if not stripped or stripped in {":", "-", "RM", "-/-"}:
+            continue
+        if _is_subtitle_label(stripped):
+            continue
+        return _clean_code_value(stripped)
     return ""
 
 
 def _line_value(line: str, lines: list[str], index: int) -> str:
     if ":" in line:
         tail = line.split(":", 1)[1].strip()
-        if tail:
+        if tail and not _is_subtitle_label(tail):
             parts = re.split(r"\s{2,}|(?i:\b(?:car|model|vehicle|chassis|engine|year|reg(?:ist|istration)?|premium|ncd)\b[\s\-:])", tail)
-            return parts[0].strip() if parts else tail
+            raw = parts[0].strip() if parts else tail
+            return _clean_code_value(raw)
     return _next_value(lines, index)
 
 
@@ -236,23 +267,34 @@ def _semantic_label_map() -> list[tuple[str, str]]:
     return [
         ("applicant", "customer_name"),
         ("insured name", "customer_name"),
+        ("the insured", "customer_name"),
+        ("the insured / pihak diinsuranskan", "customer_name"),
         ("participant name", "customer_name"),
         ("participant", "customer_name"),
         ("name", "customer_name"),
         ("quotation date", "issue_date"),
         ("issued date", "issue_date"),
+        ("date of issue", "issue_date"),
         ("date", "issue_date"),
+        ("this quotation will expire on", "valid_until"),
+        ("quotation will expire on", "valid_until"),
+        ("expire on", "valid_until"),
+        ("expiry date", "valid_until"),
+        ("tarikh luput", "valid_until"),
         ("valid until", "valid_until"),
         ("validity period", "valid_until"),
+        ("validity", "valid_until"),
+        ("sah sehingga", "valid_until"),
         ("vehicle registration number", "vehicle_no"),
-        ("vehicle no", "vehicle_no"),
         ("registration no", "vehicle_no"),
+        ("vehicle no", "vehicle_no"),
         ("regist. no", "vehicle_no"),
         ("regist no", "vehicle_no"),
         ("reg. no", "vehicle_no"),
         ("reg no", "vehicle_no"),
         ("vehicle make", "car_brand"),
         ("make", "car_brand"),
+        ("make & type of body", "car_model"),
         ("vehicle model", "car_model"),
         ("make & model", "car_model"),
         ("model", "car_model"),
@@ -260,6 +302,7 @@ def _semantic_label_map() -> list[tuple[str, str]]:
         ("year of manufacture", "vehicle_year"),
         ("year of make", "vehicle_year"),
         ("year", "vehicle_year"),
+        ("engine capacity", "engine_cc"),
         ("cubic capacity", "engine_cc"),
         ("capacity", "engine_cc"),
         ("chassis number", "chassis_no"),
@@ -268,10 +311,12 @@ def _semantic_label_map() -> list[tuple[str, str]]:
         ("engine no", "engine_no"),
         ("sum covered (rm)", "coverage_amount"),
         ("sum covered", "coverage_amount"),
+        ("sum insured (agreed value)", "coverage_amount"),
         ("vehicle sum insured", "coverage_amount"),
         ("sum insured", "coverage_amount"),
         ("cover type", "coverage_type"),
         ("coverage type", "coverage_type"),
+        ("class of vehicle", "vehicle_class"),
         ("scope of cover", "coverage_type"),
         ("takaful scheme", "coverage_type"),
         ("product type", "product_name"),
@@ -281,12 +326,19 @@ def _semantic_label_map() -> list[tuple[str, str]]:
         ("gross premium", "premium"),
         ("total contribution payable", "total_amount"),
         ("total payable", "total_amount"),
+        ("total / jumlah", "total_amount"),
+        ("total", "total_amount"),
         ("stamp duty", "stamp_duty"),
         ("sst", "service_tax"),
         ("service tax", "service_tax"),
         ("excess all claims", "excess_amount"),
         ("excess amount", "excess_amount"),
         ("policy excess", "excess_amount"),
+        ("compulsory excess", "excess_amount"),
+        ("excess", "excess_amount"),
+        ("lebihan", "excess_amount"),
+        ("ekses", "excess_amount"),
+        ("ekses polisi", "excess_amount"),
     ]
 
 
@@ -317,8 +369,15 @@ def _add_semantic_label_values(text: str, page_text: list[dict], results: dict[s
     label_map = _semantic_label_map()
     for index, line in enumerate(lines):
         normalized = line.lower().strip(" :-")
+        has_colon = ":" in line
+        head = line.split(":", 1)[0].lower().strip(" :-") if has_colon else ""
         for label, field in label_map:
-            if normalized == label or normalized.startswith(f"{label} :") or normalized.startswith(f"{label}:"):
+            matched = False
+            if has_colon:
+                matched = head == label or head.endswith(label) or head.startswith(label)
+            else:
+                matched = normalized == label or normalized.startswith(f"{label} ") or normalized.endswith(f" {label}") or normalized.endswith(label) or f" {label} " in normalized or f" {label}:" in normalized
+            if matched:
                 value = _line_value(line, lines, index)
                 if field == "valid_until":
                     dates = _dates(value)
@@ -380,9 +439,13 @@ def _add_contribution_rows(text: str, page_text: list[dict], results: dict[str, 
             amount = row_amount(index)
             if amount:
                 _add_line_value(results, "stamp_duty", amount, "semantic_contribution_row", 0.95, line, text, page_text)
-        if "policy excess" in lower or (lower.startswith("excess") and "rm" in window.lower()):
+        if "policy excess" in lower or "lebihan" in lower or "ekses" in lower or (lower.startswith("excess") and any(c.isdigit() for c in window)):
             if money_values:
                 _add_line_value(results, "excess_amount", money_values[0], "semantic_contribution_row", 0.92, line, text, page_text)
+        if "total optional cover" in lower or "extra benefit" in lower or "manfaat tambahan" in lower:
+            amount = row_amount(index)
+            if amount:
+                _add_line_value(results, "optional_cover_amount", amount, "semantic_contribution_row", 0.94, line, text, page_text)
         if lower.startswith("windscreen"):
             money_match = re.search(r"\((RM\s*[\d,]+(?:\.\d{2})?)\)", line, re.IGNORECASE)
             if money_match:
@@ -460,9 +523,18 @@ def _add_amgen_profile(text: str, page_text: list[dict], results: dict[str, list
         _add_static(results, "engine_cc", header.group("cc"), "profile_header", 0.94, evidence, text, page_text)
         _add_static(results, "vehicle_no", header.group("vehicle"), "profile_header", 0.98, evidence, text, page_text)
 
-    valid_until = re.search(r"Valid Until\s+(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{4})", text, re.IGNORECASE)
-    if valid_until:
-        _add_static(results, "valid_until", valid_until.group("date"), "profile_validity", 0.93, valid_until.group(0), text, page_text)
+    valid_until_patterns = [
+        r"(?:this\s+)?quotation\s+(?:will\s+)?expire\s+on\s*:?\s*(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
+        r"valid\s+(?:until|to)\s*:?\s*(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
+        r"validity\s*(?:period|date)?\s*:?\s*(?:until\s*)?(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
+        r"tarikh\s+luput\s*:?\s*(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
+        r"expiry\s+date\s*:?\s*(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
+    ]
+    for v_pat in valid_until_patterns:
+        v_match = re.search(v_pat, text, re.IGNORECASE)
+        if v_match:
+            _add_static(results, "valid_until", v_match.group("date"), "profile_validity", 0.95, v_match.group(0), text, page_text)
+            break
 
     vehicle = re.search(
         r"Make\s*&\s*Model\s+Year of make\s+Vehicle Sum Insured\s+Trailer Sum Insured\s+"
@@ -498,7 +570,7 @@ def _add_amgen_profile(text: str, page_text: list[dict], results: dict[str, list
         ("market_value", r"ISM-ABI Market Value\s+(?P<money>RM\s*[\d,]+\.\d{2})", 0.92),
         ("engine_no", r"Engine/Motor No\s*:?\s*(?P<value>[A-Z0-9-]+)", 0.92),
         ("chassis_no", r"Chassis No\.?\s*:?\s*(?P<value>[A-Z0-9-]+)", 0.94),
-        ("excess_amount", r"\*?Excess Amount\s*:?\s*(?P<money>RM\s*[\d,]+\.\d{2})", 0.92),
+        ("excess_amount", r"(?:\*?Excess(?:\s+Amount)?|Lebihan|Ekses(?:\s+Polisi)?|Policy\s+Excess)\s*:?\s*(?:RM\s*)?(?P<money>[\d,]+\.\d{2})", 0.92),
     ]:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:

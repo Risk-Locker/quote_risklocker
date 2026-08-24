@@ -30,6 +30,7 @@ class GridSpec:
     stagger_ratio: float = 0.5
     empty_state: str = "hide"
     readability_scale: float = 0.22
+    max_scale: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -95,7 +96,8 @@ def _candidate_score(
     if card_height > cell_height:
         card_height = cell_height
         card_width = card_height * spec.aspect_ratio
-    scale = min(card_width / spec.reference_width, card_height / spec.reference_height)
+    raw_scale = min(card_width / spec.reference_width, card_height / spec.reference_height)
+    scale = min(spec.max_scale, raw_scale)
     density_shape = abs((columns / rows) - (bounds.width / bounds.height))
     square_bias = abs(columns - rows) / max(columns, rows)
     penalty = square_bias if spec.strategy == "square_biased" else density_shape * 0.02

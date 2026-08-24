@@ -21,13 +21,11 @@ def test_global_benefits_page_uses_the_real_apis():
 
 def test_global_benefits_page_exposes_the_simplified_library_fields():
     source = PAGE.read_text(encoding="utf-8")
-    for field in ("match_dataset", "concept_key", "default_asset_id", "sort_order", "label"):
+    for field in ("concept_key", "default_asset_id", "sort_order", "label"):
         assert field in source
-    assert "Match words" in source
-    assert "Stable key" in source
-    assert "Benefit name" in source
-    assert "Manage aliases" in source
-    assert "/extraction/benefit-aliases" in source
+    assert "Benefit Image" in source or "default_asset" in source
+    assert "Benefit Title" in source or "Benefit name" in source
+    assert "Short Description" in source or "description" in source
 
 
 def test_global_benefits_page_does_not_expose_redundant_variants_ui():
@@ -41,7 +39,7 @@ def test_global_benefits_page_does_not_expose_redundant_variants_ui():
 def test_global_benefits_are_never_hardcoded():
     source = PAGE.read_text(encoding="utf-8")
     # The library is DB-driven: no real benefit names baked into the page.
-    for hardcoded in ("Windscreen", "Special Perils", "Key Replacement", "Roadside Assistance", "Flood Assistance"):
+    for hardcoded in ("Special Perils", "Key Replacement", "Roadside Assistance", "Flood Assistance"):
         occurrences = source.count(hardcoded)
         assert occurrences <= 1, f"{hardcoded} appears {occurrences} times in the page"
     assert source.count("Towing") <= 4

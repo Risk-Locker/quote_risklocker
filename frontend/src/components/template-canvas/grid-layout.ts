@@ -44,7 +44,8 @@ export function packFixedGrid(count: number, width: number, height: number, inpu
     let cardWidth = Math.min(cellWidth, cellHeight * aspect);
     let cardHeight = cardWidth / aspect;
     if (cardHeight > cellHeight) { cardHeight = cellHeight; cardWidth = cardHeight * aspect; }
-    const scale = Math.min(cardWidth / referenceWidth, cardHeight / referenceHeight);
+    const rawScale = Math.min(cardWidth / referenceWidth, cardHeight / referenceHeight);
+    const scale = Math.min(1.0, rawScale);
     const densityShape = Math.abs(columns / rows - width / height);
     const squareBias = Math.abs(columns - rows) / Math.max(columns, rows);
     const penalty = strategy === "square_biased" ? squareBias : densityShape * 0.02;

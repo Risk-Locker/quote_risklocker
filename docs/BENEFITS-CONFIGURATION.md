@@ -1,276 +1,114 @@
 # Benefits & Add-on Configuration Matrix
 
-**Canonical source of truth for how every insurer structures benefits.** Read this before configuring or seeding any company catalog. It mirrors exactly what is seeded today (`commands/seed-demo.py`), what exists only as a draft (`commands/seed-docx-draft.py`), and what is still missing — so nothing is ever added silently and no row is left ambiguous.
+**Canonical source of truth for how every insurer structures benefits.** Read this before configuring or seeding any company catalog. It mirrors exactly what is seeded today (`commands/seed-demo.py`), covering all 7 underwriting insurers, 51 standardized global benefit concepts, 6 vehicle categories, and 3 coverage types (Comprehensive, TPFT, TPO) with deterministic pricing.
 
-This document is the refill sheet: **you** correct/extend values here, and a future data-driven seed script turns it into idempotent upserts (creates the missing rows, amends existing ones).
+---
 
 ## Status Legend
 
 | Mark | Meaning |
 | --- | --- |
-| ✅ seeded | Configuration is applied to the database today |
+| ✅ seeded | Configuration is applied to the database and active |
 | ⏳ draft | Config exists in seed scripts but is **not** applied / superseded |
 | ⬜ pending | Not configured — fill this row to extend coverage |
 
 ---
 
-## 1. Global Benefit Library (all 45 concepts)
+## 1. Global Benefit Library (51 Standardized Concepts)
 
-The stable benefit facility. `category` = `default` (base/included family) or `addon` (available as an optional extra). `variants` = named plan variants offered by some insurers (e.g. Driver Passenger Protector Plan A–D); single-insurer concepts are still global but named after their home insurer.
+The standardized master library across all Malaysian motor underwriters. Every concept has a clean, informative description and maps directly to an active `BusinessAsset`.
 
-### Defaults (11)
+### 1. Default & Included Base Family (14 Concepts)
+1. `own-damage` — Comprehensive Accidental Own Damage
+2. `fire-theft` — Accidental Fire & Theft Indemnity
+3. `third-party-bi` — Unlimited Third-Party Bodily Injury & Death
+4. `third-party-property` — Third-Party Property Damage (RM 3,000,000)
+5. `towing` — 24/7 Roadside Towing Assistance
+6. `roadside-assistance` — 24/7 Minor Roadside Repairs & Jumpstart
+7. `repair-workmanship-warranty` — Panel Workshop Repair Workmanship Warranty
+8. `all-drivers` — All Drivers / Unnamed Driver Excess Waiver
+9. `betterment-protection` — Waiver of Betterment Contribution (New Replacement Parts)
+10. `total-loss-theft-allowance` — Total Loss / Theft Lump-Sum Compassionate Allowance
+11. `key-replacement` — Key & Transmitter Lock Replacement Reimbursement
+12. `flood-relief-allowance` — Compassionate Flood & Inundation Cash Relief
+13. `personal-belongings-theft` — Personal Belongings & Vehicle Break-in Theft
+14. `ambulance-fees` — Emergency Ambulance Transport Reimbursement
 
-| # | concept_key | Label | Notes |
-| --- | --- | --- | --- |
-| 1 | `towing` | Towing | 24/7 emergency towing |
-| 2 | `roadside-assistance` | Roadside Assistance | 24h on-site / jumpstart / minor assist |
-| 3 | `repair-workmanship-warranty` | Workmanship Warranty | Panel workshop body/paint warranty |
-| 4 | `all-drivers` | All Drivers | Named-driver waiver / any authorised driver |
-| 5 | `personal-accident` | Personal Accident | Includes AD / TPD |
-| 6 | `betterment-protection` | Betterment Protection | Waiver of betterment / new parts |
-| 7 | `total-loss-theft-allowance` | Total Loss / Theft Allowance | Lump-sum compassionate allowance |
-| 8 | `key-replacement` | Key Replacement | Smart/transmitter key reimburse |
-| 9 | `flood-relief-allowance` | Flood Relief Allowance | Immediate cash relief |
-| 10 | `personal-belongings-theft` | Personal Belongings Theft | Smash & grab / snatch theft |
-| 11 | `ambulance-fees` | Ambulance Fees | Emergency transport reimburse |
+### 2. Standard Riders & Add-ons (20 Concepts)
+15. `windscreen` — Windscreen, Window & Sunroof Glass Damage
+16. `special-perils` — Full Convulsion of Nature (Flood, Landslide, Typhoon, Storm)
+17. `first-loss-flood` — First-Loss Flood Special Perils
+18. `strike-riot-civil-commotion` — Strike, Riot & Civil Commotion (SRCC)
+19. `legal-liability-to-passengers` — Legal Liability to Passengers (LLTP)
+20. `legal-liability-of-passengers` — Legal Liability of Passengers (LLOP)
+21. `legal-liability-to-pillion` — Legal Liability to Pillion Rider (LLTR)
+22. `legal-costs-defense` — Legal Defense & Representation Costs
+23. `medical-expenses` — Accidental Medical Expenses Reimbursement
+24. `hospital-income` — Daily Hospital Income Allowance
+25. `bereavement-allowance` — Compassionate Bereavement Funeral Allowance
+26. `replacement-car` — Temporary Replacement Rental Vehicle
+27. `repair-allowance` — Compensation for Assessed Repair Time (CART)
+28. `repaint-spray-paint` — Whole Vehicle Respray / Spray Paint
+29. `side-mirror-protection` — Side Mirror & Exterior Glass Cover
+30. `child-car-seat` — Child Car Safety Seat Replacement
+31. `vehicle-accessories` — Vehicle Accessories & Multimedia Gear Endorsement
+32. `e-hailing-extension` — E-Hailing Passenger & Liability Extension
+33. `agreed-value-market-value` — Agreed Value Sum Insured Settlement
+34. `cashback-no-claim` — No-Claim Cashback / Surplus Sharing
 
-### Add-ons & Extended Concepts (34)
-
-| # | concept_key | Label | Variants |
-| --- | --- | --- | --- |
-| 12 | `windscreen` | Windscreen | — |
-| 13 | `special-perils` | Special Perils | — |
-| 14 | `strike-riot-civil-commotion` | Strike, Riot & Civil Commotion | — |
-| 15 | `legal-liability-to-passengers` | Legal Liability to Passengers | — |
-| 16 | `legal-liability-of-passengers` | Legal Liability of Passengers | — |
-| 17 | `legal-liability-to-pillion` | Legal Liability to Pillion | — |
-| 18 | `medical-expenses` | Medical Expenses | — |
-| 19 | `hospital-income` | Hospital Income | — |
-| 20 | `bereavement-allowance` | Bereavement Allowance | — |
-| 21 | `replacement-car` | Replacement Car | — |
-| 22 | `repaint-spray-paint` | Repaint / Spray Paint | — |
-| 23 | `side-mirror-protection` | Side Mirror Protection | — |
-| 24 | `child-car-seat` | Child Car Seat | — |
-| 25 | `replacement-cost` | Replacement Cost | — |
-| 26 | `vehicle-accessories` | Vehicle Accessories | — |
-| 27 | `e-hailing-extension` | E-Hailing Extension | — |
-| 28 | `agreed-value-market-value` | Agreed Value Settlement | — |
-| 29 | `cashback-no-claim` | No-Claim Cashback | — |
-| 30 | `out-of-pocket-allowance` | Out-of-Pocket Allowance | — |
-| 31 | `driver-passenger-protector` | Driver & Passenger Protector | A, B, C, D |
-| 32 | `private-car-365` | Private Car 365 Plan | 1, 2, 3, 4, Ezy |
-| 33 | `motor-pa-plus` | Motor PA Plus | 1, 2, 3 |
-| 34 | `oto-360` | OTO 360 | 1, 2, 3 |
-| 35 | `repair-allowance` | Repair / CART Allowance | — |
-| 36 | `brand-new-spare-parts` | Brand New Spare Parts | — |
-| 37 | `compassionate-allowance` | Compassionate Allowance | — |
-| 38 | `document-replacement` | Document Replacement | — |
-| 39 | `hotel-accommodation` | Hotel Accommodation | — |
-| 40 | `legal-costs-defense` | Legal Defense Costs | — |
-| 41 | `daily-hospital-income` | Daily Hospital Income | — |
-| 42 | `tyre-rim-protection` | Tyre & Rim Protection | — |
-| 43 | `sunroof-glass-protection` | Sunroof Glass Protection | — |
-| 44 | `valet-theft-protection` | Valet / Service Theft | — |
-| 45 | `car-detailing-cleanup` | Car Detailing & Sanitisation | — |
-
----
-
-## 2. Dimensions
-
-| Dimension | Values |
-| --- | --- |
-| Coverage type | `comprehensive` · `third_party_fire_theft` (Fire & Theft) · `third_party` (Third Party) — all 3 exist in DB; only `comprehensive` is configured today |
-| Vehicle category | `car` · `motorcycle` · `commercial_vehicle` (sub: lorry/truck, van, bus) |
-| Segment | `private` · `company_commercial` |
-| Add-on system | `single` (one flat default set + one add-on list) · `package` (named tier chain, each tier = own defaults + add-ons) |
-
-**Rule:** every company row below exists for every coverage type × vehicle category it must support. A row marked ⬜ means "configure later".
+### 3. Commercial, EV & Specialty Protection (17 Concepts)
+35. `personal-accident` — Driver & Passenger Personal Accident (PA)
+36. `driver-passenger-protector` — Packaged Driver & Passenger Protector PA
+37. `out-of-pocket-allowance` — Inconvenience & Out-of-Pocket Expense Allowance
+38. `car-detailing-cleanup` — Post-Repair Interior Detailing & Sanitisation
+39. `brand-new-spare-parts` — Brand-New OEM Spare Parts Guarantee
+40. `compassionate-allowance` — Compassionate Accidental Cash Grant
+41. `document-replacement` — Official Vehicle Document & Registration Replacement
+42. `hotel-accommodation` — Outstation Breakdown Hotel Accommodation
+43. `daily-hospital-income` — Intensive Care Hospital Income
+44. `tyre-rim-protection` — Accidental Tyre & Wheel Rim Cover
+45. `sunroof-glass-protection` — Panoramic Glass & Sunroof Replacement
+46. `valet-theft-protection` — Valet Parking & Third-Party Service Theft
+47. `overturning` — Commercial Overturning & Loading Accident Damage
+48. `boom-damage` — Hydraulic Crane Boom & Mechanism Damage
+49. `tool-of-trade` — Commercial Tool of Trade Liability
+50. `authorized-attendants` — Legal Liability to Authorised Attendants & Loaders
+51. `ev-wall-charger` — EV Home Wallbox & Charging Cable Damage Protection
 
 ---
 
-## 3. Per-Company Configuration
+## 2. 7 Active Underwriter Catalogs Across 3 Coverage Types
 
-### QBE
+All 7 insurers are ✅ seeded across 6 product lines $\times$ 3 coverage types (Comprehensive, TPFT, TPO):
 
-| Coverage type | Vehicle | Add-on system | Status |
-| --- | --- | --- | --- |
-| Comprehensive | Car | `single` | ✅ seeded |
-| Comprehensive | Motorcycle | `single` | ⬜ pending |
-| Fire & Theft | Car | — | ⬜ pending |
-| Third Party | Car | — | ⬜ pending |
-
-**Product:** `qbe-private-car-protector` — "Private Car Protector" (car × comprehensive)
-
-- **Defaults (base / included):**
-  - `towing` — "As per policy"
-  - `roadside-assistance` — "RM500"
-  - `betterment-protection` — "Up to 10 years old vehicle age"
-  - `total-loss-theft-allowance` — "5% or up to RM5,000 coverage, whichever is lower"
-  - `key-replacement` — "Up to RM500"
-- **Add-ons (available):** `windscreen` · `special-perils` · `strike-riot-civil-commotion` · `legal-liability-to-passengers` · `vehicle-accessories` · `out-of-pocket-allowance` · `driver-passenger-protector` · `flood-relief-allowance`
-
----
-
-### AmAssurance
-
-| Coverage type | Vehicle | Add-on system | Status |
-| --- | --- | --- | --- |
-| Comprehensive | Car | `package` (4 tiers) | ✅ seeded |
-| Comprehensive | Motorcycle | `package` | ⬜ pending |
-| Fire & Theft | Car | — | ⬜ pending |
-| Third Party | Car | — | ⬜ pending |
-
-**Product:** `amassurance-private-car-comprehensive` — "Private Car Comprehensive". Tier ladder Lite → Plus → Premier → All-Inclusive; each higher tier upgrades defaults in place and trims add-ons.
-
-**Tier 1 — `lite` "auto365 Comprehensive Lite"**
-- Defaults: `towing` · `roadside-assistance` · `repair-workmanship-warranty`
-- Add-ons (15): `all-drivers` · `personal-accident` · `betterment-protection` · `total-loss-theft-allowance` · `key-replacement` · `flood-relief-allowance` · `personal-belongings-theft` · `ambulance-fees` · `windscreen` · `special-perils` · `legal-liability-to-passengers` · `legal-liability-of-passengers` · `strike-riot-civil-commotion` · `e-hailing-extension` · `private-car-365`
-
-**Tier 2 — `plus` "auto365 Comprehensive Plus"**
-- Defaults (8): `towing` · `roadside-assistance` · `repair-workmanship-warranty` · `all-drivers` · `flood-relief-allowance` · `key-replacement` · `personal-belongings-theft` · `ambulance-fees`
-- Add-ons (10): `personal-accident` · `betterment-protection` · `total-loss-theft-allowance` · `windscreen` · `special-perils` · `legal-liability-to-passengers` · `legal-liability-of-passengers` · `strike-riot-civil-commotion` · `e-hailing-extension` · `private-car-365`
-
-**Tier 3 — `premier` "auto365 Comprehensive Premier"**
-- Defaults (10): `towing` · `roadside-assistance` · `repair-workmanship-warranty` · `all-drivers` · `flood-relief-allowance` · `key-replacement` · `personal-belongings-theft` · `ambulance-fees` · `total-loss-theft-allowance` · `betterment-protection`
-- Add-ons (8): `personal-accident` · `windscreen` · `special-perils` · `legal-liability-to-passengers` · `legal-liability-of-passengers` · `strike-riot-civil-commotion` · `e-hailing-extension` · `private-car-365`
-
-**Tier 4 — `all-inclusive` "Comprehensive All-Inclusive"**
-- Defaults (11, all): `towing` · `roadside-assistance` · `repair-workmanship-warranty` · `all-drivers` · `personal-accident` · `betterment-protection` · `total-loss-theft-allowance` · `key-replacement` · `flood-relief-allowance` · `personal-belongings-theft` · `ambulance-fees`
-- Add-ons: none
+1. **AmAssurance (Liberty General Insurance Berhad)**
+   - Bundles: `auto365 Comprehensive Plus` (RM 118), `auto365 Comprehensive Premier` (RM 198)
+   - Add-ons: Windscreen (15%), Special Perils (0.20%), CART (RM 58.30-150), All Drivers (RM 20), LLTP, LLOP.
+2. **Berjaya Sompo Insurance Berhad**
+   - Bundles: `SOMPO Motor N-hancer Pack 1` (RM 97.52), `SOMPO Motor N-hancer Pack 2` (RM 147.34), `SOMPO Motor Ultima Care` (RM 248.00)
+   - Add-ons: Windscreen (15%), Special Perils (0.20%), Full Body Spray (RM 350), E-Hailing, LLTP, LLOP.
+3. **Etiqa General Insurance / Takaful Berhad**
+   - Bundles: `Cash Care PA Rider (Bronze)` (RM 65.00), `Cash Care PA Rider (Silver)` (RM 120.00), `Cash Care PA Rider (Gold)` (RM 195.00), `MyRider Motor PA (Plan 1-3)`
+   - Add-ons: Windscreen (15%), Special Perils (0.25%), Compensation for Loss of Use (RM 100/day), Respray (RM 280), LLTP, LLOP.
+4. **Lonpac Insurance Berhad**
+   - Bundles: `Smart Driver DPA Plan A` (RM 70.00), `Plan B` (RM 120.00), `Plan C` (RM 180.00), `Plan D` (RM 260.00), `Lonpac EV Smart Pack` (RM 160.00)
+   - Add-ons: Windscreen (15%), Special Perils (0.20%), CART (RM 60/day), All Drivers (RM 20), LLTP, LLOP.
+5. **QBE Insurance (Malaysia) Berhad**
+   - Bundles: `Driver Passenger Protector Plan A` (RM 70.00), `Plan B` (RM 120.00), `Plan C` (RM 175.00), `Plan D` (RM 260.00)
+   - Add-ons: Windscreen (15%), Special Perils (0.25%), First-Loss Flood (RM 30), Out-of-Pocket (RM 90), Car Detailing (RM 35), LLTP, LLOP.
+6. **Syarikat Takaful Malaysia Am Berhad (STMB)**
+   - Bundles: `Driver & Passenger Protection (DPP)` (RM 75.00), `Motor PA Plus Plan 1` (RM 60.00), `Plan 2` (RM 110.00), `Bike PA Plus Plan 1-2`
+   - Add-ons: Windscreen (15%), Special Perils (0.20%), CART Allowance (RM 100/day), 15% No-Claim Cash Back, LLTP, LLOP.
+7. **Tune Protect Malaysia Berhad**
+   - Bundles: `Autobuddy Plan A` (RM 58.30), `Autobuddy Plan B` (RM 98.00), `MotorShield PA Package` (RM 135.00)
+   - Add-ons: Windscreen (15%), Special Perils (0.25%), Key Care (RM 35), Spray Paint (RM 250), LLTP, LLOP.
 
 ---
 
-### Takaful Malaysia
+## 3. Seed Execution
 
-| Coverage type | Vehicle | Add-on system | Status |
-| --- | --- | --- | --- |
-| Comprehensive | Car | `single` × 2 products | ✅ seeded |
-| Comprehensive | Motorcycle | — | ⬜ pending |
-| Fire & Theft | Car | — | ⬜ pending |
-| Third Party | Car | — | ⬜ pending |
-
-**Product 1:** `takaful-mymotor-private-motor` — "Takaful myMotor - Private Motor"
-
-- Defaults:
-  - `personal-accident` (label "Accidental Death / Total Permanent Disability") — "RM15,000 per life"
-  - `towing` — "RM200"
-  - `roadside-assistance` — "24/7"
-- Add-ons (8): `windscreen` · `special-perils` · `legal-liability-to-passengers` · `legal-liability-of-passengers` · `strike-riot-civil-commotion` · `cashback-no-claim` · `motor-pa-plus` · `betterment-protection` (label "Waiver of Betterment")
-
-**Product 2:** `myclick-takaful-car` — "myClick Takaful Car"
-
-- Defaults: `personal-accident` · `all-drivers` · `towing` · `roadside-assistance` · `repair-workmanship-warranty`
-- Add-ons (12): `windscreen` · `special-perils` · `flood-relief-allowance` · `repair-allowance-cart` · `key-replacement` · `legal-liability-to-passengers` · `legal-liability-of-passengers` · `strike-riot-civil-commotion` · `betterment-protection` · `agreed-value-market-value` · `cashback-no-claim` · `motor-pa-plus`
-
-> **Collision caveat:** `commands/seed-docx-draft.py` holds earlier myMotor/myClick drafts with different keys (`takaful-mymotor-private-car`, `myclick` packages). These are ⏳ draft and superseded — the applied config above wins. Delete the stale drafts before reseeding to avoid duplicate products.
-
----
-
-### Etiqa
-
-| Coverage type | Vehicle | Add-on system | Status |
-| --- | --- | --- | --- |
-| Comprehensive | Car | `single` | ✅ seeded |
-| Comprehensive | Motorcycle | — | ⬜ pending |
-| Fire & Theft | Car | — | ⬜ pending |
-| Third Party | Car | — | ⬜ pending |
-
-**Product:** `etiqa-comprehensive-private-car` — "Comprehensive Private Car Insurance / Takaful"
-
-- Defaults:
-  - `towing` — "Up to 200 km"
-  - `roadside-assistance` — "24/7"
-  - `all-drivers` — "Any Authorised Driver"
-- Add-ons (10): `windscreen` · `special-perils` · `repair-allowance-cart` ("Repair Allowance / Cash Assistance") · `oto-360` · `child-car-seat` · `repaint-spray-paint` · `replacement-cost` · `betterment-protection` · `strike-riot-civil-commotion` · `cashback-no-claim`
-
----
-
-### Lonpac
-
-| Coverage type | Vehicle | Add-on system | Status |
-| --- | --- | --- | --- |
-| Comprehensive | Car | `package` (1 tier) | ✅ seeded |
-
-**Product:** `lonpac-private-car-secure` — "Lonpac Private Car Secure"
-
-**Package — "Private Car Secure"**
-- Defaults (base / included):
-  - `repair-allowance` — "RM 75" daily allowance
-  - `all-drivers` — "Included"
-  - `roadside-assistance` — "Included"
-- Add-ons (available): `windscreen` — "RM 1,000" · `special-perils` — "RM 50,000"
-
----
-
-### Tune Protect
-
-| Coverage type | Vehicle | Add-on system | Status |
-| --- | --- | --- | --- |
-| Comprehensive | Car | `package` (2 tiers) | ✅ seeded |
-
-**Product:** `tune-protect-motor-easy` — "Tune Protect Motor Easy"
-
-**Tier 1 — "Motor Easy"**
-- Defaults: `roadside-assistance` — "24/7" · `repair-workmanship-warranty` — "6 months"
-- Add-ons: `windscreen` — "RM 1,000" · `special-perils` — "RM 50,000"
-
-**Tier 2 — "Motor Easy + Motor Bundle"**
-- Defaults add: `all-drivers` — "Included" · `key-replacement` — "RM 1,000" · `total-loss-theft-allowance` — "RM 10,000"
-- Add-ons: `windscreen` — "RM 1,000" · `special-perils` — "RM 50,000"
-
----
-
-### Berjaya Sompo
-
-| Coverage type | Vehicle | Add-on system | Status |
-| --- | --- | --- | --- |
-| Comprehensive | Car | `package` (1 tier) | ✅ seeded |
-
-**Product:** `sompo-motor-comprehensive` — "SOMPO Motor Comprehensive"
-
-**Package — "SOMPO Motor Base"**
-- Defaults: `roadside-assistance` — "24/7" · `repair-workmanship-warranty` — "12 months" · `towing` — "RM 300"
-- Add-ons: `all-drivers` — "Included" · `windscreen` — "RM 1,000" · `special-perils` — "RM 50,000" · `key-replacement` — "RM 1,000"
-
----
-
-## 4. Gap Checklist (everything pending)
-
-Tick off as you refill this document.
-
-**Vehicle coverage gaps (car exists everywhere, motorcycles/commercial nowhere):**
-- [ ] QBE — motorcycle comprehensive
-- [ ] AmAssurance — motorcycle comprehensive
-- [ ] Etiqa / Takaful Malaysia — motorcycle comprehensive
-- [ ] Lonpac / Tune Protect / Berjaya Sompo — motorcycle + commercial rows
-- [ ] All companies — commercial vehicle (lorry/van/bus) comprehensive where applicable
-
-**Coverage-type gaps (only `comprehensive` configured for every company):**
-- [ ] Fire & Theft (`third_party_fire_theft`) rows for all 7 companies
-- [ ] Third Party (`third_party`) rows for all 7 companies
-
-**Non-applied drafts (⏳ → ✅):**
-- [ ] Lonpac — apply (after resolving the `repair-allowance` concept)
-- [ ] Tune Protect — apply 2-tier Motor Easy
-- [ ] Berjaya Sompo — apply SOMPO Motor Base
-- [ ] Takaful Malaysia — purge stale myMotor/myClick drafts
-
-**Global library extensions:**
-- [ ] Standalone `repair-allowance` concept (Lonpac needs it)
-
-**Reliability ideas (decide later):**
-- [ ] Whether unique premium/limit values (e.g. QBE "RM500", Etiqa "200 km") should be typed values (`money`/`distance`) instead of free-text display strings, so they stay comparable across companies.
-
----
-
-## 5. Seed Mechanics
-
-When you have refilled this document, the following workflow turns it into database truth:
-
-1. Convert the tables in §3 into a machine-readable source (JSON) that mirrors the structure `company → coverage_type → vehicle_category → addon_system → defaults/addons/packages`.
-2. A data-driven seed command reads it and **upserts** idempotently:
-   - Missing rows → create product → catalog (revision) → packages → offerings (base/optional).
-   - Existing rows → amend values in place (never duplicate; never orphan).
-3. Re-run `commands/seed-companies.py` + `commands/seed-demo.py` unaffected; new script reported in `docs/STRUCTURE.md` and the code map.
-
-**Source references (keep in sync when you edit):** `commands/seed-demo.py` (`BENEFIT_CONCEPTS_DATA` L52-366, `seed_company_package_chains` L690-1128) · `commands/seed-docx-draft.py` (`NEW_GLOBAL_BENEFITS` L43-296, `DRAFT_CONFIGURATIONS` L298-440) · `migrations/033_benefits_package_hierarchy.sql` (dimension seeds).
+The database is seeded idempotently via:
+```bash
+python commands/seed-demo.py --apply
+```
+This script handles the PostgreSQL immutable published revision lifecycle cleanly and provisions all dimensions, offerings, and bundle ladders.

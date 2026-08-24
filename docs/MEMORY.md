@@ -17,6 +17,101 @@
 - Database state 2026-08-23: migrations 001-037 applied & checksummed (037 adds `quotation_drafts.package_id` + index).
 - Database state 2026-08-20 (companies): 7 active companies — QBE, Etiqa, Takaful Malaysia, AmAssurance, Lonpac, Berjaya Sompo, Tune Protect. `commands/seed-companies.py` is idempotent (dry-run/apply).
 
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Executed 100% Zero-Touch Extraction & Auto-Plotting for Quotation Processing
+Asked: 100% autonomous quotation processing without user intervention: extract excess amount (RM 0.00), quotation validity date, auto-plot base and purchased add-ons with pricing into template benefits.
+Done: Fixed subtitle label skipping (`candidate_finder.py:200-245`) and excess/valid_until extraction (`candidate_finder.py:85-98,510-565`); added Gemini schema descriptions (`gemini_extractor.py:141-195`); fixed vehicle category resolution excluding insurance_type (`catalog_review_service.py:59-135`); enabled synchronous catalog pinning & base benefit/add-on auto-application on upload (`upload_service.py:115-165`); auto-injected custom add-ons into current selections (`catalog_review_service.py:618-685`); supported text element `{valid_until}` and `{excess_amount}` defaults (`shared.tsx:395-418`, `template_renderer.py:85-98,600-610`). Verified 519/519 backend pytest passed, `npx tsc --noEmit` clean, `npm run build` passed (36 routes green), code map updated.
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Fixed Live Template Canvas Preview Coordinates & Real-Time Context Variables
+Asked: Fix template canvas preview showing empty/broken vehicle context, road tax, runner fee, extras, and total premium.
+Done: Fixed `premium-info-block` coordinate calculation in `shared.tsx:556-605` (removed double-offset `left: element.x, top: element.y + ...` inside absolute parent container); added complete `VARIABLE_FALLBACK_MAP`, `resolveVariableValue`, and `formatVariableValue` in `shared.tsx:129-195,398-418` for all vehicle & policy variables (`coverage_amount`, `sum_insured`, `engine_cc`, `ncd_percent`, `roadtax`, `service_fee`, `total_amount`); implemented live total premium recalculation (`premium + roadtax + runner_fee + extras`) in `review-phase.tsx:884-980`; verified 519/519 backend pytest passed, `npx tsc --noEmit` 0 errors, `npm run build` green (36/36 routes).
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Fixed Private Car Product Resolution vs Commercial Motorcycle Mismatch
+Asked: Fix product selection mismatching to "Commercial Motorcycle Policy" for Toyota Vellfire Private Car and leaving defaults empty.
+Done: Fixed `pin_catalog_context` in `catalog_review_service.py:188-235` to match `InsuranceProduct` by vehicle category (Private Car/Saloon vs Motorcycle vs Lorry), coverage (Comprehensive vs TPFT vs Third Party), and segment (Private vs Commercial); updated `workspace_service.py:340-355` to automatically re-pin catalog context and seed company defaults whenever current selections are empty; validated 519/519 backend pytest passed.
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Eliminated 422 Error & Cascading Page Load Request Loop
+Asked: Fix slow loading times and eliminate 422 Unprocessable Entity error on /template-selection-impact.
+Done: Fixed `schemas.py:51` (`TemplateSelectionImpactRequest.base_revision` default=1); removed premature `selectTemplateDirectly` auto-save call in `review-phase.tsx:674-705` which was triggering an infinite re-fetch/mutation cascade on page mount; validated `npx tsc --noEmit` clean and 519/519 backend pytest passed.
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Executed Hierarchy Badges, Zero-Touch Extracted Addons, Bundles & Capsule Cards
+Asked: Automatically populate purchased add-ons from uploaded quotations as Current / Default covers without human interaction, fix hierarchy overview, excess/validity fields, /builder/benefits template preview, and sleek capsule cards.
+Done: Fixed `auto_apply_extracted_benefits` in `catalog_review_service.py:450-460` to auto-apply all detected lines (Private Car 365, LLOP, LLTP, Windscreen) with `state="current"`, `cost_status="paid"`, and attached pricing; updated `workspace_service.py:338-410` with self-healing fallback and hierarchy metadata; added hierarchy overview badge bar and bundle stack cards to `review-phase.tsx:1510-1550,2420-2480`; updated `/builder/benefits` template array loading in `builder/benefits/page.tsx:170-195`; modernized benefit card capsule rendering in `template_renderer.py:225-285` and `shared.tsx:470-525`. Verified 519/519 backend pytest passed, `npx tsc --noEmit` clean, `npm run build` passed (36 routes green).
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Resolved IDE Type & Import Diagnostic Errors
+Asked: Audit and resolve all IDE type errors in @[current_problems], @[catalog_review_service.py:current_problems], and @[routes.py:current_problems] across routes.py, benefits.py, template_renderer.py, and catalog_review_service.py.
+Done: Added `from typing import Any` and missing table imports in `catalog_review_service.py:7` and `routes.py:73-85`; updated `MoneyAmount` / `BenefitValue` `ge` constraint to `Decimal("0")` in `domain/benefits.py:36,69`; cleaned up redundant `str()` / `float()` casts in `catalog_review_service.py:61`, `template_renderer.py:366`, and `routes.py:1846`. Verified 519/519 backend pytest passed.
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Executed Auto-Addons, Dynamic Layout, Package Filtering & Performance Fixes
+Asked: Fix session 29fa014c-34a4-4203-ad43-4146f3db80c1 Etiqa Vellfire defaults/add-ons auto-population, top-left template layout with dynamic extras expansion & validity, package dropdown vehicle filtering, template error dismissal, and page load performance.
+Done: Harmonized concept matching (`orchestrator.py:105-175`, `routes.py:664-760`); enhanced vehicle category/segment resolution for 40+ car models (`catalog_review_service.py:53-195`); auto-applied extracted add-ons with pricing into current selections (`catalog_review_service.py:448-606`); implemented dynamic top-left card expansion with grid balancing and footer validity substitution (`master_template_service.py:220`, `template_renderer.py:363-440,580`, `shared.tsx:366-375,664-740`); fixed template alert closure & filtered package dropdown (`review-phase.tsx:672-840`). Verified 519/519 backend pytest passed, `npx tsc --noEmit` clean, `npm run build` passed (36 routes green).
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Executed 7-Company Ingestion, 3 Coverage Types & Zero-Touch Flow
+Asked: Ingest all 7 insurer catalogs (AmAssurance, Berjaya Sompo, Etiqa, Lonpac, QBE, STMB, Tune Protect) from docx across 3 Coverage Types (Comprehensive, TPFT, TPO) with exact prices, clean bundle models, 51 global concepts, and zero-touch seamless UI.
+Done: Seeded 51 standardized concepts with authentic descriptions; populated all 7 underwriters across 6 vehicle lines & 3 coverage types into PostgreSQL; updated `commands/seed-demo.py:50-540` (idempotent seed runner with immutable revision handling); updated `frontend/src/components/session-workspace/review-phase.tsx:1115-1205,1940-1950` (auto-save before export, template readiness check, replaced 'Adopt' with 'Add to defaults'); updated `docs/BENEFITS-CONFIGURATION.md:1-120`. Verified 519/519 backend pytest passed, `npx tsc --noEmit` clean, `npm run build` passed (36 routes green), code map current.
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Planned Standardized Benefits Architecture & 7-Company Ingestion
+Asked: Analyze benefits architecture and 7 company docx catalogs (AmAssurance, Sompo, Etiqa, Lonpac, QBE, STMB, Tune Protect), normalize AmAssurance tier hierarchy to base + addon bundles, map all global concepts with real descriptions, and prepare seeding & extraction RAG plan.
+Done: Audited all 7 docx files in `fix/company/` (680 raw lines, 220 unique items, 50 standardized concepts, 42 products, 16 bundle ladders); created comprehensive `implementation_plan.md` artifact.
+Pending: User review and approval of implementation plan.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Executed Perfect Canonical Template & Clean Grid Architecture
+Asked: Build final perfect Bilingual Agency Motor template with Vehicle CC, Insurer Name in header, Excess Amount in right card, Roadtax, Runner Fee, dynamic Extras calculation, validity footer, standard card scaling (max scale 1.0 to prevent giant bloated boxes), and cleanup of obsolete templates.
+Done: Updated `master_template_service.py:20-25,115-215` (canonical Bilingual Agency Motor config with complete table & right card layout; updated `_text`/`_variable` type annotation to `size: int | float`); updated `grid_layout.py:30,95-105` & `grid-layout.ts:45-55` (enforced `max_scale = 1.0` for standard crisp cards); updated `template_renderer.py:15-60,310-355` & `shared.tsx:130-145,530-565` (dynamic extras, aliases, vehicle CC suffix); updated `review-phase.tsx:43,2085` (`balanceBenefitGridElements` live preview); updated `gemini_extractor.py:185` (validity date schema); published revision r3 for Bilingual Agency Motor and soft-deleted obsolete duplicate templates. Verified 519/519 backend pytest passed, `npx tsc --noEmit` clean, `npm run build` passed (36 routes green), code map updated.
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Executed Benefits Builder & QBE Ingestion Architecture
+Asked: Simplify builder/global-benefits to 3 items (Image, Title, Short Description), add custom bundle addons with plan tiers & 3 core items (Title, Short Description, Cost) in builder/benefits, and ingest all 6 QBE products with DPP bundle tiers from Word doc.
+Done: Updated `global-benefits/page.tsx:440-575` (Image, Title, Short Description only); updated `benefits/page.tsx:840-885,1850-2035` (custom bundle creator, vehicle badges, plan tiers A/B/C/D, inline overrides, RM cost formatting); updated `seed-demo.py:50-400,860-1420` (seeded 53 global concepts, 6 QBE products, 4 DPP tiers); updated `docs/BENEFITS-CONFIGURATION.md:90-148` & `tests/test_frontend_global_benefits_contract.py:1-55`. Verified 519/519 backend pytest passed, `npx tsc --noEmit` clean, `npm run build` passed (36 routes green), code map updated.
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Planned Benefits Builder Architecture & QBE Ingestion
+Asked: Plan builder/global-benefits simplification (Image, Title, Short Description only), builder/benefits custom bundle add-ons with plan tiers & 3 core properties (Title, Short Description, Cost), and QBE standardized ingestion from docx.
+Done: Analyzed `QBE_Insurance_Standardized_Benefits_and_Costing.docx` (all 6 products + DPP bundle plans); created comprehensive `implementation_plan.md` artifact.
+Pending: User review and approval of implementation plan.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Executed Codebase Hardening & Alias Harmonization
+Asked: Execute approved implementation plan for alias harmonization and calculation reliability.
+Done: Updated `workspace_service.py:65-71,862-898` with canonical money fields & robust multi-alias `_recompute_total`; updated `template_renderer.py:48-70` with `FIELD_FALLBACK_MAP`; updated `shared.tsx:129-158,367-377,525-536` with `resolveVariableValue`. Verified 519/519 backend pytest passed, `npx tsc --noEmit` clean, `npm run build` passed (36 routes green), code map updated.
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Comprehensive Health Check & Hardening Implementation Plan
+Asked: Perform a basic check across the codebase for coding issues, logic flaws, and created an implementation plan without editing.
+Done: Audited all backend services, rendering pipeline, calculations, and frontend state bindings; verified 519/519 backend pytest passed and tsc/build green; created `implementation_plan.md` artifact detailing findings and minor alias harmonization enhancements.
+Pending: user review of implementation plan.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Database Connection Pool Scalability & Concurrent Request Hardening
+Asked: Resolve database connection checkout traceback during concurrent frontend page initialization and background worker loops.
+Done: Updated `session.py:27-34` with scalable connection pool configuration (`pool_size=10`, `max_overflow=10`, `pool_timeout=30`, `pool_recycle=300`) to comfortably service burst Next.js parallel queries alongside background workers; verified connectivity and tests.
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Full System Audit, API & Workflow Testing, Architecture & Flaw Inspection
+Asked: 1. Full testing of APIs, buttons, features, minor issues, 2. Logical flaws & useless/junk files, 3. Redundant/resource-consuming code, 4. Business operation logic compliance, 5. Reusable components & schema cleanliness, 6. Downloads, editing, changing, detection, price increases/decreases.
+Done: Audited all 36 Next.js routes, FastAPI backend endpoints, and services; discovered and fixed missing `GET /business/companies` endpoint in `routes.py:1115-1123`; executed master audit suite `.qc-tmp/test_master_system_audit.py` verifying authentication, CSRF, workspace mutations, brand pinning, tier switching, pricing/extras calculations, PDF/PNG exports, and trash lifecycle. Verified 519/519 backend pytest passed, `npx tsc --noEmit` passed, `npm run build` passed (36 routes green), code map updated (`update-code-map.py --check` OK).
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Collapsible Sidebar, Mobile Responsiveness, Lightweight AI Grounding Chatbot & Authentic Metrics
+Asked: 1. Collapsible left sidebar (flex flex-col gap-1), 2. Mobile responsiveness for every page, 3. Lightweight AI grounding chatbot with super low context/token usage, 4. Authentic data with zero demo/fake/hardcoded texts & real quota/metrics.
+Done: Added desktop collapsible sidebar (64px/220px, localStorage, tooltips) & mobile drawer in `app-shell.tsx:25-240`; added `isDesktop` responsive layout in `review-phase.tsx:542-555,1431-1990` and flex-wrap search in `sessions/page.tsx:150-175`; implemented `grounding_assistant.py:1-218` + `POST /settings/ai-grounding-chat` (`routes.py:2191-2200`, `schemas.py:435-440`) with targeted DB retrieval; updated `/settings/ai-context` and rebuilt `ai-context/page.tsx:1-490` with Chatbot tab and real database metrics; replaced simulated quota meter with honest connection status in `gemini-quota-meter.tsx:24-95`; added tests in `tests/test_grounding_assistant.py:1-45`. Verified 519/519 backend pytest passed, `npx tsc --noEmit` passed, `npm run build` passed (36 routes green), code map updated.
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Benefits Reset/Undo, Total Card Removal, Costing & Template Management
+Asked: 1. Reset button rename + preserve insurer/package/tier on reset, 2. Add Undo & Redo stack, 3. Total benefit card removal (X), 4. Dedicated Insurer's Catalog filter in Global Library & builder, 5. Add-on / benefit costing in builder + auto template sync in Extras, 6. Template builder management (rename modal, hard delete, non-canonical open), 7. Dynamic flex balancing of benefit grids in templates.
+Done: Fixed `_apply_reset_benefits` (`workspace_service.py:1056`) to preserve company/tier/template and reseed clean base offerings + extractions; fixed `resolve_benefit_cards` (`render_context.py:205-330`) to exclude removed cards and handle price/extras; updated `template_renderer.py:289-410` with `_balance_benefit_grid_elements` and dynamic extras; updated `shared.tsx:484-705` with `balanceBenefitGridElements`; updated `admin_service.py:300-325` to support template renaming without lock conflict; updated `builder/templates/page.tsx:290-645,1260-1285` with Rename/Delete dialogs and actions; updated `builder/benefits/page.tsx:595-640,1645-1800` with price inputs and inline saving; updated `builder/global-benefits/page.tsx:50-135,320-375` with company filter; updated `review-phase.tsx:270-450,790-830,950-1010,2170-2210,2510-2540` with Reset, Undo/Redo stack, total card removal (X), and Insurer Catalog filter. Verified 516/516 backend tests passed, `npx tsc --noEmit` passed, `npm run build` passed (36 routes green), code map updated.
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Car CC, Excess Amount, Road Tax Formula & Extracted Benefits Section
+Asked: 1. Add CC variable (Car cc), 2. Excess Amount variable and extraction, 3. Road Tax Amount formula schedules (Private Saloon, Private Moto, Company Saloon, Corporate Moto), 4. New section below extracted values with package name, extras/addons, benefits, and costing breakdown (AmGen & Etiqa examples).
+Done: Added `engine_cc` & `excess_amount` to `candidate_finder.py:84,385`, `gemini_extractor.py:141,162,185`, `draft_mapper.py:120`, `template_config.py:20,73`, `template_renderer.py:18`; updated 4 road tax schedules in `road_tax_service.py:32-108,301-325` & `review-phase.tsx:184-226`; added `_workspace_extracted_benefits_section` in `workspace_service.py:432-530`; added "Extracted Benefits, Extras & Packages" UI card with 2 view modes & 1-click tier adoption in `review-phase.tsx:1612-1845`; added road tax tests in `tests/test_road_tax_service.py:55-115`. Verified 516/516 pytest green, `npx tsc --noEmit` clean, `npm run build` green (36 routes), code map current.
+Pending: none.
+
 ## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Deployment /health 400 Root Cause & Fix (Deployed Successfully)
 Asked: Fix deployment failure "Backend /health did not return 200 after deploy (last: 400)", commit, push, and verify green deployment.
 Done: Fixed `config.py` (`trusted_hosts` automatically includes `127.0.0.1`, `localhost`, `testserver` so local loopback probes & proxying always succeed without manual VPS `.env` edits), updated `deploy.yml` health check gate to `/api/health` with diagnostics, updated `setup-vps.sh` + `SETUP.md`. Verified 512/512 pytest green, tsc clean, next build green, code map current. Committed (`10988a4`), pushed to `main` + `v8`. GitHub Actions workflow `32658768755` completed with both jobs green (`Test backend and build frontend` 2m52s, `Deploy main to VPS` 3m3s).

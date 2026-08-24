@@ -117,6 +117,9 @@ def build_draft(candidates: dict[str, list[CandidateValue]]) -> tuple[dict, list
         if not fields["vehicle_type"].get("value"):
             fields["vehicle_type"]["value"] = inferred_type
             fields["vehicle_type"]["status"] = "ready"
+    if "engine_cc" in fields and not fields["engine_cc"].get("value") and inferred_cc:
+        fields["engine_cc"]["value"] = str(inferred_cc)
+        fields["engine_cc"]["status"] = "ready"
 
     # Default Runner Fee to RM 20.00 if missing
     if "service_fee" in fields and not fields["service_fee"].get("value"):

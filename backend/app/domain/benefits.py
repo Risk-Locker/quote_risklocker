@@ -33,7 +33,7 @@ class SourceLineDisposition(StrEnum):
 
 
 class MoneyAmount(BaseModel):
-    amount: Decimal = Field(ge=0)
+    amount: Decimal = Field(ge=Decimal("0"))
     currency: str = Field(min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
 
 
@@ -66,7 +66,7 @@ class BenefitValue(BaseModel):
     cap: MoneyAmount | None = None
     premium: MoneyAmount | None = None
     max_days: int | None = Field(default=None, ge=1, le=366)
-    aggregate_cap: Decimal | None = Field(default=None, ge=0)
+    aggregate_cap: Decimal | None = Field(default=None, ge=Decimal("0"))
     per_event: Decimal | int | None = None
     occurrences: int | None = Field(default=None, ge=0)
     expression: str | None = Field(default=None, max_length=1_000)
@@ -102,8 +102,10 @@ class BenefitValue(BaseModel):
             if not self.unlimited and self.value is None:
                 raise ValueError("Finite distance requires a value.")
         elif self.type == "money":
-            if self.value is None or not self.currency or not self.semantic_role:
-                raise ValueError("Money requires value, currency, and semantic role.")
+            if self.value is None or not self.currency:
+                raise ValueError("Money requires value and currency.")
+            if not self.semantic_role:
+                self.semantic_role = "limit"
         elif self.type == "percentage":
             if self.value is None or not self.basis:
                 raise ValueError("Percentage requires value and basis.")

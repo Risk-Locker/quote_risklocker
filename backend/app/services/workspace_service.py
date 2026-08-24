@@ -54,7 +54,7 @@ from app.rendering.render_context import (
     format_benefit_value,
     resolve_benefit_cards,
 )
-from app.services.catalog_review_service import auto_apply_extracted_benefits, initialize_catalog_review, seed_base_benefits
+from app.services.catalog_review_service import _resolve_vehicle_category, auto_apply_extracted_benefits, initialize_catalog_review, pin_catalog_context, seed_base_benefits
 from app.extraction.validators import normalize_date, normalize_money
 
 
@@ -63,12 +63,12 @@ SELECTION_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9._:-]{0,159}$")
 BUSINESS_ROLES = frozenset({Role.STAFF.value, Role.ADMIN.value, Role.SUPER_ADMIN.value})
 PIN_SENSITIVE_FIELDS = frozenset({"insurance_company", "product_name", "product", "tier_name", "product_tier", "plan_name"})
 MONEY_FIELDS = frozenset({
-    "coverage_amount", "market_value", "agreed_value", "excess_amount", "basic_premium_vehicle",
-    "premium", "ncd_amount", "loading_amount", "all_riders_amount", "optional_cover_amount",
-    "service_tax", "stamp_duty", "gross_premium", "roadtax", "service_fee", "total_amount",
+    "coverage_amount", "sum_insured", "market_value", "agreed_value", "excess_amount", "basic_premium_vehicle",
+    "premium", "coverage_premium", "ncd_amount", "loading_amount", "all_riders_amount", "optional_cover_amount",
+    "service_tax", "stamp_duty", "gross_premium", "roadtax", "road_tax_amount", "service_fee", "runner_fee", "total_amount",
 })
 DATE_FIELDS = frozenset({"issue_date", "valid_until", "cover_start_date", "cover_end_date"})
-TOTAL_SOURCES = frozenset({"premium", "roadtax", "service_fee"})
+TOTAL_SOURCES = frozenset({"premium", "coverage_premium", "roadtax", "road_tax_amount", "service_fee", "runner_fee"})
 
 
 def _utcnow() -> datetime:
@@ -338,12 +338,46 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
 def build_workspace_snapshot(db, user, session_id: str) -> dict:
     session, draft = _session_and_draft(db, user, session_id)
     selections = _rows_for_draft(db, DraftBenefitSelection, draft.id)
+    current_selections = [s for s in selections if s.state == "current"]
+    catalog_rev = db.get(BenefitCatalogRevision, draft.catalog_revision_id) if draft.catalog_revision_id else None
+    catalog = db.get(BenefitCatalog, catalog_rev.catalog_id) if catalog_rev else None
+    veh_cat_id = _resolve_vehicle_category(db, "", draft.fields or {})
+    mismatched = False
+    if catalog and veh_cat_id and catalog.vehicle_category_id and str(catalog.vehicle_category_id) != str(veh_cat_id):
+        mismatched = True
+
+    if mismatched or (not current_selections and (draft.company_id or session.detected_company)):
+        try:
+            if mismatched:
+                draft.product_id = None
+                draft.tier_id = None
+                draft.package_id = None
+                draft.catalog_revision_id = None
+                for s in selections:
+                    db.delete(s)
+                db.flush()
+            revision = pin_catalog_context(db, draft)
+            if revision:
+                seed_base_benefits(db, draft, revision)
+            auto_apply_extracted_benefits(db, draft)
+            for s in _rows_for_draft(db, DraftBenefitSelection, draft.id):
+                if s.state == "available_addon" and (s.evidence_snapshot or s.price):
+                    s.state = "current"
+                    s.cost_status = "paid"
+            db.commit()
+            selections = _rows_for_draft(db, DraftBenefitSelection, draft.id)
+            current_selections = [s for s in selections if s.state == "current"]
+        except Exception:
+            db.rollback()
+            selections = _rows_for_draft(db, DraftBenefitSelection, draft.id)
     decisions = _rows_for_draft(db, DraftSourceLineDecision, draft.id)
     template_revision = _template_for_draft(db, draft)
     blockers = generation_blockers(draft, decisions, selections, template_revision=template_revision)
     try:
         benefit_cards = _workspace_benefit_cards(db, draft, selections)
-    except RenderContextError:
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         benefit_cards = {"current_benefits": [], "available_addons": []}
         blockers.append({
             "code": "invalid_benefit_graph",
@@ -374,6 +408,11 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
     concepts = list(db.scalars(select(BenefitConcept)).all())
     extras = build_extras(selections, concepts)
     adjusted_total = adjusted_total_text(draft.fields or {}, extras)
+    
+    # Extract car model string safely
+    raw_car_model = (draft.fields or {}).get("car_model")
+    car_model_str = raw_car_model.get("value") if isinstance(raw_car_model, dict) else (raw_car_model or "")
+    
     return {
         "session_id": session.id,
         "draft_id": draft.id,
@@ -402,6 +441,14 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
             "tier_name": tier.name if tier else None,
             "package_name": package.name if package else None,
         },
+        "hierarchy": {
+            "company_name": company.name if company else (session.detected_company or "Insurance Company"),
+            "product_name": product.name if product else "Comprehensive Motor",
+            "vehicle_category": getattr(product, "vehicle_category_code", None) or "Private Passenger Car",
+            "segment": getattr(product, "segment_code", None) or "Private",
+            "coverage_type": getattr(product, "coverage_type_code", None) or "Comprehensive",
+            "car_model": str(car_model_str or "Vehicle"),
+        },
         "catalog": catalog_overview,
         "template": template,
         "layout_override": draft.layout_override if (
@@ -426,7 +473,105 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
             }
             for version in versions
         ],
+        "extracted_benefits_section": _workspace_extracted_benefits_section(db, draft, decisions, selections),
         "capabilities": workspace_capabilities(user),
+    }
+
+
+def _workspace_extracted_benefits_section(
+    db,
+    draft: QuotationDraft,
+    decisions: list[DraftSourceLineDecision],
+    selections: list[DraftBenefitSelection],
+) -> dict:
+    """Detailed summary of detected insurance packages, extra covers, and add-on costs from quotation PDF."""
+    extraction = db.scalar(
+        select(ExtractionRecord).where(ExtractionRecord.uploaded_file_id == draft.uploaded_file_id)
+    )
+    detected_package_name = ""
+    detected_packs = []
+    if extraction and extraction.candidates:
+        tier_candidates = extraction.candidates.get("product_tier") or extraction.candidates.get("tier_name") or []
+        if tier_candidates and isinstance(tier_candidates, list):
+            detected_package_name = str(tier_candidates[0].get("value") or "")
+        detected_packs = extraction.candidates.get("detected_packs") or []
+
+    if not detected_package_name:
+        prod_val = str((draft.fields or {}).get("product_name", {}).get("value") or "")
+        if any(w in prod_val.lower() for w in ("auto365", "premier", "plus", "lite", "standard", "mymotor", "myclick")):
+            detected_package_name = prod_val
+
+    # Find matching package tier if any
+    matched_tier_id = None
+    pkg_tiers = _workspace_package_tiers(db, draft)
+    if detected_package_name and pkg_tiers:
+        norm_det = re.sub(r"[^a-z0-9]+", "", detected_package_name.lower())
+        for pt in pkg_tiers:
+            norm_pt = re.sub(r"[^a-z0-9]+", "", pt["name"].lower())
+            if norm_pt in norm_det or norm_det in norm_pt:
+                matched_tier_id = pt["package_id"]
+                break
+
+    raw_lines = extraction.benefit_lines if extraction and extraction.benefit_lines else []
+    selection_concepts = {str(s.concept_id): s for s in selections if s.state == "current"}
+
+    extras_list = []
+    seen_labels = set()
+    total_opt_cover = str((draft.fields or {}).get("optional_cover_amount", {}).get("value") or "")
+
+    for idx, line in enumerate(raw_lines):
+        label = line.get("raw_label") or line.get("raw_text") or ""
+        if not label:
+            continue
+        norm_label = re.sub(r"\s+", " ", label).strip()
+        if norm_label.lower() in seen_labels:
+            continue
+        seen_labels.add(norm_label.lower())
+
+        cost = str(line.get("premium_cost") or "")
+        cov_limit = str(line.get("coverage_limit") or "")
+        typed_val = line.get("extracted_value") or {}
+        if not cost and isinstance(typed_val, dict) and typed_val.get("semantic_role") == "premium":
+            cost = str(typed_val.get("value") or "")
+        if not cov_limit and isinstance(typed_val, dict) and typed_val.get("semantic_role") == "limit":
+            cov_limit = str(typed_val.get("value") or "")
+
+        mappings = line.get("candidate_mappings") or []
+        first_map = mappings[0] if mappings else {}
+        concept_id = first_map.get("concept_id")
+        concept_key = first_map.get("concept_key") or ""
+
+        is_applied = False
+        selection_id = None
+        if concept_id and str(concept_id) in selection_concepts:
+            is_applied = True
+            selection_id = selection_concepts[str(concept_id)].id
+
+        is_optional = bool(line.get("is_optional_cover")) or line.get("section") == "Optional Covers" or bool(cost)
+
+        extras_list.append({
+            "id": line.get("line_id") or f"ext_{idx}",
+            "label": label,
+            "raw_text": line.get("raw_text") or label,
+            "coverage_limit": cov_limit or (line.get("evidence") if not cost else ""),
+            "cost": cost,
+            "is_optional_cover": is_optional,
+            "concept_key": concept_key,
+            "concept_id": concept_id,
+            "is_applied": is_applied,
+            "selection_id": selection_id,
+            "source": "gemini_vision" if "gemini" in str(line.get("line_id", "")) else "native_pdf",
+        })
+
+    return {
+        "detected_package": {
+            "name": detected_package_name,
+            "matching_package_id": matched_tier_id,
+            "is_active_tier": any(pt.get("is_current") for pt in pkg_tiers if pt.get("package_id") == matched_tier_id) if matched_tier_id else False,
+        },
+        "total_optional_cover_amount": total_opt_cover,
+        "extras": extras_list,
+        "detected_packs": detected_packs,
     }
 
 
@@ -764,7 +909,7 @@ def _normalize_edited_value(field_name: str, raw) -> str | None:
         if normalized is None:
             raise AppError("Enter a valid date, for example 25/01/2026.", 422)
         return normalized
-    if field_name == "ncd_percent":
+    if field_name in {"ncd_percent", "ncd_percentage"}:
         text = re.sub(r"[^0-9.]", "", str(raw))
         if not text or text.count(".") > 1:
             raise AppError("Enter NCD as a percentage number, for example 25.", 422)
@@ -773,13 +918,24 @@ def _normalize_edited_value(field_name: str, raw) -> str | None:
 
 
 def _recompute_total(fields: dict, decisions: dict, user) -> None:
+    sources = (
+        ("premium", "coverage_premium", "basic_premium_vehicle"),
+        ("roadtax", "road_tax_amount"),
+        ("service_fee", "runner_fee"),
+    )
     amounts: list[Decimal] = []
-    for name in ("premium", "roadtax", "service_fee"):
-        field = fields.get(name)
-        value = field.get("value") if isinstance(field, dict) else field
-        try:
-            amounts.append(Decimal(str(value)))
-        except (InvalidOperation, TypeError, ValueError):
+    for aliases in sources:
+        found_val: Decimal | None = None
+        for name in aliases:
+            field = fields.get(name)
+            value = field.get("value") if isinstance(field, dict) else field
+            if value is not None and str(value).strip():
+                try:
+                    found_val = Decimal(str(value).replace(",", "").strip())
+                    break
+                except (InvalidOperation, TypeError, ValueError):
+                    pass
+        if found_val is None:
             fields["total_amount"] = {
                 "value": None,
                 "status": "check_needed",
@@ -791,6 +947,7 @@ def _recompute_total(fields: dict, decisions: dict, user) -> None:
                 "decided_at": _utcnow().isoformat(),
             }
             return
+        amounts.append(found_val)
     total = sum(amounts, Decimal("0"))
     fields["total_amount"] = {"value": f"{total:.2f}", "status": "ready", "message": ""}
     decisions["total_amount"] = {
@@ -956,12 +1113,24 @@ def _apply_select_package_tier(db, draft: QuotationDraft, user, operation: dict)
 
 
 def _apply_reset_benefits(db, draft: QuotationDraft, user, operation: dict) -> str:
-    """Reset all benefit selections back to the clean catalog defaults and auto-applied detections."""
+    """Reset all benefit selections back to the clean catalog defaults and auto-applied detections.
+
+    Preserves the draft's pinned insurance company, product, package tier, and template selection.
+    """
     for s in _rows_for_draft(db, DraftBenefitSelection, draft.id):
         db.delete(s)
     for d in _rows_for_draft(db, DraftSourceLineDecision, draft.id):
         db.delete(d)
-    initialize_catalog_review(db, draft)
+
+    if draft.catalog_revision_id:
+        revision = db.get(BenefitCatalogRevision, draft.catalog_revision_id)
+        if revision:
+            seed_base_benefits(db, draft, revision)
+        else:
+            initialize_catalog_review(db, draft)
+    else:
+        initialize_catalog_review(db, draft)
+
     auto_apply_extracted_benefits(db, draft)
     return "benefits"
 
@@ -1066,6 +1235,15 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
         except ValidationError as exc:
             raise AppError("The quotation-specific benefit value is invalid.", 422) from exc
 
+    price = operation.get("price")
+    if price is None and offering.optional_price:
+        price = deepcopy(offering.optional_price)
+    elif price is not None:
+        try:
+            price = MoneyAmount.model_validate(price).model_dump(mode="json", exclude_none=True)
+        except Exception:
+            price = None
+
     selected = next((item for item in selections if item.catalog_offering_id == offering.id), None)
     if selected is None:
         selected = DraftBenefitSelection(
@@ -1078,6 +1256,7 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
     selected.state = ReviewedBenefitState.CURRENT.value
     selected.cost_status = cost_status
     selected.typed_value_override = typed_override
+    selected.price = price
     selected.selected_by = user.id
     if current and current[0].id != selected.id:
         current[0].state = ReviewedBenefitState.SUPERSEDED.value
@@ -1110,6 +1289,15 @@ def _apply_benefit_update(db, draft: QuotationDraft, user, operation: dict) -> s
             selection.cost_status = CostStatus(str(operation.get("cost_status"))).value
         except ValueError as exc:
             raise AppError("Benefit cost must be included, paid, FOC, or unknown.", 422) from exc
+    if "price" in operation:
+        raw_price = operation.get("price")
+        if raw_price is None:
+            selection.price = None
+        else:
+            try:
+                selection.price = MoneyAmount.model_validate(raw_price).model_dump(mode="json", exclude_none=True)
+            except Exception:
+                selection.price = raw_price if isinstance(raw_price, dict) else None
     if "typed_value" in operation:
         raw = operation.get("typed_value")
         if raw is None:

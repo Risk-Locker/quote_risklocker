@@ -15,12 +15,16 @@ FIELD_LABELS = {
     "coverage_type": "Coverage Type",
     "cover_period": "Cover of Period",
     "car_model": "Car Model",
+    "engine_cc": "Vehicle CC",
     "ncd_percent": "NCD",
     "coverage_amount": "Coverage",
+    "excess_amount": "Policy Excess",
     "premium": "Insurance Premium",
     "roadtax": "Roadtax",
     "service_fee": "Runner Fee",
     "total_amount": "Total Premium",
+    "insurance_company": "Insurer Name",
+    "valid_until": "Validity Date",
 }
 
 SHAPE_RADII = {"rounded": "12px", "capsule": "999px", "square": "0"}
@@ -43,11 +47,37 @@ GRID_TEXT_DENSITIES = {
 }
 
 
+FIELD_FALLBACK_MAP: dict[str, tuple[str, ...]] = {
+    "premium": ("coverage_premium", "basic_premium_vehicle"),
+    "coverage_premium": ("premium", "basic_premium_vehicle"),
+    "coverage_amount": ("sum_insured", "market_value", "agreed_value"),
+    "sum_insured": ("coverage_amount", "market_value", "agreed_value"),
+    "roadtax": ("road_tax_amount",),
+    "road_tax_amount": ("roadtax",),
+    "service_fee": ("runner_fee",),
+    "runner_fee": ("service_fee",),
+    "ncd_percent": ("ncd_percentage",),
+    "ncd_percentage": ("ncd_percent",),
+    "total_amount": ("total_premium_adjusted", "gross_premium"),
+    "total_premium_adjusted": ("total_amount", "gross_premium"),
+    "engine_cc": ("vehicle_cc", "engine_capacity", "cubic_capacity"),
+    "excess_amount": ("policy_excess", "compulsory_excess", "excess", "lebihan", "ekses", "ekses_polisi"),
+    "valid_until": ("validity_date", "expiry_date", "validity", "quotation_validity", "valid_to", "expire_on"),
+    "insurance_company": ("company_name", "insurer_name"),
+}
+
+
 def _value(fields: dict, field_name: str) -> str:
     field = fields.get(field_name, {})
-    if isinstance(field, dict):
-        return str(field.get("value") or "")
-    return str(field or "")
+    val = field.get("value") if isinstance(field, dict) else field
+    if val is not None and str(val).strip():
+        return str(val).strip()
+    for alias in FIELD_FALLBACK_MAP.get(field_name, ()):
+        alt_field = fields.get(alias, {})
+        alt_val = alt_field.get("value") if isinstance(alt_field, dict) else alt_field
+        if alt_val is not None and str(alt_val).strip():
+            return str(alt_val).strip()
+    return ""
 
 
 def _variable_value(fields: dict, config: dict[str, Any], variable_id: str | None) -> str:
@@ -57,8 +87,14 @@ def _variable_value(fields: dict, config: dict[str, Any], variable_id: str | Non
         if variable.get("id") == variable_id:
             if variable.get("source") == "fixed":
                 return str(variable.get("fixed_value") or "")
-            return _value(fields, variable.get("field") or variable_id)
-    return _value(fields, variable_id)
+            val = _value(fields, variable.get("field") or variable_id)
+            if not val and (variable_id in {"excess_amount", "excess"} or variable.get("field") in {"excess_amount", "excess"}):
+                return "0.00"
+            return val
+    val = _value(fields, variable_id)
+    if not val and variable_id in {"excess_amount", "excess"}:
+        return "0.00"
+    return val
 
 
 def _format_value(value: str, prefix: str = "", suffix: str = "") -> str:
@@ -199,12 +235,12 @@ def _dynamic_benefit_grid(
     spec = GridSpec(
         strategy=str(packing.get("strategy") or "balanced"),
         alignment=str(packing.get("alignment") or "center"),
-        aspect_ratio=float(packing.get("aspectRatio") or 1.45),
-        reference_width=float(packing.get("referenceWidth") or 180),
-        reference_height=float(packing.get("referenceHeight") or 124),
-        gap_ratio=float(packing["gapRatio"]) if packing.get("gapRatio") is not None else 0.06,
+        aspect_ratio=float(packing.get("aspectRatio") or 4.5),
+        reference_width=float(packing.get("referenceWidth") or 226),
+        reference_height=float(packing.get("referenceHeight") or 50),
+        gap_ratio=float(packing["gapRatio"]) if packing.get("gapRatio") is not None else 0.04,
         padding_ratio=float(packing["paddingRatio"]) if packing.get("paddingRatio") is not None else 0.02,
-        stagger_ratio=float(packing.get("staggerRatio") if packing.get("staggerRatio") is not None else 0.5),
+        stagger_ratio=float(packing.get("staggerRatio") if packing.get("staggerRatio") is not None else 0.0),
         empty_state=str(element.get("emptyState") or "hide"),
     )
     layout = pack_fixed_grid(len(ordered), bounds, spec)
@@ -230,28 +266,42 @@ def _dynamic_benefit_grid(
         cost = str(card.get("cost_status") or "")
         asset_id = str(card.get("asset_id") or "")
         asset_uri = resolved_assets.get(asset_id, "")
+        icon_size = max(24, min(36, density["icon"]))
         icon = (
-            f'<img alt="" src="{escape(asset_uri)}" style="width:{density["icon"]}px;height:{density["icon"]}px;object-fit:contain" />'
-            if asset_uri else ""
+            f'<img alt="" src="{escape(asset_uri)}" style="width:{icon_size}px;height:{icon_size}px;object-fit:contain" />'
+            if asset_uri else f'<span style="display:grid;place-items:center;width:{icon_size}px;height:{icon_size}px;border-radius:6px;background:#FEE2E2;color:#DC2626;font-size:10px;font-weight:800">{label[:2].upper()}</span>'
         )
-        cost_label = "FOC" if cost == "foc" else ""
-        cost_html = f'<em style="font-size:11px;font-weight:800">{cost_label}</em>' if cost_label else ""
-        value_html = f'<span style="display:block;margin-top:2px;font-size:{density["value"]}px;line-height:1.2;color:#6b7280;word-break:break-word">{value}</span>' if value else ""
-        font_size = density["label"] if len(label) <= 18 else max(10, density["label"] - 3)
+        price_badge = ""
+        price = card.get("price")
+        if price:
+            p_val = price.get("amount") if isinstance(price, dict) else price
+            try:
+                p_num = float(str(p_val).replace(",", ""))
+                p_str = f"RM {p_num:,.2f}"
+            except Exception:
+                p_str = f"RM {p_val}" if not str(p_val).startswith("RM") else str(p_val)
+            price_badge = f'<span style="font-size:9px;font-weight:800;color:#DC2626;background:#FEF2F2;padding:2px 5px;border-radius:4px;white-space:nowrap;border:1px solid #FECACA">+{p_str}</span>'
+        elif cost == "foc":
+            price_badge = '<span style="font-size:8.5px;font-weight:700;color:#16A34A;background:#F0FDF4;padding:2px 4px;border-radius:4px;white-space:nowrap">FOC</span>'
+
+        value_html = f'<span style="display:block;margin-top:1px;font-size:{max(8.5, density["value"] - 1)}px;line-height:1.15;color:#64748B;word-break:break-word">{value}</span>' if value else ""
+        font_size = density["label"] if len(label) <= 24 else max(9.5, density["label"] - 2)
         scale = packed.scale
         output.append(
             f'<article data-benefit-card="1" data-card-scale="{scale:.12f}" '
             f'data-card-style="{escape(card_style_name)}" data-text-density="{escape(density_name)}" '
             f'style="position:absolute;left:{packed.x:.8f}px;top:{packed.y:.8f}px;'
             f'width:{packed.width:.8f}px;height:{packed.height:.8f}px;overflow:hidden;'
-            'display:flex;align-items:center;justify-content:center">'
-            f'<div style="width:{spec.reference_width}px;height:{spec.reference_height}px;transform:scale({scale:.12f});'
-            'transform-origin:center;display:grid;align-items:center;'
-            f'grid-template-columns:{density["icon"] + 10}px minmax(0,1fr);gap:{density["gap"]}px;padding:{density["padding"]}px;'
-            f'box-sizing:border-box;{card_style};overflow:hidden">'
-            f'<div>{icon}</div><div style="min-width:0;display:flex;flex-direction:column;justify-content:center">'
-            f'<strong style="display:block;font-size:{font_size}px;line-height:1.18;word-break:break-word">{label}</strong>'
-            f'{value_html}{cost_html}</div></div></article>'
+            'display:flex;align-items:stretch;box-sizing:border-box">'
+            f'<div style="width:100%;height:100%;display:grid;align-items:center;'
+            f'grid-template-columns:{icon_size + 8}px minmax(0,1fr) auto;gap:{density["gap"]}px;padding:{density["padding"]}px;'
+            f'box-sizing:border-box;{card_style};overflow:hidden;border-radius:6px;border:1px solid #E2E8F0;background:#FFFFFF">'
+            f'<div style="display:flex;align-items:center;justify-content:center">{icon}</div>'
+            f'<div style="min-width:0;display:flex;flex-direction:column;justify-content:center">'
+            f'<strong style="display:block;font-size:{font_size}px;line-height:1.18;word-break:break-word;color:#0F172A">{label}</strong>'
+            f'{value_html}</div>'
+            f'<div style="display:flex;align-items:center;justify-content:flex-end;margin-left:4px">{price_badge}</div>'
+            f'</div></article>'
         )
     warning = escape(layout.warning or "")
     borders: list[str] = []
@@ -287,8 +337,7 @@ def _dynamic_benefit_grid(
 def _premium_info_block(element: dict[str, Any], fields: dict, render_context: dict[str, Any]) -> str:
     """Dynamic coverage-card rows: extras, premium, roadtax, runner fee, total.
 
-    Extras are staff-added priced add-ons shown above the coverage premium;
-    the total row adds their sum onto the extracted total premium.
+    Positioned deterministically in the canvas, bound to calculated draft values.
     """
     x = float(element.get("x") or 0)
     y = float(element.get("y") or 0)
@@ -297,10 +346,8 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
     labels = element.get("labels") or {}
     extras = list((render_context or {}).get("extras") or [])
     rows: list[tuple[str, str, str]] = []
-    for extra in extras[:3]:
+    for extra in extras:
         rows.append(("extra", str(extra.get("label") or ""), format_money_amount(extra.get("price"))))
-    if len(extras) > 3:
-        rows.append(("extra", f"+{len(extras) - 3} more", ""))
     rows.append(("premium", str(labels.get("premium") or "Coverage Premium"), _format_value(_value(fields, "premium"), "RM ")))
     rows.append(("divider", "", ""))
     rows.append(("roadtax", str(labels.get("roadtax") or "Roadtax"), _format_value(_value(fields, "roadtax"), "RM ")))
@@ -331,6 +378,87 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
             f'<span style="{value_style}">{escape(value)}</span></div>'
         )
     return "".join(html)
+
+
+def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_context: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Dynamically balance the heights of current benefits and available add-ons grids."""
+    extras = list((render_context or {}).get("extras") or []) if render_context else []
+    extra_shift = len(extras) * 14.0
+
+    current_cards = list((render_context or {}).get("current_benefits") or []) if render_context else []
+    addon_cards = list((render_context or {}).get("available_addons") or []) if render_context else []
+    n1 = len(current_cards)
+    n2 = len(addon_cards)
+
+    grid1 = next((e for e in elements if e.get("type") == "benefit-grid" and e.get("gridKind") == "current_benefits"), None)
+    grid2 = next((e for e in elements if e.get("type") == "benefit-grid" and e.get("gridKind") == "available_addons"), None)
+    if not grid1 or not grid2:
+        return elements
+
+    hdr1_bg = next((e for e in elements if e.get("id") == "specials_header_bg"), None)
+    hdr1_txt = next((e for e in elements if e.get("id") == "specials_header_txt"), None)
+    hdr2_bg = next((e for e in elements if e.get("id") == "addons_header_bg"), None)
+    hdr2_txt = next((e for e in elements if e.get("id") == "addons_header_txt"), None)
+
+    base_y_top = float(hdr1_bg.get("y") or 414) if hdr1_bg else float(grid1.get("y") or 444)
+    y_top = base_y_top + extra_shift
+    y_bottom = float(grid2.get("y") or 796) + float(grid2.get("h") or 262)
+
+    rows1 = max(1, (n1 + 1) // 2) if n1 > 0 else 0
+    rows2 = max(1, (n2 + 1) // 2) if n2 > 0 else 0
+
+    total_space = y_bottom - y_top
+    hdr_h = 26.0
+    gap = 10.0
+    pad = 4.0
+
+    avail_grids_h = total_space - (2 * hdr_h) - gap - (2 * pad)
+    if avail_grids_h <= 100:
+        avail_grids_h = 360.0
+
+    if rows1 > 0 and rows2 > 0:
+        ratio1 = rows1 / (rows1 + rows2)
+        h1 = max(100.0, min(avail_grids_h - 80.0, avail_grids_h * ratio1))
+        h2 = avail_grids_h - h1
+    elif rows1 > 0 and rows2 == 0:
+        h1 = avail_grids_h + hdr_h + gap + pad - 60.0
+        h2 = 60.0
+    elif rows1 == 0 and rows2 > 0:
+        h1 = 60.0
+        h2 = avail_grids_h + hdr_h + gap + pad - 60.0
+    else:
+        h1 = avail_grids_h / 2.0
+        h2 = avail_grids_h / 2.0
+
+    adjusted_elements = []
+    y_g1 = y_top + hdr_h + pad
+    y_h2 = y_g1 + h1 + gap
+    y_g2 = y_h2 + hdr_h + pad
+
+    for elem in elements:
+        e = dict(elem)
+        eid = e.get("id")
+        if eid == "cov_table_bg" and extra_shift > 0:
+            e["h"] = float(e.get("h") or 246) + extra_shift
+        elif eid == "specials_header_bg" and hdr1_bg:
+            e["y"] = y_top
+            e["h"] = hdr_h
+        elif eid == "specials_header_txt" and hdr1_txt:
+            e["y"] = y_top + 5
+        elif e.get("type") == "benefit-grid" and e.get("gridKind") == "current_benefits":
+            e["y"] = y_g1
+            e["h"] = h1
+        elif eid == "addons_header_bg" and hdr2_bg:
+            e["y"] = y_h2
+            e["h"] = hdr_h
+        elif eid == "addons_header_txt" and hdr2_txt:
+            e["y"] = y_h2 + 5
+        elif e.get("type") == "benefit-grid" and e.get("gridKind") == "available_addons":
+            e["y"] = y_g2
+            e["h"] = h2
+        adjusted_elements.append(e)
+
+    return adjusted_elements
 
 
 def _section_variants(db: Any, section: str | None) -> list[Any]:
@@ -376,12 +504,8 @@ def _variant_card(variant: Any, db: Any = None) -> str:
         src = asset_data_uri(db, icon_id)
         if src:
             icon = f'<img alt="" src="{src}" style="max-width:38px;max-height:34px;object-fit:contain;display:block;margin:auto" />'
-    if not icon:
-        initials = "".join(part[0] for part in label.split() if part)[:2].upper() or "IC"
-        icon = f'<span style="display:block;text-align:center;font-weight:900;font-size:9px;line-height:1;color:{escape(fg)}">{escape(initials)}</span>'
-
     card_style = (
-        "display:flex;align-items:center;gap:8px;padding:6px 8px;min-width:0;overflow:hidden;"
+        "display:flex;align-items:center;gap:8px;padding:8px;box-sizing:border-box;overflow:hidden;"
         f"background:{escape(bg)};color:{escape(fg)};border-radius:{radius};box-shadow:{shadow};{border}"
     )
     icon_box = (
@@ -466,15 +590,23 @@ def _element_html(
     if element_type == "variable":
         value = _format_value(_variable_value(fields, config, element.get("variableId")), str(element.get("prefix") or ""), str(element.get("suffix") or ""))
         return f'<div style="{_style(element)}">{escape(value)}</div>'
+    if element_type == "special":
+        return _special_html(element, config)
     if element_type == "benefit-section":
         return _benefit_section(element, db)
     if element_type == "benefit-grid":
         return _dynamic_benefit_grid(element, render_context or {}, resolved_assets or {})
     if element_type == "premium-info-block":
         return _premium_info_block(element, fields, render_context or {})
-    if element_type == "special":
-        return _special_html(element, config)
     text = str(element.get("text") or "")
+    if "{" in text:
+        def _replace_var(m):
+            v_name = m.group(1)
+            val = _value(fields, v_name)
+            if not val and v_name == "valid_until":
+                return "30 Days"
+            return val if val else m.group(0)
+        text = re.sub(r"\{([a-zA-Z0-9_-]+)\}", _replace_var, text)
     return f'<div style="{_style(element)}">{escape(text)}</div>'
 
 
@@ -494,7 +626,9 @@ def render_quotation_html(
     canvas = config.get("canvas") or {}
     width = int(canvas.get("width") or 794)
     height = int(canvas.get("height") or 1123)
-    elements = sorted(canvas.get("elements") or [], key=lambda item: int(item.get("z", 1)))
+    raw_elements = canvas.get("elements") or []
+    balanced = _balance_benefit_grid_elements(raw_elements, render_context)
+    elements = sorted(balanced, key=lambda item: int(item.get("z", 1)))
     body = "".join(
         _element_html(element, draft_fields, config, db, render_context, resolved_assets)
         for element in elements

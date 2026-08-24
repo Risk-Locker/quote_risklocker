@@ -138,6 +138,10 @@ GEMINI_EXTRACTION_SCHEMA = {
             "type": "string",
             "description": "Scope of coverage. Must be normalized to 'Comprehensive', 'Third Party Fire & Theft', or 'Third Party'. NEVER return 'Jenis Perlindungan' (which is just the Malay word for Cover Type).",
         },
+        "excess_amount": {
+            "type": "string",
+            "description": "Excess amount or policy excess in RM (e.g. '0.00', '1,000.00', '500.00', '400.00'). Look for 'Excess', 'Lebihan', '*Excess Amount', 'Excess Amount', 'Policy Excess', 'Excess all claims', 'Ekses Polisi'. ALWAYS output '0.00' if excess is stated as 0 or 0.00.",
+        },
         "coverage_amount": {
             "type": "string",
             "description": "Sum insured / agreed value / market value (e.g. '53,000.00').",
@@ -152,11 +156,15 @@ GEMINI_EXTRACTION_SCHEMA = {
         },
         "ncd_percent": {
             "type": "string",
-            "description": "No Claim Discount percentage number without percent sign (e.g. '25.00' or '55'). Check 'NCD', 'NCB', 'No Claim Bonus', 'No Claim Discount'.",
+            "description": "No Claim Discount percentage number without percent sign (e.g. '25.00' or '55'). Check 'NCD', 'NCB', 'No Claim Bonus', 'No Claim Discount', 'DTT'.",
         },
         "premium": {
             "type": "string",
             "description": "Gross or basic insurance premium payable before runner fees (e.g. '1,056.45' or '1,381.94').",
+        },
+        "total_optional_cover_amount": {
+            "type": "string",
+            "description": "Total Optional Cover Amount or Extra Benefit cost sum in RM (e.g. '845.35' or '20.00').",
         },
         "service_tax": {
             "type": "string",
@@ -178,23 +186,39 @@ GEMINI_EXTRACTION_SCHEMA = {
             "type": "string",
             "description": "Runner / service fee if specified.",
         },
+        "valid_until": {
+            "type": "string",
+            "description": "Quotation validity expiry date or duration (e.g. '18-03-2026', '15/09/2026', or '30 Days'). Look for 'This quotation will expire on DD-MM-YYYY', 'Quotation will expire on...', 'Validity', 'Valid Until', 'Sah Sehingga', 'Tarikh Tamat', 'Tarikh Luput'.",
+        },
         "detected_benefits": {
             "type": "array",
-            "description": "List of all benefits, add-ons, extra covers, and riders explicitly present in this quotation (e.g. Windscreen RM 1,000, 24-hr Towing, Special Perils, Legal Liability to Passengers, All Drivers, Workmanship Warranty, Compassionate Allowance, Flood Relief, etc.).",
+            "description": "List of all benefits, add-ons, extra covers, and riders explicitly present in this quotation (e.g. Windscreen Damage RM 4,000 cost RM 600, Private Car 365 Plan 2 cost RM 166, Legal Liability Of Passengers RM 7.50, Legal Liability To Passengers RM 71.85, All Drivers RM 20, 24-hr Towing, Special Perils, Workmanship Warranty, etc.).",
             "items": {
                 "type": "object",
                 "properties": {
                     "label": {
                         "type": "string",
-                        "description": "The standard name of the benefit.",
+                        "description": "The standard name or description of the benefit / add-on.",
                     },
                     "concept_key": {
                         "type": "string",
-                        "description": "Matched concept key from the concepts library (e.g. 'wndscrn', 'towing', 'spcl_peril', 'llp', 'all_driver', 'comp_allowance', 'flood_allowance', 'excess', 'ambulance_fee', 'one_touch_mobile', 'express_claim', 'workmanship_warranty', 'e_hailing', 'waiver_betterment', 'cart_plan').",
+                        "description": "Matched concept key from the concepts library (e.g. 'windscreen', 'towing', 'special-perils', 'legal-liability-to-passengers', 'legal-liability-of-passengers', 'all-drivers', 'private-car-365', 'motor-pa-plus', 'oto-360', 'repair-workmanship-warranty').",
                     },
                     "value": {
                         "type": "string",
-                        "description": "The coverage value, limit amount, or description (e.g. 'Up to RM 1,000', 'Unlimited Towing', 'Included', 'RM 4,500', '3 Years').",
+                        "description": "The coverage value, limit amount, or description (e.g. 'RM 4,000.00', 'Unlimited Towing', 'Included', 'Plan 2').",
+                    },
+                    "coverage_limit": {
+                        "type": "string",
+                        "description": "Sum covered / coverage limit if any (e.g. 'RM 4,000.00', 'RM 10,000', '200 km').",
+                    },
+                    "premium_cost": {
+                        "type": "string",
+                        "description": "Additional premium cost in RM for this add-on (e.g. '600.00', '166.00', '7.50', '71.85', '20.00'). Empty string if included/FOC.",
+                    },
+                    "is_optional_cover": {
+                        "type": "boolean",
+                        "description": "True if this is an optional paid add-on / rider from the Optional Cover List or Extra Benefit table, False if included base cover.",
                     },
                     "raw_text": {
                         "type": "string",
@@ -322,6 +346,11 @@ Extract structured quotation data from the provided insurance document with 100%
    - Tolerate small wording variations in the description text and match the plan level (A/B/C/D) when present.
    - Known packs and their plan levels:
 {packs_str}
+9. **EXCESS AMOUNT, VALIDITY & OPTIONAL COVER BREAKDOWN**:
+   - Extract `excess_amount` if stated (e.g. 'Excess / Lebihan 0.00' -> '0.00', '*Excess Amount : RM 1,000.00' -> '1,000.00', 'Policy Excess: RM 500.00', 'Ekses Polisi'). Output '0.00' if excess is 0 or zero.
+   - Extract `valid_until` date (e.g. 'This quotation will expire on 18-03-2026' -> '18-03-2026', 'Valid Until 05-07-2026', 'Tarikh Luput').
+   - Extract `total_optional_cover_amount` (e.g. 'Total Optional Cover Amount : RM 845.35' or 'Extra Benefit / Manfaat Tambahan : RM 20.00').
+   - In `detected_benefits`, extract EVERY item in the Optional Cover List or Extra Benefit section with its name (`label`, e.g. 'ALL DRIVERS', 'Windscreen', 'Legal Liability to Passengers'), coverage limit (`coverage_limit`), cost (`premium_cost`, e.g. '20.00', '150.00', '7.50'), and mark `is_optional_cover: true`.
 Return strictly structured JSON adhering to the provided schema.
 """
 

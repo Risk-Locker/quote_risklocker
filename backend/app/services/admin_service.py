@@ -303,14 +303,17 @@ def update_template(db: Session, user, template_id: str, payload: dict) -> Outpu
     if not template or template.deleted_at:
         raise AppError("Template not found.", 404)
     current_config = normalize_template_config(template.fixed_fields, template.name)
-    if current_config.get("locked"):
-        raise AppError("Copy this default template before editing.")
+    if current_config.get("locked") and current_config.get("v7_master_key") and "fixed_fields" in payload:
+        raise AppError("Copy this default template before editing canvas structure.")
     base_revision = payload.pop("base_revision", None)
     if base_revision is not None and int(base_revision) != template.revision:
         raise AppError("This template changed elsewhere. Reload before saving.", 409)
     for key in ["name", "insurance_type", "insurance_company_id", "group_id", "static_notes", "editable_fields", "status"]:
         if key in payload:
             setattr(template, key, payload[key])
+    if "name" in payload and isinstance(template.fixed_fields, dict):
+        template.fixed_fields["template_name"] = template.name
+        flag_modified(template, "fixed_fields")
     if "fixed_fields" in payload:
         config = normalize_template_config(payload["fixed_fields"], template.name)
         config["is_default"] = False

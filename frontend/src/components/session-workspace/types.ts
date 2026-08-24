@@ -57,6 +57,7 @@ export type WorkspaceSnapshot = {
     current_benefits: BenefitCardSummary[];
     available_addons: BenefitCardSummary[];
     groups?: Array<{ plan_id: string; plan_key: string; plan_label: string; cards: BenefitCardSummary[] }>;
+    extras?: Array<{ selection_id: string; label: string; price?: { amount?: number | string; currency?: string } }>;
   };
   extras: Array<{ selection_id: string; label: string; price?: { amount?: number | string; currency?: string } }>;
   total_premium_adjusted: string;
@@ -92,6 +93,14 @@ export type WorkspaceSnapshot = {
   }>;
   pinned: Record<string, string | null>;
   pinned_names: { company_name: string | null; product_name: string | null; tier_name: string | null; package_name?: string | null };
+  hierarchy?: {
+    company_name?: string | null;
+    product_name?: string | null;
+    vehicle_category?: string | null;
+    segment?: string | null;
+    coverage_type?: string | null;
+    car_model?: string | null;
+  };
   catalog: {
     defaults: Array<{ offering_id: string; label: string; value: string }>;
     addons: Array<{ offering_id: string; label: string; value: string }>;
@@ -101,6 +110,24 @@ export type WorkspaceSnapshot = {
   layout_binding: { template_id: string | null; template_revision_id: string | null; base_hash: string | null };
   generation_blockers: GenerationBlocker[];
   versions: Array<{ id: string; version_number: number; draft_revision: number; stale: boolean; generated_at: string }>;
+  extracted_benefits_section?: {
+    detected_package?: { name: string; matching_package_id: string | null; is_active_tier: boolean };
+    total_optional_cover_amount?: string;
+    extras?: Array<{
+      id: string;
+      label: string;
+      raw_text: string;
+      coverage_limit?: string;
+      cost?: string;
+      is_optional_cover?: boolean;
+      concept_key?: string;
+      concept_id?: string | null;
+      is_applied?: boolean;
+      selection_id?: string | null;
+      source?: string;
+    }>;
+    detected_packs?: Array<{ package_name: string; plan_name?: string; raw_text?: string }>;
+  };
   capabilities: WorkspaceCapabilities;
 };
 

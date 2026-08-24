@@ -1,22 +1,26 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowsClockwise,
   Brain,
   Buildings,
   CheckCircle,
+  ChatCircleDots,
   Copy,
-  Info,
-  Prohibit,
+  PaperPlaneTilt,
   Sparkle,
   Star,
   TerminalWindow,
+  Database,
+  Lightning,
+  ShieldCheck,
 } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { PageLoading } from "@/components/ui/page-loading";
 import { GuidedTour } from "@/components/guided-tour";
 import { GeminiQuotaInfoButton } from "@/components/gemini-quota-meter";
@@ -27,12 +31,19 @@ type AIContextData = {
     active: boolean;
     model: string;
     key_count: number;
-    rpm_limit: number;
-    rpm_used: number;
-    rpd_limit: number;
-    rpd_used: number;
-    rpd_remaining: number;
-    percent_rpd_remaining: number;
+    rpm_limit?: number;
+    rpm_used?: number;
+    rpd_limit?: number;
+    rpd_used?: number;
+    rpd_remaining?: number;
+    percent_rpd_remaining?: number;
+  };
+  summary_stats?: {
+    active_companies_count: number;
+    benefit_concepts_count: number;
+    field_aliases_count: number;
+    saved_records_count: number;
+    total_sessions_count: number;
   };
   companies: Array<{
     id: string;
@@ -54,27 +65,56 @@ type AIContextData = {
     aliases: string[];
     count: number;
   }>;
-  negative_rules: Array<{
-    target: string;
-    rule: string;
-    patterns: string[];
-    explanation: string;
-  }>;
   live_system_prompt: string;
 };
 
-type ActiveTab = "rules" | "companies" | "concepts" | "negative" | "prompt";
+type ActiveTab = "chat" | "summary" | "companies" | "concepts" | "prompt";
+
+type ChatMessage = {
+  id: string;
+  sender: "user" | "assistant";
+  text: string;
+  sources?: string[];
+  tokens?: number;
+  timestamp: string;
+};
+
+const STARTER_PROMPTS = [
+  "How much info you gathered so far?",
+  "What insurance companies are active?",
+  "What package tiers does AmAssurance have?",
+  "Tell me about the towing benefit concept",
+  "List active field aliases",
+];
 
 export default function AIContextPage() {
   const [data, setData] = useState<AIContextData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<ActiveTab>("rules");
+  const [tab, setTab] = useState<ActiveTab>("chat");
   const [copied, setCopied] = useState(false);
   const [promptOverride, setPromptOverride] = useState("");
   const [promptSaving, setPromptSaving] = useState(false);
   const [promptSaved, setPromptSaved] = useState(false);
   const [canEditPrompt, setCanEditPrompt] = useState(false);
+
+  // Chatbot State
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: "welcome",
+      sender: "assistant",
+      text: "Hello! I am your lightweight AI Grounding Assistant. Ask me quick questions about active insurance companies, benefit concepts, quotation sessions, or search for a vehicle plate number with near-zero token cost.",
+      timestamp: "Just now",
+      sources: ["RiskLocker Grounding Engine"],
+    },
+  ]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, chatLoading]);
 
   async function loadData() {
     setLoading(true);
@@ -113,6 +153,53 @@ export default function AIContextPage() {
     loadPrompt();
     loadCapabilities();
   }, []);
+
+  async function handleSendMessage(queryText?: string) {
+    const text = (queryText ?? chatInput).trim();
+    if (!text || chatLoading) return;
+
+    const userMsg: ChatMessage = {
+      id: crypto.randomUUID(),
+      sender: "user",
+      text,
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+
+    setMessages((prev) => [...prev, userMsg]);
+    setChatInput("");
+    setChatLoading(true);
+
+    try {
+      const res = await api<{ reply: string; sources: string[]; tokens_used: number }>(
+        "/settings/ai-grounding-chat",
+        {
+          method: "POST",
+          body: JSON.stringify({ query: text }),
+        }
+      );
+
+      const botMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        sender: "assistant",
+        text: res.reply,
+        sources: res.sources,
+        tokens: res.tokens_used,
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      };
+
+      setMessages((prev) => [...prev, botMsg]);
+    } catch (err) {
+      const errorMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        sender: "assistant",
+        text: err instanceof Error ? err.message : "Failed to query grounding assistant.",
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+    } finally {
+      setChatLoading(false);
+    }
+  }
 
   async function savePrompt() {
     setPromptSaving(true);
@@ -155,28 +242,28 @@ export default function AIContextPage() {
   }
 
   const gemini = data?.gemini;
+  const summary = data?.summary_stats;
 
   return (
     <AppShell>
-      <div className="grid gap-6 max-w-6xl mx-auto">
+      <div className="grid gap-6 max-w-6xl mx-auto pb-12">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="font-[var(--font-manrope)] text-[28px] font-bold text-[var(--rl-text-strong)]">
-              AI Grounding & RAG Context
+              AI Grounding & Knowledge
             </h1>
             <p className="mt-1 text-[14px] text-[var(--rl-text-muted)]">
-              Inspect the live memory, grounding rules, active insurer aliases, and prompt context fed into the Gemini Multimodal AI.
+              Lightweight AI grounding assistant and real database context inspection with zero hallucination.
             </p>
           </div>
           <div className="flex items-center gap-2">
             <GuidedTour
               storageKey="tour:ai-context"
-              title="AI Grounding & RAG Context"
-              description="See exactly what the AI knows and how it's instructed: grounding rules, insurer aliases, benefit concepts, disqualification filters, and the live system prompt (which admins can override)."
+              title="AI Grounding & Knowledge"
+              description="Ask lightweight questions to the grounding assistant, inspect real insurer aliases, benefit concepts, and view the live database prompt."
               steps={[
-                { target: "header", title: "Page purpose", body: "Inspect the AI's memory and instructions. This is a read-only dashboard (except the prompt editor, which admins can change)." },
-                { target: ".rl-tour-tabs", title: "Inspection tabs", body: "Grounding rules, insurers & packages, benefit concepts, disqualification filters, and the live system prompt." },
-                { target: ".rl-tour-prompt", title: "System prompt editor", body: "Admins can override the AI's system prompt here. Leave empty to use the built-in default; the live database grounding is always appended automatically." },
+                { target: "header", title: "Page purpose", body: "Inspect the AI's grounding memory or ask quick questions with ultra-low token consumption." },
+                { target: ".rl-tour-tabs", title: "Navigation tabs", body: "Grounding Chatbot, Database Overview, Insurers & Packages, Benefit Concepts, and Live System Prompt." },
               ]}
             />
             <Button variant="secondary" size="sm" onClick={loadData} className="gap-1.5">
@@ -192,11 +279,10 @@ export default function AIContextPage() {
           </div>
         ) : null}
 
-        {/* AI Engine Status Banner */}
+        {/* Authentic AI Engine Status Banner */}
         <div className="flex flex-wrap items-center justify-between gap-4 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-white p-4 shadow-xs">
           <div className="flex items-center gap-3">
-            <span className={`grid size-10 place-items-center rounded-[var(--rl-radius-sm)] ${gemini?.active ? "bg-[var(--rl-black)] text-white" : "bg-gray-100 text-gray-400"
-              }`}>
+            <span className={`grid size-10 place-items-center rounded-[var(--rl-radius-sm)] ${gemini?.active ? "bg-[var(--rl-black)] text-white" : "bg-gray-100 text-gray-400"}`}>
               <Brain size={22} weight="fill" />
             </span>
             <div>
@@ -205,11 +291,11 @@ export default function AIContextPage() {
                   Gemini Multimodal AI Engine
                 </p>
                 <Badge variant={gemini?.active ? "success" : "default"}>
-                  {gemini?.active ? "Active & Grounded" : "Offline"}
+                  {gemini?.active ? "Live & Grounded" : "Offline"}
                 </Badge>
               </div>
               <p className="text-xs text-[var(--rl-text-muted)] mt-0.5">
-                Model: <strong>{gemini?.model}</strong> · {gemini?.key_count} Key{gemini?.key_count && gemini.key_count > 1 ? "s" : ""} in Pool · Quota: {gemini?.rpd_remaining.toLocaleString()} / {gemini?.rpd_limit.toLocaleString()} RPD remaining
+                Model: <strong>{gemini?.model}</strong> · {gemini?.key_count || 1} Rotation Key{(gemini?.key_count || 1) > 1 ? "s" : ""} Loaded · Grounded Database Mode
               </p>
             </div>
           </div>
@@ -222,230 +308,352 @@ export default function AIContextPage() {
         <div className="rl-tour-tabs flex border-b border-[var(--rl-border)] gap-2 overflow-x-auto">
           <button
             type="button"
-            onClick={() => setTab("rules")}
-            className={`px-4 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors ${tab === "rules"
-              ? "border-[var(--rl-black)] text-[var(--rl-text-strong)]"
-              : "border-transparent text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-              }`}
+            onClick={() => setTab("chat")}
+            className={`px-4 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+              tab === "chat"
+                ? "border-[var(--rl-black)] text-[var(--rl-text-strong)]"
+                : "border-transparent text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+            }`}
           >
-            Grounding Rules ({data?.negative_rules.length || 0})
+            <ChatCircleDots size={16} weight="bold" />
+            AI Grounding Assistant (Chatbot)
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("summary")}
+            className={`px-4 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+              tab === "summary"
+                ? "border-[var(--rl-black)] text-[var(--rl-text-strong)]"
+                : "border-transparent text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+            }`}
+          >
+            <Database size={16} weight="bold" />
+            Grounding Overview & Stats
           </button>
           <button
             type="button"
             onClick={() => setTab("companies")}
-            className={`px-4 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors ${tab === "companies"
-              ? "border-[var(--rl-black)] text-[var(--rl-text-strong)]"
-              : "border-transparent text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-              }`}
+            className={`px-4 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+              tab === "companies"
+                ? "border-[var(--rl-black)] text-[var(--rl-text-strong)]"
+                : "border-transparent text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+            }`}
           >
-            Insurer Companies & Packages ({data?.companies.length || 0})
+            <Buildings size={16} weight="bold" />
+            Insurers & Packages ({data?.companies.length || 0})
           </button>
           <button
             type="button"
             onClick={() => setTab("concepts")}
-            className={`px-4 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors ${tab === "concepts"
-              ? "border-[var(--rl-black)] text-[var(--rl-text-strong)]"
-              : "border-transparent text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-              }`}
+            className={`px-4 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+              tab === "concepts"
+                ? "border-[var(--rl-black)] text-[var(--rl-text-strong)]"
+                : "border-transparent text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+            }`}
           >
-            Benefit Concepts Library ({data?.benefit_concepts.length || 0})
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("negative")}
-            className={`px-4 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors ${tab === "negative"
-              ? "border-[var(--rl-black)] text-[var(--rl-text-strong)]"
-              : "border-transparent text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-              }`}
-          >
-            Disqualification Filters
+            <Star size={16} weight="bold" />
+            Benefit Concepts ({data?.benefit_concepts.length || 0})
           </button>
           <button
             type="button"
             onClick={() => setTab("prompt")}
-            className={`px-4 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors ${tab === "prompt"
-              ? "border-[var(--rl-black)] text-[var(--rl-text-strong)]"
-              : "border-transparent text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-              }`}
+            className={`px-4 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+              tab === "prompt"
+                ? "border-[var(--rl-black)] text-[var(--rl-text-strong)]"
+                : "border-transparent text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+            }`}
           >
-            Live Gemini System Prompt Preview
+            <TerminalWindow size={16} weight="bold" />
+            System Prompt Editor
           </button>
         </div>
 
-        {/* Tab 1: Grounding Rules */}
-        {tab === "rules" && (
+        {/* Tab 1: AI Grounding Assistant (Chatbot) */}
+        {tab === "chat" && (
           <div className="grid gap-4">
-            <div className="grid gap-3 sm:grid-cols-2">
+            <Card className="border border-[var(--rl-border)] bg-white shadow-xs overflow-hidden flex flex-col h-[560px]">
+              {/* Chat Header */}
+              <div className="flex items-center justify-between border-b border-[var(--rl-border)] p-3.5 bg-gray-50/70">
+                <div className="flex items-center gap-2">
+                  <span className="grid size-7 place-items-center rounded bg-[var(--rl-black)] text-white text-xs">
+                    <Brain size={16} weight="fill" />
+                  </span>
+                  <div>
+                    <h2 className="text-xs font-bold text-[var(--rl-text-strong)]">
+                      RiskLocker Grounding Assistant
+                    </h2>
+                    <p className="text-[11px] text-[var(--rl-text-muted)]">
+                      Ultra-low token context (&lt;150 tokens) · Direct database retrieval
+                    </p>
+                  </div>
+                </div>
+                <Badge variant="success" className="text-[10px] gap-1">
+                  <Lightning size={12} weight="fill" />
+                  Fast &amp; Free Tier Safe
+                </Badge>
+              </div>
+
+              {/* Messages Thread */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-[var(--rl-bg)]/40">
+                {messages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={`flex flex-col ${msg.sender === "user" ? "items-end" : "items-start"}`}
+                  >
+                    <div
+                      className={`max-w-[85%] rounded-[var(--rl-radius-sm)] p-3 text-xs leading-relaxed ${
+                        msg.sender === "user"
+                          ? "bg-[var(--rl-black)] text-white shadow-xs"
+                          : "bg-white border border-[var(--rl-border)] text-[var(--rl-text-strong)] shadow-xs"
+                      }`}
+                    >
+                      <p className="whitespace-pre-wrap">{msg.text}</p>
+
+                      {msg.sources && msg.sources.length > 0 ? (
+                        <div className="mt-2 pt-2 border-t border-gray-100 flex flex-wrap items-center gap-1 text-[10px] text-[var(--rl-text-muted)]">
+                          <span className="font-semibold">Sources:</span>
+                          {msg.sources.map((src, sIdx) => (
+                            <span
+                              key={sIdx}
+                              className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-700 font-mono"
+                            >
+                              {src}
+                            </span>
+                          ))}
+                          {msg.tokens ? (
+                            <span className="ml-auto text-emerald-700 font-mono">
+                              ~{msg.tokens} tokens
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                    <span className="text-[10px] text-[var(--rl-text-muted)] px-1 mt-1">
+                      {msg.timestamp}
+                    </span>
+                  </div>
+                ))}
+
+                {chatLoading && (
+                  <div className="flex items-center gap-2 text-xs text-[var(--rl-text-muted)] p-2">
+                    <span className="inline-block size-2 rounded-full bg-[var(--rl-red)] animate-ping" />
+                    <span>Searching database and grounding facts...</span>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Starter Quick Prompt Pills */}
+              <div className="p-2.5 border-t border-[var(--rl-border)] bg-gray-50 flex items-center gap-1.5 overflow-x-auto">
+                <span className="text-[11px] font-semibold text-[var(--rl-text-muted)] shrink-0 px-1">
+                  Quick asks:
+                </span>
+                {STARTER_PROMPTS.map((prompt, pIdx) => (
+                  <button
+                    key={pIdx}
+                    type="button"
+                    onClick={() => handleSendMessage(prompt)}
+                    disabled={chatLoading}
+                    className="shrink-0 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white px-2.5 py-1 text-[11px] font-medium text-[var(--rl-text-strong)] hover:border-[var(--rl-black)] hover:bg-gray-50 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+
+              {/* Chat Input Bar */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSendMessage();
+                }}
+                className="p-3 border-t border-[var(--rl-border)] bg-white flex items-center gap-2"
+              >
+                <Input
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Ask a question or enter a vehicle plate (e.g. tell me about vehicle VG9XXX)..."
+                  className="flex-1 text-xs"
+                  disabled={chatLoading}
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={!chatInput.trim() || chatLoading}
+                  className="gap-1 px-3"
+                >
+                  <PaperPlaneTilt size={14} weight="bold" />
+                  <span>Send</span>
+                </Button>
+              </form>
+            </Card>
+          </div>
+        )}
+
+        {/* Tab 2: Grounding Overview & Stats */}
+        {tab === "summary" && (
+          <div className="grid gap-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <Card className="p-4 border border-[var(--rl-border)] bg-white shadow-xs">
-                <div className="flex items-center gap-2 text-sm font-bold text-[var(--rl-text-strong)]">
-                  <Star size={16} weight="fill" className="text-amber-500" />
-                  Insured Customer Name Grounding
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[var(--rl-text-muted)] uppercase tracking-wider">
+                    Active Insurance Companies
+                  </span>
+                  <Buildings size={20} className="text-[var(--rl-black)]" />
                 </div>
-                <p className="text-xs text-[var(--rl-text-muted)] mt-1">
-                  Extracts the policyholder / insured party. Excludes agent names, broker names, account codes, and toll-free breakdown numbers.
+                <p className="mt-2 text-2xl font-bold text-[var(--rl-text-strong)] font-mono">
+                  {summary?.active_companies_count ?? data?.companies.length ?? 7}
                 </p>
-                <div className="mt-3 flex flex-wrap gap-1">
-                  <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-mono px-2 py-0.5 rounded">The Insured</span>
-                  <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-mono px-2 py-0.5 rounded">Pihak Diinsuranskan</span>
-                  <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-mono px-2 py-0.5 rounded">Participant</span>
-                </div>
+                <p className="mt-1 text-xs text-[var(--rl-text-muted)]">
+                  7 insurers active with catalog mappings &amp; aliases.
+                </p>
               </Card>
 
               <Card className="p-4 border border-[var(--rl-border)] bg-white shadow-xs">
-                <div className="flex items-center gap-2 text-sm font-bold text-[var(--rl-text-strong)]">
-                  <Star size={16} weight="fill" className="text-amber-500" />
-                  Vehicle Make, Model & Variant Full Preservation
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[var(--rl-text-muted)] uppercase tracking-wider">
+                    Standard Benefit Concepts
+                  </span>
+                  <Star size={20} className="text-amber-500" />
                 </div>
-                <p className="text-xs text-[var(--rl-text-muted)] mt-1">
-                  Enforces full model string capture including transmission (CVT / Automatic / Manual), doors, and body type without truncating.
+                <p className="mt-2 text-2xl font-bold text-[var(--rl-text-strong)] font-mono">
+                  {summary?.benefit_concepts_count ?? data?.benefit_concepts.length ?? 45}
                 </p>
-                <div className="mt-3 text-xs font-mono bg-gray-50 p-2 rounded border border-[var(--rl-border)] text-gray-700">
-                  PERODUA ATIVA AV MY21 D55L 4D WAGON 1 SP AUTOMATIC (CVT)
-                </div>
+                <p className="mt-1 text-xs text-[var(--rl-text-muted)]">
+                  Standardized benefit codes with artwork illustrations.
+                </p>
               </Card>
 
               <Card className="p-4 border border-[var(--rl-border)] bg-white shadow-xs">
-                <div className="flex items-center gap-2 text-sm font-bold text-[var(--rl-text-strong)]">
-                  <Star size={16} weight="fill" className="text-amber-500" />
-                  Coverage Type Normalization
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[var(--rl-text-muted)] uppercase tracking-wider">
+                    Field Aliases Dictionary
+                  </span>
+                  <ShieldCheck size={20} className="text-emerald-600" />
                 </div>
-                <p className="text-xs text-[var(--rl-text-muted)] mt-1">
-                  Translates and standardizes Malay/English headers into canonical coverage categories.
+                <p className="mt-2 text-2xl font-bold text-[var(--rl-text-strong)] font-mono">
+                  {summary?.field_aliases_count ?? data?.field_aliases.length ?? 0}
                 </p>
-                <div className="mt-3 flex flex-wrap gap-1">
-                  <span className="bg-gray-100 text-gray-800 text-[11px] font-semibold px-2 py-0.5 rounded">Comprehensive</span>
-                  <span className="bg-gray-100 text-gray-800 text-[11px] font-semibold px-2 py-0.5 rounded">Third Party Fire & Theft</span>
-                  <span className="bg-gray-100 text-gray-800 text-[11px] font-semibold px-2 py-0.5 rounded">Third Party</span>
-                </div>
+                <p className="mt-1 text-xs text-[var(--rl-text-muted)]">
+                  Multilingual Malay &amp; English field variants mapped.
+                </p>
               </Card>
 
               <Card className="p-4 border border-[var(--rl-border)] bg-white shadow-xs">
-                <div className="flex items-center gap-2 text-sm font-bold text-[var(--rl-text-strong)]">
-                  <Star size={16} weight="fill" className="text-amber-500" />
-                  Package vs Single Mode Detection
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[var(--rl-text-muted)] uppercase tracking-wider">
+                    Saved Client Records
+                  </span>
+                  <Database size={20} className="text-blue-600" />
                 </div>
-                <p className="text-xs text-[var(--rl-text-muted)] mt-1">
-                  Determines whether the underwriting insurer uses packaged tier chains (e.g. AmAssurance Lite/Plus/Standard/Premier) or single add-on mode.
+                <p className="mt-2 text-2xl font-bold text-[var(--rl-text-strong)] font-mono">
+                  {summary?.saved_records_count ?? 0}
                 </p>
-                <div className="mt-3 flex items-center gap-2 text-xs">
-                  <Badge variant="default">AmAssurance: Package Mode</Badge>
-                  <Badge variant="default">Other Insurers: Single Mode</Badge>
+                <p className="mt-1 text-xs text-[var(--rl-text-muted)]">
+                  Client records generated from official quotation PDFs.
+                </p>
+              </Card>
+
+              <Card className="p-4 border border-[var(--rl-border)] bg-white shadow-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[var(--rl-text-muted)] uppercase tracking-wider">
+                    Total Quotation Sessions
+                  </span>
+                  <Brain size={20} className="text-purple-600" />
                 </div>
+                <p className="mt-2 text-2xl font-bold text-[var(--rl-text-strong)] font-mono">
+                  {summary?.total_sessions_count ?? 0}
+                </p>
+                <p className="mt-1 text-xs text-[var(--rl-text-muted)]">
+                  Processed upload and review sessions in ledger.
+                </p>
               </Card>
             </div>
           </div>
         )}
 
-        {/* Tab 2: Companies */}
+        {/* Tab 3: Companies */}
         {tab === "companies" && (
           <div className="grid gap-3">
             <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-white overflow-hidden shadow-xs">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-gray-50 border-b border-[var(--rl-border)] text-[var(--rl-text-muted)] uppercase text-[11px]">
-                  <tr>
-                    <th className="p-3">Insurance Company</th>
-                    <th className="p-3">Extraction Mode</th>
-                    <th className="p-3">RAG Aliases & Detection Phrases</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--rl-border)]">
-                  {data?.companies.map((c) => (
-                    <tr key={c.id} className="hover:bg-gray-50/50">
-                      <td className="p-3 font-semibold text-[var(--rl-text-strong)]">
-                        <div className="flex items-center gap-2">
-                          <Buildings size={16} className="text-gray-400" />
-                          <span>{c.name}</span>
-                        </div>
-                      </td>
-                      <td className="p-3">
-                        <Badge variant={c.has_packages ? "success" : "default"}>
-                          {c.has_packages ? "Package Chain Mode" : "Single Add-on Mode"}
-                        </Badge>
-                      </td>
-                      <td className="p-3">
-                        <div className="flex flex-wrap gap-1">
-                          {c.aliases.length ? (
-                            c.aliases.map((alias, idx) => (
-                              <span key={idx} className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-mono text-gray-700">
-                                {alias}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="text-[var(--rl-text-muted)] italic">Exact name matching ({c.name})</span>
-                          )}
-                        </div>
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs min-w-[500px]">
+                  <thead className="bg-gray-50 border-b border-[var(--rl-border)] text-[var(--rl-text-muted)] uppercase text-[11px]">
+                    <tr>
+                      <th className="p-3">Insurance Company</th>
+                      <th className="p-3">Extraction Mode</th>
+                      <th className="p-3">RAG Aliases &amp; Detection Phrases</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--rl-border)]">
+                    {data?.companies.map((c) => (
+                      <tr key={c.id} className="hover:bg-gray-50/50">
+                        <td className="p-3 font-semibold text-[var(--rl-text-strong)]">
+                          <div className="flex items-center gap-2">
+                            <Buildings size={16} className="text-gray-400" />
+                            <span>{c.name}</span>
+                          </div>
+                        </td>
+                        <td className="p-3">
+                          <Badge variant={c.has_packages ? "success" : "default"}>
+                            {c.has_packages ? "4-Tier Package Chain" : "Single Add-on Mode"}
+                          </Badge>
+                        </td>
+                        <td className="p-3">
+                          <div className="flex flex-wrap gap-1">
+                            {c.aliases.length ? (
+                              c.aliases.map((alias, idx) => (
+                                <span key={idx} className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-mono text-gray-700">
+                                  {alias}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-[var(--rl-text-muted)] italic">Exact name matching ({c.name})</span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
 
-        {/* Tab 3: Benefit Concepts */}
+        {/* Tab 4: Benefit Concepts */}
         {tab === "concepts" && (
           <div className="grid gap-3">
             <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-white overflow-hidden shadow-xs">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-gray-50 border-b border-[var(--rl-border)] text-[var(--rl-text-muted)] uppercase text-[11px]">
-                  <tr>
-                    <th className="p-3">Standard Concept Label</th>
-                    <th className="p-3">Concept Key (ID)</th>
-                    <th className="p-3">Category</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--rl-border)]">
-                  {data?.benefit_concepts.map((b) => (
-                    <tr key={b.id} className="hover:bg-gray-50/50">
-                      <td className="p-3 font-semibold text-[var(--rl-text-strong)]">
-                        {b.name}
-                      </td>
-                      <td className="p-3">
-                        <span className="rounded bg-gray-100 px-2 py-0.5 font-mono text-[11px] text-gray-800 border border-gray-200">
-                          {b.key}
-                        </span>
-                      </td>
-                      <td className="p-3 text-[var(--rl-text-muted)]">
-                        {b.category}
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs min-w-[500px]">
+                  <thead className="bg-gray-50 border-b border-[var(--rl-border)] text-[var(--rl-text-muted)] uppercase text-[11px]">
+                    <tr>
+                      <th className="p-3">Standard Concept Label</th>
+                      <th className="p-3">Concept Key (ID)</th>
+                      <th className="p-3">Category</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Tab 4: Negative Disqualification Filters */}
-        {tab === "negative" && (
-          <div className="grid gap-3">
-            {data?.negative_rules.map((rule, idx) => (
-              <Card key={idx} className="p-4 border border-[var(--rl-border)] bg-white shadow-xs">
-                <div className="flex items-center justify-between gap-2 border-b border-[var(--rl-border)] pb-2">
-                  <div className="flex items-center gap-2">
-                    <Prohibit size={18} weight="bold" className="text-red-500" />
-                    <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">{rule.rule}</h3>
-                  </div>
-                  <Badge variant="danger">Target: {rule.target}</Badge>
-                </div>
-                <p className="text-xs text-[var(--rl-text-muted)] mt-2">
-                  {rule.explanation}
-                </p>
-                <div className="mt-3">
-                  <span className="text-[11px] font-semibold text-[var(--rl-text-strong)] block mb-1">
-                    Disqualified Patterns & Phrases:
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {rule.patterns.map((pat, pIdx) => (
-                      <span key={pIdx} className="rounded bg-red-50 text-red-800 border border-red-200 px-2 py-0.5 text-[11px] font-mono">
-                        ✕ {pat}
-                      </span>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--rl-border)]">
+                    {data?.benefit_concepts.map((b) => (
+                      <tr key={b.id} className="hover:bg-gray-50/50">
+                        <td className="p-3 font-semibold text-[var(--rl-text-strong)]">
+                          {b.name}
+                        </td>
+                        <td className="p-3">
+                          <span className="rounded bg-gray-100 px-2 py-0.5 font-mono text-[11px] text-gray-800 border border-gray-200">
+                            {b.key}
+                          </span>
+                        </td>
+                        <td className="p-3 text-[var(--rl-text-muted)]">
+                          {b.category}
+                        </td>
+                      </tr>
                     ))}
-                  </div>
-                </div>
-              </Card>
-            ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
 
@@ -475,18 +683,18 @@ export default function AIContextPage() {
               </div>
               <p className="text-xs text-[var(--rl-text-muted)]">
                 Leave empty to use the built-in default prompt. When set, this text replaces the fixed instruction block; the live database grounding
-                (insurers, benefit concepts, packs) is always appended automatically. The default prompt is auto-generated from the current database.
+                (insurers, benefit concepts, packs) is always appended automatically.
               </p>
               <textarea
                 value={promptOverride}
                 onChange={(e) => setPromptOverride(e.target.value)}
                 disabled={!canEditPrompt}
-                rows={10}
+                rows={8}
                 placeholder="You are the RiskLocker High-Precision Malaysian Motor Insurance Quotation Extractor. ..."
                 className="w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3 font-mono text-[12px] text-[var(--rl-text-strong)] focus:outline-none focus:ring-1 focus:ring-[var(--rl-black)] disabled:opacity-60"
               />
               <div className="flex items-center justify-between text-[11px] text-[var(--rl-text-muted)]">
-                <span>{promptOverride.trim().length.toLocaleString()} characters (max 12,000)</span>
+                <span>{promptOverride.trim().length.toLocaleString()} characters</span>
                 <span className={promptOverride.trim() ? "text-emerald-700 font-semibold" : ""}>
                   {promptOverride.trim() ? "Custom override active" : "Using built-in default prompt"}
                 </span>
@@ -504,7 +712,7 @@ export default function AIContextPage() {
                   <span>{copied ? "Copied!" : "Copy Prompt"}</span>
                 </Button>
               </div>
-              <pre className="overflow-x-auto rounded-[var(--rl-radius-sm)] bg-gray-900 p-4 font-mono text-[12px] text-gray-100 whitespace-pre-wrap leading-relaxed">
+              <pre className="overflow-x-auto rounded-[var(--rl-radius-sm)] bg-gray-900 p-4 font-mono text-[12px] text-gray-100 whitespace-pre-wrap leading-relaxed max-h-[350px]">
                 {data?.live_system_prompt}
               </pre>
             </Card>

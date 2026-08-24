@@ -41,6 +41,8 @@ Benefit Packs (applied): plan levels on add-on bundles — `POST /api/business/c
 
 AI system prompt (applied): `GET /api/settings/ai-prompt` (staff read — returns `override`, `effective_prompt`, `is_override_active`) and `PUT /api/settings/ai-prompt` (admin/super_admin write, audit-logged, max 12,000 chars) store the global override in `AppSetting` key `ai_system_prompt`. When set, the override replaces the fixed instruction block of the Gemini system prompt; the live database grounding (insurers, benefit concepts, packs) is always appended. The override is threaded through upload extraction and `POST /api/sessions/{id}/extract-gemini`.
 
+AI Grounding Assistant (applied): `POST /api/settings/ai-grounding-chat` (staff/admin access) accepts `{ query: str, session_id?: str }`, performs targeted database lookups for vehicle plates, active insurer catalogs, concepts, and statistics, and returns grounded answers (`{ reply: str, sources: str[], tokens_used: int }`) using ultra-low token context (<150 tokens) with Gemini Flash-Lite. `GET /api/settings/ai-context` returns live summary statistics, active insurers with aliases, and standardized concepts from the database.
+
 CRUD Lifecycle (applied): Complete resource lifecycle operations across Business Setup:
 - `PUT /api/business/company-aliases/{id}` (edit alias text)
 - `PUT /api/business/products/{id}` & `DELETE /api/business/products/{id}` (edit name/key/status, cascading deletion of product hierarchy)

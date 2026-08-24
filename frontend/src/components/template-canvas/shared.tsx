@@ -126,6 +126,70 @@ export const shapeRadii: Record<string, string> = {
   square: "0",
 };
 
+export const VARIABLE_FALLBACK_MAP: Record<string, string[]> = {
+  premium: ["coverage_premium", "basic_premium_vehicle", "basic_premium"],
+  coverage_premium: ["premium", "basic_premium_vehicle", "basic_premium"],
+  coverage_amount: ["sum_insured", "market_value", "agreed_value"],
+  sum_insured: ["coverage_amount", "market_value", "agreed_value"],
+  roadtax: ["road_tax_amount", "road_tax"],
+  road_tax_amount: ["roadtax", "road_tax"],
+  service_fee: ["runner_fee", "runner"],
+  runner_fee: ["service_fee", "runner"],
+  ncd_percent: ["ncd_percentage", "ncd"],
+  ncd_percentage: ["ncd_percent", "ncd"],
+  total_amount: ["total_premium_adjusted", "gross_premium", "total_payable"],
+  total_premium_adjusted: ["total_amount", "gross_premium", "total_payable"],
+  engine_cc: ["vehicle_cc", "engine_capacity", "cubic_capacity"],
+  excess_amount: ["policy_excess", "compulsory_excess", "excess", "lebihan", "ekses", "ekses_polisi"],
+  valid_until: ["validity_date", "expiry_date", "validity", "quotation_validity", "valid_to", "expire_on"],
+  insurance_company: ["company_name", "insurer_name", "insurance_name"],
+  company_name: ["insurance_company", "insurer_name", "insurance_name"],
+};
+
+export function resolveVariableValue(
+  variableValues: Record<string, string> | undefined,
+  variableId: string | undefined
+): string | null {
+  if (!variableValues || !variableId) return null;
+  if (variableId in variableValues && variableValues[variableId] !== undefined && String(variableValues[variableId]).trim() !== "") {
+    return String(variableValues[variableId]).trim();
+  }
+  for (const alias of VARIABLE_FALLBACK_MAP[variableId] || []) {
+    if (alias in variableValues && variableValues[alias] !== undefined && String(variableValues[alias]).trim() !== "") {
+      return String(variableValues[alias]).trim();
+    }
+  }
+  return null;
+}
+
+export function formatVariableValue(value: string | null, prefix = "", suffix = ""): string {
+  if (value === null || value === undefined || value === "") return "";
+  let formatted = value.trim();
+  if (prefix) {
+    if (prefix.trim().toUpperCase() === "RM" || prefix.trim().toUpperCase() === "RM ") {
+      if (!formatted.toUpperCase().startsWith("RM")) {
+        formatted = `${prefix}${formatted}`;
+      }
+    } else if (!formatted.startsWith(prefix)) {
+      formatted = `${prefix}${formatted}`;
+    }
+  }
+  if (suffix) {
+    if (suffix.trim() === "%") {
+      if (!formatted.endsWith("%")) {
+        formatted = `${formatted}${suffix}`;
+      }
+    } else if (suffix.trim().toLowerCase() === "cc") {
+      if (!formatted.toLowerCase().endsWith("cc")) {
+        formatted = `${formatted}${suffix}`;
+      }
+    } else if (!formatted.endsWith(suffix)) {
+      formatted = `${formatted}${suffix}`;
+    }
+  }
+  return formatted;
+}
+
 export const shadowMap: Record<string, string> = {
   none: "none",
   sm: "0 1px 3px rgba(0,0,0,0.12)",
@@ -331,16 +395,36 @@ export function CanvasElementView({
           onCommit={(text) => onTextCommit?.(text)}
         />
       ) : element.type === "text" ? (
-        element.text
+        (() => {
+          let text = element.text || "";
+          if (text.includes("{") && variableValues) {
+            text = text.replace(/\{([a-zA-Z0-9_-]+)\}/g, (match, varName) => {
+              const val = resolveVariableValue(variableValues, varName);
+              return val !== null ? val : (varName === "valid_until" ? "30 Days" : match);
+            });
+          }
+          return text;
+        })()
       ) : null}
       {element.type === "variable" ? (
-        <span className="text-[var(--rl-red)]">
-          {element.prefix || ""}
-          {variableValues && (element.variableId || "") in variableValues
-            ? variableValues[element.variableId || ""]
-            : `{${element.variableId || "variable"}}`}
-          {element.suffix || ""}
-        </span>
+        (() => {
+          let raw = resolveVariableValue(variableValues, element.variableId);
+          if (raw === null && (element.variableId === "excess_amount" || element.variableId === "excess")) {
+            raw = "0.00";
+          }
+          if (raw !== null) {
+            return (
+              <span className="text-[var(--rl-red)]">
+                {formatVariableValue(raw, element.prefix || "", element.suffix || "")}
+              </span>
+            );
+          }
+          return (
+            <span className="text-[var(--rl-red)]">
+              {element.prefix || ""}{`{${element.variableId || "variable"}}`}{element.suffix || ""}
+            </span>
+          );
+        })()
       ) : null}
       {element.type === "benefit-section" ? (
         <div className="p-1 text-xs font-bold text-[var(--rl-red)]">
@@ -505,30 +589,29 @@ export function CanvasElementView({
           rows.push({ kind: "total", label: labels.total || "Total Premium 总额", value: total ? `RM ${total}` : "" });
           const rowHeight = Number(element.rowHeight) || 14;
           return (
-            <>
+            <div className="relative w-full h-full flex flex-col justify-start">
               {rows.map((row, index) => {
-                const top = Number(element.y) + index * rowHeight;
                 if (row.kind === "divider") {
-                  return <div key={`divider-${index}`} className="absolute" style={{ left: element.x, top, width: element.w, height: 1, background: "#E2E8F0" }} />;
+                  return <div key={`divider-${index}`} className="w-full my-0.5" style={{ height: 1, background: "#E2E8F0" }} />;
                 }
                 const labelStyle =
                   row.kind === "total"
-                    ? { fontSize: 11, fontWeight: 800, color: "#0F172A" }
+                    ? { fontSize: 10.5, fontWeight: 800, color: "#0F172A" }
                     : row.kind === "extra"
-                      ? { fontSize: 9.5, fontWeight: 600, color: "#B91C1C" }
-                      : { fontSize: 9.5, fontWeight: 600, color: "#334155" };
+                      ? { fontSize: 9, fontWeight: 600, color: "#B91C1C" }
+                      : { fontSize: 9, fontWeight: 600, color: "#334155" };
                 const valueStyle =
                   row.kind === "total"
-                    ? { fontSize: 13, fontWeight: 800, color: "#DC2626" }
-                    : { fontSize: 10, fontWeight: 700, color: "#0F172A" };
+                    ? { fontSize: 11.5, fontWeight: 800, color: "#DC2626" }
+                    : { fontSize: 9.5, fontWeight: 700, color: "#0F172A" };
                 return (
-                  <div key={`row-${index}`} className="absolute flex items-center justify-between" style={{ left: element.x, top, width: element.w, height: rowHeight }}>
+                  <div key={`row-${index}`} className="flex items-center justify-between w-full" style={{ height: rowHeight }}>
                     <span style={labelStyle}>{row.label}</span>
                     <span style={valueStyle}>{row.value}</span>
                   </div>
                 );
               })}
-            </>
+            </div>
           );
         })()
       ) : null}
@@ -622,4 +705,91 @@ function EditableText({ initial, onCommit }: { initial: string; onCommit: (text:
       }}
     />
   );
+}
+
+export function balanceBenefitGridElements(
+  elements: CanvasElement[],
+  benefitData?: {
+    current_benefits?: any[];
+    available_addons?: any[];
+    extras?: any[];
+    groups?: any[];
+  },
+): CanvasElement[] {
+  const extras = benefitData?.extras || [];
+  const extraShift = extras.length * 14;
+  if (!benefitData && extraShift === 0) return elements;
+  const currentCards = benefitData?.current_benefits || [];
+  const addonCards = benefitData?.available_addons || [];
+  const n1 = currentCards.length;
+  const n2 = addonCards.length;
+
+  const grid1 = elements.find((e) => e.type === "benefit-grid" && e.gridKind === "current_benefits");
+  const grid2 = elements.find((e) => e.type === "benefit-grid" && e.gridKind === "available_addons");
+  if (!grid1 || !grid2) return elements;
+
+  const hdr1Bg = elements.find((e) => e.id === "specials_header_bg");
+  const hdr1Txt = elements.find((e) => e.id === "specials_header_txt");
+  const hdr2Bg = elements.find((e) => e.id === "addons_header_bg");
+  const hdr2Txt = elements.find((e) => e.id === "addons_header_txt");
+
+  const baseTop = hdr1Bg ? Number(hdr1Bg.y || 414) : Number(grid1.y || 444);
+  const yTop = baseTop + extraShift;
+  const yBottom = Number(grid2.y || 796) + Number(grid2.h || 262);
+
+  const rows1 = n1 > 0 ? Math.max(1, Math.ceil(n1 / 2)) : 0;
+  const rows2 = n2 > 0 ? Math.max(1, Math.ceil(n2 / 2)) : 0;
+
+  const totalSpace = yBottom - yTop;
+  const hdrH = 26;
+  const gap = 10;
+  const pad = 4;
+
+  const availGridsH = totalSpace - 2 * hdrH - gap - 2 * pad;
+  if (availGridsH <= 100) return elements;
+
+  let h1: number;
+  let h2: number;
+  if (rows1 > 0 && rows2 > 0) {
+    const ratio1 = rows1 / (rows1 + rows2);
+    h1 = Math.max(100, Math.min(availGridsH - 80, availGridsH * ratio1));
+    h2 = availGridsH - h1;
+  } else if (rows1 > 0 && rows2 == 0) {
+    h1 = availGridsH + hdrH + gap + pad - 60;
+    h2 = 60;
+  } else if (rows1 === 0 && rows2 > 0) {
+    h1 = 60;
+    h2 = availGridsH + hdrH + gap + pad - 60;
+  } else {
+    h1 = availGridsH / 2;
+    h2 = availGridsH / 2;
+  }
+
+  const yG1 = yTop + hdrH + pad;
+  const yH2 = yG1 + h1 + gap;
+  const yG2 = yH2 + hdrH + pad;
+
+  return elements.map((elem) => {
+    const e = { ...elem };
+    if (e.id === "cov_table_bg" && extraShift > 0) {
+      e.h = Number(e.h || 246) + extraShift;
+    } else if (e.id === "specials_header_bg" && hdr1Bg) {
+      e.y = yTop;
+      e.h = hdrH;
+    } else if (e.id === "specials_header_txt" && hdr1Txt) {
+      e.y = yTop + 5;
+    } else if (e.type === "benefit-grid" && e.gridKind === "current_benefits") {
+      e.y = yG1;
+      e.h = h1;
+    } else if (e.id === "addons_header_bg" && hdr2Bg) {
+      e.y = yH2;
+      e.h = hdrH;
+    } else if (e.id === "addons_header_txt" && hdr2Txt) {
+      e.y = yH2 + 5;
+    } else if (e.type === "benefit-grid" && e.gridKind === "available_addons") {
+      e.y = yG2;
+      e.h = h2;
+    }
+    return e;
+  });
 }

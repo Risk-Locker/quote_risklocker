@@ -294,6 +294,11 @@ export default function BuilderTemplatesPage() {
   const [creating, setCreating] = useState(false);
   const [preview, setPreview] = useState<TemplateRecord | null>(null);
   const [pendingRetire, setPendingRetire] = useState<TemplateRecord | null>(null);
+  const [pendingRename, setPendingRename] = useState<TemplateRecord | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<TemplateRecord | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const { toast } = useToast();
 
   // Benefit Card Templates State
@@ -354,9 +359,8 @@ export default function BuilderTemplatesPage() {
 
   const profiles = useMemo(() => [...new Set(templates.map((item) => pageProfile(item).name))].sort(), [templates]);
   const visibleTemplates = useMemo(() => {
-    const term = search.trim().toLocaleLowerCase();
     return templates.filter((template) => {
-      const matchesText = !term || `${template.name} ${pageProfile(template).name}`.toLocaleLowerCase().includes(term);
+      const matchesText = !search.trim() || template.name.toLowerCase().includes(search.trim().toLowerCase());
       const matchesStatus = statusFilter === "all" || templateState(template) === statusFilter;
       const matchesProfile = profileFilter === "all" || pageProfile(template).name === profileFilter;
       return matchesText && matchesStatus && matchesProfile;
@@ -387,6 +391,42 @@ export default function BuilderTemplatesPage() {
       window.location.assign(`/builder/templates/${result.template.id}/builder`);
     } catch (reason) {
       setError(apiErrorMessage(reason));
+    }
+  }
+
+  async function handleRenameSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!pendingRename || !renameValue.trim()) return;
+    setRenaming(true);
+    setError("");
+    try {
+      await api(`/admin/templates/${pendingRename.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ base_revision: pendingRename.revision, name: renameValue.trim() }),
+      });
+      toast("Template renamed successfully.", "success");
+      setPendingRename(null);
+      await load();
+    } catch (reason) {
+      setError(apiErrorMessage(reason));
+    } finally {
+      setRenaming(false);
+    }
+  }
+
+  async function handleDeleteTemplate() {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await api(`/admin/templates/${pendingDelete.id}`, { method: "DELETE" });
+      toast("Template deleted successfully.", "success");
+      setPendingDelete(null);
+      await load();
+    } catch (reason) {
+      setError(apiErrorMessage(reason));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -587,11 +627,12 @@ export default function BuilderTemplatesPage() {
                         </div>
                         <div className="flex items-center justify-between gap-3 border-t border-[var(--rl-border)] pt-3">
                           <p className="m-0 text-[11px] text-[var(--rl-text-muted)]">{published ? `Published revision ${published.revision_number}` : `Working revision ${template.revision}`}</p>
-                          <div className="flex gap-1">
+                          <div className="flex flex-wrap gap-1 items-center">
                             <Button variant="ghost" size="sm" icon={<Eye size={14} />} onClick={() => setPreview(template)}>Preview</Button>
+                            <Button variant="secondary" size="sm" icon={<PencilSimple size={14} />} onClick={() => { setPendingRename(template); setRenameValue(template.name); }}>Rename</Button>
                             <Button variant="secondary" size="sm" icon={<CopySimple size={14} />} onClick={() => cloneTemplate(template)}>Clone</Button>
                             {!template.locked && template.status !== "retired" ? <Link href={`/builder/templates/${template.id}/builder`}><Button size="sm" icon={<PencilSimple size={14} />}>Open</Button></Link> : null}
-                            {!template.locked && template.status !== "retired" ? <Button variant="ghost" size="sm" aria-label={`Retire ${template.name}`} icon={<Trash size={14} />} className="text-[var(--rl-red)]" onClick={() => setPendingRetire(template)}><span className="sr-only">Retire</span></Button> : null}
+                            {!template.locked && template.status !== "retired" ? <Button variant="ghost" size="sm" aria-label={`Delete ${template.name}`} icon={<Trash size={14} />} className="text-[var(--rl-red)]" onClick={() => setPendingDelete(template)}><span className="sr-only">Delete</span></Button> : null}
                           </div>
                         </div>
                       </div>
@@ -1224,9 +1265,33 @@ export default function BuilderTemplatesPage() {
         <form onSubmit={createTemplate} className="grid gap-4"><label className="grid gap-1.5 text-[12px] font-semibold text-[var(--rl-text-strong)]">Template name<Input autoFocus value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="e.g. Standard A4" required /></label><div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setShowCreate(false)}>Cancel</Button><Button type="submit" loading={creating}>Create and open</Button></div></form>
       </Dialog>
 
+      <Dialog open={Boolean(pendingRename)} onOpenChange={(open) => { if (!open) setPendingRename(null); }} title={`Rename “${pendingRename?.name || ""}”`} description="Update the display name of this quotation template.">
+        <form onSubmit={handleRenameSubmit} className="grid gap-4">
+          <label className="grid gap-1.5 text-[12px] font-semibold text-[var(--rl-text-strong)]">
+            New Template Name
+            <Input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)} placeholder="e.g. AmAssurance Custom Quotation" required />
+          </label>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setPendingRename(null)}>Cancel</Button>
+            <Button type="submit" loading={renaming}>Rename Template</Button>
+          </div>
+        </form>
+      </Dialog>
+
       <Dialog open={Boolean(preview)} onOpenChange={(open) => { if (!open) setPreview(null); }} title={preview?.name || "Template preview"} description={preview ? `${pageProfile(preview).name} · ${templateState(preview)}` : undefined}>{preview ? <TemplateThumbnail template={preview} large /> : null}</Dialog>
 
       {pendingRetire ? <ConfirmDialog open onOpenChange={(open) => { if (!open) setPendingRetire(null); }} title={`Retire “${pendingRetire.name}”?`} message="Pinned quotations keep their immutable published revision. This working template disappears from new selection." confirmLabel="Retire template" onConfirm={retireTemplate} /> : null}
+
+      {pendingDelete ? (
+        <ConfirmDialog
+          open
+          onOpenChange={(open) => { if (!open) setPendingDelete(null); }}
+          title={`Delete Template “${pendingDelete.name}”?`}
+          message="Are you sure you want to delete this template? Any quotations that have pinned published revisions will continue to work, but this working template will be removed."
+          confirmLabel="Delete Template"
+          onConfirm={handleDeleteTemplate}
+        />
+      ) : null}
 
       {/* Delete Custom Benefit Preset Dialog */}
       {pendingDeletePreset ? (

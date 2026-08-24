@@ -45,16 +45,16 @@ def format_money_amount(raw_price: dict | None) -> str:
         return ""
     try:
         price = MoneyAmount.model_validate(raw_price)
-    except ValidationError:
-        amount = (raw_price or {}).get("amount")
-        currency = (raw_price or {}).get("currency")
+        return _money(price.amount, price.currency)
+    except Exception:
+        amount = (raw_price or {}).get("amount") if (raw_price or {}).get("amount") is not None else (raw_price or {}).get("value")
+        currency = (raw_price or {}).get("currency") or "MYR"
         if amount is None:
             return ""
         try:
             return _money(amount, currency)
         except RenderContextError:
             return ""
-    return _money(price.amount, price.currency)
 
 
 def build_extras(selections: Iterable[Any], concepts: Iterable[Any]) -> list[dict]:
@@ -84,7 +84,8 @@ def adjusted_total_text(fields: dict, extras: list[dict]) -> str:
     except (InvalidOperation, TypeError, ValueError):
         return ""
     for extra in extras:
-        amount = (extra.get("price") or {}).get("amount")
+        raw_price = extra.get("price") or {}
+        amount = raw_price.get("amount") if raw_price.get("amount") is not None else raw_price.get("value")
         try:
             total += Decimal(str(amount))
         except (InvalidOperation, TypeError, ValueError):
@@ -158,6 +159,8 @@ def _card(
         "label": label or getattr(offering, "label_override", None) or concept.label,
         "value": format_benefit_value(typed_value) if typed_value is not None else "",
         "typed_value": typed_value,
+        "price": getattr(selection, "price", None) or getattr(offering, "optional_price", None),
+        "optional_price": getattr(offering, "optional_price", None),
         "asset_id": asset_id or concept.default_asset_id,
         "cost_status": getattr(selection, "cost_status", None),
         "sort_order": int(getattr(offering, "sort_order", 0) or 0),
@@ -205,10 +208,20 @@ def resolve_benefit_cards(
     offerings_by_id = _index(offerings)
     concepts_by_id = _index(concepts)
     facets_by_id = _index(facets)
+    removed_offering_ids = {
+        str(item.catalog_offering_id)
+        for item in selections
+        if item.catalog_offering_id and item.state == "removed"
+    }
+    removed_concepts = {
+        str(item.concept_id)
+        for item in selections
+        if item.concept_id and item.state == "removed"
+    }
     selected_offering_ids = {
         str(item.catalog_offering_id)
         for item in selections
-        if item.catalog_offering_id and item.state in {"current", "superseded"}
+        if item.catalog_offering_id and item.state in {"current", "superseded", "removed"}
     }
     current = [item for item in selections if item.state == "current"]
     current_by_concept: dict[str, list[Any]] = {}
@@ -230,6 +243,7 @@ def resolve_benefit_cards(
             pseudo = type("CustomOffering", (), {
                 "id": f"custom:{item.id}", "label_override": item.label_override,
                 "typed_value": item.typed_value_override, "sort_order": item.sort_order,
+                "optional_price": item.price,
                 "presentation_facet_ids": [],
             })()
             current_cards.append(_card(selection=item, offering=pseudo, concept=concept, typed_value=item.typed_value_override))
@@ -254,7 +268,7 @@ def resolve_benefit_cards(
         edges = sorted(outgoing.get(str(item.catalog_offering_id), []), key=lambda edge: (int(edge.sort_order or 0), str(edge.branch_key or ""), str(edge.to_offering_id)))
         for edge in edges:
             target = offerings_by_id.get(str(edge.to_offering_id))
-            if not target or target.status not in {"active", "compatibility"} or target.id in selected_offering_ids or target.id in offered_ids:
+            if not target or target.status not in {"active", "compatibility"} or target.id in selected_offering_ids or target.id in offered_ids or target.id in removed_offering_ids or str(target.concept_id) in removed_concepts:
                 continue
             concept = concepts_by_id.get(str(target.concept_id))
             if not concept:
@@ -273,6 +287,8 @@ def resolve_benefit_cards(
                 and off.id != item.catalog_offering_id
                 and off.id not in selected_offering_ids
                 and off.id not in offered_ids
+                and off.id not in removed_offering_ids
+                and str(off.concept_id) not in removed_concepts
                 and off.status in {"active", "compatibility"}
                 and (off.offering_kind in {"upgrade", "optional"} or getattr(off, "role", None) in {"addon_option", "bundle_component"})
             ]
@@ -295,17 +311,17 @@ def resolve_benefit_cards(
         if is_optional and item.status in {"active", "compatibility"}:
             optionals_by_concept.setdefault(str(item.concept_id), []).append(item)
     for concept_id, items in optionals_by_concept.items():
-        if concept_id in active_concepts or any(str(item.id) in offered_ids for item in items):
+        if concept_id in active_concepts or concept_id in removed_concepts or any(str(item.id) in offered_ids for item in items):
             continue
         first = min(items, key=lambda item: (int(item.sort_order or 0), str(item.offering_key)))
         concept = concepts_by_id.get(concept_id)
-        if concept and str(first.id) not in selected_offering_ids and str(first.id) not in offered_ids:
+        if concept and str(first.id) not in selected_offering_ids and str(first.id) not in offered_ids and str(first.id) not in removed_offering_ids:
             available_cards.append(_card(selection=None, offering=first, concept=concept, typed_value=first.typed_value))
             offered_ids.add(first.id)
 
-    available_selected = [item for item in selections if item.state in {"available_addon", "removed"}]
+    available_selected = [item for item in selections if item.state == "available_addon"]
     for item in sorted(available_selected, key=lambda row: (int(row.sort_order or 0), str(row.selection_key))):
-        if item.concept_id and str(item.concept_id) in active_concepts:
+        if item.concept_id and (str(item.concept_id) in active_concepts or str(item.concept_id) in removed_concepts):
             continue
         if item.item_kind == "custom":
             concept = concepts_by_id.get(str(item.concept_id))
@@ -316,6 +332,7 @@ def resolve_benefit_cards(
             pseudo = type("CustomOffering", (), {
                 "id": f"custom:{item.id}", "label_override": item.label_override,
                 "typed_value": item.typed_value_override, "sort_order": item.sort_order,
+                "optional_price": item.price,
                 "presentation_facet_ids": [],
             })()
             available_cards.append(_card(selection=item, offering=pseudo, concept=concept, typed_value=item.typed_value_override))

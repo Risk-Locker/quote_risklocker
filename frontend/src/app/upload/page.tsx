@@ -65,6 +65,8 @@ export default function UploadPage() {
   const [error, setError] = useState("");
   const [limits, setLimits] = useState<UploadLimits | null>(null);
   const [job, setJob] = useState<JobStatus | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounter = useRef(0);
   const mounted = useRef(true);
   const cancelRequested = useRef(false);
   const idempotencyKey = useRef("");
@@ -97,6 +99,46 @@ export default function UploadPage() {
     }
     setFile(nextFile);
     idempotencyKey.current = nextFile ? crypto.randomUUID() : "";
+  }
+
+  function handleDragEnter(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current += 1;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragging(true);
+    }
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+    if (!isDragging) {
+      setIsDragging(true);
+    }
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current -= 1;
+    if (dragCounter.current <= 0) {
+      dragCounter.current = 0;
+      setIsDragging(false);
+    }
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current = 0;
+    setIsDragging(false);
+    if (loading) return;
+    const droppedFile = e.dataTransfer.files?.[0] || null;
+    if (droppedFile) {
+      selectFile(droppedFile);
+    }
   }
 
   async function waitForJob(result: UploadResult) {
@@ -227,14 +269,30 @@ export default function UploadPage() {
 
         <Card className="p-6 border border-[var(--rl-border)] shadow-xs">
           <form onSubmit={submit} className="grid gap-5">
-            <label className="rl-tour-dropzone grid min-h-[170px] cursor-pointer place-items-center rounded-[var(--rl-radius)] border-2 border-dashed border-[var(--rl-border)] bg-[var(--rl-bg)] p-8 text-center transition-colors hover:border-[var(--rl-black)]/30">
-              <span className="grid justify-items-center gap-3">
-                <span className="grid size-12 place-items-center rounded-[var(--rl-radius)] bg-[var(--rl-black)]/6 text-[var(--rl-text-strong)]">
+            <label
+              onDragEnter={handleDragEnter}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={`rl-tour-dropzone grid min-h-[170px] cursor-pointer place-items-center rounded-[var(--rl-radius)] border-2 border-dashed p-8 text-center transition-all duration-200 ${
+                isDragging
+                  ? "border-[var(--rl-black)] bg-[var(--rl-black)]/[0.04] scale-[1.01] ring-4 ring-[var(--rl-black)]/5 shadow-md"
+                  : "border-[var(--rl-border)] bg-[var(--rl-bg)] hover:border-[var(--rl-black)]/30 hover:bg-[var(--rl-black)]/[0.01]"
+              }`}
+            >
+              <span className="grid justify-items-center gap-3 pointer-events-none">
+                <span
+                  className={`grid size-12 place-items-center rounded-[var(--rl-radius)] transition-transform duration-200 ${
+                    isDragging
+                      ? "bg-[var(--rl-black)] text-white scale-110 shadow-sm"
+                      : "bg-[var(--rl-black)]/6 text-[var(--rl-text-strong)]"
+                  }`}
+                >
                   <Upload aria-hidden="true" size={24} weight="bold" />
                 </span>
                 <div>
                   <span className="font-[var(--font-manrope)] text-[15px] font-semibold text-[var(--rl-text-strong)] block">
-                    Choose one PDF quotation
+                    {isDragging ? "Drop your PDF quotation here" : "Choose one PDF quotation"}
                   </span>
                   <span className="text-[13px] text-[var(--rl-text-muted)] block mt-0.5">
                     Drag and drop or browse · PDF only, up to {formatBytes(maximum)}

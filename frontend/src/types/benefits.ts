@@ -107,6 +107,8 @@ export type OfferingSummary = {
   role?: string | null;
   label_override?: string | null;
   display_value?: string | null;
+  typed_value?: { type?: string; display_text?: string; [key: string]: unknown } | null;
+  optional_price?: { type?: string; value?: number; amount?: string | number; currency?: string } | null;
   source_document_id?: string | null;
   source_citation: Record<string, unknown>;
   source_aliases: string[];

@@ -45,6 +45,7 @@ export default function AssetLibraryPage() {
   const [uploadLabel, setUploadLabel] = useState("");
   const [uploadKind, setUploadKind] = useState("benefit_art");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [isAssetDragging, setIsAssetDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async (nextPage = page, nextSearch = appliedSearch, nextKind = kind) => {
@@ -98,20 +99,21 @@ export default function AssetLibraryPage() {
   return (
     <AppShell>
       <section className="grid gap-5">
-        <header className="flex flex-wrap items-end justify-between gap-3">
+        <header className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="m-0 text-[30px] font-bold text-[var(--rl-text-strong)]">Asset Library</h1>
-            <p className="mt-1 text-[14px] text-[var(--rl-text-muted)]">Authorized, content-addressed artwork used by company records, benefit concepts, and templates.</p>
+            <h1 className="font-[var(--font-manrope)] text-[22px] font-bold text-[var(--rl-text-strong)]">Asset library</h1>
+            <p className="mt-1 text-[13px] text-[var(--rl-text-muted)]">Upload and audit logos, benefit art, and template backdrops used across published layouts.</p>
           </div>
-          <Button icon={<Plus size={15} weight="bold" />} onClick={() => setUploadOpen(true)}>Add asset</Button>
+          <Button onClick={() => setUploadOpen(true)}><Plus size={16} weight="bold" />Add asset</Button>
         </header>
+
         <BuilderNav />
 
-        {error ? <div role="alert" className="border-l-4 border-[var(--rl-red)] bg-[var(--rl-red-light)] px-4 py-3 text-[13px] font-medium text-[var(--rl-red)]">{error}</div> : null}
+        {error ? <div className="border border-[var(--rl-danger)] bg-[var(--rl-danger)]/10 p-3 text-[13px] text-[var(--rl-danger)]">{error}</div> : null}
 
-        <div className="flex flex-wrap items-center gap-2 border border-[var(--rl-border)] bg-[var(--rl-surface)] p-3">
+        <div className="flex flex-wrap items-center gap-3">
           <label className="relative min-w-64 flex-1">
-            <MagnifyingGlass size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--rl-text-muted)]" />
+            <MagnifyingGlass size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--rl-text-muted)]" />
             <Input className="pl-9" value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") applyFilters(search.trim(), kind); }} placeholder="Search label or source filename" />
           </label>
           <Select className="w-52" value={kind} onChange={(event) => applyFilters(search.trim(), event.target.value)} aria-label="Asset kind">{kinds.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</Select>
@@ -150,7 +152,34 @@ export default function AssetLibraryPage() {
         <div className="grid gap-3">
           <label className="grid gap-1"><span className="text-[12px] font-semibold text-[var(--rl-text-strong)]">Display name</span><Input value={uploadLabel} onChange={(event) => setUploadLabel(event.target.value)} /></label>
           <label className="grid gap-1"><span className="text-[12px] font-semibold text-[var(--rl-text-strong)]">Purpose</span><Select value={uploadKind} onChange={(event) => setUploadKind(event.target.value)}><option value="benefit_art">Benefit artwork</option><option value="company_logo">Company logo</option><option value="template_background">Template background</option><option value="decorative">Decorative</option></Select></label>
-          <button type="button" onClick={() => inputRef.current?.click()} className="grid min-h-32 place-items-center border border-dashed border-[var(--rl-border)] bg-[var(--rl-bg)] p-4 text-center hover:border-[var(--rl-black)]"><span><UploadSimple size={24} className="mx-auto text-[var(--rl-text-muted)]" /><span className="mt-2 block text-[12px] font-semibold text-[var(--rl-text-strong)]">{uploadFile?.name || "Choose PNG, JPG, or WebP"}</span><span className="mt-1 block text-[11px] text-[var(--rl-text-muted)]">Maximum 10 MiB and 32 megapixels</span></span></button>
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setIsAssetDragging(true); }}
+            onDragLeave={(e) => { e.preventDefault(); setIsAssetDragging(false); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsAssetDragging(false);
+              const file = e.dataTransfer.files?.[0] || null;
+              if (file) {
+                setUploadFile(file);
+                if (!uploadLabel) setUploadLabel(file.name.replace(/\.[^.]+$/, ""));
+              }
+            }}
+            className={`grid min-h-32 place-items-center border-2 border-dashed p-4 text-center transition-all ${
+              isAssetDragging
+                ? "border-[var(--rl-black)] bg-[var(--rl-black)]/[0.04] scale-[1.01]"
+                : "border-[var(--rl-border)] bg-[var(--rl-bg)] hover:border-[var(--rl-black)]"
+            }`}
+          >
+            <span className="pointer-events-none">
+              <UploadSimple size={24} className={`mx-auto transition-transform ${isAssetDragging ? "scale-110 text-[var(--rl-text-strong)]" : "text-[var(--rl-text-muted)]"}`} />
+              <span className="mt-2 block text-[12px] font-semibold text-[var(--rl-text-strong)]">
+                {uploadFile?.name || (isAssetDragging ? "Drop image file here" : "Choose or drag PNG, JPG, or WebP")}
+              </span>
+              <span className="mt-1 block text-[11px] text-[var(--rl-text-muted)]">Maximum 10 MiB and 32 megapixels</span>
+            </span>
+          </button>
           <input ref={inputRef} type="file" className="sr-only" accept=".png,.jpg,.jpeg,.webp" onChange={(event) => { const file = event.target.files?.[0] || null; setUploadFile(file); if (file && !uploadLabel) setUploadLabel(file.name.replace(/\.[^.]+$/, "")); }} />
         </div>
       </Dialog>

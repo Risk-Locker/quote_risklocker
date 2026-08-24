@@ -51,6 +51,9 @@ function EmptyPanel({ title, detail, action }: { title: string; detail: string; 
 export default function GlobalBenefitsPage() {
   const [benefits, setBenefits] = useState<GlobalBenefit[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
+  const [companyIdFilter, setCompanyIdFilter] = useState("all");
+  const [companyWorkspace, setCompanyWorkspace] = useState<any>(null);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<"all" | "default" | "addon">("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -74,20 +77,26 @@ export default function GlobalBenefitsPage() {
   const [formActive, setFormActive] = useState(true);
 
   const loadReferenceData = useCallback(async () => {
-    const [benefitResult, assetResult] = await Promise.all([
+    const [benefitResult, assetResult, companyResult] = await Promise.all([
       api<{ benefit_concepts: { items: GlobalBenefit[] } }>("/business/benefit-concepts?page=1&page_size=100"),
       api<{ assets: { items: Asset[] } }>("/business/assets?kind=benefit_art&page=1&page_size=100"),
+      api<{ companies: { items: Array<{ id: string; name: string }> } }>("/business/companies?page_size=100"),
     ]);
-    return { benefits: benefitResult.benefit_concepts.items, assets: assetResult.assets.items };
+    return {
+      benefits: benefitResult.benefit_concepts.items,
+      assets: assetResult.assets.items,
+      companies: companyResult.companies?.items || [],
+    };
   }, []);
 
   const refresh = useCallback(async (keepSelection = true) => {
     setError("");
     try {
-      const { benefits: next, assets: nextAssets } = await loadReferenceData();
+      const { benefits: next, assets: nextAssets, companies: nextCompanies } = await loadReferenceData();
       if (!mountedRef.current) return;
       setBenefits(next);
       setAssets(nextAssets);
+      setCompanies(nextCompanies);
       if (keepSelection && selectedId && !next.some((item) => item.id === selectedId)) {
         setSelectedId("");
         setIsNew(false);
@@ -101,10 +110,11 @@ export default function GlobalBenefitsPage() {
     mountedRef.current = true;
     let cancelled = false;
     loadReferenceData()
-      .then(({ benefits: next, assets: nextAssets }) => {
+      .then(({ benefits: next, assets: nextAssets, companies: nextCompanies }) => {
         if (cancelled) return;
         setBenefits(next);
         setAssets(nextAssets);
+        setCompanies(nextCompanies);
         if (next.length) selectBenefit(next[0]);
       })
       .catch((err) => !cancelled && setError(apiErrorMessage(err)))
@@ -113,9 +123,40 @@ export default function GlobalBenefitsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (companyIdFilter === "all") {
+      setCompanyWorkspace(null);
+      return;
+    }
+    let cancelled = false;
+    api<{ workspace: any }>(`/business/companies/${companyIdFilter}/workspace`)
+      .then((res) => {
+        if (!cancelled) setCompanyWorkspace(res.workspace);
+      })
+      .catch(() => {
+        if (!cancelled) setCompanyWorkspace(null);
+      });
+    return () => { cancelled = true; };
+  }, [companyIdFilter]);
+
+  const insurerConceptKeys = useMemo(() => {
+    if (!companyWorkspace) return null;
+    const keys = new Set<string>();
+    for (const cat of (companyWorkspace.catalogs || [])) {
+      for (const off of (cat.offerings || [])) {
+        if (off.concept_key) keys.add(off.concept_key);
+        if (off.concept?.concept_key) keys.add(off.concept.concept_key);
+        if (off.concept_id) keys.add(off.concept_id);
+        if (off.concept?.id) keys.add(off.concept.id);
+      }
+    }
+    return keys;
+  }, [companyWorkspace]);
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return benefits.filter((item) => {
+      if (insurerConceptKeys && !insurerConceptKeys.has(item.concept_key) && !insurerConceptKeys.has(item.id)) return false;
       const cat = item.category || (item.sort_order <= 11 ? "default" : "addon");
       if (categoryFilter !== "all" && cat !== categoryFilter) return false;
       if (statusFilter !== "all" && item.status !== statusFilter) return false;
@@ -126,7 +167,7 @@ export default function GlobalBenefitsPage() {
         (item.variants || []).some((v) => v.toLowerCase().includes(term))
       );
     });
-  }, [benefits, search, categoryFilter, statusFilter]);
+  }, [benefits, search, categoryFilter, statusFilter, insurerConceptKeys]);
 
   const defaultCount = useMemo(() => benefits.filter((b) => (b.category || (b.sort_order <= 11 ? "default" : "addon")) === "default").length, [benefits]);
   const addonCount = useMemo(() => benefits.filter((b) => (b.category || (b.sort_order <= 11 ? "default" : "addon")) === "addon").length, [benefits]);
@@ -279,9 +320,9 @@ export default function GlobalBenefitsPage() {
           </div>
         ) : null}
 
-        {/* Category Tabs Bar */}
+        {/* Category Tabs & Insurer Filter Bar */}
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-2.5 shadow-xs">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => setCategoryFilter("all")}
@@ -312,6 +353,22 @@ export default function GlobalBenefitsPage() {
             >
               Unique Add-ons ({addonCount})
             </button>
+
+            {companies.length > 0 ? (
+              <select
+                aria-label="Filter by insurance company"
+                value={companyIdFilter}
+                onChange={(e) => setCompanyIdFilter(e.target.value)}
+                className="h-8 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white px-2 text-xs font-semibold text-[var(--rl-text-strong)] shadow-xs focus:outline-none focus:ring-1 focus:ring-[var(--rl-black)]"
+              >
+                <option value="all">🏢 All Insurers</option>
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    🏢 {c.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
           </div>
 
           <Button size="sm" icon={<Plus size={14} weight="bold" />} onClick={newBenefit}>
@@ -418,142 +475,104 @@ export default function GlobalBenefitsPage() {
                   </div>
                 </div>
 
-                <div className="grid gap-4">
-                  {/* Category & Identity */}
-                  <div className="grid gap-3 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] p-4 bg-gray-50/50">
-                    <h3 className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rl-text-muted)]">Classification & Category</h3>
-                    <div className="grid sm:grid-cols-2 gap-3">
-                      <label className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
-                        Benefit Category <span className="text-[var(--rl-red)]">*</span>
-                        <Select value={formCategory} onChange={(e) => setFormCategory(e.target.value as "default" | "addon")}>
-                          <option value="default">Category 1: Default / Global Benefit (11 total)</option>
-                          <option value="addon">Category 2: Unique Add-on (23 total)</option>
-                        </Select>
-                      </label>
-                      <label className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
-                        Sort Order
-                        <Input type="number" min={0} value={formSort} onChange={(e) => setFormSort(Number(e.target.value) || 0)} className="text-xs" />
-                      </label>
+                <div className="grid gap-5">
+                  {/* 3 Core Fields Card */}
+                  <div className="grid gap-4 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] p-5 bg-white shadow-xs">
+                    <div className="flex items-center justify-between border-b border-[var(--rl-border)] pb-3">
+                      <div>
+                        <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--rl-text-strong)]">
+                          Core Benefit Properties
+                        </h3>
+                        <p className="text-[12px] text-[var(--rl-text-muted)]">
+                          The 3 essential properties defined for this global benefit concept.
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-[var(--rl-bg)] border border-[var(--rl-border)] px-3 py-1 text-[11px] font-bold text-[var(--rl-text-strong)]">
+                        {formCategory === "default" ? "🛡️ Default Benefit" : "✨ Add-on Benefit"}
+                      </span>
                     </div>
 
-                    <div className="grid sm:grid-cols-2 gap-3 mt-1">
-                      <label className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
-                        Benefit name <span className="text-[var(--rl-red)]">*</span>
-                        <Input value={formLabel} onChange={(e) => setFormLabel(e.target.value)} placeholder="e.g. Towing" className="text-xs" />
+                    {/* 1. Image / Artwork */}
+                    <div className="grid gap-1.5">
+                      <label className="text-xs font-bold text-[var(--rl-text-strong)] flex items-center justify-between">
+                        <span>1. Benefit Image / Icon <span className="text-[var(--rl-red)]">*</span></span>
+                        <span className="text-[11px] font-normal text-[var(--rl-text-muted)]">Artwork badge for quotation cards</span>
                       </label>
-                      <label className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
-                        Stable key
-                        <Input value={formKey} onChange={(e) => setFormKey(e.target.value)} placeholder={slugify(formLabel) || "Generated from name"} className="text-xs font-mono" />
-                      </label>
+                      <div className="flex items-center gap-3 p-3 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)]">
+                        <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg border border-[var(--rl-border)] bg-white shadow-xs">
+                          {formAssetId ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={fileUrl(assets.find((a) => a.id === formAssetId)?.url || "")} alt="" className="max-h-9 max-w-9 object-contain" />
+                          ) : (
+                            <ImageSquare size={24} className="text-[var(--rl-text-muted)]" />
+                          )}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <Select value={formAssetId} onChange={(e) => setFormAssetId(e.target.value)} className="text-xs font-medium bg-white">
+                            <option value="">(Select Artwork Icon...)</option>
+                            {assets.map((asset) => (
+                              <option key={asset.id} value={asset.id}>
+                                🖼️ {asset.label}
+                              </option>
+                            ))}
+                          </Select>
+                          <p className="mt-1 text-[11px] text-[var(--rl-text-muted)] truncate">
+                            {formAssetId ? `Selected: ${assets.find((a) => a.id === formAssetId)?.label}` : "Select a standard icon badge for this benefit."}
+                          </p>
+                        </div>
+                      </div>
                     </div>
 
-                    <label className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
-                      Description <span className="font-normal text-[var(--rl-text-muted)]">(optional — use {"{value}"} for dynamic value injection)</span>
+                    {/* 2. Benefit Title */}
+                    <div className="grid gap-1.5">
+                      <label className="text-xs font-bold text-[var(--rl-text-strong)] flex items-center justify-between">
+                        <span>2. Benefit Title <span className="text-[var(--rl-red)]">*</span></span>
+                        <span className="text-[11px] font-normal text-[var(--rl-text-muted)]">Official display title</span>
+                      </label>
+                      <Input
+                        value={formLabel}
+                        onChange={(e) => {
+                          setFormLabel(e.target.value);
+                          if (isNew) setFormKey(slugify(e.target.value));
+                        }}
+                        placeholder="e.g. Towing Assistance, Windscreen, Legal Liability..."
+                        className="text-xs font-semibold h-9"
+                      />
+                    </div>
+
+                    {/* 3. Short Description */}
+                    <div className="grid gap-1.5">
+                      <label className="text-xs font-bold text-[var(--rl-text-strong)] flex items-center justify-between">
+                        <span>3. Benefit Short Description <span className="text-[var(--rl-red)]">*</span></span>
+                        <span className="text-[11px] font-normal text-[var(--rl-text-muted)]">Clear summary of coverage / limit</span>
+                      </label>
                       <Textarea
                         value={formDescription}
                         onChange={(e) => setFormDescription(e.target.value)}
-                        rows={2}
-                        placeholder="e.g. Accidental death and disability protection up to {value}..."
+                        rows={3}
+                        placeholder="e.g. 24/7 emergency towing assistance to nearest workshop or preferred location..."
                         className="text-xs"
                       />
-                    </label>
-
-                    <label className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
-                      Artwork Asset
-                      <span className="grid grid-cols-[40px_1fr] items-center gap-2">
-                        <span className="grid h-9 w-9 place-items-center rounded border border-[var(--rl-border)] bg-white">
-                          {formAssetId ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={fileUrl(assets.find((a) => a.id === formAssetId)?.url || "")} alt="" className="max-h-7 max-w-7 object-contain" />
-                          ) : (
-                            <ImageSquare size={16} className="text-[var(--rl-text-muted)]" />
-                          )}
-                        </span>
-                        <Select value={formAssetId} onChange={(e) => setFormAssetId(e.target.value)} className="text-xs">
-                          <option value="">No artwork</option>
-                          {assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.label}</option>)}
-                        </Select>
-                      </span>
-                    </label>
+                    </div>
                   </div>
 
-                  {/* Plan Variations System */}
-                  <div className="grid gap-3 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] p-4 bg-[var(--rl-bg)]">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rl-text-muted)]">
-                          Plan Variations & Tiers
-                        </h3>
-                        <p className="text-xs text-[var(--rl-text-muted)]">
-                          For multi-plan add-ons (e.g. Plan A/B/C/D, Plan 1/2/3/4/Ezy). Variations stay inside this single benefit.
-                        </p>
-                      </div>
-                      <span className="rounded bg-[var(--rl-surface)] border border-[var(--rl-border)] px-2 py-0.5 text-xs font-bold text-[var(--rl-text-strong)]">
-                        {formVariants.length} Defined Variations
-                      </span>
+                  {/* System Classification & Controls */}
+                  <div className="grid sm:grid-cols-2 gap-4 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] p-4 bg-gray-50/70">
+                    <div className="grid gap-1.5">
+                      <label className="text-xs font-semibold text-[var(--rl-text-strong)]">Category</label>
+                      <Select value={formCategory} onChange={(e) => setFormCategory(e.target.value as "default" | "addon")} className="text-xs bg-white">
+                        <option value="default">Default / Base Family (Included in Quote)</option>
+                        <option value="addon">Add-on Family (Optional Extra)</option>
+                      </Select>
                     </div>
-
-                    <div className="flex flex-wrap gap-2 min-h-[38px] items-center p-2.5 rounded border border-[var(--rl-border)] bg-[var(--rl-surface)]">
-                      {formVariants.length > 0 ? (
-                        formVariants.map((variant, index) => (
-                          <span
-                            key={index}
-                            className="inline-flex items-center gap-1.5 rounded-full border border-[var(--rl-border)] bg-[var(--rl-bg)] px-2.5 py-1 text-xs font-bold text-[var(--rl-text-strong)] shadow-xs"
-                          >
-                            <span>{variant}</span>
-                            <button
-                              type="button"
-                              onClick={() => removeVariant(index)}
-                              className="rounded-full p-0.5 hover:bg-neutral-200 text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                            >
-                              <X size={11} weight="bold" />
-                            </button>
-                          </span>
-                        ))
-                      ) : (
-                        <p className="text-xs text-[var(--rl-text-muted)] italic">No plan variations configured (standard single-tier benefit).</p>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <Input
-                        value={newVariantInput}
-                        onChange={(e) => setNewVariantInput(e.target.value)}
-                        placeholder="e.g. Plan A or Plan Ezy"
-                        className="text-xs h-8"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            addVariant();
-                          }
-                        }}
+                    <div className="flex items-center pt-5">
+                      <Toggle
+                        checked={formActive}
+                        onChange={setFormActive}
+                        label={formActive ? "Active in Global Library" : "Inactive / Draft"}
+                        description="Controls visibility in product catalog builders."
                       />
-                      <Button size="sm" variant="secondary" onClick={addVariant} disabled={!newVariantInput.trim()}>
-                        + Add Variant
-                      </Button>
                     </div>
-                  </div>
-
-                  {/* Extraction Match Dataset */}
-                  <div className="grid gap-3 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] p-4">
-                    <h3 className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rl-text-muted)]">Extraction Dataset</h3>
-                    <TagEditor
-                      label="Match words"
-                      values={formMatch}
-                      onChange={setFormMatch}
-                      placeholder="Add keyword or phrase (e.g. driver passenger protector)"
-                      hint="Phrases scored against quotation OCR lines to identify this benefit."
-                    />
-                  </div>
-
-                  {/* Status Toggle */}
-                  <div className="grid gap-4 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] p-4 sm:grid-cols-2">
-                    <Toggle
-                      checked={formActive}
-                      onChange={setFormActive}
-                      label={formActive ? "Active in Catalog" : "Inactive / Draft"}
-                      description="Inactive benefits are hidden from product builders."
-                    />
                   </div>
                 </div>
               </div>

@@ -111,18 +111,46 @@ class ExtractionOrchestrator:
                     b_key = str(b_item.get("concept_key") or "").strip()
                     b_raw = str(b_item.get("raw_text") or f"{b_label}: {b_val}").strip()
                     if b_label:
-                        # Find matching concept
+                        # Find matching concept robustly across id/concept_id, key/concept_key, name/label
                         matched_concept = None
+                        b_norm = b_label.lower().replace(" ", "-").replace("_", "-")
                         for c in (db_benefit_concepts or []):
-                            if b_key and c.get("key") == b_key:
+                            c_k = (c.get("concept_key") or c.get("key") or "").lower().replace("_", "-")
+                            c_lbl = (c.get("label") or c.get("name") or "").lower()
+                            if b_key and c_k and (c_k == b_key.lower().replace("_", "-")):
                                 matched_concept = c
                                 break
-                            if c.get("name", "").lower() == b_label.lower():
+                            if c_lbl and (c_lbl == b_label.lower() or c_lbl in b_label.lower() or b_label.lower() in c_lbl):
+                                matched_concept = c
+                                break
+                            if b_norm and c_k and (c_k in b_norm or b_norm in c_k):
                                 matched_concept = c
                                 break
 
-                        concept_id = matched_concept.get("id") if matched_concept else None
-                        c_key = matched_concept.get("key") if matched_concept else (b_key or b_label.lower().replace(" ", "_"))
+                        concept_id = (matched_concept.get("concept_id") or matched_concept.get("id")) if matched_concept else None
+                        c_key = (matched_concept.get("concept_key") or matched_concept.get("key")) if matched_concept else (b_key or b_norm)
+                        cov_limit = str(b_item.get("coverage_limit") or "").strip()
+                        cost = str(b_item.get("premium_cost") or "").strip()
+                        is_optional = bool(b_item.get("is_optional_cover", False))
+                        
+                        limit_val = cov_limit or (b_val if b_val.lower() not in {"included", "standard", "yes", "true"} else "")
+                        typed_val = None
+                        if limit_val:
+                            clean_limit = limit_val.upper().replace("RM", "").replace(",", "").strip()
+                            typed_val = {
+                                "type": "money" if any(char.isdigit() for char in clean_limit) else "string",
+                                "value": clean_limit if any(char.isdigit() for char in clean_limit) else limit_val,
+                                "currency": "MYR",
+                                "display_text": limit_val if limit_val.startswith("RM") else f"RM {limit_val}" if any(char.isdigit() for char in clean_limit) else limit_val,
+                            }
+                        elif cost:
+                            clean_cost = cost.upper().replace("RM", "").replace(",", "").strip()
+                            typed_val = {
+                                "type": "money",
+                                "value": clean_cost,
+                                "currency": "MYR",
+                                "display_text": f"RM {clean_cost}",
+                            }
 
                         benefit_lines.append({
                             "line_id": f"gemini_{len(benefit_lines) + 1}",
@@ -132,7 +160,7 @@ class ExtractionOrchestrator:
                             "normalized_text": b_label.lower(),
                             "page_number": 1,
                             "page": 1,
-                            "section": "Selected Benefits",
+                            "section": "Optional Covers" if is_optional else "Selected Benefits",
                             "source_scope": "selected",
                             "line_kind": "benefit_candidate",
                             "heading_category": "selected",
@@ -140,6 +168,10 @@ class ExtractionOrchestrator:
                             "confidence": 1.0,
                             "source_disposition": "auto_apply",
                             "is_detected": True,
+                            "coverage_limit": cov_limit or b_val,
+                            "premium_cost": cost,
+                            "is_optional_cover": is_optional,
+                            "extracted_value": typed_val,
                             "candidate_mappings": [
                                 {
                                     "concept_id": concept_id,
@@ -150,6 +182,8 @@ class ExtractionOrchestrator:
                                     "match_type": "gemini_multimodal",
                                     "evidence": b_val,
                                     "shaped_description": f"{b_label} ({b_val})" if b_val and b_val.lower() != "included" else b_label,
+                                    "coverage_limit": cov_limit or b_val,
+                                    "premium_cost": cost,
                                     "is_detected": True,
                                 }
                             ] if concept_id or c_key else [],

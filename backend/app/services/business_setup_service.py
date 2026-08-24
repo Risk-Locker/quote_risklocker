@@ -1010,13 +1010,28 @@ def _validate_assignment_context(db, catalog: BenefitCatalog, revision: BenefitC
             raise AppError("This catalog is packaged; assign benefits to the package instead.", 422)
     optional_price = payload.get("optional_price")
     if optional_price is not None:
-        if not isinstance(optional_price, dict):
-            raise AppError("Optional price must be a typed value object.", 422)
-        if "type" in optional_price:
+        if isinstance(optional_price, (int, float, str)):
+            str_val = str(optional_price).replace("RM", "").replace(",", "").strip()
             try:
-                BenefitValue.model_validate(optional_price)
-            except Exception as exc:
-                raise AppError("Optional price is an invalid typed value.", 422) from exc
+                num_val = float(str_val)
+                payload["optional_price"] = {"type": "money", "value": num_val, "currency": "MYR"}
+            except ValueError:
+                payload["optional_price"] = None
+        elif isinstance(optional_price, dict):
+            if "type" in optional_price:
+                try:
+                    BenefitValue.model_validate(optional_price)
+                except Exception as exc:
+                    raise AppError("Optional price is an invalid typed value.", 422) from exc
+            elif "amount" in optional_price:
+                str_val = str(optional_price["amount"]).replace("RM", "").replace(",", "").strip()
+                try:
+                    num_val = float(str_val)
+                    payload["optional_price"] = {"type": "money", "value": num_val, "currency": optional_price.get("currency") or "MYR"}
+                except ValueError:
+                    payload["optional_price"] = None
+        else:
+            raise AppError("Optional price must be a typed value object or price amount.", 422)
     payload["applies_to_type"] = applies_type
     payload["applies_to_id"] = applies_id if applies_type is not None else None
     return payload

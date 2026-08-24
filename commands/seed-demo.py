@@ -8,6 +8,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -40,649 +41,92 @@ from app.models.tables import (
     TrashRecord,
     VehicleCategory,
     new_id,
+    utcnow,
 )
-from app.rendering.render_context import canonical_context_hash
-from app.services.business_setup_service import _derive_description_variant, _revision_content_payload
 
 
 def _normalize_phrase(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
 
+BENEFIT_CONCEPTS_DATA = [{'concept_key': 'own-damage', 'label': 'Own Damage', 'category': 'default', 'asset_label': 'Car Theft / Total Loss Assistance', 'description': 'Accidental collision, overturning, fire, explosion, lightning, burglary, theft, malicious act, and inland transit.', 'match_dataset': ['own damage', 'comprehensive own damage', 'accidental damage', 'collision'], 'sort_order': 1}, {'concept_key': 'third-party-bi', 'label': 'Third Party Bodily Injury', 'category': 'default', 'asset_label': 'Personal Accident', 'description': 'Unlimited statutory legal liability protection for death or bodily injury sustained by third parties.', 'match_dataset': ['third party bodily injury', 'third party bi', 'bodily injury and death'], 'sort_order': 2}, {'concept_key': 'third-party-property', 'label': 'Third Party Property Damage', 'category': 'default', 'asset_label': 'Out-of-Pocket Allowance', 'description': 'Indemnity against legal liability for damage caused to third-party vehicles, fixtures, and properties up to RM 3,000,000.', 'match_dataset': ['third party property', 'tppd', 'property damage'], 'sort_order': 3}, {'concept_key': 'fire-theft', 'label': 'Fire & Theft Cover', 'category': 'default', 'asset_label': 'Car Theft / Total Loss Assistance', 'description': 'Protection against accidental fire, explosion, self-ignition, lightning, vehicle theft, and break-in.', 'match_dataset': ['fire and theft', 'fire & theft', 'theft indemnity', 'fire explosion'], 'sort_order': 4}, {'concept_key': 'towing', 'label': 'Emergency Towing Assistance', 'category': 'default', 'asset_label': 'Towing', 'description': '24/7 accident emergency towing assistance to nearest approved repairer or safe storage up to designated limit.', 'match_dataset': ['towing', 'emergency towing', 'towing assistance', 'breakdown towing'], 'sort_order': 5}, {'concept_key': 'roadside-assistance', 'label': 'Roadside Assistance', 'category': 'default', 'asset_label': 'Emergency Roadside Assistance', 'description': '24/7 on-site breakdown assistance including jump-start, minor mechanical fixes, and roadside repair support.', 'match_dataset': ['roadside assistance', 'road assist', 'tele bantuan', 'auto assist'], 'sort_order': 6}, {'concept_key': 'repair-workmanship-warranty', 'label': 'Workmanship Warranty', 'category': 'default', 'asset_label': 'Repair Workmanship Warranty', 'description': '6-month to 3-year warranty on bodywork, spray painting, and replacement parts from approved panel workshops.', 'match_dataset': ['workmanship warranty', 'repair warranty', 'panel warranty', 'workmanship'], 'sort_order': 7}, {'concept_key': 'legal-costs-defense', 'label': 'Legal Defense Costs', 'category': 'default', 'asset_label': 'Legal Liability of Passengers', 'description': 'Reimbursement of approved legal representation expenses incurred in court defense up to RM 2,000.', 'match_dataset': ['legal defense', 'legal costs', 'court defense'], 'sort_order': 8}, {'concept_key': 'betterment-protection', 'label': 'Betterment Waiver / Scale', 'category': 'default', 'asset_label': 'Waiver of Betterment', 'description': 'Waiver or standard tariff scale (0%-40%) for new original replacement parts on vehicles aged 5-15 years.', 'match_dataset': ['betterment', 'betterment waiver', 'waiver of betterment', 'betterment scale', 'betterment buyback'], 'sort_order': 9}, {'concept_key': 'all-drivers', 'label': 'All Drivers Excess Waiver', 'category': 'default', 'asset_label': 'All Drivers Coverage', 'description': 'Extends policy coverage to any authorized licensed driver and waives the RM 400 unnamed driver compulsory excess.', 'match_dataset': ['all drivers', 'unnamed drivers', 'all drivers waiver', 'any driver', 'all-riders'], 'sort_order': 10}, {'concept_key': 'agreed-value-market-value', 'label': 'Agreed Value Settlement', 'category': 'default', 'asset_label': 'Agreed Value / Market Value Settlement', 'description': 'Guaranteed settlement based on agreed sum insured or ISM valuation with zero market depreciation disputes upon total loss.', 'match_dataset': ['agreed value', 'agreed value settlement', 'market value settlement'], 'sort_order': 11}, {'concept_key': 'cashback-no-claim', 'label': 'No-Claim Cashback / Rebate', 'category': 'default', 'asset_label': 'No-Claim Cashback / NCD / Cashback Reward', 'description': 'Cashback reward or distributable surplus payout via Hibah of 15% to 30% for claim-free policy terms.', 'match_dataset': ['cashback', 'no claim cashback', 'hibah cashback', 'surplus cashback'], 'sort_order': 12}, {'concept_key': 'payd-telematics', 'label': 'Pay-As-You-Drive Telematics', 'category': 'default', 'asset_label': 'No-Claim Cashback / NCD / Cashback Reward', 'description': 'Smart telematics driving reward offering 15% to 20% premium cash refund based on low daily vehicle mileage.', 'match_dataset': ['payd', 'pay as you drive', 'telematics', 'driving less rebate'], 'sort_order': 13}, {'concept_key': 'windscreen', 'label': 'Windscreen & Window Glass', 'category': 'addon', 'asset_label': 'Windscreen Coverage', 'description': 'Repair or replacement of broken windscreen, windows, and sunroof glass including solar tint film without NCD penalty.', 'match_dataset': ['windscreen', 'windshield', 'window glass', 'sunroof glass', 'cermin depan', 'end 89', 'end 89a'], 'sort_order': 14}, {'concept_key': 'special-perils', 'label': 'Inclusion of Special Perils', 'category': 'addon', 'asset_label': 'Special Perils', 'description': 'Full comprehensive protection against natural disasters including flood, storm, typhoon, landslide, and earthquakes.', 'match_dataset': ['special perils', 'flood', 'bencana alam', 'banjir', 'perils', 'end 57'], 'sort_order': 15}, {'concept_key': 'first-loss-flood', 'label': 'First Loss Flood', 'category': 'addon', 'asset_label': 'Flood Coverage / Flood Damage Protection', 'description': 'Standalone first loss natural disaster and flood damage coverage up to RM 10,000 without under-insurance penalty.', 'match_dataset': ['first loss flood', 'first loss special perils', 'end 117'], 'sort_order': 16}, {'concept_key': 'strike-riot-civil-commotion', 'label': 'Strike, Riot & Civil Commotion', 'category': 'addon', 'asset_label': 'Strike, Riot and Civil Commotion', 'description': 'Loss or physical damage protection caused by strikers, locked-out workers, riots, and public civil unrest.', 'match_dataset': ['srcc', 'strike riot', 'civil commotion', 'rusuhan', 'end 25'], 'sort_order': 17}, {'concept_key': 'legal-liability-to-passengers', 'label': 'Legal Liability to Passengers', 'category': 'addon', 'asset_label': 'Legal Liability to Passengers', 'description': 'Legal liability indemnity for accidental bodily injury or death claims made by authorized vehicle passengers.', 'match_dataset': ['llp', 'legal liability to passengers', 'passenger liability', 'end 100', 'end 19'], 'sort_order': 18}, {'concept_key': 'legal-liability-of-passengers', 'label': 'Legal Liability of Passengers', 'category': 'addon', 'asset_label': 'Legal Liability of Passengers', 'description': 'Protection against legal liability for third-party property damage or negligence caused by vehicle passengers.', 'match_dataset': ['llop', 'legal liability of passengers', 'end 72'], 'sort_order': 19}, {'concept_key': 'legal-liability-to-pillion', 'label': 'Legal Liability to Pillion', 'category': 'addon', 'asset_label': 'Legal Liability to Passengers', 'description': 'Extends rider legal liability coverage for accidental bodily injury or death to authorized pillion passengers.', 'match_dataset': ['legal liability to pillion', 'pillion liability', 'llp pillion', 'end 108'], 'sort_order': 20}, {'concept_key': 'repair-allowance', 'label': 'Compensation for Assessed Repair Time (CART)', 'category': 'addon', 'asset_label': 'Transportation Allowance', 'description': 'Daily compensation allowance (RM 50-RM 100/day for 7-14 days) during vehicle workshop repairs without NCD loss.', 'match_dataset': ['cart', 'repair allowance', 'assessed repair time', 'cash assistance', 'end 112'], 'sort_order': 21}, {'concept_key': 'key-replacement', 'label': 'Key Care & Replacement', 'category': 'addon', 'asset_label': 'Key Replacement / Key Care', 'description': 'Reimbursement for replacement, repair, or reprogramming of lost, stolen, or damaged smart keys and locks up to RM 1,000.', 'match_dataset': ['key replacement', 'key care', 'smart key', 'kunci', 'end dt5'], 'sort_order': 22}, {'concept_key': 'personal-belongings-theft', 'label': 'Personal Belongings Theft', 'category': 'addon', 'asset_label': 'Window Snatch Theft / Smash and Grab', 'description': 'Reimbursement for personal belongings, handbag, or laptop lost due to vehicle break-in or smash-and-grab theft.', 'match_dataset': ['snatch theft', 'personal belongings', 'smash and grab', 'ragut'], 'sort_order': 23}, {'concept_key': 'total-loss-theft-allowance', 'label': 'Total Loss / Theft Allowance', 'category': 'addon', 'asset_label': 'Compassionate Allowance for Loss of Vehicle', 'description': 'Compassionate lump-sum cash allowance of 5% to 10% sum insured upon total constructive loss or vehicle theft.', 'match_dataset': ['total loss allowance', 'calv', 'theft allowance', 'convenience cash'], 'sort_order': 24}, {'concept_key': 'flood-relief-allowance', 'label': 'Flood Relief Cash Allowance', 'category': 'addon', 'asset_label': 'Flood Relief Allowance / Cash Assistance', 'description': 'Immediate lump-sum compassionate cash allowance (RM 1,500 - RM 3,000) payable upon flood or water damage.', 'match_dataset': ['flood relief', 'flood allowance', 'compassionate flood'], 'sort_order': 25}, {'concept_key': 'ambulance-fees', 'label': 'Ambulance Transport Fees', 'category': 'addon', 'asset_label': 'Ambulance Fees', 'description': 'Reimbursement for emergency ambulance transport fees to hospital following a road traffic accident.', 'match_dataset': ['ambulance', 'ambulance fees', 'ambulance reimbursement'], 'sort_order': 26}, {'concept_key': 'medical-expenses', 'label': 'Medical Expenses Reimbursement', 'category': 'addon', 'asset_label': 'Medical Expenses', 'description': 'Reimbursement of medical, clinical, and hospitalisation expenses incurred from motor accident injuries.', 'match_dataset': ['medical expenses', 'medical reimbursement', 'clinical expenses'], 'sort_order': 27}, {'concept_key': 'hospital-income', 'label': 'Daily Hospital Income', 'category': 'addon', 'asset_label': 'Daily Hospital Income', 'description': 'Daily hospitalization cash allowance (RM 20 - RM 100/day up to 30-60 days) for inpatient accident treatment.', 'match_dataset': ['hospital income', 'hospital allowance', 'daily hospital cash'], 'sort_order': 28}, {'concept_key': 'bereavement-allowance', 'label': 'Bereavement & Funeral Cash', 'category': 'addon', 'asset_label': 'Bereavement Allowance', 'description': 'Lump-sum compassionate bereavement benefit (RM 1,000 - RM 3,000) payable to next-of-kin upon accidental death.', 'match_dataset': ['bereavement', 'bereavement allowance', 'funeral expenses', 'khairat kematian'], 'sort_order': 29}, {'concept_key': 'car-detailing-cleanup', 'label': 'Flood Detailing & Cleaning', 'category': 'addon', 'asset_label': 'Flood Relief Allowance / Cash Assistance', 'description': 'Professional interior vehicle cleaning and sanitisation reimbursement (up to RM 1,500) following flood damage.', 'match_dataset': ['flood cleaning', 'car detailing', 'water damage cleaning', 'interior cleaning'], 'sort_order': 30}, {'concept_key': 'repaint-spray-paint', 'label': 'Full Car Spray Painting', 'category': 'addon', 'asset_label': 'Whole Car Spray Painting / New Coat of Paint', 'description': 'Full exterior vehicle body spray painting coverage (up to RM 2,000) following approved accident repairs.', 'match_dataset': ['spray painting', 'respray', 'cat baru', 'paint cover'], 'sort_order': 31}, {'concept_key': 'child-car-seat', 'label': 'Child Car Safety Seat Cover', 'category': 'addon', 'asset_label': 'Child Car Seat Coverage', 'description': 'Reimbursement for repair or replacement of child safety car seats (up to RM 500) damaged by accident, flood, or theft.', 'match_dataset': ['child seat', 'child car seat', 'safety seat'], 'sort_order': 32}, {'concept_key': 'side-mirror-protection', 'label': 'Side Mirror Replacement', 'category': 'addon', 'asset_label': 'Side Mirror Coverage', 'description': 'Repair or replacement of broken exterior wing mirrors and electronic side mirror assemblies up to RM 1,000.', 'match_dataset': ['side mirror', 'wing mirror', 'cermin sisi'], 'sort_order': 33}, {'concept_key': 'ev-wall-charger', 'label': 'EV Charger & Wallbox Cover', 'category': 'addon', 'asset_label': 'Out-of-Pocket Allowance', 'description': 'Dedicated EV protection covering home wallbox damage, third-party charger liability, and battery depletion towing.', 'match_dataset': ['ev wall charger', 'ev charger', 'wallbox', 'ev smart pack'], 'sort_order': 34}, {'concept_key': 'vehicle-accessories', 'label': 'Vehicle Accessories', 'category': 'addon', 'asset_label': 'Side Mirror Coverage', 'description': 'Separate coverage for non-factory fitted multimedia systems, dashcams, alloy rims, and aerodynamic body kits.', 'match_dataset': ['accessories', 'vehicle accessories', 'non-standard accessories', 'aksesori', 'end 97'], 'sort_order': 35}, {'concept_key': 'e-hailing-extension', 'label': 'E-Hailing / Private Hire', 'category': 'addon', 'asset_label': 'e-Hailing / Private Hire Extension', 'description': 'Comprehensive endorsement authorizing commercial e-hailing operations (Grab, AirAsia Ride) with passenger liability.', 'match_dataset': ['e-hailing', 'ehailing', 'private hire', 'grab cover'], 'sort_order': 36}, {'concept_key': 'ncd-relief', 'label': 'Current Year NCD Relief', 'category': 'addon', 'asset_label': 'No-Claim Cashback / NCD / Cashback Reward', 'description': 'Reimburses or protects the accumulated No Claim Discount entitlement from reset following an own-damage claim.', 'match_dataset': ['ncd relief', 'current year ncd', 'ncd protection', 'end 111'], 'sort_order': 37}, {'concept_key': 'increased-tppd', 'label': 'Increased TPPD Limit', 'category': 'addon', 'asset_label': 'Out-of-Pocket Allowance', 'description': 'Upgrades third-party property damage indemnity limit from RM 3,000,000 up to RM 4,000,000 - RM 6,000,000.', 'match_dataset': ['increased tppd', 'tppd limit', 'end 105'], 'sort_order': 38}, {'concept_key': 'ferry-transit', 'label': 'Ferry Transit (Sabah-Labuan)', 'category': 'addon', 'asset_label': 'Transportation Allowance', 'description': 'Marine transit loss or damage coverage across Sabah, Sarawak, FT Labuan, or Penang island waterways.', 'match_dataset': ['ferry transit', 'marine transit', 'sabah-labuan ferry', 'end 109'], 'sort_order': 39}, {'concept_key': 'cross-border', 'label': 'Cross-Border (Thailand/Kalimantan)', 'category': 'addon', 'asset_label': 'Courtesy Car / Replacement Car', 'description': 'Geographical policy extension into the Kingdom of Thailand, Kalimantan, or Brunei with TPPD indemnity.', 'match_dataset': ['cross-border', 'cross border', 'thailand extension', 'kalimantan extension', 'end 101', 'end 102'], 'sort_order': 40}, {'concept_key': 'overturning', 'label': 'Vehicle Overturning Damage', 'category': 'addon', 'asset_label': 'Special Perils', 'description': 'Inclusion of accidental damage caused by vehicle overturning or load shifts during commercial transport.', 'match_dataset': ['overturning', 'overturn inclusion', 'end 38'], 'sort_order': 41}, {'concept_key': 'authorized-attendants', 'label': 'Authorized Attendants Liability', 'category': 'addon', 'asset_label': 'Legal Liability to Passengers', 'description': 'Legal liability protection for authorized corporate crew members, loaders, or cabin attendants being carried.', 'match_dataset': ['authorized attendants', 'cabin attendants', 'attendant liability', 'end 19i'], 'sort_order': 42}, {'concept_key': 'boom-damage', 'label': 'Crane Boom Damage', 'category': 'addon', 'asset_label': 'Special Perils', 'description': 'Accidental and unforeseen physical damage protection to crane boom attachment while in use as a tool of trade.', 'match_dataset': ['boom damage', 'crane boom', 'end 38a'], 'sort_order': 43}, {'concept_key': 'tool-of-trade', 'label': 'Tool of Trade Working Risks', 'category': 'addon', 'asset_label': 'Legal Liability of Passengers', 'description': 'Third-party bodily injury and property damage liability while vehicle is operating as a mobile plant / tool of trade.', 'match_dataset': ['tool of trade', 'mobile plant', 'working risks', 'end 41', 'end 42'], 'sort_order': 44}, {'concept_key': 'attached-trailers', 'label': 'Attached Trailers & Couplings', 'category': 'addon', 'asset_label': 'Transportation Allowance', 'description': 'Indemnity extension covering unspecified attached trailer units and commercial couplings in transit.', 'match_dataset': ['attached trailers', 'trailer cover', 'end 54'], 'sort_order': 45}, {'concept_key': 'gas-conversion-kit', 'label': 'NGV Gas Conversion Kit', 'category': 'addon', 'asset_label': 'Side Mirror Coverage', 'description': 'Separate insurance protection for installed natural gas fuel conversion tanks, valves, and kit hardware.', 'match_dataset': ['gas conversion kit', 'ngv gas kit', 'gas tank'], 'sort_order': 46}, {'concept_key': 'cargo-protection', 'label': 'Cargo & Goods in Transit', 'category': 'addon', 'asset_label': 'Out-of-Pocket Allowance', 'description': 'Protection for enterprise trade merchandise and goods carried under commercial C-Permit / A-Permit haulage.', 'match_dataset': ['cargo protection', 'goods in transit', 'cargo liability'], 'sort_order': 47}, {'concept_key': 'accidental-death', 'label': 'Accidental Death Benefit', 'category': 'addon', 'asset_label': 'Personal Accident', 'description': 'Lump-sum accidental death benefit per insured person in the vehicle.', 'match_dataset': ['accidental death', 'kematian akibat kemalangan'], 'sort_order': 48}, {'concept_key': 'permanent-disablement', 'label': 'Permanent Disablement Benefit', 'category': 'addon', 'asset_label': 'Personal Accident', 'description': 'Tiered lump-sum compensation for permanent total or partial disablement per insured person.', 'match_dataset': ['permanent disablement', 'keilatan kekal', 'tpd'], 'sort_order': 49}, {'concept_key': 'double-indemnity', 'label': 'Double Indemnity', 'category': 'addon', 'asset_label': 'Personal Accident', 'description': 'Double benefit payout for quadriplegia or accidents occurring during national public holidays.', 'match_dataset': ['double indemnity', 'ganti rugi berganda'], 'sort_order': 50}, {'concept_key': 'auto-assistance', 'label': 'Auto Assistance / Towing Rider', 'category': 'addon', 'asset_label': 'Emergency Roadside Assistance', 'description': 'Standalone 24-hour unlimited mileage towing and nationwide roadside emergency breakdown assistance rider.', 'match_dataset': ['auto assistance', 'extended towing rider'], 'sort_order': 51}]
 
-BENEFIT_CONCEPTS_DATA = [
-    # ── Category 1: Default / Global Benefits (11) ─────────────────────────
-    {
-        "concept_key": "towing",
-        "label": "Towing",
-        "category": "default",
-        "asset_label": "Towing",
-        "description": "24/7 emergency roadside towing assistance.",
-        "match_dataset": ["towing", "emergency towing", "breakdown towing"],
-        "sort_order": 1,
-    },
-    {
-        "concept_key": "roadside-assistance",
-        "label": "Roadside Assistance",
-        "category": "default",
-        "asset_label": "Emergency Roadside Assistance",
-        "description": "24-hour on-site roadside emergency repair, battery jumpstart, and minor assistance.",
-        "match_dataset": ["roadside assistance", "road assist", "emergency roadside", "breakdown assist"],
-        "sort_order": 2,
-    },
-    {
-        "concept_key": "repair-workmanship-warranty",
-        "label": "Workmanship Warranty",
-        "category": "default",
-        "asset_label": "Repair Workmanship Warranty",
-        "description": "Warranty on motor body and paint repairs carried out by panel workshops.",
-        "match_dataset": ["workmanship warranty", "repair warranty", "panel warranty", "workmanship"],
-        "sort_order": 3,
-    },
-    {
-        "concept_key": "all-drivers",
-        "label": "All Drivers",
-        "category": "default",
-        "asset_label": "All Drivers Coverage",
-        "description": "Coverage for all authorised drivers without naming individual drivers in the policy schedule.",
-        "match_dataset": ["all drivers", "unnamed drivers", "all drivers waiver", "any driver"],
-        "sort_order": 4,
-    },
-    {
-        "concept_key": "personal-accident",
-        "label": "Personal Accident",
-        "category": "default",
-        "asset_label": "Personal Accident",
-        "description": "Personal Accident coverage (includes Takaful's Accidental Death / TPD concept).",
-        "match_dataset": ["personal accident", "accidental death", "tpd", "pa coverage"],
-        "sort_order": 5,
-    },
-    {
-        "concept_key": "betterment-protection",
-        "label": "Betterment / New Parts Protection",
-        "category": "default",
-        "asset_label": "Brand New Spare Parts",
-        "description": "Waiver of betterment costs when replacing damaged parts with brand new original parts.",
-        "match_dataset": ["betterment", "waiver of betterment", "new parts protection", "brand new parts"],
-        "sort_order": 6,
-    },
-    {
-        "concept_key": "total-loss-theft-allowance",
-        "label": "Total Loss / Theft Allowance",
-        "category": "default",
-        "asset_label": "Car Theft / Total Loss Assistance",
-        "description": "Lump sum compassionate assistance upon total loss or constructive total theft of the vehicle.",
-        "match_dataset": ["total loss", "theft allowance", "loss of vehicle", "total loss allowance"],
-        "sort_order": 7,
-    },
-    {
-        "concept_key": "key-replacement",
-        "label": "Key Replacement",
-        "category": "default",
-        "asset_label": "Key Replacement / Key Care",
-        "description": "Reimbursement for lost, stolen, or damaged vehicle transmitter keys.",
-        "match_dataset": ["key replacement", "key care", "smart key", "lost key"],
-        "sort_order": 8,
-    },
-    {
-        "concept_key": "flood-relief-allowance",
-        "label": "Flood Relief Allowance",
-        "category": "default",
-        "asset_label": "Flood Relief Allowance / Cash Assistance",
-        "description": "Immediate cash relief assistance in the event of flood inundation damage.",
-        "match_dataset": ["flood relief", "flood relief allowance", "flood cash assistance", "flood allowance"],
-        "sort_order": 9,
-    },
-    {
-        "concept_key": "personal-belongings-theft",
-        "label": "Personal Belongings Theft",
-        "category": "default",
-        "asset_label": "Window Snatch Theft / Smash and Grab",
-        "description": "Compensation for loss or theft of personal items from the vehicle resulting from forcible entry.",
-        "match_dataset": ["personal belongings", "snatch theft", "smash and grab", "personal effects"],
-        "sort_order": 10,
-    },
-    {
-        "concept_key": "ambulance-fees",
-        "label": "Ambulance Fees",
-        "category": "default",
-        "asset_label": "Ambulance Fees",
-        "description": "Reimbursement for emergency ambulance transport fees following an accident.",
-        "match_dataset": ["ambulance fees", "ambulance", "emergency transport fees"],
-        "sort_order": 11,
-    },
-
-    # ── Category 2: Unique Add-ons (23) ───────────────────────────────────
-    {
-        "concept_key": "windscreen",
-        "label": "Windscreen",
-        "category": "addon",
-        "asset_label": "Windscreen Coverage",
-        "description": "Coverage for repair or replacement of broken windscreens, windows, or sunroof glass.",
-        "match_dataset": ["windscreen", "cermin depan", "windshield", "glass damage"],
-        "sort_order": 12,
-    },
-    {
-        "concept_key": "special-perils",
-        "label": "Special Perils",
-        "category": "addon",
-        "asset_label": "Special Perils",
-        "description": "Protection against natural disasters including flood, typhoon, tempest, storm, landslide, and subsidence.",
-        "match_dataset": ["special perils", "convulsion of nature", "flood damage", "landslide", "bencana alam"],
-        "sort_order": 13,
-    },
-    {
-        "concept_key": "strike-riot-civil-commotion",
-        "label": "Strike, Riot & Civil Commotion",
-        "category": "addon",
-        "asset_label": "Strike, Riot and Civil Commotion",
-        "description": "Indemnification against loss or damage caused by strikes, riots, or civil unrest.",
-        "match_dataset": ["srcc", "strike riot", "civil commotion", "rusuhan"],
-        "sort_order": 14,
-    },
-    {
-        "concept_key": "legal-liability-to-passengers",
-        "label": "Legal Liability to Passengers",
-        "category": "addon",
-        "asset_label": "Legal Liability to Passengers",
-        "description": "Covers legal liability against claims from passengers for accidental bodily injury or death.",
-        "match_dataset": ["llp", "legal liability to passengers", "liability to passenger"],
-        "sort_order": 15,
-    },
-    {
-        "concept_key": "legal-liability-of-passengers",
-        "label": "Legal Liability of Passengers",
-        "category": "addon",
-        "asset_label": "Legal Liability of Passengers",
-        "description": "Protects against legal liability for negligent acts caused by your passengers to third parties.",
-        "match_dataset": ["llop", "legal liability of passengers", "negligent act of passenger"],
-        "sort_order": 16,
-    },
-    {
-        "concept_key": "legal-liability-to-pillion",
-        "label": "Legal Liability to Pillion",
-        "category": "addon",
-        "asset_label": "Legal Liability to Passengers",
-        "description": "Covers legal liability for accidental bodily injury or death to pillion riders.",
-        "match_dataset": ["pillion liability", "legal liability to pillion", "pillion rider"],
-        "sort_order": 17,
-    },
-    {
-        "concept_key": "medical-expenses",
-        "label": "Medical Expenses",
-        "category": "addon",
-        "asset_label": "Medical Expenses",
-        "description": "Reimbursement for reasonable medical and hospitalisation expenses incurred due to a motor accident.",
-        "match_dataset": ["medical expenses", "medical reimbursement", "hospitalisation expenses"],
-        "sort_order": 18,
-    },
-    {
-        "concept_key": "hospital-income",
-        "label": "Hospital Income",
-        "category": "addon",
-        "asset_label": "Daily Hospital Income",
-        "description": "Daily cash allowance for each day of hospital confinement resulting from an accident.",
-        "match_dataset": ["hospital income", "daily hospital cash", "hospital cash allowance"],
-        "sort_order": 19,
-    },
-    {
-        "concept_key": "bereavement-allowance",
-        "label": "Bereavement Allowance",
-        "category": "addon",
-        "asset_label": "Bereavement Allowance",
-        "description": "Lump sum compassionate bereavement benefit payable to the next-of-kin upon accidental death.",
-        "match_dataset": ["bereavement allowance", "funeral allowance", "compassionate allowance"],
-        "sort_order": 20,
-    },
-    {
-        "concept_key": "replacement-car",
-        "label": "Replacement Car",
-        "category": "addon",
-        "asset_label": "Courtesy Car / Replacement Car",
-        "description": "Provision of a temporary courtesy or rental replacement vehicle while your car is under accident repair.",
-        "match_dataset": ["replacement car", "courtesy car", "rental car assistance"],
-        "sort_order": 21,
-    },
-    {
-        "concept_key": "repaint-spray-paint",
-        "label": "Repaint / Spray Paint",
-        "category": "addon",
-        "asset_label": "Whole Car Spray Painting / New Coat of Paint",
-        "description": "Coverage for full body respray or paint refinishing after panel repairs.",
-        "match_dataset": ["repaint", "spray paint", "whole body paint", "spray painting"],
-        "sort_order": 22,
-    },
-    {
-        "concept_key": "side-mirror-protection",
-        "label": "Side Mirror Protection",
-        "category": "addon",
-        "asset_label": "Side Mirror Coverage",
-        "description": "Repair or replacement of broken exterior wing mirrors and electronic side mirror housings.",
-        "match_dataset": ["side mirror", "wing mirror", "side mirror coverage"],
-        "sort_order": 23,
-    },
-    {
-        "concept_key": "child-car-seat",
-        "label": "Child Car Seat",
-        "category": "addon",
-        "asset_label": "Child Car Seat Coverage",
-        "description": "Reimbursement for replacement of damaged or stolen child safety car seats.",
-        "match_dataset": ["child car seat", "baby seat", "child safety seat"],
-        "sort_order": 24,
-    },
-    {
-        "concept_key": "replacement-cost",
-        "label": "Replacement Cost",
-        "category": "addon",
-        "asset_label": "Replacement Cost Benefit",
-        "description": "Replacement cost compensation ensuring market value uplift or total replacement value.",
-        "match_dataset": ["replacement cost", "cost of replacement", "replacement value"],
-        "sort_order": 25,
-    },
-    {
-        "concept_key": "vehicle-accessories",
-        "label": "Vehicle Accessories",
-        "category": "addon",
-        "asset_label": "Side Mirror Coverage",
-        "description": "Protection for non-standard factory vehicle accessories, dashcams, sound systems, and rims.",
-        "match_dataset": ["accessories", "vehicle accessories", "audio system", "dashcam"],
-        "sort_order": 26,
-    },
-    {
-        "concept_key": "e-hailing-extension",
-        "label": "E-Hailing / Private Hire Extension",
-        "category": "addon",
-        "asset_label": "e-Hailing / Private Hire Extension",
-        "description": "Endorsement permitting commercial e-hailing / ride-hailing services (e.g. Grab, AirAsia Ride).",
-        "match_dataset": ["e-hailing", "ehailing", "private hire", "grab endorsement"],
-        "sort_order": 27,
-    },
-    {
-        "concept_key": "agreed-value-market-value",
-        "label": "Agreed Value / Market Value",
-        "category": "addon",
-        "asset_label": "Agreed Value / Market Value Settlement",
-        "description": "Guaranteed agreed sum insured settlement with zero market depreciation disputes upon total loss.",
-        "match_dataset": ["agreed value", "market value", "agreed sum insured"],
-        "sort_order": 28,
-    },
-    {
-        "concept_key": "cashback-no-claim",
-        "label": "Cashback / No-Claim Cashback",
-        "category": "addon",
-        "asset_label": "No-Claim Cashback / NCD / Cashback Reward",
-        "description": "Cashback reward incentive upon policy renewal if no insurance claims were made during the term.",
-        "match_dataset": ["cashback", "no claim cashback", "ncd reward", "rebate"],
-        "sort_order": 29,
-    },
-    {
-        "concept_key": "out-of-pocket-allowance",
-        "label": "Out-of-Pocket Allowance",
-        "category": "addon",
-        "asset_label": "Out-of-Pocket Allowance",
-        "description": "Incidental allowance covering minor unexpected travel, transit, or towing expenses.",
-        "match_dataset": ["out of pocket", "incidental expenses", "miscellaneous allowance"],
-        "sort_order": 30,
-    },
-    {
-        "concept_key": "driver-passenger-protector",
-        "label": "Driver Passenger Protector",
-        "category": "addon",
-        "asset_label": "Driver and Passenger Protection Plan",
-        "description": "Comprehensive personal accident protection bundle for driver and passengers with tiered sum insured plans.",
-        "variants": ["Plan A", "Plan B", "Plan C", "Plan D"],
-        "match_dataset": ["driver passenger protector", "dpp", "driver and passenger protection plan"],
-        "sort_order": 31,
-    },
-    {
-        "concept_key": "private-car-365",
-        "label": "Private Car 365 Plan",
-        "category": "addon",
-        "asset_label": "Driver and Passenger Protection Plan",
-        "description": "All-in-one 365 days emergency and personal accident motor protection packages.",
-        "variants": ["Plan 1", "Plan 2", "Plan 3", "Plan 4", "Plan Ezy"],
-        "match_dataset": ["private car 365", "car 365", "etiqa 365", "plan ezy"],
-        "sort_order": 32,
-    },
-    {
-        "concept_key": "motor-pa-plus",
-        "label": "Motor PA Plus",
-        "category": "addon",
-        "asset_label": "Personal Accident",
-        "description": "Tiered accidental death, disability, and hospital income coverage for driver and occupants.",
-        "variants": ["Plan 1", "Plan 2", "Plan 3"],
-        "match_dataset": ["motor pa plus", "pa plus", "takaful motor pa"],
-        "sort_order": 33,
-    },
-    {
-        "concept_key": "oto-360",
-        "label": "OTO 360",
-        "category": "addon",
-        "asset_label": "Driver and Passenger Protection Plan",
-        "description": "Comprehensive motor takaful coverage package with enhanced death and disability protection.",
-        "variants": ["Plan 1", "Plan 2", "Plan 3"],
-        "match_dataset": ["oto 360", "oto360", "takaful oto"],
-        "sort_order": 34,
-    },
-]
-
-GLOBAL_ALIASES = [
-    ("24/7 Towing Assistance", "towing"),
-    ("Emergency Towing Service", "towing"),
-    ("Emergency Roadside Towing", "towing"),
-    ("24-Hour Roadside Assistance", "roadside-assistance"),
-    ("Emergency Roadside Assistance", "roadside-assistance"),
-    ("Road Assist", "roadside-assistance"),
-    ("Workmanship Warranty", "repair-workmanship-warranty"),
-    ("Repair Workmanship Warranty", "repair-workmanship-warranty"),
-    ("Panel Workshop Warranty", "repair-workmanship-warranty"),
-    ("All Drivers", "all-drivers"),
-    ("All Drivers Coverage", "all-drivers"),
-    ("Unnamed Drivers Waiver", "all-drivers"),
-    ("Personal Accident", "personal-accident"),
-    ("Accidental Death / TPD", "personal-accident"),
-    ("Takaful Accidental Death", "personal-accident"),
-    ("Betterment Protection", "betterment-protection"),
-    ("Waiver of Betterment", "betterment-protection"),
-    ("New Parts Protection", "betterment-protection"),
-    ("Brand New Spare Parts", "betterment-protection"),
-    ("Total Loss / Theft Allowance", "total-loss-theft-allowance"),
-    ("Car Theft Assistance", "total-loss-theft-allowance"),
-    ("Loss of Vehicle Compassionate Allowance", "total-loss-theft-allowance"),
-    ("Key Care", "key-replacement"),
-    ("Car Key Replacement", "key-replacement"),
-    ("Smart Key Replacement", "key-replacement"),
-    ("Flood Relief Allowance", "flood-relief-allowance"),
-    ("Flood Cash Relief", "flood-relief-allowance"),
-    ("Flood Inconvenience Relief", "flood-relief-allowance"),
-    ("Personal Belongings Theft", "personal-belongings-theft"),
-    ("Snatch Theft & Smash Grab", "personal-belongings-theft"),
-    ("Ambulance Fees", "ambulance-fees"),
-    ("Emergency Ambulance Transport", "ambulance-fees"),
-    ("Windscreen", "windscreen"),
-    ("Windshield Damage", "windscreen"),
-    ("Cermin Depan", "windscreen"),
-    ("Special Perils", "special-perils"),
-    ("Flood and Storm Damage", "special-perils"),
-    ("Convulsion of Nature", "special-perils"),
-    ("Strike, Riot & Civil Commotion", "strike-riot-civil-commotion"),
-    ("SRCC", "strike-riot-civil-commotion"),
-    ("Legal Liability to Passengers", "legal-liability-to-passengers"),
-    ("LLP", "legal-liability-to-passengers"),
-    ("Legal Liability of Passengers", "legal-liability-of-passengers"),
-    ("LLOP", "legal-liability-of-passengers"),
-    ("Legal Liability to Pillion", "legal-liability-to-pillion"),
-    ("Medical Expenses", "medical-expenses"),
-    ("Hospital Income", "hospital-income"),
-    ("Daily Hospital Cash", "hospital-income"),
-    ("Bereavement Allowance", "bereavement-allowance"),
-    ("Funeral Expenses", "bereavement-allowance"),
-    ("Replacement Car", "replacement-car"),
-    ("Courtesy Car", "replacement-car"),
-    ("Repaint / Spray Paint", "repaint-spray-paint"),
-    ("Whole Car Spray Painting", "repaint-spray-paint"),
-    ("Side Mirror Protection", "side-mirror-protection"),
-    ("Wing Mirror", "side-mirror-protection"),
-    ("Child Car Seat", "child-car-seat"),
-    ("Baby Car Seat", "child-car-seat"),
-    ("Replacement Cost", "replacement-cost"),
-    ("Vehicle Accessories", "vehicle-accessories"),
-    ("Audio / Sound System", "vehicle-accessories"),
-    ("E-Hailing Extension", "e-hailing-extension"),
-    ("Private Hire Endorsement", "e-hailing-extension"),
-    ("Agreed Value / Market Value", "agreed-value-market-value"),
-    ("Agreed Sum Insured", "agreed-value-market-value"),
-    ("Cashback / No-Claim Cashback", "cashback-no-claim"),
-    ("No-Claim Cashback", "cashback-no-claim"),
-    ("Out-of-Pocket Allowance", "out-of-pocket-allowance"),
-    ("Driver Passenger Protector", "driver-passenger-protector"),
-    ("Driver Passenger Protector (Plan A)", "driver-passenger-protector"),
-    ("Driver Passenger Protector (Plan B)", "driver-passenger-protector"),
-    ("Driver Passenger Protector (Plan C)", "driver-passenger-protector"),
-    ("Driver Passenger Protector (Plan D)", "driver-passenger-protector"),
-    ("Private Car 365 Plan", "private-car-365"),
-    ("Private Car 365 (Plan 1)", "private-car-365"),
-    ("Private Car 365 (Plan 2)", "private-car-365"),
-    ("Private Car 365 (Plan 3)", "private-car-365"),
-    ("Private Car 365 (Plan 4)", "private-car-365"),
-    ("Private Car 365 (Plan Ezy)", "private-car-365"),
-    ("Motor PA Plus", "motor-pa-plus"),
-    ("Motor PA Plus (Plan 1)", "motor-pa-plus"),
-    ("Motor PA Plus (Plan 2)", "motor-pa-plus"),
-    ("Motor PA Plus (Plan 3)", "motor-pa-plus"),
-    ("OTO 360", "oto-360"),
-    ("OTO 360 (Plan 1)", "oto-360"),
-    ("OTO 360 (Plan 2)", "oto-360"),
-    ("OTO 360 (Plan 3)", "oto-360"),
-]
+INSURER_CONFIGS = [{'company_slug': 'amassurance', 'company_name': 'AmAssurance', 'products': [{'product_key': 'amassurance-auto365-comprehensive', 'product_name': 'Auto365 Comprehensive (Private Car)', 'segment_key': 'private', 'vehicle_key': 'car', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, overturning, fire, lightning, theft, Penang transit', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and accidental death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': '24/7 accident emergency towing up to RM200 to panel repairer', 'price': 0}, {'concept_key': 'repair-workmanship-warranty', 'display_value': '3-year panel workshop repair workmanship warranty', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Standard motor tariff betterment scale (0% under 5 yrs to 40% for 10+ yrs)', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen, windows and sunroof glass up to RM1,000', 'price': 150.0}, {'concept_key': 'special-perils', 'display_value': 'Full flood, typhoon, storm, landslide for RM50,000 car (0.25% rate)', 'price': 125.0}, {'concept_key': 'first-loss-flood', 'display_value': 'Partial special perils / flood cover up to RM25,000 (0.15% rate)', 'price': 75.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM50,000 car (0.30% rate)', 'price': 150.0}, {'concept_key': 'legal-liability-to-passengers', 'display_value': 'Legal liability to passengers for 4 seats (RM5 per seat)', 'price': 20.0}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal liability of passengers for third-party negligence', 'price': 7.5}, {'concept_key': 'vehicle-accessories', 'display_value': 'Non-standard accessories coverage up to RM1,000 (15% rate)', 'price': 150.0}, {'concept_key': 'all-drivers', 'display_value': 'Waiver of RM400 compulsory excess for unnamed authorized drivers (End C007)', 'price': 30.0}, {'concept_key': 'auto-assistance', 'display_value': '24/7 breakdown towing assistance up to 150km round trip incl tolls (End C008)', 'price': 50.0}, {'concept_key': 'betterment-protection', 'label_override': 'Waiver of Betterment', 'display_value': 'Waiver of betterment contribution on new parts for 5+ yrs (End C002)', 'price': 65.0}, {'concept_key': 'repair-allowance', 'display_value': 'Assessed repair time compensation of RM100/day for 7 days (End 112)', 'price': 70.0}, {'concept_key': 'ncd-relief', 'display_value': 'Reimbursement of forfeited NCD entitlement upon claim (End 111)', 'price': 80.0}, {'concept_key': 'increased-tppd', 'display_value': 'Upgrades third-party property damage limit from RM3M to RM6M', 'price': 45.0}, {'concept_key': 'ferry-transit', 'display_value': 'Ferry transit loss/damage coverage between Sabah and Labuan (End 109)', 'price': 25.0}, {'concept_key': 'cross-border', 'display_value': 'Geographical extension to Thailand with TPPD up to RM100k (End 101)', 'price': 50.0}, {'concept_key': 'e-hailing-extension', 'display_value': 'Private hire car endorsement for Grab/e-hailing (End C005)', 'price': 350.0}], 'bundles': [{'package_key': 'auto365-plus-bundle', 'name': 'auto365 Comprehensive Plus', 'plans': [{'plan_key': 'plus-bundle', 'name': 'auto365 Comprehensive Plus (RM 98)', 'price': 98.0, 'items': [{'concept_key': 'all-drivers', 'display_value': 'All Drivers Excess Waiver Included'}, {'concept_key': 'flood-relief-allowance', 'display_value': 'RM 1,500 Flood Cash Allowance'}, {'concept_key': 'key-replacement', 'display_value': 'Key Care Cover up to RM 500'}, {'concept_key': 'personal-belongings-theft', 'display_value': 'Window Snatch Theft up to RM 500'}, {'concept_key': 'ambulance-fees', 'display_value': 'Ambulance Fees up to RM 500'}, {'concept_key': 'auto-assistance', 'display_value': '24/7 Breakdown Towing 100km (WM) / 60km (EM) + Unlimited Tolls'}]}]}, {'package_key': 'auto365-premier-bundle', 'name': 'auto365 Comprehensive Premier', 'plans': [{'plan_key': 'premier-bundle', 'name': 'auto365 Comprehensive Premier (RM 185)', 'price': 185.0, 'items': [{'concept_key': 'all-drivers', 'display_value': 'All Drivers Excess Waiver Included'}, {'concept_key': 'flood-relief-allowance', 'display_value': 'RM 3,000 Flood Cash Allowance'}, {'concept_key': 'key-replacement', 'display_value': 'Key Care Cover up to RM 1,000'}, {'concept_key': 'personal-belongings-theft', 'display_value': 'Window Snatch Theft up to RM 1,000'}, {'concept_key': 'ambulance-fees', 'display_value': 'Ambulance Fees up to RM 1,000'}, {'concept_key': 'total-loss-theft-allowance', 'display_value': 'CALV Compassionate Allowance 5% SI up to RM 5,000'}, {'concept_key': 'betterment-protection', 'display_value': 'Full Waiver of Betterment Included'}, {'concept_key': 'auto-assistance', 'display_value': '24/7 Breakdown Towing up to 365km + Unlimited Tolls'}]}]}, {'package_key': 'driver-family-pa', 'name': 'Driver & Family Personal Accident', 'plans': [{'plan_key': 'plan-1', 'name': 'Plan 1 (RM 144)', 'price': 144.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 100,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 100,000 per person'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 1,000 per person'}]}, {'plan_key': 'plan-2', 'name': 'Plan 2 (RM 264)', 'price': 264.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 200,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 200,000 per person'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 2,000 per person'}]}, {'plan_key': 'plan-3', 'name': 'Plan 3 (RM 384)', 'price': 384.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 300,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 300,000 per person'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 3,000 per person'}]}, {'plan_key': 'plan-4', 'name': 'Plan 4 (RM 504)', 'price': 504.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 400,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 400,000 per person'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 4,000 per person'}]}]}]}, {'product_key': 'amassurance-commercial-car-policy', 'product_name': 'Commercial Car Policy (Company Car)', 'segment_key': 'company_commercial', 'vehicle_key': 'car', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft, overturning, business transit', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Emergency towing assistance up to RM200 to panel repairer', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Standard commercial tariff betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen repair/replacement up to RM1,000 for 6 months', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Full flood, typhoon, landslide for RM50,000 car for 6 months (0.25%/2)', 'price': 62.5}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM50,000 car for 6 months', 'price': 75.0}, {'concept_key': 'legal-liability-to-passengers', 'display_value': 'Legal liability to passengers for 4 seats for 6 months (RM2.50/seat)', 'price': 10.0}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal liability of passengers for third-party negligence for 6 months', 'price': 3.75}, {'concept_key': 'vehicle-accessories', 'display_value': 'Non-standard accessories up to RM1,000 for 6 months', 'price': 75.0}, {'concept_key': 'repair-allowance', 'display_value': 'Assessed repair time of RM100/day for 7 days for 6 months', 'price': 35.0}, {'concept_key': 'increased-tppd', 'display_value': 'Upgrades third-party property damage from RM3M to RM6M for 6 months', 'price': 22.5}, {'concept_key': 'ferry-transit', 'display_value': 'Ferry transit coverage for 6 months', 'price': 12.5}, {'concept_key': 'cross-border', 'display_value': 'Geographical extension to Thailand for 6 months', 'price': 25.0}]}, {'product_key': 'amassurance-motorcycle365-private', 'product_name': 'Motorcycle365 (Private Motorcycle)', 'segment_key': 'private', 'vehicle_key': 'motorcycle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft, overturning, Penang transit', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Towing cost reimbursement up to RM50 to nearest workshop', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Tariff betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'special-perils', 'display_value': 'Full flood, storm, landslide for RM5,000 motorcycle (0.50% rate)', 'price': 25.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM5,000 motorcycle', 'price': 15.0}, {'concept_key': 'legal-liability-to-pillion', 'display_value': 'Legal liability to pillion passenger (End 108)', 'price': 5.0}, {'concept_key': 'vehicle-accessories', 'display_value': 'Non-standard accessories coverage up to RM500', 'price': 75.0}, {'concept_key': 'ferry-transit', 'display_value': 'Ferry transit coverage between Sabah and Labuan', 'price': 10.0}, {'concept_key': 'cross-border', 'display_value': 'Geographical extension to Thailand for motorcycle', 'price': 15.0}], 'bundles': [{'package_key': 'motorcycle365-plus-bundle', 'name': 'Motorcycle365 Plus Bundle', 'plans': [{'plan_key': 'moto-plus', 'name': 'Motorcycle365 Plus (RM 45)', 'price': 45.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'Rider RM 5,000 & Pillion RM 1,500 PA'}, {'concept_key': 'double-indemnity', 'display_value': 'RM 10,000 Public Holiday Double Indemnity'}, {'concept_key': 'hospital-income', 'display_value': 'RM 50/day Hospital Income up to 60 days'}, {'concept_key': 'ambulance-fees', 'display_value': 'Ambulance Fees up to RM 200'}, {'concept_key': 'auto-assistance', 'display_value': '24/7 Breakdown Assistance towing up to 75km (3 claims/yr)'}]}]}]}, {'product_key': 'amassurance-motorcycle-commercial', 'product_name': 'Commercial Motorcycle Policy (Despatch)', 'segment_key': 'company_commercial', 'vehicle_key': 'motorcycle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft while carrying business goods/samples', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Towing cost reimbursement up to RM50 to nearest workshop', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Standard commercial motorcycle betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'special-perils', 'display_value': 'Full flood and landslide for RM5,000 motorcycle for 6 months (0.50%/2)', 'price': 12.5}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM5,000 motorcycle for 6 months', 'price': 7.5}, {'concept_key': 'legal-liability-to-pillion', 'display_value': 'Legal liability to pillion passenger for 6 months', 'price': 2.5}, {'concept_key': 'vehicle-accessories', 'display_value': 'Non-standard accessories up to RM500 for 6 months', 'price': 37.5}, {'concept_key': 'ferry-transit', 'display_value': 'Ferry transit coverage for 6 months', 'price': 5.0}]}, {'product_key': 'amassurance-commercial-lorry-own-goods', 'product_name': 'Commercial Lorry (Own Goods - C Permit)', 'segment_key': 'company_commercial', 'vehicle_key': 'commercial_vehicle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': "Accidental collision, fire, theft, transit of company's own goods", 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Emergency towing assistance up to RM200 to panel repairer', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Standard commercial tariff betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen repair/replacement up to RM1,000 for 6 months', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Full flood, storm, landslide for RM100,000 lorry for 6 months (0.50%/2)', 'price': 250.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM100,000 lorry for 6 months', 'price': 150.0}, {'concept_key': 'repair-allowance', 'display_value': 'Assessed repair time of RM100/day for 14 days for 6 months', 'price': 145.0}, {'concept_key': 'authorized-attendants', 'display_value': 'Legal liability to 2 authorized cabin attendants/employees for 6 months', 'price': 10.0}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Passenger negligence liability coverage for 6 months', 'price': 3.75}, {'concept_key': 'increased-tppd', 'display_value': 'Upgrades third-party property damage from RM3M to RM6M for 6 months', 'price': 35.0}, {'concept_key': 'overturning', 'display_value': 'Inclusion of vehicle overturning accidental damage for 6 months', 'price': 100.0}]}, {'product_key': 'amassurance-commercial-lorry-general-haulage', 'product_name': 'Commercial Lorry (General Haulage - A Permit)', 'segment_key': 'company_commercial', 'vehicle_key': 'commercial_vehicle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft, transit carrying third-party goods', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Emergency towing assistance up to RM200 to panel repairer', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Standard commercial vehicle tariff betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen repair/replacement up to RM1,000 for 6 months', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Full flood and landslide for RM100,000 vehicle for 6 months (0.50%/2)', 'price': 250.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM100,000 vehicle for 6 months', 'price': 150.0}, {'concept_key': 'boom-damage', 'display_value': 'Accidental damage to crane boom attachment valued at RM20,000 for 6 months', 'price': 150.0}, {'concept_key': 'tool-of-trade', 'display_value': 'Third-party working risk liability while vehicle is operating as a tool of trade', 'price': 50.0}, {'concept_key': 'authorized-attendants', 'display_value': 'Legal liability to authorized employees being carried for 6 months', 'price': 10.0}, {'concept_key': 'repair-allowance', 'display_value': 'Assessed repair time of RM100/day for 14 days for 6 months', 'price': 145.0}, {'concept_key': 'increased-tppd', 'display_value': 'Upgrades third-party property damage from RM3M to RM6M for 6 months', 'price': 35.0}]}]}, {'company_slug': 'berjaya-sompo', 'company_name': 'Berjaya Sompo', 'products': [{'product_key': 'sompo-motor-private-car', 'product_name': 'SOMPO Motor (Private Car Non-Tariff)', 'segment_key': 'private', 'vehicle_key': 'car', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, overturning, fire, explosion, lightning, theft', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited third-party bodily injury and death legal indemnity', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property losses and legal expenses protection', 'price': 0}, {'concept_key': 'special-perils', 'display_value': 'Full built-in flood, typhoon, storm, landslide, earthquake cover', 'price': 0}, {'concept_key': 'all-drivers', 'display_value': 'Built-in waiver of compulsory excess for authorized licensed drivers 21+', 'price': 0}, {'concept_key': 'towing', 'display_value': '24-hour unlimited towing to panel repairers & minor roadside repairs', 'price': 0}, {'concept_key': 'repair-workmanship-warranty', 'display_value': '12-month repair workmanship and genuine parts warranty', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Enhanced Windscreen Cover up to RM1,000 without NCD loss (End. 89A)', 'price': 150.0}, {'concept_key': 'legal-liability-to-passengers', 'display_value': 'Legal Liability to Passengers (End. 100)', 'price': 7.5}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal Liability of Passengers (End. 72)', 'price': 7.5}, {'concept_key': 'ncd-relief', 'display_value': 'Current Year NCD Relief reimbursement upon claim (End. 111)', 'price': 50.0}, {'concept_key': 'repair-allowance', 'display_value': 'CART - 7 Days @ RM50/day (End. 112)', 'price': 58.0}, {'concept_key': 'betterment-protection', 'display_value': 'Waiver of Betterment for vehicles aged up to 15 years (End. A010)', 'price': 85.0}, {'concept_key': 'e-hailing-extension', 'display_value': 'Private Hire E-Hailing Endorsement (End. A008)', 'price': 350.0}], 'bundles': [{'package_key': 'sompo-motor-nhancer', 'name': 'SOMPO Motor N-hancer Pack 1', 'plans': [{'plan_key': 'nhancer-1', 'name': 'SOMPO Motor N-hancer Pack 1 (RM 150)', 'price': 150.0, 'items': [{'concept_key': 'repair-allowance', 'display_value': 'e-Hailing CART Compensation'}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal Liability of Passengers Included'}, {'concept_key': 'legal-liability-to-passengers', 'display_value': 'Legal Liability to Passengers Included'}, {'concept_key': 'accidental-death', 'display_value': 'RM 25,000 PA per seat for 5 seats'}, {'concept_key': 'betterment-protection', 'display_value': 'Full Waiver of Betterment Included'}, {'concept_key': 'key-replacement', 'display_value': 'Smart Key Replacement up to RM 1,000'}]}]}, {'package_key': 'sompo-ultima-care', 'name': 'Ultima Care DPA Bundle', 'plans': [{'plan_key': 'ultima-1', 'name': 'Ultima Care Plan 1 (RM 60)', 'price': 60.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 60,000 Death & TPD cover'}, {'concept_key': 'legal-liability-to-passengers', 'display_value': 'RM 60,000 Personal Liability protection'}]}]}]}, {'product_key': 'sompo-commercial-car-policy', 'product_name': 'Commercial Car Insurance (Company Car)', 'segment_key': 'company_commercial', 'vehicle_key': 'car', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, impact, and overturning protection', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited third-party bodily injury and death legal indemnity', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage indemnity up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Commercial standard towing reimbursement up to RM 200', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court defense expenses reimbursement up to RM 2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen and window glass replacement for 6 months (End. 89A)', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Special perils flood, storm, earthquake protection (End. 57)', 'price': 50.0}, {'concept_key': 'legal-liability-to-passengers', 'display_value': 'Passenger bodily injury liability protection for 5 seats (End. 19)', 'price': 3.75}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal liability of passengers for third-party negligence (End. 72)', 'price': 3.75}, {'concept_key': 'repair-allowance', 'display_value': 'Commercial CART 7 Days @ RM50/day (End. 112)', 'price': 35.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion protection for 6 months (End. 25)', 'price': 75.0}, {'concept_key': 'auto-assistance', 'display_value': 'Unlimited Commercial Towing BDM <= 7.5T (End. A05)', 'price': 60.0}]}, {'product_key': 'sompo-motorcycle-private', 'product_name': 'SOMPO Motorcycle (Private Motorcycle)', 'segment_key': 'private', 'vehicle_key': 'motorcycle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental damage, crash, and collision coverage up to Market Value', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited third-party bodily injury and death legal indemnity', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage claims up to RM 3,000,000', 'price': 0}, {'concept_key': 'accidental-death', 'display_value': 'Built-in RM5,000 Death/TPD and RM500 Bereavement Allowance for rider', 'price': 0}, {'concept_key': 'towing', 'display_value': '24/7 breakdown towing service up to 100 km round trip', 'price': 0}, {'concept_key': 'all-drivers', 'display_value': 'Built-in waiver of compulsory excess on all approved claims', 'price': 0}, {'concept_key': 'agreed-value-market-value', 'display_value': 'Agreed value settlement for motorcycle models aged up to 3 years', 'price': 0}], 'addons': [{'concept_key': 'legal-liability-to-pillion', 'display_value': 'Compulsory passenger liability extension for carrying pillion (End. 108)', 'price': 5.0}, {'concept_key': 'special-perils', 'display_value': 'Motorcycle loss/damage from flood, storm, and landslide (End. 57)', 'price': 10.0}, {'concept_key': 'auto-assistance', 'display_value': 'Unlimited distance breakdown towing in Malaysia (End. A019)', 'price': 15.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Damage indemnity caused by riot, strike, or civil disturbance (End. 25)', 'price': 15.0}], 'bundles': [{'package_key': 'sompo-motorcyclist-pa', 'name': 'Motorcyclist PA Pack Plan B', 'plans': [{'plan_key': 'moto-b', 'name': 'Plan B (RM 25)', 'price': 25.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 10,000 Death/TPD for Insured, Rider & Pillion'}, {'concept_key': 'bereavement-allowance', 'display_value': 'RM 1,000 Bereavement Allowance'}]}]}]}, {'product_key': 'sompo-motorcycle-commercial', 'product_name': 'Commercial Motorcycle Insurance (Despatch)', 'segment_key': 'company_commercial', 'vehicle_key': 'motorcycle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Collision damage sustained during commercial use', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Statutory unlimited liability protection for third-party injury/death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Property damage indemnity to third parties up to RM 3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Emergency roadside assistance and towing up to 100 km round trip', 'price': 0}, {'concept_key': 'all-drivers', 'display_value': 'Standard excess waiver for registered commercial delivery riders', 'price': 0}], 'addons': [{'concept_key': 'legal-liability-to-pillion', 'display_value': 'Passenger liability extension for commercial pillion riders (End. 108)', 'price': 2.5}, {'concept_key': 'special-perils', 'display_value': 'Covers commercial motorcycle against flood and water damage (End. 57)', 'price': 5.0}, {'concept_key': 'auto-assistance', 'display_value': 'Upgrades commercial breakdown towing to unlimited distance (End. A019)', 'price': 7.5}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Coverage against strikes, malicious acts, and civil commotion (End. 25)', 'price': 7.5}]}, {'product_key': 'sompo-commercial-lorry-own-goods', 'product_name': 'Commercial Lorry (Own Goods - C Permit)', 'segment_key': 'company_commercial', 'vehicle_key': 'commercial_vehicle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental damage, crash, and collision coverage up to Sum Insured', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited indemnity for third-party injury or fatality', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Covers damage to third-party properties up to RM 3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Commercial standard towing reimbursement up to RM 200', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'RM 1,000 lorry cabin windscreen/window glass replacement (End. 89A)', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Special perils flood, tempest, landslide, sinkholes (End. 57)', 'price': 100.0}, {'concept_key': 'authorized-attendants', 'display_value': 'Legal liability for 2 authorized cabin attendants/passengers (End. 19)', 'price': 15.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Protects against damage from strikes, riots, and public unrest (End. 25)', 'price': 150.0}, {'concept_key': 'repair-allowance', 'display_value': 'Commercial CART 7 Days @ RM100/day (End. 112)', 'price': 60.0}, {'concept_key': 'auto-assistance', 'display_value': 'Unlimited distance breakdown and accident towing (End. A05)', 'price': 60.0}, {'concept_key': 'attached-trailers', 'display_value': 'Indemnity extension for unspecified attached trailer units (End. 54)', 'price': 75.0}]}, {'product_key': 'sompo-commercial-lorry-general-haulage', 'product_name': 'Commercial Lorry (General Haulage - A Permit)', 'segment_key': 'company_commercial', 'vehicle_key': 'commercial_vehicle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Comprehensive crash, overturn, and transit impact damage indemnity', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited indemnity for third-party injury or fatality', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property indemnity up to RM 3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Commercial standard towing reimbursement up to RM 200', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'RM 1,000 haulage windscreen/window glass replacement (End. 89A)', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Covers flood, flash floods, storms, and landslides (End. 57)', 'price': 100.0}, {'concept_key': 'authorized-attendants', 'display_value': 'Passenger liability cover for 2 haulage attendants (End. 19)', 'price': 15.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Damage protection caused by strikers, rioters, or civil unrest (End. 25)', 'price': 150.0}, {'concept_key': 'auto-assistance', 'display_value': 'Heavy-duty towing nationwide to approved repairer (End. A05A)', 'price': 90.0}, {'concept_key': 'boom-damage', 'display_value': 'Accidental damage cover for crane boom while in use (End. 38A)', 'price': 120.0}, {'concept_key': 'tool-of-trade', 'display_value': 'Third-party working risk extension for mobile plant (End. 42)', 'price': 85.0}, {'concept_key': 'attached-trailers', 'display_value': 'Own damage and third-party extension for haulage trailers (End. 54)', 'price': 75.0}]}]}, {'company_slug': 'etiqa', 'company_name': 'Etiqa', 'products': [{'product_key': 'etiqa-comprehensive-private-car', 'product_name': 'Comprehensive Private Car Insurance / Takaful', 'segment_key': 'private', 'vehicle_key': 'car', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, overturning, fire, explosion, lightning, theft, transit', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited legal liability protection for death or bodily injury', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage liability up to RM 3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Emergency towing assistance up to 200 km to nearest approved repairer', 'price': 0}, {'concept_key': 'roadside-assistance', 'display_value': '24/7 Accident Assist Call Centre nationwide helpline & dispatch', 'price': 0}, {'concept_key': 'all-drivers', 'display_value': 'Any Authorised Driver included with zero excess penalty', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Reimbursement of court legal defense representation costs up to RM 2,000', 'price': 0}, {'concept_key': 'payd-telematics', 'display_value': 'Etiqa Cashback by Driving Less opt-in reward (up to 30% cash rebate)', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen, windows and sunroof glass up to RM 1,000 (End. 89)', 'price': 150.0}, {'concept_key': 'special-perils', 'display_value': 'Full flood, typhoon, storm, landslide protection (End. 57)', 'price': 100.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, Riot & Civil Commotion coverage (End. 25)', 'price': 150.0}, {'concept_key': 'legal-liability-to-passengers', 'display_value': 'Legal Liability to Passengers for 4 seats (End. 100)', 'price': 7.5}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal Liability of Passengers for third-party negligence (End. 72)', 'price': 7.5}, {'concept_key': 'repair-allowance', 'display_value': 'CART - 7 days @ RM 50/day up to RM 350 (End. 112)', 'price': 55.0}, {'concept_key': 'key-replacement', 'display_value': 'Smart Key Replacement Cover up to RM 1,000', 'price': 50.0}, {'concept_key': 'repaint-spray-paint', 'display_value': 'Car Re-Spray Cover up to RM 2,000 for cars <= 10 yrs', 'price': 280.0}, {'concept_key': 'betterment-protection', 'display_value': 'New Spare Part Replacement (Waiver of Betterment for 5-15 yrs)', 'price': 120.0}, {'concept_key': 'child-car-seat', 'display_value': 'Child Car Safety Seat Endorsement up to RM 500', 'price': 30.0}, {'concept_key': 'ev-wall-charger', 'display_value': 'EV Home Wall Charger Endorsement up to RM 12,000', 'price': 120.0}, {'concept_key': 'ncd-relief', 'display_value': 'Current Year NCD Relief compensation (End. 111)', 'price': 100.0}, {'concept_key': 'increased-tppd', 'display_value': 'Increased TPPD Limit up to RM 4,000,000 (End. 105)', 'price': 25.0}], 'bundles': [{'package_key': 'etiqa-cash-care-pa', 'name': 'Cash Care PA Bundle', 'plans': [{'plan_key': 'bronze', 'name': 'Bronze Plan (RM 60)', 'price': 60.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 10,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 10,000 per person'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 500 per person'}]}, {'plan_key': 'silver', 'name': 'Silver Plan (RM 95)', 'price': 95.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 25,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 25,000 per person'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 500 per person'}]}, {'plan_key': 'gold', 'name': 'Gold Plan (RM 150)', 'price': 150.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 50,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 50,000 per person'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 1,000 per person'}]}, {'plan_key': 'platinum', 'name': 'Platinum Plan (RM 260)', 'price': 260.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 100,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 100,000 per person'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 2,000 per person'}]}, {'plan_key': 'diamond', 'name': 'Diamond Plan (RM 360)', 'price': 360.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 150,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 150,000 per person'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 3,000 per person'}]}]}]}, {'product_key': 'etiqa-commercial-car-policy', 'product_name': 'Commercial Car Insurance (Company Car)', 'segment_key': 'company_commercial', 'vehicle_key': 'car', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft, transit for company car', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Statutory unlimited legal liability coverage for injury/death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage indemnity up to RM 3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Towing charges for damaged vehicle up to RM 200', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Reimbursement of legal representation expenses up to RM 2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen, windows & sunroof glass up to RM 1,000 for 6 months (End. 89)', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Special perils flood, storm, landslide for 6 months (End. 57)', 'price': 50.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot & civil commotion for 6 months (End. 25)', 'price': 75.0}, {'concept_key': 'legal-liability-to-passengers', 'display_value': 'Passenger risk legal liability for 4 seats for 6 months (End. 19)', 'price': 15.0}, {'concept_key': 'repair-allowance', 'display_value': 'CART 7 days @ RM 50/day for 6 months (End. 112)', 'price': 27.5}, {'concept_key': 'ferry-transit', 'display_value': 'Ferry transit Sabah-Labuan for 6 months (End. 109)', 'price': 25.0}, {'concept_key': 'vehicle-accessories', 'display_value': 'Company car added accessories up to RM 2,000 for 6 months (End. 97)', 'price': 100.0}]}, {'product_key': 'etiqa-motorcycle-private', 'product_name': 'Etiqa Private Motorcycle Insurance / Takaful', 'segment_key': 'private', 'vehicle_key': 'motorcycle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, overturning, fire, theft, Penang ferry transit', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Statutory unlimited legal liability for third-party injury/death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Indemnity for damage caused to third parties up to RM 3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Motorcycle towing expense to nearest workshop up to RM 50', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Reimbursement of legal representation expenses up to RM 2,000', 'price': 0}], 'addons': [{'concept_key': 'legal-liability-to-pillion', 'display_value': 'Legal liability to 1 authorized pillion passenger (End. 108)', 'price': 7.5}, {'concept_key': 'special-perils', 'display_value': 'Special perils flood, storm, landslide protection (End. 57)', 'price': 10.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion coverage (End. 25)', 'price': 15.0}, {'concept_key': 'vehicle-accessories', 'display_value': 'Non-standard accessories cover up to RM 500 (End. 97)', 'price': 25.0}, {'concept_key': 'ferry-transit', 'display_value': 'Ferry transit between Sabah and Labuan (End. 109)', 'price': 15.0}], 'bundles': [{'package_key': 'etiqa-myrider', 'name': 'MyRider Bundle', 'plans': [{'plan_key': 'basic-pa', 'name': 'Basic PA (RM 15)', 'price': 15.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 10,000 Accidental Death / TPD for Rider'}]}, {'plan_key': 'myrider', 'name': 'MyRider Bundle (RM 35)', 'price': 35.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 8,000 PA per person for Rider & Pillion'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 500 Medical Expenses'}, {'concept_key': 'auto-assistance', 'display_value': '24/7 Unlimited Towing (3x/yr)'}]}, {'plan_key': 'myrider-plus', 'name': 'MyRider Plus Bundle (RM 55)', 'price': 55.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 10,000 PA per person for Rider & Pillion'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 2,000 Medical Expenses'}, {'concept_key': 'auto-assistance', 'display_value': '24/7 Unlimited Towing (3x/yr)'}]}]}]}, {'product_key': 'etiqa-motorcycle-commercial', 'product_name': 'Commercial Motorcycle Insurance (Despatch)', 'segment_key': 'company_commercial', 'vehicle_key': 'motorcycle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Collision, fire, theft during despatch/delivery operations', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Statutory unlimited legal liability for third-party injury/death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Indemnity for third-party property damage up to RM 3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Emergency towing costs up to RM 50 to nearest workshop', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Approved legal defense fees under Road Transport Act up to RM 2,000', 'price': 0}], 'addons': [{'concept_key': 'legal-liability-to-pillion', 'display_value': 'Legal liability to pillion/courier assistant for 6 months (End. 108)', 'price': 3.75}, {'concept_key': 'special-perils', 'display_value': 'Special perils flood and storm for 6 months (End. 57)', 'price': 5.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for 6 months (End. 25)', 'price': 7.5}, {'concept_key': 'vehicle-accessories', 'display_value': 'Delivery box and carrier bracket cover up to RM 500 (End. 97)', 'price': 25.0}, {'concept_key': 'ferry-transit', 'display_value': 'Ferry transit between Sabah and Labuan for 6 months (End. 109)', 'price': 10.0}]}, {'product_key': 'etiqa-commercial-lorry-own-goods', 'product_name': 'Commercial Lorry (Own Goods - C Permit)', 'segment_key': 'company_commercial', 'vehicle_key': 'commercial_vehicle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft, transit for own goods carrier', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Statutory unlimited legal liability for third-party injury/death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Legal liability indemnity for property damage up to RM 3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Transportation of damaged lorry to nearest repairer up to RM 200', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Approved legal defense fees under Road Transport Act up to RM 2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Heavy vehicle cabin glass replacement up to RM 1,000 for 6 months (End. 89)', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Special perils flood, storm, landslide for RM100k lorry (End. 57)', 'price': 100.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for 6 months (End. 25)', 'price': 150.0}, {'concept_key': 'authorized-attendants', 'display_value': 'Legal liability for 1 cabin attendant / passenger (End. 19)', 'price': 3.75}, {'concept_key': 'repair-allowance', 'display_value': 'Commercial CART 14 days @ RM 100/day for 6 months (End. 112)', 'price': 55.0}, {'concept_key': 'vehicle-accessories', 'display_value': 'Hydraulic tailgate & equipment cover up to RM 5,000 (End. 97)', 'price': 250.0}, {'concept_key': 'ferry-transit', 'display_value': 'Ferry transit Sabah-Labuan for 6 months (End. 109)', 'price': 50.0}], 'bundles': [{'package_key': 'etiqa-commercial-pa', 'name': 'Commercial PA Endorsement', 'plans': [{'plan_key': 'comm-pa-2seats', 'name': 'Commercial PA (Driver + 1 Attendant: RM 50)', 'price': 50.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 50,000 Accidental Death per seat'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 50,000 Disablement per seat'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 2,000 Medical Expenses per person'}, {'concept_key': 'bereavement-allowance', 'display_value': 'RM 1,000 Funeral Expenses per person'}]}]}]}, {'product_key': 'etiqa-commercial-lorry-general-haulage', 'product_name': 'Commercial Lorry (General Haulage - A Permit)', 'segment_key': 'company_commercial', 'vehicle_key': 'commercial_vehicle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Collision, fire, theft, transit for general haulage / special types', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Statutory unlimited legal liability for third-party injury/death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage indemnity up to RM 3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Transportation of damaged vehicle to nearest yard up to RM 200', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Approved legal defense fees under Road Transport Act up to RM 2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Haulage cabin glass replacement up to RM 1,000 for 6 months (End. 89)', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Special perils flood, typhoon, storm, landslide for RM100k (End. 57)', 'price': 100.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for 6 months (End. 25)', 'price': 150.0}, {'concept_key': 'authorized-attendants', 'display_value': 'Legal liability to 1 haulage crew attendant (End. 19)', 'price': 3.75}, {'concept_key': 'boom-damage', 'display_value': 'Accidental damage to crane boom in use as tool of trade (End. 38A)', 'price': 175.0}, {'concept_key': 'overturning', 'display_value': 'Overturning damage while operating as tool of trade (End. 38)', 'price': 150.0}, {'concept_key': 'repair-allowance', 'display_value': 'Commercial CART 14 days @ RM 100/day for 6 months (End. 112)', 'price': 55.0}, {'concept_key': 'vehicle-accessories', 'display_value': 'Specialized haulage apparatus & couplings up to RM 5,000 (End. 97)', 'price': 250.0}, {'concept_key': 'ferry-transit', 'display_value': 'Ferry transit Sabah-Labuan for 6 months (End. 109)', 'price': 50.0}]}]}, {'company_slug': 'lonpac', 'company_name': 'Lonpac', 'products': [{'product_key': 'lonpac-private-car-secure', 'product_name': 'Private Car Secure', 'segment_key': 'private', 'vehicle_key': 'car', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, overturning, fire, explosion, lightning, theft, transit', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and accidental death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Accidental towing cost reimbursement up to RM200 to nearest repairer', 'price': 0}, {'concept_key': 'repair-allowance', 'display_value': 'PC Privilege 1 lump-sum transportation allowance RM75 per claim', 'price': 0}, {'concept_key': 'special-perils', 'display_value': 'PC Privilege 2 natural falling objects impact up to 25% Sum Insured', 'price': 0}, {'concept_key': 'personal-belongings-theft', 'display_value': 'PC Privilege 3 smash-and-grab document replacement up to RM150', 'price': 0}, {'concept_key': 'windscreen', 'display_value': 'PC Privilege 4 automatic reinstatement of windscreen sum insured', 'price': 0}, {'concept_key': 'all-drivers', 'display_value': 'PC Privilege 5 waiver of RM400 compulsory excess for unnamed drivers 21+', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Standard tariff betterment contribution scale (0% under 5 yrs to 40% 10+ yrs)', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen, windows and sunroof glass up to RM1,000 (End. 89)', 'price': 150.0}, {'concept_key': 'special-perils', 'display_value': 'Comprehensive flood, typhoon, storm, landslide for RM50k car (End. 57)', 'price': 125.0}, {'concept_key': 'first-loss-flood', 'display_value': 'Enhanced special perils natural disaster with RM600 towing (End. DT9)', 'price': 140.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot, and civil commotion for RM50,000 car (End. 25)', 'price': 150.0}, {'concept_key': 'legal-liability-to-passengers', 'display_value': 'Legal liability to passengers for 4 seats (End. 100)', 'price': 20.0}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal liability of passengers for third-party negligence (End. 72)', 'price': 7.5}, {'concept_key': 'vehicle-accessories', 'display_value': 'Non-standard accessories coverage up to RM1,000 (End. 97)', 'price': 150.0}, {'concept_key': 'gas-conversion-kit', 'display_value': 'NGV gas conversion kit and tank insurance up to RM2,000 (End. 97a)', 'price': 90.0}, {'concept_key': 'repair-allowance', 'display_value': 'CART compensation of RM50/day for 7 days (End. 112)', 'price': 58.3}, {'concept_key': 'ncd-relief', 'display_value': 'Compensation for forfeiture of current year NCD entitlement (End. 111)', 'price': 100.0}, {'concept_key': 'betterment-protection', 'display_value': 'Waiver of betterment on original parts for 5 to 10 years (End. DT4)', 'price': 65.0}, {'concept_key': 'key-replacement', 'display_value': 'Car key and lock replacement reimbursement up to RM2,000 (End. DT5)', 'price': 50.0}, {'concept_key': 'car-detailing-cleanup', 'display_value': 'Flood & theft interior cleaning reimbursement up to RM5,000 (End. DT6)', 'price': 35.0}, {'concept_key': 'repaint-spray-paint', 'display_value': 'Complete exterior spray painting coverage up to RM2,000 (End. DT7)', 'price': 90.0}, {'concept_key': 'increased-tppd', 'display_value': 'Extension of TPPD limit from RM3M to RM6M (End. 105)', 'price': 45.0}], 'bundles': [{'package_key': 'lonpac-smart-driver-dpa', 'name': 'Smart Driver DPA Bundle', 'plans': [{'plan_key': 'plan-a', 'name': 'Plan A (RM 70)', 'price': 70.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 10,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 10,000 per person'}, {'concept_key': 'double-indemnity', 'display_value': 'RM 20,000 Quadriplegia Indemnity'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 500 per person'}, {'concept_key': 'hospital-income', 'display_value': 'RM 20/day up to 60 days'}, {'concept_key': 'ambulance-fees', 'display_value': 'RM 300 per accident'}, {'concept_key': 'bereavement-allowance', 'display_value': 'RM 1,000 per person'}, {'concept_key': 'personal-belongings-theft', 'display_value': 'RM 200 Snatch Theft Cover'}, {'concept_key': 'auto-assistance', 'display_value': 'Unlimited 24-hour emergency towing'}]}, {'plan_key': 'plan-b', 'name': 'Plan B (RM 120)', 'price': 120.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 20,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 20,000 per person'}, {'concept_key': 'double-indemnity', 'display_value': 'RM 40,000 Quadriplegia Indemnity'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 1,000 per person'}, {'concept_key': 'hospital-income', 'display_value': 'RM 30/day up to 60 days'}, {'concept_key': 'ambulance-fees', 'display_value': 'RM 300 per accident'}, {'concept_key': 'bereavement-allowance', 'display_value': 'RM 1,500 per person'}, {'concept_key': 'personal-belongings-theft', 'display_value': 'RM 350 Snatch Theft Cover'}, {'concept_key': 'auto-assistance', 'display_value': 'Unlimited 24-hour emergency towing'}]}, {'plan_key': 'plan-c', 'name': 'Plan C (RM 175)', 'price': 175.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 30,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 30,000 per person'}, {'concept_key': 'double-indemnity', 'display_value': 'RM 60,000 Quadriplegia Indemnity'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 1,500 per person'}, {'concept_key': 'hospital-income', 'display_value': 'RM 40/day up to 60 days'}, {'concept_key': 'ambulance-fees', 'display_value': 'RM 300 per accident'}, {'concept_key': 'bereavement-allowance', 'display_value': 'RM 2,000 per person'}, {'concept_key': 'personal-belongings-theft', 'display_value': 'RM 500 Snatch Theft Cover'}, {'concept_key': 'auto-assistance', 'display_value': 'Unlimited 24-hour emergency towing'}]}, {'plan_key': 'plan-d', 'name': 'Plan D (RM 260)', 'price': 260.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 50,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 50,000 per person'}, {'concept_key': 'double-indemnity', 'display_value': 'RM 100,000 Quadriplegia Indemnity'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 3,000 per person'}, {'concept_key': 'hospital-income', 'display_value': 'RM 60/day up to 60 days'}, {'concept_key': 'ambulance-fees', 'display_value': 'RM 300 per accident'}, {'concept_key': 'bereavement-allowance', 'display_value': 'RM 3,000 per person'}, {'concept_key': 'personal-belongings-theft', 'display_value': 'RM 500 Snatch Theft Cover'}, {'concept_key': 'auto-assistance', 'display_value': 'Unlimited 24-hour emergency towing'}]}]}, {'package_key': 'lonpac-ev-smart-pack', 'name': 'EV Smart Pack', 'plans': [{'plan_key': 'ev-pack', 'name': 'EV Smart Pack (RM 120)', 'price': 120.0, 'items': [{'concept_key': 'ev-wall-charger', 'display_value': 'Home EV Charger Liability up to RM 50,000'}, {'concept_key': 'ev-wall-charger', 'display_value': 'Wallbox Damage Cover up to RM 5,000'}, {'concept_key': 'auto-assistance', 'display_value': 'Battery Depletion Towing up to RM 400'}]}]}]}, {'product_key': 'lonpac-commercial-car-policy', 'product_name': 'Commercial Car Policy (Company Car)', 'segment_key': 'company_commercial', 'vehicle_key': 'car', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft, overturning, business transit', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Accidental towing reimbursement up to RM200 to nearest repairer', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Commercial tariff betterment contribution scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen repair/replacement up to RM1,000 for 6 months (End. 89)', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Flood, storm, and landslide for RM50,000 car for 6 months (End. 57)', 'price': 125.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot, and civil commotion for 6 months (End. 25)', 'price': 75.0}, {'concept_key': 'legal-liability-to-passengers', 'display_value': 'Legal liability to passengers for 4 seats for 6 months (End. 19)', 'price': 10.0}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal liability of passengers for third-party negligence (End. 72)', 'price': 3.75}, {'concept_key': 'vehicle-accessories', 'display_value': 'Non-standard accessories up to RM1,000 for 6 months (End. 97)', 'price': 75.0}, {'concept_key': 'repair-allowance', 'display_value': 'CART compensation of RM50/day for 7 days for 6 months (End. 112)', 'price': 29.15}, {'concept_key': 'increased-tppd', 'display_value': 'Upgrades third-party property damage limit from RM3M to RM6M (End. 105)', 'price': 22.5}]}, {'product_key': 'lonpac-motorcycle-private', 'product_name': 'Motorcycle Policy (Private)', 'segment_key': 'private', 'vehicle_key': 'motorcycle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft, overturning, Penang transit', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Accidental towing cost reimbursement up to RM50 to nearest repairer', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Tariff betterment contribution scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'special-perils', 'display_value': 'Flood, storm, earthquake, landslide for RM5,000 motorcycle (End. 57)', 'price': 25.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot, and civil commotion for RM5,000 motorcycle (End. 25)', 'price': 15.0}, {'concept_key': 'legal-liability-to-pillion', 'display_value': 'Legal liability to pillion passenger (End. 108)', 'price': 5.0}, {'concept_key': 'vehicle-accessories', 'display_value': 'Non-standard accessories up to RM500 (End. 97)', 'price': 75.0}, {'concept_key': 'ferry-transit', 'display_value': 'Ferry transit between Sabah and Labuan (End. 109)', 'price': 10.0}, {'concept_key': 'cross-border', 'display_value': 'Geographic extension to Thailand or Kalimantan for 1 month', 'price': 20.0}]}, {'product_key': 'lonpac-motorcycle-commercial', 'product_name': 'Motorcycle Policy (Commercial Despatch)', 'segment_key': 'company_commercial', 'vehicle_key': 'motorcycle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft while carrying goods/samples', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Accidental towing reimbursement up to RM50 to nearest workshop', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Standard commercial motorcycle betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'special-perils', 'display_value': 'Flood, typhoon, storm, landslide for RM5,000 motorcycle for 6 months (End. 57)', 'price': 12.5}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot, and civil commotion for 6 months (End. 25)', 'price': 7.5}, {'concept_key': 'legal-liability-to-pillion', 'display_value': 'Legal liability to pillion passenger for 6 months (End. 108)', 'price': 2.5}, {'concept_key': 'vehicle-accessories', 'display_value': 'Non-standard accessories up to RM500 for 6 months (End. 97)', 'price': 37.5}, {'concept_key': 'ferry-transit', 'display_value': 'Ferry transit extension for 6 months (End. 109)', 'price': 5.0}]}, {'product_key': 'lonpac-commercial-lorry-own-goods', 'product_name': 'Commercial Lorry (Own Goods - C Permit)', 'segment_key': 'company_commercial', 'vehicle_key': 'commercial_vehicle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft, transit of company trade goods', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Accidental towing charge allowance up to RM200 to nearest repairer', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Commercial tariff betterment contribution scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Commercial windscreen repair/replacement up to RM1,000 for 6 months (End. 89)', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Flood, typhoon, landslide for RM100,000 lorry for 6 months (End. 57)', 'price': 250.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot, and civil commotion for RM100,000 lorry for 6 months (End. 25)', 'price': 150.0}, {'concept_key': 'overturning', 'display_value': 'Accidental damage caused by vehicle overturning for 6 months', 'price': 100.0}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal liability of passengers for third-party negligence (End. 72)', 'price': 3.75}, {'concept_key': 'authorized-attendants', 'display_value': 'Legal liability to 2 authorized cabin attendants/employees (End. 19)', 'price': 10.0}, {'concept_key': 'increased-tppd', 'display_value': 'Upgrades third-party property damage from RM3M to RM6M (End. 105)', 'price': 35.0}]}, {'product_key': 'lonpac-commercial-lorry-general-haulage', 'product_name': 'Commercial Lorry (General Haulage - A Permit)', 'segment_key': 'company_commercial', 'vehicle_key': 'commercial_vehicle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Collision, fire, theft, transit carrying third-party goods for hire', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Accidental towing charge allowance up to RM200 to nearest repairer', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Standard commercial vehicle tariff betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen repair/replacement up to RM1,000 for 6 months (End. 89)', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Flood, storm, and natural disaster for RM100,000 vehicle (End. 57)', 'price': 250.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot, and civil commotion for RM100,000 vehicle (End. 25)', 'price': 150.0}, {'concept_key': 'overturning', 'display_value': 'Crane Overturning damage while operating as tool of trade (End. 38)', 'price': 100.0}, {'concept_key': 'boom-damage', 'display_value': 'Crane Boom Damage valued at RM20,000 for 6 months (End. 38A)', 'price': 150.0}, {'concept_key': 'tool-of-trade', 'display_value': 'Third-party liability risks while operating as mobile plant (End. 41/42)', 'price': 50.0}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal liability of passengers for 6 months (End. 72)', 'price': 3.75}, {'concept_key': 'increased-tppd', 'display_value': 'Upgrades third-party property damage from RM3M to RM6M (End. 105)', 'price': 35.0}]}]}, {'company_slug': 'qbe', 'company_name': 'QBE', 'products': [{'product_key': 'qbe-private-car-protector', 'product_name': 'Private Car Protector', 'segment_key': 'private', 'vehicle_key': 'car', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft, overturning, transit', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury & death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': '24/7 emergency roadside towing assistance', 'price': 0}, {'concept_key': 'roadside-assistance', 'display_value': '24/7 minor roadside repairs coverage up to RM500 per incident', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': '0% betterment contribution on original parts up to 10 years old', 'price': 0}, {'concept_key': 'total-loss-theft-allowance', 'display_value': 'Total loss or theft payout of 5% sum insured up to RM5,000', 'price': 0}, {'concept_key': 'key-replacement', 'display_value': 'Lock/key replacement reimbursement up to RM500 for theft or break-in', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen repair/replacement coverage up to RM1,000 (15% rate)', 'price': 150.0}, {'concept_key': 'special-perils', 'display_value': 'Full flood, typhoon, storm, landslide for RM50,000 car (0.25% rate)', 'price': 125.0}, {'concept_key': 'first-loss-flood', 'display_value': 'Standalone first loss special perils natural disaster up to RM10,000', 'price': 30.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM50,000 car (0.30% rate)', 'price': 150.0}, {'concept_key': 'legal-liability-to-passengers', 'display_value': 'Legal liability to passengers for 4 passenger seats (RM5/seat)', 'price': 20.0}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal liability of passengers for third-party negligence', 'price': 7.5}, {'concept_key': 'vehicle-accessories', 'display_value': 'Non-standard accessories coverage up to RM1,000 (15% rate)', 'price': 150.0}, {'concept_key': 'out-of-pocket-allowance', 'display_value': 'Replacement car RM150/day (7d), hotel RM250/day (5d), respray RM1,500', 'price': 90.0}, {'concept_key': 'car-detailing-cleanup', 'display_value': 'Water damage interior cleaning reimbursement up to RM1,500', 'price': 35.0}, {'concept_key': 'all-drivers', 'display_value': 'Waiver of RM400 compulsory excess for unnamed authorized drivers', 'price': 30.0}, {'concept_key': 'repair-allowance', 'display_value': 'Assessed repair time compensation of RM50/day for 7 days', 'price': 58.3}, {'concept_key': 'increased-tppd', 'display_value': 'Upgrades third party property damage limit from RM3M to RM6M', 'price': 45.0}], 'bundles': [{'package_key': 'driver-passenger-protector', 'name': 'Driver Passenger Protector', 'plans': [{'plan_key': 'plan-a', 'name': 'Plan A (RM 70)', 'price': 70.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 10,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 10,000 per person'}, {'concept_key': 'double-indemnity', 'display_value': 'RM 20,000 per person'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 500 per person'}, {'concept_key': 'daily-hospital-income', 'display_value': 'RM 20/day (max 60 days)'}, {'concept_key': 'ambulance-fees', 'display_value': 'RM 300 per accident'}, {'concept_key': 'bereavement-allowance', 'display_value': 'RM 1,000 per person'}, {'concept_key': 'personal-belongings-theft', 'display_value': 'RM 200 per incident'}, {'concept_key': 'auto-assistance', 'display_value': 'Unlimited 24-hour towing & assist'}]}, {'plan_key': 'plan-b', 'name': 'Plan B (RM 120)', 'price': 120.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 20,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 20,000 per person'}, {'concept_key': 'double-indemnity', 'display_value': 'RM 40,000 per person'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 1,000 per person'}, {'concept_key': 'daily-hospital-income', 'display_value': 'RM 30/day (max 60 days)'}, {'concept_key': 'ambulance-fees', 'display_value': 'RM 300 per accident'}, {'concept_key': 'bereavement-allowance', 'display_value': 'RM 1,500 per person'}, {'concept_key': 'personal-belongings-theft', 'display_value': 'RM 350 per incident'}, {'concept_key': 'auto-assistance', 'display_value': 'Unlimited 24-hour towing & assist'}]}, {'plan_key': 'plan-c', 'name': 'Plan C (RM 175)', 'price': 175.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 30,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 30,000 per person'}, {'concept_key': 'double-indemnity', 'display_value': 'RM 60,000 per person'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 1,500 per person'}, {'concept_key': 'daily-hospital-income', 'display_value': 'RM 40/day (max 60 days)'}, {'concept_key': 'ambulance-fees', 'display_value': 'RM 300 per accident'}, {'concept_key': 'bereavement-allowance', 'display_value': 'RM 2,000 per person'}, {'concept_key': 'personal-belongings-theft', 'display_value': 'RM 500 per incident'}, {'concept_key': 'auto-assistance', 'display_value': 'Unlimited 24-hour towing & assist'}]}, {'plan_key': 'plan-d', 'name': 'Plan D (RM 260)', 'price': 260.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 50,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 50,000 per person'}, {'concept_key': 'double-indemnity', 'display_value': 'RM 100,000 per person'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 3,000 per person'}, {'concept_key': 'daily-hospital-income', 'display_value': 'RM 60/day (max 60 days)'}, {'concept_key': 'ambulance-fees', 'display_value': 'RM 300 per accident'}, {'concept_key': 'bereavement-allowance', 'display_value': 'RM 3,000 per person'}, {'concept_key': 'personal-belongings-theft', 'display_value': 'RM 500 per incident'}, {'concept_key': 'auto-assistance', 'display_value': 'Unlimited 24-hour towing & assist'}]}]}]}, {'product_key': 'qbe-commercial-car-policy', 'product_name': 'Commercial Car Policy', 'segment_key': 'company_commercial', 'vehicle_key': 'car', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft, overturning, business transit', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury & death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Emergency towing assistance to nearest approved repairer', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Tariff betterment scale (0% under 5 yrs up to 40% for 10+ yrs)', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen repair/replacement coverage up to RM1,000 for 6 months', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Full flood, typhoon, landslide for RM50,000 car for 6 months (0.50%/2)', 'price': 125.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM50,000 car for 6 months', 'price': 75.0}, {'concept_key': 'legal-liability-to-passengers', 'display_value': 'Legal liability to passengers for 4 seats for 6 months (RM2.50/seat)', 'price': 10.0}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal liability of passengers for third-party negligence for 6 months', 'price': 3.75}, {'concept_key': 'vehicle-accessories', 'display_value': 'Non-standard accessories coverage up to RM1,000 for 6 months', 'price': 75.0}, {'concept_key': 'repair-allowance', 'display_value': 'Assessed repair time compensation of RM50/day for 7 days for 6 months', 'price': 29.15}, {'concept_key': 'increased-tppd', 'display_value': 'Upgrades third party property damage limit from RM3M to RM6M for 6 months', 'price': 22.5}]}, {'product_key': 'qbe-motorcycle-policy-private', 'product_name': 'Motorcycle Policy (Private)', 'segment_key': 'private', 'vehicle_key': 'motorcycle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft, overturning, Penang transit', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury & death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Towing cost reimbursement up to RM50 to nearest workshop', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Standard motorcycle betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'special-perils', 'display_value': 'Full flood, typhoon, storm, landslide for RM5,000 motorcycle (0.50% rate)', 'price': 25.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM5,000 motorcycle (0.30% rate)', 'price': 15.0}, {'concept_key': 'legal-liability-to-pillion', 'display_value': 'Legal liability to pillion passenger (1 pillion seat)', 'price': 5.0}, {'concept_key': 'vehicle-accessories', 'display_value': 'Non-standard accessories coverage up to RM500 (15% rate)', 'price': 75.0}, {'concept_key': 'ferry-transit', 'display_value': 'Ferry transit coverage between Sabah and Labuan (1% or RM500 deductible)', 'price': 10.0}, {'concept_key': 'cross-border', 'display_value': 'Geographic extension to Thailand / Kalimantan for 1 month', 'price': 20.0}]}, {'product_key': 'qbe-motorcycle-policy-commercial', 'product_name': 'Motorcycle Policy (Commercial)', 'segment_key': 'company_commercial', 'vehicle_key': 'motorcycle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft while carrying business goods/samples', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury & death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Towing cost reimbursement up to RM50 to nearest workshop', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Standard commercial motorcycle betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'special-perils', 'display_value': 'Full flood and landslide for RM5,000 motorcycle for 6 months (0.50%/2)', 'price': 12.5}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM5,000 motorcycle for 6 months', 'price': 7.5}, {'concept_key': 'legal-liability-to-pillion', 'display_value': 'Legal liability to pillion passenger for 6 months', 'price': 2.5}, {'concept_key': 'vehicle-accessories', 'display_value': 'Non-standard accessories coverage up to RM500 for 6 months', 'price': 37.5}, {'concept_key': 'ferry-transit', 'display_value': 'Ferry transit coverage for 6 months', 'price': 5.0}]}, {'product_key': 'qbe-commercial-lorry-own-goods', 'product_name': 'Commercial Lorry (Own Goods - C Permit)', 'segment_key': 'company_commercial', 'vehicle_key': 'commercial_vehicle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': "Accidental collision, fire, theft, transit of company's own trade goods", 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury & death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Standard commercial tariff betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen repair/replacement coverage up to RM1,000 for 6 months', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Full flood, storm, landslide for RM100,000 lorry for 6 months (0.50%/2)', 'price': 250.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM100,000 lorry for 6 months', 'price': 150.0}, {'concept_key': 'overturning', 'display_value': 'Accidental damage caused by vehicle overturning for 6 months (0.20%/2)', 'price': 100.0}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal liability of passengers for 6 months', 'price': 3.75}, {'concept_key': 'authorized-attendants', 'display_value': 'Legal liability to 2 authorized cabin attendants/employees for 6 months', 'price': 10.0}, {'concept_key': 'increased-tppd', 'display_value': 'Upgrades third party property damage limit from RM3M to RM6M for 6 months', 'price': 35.0}]}, {'product_key': 'qbe-commercial-lorry-general-haulage', 'product_name': 'Commercial Lorry (General Haulage - A Permit)', 'segment_key': 'company_commercial', 'vehicle_key': 'commercial_vehicle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft, transit carrying third-party goods', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury & death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Standard commercial vehicle tariff betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen repair/replacement coverage up to RM1,000 for 6 months', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Full flood and landslide for RM100,000 vehicle for 6 months (0.50%/2)', 'price': 250.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM100,000 vehicle for 6 months', 'price': 150.0}, {'concept_key': 'overturning', 'display_value': 'Inclusion of overturning accidental damage for 6 months', 'price': 100.0}, {'concept_key': 'boom-damage', 'display_value': 'Accidental damage to crane boom attachment valued at RM20,000 for 6 months', 'price': 150.0}, {'concept_key': 'tool-of-trade', 'display_value': 'Third party liability risks while vehicle is operating as a tool of trade for 6 months', 'price': 50.0}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal liability of passengers for 6 months', 'price': 3.75}, {'concept_key': 'increased-tppd', 'display_value': 'Upgrades third party property damage limit from RM3M to RM6M for 6 months', 'price': 35.0}]}]}, {'company_slug': 'takaful-malaysia', 'company_name': 'Takaful Malaysia', 'products': [{'product_key': 'takaful-mymotor-private-motor', 'product_name': 'Takaful myMotor (Private Car)', 'segment_key': 'private', 'vehicle_key': 'car', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, overturning, fire, explosion, lightning, theft, transit', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and accidental death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'accidental-death', 'display_value': 'Built-in RM15,000 accidental death and disability cover per person', 'price': 0}, {'concept_key': 'roadside-assistance', 'display_value': '24/7 nationwide roadside assistance helpline 1800-888-788 & Tele Bantuan', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Towing assistance up to RM200 to nearest approved repairer', 'price': 0}, {'concept_key': 'cashback-no-claim', 'display_value': '15% surplus sharing cashback payout via Hibah if no claims made', 'price': 0}, {'concept_key': 'all-drivers', 'display_value': 'Automatic coverage for any authorized licensed driver without excess penalty', 'price': 0}, {'concept_key': 'agreed-value-market-value', 'display_value': 'Settlement based on ISM Market Valuation without under-insurance penalty', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': '0% betterment for cars under 5 yrs up to 40% for 10+ yrs', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen repair/replacement coverage up to RM1,000 without NCD loss', 'price': 150.0}, {'concept_key': 'special-perils', 'display_value': 'Flood, typhoon, landslide, natural disaster for RM50,000 car (0.20% rate)', 'price': 100.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM50,000 car (0.30% rate)', 'price': 150.0}, {'concept_key': 'legal-liability-to-passengers', 'display_value': 'Legal liability to passengers for 4 passenger seats (RM7.50/seat)', 'price': 30.0}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal liability of passengers for third-party negligence', 'price': 7.5}, {'concept_key': 'ncd-relief', 'display_value': 'Protects and compensates accumulated NCD from at-fault claim reset', 'price': 85.0}, {'concept_key': 'repair-allowance', 'display_value': 'Assessed repair time compensation of RM50/day for 7 days', 'price': 55.0}, {'concept_key': 'key-replacement', 'display_value': 'Lock and key replacement reimbursement up to RM1,000', 'price': 35.0}, {'concept_key': 'car-detailing-cleanup', 'display_value': 'Flood towing and interior cleaning reimbursement up to RM1,000', 'price': 28.0}, {'concept_key': 'betterment-protection', 'display_value': 'Full waiver of betterment contribution for cars aged 5 to 11 years', 'price': 80.0}, {'concept_key': 'increased-tppd', 'display_value': 'Upgrades third party property damage limit from RM3M to RM4M', 'price': 22.5}, {'concept_key': 'cross-border', 'display_value': 'Geographic extension to Thailand/Kalimantan for 14 days', 'price': 40.0}], 'bundles': [{'package_key': 'stmb-driver-passenger-protection', 'name': 'Driver Passenger Protection', 'plans': [{'plan_key': 'plan-a', 'name': 'Plan A (RM 60)', 'price': 60.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 20,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 20,000 per person'}, {'concept_key': 'double-indemnity', 'display_value': 'RM 20,000 Traffic Accident Double Indemnity'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 1,000 Medical Expenses'}, {'concept_key': 'hospital-income', 'display_value': 'RM 50/day up to 30 days'}]}, {'plan_key': 'plan-b', 'name': 'Plan B (RM 120)', 'price': 120.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 50,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 50,000 per person'}, {'concept_key': 'double-indemnity', 'display_value': 'RM 50,000 Traffic Accident Double Indemnity'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 2,500 Medical Expenses'}, {'concept_key': 'hospital-income', 'display_value': 'RM 100/day up to 30 days'}]}, {'plan_key': 'plan-c', 'name': 'Plan C (RM 220)', 'price': 220.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 100,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 100,000 per person'}, {'concept_key': 'double-indemnity', 'display_value': 'RM 100,000 Traffic Accident Double Indemnity'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 5,000 Medical Expenses'}, {'concept_key': 'hospital-income', 'display_value': 'RM 150/day up to 30 days'}]}, {'plan_key': 'plan-d', 'name': 'Plan D (RM 400)', 'price': 400.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 200,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 200,000 per person'}, {'concept_key': 'double-indemnity', 'display_value': 'RM 200,000 Traffic Accident Double Indemnity'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 10,000 Medical Expenses'}, {'concept_key': 'hospital-income', 'display_value': 'RM 200/day up to 30 days'}]}]}, {'package_key': 'stmb-motor-pa-plus', 'name': 'Motor PA Plus', 'plans': [{'plan_key': 'pa-plus-1', 'name': 'Motor PA Plus Plan 1 (RM 48)', 'price': 48.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 20,000 PA per person'}, {'concept_key': 'auto-assistance', 'display_value': 'Extended Breakdown Towing up to 100 km'}]}]}]}, {'product_key': 'stmb-commercial-car-takaful', 'product_name': 'Commercial Car Takaful (Company Car)', 'segment_key': 'company_commercial', 'vehicle_key': 'car', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Commercial fleet collision, fire, theft, overturning, transit', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'roadside-assistance', 'display_value': '24/7 corporate roadside assistance & breakdown helpline', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Commercial towing assistance up to RM200 to panel repairer', 'price': 0}, {'concept_key': 'cashback-no-claim', 'display_value': 'Distributable surplus cashback payout via Hibah if no fleet claims', 'price': 0}, {'concept_key': 'all-drivers', 'display_value': 'Covers authorized company employees holding valid driving licenses', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': '0% betterment under 5 yrs up to 40% for 10+ yrs', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen repair/replacement up to RM1,000 for 6 months', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Flood, typhoon, landslide for RM50,000 car for 6 months (0.20%/2)', 'price': 50.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for 6 months', 'price': 75.0}, {'concept_key': 'legal-liability-to-passengers', 'display_value': 'Legal liability to passengers for 4 seats for 6 months (RM3.75/seat)', 'price': 15.0}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal liability of passengers for third-party negligence for 6 months', 'price': 3.75}, {'concept_key': 'ncd-relief', 'display_value': 'Fleet NCD protection from single claim reset for 6 months', 'price': 42.5}, {'concept_key': 'repair-allowance', 'display_value': 'Assessed repair time of RM50/day for 7 days for 6 months', 'price': 27.5}, {'concept_key': 'key-replacement', 'display_value': 'Replacement reimbursement of lost/damaged vehicle keys for 6 months', 'price': 17.5}, {'concept_key': 'car-detailing-cleanup', 'display_value': 'Flash flood towing and interior cleaning reimbursement for 6 months', 'price': 14.0}, {'concept_key': 'betterment-protection', 'display_value': 'Waives parts betterment deduction for commercial fleet for 6 months', 'price': 40.0}, {'concept_key': 'increased-tppd', 'display_value': 'Upgrades third party property damage from RM3M to RM4M for 6 months', 'price': 11.25}]}, {'product_key': 'stmb-motorcycle-private', 'product_name': 'Motorcycle Takaful (Private)', 'segment_key': 'private', 'vehicle_key': 'motorcycle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft, overturning, Penang transit', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'roadside-assistance', 'display_value': '24/7 nationwide emergency assistance helpline (1800-888-788)', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Emergency towing cost reimbursement up to RM50 to nearest workshop', 'price': 0}, {'concept_key': 'cashback-no-claim', 'display_value': '15% surplus sharing cashback payout via Hibah if no claims made', 'price': 0}, {'concept_key': 'all-drivers', 'display_value': 'Covers any authorized rider holding a valid motorcycle licence', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Tariff betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'special-perils', 'display_value': 'Full flood, typhoon, storm, landslide for RM5,000 motorcycle', 'price': 12.5}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM5,000 motorcycle', 'price': 15.0}, {'concept_key': 'legal-liability-to-pillion', 'display_value': 'Legal liability to pillion passenger (1 pillion seat)', 'price': 7.5}, {'concept_key': 'cross-border', 'display_value': 'Geographic extension to Thailand/Kalimantan for 14 days', 'price': 20.0}], 'bundles': [{'package_key': 'stmb-bike-pa-plus', 'name': 'Bike PA Plus', 'plans': [{'plan_key': 'bike-pa-1', 'name': 'Plan 1 (RM 25)', 'price': 25.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 10,000 Accidental Death/TPD + Badal Hajj RM 3,000'}]}, {'plan_key': 'bike-pa-3', 'name': 'Plan 3 - Pillion (RM 40)', 'price': 40.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'Comprehensive PA for rider and pillion + Badal Hajj'}]}]}]}, {'product_key': 'stmb-motorcycle-commercial', 'product_name': 'Motorcycle Takaful (Commercial Despatch)', 'segment_key': 'company_commercial', 'vehicle_key': 'motorcycle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft while carrying business goods/samples', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'roadside-assistance', 'display_value': '24/7 commercial emergency assistance dispatch helpline', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Towing cost reimbursement up to RM50 to nearest workshop', 'price': 0}, {'concept_key': 'cashback-no-claim', 'display_value': 'Distributable surplus cashback payout via Hibah if no claims', 'price': 0}, {'concept_key': 'all-drivers', 'display_value': 'Covers registered licensed commercial despatch riders', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'special-perils', 'display_value': 'Full flood and landslide for RM5,000 motorcycle for 6 months', 'price': 6.25}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for 6 months', 'price': 7.5}, {'concept_key': 'legal-liability-to-pillion', 'display_value': 'Legal liability to pillion/assistant for 6 months', 'price': 3.75}, {'concept_key': 'cross-border', 'display_value': 'Geographic despatch extension to Thailand for 6 months', 'price': 15.0}]}, {'product_key': 'stmb-commercial-lorry-own-goods', 'product_name': 'Commercial Lorry (Own Goods - C Permit)', 'segment_key': 'company_commercial', 'vehicle_key': 'commercial_vehicle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft, transit of own enterprise goods', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'cashback-no-claim', 'display_value': 'Distributable surplus cashback payout via Hibah if no fleet claims', 'price': 0}, {'concept_key': 'all-drivers', 'display_value': 'Covers authorized corporate drivers holding valid GDL licenses', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Tariff commercial vehicle betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen repair/replacement up to RM2,000 for 6 months', 'price': 150.0}, {'concept_key': 'special-perils', 'display_value': 'Full flood, typhoon, landslide for RM100,000 lorry for 6 months', 'price': 125.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM100,000 lorry for 6 months', 'price': 150.0}, {'concept_key': 'authorized-attendants', 'display_value': 'Legal liability to 1 cabin attendant/passenger for 6 months', 'price': 3.75}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal liability of passengers for third-party negligence for 6 months', 'price': 3.75}, {'concept_key': 'auto-assistance', 'display_value': 'Commercial heavy vehicle towing and winching recovery package for 6 months', 'price': 180.0}, {'concept_key': 'cargo-protection', 'display_value': 'Loss or damage protection to own enterprise goods in transit for 6 months', 'price': 250.0}, {'concept_key': 'increased-tppd', 'display_value': 'Upgrades third party property damage from RM3M to RM5M for 6 months', 'price': 45.0}]}, {'product_key': 'stmb-commercial-lorry-general-haulage', 'product_name': 'Commercial Lorry (General Haulage - A Permit)', 'segment_key': 'company_commercial', 'vehicle_key': 'commercial_vehicle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft, transit carrying third-party freight', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'cashback-no-claim', 'display_value': 'Distributable surplus cashback payout via Hibah if no fleet claims', 'price': 0}, {'concept_key': 'all-drivers', 'display_value': 'Covers authorized professional heavy vehicle drivers with valid E/GDL', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Tariff commercial vehicle betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen repair/replacement up to RM2,000 for 6 months', 'price': 150.0}, {'concept_key': 'special-perils', 'display_value': 'Full flood, typhoon, landslide for RM100,000 lorry for 6 months', 'price': 125.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM100,000 lorry for 6 months', 'price': 150.0}, {'concept_key': 'authorized-attendants', 'display_value': 'Legal liability to 1 cabin co-driver/passenger for 6 months', 'price': 3.75}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal liability of passengers for third-party negligence for 6 months', 'price': 3.75}, {'concept_key': 'auto-assistance', 'display_value': 'Heavy prime mover towing, winching, and recovery rider for 6 months', 'price': 220.0}, {'concept_key': 'cargo-protection', 'display_value': 'Carrier legal liability for third-party freight in transit for 6 months', 'price': 350.0}, {'concept_key': 'increased-tppd', 'display_value': 'Upgrades third party property damage from RM3M to RM5M for 6 months', 'price': 45.0}]}]}, {'company_slug': 'tune-protect', 'company_name': 'Tune Protect', 'products': [{'product_key': 'tune-private-car-protector', 'product_name': 'Tune Protect Motor Easy (Private Car)', 'segment_key': 'private', 'vehicle_key': 'car', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, overturning, fire, explosion, lightning, theft, transit', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and accidental death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Accidental towing assistance to nearest approved repairer up to RM200', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Tariff betterment scale (0% under 5 yrs up to 40% for 10+ yrs)', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}, {'concept_key': 'payd-telematics', 'display_value': 'PAYD Smart telematics opt-in offering 15% to 20% premium cash refund', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen, windows, and sunroof repair/replacement up to RM1,000 (15% rate)', 'price': 150.0}, {'concept_key': 'special-perils', 'display_value': 'Full flood, typhoon, storm, landslide for RM50,000 car (0.20% rate)', 'price': 100.0}, {'concept_key': 'first-loss-flood', 'display_value': 'Special perils on first loss basis up to RM10,000 (Endorsement 117)', 'price': 50.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM50,000 car (0.30% rate)', 'price': 150.0}, {'concept_key': 'legal-liability-to-passengers', 'display_value': 'Legal liability to passengers for 4 passenger seats (RM5/seat)', 'price': 20.0}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal liability of passengers for third-party negligence', 'price': 7.5}, {'concept_key': 'all-drivers', 'display_value': 'Waiver of RM400 compulsory excess for unnamed authorized drivers', 'price': 20.0}, {'concept_key': 'betterment-protection', 'display_value': '0% betterment contribution on original parts for 5 to 15 yrs (End. 120)', 'price': 100.0}, {'concept_key': 'repair-allowance', 'display_value': 'Assessed repair time compensation of RM50/day for 7 days (End. 112)', 'price': 52.5}, {'concept_key': 'repaint-spray-paint', 'display_value': 'Whole car spray painting coverage up to RM2,000 (Plan 2)', 'price': 90.0}, {'concept_key': 'vehicle-accessories', 'display_value': 'Non-standard accessories coverage up to RM1,000 (15% rate)', 'price': 150.0}, {'concept_key': 'auto-assistance', 'display_value': 'Standalone 24-hour unlimited mileage towing & breakdown assistance', 'price': 60.0}, {'concept_key': 'cross-border', 'display_value': 'Cross-border extension to Thailand with RM100,000 TPPD limit', 'price': 50.0}, {'concept_key': 'ferry-transit', 'display_value': 'Marine transit coverage between Sabah and Labuan', 'price': 35.0}], 'bundles': [{'package_key': 'tune-autobuddy-bundle', 'name': 'Autobuddy Multi-Rider Package', 'plans': [{'plan_key': 'plan-a', 'name': 'Plan A (RM 65)', 'price': 65.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 20,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 20,000 per person'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 200 per person'}, {'concept_key': 'bereavement-allowance', 'display_value': 'RM 1,000 per person'}, {'concept_key': 'hospital-income', 'display_value': 'RM 50/day (max 30 days)'}, {'concept_key': 'auto-assistance', 'display_value': 'Unlimited 24-hour breakdown & towing'}, {'concept_key': 'flood-relief-allowance', 'display_value': 'RM 1,500 Flood damage reimbursement'}]}, {'plan_key': 'plan-b', 'name': 'Plan B (RM 85)', 'price': 85.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 30,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 30,000 per person'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 400 per person'}, {'concept_key': 'bereavement-allowance', 'display_value': 'RM 1,000 per person'}, {'concept_key': 'hospital-income', 'display_value': 'RM 50/day (max 30 days)'}, {'concept_key': 'auto-assistance', 'display_value': 'Unlimited 24-hour breakdown & towing'}, {'concept_key': 'flood-relief-allowance', 'display_value': 'RM 1,500 Flood damage reimbursement'}]}, {'plan_key': 'plan-c', 'name': 'Plan C (RM 110)', 'price': 110.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 40,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 40,000 per person'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 700 per person'}, {'concept_key': 'bereavement-allowance', 'display_value': 'RM 1,000 per person'}, {'concept_key': 'hospital-income', 'display_value': 'RM 50/day (max 30 days)'}, {'concept_key': 'auto-assistance', 'display_value': 'Unlimited 24-hour breakdown & towing'}, {'concept_key': 'flood-relief-allowance', 'display_value': 'RM 1,500 Flood damage reimbursement'}]}, {'plan_key': 'plan-d', 'name': 'Plan D (RM 135)', 'price': 135.0, 'items': [{'concept_key': 'accidental-death', 'display_value': 'RM 50,000 per person'}, {'concept_key': 'permanent-disablement', 'display_value': 'RM 50,000 per person'}, {'concept_key': 'medical-expenses', 'display_value': 'RM 800 per person'}, {'concept_key': 'bereavement-allowance', 'display_value': 'RM 1,000 per person'}, {'concept_key': 'hospital-income', 'display_value': 'RM 50/day (max 30 days)'}, {'concept_key': 'auto-assistance', 'display_value': 'Unlimited 24-hour breakdown & towing'}, {'concept_key': 'flood-relief-allowance', 'display_value': 'RM 1,500 Flood damage reimbursement'}]}]}, {'package_key': 'tune-motorshield-bundle', 'name': 'MotorShield 8-in-1 Comprehensive Bundle', 'plans': [{'plan_key': 'motorshield-annual', 'name': 'MotorShield Bundle (RM 135)', 'price': 135.0, 'items': [{'concept_key': 'all-drivers', 'display_value': 'All Drivers Excess Waiver Included'}, {'concept_key': 'total-loss-theft-allowance', 'display_value': '10% SI Convenience Cash up to RM 10,000'}, {'concept_key': 'side-mirror-protection', 'display_value': 'Side Mirror Cover up to RM 1,000 (NCD preserved)'}, {'concept_key': 'key-replacement', 'display_value': 'Key Replacement Reimbursement up to RM 1,000'}, {'concept_key': 'legal-liability-to-passengers', 'display_value': 'Legal Liability to Passengers Included'}, {'concept_key': 'accidental-death', 'display_value': 'RM 20,000 PA per person up to RM 100,000'}, {'concept_key': 'auto-assistance', 'display_value': '24-hour unlimited emergency breakdown & towing'}, {'concept_key': 'flood-relief-allowance', 'display_value': 'Lump sum compassionate flood relief RM 1,500'}]}]}]}, {'product_key': 'tune-commercial-car-policy', 'product_name': 'Commercial Car Policy (Company Car)', 'segment_key': 'company_commercial', 'vehicle_key': 'car', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft, overturning, business transit', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Accidental towing assistance to nearest approved repairer up to RM200', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Tariff commercial betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Commercial windscreen repair/replacement up to RM1,000 for 6 months', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Full flood, typhoon, landslide for RM50,000 car for 6 months (0.20%/2)', 'price': 50.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM50,000 car for 6 months', 'price': 75.0}, {'concept_key': 'legal-liability-to-passengers', 'display_value': 'Legal liability to passengers for 4 seats for 6 months (RM2.50/seat)', 'price': 10.0}, {'concept_key': 'legal-liability-of-passengers', 'display_value': 'Legal liability of passengers for third-party negligence for 6 months', 'price': 3.75}, {'concept_key': 'all-drivers', 'display_value': 'Commercial all-authorized drivers extension for employees', 'price': 10.0}, {'concept_key': 'vehicle-accessories', 'display_value': 'Non-standard accessories coverage up to RM1,000 for 6 months', 'price': 75.0}, {'concept_key': 'auto-assistance', 'display_value': 'Semi-annual 24-hour emergency accident & breakdown towing support', 'price': 35.0}, {'concept_key': 'cross-border', 'display_value': 'Cross-border commercial extension into Thailand for 6 months', 'price': 25.0}], 'bundles': [{'package_key': 'tune-motorshield-corporate', 'name': 'MotorShield Corporate (6 Months)', 'plans': [{'plan_key': 'motorshield-6m', 'name': 'MotorShield Corporate 6M (RM 67.50)', 'price': 67.5, 'items': [{'concept_key': 'all-drivers', 'display_value': 'All Drivers Excess Waiver Included'}, {'concept_key': 'side-mirror-protection', 'display_value': 'Side Mirror Cover up to RM 1,000'}, {'concept_key': 'key-replacement', 'display_value': 'Key Replacement up to RM 1,000'}, {'concept_key': 'legal-liability-to-passengers', 'display_value': 'Legal Liability to Passengers Included'}, {'concept_key': 'accidental-death', 'display_value': 'RM 20,000 PA per person for 5 seats'}, {'concept_key': 'auto-assistance', 'display_value': '24/7 Breakdown & Towing Assistance'}, {'concept_key': 'flood-relief-allowance', 'display_value': 'Flood Allowance RM 1,500'}]}]}]}, {'product_key': 'tune-motorcycle-policy-private', 'product_name': 'Motorcycle Policy (Private)', 'segment_key': 'private', 'vehicle_key': 'motorcycle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, lightning, explosion, theft, Penang transit', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Towing cost reimbursement up to RM50 to nearest workshop', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Tariff motorcycle betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'special-perils', 'display_value': 'Full flood, typhoon, storm, landslide for RM5,000 motorcycle (0.20% rate)', 'price': 10.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM5,000 motorcycle (0.30% rate)', 'price': 15.0}, {'concept_key': 'legal-liability-to-pillion', 'display_value': 'Legal liability to pillion passenger (1 pillion seat)', 'price': 5.0}, {'concept_key': 'vehicle-accessories', 'display_value': 'Non-standard accessories coverage up to RM500', 'price': 75.0}, {'concept_key': 'all-drivers', 'display_value': 'Extends policy coverage to any authorized licensed rider', 'price': 25.0}, {'concept_key': 'auto-assistance', 'display_value': '24/7 emergency breakdown and flat tyre towing up to 50 km', 'price': 30.0}, {'concept_key': 'cross-border', 'display_value': 'Geographic extension to Thailand for 1 year', 'price': 15.0}, {'concept_key': 'ferry-transit', 'display_value': 'Marine transit coverage between Sabah and Labuan', 'price': 15.0}]}, {'product_key': 'tune-motorcycle-policy-commercial', 'product_name': 'Motorcycle Policy (Commercial Despatch)', 'segment_key': 'company_commercial', 'vehicle_key': 'motorcycle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft while carrying business goods/samples', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Towing cost reimbursement up to RM50 to nearest workshop', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Tariff motorcycle betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'special-perils', 'display_value': 'Full flood, typhoon, landslide for RM5,000 motorcycle for 6 months', 'price': 5.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM5,000 motorcycle for 6 months', 'price': 7.5}, {'concept_key': 'legal-liability-to-pillion', 'display_value': 'Legal liability to pillion passenger for 6 months', 'price': 2.5}, {'concept_key': 'vehicle-accessories', 'display_value': 'Non-standard accessories coverage up to RM500 for 6 months', 'price': 37.5}, {'concept_key': 'all-drivers', 'display_value': 'Commercial dispatch all-riders authorization for licensed employees', 'price': 15.0}, {'concept_key': 'auto-assistance', 'display_value': '24/7 emergency roadside dispatch towing assistance for 6 months', 'price': 20.0}, {'concept_key': 'cross-border', 'display_value': 'Commercial cross-border extension to Thailand for 6 months', 'price': 10.0}, {'concept_key': 'ferry-transit', 'display_value': 'Marine transit coverage between Sabah and Labuan for 6 months', 'price': 7.5}]}, {'product_key': 'tune-commercial-lorry-own-goods', 'product_name': 'Commercial Lorry (Own Goods - C Permit)', 'segment_key': 'company_commercial', 'vehicle_key': 'commercial_vehicle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft, hijacking, transit of trade goods', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Accidental towing assistance to nearest approved repairer up to RM200', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Standard commercial vehicle tariff betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Commercial heavy vehicle windscreen/cabin glass up to RM1,000 for 6 months', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Full flood, typhoon, storm, landslide for RM100,000 lorry for 6 months', 'price': 100.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM100,000 lorry for 6 months', 'price': 150.0}, {'concept_key': 'authorized-attendants', 'display_value': 'Legal liability to 2 authorized cabin attendants/loaders for 6 months', 'price': 10.0}, {'concept_key': 'all-drivers', 'display_value': 'Commercial all-authorized drivers extension for company drivers with GDL', 'price': 15.0}, {'concept_key': 'increased-tppd', 'display_value': 'Upgrades third-party property damage limit from RM3M to RM6M for 6 months', 'price': 35.0}, {'concept_key': 'cross-border', 'display_value': 'Cross-border haulage extension into Thailand for 6 months', 'price': 25.0}, {'concept_key': 'ferry-transit', 'display_value': 'Marine transit coverage across Sabah and FT Labuan for 6 months', 'price': 50.0}]}, {'product_key': 'tune-commercial-lorry-general-haulage', 'product_name': 'Commercial Lorry (General Haulage - A Permit)', 'segment_key': 'company_commercial', 'vehicle_key': 'commercial_vehicle', 'coverage_key': 'comprehensive', 'default_benefits': [{'concept_key': 'own-damage', 'display_value': 'Accidental collision, fire, theft, transit carrying third-party goods', 'price': 0}, {'concept_key': 'third-party-bi', 'display_value': 'Unlimited coverage for third-party bodily injury and death', 'price': 0}, {'concept_key': 'third-party-property', 'display_value': 'Third-party property damage coverage up to RM3,000,000', 'price': 0}, {'concept_key': 'towing', 'display_value': 'Accidental towing assistance to nearest approved repairer up to RM200', 'price': 0}, {'concept_key': 'betterment-protection', 'display_value': 'Standard commercial vehicle tariff betterment scale', 'price': 0}, {'concept_key': 'legal-costs-defense', 'display_value': 'Court legal defense costs coverage up to RM2,000', 'price': 0}], 'addons': [{'concept_key': 'windscreen', 'display_value': 'Windscreen and cabin glass coverage up to RM1,000 for 6 months', 'price': 75.0}, {'concept_key': 'special-perils', 'display_value': 'Full flood and landslide for RM100,000 vehicle for 6 months', 'price': 100.0}, {'concept_key': 'strike-riot-civil-commotion', 'display_value': 'Strike, riot and civil commotion for RM100,000 vehicle for 6 months', 'price': 150.0}, {'concept_key': 'boom-damage', 'display_value': 'Accidental damage to crane boom while in use as tool of trade for 6 months', 'price': 125.0}, {'concept_key': 'tool-of-trade', 'display_value': 'Third party liability risks while operating as tool of trade for 6 months', 'price': 75.0}, {'concept_key': 'authorized-attendants', 'display_value': 'Legal liability to 2 crew members/loaders for 6 months', 'price': 10.0}, {'concept_key': 'all-drivers', 'display_value': 'Commercial all-authorized drivers for licensed haulage drivers', 'price': 15.0}, {'concept_key': 'increased-tppd', 'display_value': 'Upgrades third party property damage limit from RM3M to RM6M for 6 months', 'price': 35.0}, {'concept_key': 'cross-border', 'display_value': 'Cross-border haulage extension into Thailand for 6 months', 'price': 25.0}]}]}]
 
 
 def cleanup_junk(db, dry_run: bool) -> list[str]:
     logs = []
-
-    # 1. Clean junk / obsolete catalogs
-    junk_catalogs = db.scalars(
-        select(BenefitCatalog).where(
-            BenefitCatalog.name.in_([
-                "Towing",
-                "Q-Drive Standard",
-                "QBE Private Car",
-                "AmAssurance Private Car",
-                "Etiqa Motor Comprehensive",
-                "Takaful myMotor Private Car (Draft)",
-                "Takaful myMotor Private Car",
-            ])
-        )
-    ).all()
-
-    cat_ids = [c.id for c in junk_catalogs]
-    if cat_ids:
-        revisions = db.scalars(
-            select(BenefitCatalogRevision).where(BenefitCatalogRevision.catalog_id.in_(cat_ids))
-        ).all()
-        rev_ids = [r.id for r in revisions]
-
-        packages = (
-            db.scalars(select(BenefitPackage).where(BenefitPackage.catalog_revision_id.in_(rev_ids))).all()
-            if rev_ids
-            else []
-        )
-        pkg_ids = [p.id for p in packages]
-
-        for cat in junk_catalogs:
-            logs.append(f"Hard-delete junk catalog '{cat.name}' (id={cat.id})")
-
-        if not dry_run:
-            db.execute(text("SET session_replication_role = 'replica'"))
-            try:
-                db.execute(
-                    update(QuotationDraft)
-                    .where(QuotationDraft.catalog_revision_id.in_(rev_ids))
-                    .values(catalog_revision_id=None)
-                )
-                db.execute(
-                    delete(TrashRecord).where(
-                        TrashRecord.entity_type == "benefit_catalog",
-                        TrashRecord.entity_id.in_(cat_ids),
-                    )
-                )
-                if pkg_ids:
-                    db.execute(delete(BenefitAlias).where(BenefitAlias.package_id.in_(pkg_ids)))
-                    plans = db.scalars(
-                        select(BenefitPackagePlan).where(BenefitPackagePlan.package_id.in_(pkg_ids))
-                    ).all()
-                    plan_ids = [pl.id for pl in plans]
-                    if plan_ids:
-                        db.execute(delete(BenefitPackagePlanItem).where(BenefitPackagePlanItem.plan_id.in_(plan_ids)))
-                        db.execute(delete(BenefitPackagePlan).where(BenefitPackagePlan.id.in_(plan_ids)))
-
-                if rev_ids:
-                    db.execute(delete(BenefitPackage).where(BenefitPackage.catalog_revision_id.in_(rev_ids)))
-                    db.execute(delete(BenefitRelation).where(BenefitRelation.catalog_revision_id.in_(rev_ids)))
-                    db.execute(delete(CatalogOffering).where(CatalogOffering.catalog_revision_id.in_(rev_ids)))
-                    db.execute(delete(BenefitCatalogRevision).where(BenefitCatalogRevision.id.in_(rev_ids)))
-
-                for cat in junk_catalogs:
-                    db.delete(cat)
-                db.flush()
-            finally:
-                db.execute(text("SET session_replication_role = 'origin'"))
-
-    # 2. Clean junk tiers (e.g. "Standard", "Towing 50km", "Towing Unlimited")
-    junk_tiers = db.scalars(
-        select(InsuranceProductTier).where(
-            or_(
-                InsuranceProductTier.name.in_(["Standard", "Towing 50km", "Towing Unlimited"]),
-                InsuranceProductTier.tier_key.in_(["standard", "towing-50km", "towing-unlimited"]),
-            )
-        )
-    ).all()
-    if junk_tiers:
-        tier_ids = [t.id for t in junk_tiers]
-        for t in junk_tiers:
-            logs.append(f"Hard-delete junk product tier '{t.name}' (key={t.tier_key})")
-        if not dry_run:
-            db.execute(text("SET session_replication_role = 'replica'"))
-            try:
-                db.execute(
-                    update(QuotationDraft)
-                    .where(QuotationDraft.tier_id.in_(tier_ids))
-                    .values(tier_id=None)
-                )
-                db.execute(
-                    delete(TrashRecord).where(
-                        TrashRecord.entity_type == "product_tier",
-                        TrashRecord.entity_id.in_(tier_ids),
-                    )
-                )
-                for t in junk_tiers:
-                    db.delete(t)
-                db.flush()
-            finally:
-                db.execute(text("SET session_replication_role = 'origin'"))
-
-    # 3. Clean junk / obsolete products
-    junk_products = db.scalars(
-        select(InsuranceProduct).where(
-            or_(
-                InsuranceProduct.product_key.in_([
-                    "towing",
-                    "q-drive",
-                    "amassurance-private-car",
-                    "etiqa-motor-comprehensive",
-                    "qbe-private-car",
-                    "takaful-mymotor-private-car",
-                ]),
-                InsuranceProduct.name.in_([
-                    "Towing",
-                    "Q-Drive",
-                    "AmAssurance Private Car",
-                    "Etiqa Motor Comprehensive",
-                    "QBE Private Car",
-                    "Takaful myMotor Private Car",
-                ]),
-            )
-        )
-    ).all()
-    if junk_products:
-        prod_ids = [p.id for p in junk_products]
-        for prod in junk_products:
-            logs.append(f"Hard-delete junk product '{prod.name}' (key={prod.product_key})")
-        if not dry_run:
-            db.execute(text("SET session_replication_role = 'replica'"))
-            try:
-                db.execute(
-                    update(QuotationDraft)
-                    .where(QuotationDraft.product_id.in_(prod_ids))
-                    .values(product_id=None)
-                )
-                db.execute(
-                    delete(TrashRecord).where(
-                        TrashRecord.entity_type == "insurance_product",
-                        TrashRecord.entity_id.in_(prod_ids),
-                    )
-                )
-                db.execute(delete(BenefitAlias).where(BenefitAlias.product_id.in_(prod_ids)))
-                db.execute(delete(InsuranceProductTier).where(InsuranceProductTier.product_id.in_(prod_ids)))
-                for prod in junk_products:
-                    db.delete(prod)
-                db.flush()
-            finally:
-                db.execute(text("SET session_replication_role = 'origin'"))
-
+    db.execute(delete(TrashRecord).where(TrashRecord.purge_after < utcnow()))
+    logs.append("Purged expired trash records")
     return logs
 
 
 def seed_global_benefits(db, dry_run: bool) -> dict[str, BenefitConcept]:
-    assets_by_label = {a.label: a for a in db.scalars(select(BusinessAsset).where(BusinessAsset.asset_kind == "benefit_art")).all()}
+    assets_by_label = {a.label: a for a in db.scalars(select(BusinessAsset)).all()}
     concepts_by_key = {}
-
-    for data in BENEFIT_CONCEPTS_DATA:
-        key = data["concept_key"]
-        concept = db.scalar(select(BenefitConcept).where(BenefitConcept.concept_key == key))
-        asset = assets_by_label.get(data["asset_label"])
-
-        if concept is None:
+    for c_data in BENEFIT_CONCEPTS_DATA:
+        k = c_data["concept_key"]
+        concept = db.scalar(select(BenefitConcept).where(BenefitConcept.concept_key == k))
+        asset_obj = assets_by_label.get(c_data["asset_label"])
+        if not concept:
             concept = BenefitConcept(
                 id=new_id(),
-                concept_key=key,
-                label=data["label"],
-                status="active",
+                concept_key=k,
+                label=c_data["label"],
+                value_schema={"type": "object"},
+                display_template="{label}",
+                required_variables=[],
+                optional_variables=[],
+                validation_rules={},
+                default_asset_id=asset_obj.id if asset_obj else None,
+                description=c_data["description"],
+                demo_value=None,
+                match_dataset=c_data["match_dataset"],
+                value_pattern_dataset=[],
+                description_variants=[{"category": c_data.get("category", "default")}],
+                sort_order=c_data["sort_order"],
                 revision=1,
+                status="active",
             )
             if not dry_run:
                 db.add(concept)
+                db.flush()
+        else:
+            if not dry_run:
+                concept.label = c_data["label"]
+                concept.description = c_data["description"]
+                concept.sort_order = c_data["sort_order"]
+                concept.match_dataset = c_data["match_dataset"]
+                if asset_obj:
+                    concept.default_asset_id = asset_obj.id
+                concept.description_variants = [{"category": c_data.get("category", "default")}]
+                db.flush()
+        concepts_by_key[k] = concept
 
-        if not dry_run:
-            concept.label = data["label"]
-            concept.description = data["description"]
-            concept.default_asset_id = asset.id if asset else None
-            concept.match_dataset = data["match_dataset"]
-            concept.sort_order = data["sort_order"]
-            concept.status = "active"
-            concept.value_schema = {
-                "category": data.get("category", "default" if data["sort_order"] <= 11 else "addon"),
-                "variants": data.get("variants", []),
-            }
-            concept.description_variants = _derive_description_variant(data["description"])
-        concepts_by_key[key] = concept
-
-    # Purge any obsolete concepts not in the canonical 34 list
-    valid_keys = {d["concept_key"] for d in BENEFIT_CONCEPTS_DATA}
-    if not dry_run:
-        for old_concept in db.scalars(select(BenefitConcept).where(~BenefitConcept.concept_key.in_(valid_keys))).all():
-            db.execute(delete(BenefitAlias).where(BenefitAlias.benefit_id == old_concept.id))
-            db.delete(old_concept)
-        db.flush()
-        db.commit()
-
-    # Seed aliases
-    for raw_phrase, ckey in GLOBAL_ALIASES:
-        target_concept = concepts_by_key.get(ckey)
-        if not target_concept:
+    # Scoped aliases with in-memory deduplication
+    existing_aliases = {(a.benefit_id, a.normalized_phrase) for a in db.scalars(select(BenefitAlias)).all()}
+    for c_data in BENEFIT_CONCEPTS_DATA:
+        k = c_data["concept_key"]
+        target = concepts_by_key.get(k)
+        if not target:
             continue
-        norm = _normalize_phrase(raw_phrase)
-        existing = db.scalar(
-            select(BenefitAlias).where(
-                BenefitAlias.normalized_phrase == norm,
-                BenefitAlias.scope == "global",
-            )
-        )
-        if existing is None and not dry_run:
-            alias = BenefitAlias(
-                id=new_id(),
-                scope="global",
-                company_id=None,
-                product_id=None,
-                package_id=None,
-                benefit_id=target_concept.id,
-                phrase=raw_phrase.strip(),
-                normalized_phrase=norm,
-                status="active",
-            )
-            db.add(alias)
+        for phrase in c_data.get("match_dataset", []):
+            norm = _normalize_phrase(phrase)
+            if not norm or (target.id, norm) in existing_aliases:
+                continue
+            existing_aliases.add((target.id, norm))
+            if not dry_run:
+                alias = BenefitAlias(
+                    id=new_id(),
+                    benefit_id=target.id,
+                    phrase=phrase,
+                    normalized_phrase=norm,
+                    scope="global",
+                    status="active",
+                )
+                db.add(alias)
 
     if not dry_run:
-        db.commit()
+        db.flush()
 
     return concepts_by_key
 
@@ -690,473 +134,339 @@ def seed_global_benefits(db, dry_run: bool) -> dict[str, BenefitConcept]:
 def seed_company_package_chains(db, dry_run: bool) -> list[str]:
     logs = []
     concepts = {bc.concept_key: bc for bc in db.scalars(select(BenefitConcept)).all()}
-    segment = db.scalar(select(Segment).where(Segment.segment_key == "private"))
-    vehicle = db.scalar(select(VehicleCategory).where(VehicleCategory.category_key == "car"))
-    coverage = db.scalar(select(CoverageType).where(CoverageType.coverage_key == "comprehensive"))
+    segments = {s.segment_key: s for s in db.scalars(select(Segment)).all()}
+    vehicles = {v.category_key: v for v in db.scalars(select(VehicleCategory)).all()}
+    coverages = {c.coverage_key: c for c in db.scalars(select(CoverageType)).all()}
 
-    from app.models.tables import utcnow
-
-    insurer_configs = [
-        # ── 1. QBE (Add-on System) ───────────────────────────────────────────
-        {
-            "company_slug": "qbe",
-            "company_name": "QBE",
-            "products": [
-                {
-                    "product_key": "qbe-private-car-protector",
-                    "product_name": "Private Car Protector",
-                    "is_package_system": False,
-                    "default_benefits": [
-                        {"concept_key": "towing", "display_value": "As per policy"},
-                        {"concept_key": "roadside-assistance", "display_value": "RM500"},
-                        {"concept_key": "betterment-protection", "display_value": "Up to 10 years old vehicle age"},
-                        {"concept_key": "total-loss-theft-allowance", "display_value": "5% or up to RM5,000 coverage, whichever is lower"},
-                        {"concept_key": "key-replacement", "display_value": "Up to RM500"},
-                    ],
-                    "addons": [
-                        {"concept_key": "windscreen"},
-                        {"concept_key": "special-perils"},
-                        {"concept_key": "strike-riot-civil-commotion"},
-                        {"concept_key": "legal-liability-to-passengers"},
-                        {"concept_key": "vehicle-accessories"},
-                        {"concept_key": "out-of-pocket-allowance"},
-                        {"concept_key": "driver-passenger-protector"},
-                        {"concept_key": "flood-relief-allowance"},
-                    ],
-                }
-            ],
-        },
-
-        # ── 2. AmAssurance / Liberty (Package System) ────────────────────────
-        {
-            "company_slug": "amassurance",
-            "company_name": "AmAssurance",
-            "products": [
-                {
-                    "product_key": "amassurance-private-car-comprehensive",
-                    "product_name": "Private Car Comprehensive",
-                    "is_package_system": True,
-                    "packages": [
-                        {
-                            "package_key": "lite",
-                            "name": "auto365 Comprehensive Lite",
-                            "sort_order": 1,
-                            "default_benefits": [
-                                {"concept_key": "towing"},
-                                {"concept_key": "roadside-assistance"},
-                                {"concept_key": "repair-workmanship-warranty"},
-                            ],
-                            "addons": [
-                                {"concept_key": "all-drivers"},
-                                {"concept_key": "personal-accident"},
-                                {"concept_key": "betterment-protection"},
-                                {"concept_key": "total-loss-theft-allowance"},
-                                {"concept_key": "key-replacement"},
-                                {"concept_key": "flood-relief-allowance"},
-                                {"concept_key": "personal-belongings-theft"},
-                                {"concept_key": "ambulance-fees"},
-                                {"concept_key": "windscreen"},
-                                {"concept_key": "special-perils"},
-                                {"concept_key": "legal-liability-to-passengers"},
-                                {"concept_key": "legal-liability-of-passengers"},
-                                {"concept_key": "strike-riot-civil-commotion"},
-                                {"concept_key": "e-hailing-extension"},
-                                {"concept_key": "private-car-365"},
-                            ],
-                        },
-                        {
-                            "package_key": "plus",
-                            "name": "auto365 Comprehensive Plus",
-                            "sort_order": 2,
-                            "default_benefits": [
-                                {"concept_key": "towing"},
-                                {"concept_key": "roadside-assistance"},
-                                {"concept_key": "repair-workmanship-warranty"},
-                                {"concept_key": "all-drivers"},
-                                {"concept_key": "flood-relief-allowance"},
-                                {"concept_key": "key-replacement"},
-                                {"concept_key": "personal-belongings-theft"},
-                                {"concept_key": "ambulance-fees"},
-                            ],
-                            "addons": [
-                                {"concept_key": "personal-accident"},
-                                {"concept_key": "betterment-protection"},
-                                {"concept_key": "total-loss-theft-allowance"},
-                                {"concept_key": "windscreen"},
-                                {"concept_key": "special-perils"},
-                                {"concept_key": "legal-liability-to-passengers"},
-                                {"concept_key": "legal-liability-of-passengers"},
-                                {"concept_key": "strike-riot-civil-commotion"},
-                                {"concept_key": "e-hailing-extension"},
-                                {"concept_key": "private-car-365"},
-                            ],
-                        },
-                        {
-                            "package_key": "premier",
-                            "name": "auto365 Comprehensive Premier",
-                            "sort_order": 3,
-                            "default_benefits": [
-                                {"concept_key": "towing"},
-                                {"concept_key": "roadside-assistance"},
-                                {"concept_key": "repair-workmanship-warranty"},
-                                {"concept_key": "all-drivers"},
-                                {"concept_key": "flood-relief-allowance"},
-                                {"concept_key": "key-replacement"},
-                                {"concept_key": "personal-belongings-theft"},
-                                {"concept_key": "ambulance-fees"},
-                                {"concept_key": "total-loss-theft-allowance"},
-                                {"concept_key": "betterment-protection"},
-                            ],
-                            "addons": [
-                                {"concept_key": "personal-accident"},
-                                {"concept_key": "windscreen"},
-                                {"concept_key": "special-perils"},
-                                {"concept_key": "legal-liability-to-passengers"},
-                                {"concept_key": "legal-liability-of-passengers"},
-                                {"concept_key": "strike-riot-civil-commotion"},
-                                {"concept_key": "e-hailing-extension"},
-                                {"concept_key": "private-car-365"},
-                            ],
-                        },
-                        {
-                            "package_key": "all-inclusive",
-                            "name": "Comprehensive All-Inclusive",
-                            "sort_order": 4,
-                            "default_benefits": [
-                                {"concept_key": "towing"},
-                                {"concept_key": "roadside-assistance"},
-                                {"concept_key": "repair-workmanship-warranty"},
-                                {"concept_key": "all-drivers"},
-                                {"concept_key": "personal-accident"},
-                                {"concept_key": "betterment-protection"},
-                                {"concept_key": "total-loss-theft-allowance"},
-                                {"concept_key": "key-replacement"},
-                                {"concept_key": "flood-relief-allowance"},
-                                {"concept_key": "personal-belongings-theft"},
-                                {"concept_key": "ambulance-fees"},
-                            ],
-                            "addons": [],
-                        },
-                    ],
-                }
-            ],
-        },
-
-        # ── 3. Takaful Malaysia (Add-on System) ──────────────────────────────
-        {
-            "company_slug": "takaful-malaysia",
-            "company_name": "Takaful Malaysia",
-            "products": [
-                {
-                    "product_key": "takaful-mymotor-private-motor",
-                    "product_name": "Takaful myMotor - Private Motor",
-                    "is_package_system": False,
-                    "default_benefits": [
-                        {"concept_key": "personal-accident", "label_override": "Accidental Death / Total Permanent Disability", "display_value": "RM15,000 per life"},
-                        {"concept_key": "towing", "display_value": "RM200"},
-                        {"concept_key": "roadside-assistance", "display_value": "24/7"},
-                    ],
-                    "addons": [
-                        {"concept_key": "windscreen"},
-                        {"concept_key": "special-perils"},
-                        {"concept_key": "legal-liability-to-passengers"},
-                        {"concept_key": "legal-liability-of-passengers"},
-                        {"concept_key": "strike-riot-civil-commotion"},
-                        {"concept_key": "cashback-no-claim"},
-                        {"concept_key": "motor-pa-plus"},
-                        {"concept_key": "betterment-protection", "label_override": "Waiver of Betterment"},
-                    ],
-                },
-                {
-                    "product_key": "myclick-takaful-car",
-                    "product_name": "myClick Takaful Car",
-                    "is_package_system": False,
-                    "default_benefits": [
-                        {"concept_key": "personal-accident"},
-                        {"concept_key": "all-drivers"},
-                        {"concept_key": "towing"},
-                        {"concept_key": "roadside-assistance"},
-                        {"concept_key": "repair-workmanship-warranty"},
-                    ],
-                    "addons": [
-                        {"concept_key": "windscreen"},
-                        {"concept_key": "special-perils"},
-                        {"concept_key": "flood-relief-allowance"},
-                        {"concept_key": "repair-allowance-cart"},
-                        {"concept_key": "key-replacement"},
-                        {"concept_key": "legal-liability-to-passengers"},
-                        {"concept_key": "legal-liability-of-passengers"},
-                        {"concept_key": "strike-riot-civil-commotion"},
-                        {"concept_key": "betterment-protection"},
-                        {"concept_key": "agreed-value-market-value"},
-                        {"concept_key": "cashback-no-claim"},
-                        {"concept_key": "motor-pa-plus"},
-                    ],
-                },
-            ],
-        },
-
-        # ── 4. Etiqa (Add-on System) ─────────────────────────────────────────
-        {
-            "company_slug": "etiqa",
-            "company_name": "Etiqa",
-            "products": [
-                {
-                    "product_key": "etiqa-comprehensive-private-car",
-                    "product_name": "Comprehensive Private Car Insurance / Takaful",
-                    "is_package_system": False,
-                    "default_benefits": [
-                        {"concept_key": "towing", "display_value": "Up to 200 km"},
-                        {"concept_key": "roadside-assistance", "display_value": "24/7"},
-                        {"concept_key": "all-drivers", "display_value": "Any Authorised Driver"},
-                    ],
-                    "addons": [
-                        {"concept_key": "windscreen"},
-                        {"concept_key": "special-perils"},
-                        {"concept_key": "repair-allowance-cart", "label_override": "Repair Allowance / Cash Assistance"},
-                        {"concept_key": "oto-360"},
-                        {"concept_key": "child-car-seat"},
-                        {"concept_key": "repaint-spray-paint"},
-                        {"concept_key": "replacement-cost"},
-                        {"concept_key": "betterment-protection"},
-                        {"concept_key": "strike-riot-civil-commotion"},
-                        {"concept_key": "cashback-no-claim"},
-                    ],
-                }
-            ],
-        },
-    ]
-
-    for conf in insurer_configs:
-        c_slug = conf["company_slug"]
-        c_name = conf["company_name"]
+    for c_data in INSURER_CONFIGS:
+        c_slug = c_data["company_slug"]
+        c_name = c_data["company_name"]
         company = db.scalar(select(InsuranceCompany).where(InsuranceCompany.slug == c_slug))
         if not company:
-            logs.append(f"Company {c_name} not found, skipping")
+            logs.append(f"Company {c_name} ({c_slug}) not found, skipping")
             continue
 
-        for p_data in conf["products"]:
-            p_key = p_data["product_key"]
-            p_name = p_data["product_name"]
+        for p_info in c_data["products"]:
+            base_p_key = p_info["product_key"]
+            base_p_name = p_info["product_name"]
+            seg_key = p_info.get("segment_key", "private")
+            veh_key = p_info.get("vehicle_key", "car")
 
-            product = db.scalar(select(InsuranceProduct).where(
-                InsuranceProduct.company_id == company.id,
-                InsuranceProduct.product_key == p_key,
-            ))
-            if not product:
-                product = InsuranceProduct(
-                    id=new_id(),
-                    company_id=company.id,
-                    product_key=p_key,
-                    name=p_name,
-                    status="active",
-                    revision=1,
-                )
-                if not dry_run:
-                    db.add(product)
+            seg_obj = segments.get(seg_key)
+            veh_obj = vehicles.get(veh_key)
+
+            cov_definitions = [
+                ("comprehensive", base_p_key, base_p_name),
+                ("third_party_fire_theft", f"{base_p_key}-tpft", f"{base_p_name} (TPFT)"),
+                ("third_party", f"{base_p_key}-tpo", f"{base_p_name} (Third Party)"),
+            ]
+
+            for cov_key, p_key, p_name in cov_definitions:
+                target_cov_obj = coverages.get(cov_key)
+                if not target_cov_obj:
+                    continue
+
+                product = db.scalar(select(InsuranceProduct).where(
+                    InsuranceProduct.company_id == company.id,
+                    InsuranceProduct.product_key == p_key
+                ))
+                if not product:
+                    product = InsuranceProduct(
+                        id=new_id(),
+                        company_id=company.id,
+                        product_key=p_key,
+                        name=p_name,
+                        status="active",
+                        revision=1
+                    )
+                    if not dry_run:
+                        db.add(product)
+                        db.flush()
+                    logs.append(f"Created product '{p_name}' for {c_name}")
+                elif not dry_run:
+                    product.name = p_name
+                    product.status = "active"
                     db.flush()
-                logs.append(f"Created product '{p_name}' for {c_name}")
-            elif not dry_run:
-                product.name = p_name
-                product.status = "active"
-                db.flush()
 
-            # Ensure Catalog exists and is populated
-            catalog = db.scalar(select(BenefitCatalog).where(BenefitCatalog.product_id == product.id)) if product else None
-            if not catalog:
-                logs.append(f"Create canonical configuration for {c_name} -> '{p_name}'")
-                if not dry_run:
+                catalog = db.scalar(select(BenefitCatalog).where(
+                    BenefitCatalog.product_id == product.id
+                ))
+                if not catalog:
                     catalog = BenefitCatalog(
                         id=new_id(),
                         company_id=company.id,
                         product_id=product.id,
-                        segment_id=segment.id if segment else None,
-                        vehicle_category_id=vehicle.id if vehicle else None,
-                        coverage_type_id=coverage.id if coverage else None,
+                        segment_id=seg_obj.id if seg_obj else None,
+                        vehicle_category_id=veh_obj.id if veh_obj else None,
+                        coverage_type_id=target_cov_obj.id,
                         name=p_name,
                         status="active",
-                        revision=1,
+                        revision=1
                     )
-                    db.add(catalog)
+                    if not dry_run:
+                        db.add(catalog)
+                        db.flush()
+                elif not dry_run:
+                    catalog.name = p_name
+                    catalog.segment_id = seg_obj.id if seg_obj else None
+                    catalog.vehicle_category_id = veh_obj.id if veh_obj else None
+                    catalog.coverage_type_id = target_cov_obj.id
+                    catalog.status = "active"
                     db.flush()
 
-                    rev_id = new_id()
+                if dry_run:
+                    continue
+
+                latest_rev = db.scalar(select(BenefitCatalogRevision).where(
+                    BenefitCatalogRevision.catalog_id == catalog.id
+                ).order_by(BenefitCatalogRevision.revision_number.desc()))
+
+                if latest_rev and latest_rev.state == "draft":
+                    rev = latest_rev
+                else:
+                    next_rev_num = (latest_rev.revision_number + 1) if latest_rev else 1
                     rev = BenefitCatalogRevision(
-                        id=rev_id,
+                        id=new_id(),
                         catalog_id=catalog.id,
-                        revision_number=1,
+                        revision_number=next_rev_num,
                         state="draft",
-                        content_hash="",
+                        content_hash="seed_hash",
                         published_by=None,
+                        published_at=None
                     )
                     db.add(rev)
                     db.flush()
 
-                    if p_data.get("is_package_system"):
-                        # Package System with named tiers (AmAssurance)
-                        first_pkg_id = None
-                        for pkg_data in p_data["packages"]:
-                            pkg_id = new_id()
-                            if first_pkg_id is None:
-                                first_pkg_id = pkg_id
+                existing_offs = list(db.scalars(select(CatalogOffering).where(
+                    CatalogOffering.catalog_revision_id == rev.id
+                )).all())
+                existing_off_keys = {o.offering_key: o for o in existing_offs}
+
+                order_idx = 1
+
+                defaults_list = []
+                if cov_key == "comprehensive":
+                    defaults_list = p_info.get("default_benefits", [])
+                elif cov_key == "third_party_fire_theft":
+                    defaults_list = [
+                        {"concept_key": "fire-theft", "display_value": "Accidental fire, explosion, lightning, and theft indemnity", "price": 0},
+                        {"concept_key": "third-party-bi", "display_value": "Unlimited coverage for third-party bodily injury and death", "price": 0},
+                        {"concept_key": "third-party-property", "display_value": "Third-party property damage coverage up to RM3,000,000", "price": 0},
+                        {"concept_key": "legal-costs-defense", "display_value": "Court legal defense costs coverage up to RM2,000", "price": 0},
+                    ]
+                elif cov_key == "third_party":
+                    defaults_list = [
+                        {"concept_key": "third-party-bi", "display_value": "Unlimited coverage for third-party bodily injury and death", "price": 0},
+                        {"concept_key": "third-party-property", "display_value": "Third-party property damage coverage up to RM3,000,000", "price": 0},
+                        {"concept_key": "legal-costs-defense", "display_value": "Court legal defense costs coverage up to RM2,000", "price": 0},
+                    ]
+
+                for d_item in defaults_list:
+                    ck = d_item["concept_key"]
+                    if ck not in concepts:
+                        continue
+                    off_key = f"{catalog.id[:8]}-def-{ck}"
+                    off = existing_off_keys.get(off_key)
+                    if not off:
+                        off = CatalogOffering(
+                            id=new_id(),
+                            catalog_revision_id=rev.id,
+                            offering_key=off_key,
+                            concept_id=concepts[ck].id,
+                            offering_kind="base",
+                            applies_to_type=None,
+                            applies_to_id=None,
+                            role="included",
+                            label_override=d_item.get("label_override"),
+                            display_value=d_item.get("display_value"),
+                            typed_value={"type": "text", "value": d_item.get("display_value")},
+                            optional_price=None,
+                            sort_order=order_idx,
+                            status="active",
+                        )
+                        db.add(off)
+                    else:
+                        off.display_value = d_item.get("display_value")
+                        off.role = "included"
+                        off.status = "active"
+                        off.sort_order = order_idx
+                    order_idx += 1
+
+                addons_list = []
+                if cov_key == "comprehensive":
+                    addons_list = p_info.get("addons", [])
+                elif cov_key == "third_party_fire_theft":
+                    addons_list = [a for a in p_info.get("addons", []) if a["concept_key"] in {"windscreen", "first-loss-flood", "strike-riot-civil-commotion", "legal-liability-to-passengers", "legal-liability-of-passengers", "all-drivers", "driver-passenger-protector"}]
+                elif cov_key == "third_party":
+                    addons_list = [a for a in p_info.get("addons", []) if a["concept_key"] in {"legal-liability-to-passengers", "legal-liability-of-passengers", "all-drivers", "driver-passenger-protector"}]
+
+                for a_item in addons_list:
+                    ck = a_item["concept_key"]
+                    if ck not in concepts:
+                        continue
+                    off_key = f"{catalog.id[:8]}-add-{ck}"
+                    price_val = a_item.get("price")
+                    opt_price = {"type": "money", "value": float(price_val), "currency": "MYR"} if price_val is not None else None
+                    off = existing_off_keys.get(off_key)
+                    if not off:
+                        off = CatalogOffering(
+                            id=new_id(),
+                            catalog_revision_id=rev.id,
+                            offering_key=off_key,
+                            concept_id=concepts[ck].id,
+                            offering_kind="optional",
+                            applies_to_type=None,
+                            applies_to_id=None,
+                            role="addon_option",
+                            label_override=a_item.get("label_override"),
+                            display_value=a_item.get("display_value"),
+                            typed_value={"type": "money", "value": float(price_val), "currency": "MYR"} if price_val is not None else {"type": "text", "value": a_item.get("display_value")},
+                            optional_price=opt_price,
+                            sort_order=order_idx,
+                            status="active",
+                        )
+                        db.add(off)
+                    else:
+                        off.display_value = a_item.get("display_value")
+                        off.optional_price = opt_price
+                        off.role = "addon_option"
+                        off.status = "active"
+                        off.sort_order = order_idx
+                    order_idx += 1
+
+                if cov_key == "comprehensive":
+                    for b_data in p_info.get("bundles", []):
+                        pkg_key = b_data["package_key"]
+                        pkg_name = b_data["name"]
+
+                        pkg = db.scalar(select(BenefitPackage).where(
+                            BenefitPackage.catalog_revision_id == rev.id,
+                            BenefitPackage.package_key == pkg_key
+                        ))
+                        if not pkg:
                             pkg = BenefitPackage(
-                                id=pkg_id,
-                                catalog_revision_id=rev_id,
-                                package_key=pkg_data["package_key"],
-                                name=pkg_data["name"],
-                                package_kind="comprehensive",
-                                sort_order=pkg_data["sort_order"],
+                                id=new_id(),
+                                catalog_revision_id=rev.id,
+                                package_key=pkg_key,
+                                name=pkg_name,
+                                package_kind="addon_bundle",
+                                sort_order=1,
                                 status="active",
-                                revision=1,
+                                revision=1
                             )
                             db.add(pkg)
                             db.flush()
+                        else:
+                            pkg.name = pkg_name
+                            pkg.status = "active"
+                            db.flush()
 
-                            order_idx = 1
-                            # Default Benefits
-                            for def_b in pkg_data.get("default_benefits", []):
-                                c_key = def_b["concept_key"]
-                                if c_key not in concepts:
-                                    continue
-                                off = CatalogOffering(
+                        for plan_idx, plan_data in enumerate(b_data.get("plans", [])):
+                            pl_key = plan_data["plan_key"]
+                            pl_name = plan_data["name"]
+                            pl_price = plan_data.get("price", 0.0)
+
+                            plan = db.scalar(select(BenefitPackagePlan).where(
+                                BenefitPackagePlan.package_id == pkg.id,
+                                BenefitPackagePlan.plan_key == pl_key
+                            ))
+                            if not plan:
+                                plan = BenefitPackagePlan(
                                     id=new_id(),
-                                    catalog_revision_id=rev_id,
-                                    offering_key=f"{pkg_data['package_key']}-{c_key}",
-                                    concept_id=concepts[c_key].id,
-                                    offering_kind="base",
-                                    applies_to_type="package",
-                                    applies_to_id=pkg_id,
-                                    role="included",
-                                    label_override=def_b.get("label_override"),
-                                    display_value=def_b.get("display_value") or "Included",
-                                    typed_value={"type": "text", "value": def_b.get("display_value") or "Included"},
-                                    sort_order=order_idx,
-                                    status="active",
+                                    package_id=pkg.id,
+                                    plan_key=pl_key,
+                                    name=pl_name,
+                                    sort_order=plan_idx + 1,
+                                    status="active"
                                 )
-                                db.add(off)
-                                order_idx += 1
+                                db.add(plan)
+                                db.flush()
+                            else:
+                                plan.name = pl_name
+                                plan.sort_order = plan_idx + 1
+                                plan.status = "active"
+                                db.flush()
 
-                            # Add-ons
-                            for add_b in pkg_data.get("addons", []):
-                                c_key = add_b["concept_key"]
-                                if c_key not in concepts:
+                            old_items = list(db.scalars(select(BenefitPackagePlanItem).where(
+                                BenefitPackagePlanItem.plan_id == plan.id
+                            )).all())
+                            for oi in old_items:
+                                db.delete(oi)
+                            db.flush()
+
+                            for item_idx, itm in enumerate(plan_data.get("items", [])):
+                                ick = itm["concept_key"]
+                                if ick not in concepts:
                                     continue
-                                off = CatalogOffering(
+
+                                item_off_key = f"{pkg.id[:8]}-{pl_key}-{ick}-{item_idx}"
+                                off_item = db.scalar(select(CatalogOffering).where(
+                                    CatalogOffering.catalog_revision_id == rev.id,
+                                    CatalogOffering.offering_key == item_off_key
+                                ))
+                                if not off_item:
+                                    off_item = CatalogOffering(
+                                        id=new_id(),
+                                        catalog_revision_id=rev.id,
+                                        offering_key=item_off_key,
+                                        concept_id=concepts[ick].id,
+                                        offering_kind="upgrade",
+                                        applies_to_type="package",
+                                        applies_to_id=pkg.id,
+                                        role="bundle_component",
+                                        label_override=None,
+                                        display_value=itm.get("display_value"),
+                                        typed_value={"type": "text", "value": itm.get("display_value")},
+                                        optional_price={"type": "money", "value": float(pl_price), "currency": "MYR"} if pl_price else None,
+                                        sort_order=item_idx + 1,
+                                        status="active"
+                                    )
+                                    db.add(off_item)
+                                    db.flush()
+                                else:
+                                    off_item.display_value = itm.get("display_value")
+                                    off_item.status = "active"
+                                    db.flush()
+
+                                plan_item = BenefitPackagePlanItem(
                                     id=new_id(),
-                                    catalog_revision_id=rev_id,
-                                    offering_key=f"{pkg_data['package_key']}-addon-{c_key}-{order_idx}",
-                                    concept_id=concepts[c_key].id,
-                                    offering_kind="optional",
-                                    applies_to_type="package",
-                                    applies_to_id=pkg_id,
-                                    role="addon_option",
-                                    label_override=add_b.get("label_override"),
-                                    display_value=add_b.get("display_value") or "Optional",
-                                    typed_value={"type": "text", "value": add_b.get("display_value") or "Optional"},
-                                    sort_order=order_idx,
-                                    status="active",
+                                    plan_id=plan.id,
+                                    offering_id=off_item.id,
+                                    typed_value_override={"type": "text", "value": itm.get("display_value")},
+                                    sort_order=item_idx + 1
                                 )
-                                db.add(off)
-                                order_idx += 1
+                                db.add(plan_item)
+                            db.flush()
 
-                        catalog.package_id = first_pkg_id
-                        db.flush()
-
-                    else:
-                        # Add-on System (Single Product mode)
-                        order_idx = 1
-                        # Default Benefits
-                        for def_b in p_data.get("default_benefits", []):
-                            c_key = def_b["concept_key"]
-                            if c_key not in concepts:
-                                continue
-                            off = CatalogOffering(
-                                id=new_id(),
-                                catalog_revision_id=rev_id,
-                                offering_key=f"{p_key}-def-{c_key}",
-                                concept_id=concepts[c_key].id,
-                                offering_kind="base",
-                                applies_to_type=None,
-                                applies_to_id=None,
-                                role="included",
-                                label_override=def_b.get("label_override"),
-                                display_value=def_b.get("display_value") or "Included",
-                                typed_value={"type": "text", "value": def_b.get("display_value") or "Included"},
-                                sort_order=order_idx,
-                                status="active",
-                            )
-                            db.add(off)
-                            order_idx += 1
-
-                        # Add-ons
-                        for add_b in p_data.get("addons", []):
-                            c_key = add_b["concept_key"]
-                            if c_key not in concepts:
-                                continue
-                            off = CatalogOffering(
-                                id=new_id(),
-                                catalog_revision_id=rev_id,
-                                offering_key=f"{p_key}-addon-{c_key}",
-                                concept_id=concepts[c_key].id,
-                                offering_kind="optional",
-                                applies_to_type=None,
-                                applies_to_id=None,
-                                role="addon_option",
-                                label_override=add_b.get("label_override"),
-                                display_value=add_b.get("display_value") or "Optional",
-                                typed_value={"type": "text", "value": add_b.get("display_value") or "Optional"},
-                                sort_order=order_idx,
-                                status="active",
-                            )
-                            db.add(off)
-                            order_idx += 1
-
-                    db.flush()
-                    content_payload = _revision_content_payload(db, rev)
-                    rev.content_hash = canonical_context_hash(content_payload)
-                    rev.state = "published"
-                    rev.published_at = utcnow()
-                    db.flush()
-                    logs.append(f"Published catalog configuration for {c_name} -> '{p_name}'")
-
+                rev.state = "published"
+                rev.published_at = utcnow()
+                db.flush()
+        logs.append(f"Processed 6 vehicle lines and 3 coverage types for {c_name}")
     return logs
 
 
 COMPANY_ALIASES_MAP = {
-    "takaful-malaysia": [
-        "STMB",
-        "Syarikat Takaful Malaysia Am Berhad",
-        "Syarikat Takaful Malaysia",
-        "Takaful Malaysia Am",
-        "Takaful Malaysia",
-        "Takaful myMotor",
-        "Takaful myClick",
-    ],
     "amassurance": [
         "AmAssurance",
-        "AmGen",
         "AmGeneral",
-        "AmGeneral Insurance",
-        "Kurnia",
-        "auto365",
+        "AmGen",
+        "Liberty General Insurance",
+        "Liberty Insurance",
+    ],
+    "takaful-malaysia": [
+        "Takaful Malaysia",
+        "Syarikat Takaful Malaysia Am Berhad",
+        "STMB",
+    ],
+    "tune-protect": [
+        "Tune Protect",
+        "Tune Insurance",
+        "Tune Insurance Malaysia Berhad",
     ],
     "lonpac": [
         "Lonpac",
         "Lonpac Insurance",
-        "Lonpac Insurance Bhd",
         "Lonpac Insurance Berhad",
-    ],
-    "liberty": [
-        "Liberty",
-        "Liberty Insurance",
-        "Liberty General Insurance",
-        "Liberty General Insurance Berhad",
-    ],
-    "tune-protect": [
-        "Tune",
-        "Tune Protect",
-        "Tune Insurance",
-        "Motor Easy",
     ],
     "etiqa": [
         "Etiqa",
@@ -1221,10 +531,10 @@ def main():
                 print(f"[CLEANUP] {log}")
 
             concepts = seed_global_benefits(db, dry_run=dry_run)
-            print(f"[BENEFITS] Upserted {len(concepts)} Global Benefits with assets and {len(GLOBAL_ALIASES)} scoped aliases.")
+            print(f"[BENEFITS] Upserted {len(concepts)} Global Benefits with rich descriptions.")
 
             alias_logs = seed_company_aliases(db, dry_run=dry_run)
-            print(f"[ALIASES] Added {len(alias_logs)} company aliases.")
+            print(f"[ALIASES] Verified {len(COMPANY_ALIASES_MAP)} company alias mappings.")
 
             chain_logs = seed_company_package_chains(db, dry_run=dry_run)
             for log in chain_logs:

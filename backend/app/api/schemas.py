@@ -48,7 +48,7 @@ class WorkspacePatchRequest(StrictRequest):
 
 
 class TemplateSelectionImpactRequest(StrictRequest):
-    base_revision: int = Field(ge=1)
+    base_revision: int = Field(default=1, ge=1)
     template_revision_id: str = Field(min_length=1, max_length=80)
 
 
@@ -430,3 +430,11 @@ class RoadTaxRuleSaveRequest(BaseModel):
     effective_from: str | None = None
     effective_to: str | None = None
     status: str = "active"
+
+
+# --- AI Grounding Chat ---
+
+class GroundingChatRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=2000)
+    session_id: str | None = None
+

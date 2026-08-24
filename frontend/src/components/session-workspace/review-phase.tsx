@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowArcLeft,
+  ArrowArcRight,
   ArrowCounterClockwise,
   ArrowRight,
   ArrowsInSimple,
@@ -39,6 +41,7 @@ import { PageLoading } from "@/components/ui/page-loading";
 import { Select } from "@/components/ui/select";
 import {
   CanvasElementView,
+  balanceBenefitGridElements,
   type CanvasElement,
 } from "@/components/template-canvas/shared";
 import {
@@ -58,10 +61,14 @@ const FORM_FIELDS: FormField[] = [
   { name: "customer_name", label: "Insured name", kind: "text" },
   { name: "vehicle_no", label: "Vehicle no. / Car plate", kind: "text" },
   { name: "vehicle_type", label: "Vehicle type", kind: "vehicle_type" },
+  { name: "car_model", label: "Car model", kind: "text" },
+  { name: "engine_cc", label: "Engine CC / Capacity", kind: "text" },
+  { name: "sum_insured", label: "Sum insured / Market value", kind: "money" },
   { name: "insurance_company", label: "Insurance name", kind: "text" },
   { name: "coverage_type", label: "Coverage type", kind: "text" },
   { name: "cover_period", label: "Cover period", kind: "text" },
-  { name: "car_model", label: "Car model", kind: "text" },
+  { name: "valid_until", label: "Quotation validity", kind: "text" },
+  { name: "excess_amount", label: "Excess amount", kind: "money" },
   { name: "ncd_percent", label: "NCD", kind: "percent" },
   { name: "premium", label: "Insurance premium", kind: "money" },
   { name: "roadtax", label: "Road tax", kind: "money" },
@@ -102,6 +109,7 @@ type CompanyWorkspace = {
   company: { id: string; name: string };
   products: Array<{ id: string; name: string }>;
   tiers: Array<{ id: string; product_id: string; name: string }>;
+  catalogs?: Array<{ id: string; offerings?: Array<{ id: string; concept_key?: string; concept_id?: string; concept?: { id?: string; concept_key?: string } }> }>;
 };
 
 type PublishedTemplateOption = {
@@ -183,23 +191,24 @@ function computeMalaysianRoadTax(cc: number, vehicleType: string = "Car", ownerT
   if (!cc || cc <= 0) return 0;
   const normType = (vehicleType || "Car").toLowerCase();
   const normOwner = (ownerType || "Individual").toLowerCase();
+  const isCompany = normOwner.includes("company") || normOwner.includes("corp") || normType.includes("company");
 
   if (normType.includes("motor") || normType.includes("bike")) {
     if (cc <= 150) return 2;
     if (cc <= 200) return 30;
     if (cc <= 250) return 50;
-    if (cc <= 500) return 180;
+    if (cc <= 500) return isCompany ? 180 : 100;
     if (cc <= 800) return 250;
     return 350;
   }
 
-  if (normType.includes("lorry") || normType.includes("other") || normType.includes("truck")) {
+  if (normType.includes("lorry") || normType.includes("other") || normType.includes("truck") || normType.includes("commercial")) {
     if (cc <= 1600) return 120;
     if (cc <= 2500) return 240;
     return 480;
   }
 
-  if (normOwner.includes("company") || normOwner.includes("corp")) {
+  if (isCompany) {
     if (cc <= 1000) return 20;
     if (cc <= 1200) return 110;
     if (cc <= 1400) return 140;
@@ -211,7 +220,7 @@ function computeMalaysianRoadTax(cc: number, vehicleType: string = "Car", ownerT
     return 6010 + ((cc - 3000) * 13.50);
   }
 
-  // Private Car
+  // Private Saloon Car
   if (cc <= 1000) return 20;
   if (cc <= 1200) return 55;
   if (cc <= 1400) return 70;
@@ -219,7 +228,7 @@ function computeMalaysianRoadTax(cc: number, vehicleType: string = "Car", ownerT
   if (cc <= 1800) return 200 + ((cc - 1600) * 0.40);
   if (cc <= 2000) return 280 + ((cc - 1800) * 0.50);
   if (cc <= 2500) return 380 + ((cc - 2000) * 1.00);
-  if (cc <= 3000) return 880 + ((cc - 2500) * 2.50);
+  if (cc <= 3000) return 840 + ((cc - 2500) * 2.50);
   return 2130 + ((cc - 3000) * 4.50);
 }
 
@@ -278,6 +287,26 @@ function IncludedCard({
   const selectionId = selection && typeof selection === "object" && "id" in selection ? String(selection.id) : (card.selection_id || null);
   const pending = !selectionId || selectionId.startsWith("pending:");
 
+  const handleMoveToAddon = () => {
+    if (selectionId) {
+      onQueue({ op: "benefit_update", selection_id: selectionId, state: "available_addon", cost_status: "paid" }, `benefits.${selectionId}.state`);
+    } else if (card.offering_id) {
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid" }, `benefits.offer.${card.offering_id}`);
+    } else {
+      onQueue({ op: "create_custom_benefit", selection_key: `addon:${card.concept_key || index}`, state: "available_addon", cost_status: "paid", label: card.label }, `benefits.add.${index}`);
+    }
+  };
+
+  const handleRemove = () => {
+    if (selectionId) {
+      onQueue({ op: "benefit_update", selection_id: selectionId, state: "removed" }, `benefits.${selectionId}.state`);
+    } else if (card.offering_id) {
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "removed", cost_status: "included" }, `benefits.offer.${card.offering_id}`);
+    } else {
+      onQueue({ op: "create_custom_benefit", selection_key: `removed:${card.concept_key || index}`, state: "removed", label: card.label }, `benefits.remove.${index}`);
+    }
+  };
+
   return (
     <article className={`flex items-center justify-between gap-2.5 rounded-[var(--rl-radius-sm)] border p-2.5 shadow-xs transition-all ${card.is_detected
       ? "border-amber-300 bg-amber-50/50 ring-1 ring-amber-300/60"
@@ -313,9 +342,8 @@ function IncludedCard({
         <Button
           variant="secondary"
           size="sm"
-          disabled={pending}
           title="Move this benefit to Optional Add-ons"
-          onClick={() => selectionId && onQueue({ op: "benefit_update", selection_id: selectionId, state: "available_addon", cost_status: "paid" }, `benefits.${selectionId}.state`)}
+          onClick={handleMoveToAddon}
           className="text-[11px] h-7 px-2"
         >
           → Add-on
@@ -334,9 +362,9 @@ function IncludedCard({
         <button
           type="button"
           aria-label={`Remove ${card.label} from this quotation`}
-          disabled={pending}
-          onClick={() => selectionId && onQueue({ op: "benefit_update", selection_id: selectionId, state: "removed" }, `benefits.${selectionId}.state`)}
-          className="rounded-full p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] disabled:opacity-40 transition-colors"
+          onClick={handleRemove}
+          className="rounded-full p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] transition-colors"
+          title="Remove benefit completely"
         >
           <X size={14} weight="bold" />
         </button>
@@ -361,14 +389,20 @@ function AddonCard({
   const handleMoveToDefault = () => {
     if (selectionId) {
       onQueue({ op: "benefit_update", selection_id: selectionId, state: "current", cost_status: "included" }, `benefits.${selectionId}.state`);
+    } else if (card.offering_id) {
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "included" }, `benefits.offer.${card.offering_id}`);
     } else {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, cost_status: "included" }, `benefits.offer.${card.offering_id}`);
+      onQueue({ op: "create_custom_benefit", selection_key: `default:${card.concept_key || index}`, state: "current", cost_status: "included", label: card.label }, `benefits.add.${index}`);
     }
   };
 
   const handleRemove = () => {
     if (selectionId) {
       onQueue({ op: "benefit_update", selection_id: selectionId, state: "removed" }, `benefits.${selectionId}.state`);
+    } else if (card.offering_id) {
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "removed", cost_status: "paid" }, `benefits.offer.${card.offering_id}`);
+    } else {
+      onQueue({ op: "create_custom_benefit", selection_key: `removed:${card.concept_key || index}`, state: "removed", label: card.label }, `benefits.remove.${index}`);
     }
   };
 
@@ -411,16 +445,15 @@ function AddonCard({
         >
           ← Default/FOC
         </Button>
-        {selectionId ? (
-          <button
-            type="button"
-            aria-label={`Remove ${card.label}`}
-            onClick={handleRemove}
-            className="rounded-full p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] transition-colors"
-          >
-            <X size={14} weight="bold" />
-          </button>
-        ) : null}
+        <button
+          type="button"
+          aria-label={`Remove ${card.label}`}
+          onClick={handleRemove}
+          className="rounded-full p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] transition-colors"
+          title="Remove add-on completely"
+        >
+          <X size={14} weight="bold" />
+        </button>
       </div>
     </article>
   );
@@ -442,7 +475,9 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [globalConcepts, setGlobalConcepts] = useState<GlobalConcept[]>([]);
   const [showGlobalModal, setShowGlobalModal] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
-  const [modalFilter, setModalFilter] = useState<"all" | "global" | "addons">("all");
+  const [modalFilter, setModalFilter] = useState<"all" | "insurer" | "global" | "addons">("all");
+  const [undoStack, setUndoStack] = useState<Array<{ op: Record<string, unknown> & { op: string }; path: string; desc: string }>>([]);
+  const [redoStack, setRedoStack] = useState<Array<{ op: Record<string, unknown> & { op: string }; path: string; desc: string }>>([]);
   const [activeTab, setActiveTab] = useState<"included" | "addons">("included");
   const [modalTarget, setModalTarget] = useState<"current" | "available_addon">("current");
   const [benefitsViewMode, setBenefitsViewMode] = useState<"defaults" | "addons" | "both">("defaults");
@@ -450,6 +485,8 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [benefitsExpanded, setBenefitsExpanded] = useState(false);
   const [templateCollapsed, setTemplateCollapsed] = useState(false);
   const [extractedValuesCollapsed, setExtractedValuesCollapsed] = useState(false);
+  const [extractedBenefitsCollapsed, setExtractedBenefitsCollapsed] = useState(false);
+  const [extractedBenefitsViewMode, setExtractedBenefitsViewMode] = useState<"extras" | "all_evidence">("extras");
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [benefitsCollapsed, setBenefitsCollapsed] = useState(false);
 
@@ -508,6 +545,16 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [isDragging, setIsDragging] = useState<"pdf" | "main" | null>(null);
   const [colSizes, setColSizes] = useState({ pdf: 25, middle: 35, right: 40 });
   const [split2Col, setSplit2Col] = useState(45);
+  const [isDesktop, setIsDesktop] = useState(true);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsDesktop(typeof window !== "undefined" ? window.innerWidth >= 1024 : true);
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const handlePointerDown = useCallback((which: "pdf" | "main") => (e: React.PointerEvent) => {
     e.preventDefault();
@@ -646,16 +693,13 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 binding: { template_id: matching.template_id, template_revision_id: matching.template_revision_id, base_hash: matching.config_hash },
               });
             }
-            if (!currentRevisionId) {
-              selectTemplateDirectly(matching.template_revision_id);
-            }
           }
         }
       })
       .catch((error) => { if (!cancelled) setTemplateError(apiErrorMessage(error)); })
       .finally(() => { if (!cancelled) setTemplatesLoading(false); });
     return () => { cancelled = true; };
-  }, [workspace?.pinned.template_revision_id]);
+  }, []);
 
   // Load template config for real-time live preview
   useEffect(() => {
@@ -672,13 +716,13 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     return () => { cancelled = true; };
   }, [id, workspace?.pinned.template_revision_id]);
 
-  async function selectTemplateDirectly(templateRevisionId: string) {
+  async function selectTemplateDirectly(templateRevisionId: string, customList?: PublishedTemplateOption[]) {
     setTemplateError(null);
     setTemplateImpact(null);
     if (!templateRevisionId) return;
-    const option = publishedTemplates.find((item) => item.template_revision_id === templateRevisionId);
+    const pool = customList && customList.length > 0 ? customList : publishedTemplates;
+    const option = pool.find((item) => item.template_revision_id === templateRevisionId) || pool[0];
     if (!option) {
-      setTemplateError("That published template is no longer available.");
       return;
     }
     if (option.config) {
@@ -696,7 +740,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     try {
       await api<{ impact: TemplateSelectionImpact }>(`/sessions/${id}/template-selection-impact`, {
         method: "POST",
-        body: JSON.stringify({ base_revision: workspace?.revision, template_revision_id: templateRevisionId }),
+        body: JSON.stringify({ base_revision: workspace?.revision || 1, template_revision_id: option.template_revision_id }),
       });
     } catch {
       // Best effort
@@ -724,17 +768,6 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       setTemplateError("That published template is no longer available. Refresh this page.");
       return;
     }
-    if (option.config) {
-      setPreviewTemplate({
-        template_id: option.template_id,
-        template_revision_id: option.template_revision_id,
-        revision_number: option.revision_number,
-        config_hash: option.config_hash,
-        source: "template_revision",
-        config: option.config,
-        binding: { template_id: option.template_id, template_revision_id: option.template_revision_id, base_hash: option.config_hash },
-      });
-    }
     queueOperation({
       op: "template_selection",
       template_revision_id: option.template_revision_id,
@@ -747,7 +780,41 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     save().catch(() => undefined);
   }
 
-  const productOptions = useMemo(() => companyWorkspace?.products || [], [companyWorkspace]);
+  const productOptions = useMemo(() => {
+    const raw = companyWorkspace?.products || [];
+    const fields = workspace?.fields;
+    const vehicleText = [
+      fields?.vehicle_type?.value,
+      fields?.vehicle_category?.value,
+      fields?.car_model?.value,
+      fields?.vehicle_description?.value,
+      fields?.product_name?.value,
+    ].filter(Boolean).join(" ").toLowerCase();
+
+    const isMotorcycle = /motorcycle|motor\s*cycle|motor|bike|kapcai|scooter/.test(vehicleText);
+    const isCommercial = /lorry|truck|commercial|rigid|trailer|tipper|van|bus|prime mover/.test(vehicleText);
+    const isCar = !isMotorcycle && !isCommercial;
+
+    if (isCar) {
+      const filtered = raw.filter((p) => {
+        if (p.id === workspace?.pinned.product_id) return true;
+        const name = (p.name || "").toLowerCase();
+        if (/motorcycle|motor\s*cycle|bike|lorry|commercial\s*vehicle/.test(name)) return false;
+        return true;
+      });
+      return filtered.length > 0 ? filtered : raw;
+    }
+    if (isMotorcycle) {
+      const filtered = raw.filter((p) => {
+        if (p.id === workspace?.pinned.product_id) return true;
+        const name = (p.name || "").toLowerCase();
+        return /motorcycle|motor\s*cycle|bike|motor/.test(name);
+      });
+      return filtered.length > 0 ? filtered : raw;
+    }
+    return raw;
+  }, [companyWorkspace, workspace?.fields, workspace?.pinned.product_id]);
+
   const tierOptions = useMemo(
     () => (companyWorkspace?.tiers || []).filter((tier) => tier.product_id === workspace?.pinned.product_id),
     [companyWorkspace, workspace?.pinned.product_id],
@@ -755,15 +822,48 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
   const companyName = workspace?.pinned_names.company_name;
 
+  const insurerConceptKeys = useMemo(() => {
+    const keys = new Set<string>();
+    if (companyWorkspace?.catalogs) {
+      for (const cat of companyWorkspace.catalogs) {
+        for (const off of (cat.offerings || [])) {
+          if (off.concept_key) keys.add(String(off.concept_key));
+          if (off.concept?.concept_key) keys.add(String(off.concept.concept_key));
+          if (off.concept_id) keys.add(String(off.concept_id));
+          if (off.concept?.id) keys.add(String(off.concept.id));
+        }
+      }
+    }
+    if ((workspace as any)?.catalog_offerings) {
+      for (const off of ((workspace as any).catalog_offerings as any[])) {
+        if (off.concept_key) keys.add(String(off.concept_key));
+        if (off.concept?.concept_key) keys.add(String(off.concept.concept_key));
+        if (off.concept_id) keys.add(String(off.concept_id));
+      }
+    }
+    if (workspace?.benefits) {
+      for (const b of workspace.benefits) {
+        if (b && typeof b === "object") {
+          const cKey = (b as any).concept_key;
+          const cId = (b as any).concept_id;
+          if (cKey && typeof cKey === "string") keys.add(cKey);
+          if (cId && typeof cId === "string") keys.add(cId);
+        }
+      }
+    }
+    return keys;
+  }, [companyWorkspace, workspace]);
+
   const filteredConcepts = useMemo(() => {
     return globalConcepts.filter((c) => {
+      if (modalFilter === "insurer" && !insurerConceptKeys.has(c.concept_key) && !insurerConceptKeys.has(c.id)) return false;
       if (modalFilter === "global" && !GLOBAL_BENEFIT_KEYS.has(c.concept_key)) return false;
       if (modalFilter === "addons" && GLOBAL_BENEFIT_KEYS.has(c.concept_key)) return false;
       if (!globalSearch.trim()) return true;
       const term = globalSearch.toLowerCase();
       return c.label.toLowerCase().includes(term) || c.concept_key.toLowerCase().includes(term);
     });
-  }, [globalConcepts, modalFilter, globalSearch]);
+  }, [globalConcepts, modalFilter, globalSearch, insurerConceptKeys]);
 
   const conceptAssets = useMemo(() => {
     const map: Record<string, string> = {};
@@ -790,26 +890,93 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     }
     // Overlay real-time active form values on every keystroke
     for (const [name, val] of Object.entries(formValues)) {
-      if (val !== undefined && val !== null) {
+      if (val !== undefined && val !== null && String(val).trim() !== "") {
         fields[name] = String(val);
       }
     }
-    // Handle plate & company aliases
-    if (formValues["vehicle_no"]) {
-      fields["vehicle_no"] = formValues["vehicle_no"];
-      fields["vehicle_plate"] = formValues["vehicle_no"];
-      fields["car_plate"] = formValues["vehicle_no"];
-      fields["plate_no"] = formValues["vehicle_no"];
+
+    // Vehicle plate aliases
+    const plate = formValues["vehicle_no"] || fields["vehicle_no"] || "";
+    if (plate) {
+      fields["vehicle_no"] = plate;
+      fields["vehicle_plate"] = plate;
+      fields["car_plate"] = plate;
+      fields["plate_no"] = plate;
     }
-    const effectiveCompany = formValues["insurance_company"] || companyName;
+
+    // Insurer name aliases
+    const effectiveCompany = formValues["insurance_company"] || fields["insurance_company"] || companyName || workspace?.pinned_names?.company_name || "";
     if (effectiveCompany) {
       fields["insurance_company"] = effectiveCompany;
       fields["insurance_name"] = effectiveCompany;
       fields["company_name"] = effectiveCompany;
+      fields["insurer_name"] = effectiveCompany;
     }
-    fields["total_premium_adjusted"] = workspace?.total_premium_adjusted || fields["total_amount"] || "";
+
+    // Sum insured / coverage amount
+    const sumIns = formValues["sum_insured"] || fields["sum_insured"] || formValues["coverage_amount"] || fields["coverage_amount"] || "";
+    if (sumIns) {
+      fields["sum_insured"] = sumIns;
+      fields["coverage_amount"] = sumIns;
+    }
+
+    // Engine CC aliases
+    const cc = formValues["engine_cc"] || fields["engine_cc"] || "";
+    if (cc) {
+      fields["engine_cc"] = cc;
+      fields["vehicle_cc"] = cc;
+      fields["engine_capacity"] = cc;
+    }
+
+    // NCD aliases
+    const ncd = formValues["ncd_percent"] || fields["ncd_percent"] || formValues["ncd_percentage"] || fields["ncd_percentage"] || "";
+    if (ncd) {
+      fields["ncd_percent"] = ncd;
+      fields["ncd_percentage"] = ncd;
+    }
+
+    // Premium aliases
+    const prem = formValues["premium"] || fields["premium"] || formValues["coverage_premium"] || fields["coverage_premium"] || "";
+    if (prem) {
+      fields["premium"] = prem;
+      fields["coverage_premium"] = prem;
+      fields["basic_premium_vehicle"] = prem;
+    }
+
+    // Road tax aliases
+    const rtax = formValues["roadtax"] || fields["roadtax"] || formValues["road_tax_amount"] || fields["road_tax_amount"] || "";
+    if (rtax) {
+      fields["roadtax"] = rtax;
+      fields["road_tax_amount"] = rtax;
+    }
+
+    // Runner / Service fee aliases
+    const sfee = formValues["service_fee"] || fields["service_fee"] || formValues["runner_fee"] || fields["runner_fee"] || "";
+    if (sfee) {
+      fields["service_fee"] = sfee;
+      fields["runner_fee"] = sfee;
+    }
+
+    // Compute live total premium (Insurance Premium + Roadtax + Runner Fee + Extras)
+    const pNum = parseFloat(String(fields["premium"] || "").replace(/[^0-9.]/g, "")) || 0;
+    const rtNum = parseFloat(String(fields["roadtax"] || "").replace(/[^0-9.]/g, "")) || 0;
+    const sfNum = parseFloat(String(fields["service_fee"] || "").replace(/[^0-9.]/g, "")) || 0;
+    const extrasTotal = (workspace?.benefit_cards?.extras || []).reduce((acc, ex) => {
+      const amt = (ex as Record<string, unknown>)?.price;
+      const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
+      const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : (typeof val === "number" ? val : 0);
+      return acc + (Number.isFinite(num) ? num : 0);
+    }, 0);
+
+    const calculatedTotal = pNum + rtNum + sfNum + extrasTotal;
+    const effTotal = calculatedTotal > 0
+      ? calculatedTotal.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : (formValues["total_amount"] || fields["total_amount"] || workspace?.total_premium_adjusted || "");
+
+    fields["total_amount"] = effTotal;
+    fields["total_premium_adjusted"] = effTotal;
     return fields;
-  }, [workspace?.fields, workspace?.total_premium_adjusted, formValues, companyName]);
+  }, [workspace?.fields, workspace?.total_premium_adjusted, workspace?.benefit_cards?.extras, workspace?.pinned_names?.company_name, formValues, companyName]);
 
   function commitField(field: FormField) {
     const current = formValues[field.name];
@@ -889,32 +1056,74 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     }
   }
 
-  function addConceptAsBenefit(concept: GlobalConcept, state: "current" | "available_addon" = "current") {
+  function addConceptAsBenefit(
+    concept: GlobalConcept,
+    state: "current" | "available_addon" = "current",
+    price?: { amount: number; currency: string } | null
+  ) {
     const key = `concept:${concept.concept_key}:${crypto.randomUUID().slice(0, 8)}`;
-    queueOperation({
+    const costStatus = price ? "paid" : state === "current" ? "included" : "paid";
+    const op = {
       op: "create_custom_benefit",
       selection_key: key,
       concept_id: concept.id,
       concept_key: concept.concept_key,
       label: concept.label,
       typed_value: { type: "custom", display_text: concept.label },
-      cost_status: state === "current" ? "included" : "paid",
+      cost_status: costStatus,
       state,
-    }, `benefits.${key}`);
+      price: price || null,
+    };
+    queueOperation(op, `benefits.${key}`);
+    setUndoStack((prev) => [...prev, { op, path: `benefits.${key}`, desc: `Added ${concept.label}` }]);
+    setRedoStack([]);
     setShowGlobalModal(false);
   }
 
   // Reset all benefits back to company defaults and detected extraction items (idempotent)
-  async function handleResetDefaults() {
+  async function handleReset() {
     if (!workspace) return;
-    queueOperation({ op: "reset_benefits" }, "benefits");
+    const op = { op: "reset_benefits" };
+    queueOperation(op, "benefits");
+    setUndoStack((prev) => [...prev, { op, path: "benefits", desc: "Reset benefits" }]);
+    setRedoStack([]);
     try {
       await save();
-      setToastMessage("Reset all benefits back to insurance defaults and detections.");
+      setToastMessage("Reset all benefits back to initial insurance defaults and detections.");
     } catch {
       // Handled by workspace mutation
     }
   }
+
+  const handleUndo = useCallback(async () => {
+    if (!undoStack.length) return;
+    const last = undoStack[undoStack.length - 1];
+    setUndoStack((prev) => prev.slice(0, -1));
+    setRedoStack((prev) => [...prev, last]);
+    if (last.op.selection_id) {
+      queueOperation({ op: "revert_benefit", selection_id: last.op.selection_id }, last.path);
+    } else if (last.op.op === "create_custom_benefit") {
+      queueOperation({ op: "benefit_update", selection_id: (last.op as any).selection_key, state: "removed" }, last.path);
+    } else {
+      queueOperation({ op: "reset_benefits" }, "benefits");
+    }
+    try {
+      await save();
+      setToastMessage("Undid benefit change.");
+    } catch {}
+  }, [undoStack, queueOperation, save]);
+
+  const handleRedo = useCallback(async () => {
+    if (!redoStack.length) return;
+    const next = redoStack[redoStack.length - 1];
+    setRedoStack((prev) => prev.slice(0, -1));
+    setUndoStack((prev) => [...prev, next]);
+    queueOperation(next.op, next.path);
+    try {
+      await save();
+      setToastMessage("Redid benefit change.");
+    } catch {}
+  }, [redoStack, queueOperation, save]);
 
   function addCustomBenefit(targetState: "current" | "available_addon" = "current") {
     const label = customLabel.trim();
@@ -925,7 +1134,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     const price = priceText
       ? { amount: priceText.replace(/,/g, ""), currency: "MYR" }
       : undefined;
-    queueOperation({
+    const op = {
       op: "create_custom_benefit",
       selection_key: key,
       label,
@@ -933,7 +1142,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       cost_status: isAddon ? "paid" : "included",
       state: targetState,
       ...(price ? { price } : {}),
-    }, `benefits.${key}`);
+    };
+    queueOperation(op, `benefits.${key}`);
+    setUndoStack((prev) => [...prev, { op, path: `benefits.${key}`, desc: `Added ${label}` }]);
+    setRedoStack([]);
     setCustomLabel("");
     setCustomValue("");
     setCustomPrice("");
@@ -996,10 +1208,17 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
   async function handleCopyPng() {
     if (mutation.dirty) {
-      setActionError("Please click 'Save' to save all changes first before copying as PNG.");
+      try {
+        await save();
+      } catch (err) {
+        setActionError("Please resolve errors before copying PNG: " + apiErrorMessage(err));
+        return;
+      }
+    }
+    if (!canvasExportRef.current || !workspace) {
+      setActionError("Quotation template is still rendering. Please wait a moment.");
       return;
     }
-    if (!canvasExportRef.current) return;
     setCopyingPng(true);
     setActionError(null);
     try {
@@ -1025,10 +1244,17 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
   async function handleDownloadPng() {
     if (mutation.dirty) {
-      setActionError("Please click 'Save' to save all changes first before downloading as PNG.");
+      try {
+        await save();
+      } catch (err) {
+        setActionError("Please resolve errors before downloading PNG: " + apiErrorMessage(err));
+        return;
+      }
+    }
+    if (!canvasExportRef.current || !workspace) {
+      setActionError("Quotation template is still rendering. Please wait a moment.");
       return;
     }
-    if (!canvasExportRef.current) return;
     setDownloadingPng(true);
     setActionError(null);
     try {
@@ -1055,8 +1281,12 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
   async function handleViewPdfInNewTab() {
     if (mutation.dirty) {
-      setActionError("Please click 'Save' to save all changes first before viewing the PDF.");
-      return;
+      try {
+        await save();
+      } catch (err) {
+        setActionError("Please resolve errors before viewing PDF: " + apiErrorMessage(err));
+        return;
+      }
     }
     if (!workspace) return;
     setViewLoading(true);
@@ -1078,8 +1308,12 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
   async function handleDownloadPdf() {
     if (mutation.dirty) {
-      setActionError("Please click 'Save' to save all changes first before downloading the PDF.");
-      return;
+      try {
+        await save();
+      } catch (err) {
+        setActionError("Please resolve errors before downloading PDF: " + apiErrorMessage(err));
+        return;
+      }
     }
     if (!workspace) return;
     setPdfLoading(true);
@@ -1315,7 +1549,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         {pdfOpen ? (
           <>
             <div
-              style={{ width: `${colSizes.pdf}%` }}
+              style={{ width: isDesktop ? `${colSizes.pdf}%` : "100%" }}
               className="w-full lg:w-auto min-w-0 flex-shrink-0 relative overflow-hidden pr-0 lg:pr-1"
             >
               <div className="relative min-w-0 h-full">
@@ -1342,10 +1576,46 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
         {/* Column 2: Master Template + Extracted Values */}
         <div
-          style={{ width: pdfOpen ? `${colSizes.middle}%` : `${split2Col}%` }}
+          style={{ width: isDesktop ? (pdfOpen ? `${colSizes.middle}%` : `${split2Col}%`) : "100%" }}
           className="w-full lg:w-auto min-w-0 flex-shrink-0 px-0 lg:px-2"
         >
           <section aria-label="Template configuration and extracted values" className="grid grid-cols-1 gap-4 content-start">
+            {/* Hierarchy & Quotation Context Overview Bar */}
+            <div className="flex flex-wrap items-center gap-2 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-2.5 text-xs shadow-xs">
+              <div className="flex items-center gap-1.5 font-semibold text-[var(--rl-text-strong)]">
+                <span className="text-[var(--rl-text-muted)] text-[11px]">Insurer:</span>
+                <span className="rounded bg-gray-100 px-2 py-0.5 font-bold text-gray-900 border border-gray-200">
+                  {workspace.hierarchy?.company_name || companyName || "Etiqa"}
+                </span>
+              </div>
+              <div className="h-3 w-px bg-[var(--rl-border)]" />
+              <div className="flex items-center gap-1.5 font-semibold text-[var(--rl-text-strong)]">
+                <span className="text-[var(--rl-text-muted)] text-[11px]">Vehicle:</span>
+                <span className="rounded bg-blue-50 px-2 py-0.5 font-bold text-blue-700 border border-blue-200">
+                  {workspace.hierarchy?.vehicle_category || (formValues.vehicle_type || "Private Car")}
+                </span>
+              </div>
+              <div className="h-3 w-px bg-[var(--rl-border)]" />
+              <div className="flex items-center gap-1.5 font-semibold text-[var(--rl-text-strong)]">
+                <span className="text-[var(--rl-text-muted)] text-[11px]">Usage:</span>
+                <span className="rounded bg-emerald-50 px-2 py-0.5 font-bold text-emerald-700 border border-emerald-200">
+                  {workspace.hierarchy?.segment || "Private"}
+                </span>
+              </div>
+              <div className="h-3 w-px bg-[var(--rl-border)]" />
+              <div className="flex items-center gap-1.5 font-semibold text-[var(--rl-text-strong)]">
+                <span className="text-[var(--rl-text-muted)] text-[11px]">Coverage:</span>
+                <span className="rounded bg-purple-50 px-2 py-0.5 font-bold text-purple-700 border border-purple-200">
+                  {workspace.hierarchy?.coverage_type || (formValues.coverage_type || "Comprehensive")}
+                </span>
+              </div>
+              <div className="h-3 w-px bg-[var(--rl-border)]" />
+              <div className="flex items-center gap-1.5 font-semibold text-[var(--rl-text-strong)] min-w-0">
+                <span className="text-[var(--rl-text-muted)] text-[11px]">Model:</span>
+                <strong className="truncate font-bold text-gray-900">{formValues.car_model || workspace.hierarchy?.car_model || "—"}</strong>
+              </div>
+            </div>
+
             {/* Row 1: Master Template Selection */}
             <Card className="rl-tour-template grid gap-3 p-4 border border-[var(--rl-border)] bg-white shadow-xs">
               <div className="flex items-center justify-between">
@@ -1544,10 +1814,12 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                 const newVtype = event.target.value;
                                 setFormValues((values) => ({ ...values, [field.name]: newVtype }));
                                 commitFieldDirectly(field.name, newVtype);
-                                const modelVal = formValues["car_model"] || (workspace.fields["car_model"] as WorkspaceField | undefined)?.value;
-                                const inferredCC = inferCCFromCarModel(modelVal);
-                                if (inferredCC) {
-                                  const computedRT = computeMalaysianRoadTax(inferredCC, newVtype);
+                                const currentCCStr = formValues["engine_cc"] || (workspace.fields["engine_cc"] as WorkspaceField | undefined)?.value;
+                                const parsedCC = currentCCStr ? parseInt(currentCCStr.replace(/[^0-9]/g, ""), 10) : inferCCFromCarModel(formValues["car_model"] || (workspace.fields["car_model"] as WorkspaceField | undefined)?.value);
+                                if (parsedCC && parsedCC > 0) {
+                                  const isCompany = newVtype.toLowerCase().includes("company") || newVtype.toLowerCase().includes("corp");
+                                  const baseType = newVtype.toLowerCase().includes("motor") ? "Motorcycle" : (newVtype.toLowerCase().includes("lorry") || newVtype.toLowerCase().includes("other")) ? "Lorry" : "Car";
+                                  const computedRT = computeMalaysianRoadTax(parsedCC, baseType, isCompany ? "Company" : "Individual");
                                   if (computedRT > 0) {
                                     const rtFormatted = computedRT.toFixed(2);
                                     setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
@@ -1557,10 +1829,12 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                               }}
                               className="text-xs font-medium"
                             >
-                              <option value="Car">Car (Private / Passenger)</option>
-                              <option value="Motorcycle">Motorcycle</option>
-                              <option value="Lorry">Lorry</option>
-                              <option value="Others">Others (Lorry / Commercial)</option>
+                              <option value="Car">Car (Private Saloon)</option>
+                              <option value="CompanyCar">Car (Company / Corporate Saloon)</option>
+                              <option value="Motorcycle">Motorcycle (Private)</option>
+                              <option value="CompanyMotorcycle">Motorcycle (Corporate)</option>
+                              <option value="Lorry">Lorry / Commercial</option>
+                              <option value="Others">Others</option>
                             </Select>
                           ) : (
                             <span className="relative">
@@ -1578,12 +1852,18 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                 onChange={(event) => setFormValues((values) => ({ ...values, [field.name]: event.target.value }))}
                                 onBlur={() => {
                                   commitField(field);
-                                  if (field.name === "car_model") {
-                                    const inferredCC = inferCCFromCarModel(formValues[field.name]);
-                                    const currentRT = formValues["roadtax"];
-                                    if (inferredCC && (!currentRT || currentRT === "0" || currentRT === "Missing")) {
+                                  if (field.name === "engine_cc" || field.name === "car_model") {
+                                    const currentCCStr = formValues["engine_cc"] || (field.name === "car_model" ? inferCCFromCarModel(formValues["car_model"])?.toString() : null);
+                                    const parsedCC = currentCCStr ? parseInt(currentCCStr.replace(/[^0-9]/g, ""), 10) : null;
+                                    if (parsedCC && parsedCC > 0) {
+                                      if (!formValues["engine_cc"]) {
+                                        setFormValues((values) => ({ ...values, engine_cc: `${parsedCC} CC` }));
+                                        commitFieldDirectly("engine_cc", `${parsedCC} CC`);
+                                      }
                                       const vtype = formValues["vehicle_type"] || "Car";
-                                      const computedRT = computeMalaysianRoadTax(inferredCC, vtype);
+                                      const isCompany = vtype.toLowerCase().includes("company") || vtype.toLowerCase().includes("corp");
+                                      const baseType = vtype.toLowerCase().includes("motor") ? "Motorcycle" : (vtype.toLowerCase().includes("lorry") || vtype.toLowerCase().includes("other")) ? "Lorry" : "Car";
+                                      const computedRT = computeMalaysianRoadTax(parsedCC, baseType, isCompany ? "Company" : "Individual");
                                       if (computedRT > 0) {
                                         const rtFormatted = computedRT.toFixed(2);
                                         setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
@@ -1609,6 +1889,239 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 </>
               )}
             </Card>
+
+            {/* Card 3: Extracted Benefits, Extras & Packages */}
+            <Card className="grid gap-3.5 p-4 border border-[var(--rl-border)] shadow-sm bg-white rounded-xl">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--rl-border)] pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-100">
+                    <Sparkle size={16} weight="fill" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-bold text-[var(--rl-text-strong)] flex items-center gap-2">
+                      Extracted Benefits, Extras & Packages
+                      {workspace.extracted_benefits_section?.extras?.length ? (
+                        <span className="rounded-full bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-bold text-indigo-700 font-mono">
+                          {workspace.extracted_benefits_section.extras.length} detected
+                        </span>
+                      ) : null}
+                    </h2>
+                    <p className="text-[11px] text-[var(--rl-text-muted)]">
+                      Riders, add-on packages, and optional covers detected from the uploaded quotation.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {workspace.extracted_benefits_section?.total_optional_cover_amount ? (
+                    <span className="rounded-md bg-emerald-50 border border-emerald-200 px-2.5 py-1 text-xs font-bold text-emerald-800 font-mono">
+                      Optional Covers: RM {workspace.extracted_benefits_section.total_optional_cover_amount}
+                    </span>
+                  ) : null}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setExtractedBenefitsCollapsed(!extractedBenefitsCollapsed)}
+                    className="text-xs h-7 px-2 text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                  >
+                    {extractedBenefitsCollapsed ? "Expand" : "Collapse"}
+                  </Button>
+                </div>
+              </div>
+
+              {!extractedBenefitsCollapsed && (
+                <div className="grid gap-3.5">
+                  {/* Detected Package / Plan Banner */}
+                  {workspace.extracted_benefits_section?.detected_package?.name ? (
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-200 bg-gradient-to-r from-blue-50/80 to-indigo-50/80 p-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-600 text-white font-bold text-xs shadow-sm">
+                          PRO
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-800">Detected Insurance Package</span>
+                            {workspace.extracted_benefits_section.detected_package.is_active_tier ? (
+                              <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-800">
+                                Active Tier
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="text-xs font-bold text-[var(--rl-text-strong)]">
+                            {workspace.extracted_benefits_section.detected_package.name}
+                          </p>
+                        </div>
+                      </div>
+
+                      {workspace.extracted_benefits_section.detected_package.matching_package_id &&
+                        !workspace.extracted_benefits_section.detected_package.is_active_tier ? (
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          disabled={pinLoading}
+                          onClick={() => pinPackageTier(workspace.extracted_benefits_section!.detected_package!.matching_package_id!)}
+                          className="text-xs font-semibold h-8 bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+                        >
+                          Switch to this Tier →
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {/* View Mode Toggle */}
+                  <div className="flex items-center justify-between border-b border-[var(--rl-border)] pb-2">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setExtractedBenefitsViewMode("extras")}
+                        className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                          extractedBenefitsViewMode === "extras"
+                            ? "bg-[var(--rl-black)] text-white shadow-sm"
+                            : "bg-gray-100 text-[var(--rl-text-muted)] hover:bg-gray-200"
+                        }`}
+                      >
+                        Purchased Extras & Add-ons
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setExtractedBenefitsViewMode("all_evidence")}
+                        className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                          extractedBenefitsViewMode === "all_evidence"
+                            ? "bg-[var(--rl-black)] text-white shadow-sm"
+                            : "bg-gray-100 text-[var(--rl-text-muted)] hover:bg-gray-200"
+                        }`}
+                      >
+                        All Extracted Evidence ({workspace.extracted_benefits_section?.extras?.length || 0})
+                      </button>
+                    </div>
+
+                    <span className="text-[11px] text-[var(--rl-text-muted)] font-mono">
+                      {extractedBenefitsViewMode === "extras" ? "Cost & Coverage Breakdown" : "Source Verbatim Quotes"}
+                    </span>
+                  </div>
+
+                  {/* Scenario 1: Purchased Extras & Add-ons */}
+                  {extractedBenefitsViewMode === "extras" ? (
+                    <div className="grid gap-2">
+                      {workspace.extracted_benefits_section?.extras && workspace.extracted_benefits_section.extras.length > 0 ? (
+                        <div className="divide-y divide-gray-100 rounded-lg border border-gray-200 overflow-hidden bg-white shadow-xs">
+                          {workspace.extracted_benefits_section.extras.map((extra, idx) => {
+                            const hasCost = extra.cost && extra.cost !== "0.00" && extra.cost !== "0";
+                            return (
+                              <div
+                                key={extra.id || idx}
+                                className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 hover:bg-gray-50/80 transition-colors"
+                              >
+                                <div className="grid gap-0.5 min-w-0 flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-xs font-bold text-[var(--rl-text-strong)]">
+                                      {extra.label}
+                                    </span>
+                                    {extra.is_applied ? (
+                                      <span className="rounded bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">
+                                        ✓ Included in Grid
+                                      </span>
+                                    ) : (
+                                      <span className="rounded bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
+                                        Detected in PDF
+                                      </span>
+                                    )}
+                                    {extra.concept_key ? (
+                                      <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[9px] font-mono text-gray-600">
+                                        {extra.concept_key}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  {extra.raw_text && extra.raw_text !== extra.label ? (
+                                    <p className="text-[11px] text-[var(--rl-text-muted)] italic truncate">
+                                      &ldquo;{extra.raw_text}&rdquo;
+                                    </p>
+                                  ) : null}
+                                </div>
+
+                                <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-gray-100">
+                                  {extra.coverage_limit ? (
+                                    <div className="text-right">
+                                      <span className="block text-[9px] uppercase font-bold text-[var(--rl-text-muted)]">Limit / Sum</span>
+                                      <span className="text-xs font-semibold text-[var(--rl-text-strong)] font-mono">
+                                        {extra.coverage_limit?.startsWith("RM") ? extra.coverage_limit : `RM ${extra.coverage_limit}`}
+                                      </span>
+                                    </div>
+                                  ) : null}
+
+                                  {hasCost && extra.cost ? (
+                                    <div className="text-right">
+                                      <span className="block text-[9px] uppercase font-bold text-[var(--rl-text-muted)]">Cost</span>
+                                      <span className="text-xs font-bold text-[var(--rl-red)] font-mono">
+                                        {extra.cost.startsWith("RM") ? extra.cost : `RM ${extra.cost}`}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <div className="text-right">
+                                      <span className="block text-[9px] uppercase font-bold text-[var(--rl-text-muted)]">Cost</span>
+                                      <span className="text-[11px] font-medium text-gray-400">Included</span>
+                                    </div>
+                                  )}
+
+                                  {!extra.is_applied && extra.concept_key ? (
+                                    <Button
+                                      size="sm"
+                                      variant="secondary"
+                                      onClick={() => {
+                                        const concept = globalConcepts.find((c) => c.concept_key === extra.concept_key);
+                                        if (concept) {
+                                          const cleanCost = extra.cost ? Number(String(extra.cost).replace(/[^0-9.]/g, "")) : null;
+                                          const priceObj = cleanCost && Number.isFinite(cleanCost) ? { amount: cleanCost, currency: "MYR" } : null;
+                                          addConceptAsBenefit(concept, "current", priceObj);
+                                        }
+                                      }}
+                                      className="text-[11px] h-7 px-2.5 shrink-0 font-medium"
+                                      title="Add this detected benefit to default benefits list"
+                                    >
+                                      + Add to defaults
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-dashed border-gray-200 p-6 text-center text-xs text-[var(--rl-text-muted)]">
+                          No add-ons or optional covers detected yet. Upload an insurance quotation PDF or run Gemini extraction.
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* Scenario 2: All Extracted Evidence */
+                    <div className="grid gap-2">
+                      {workspace.source_lines && workspace.source_lines.length > 0 ? (
+                        <div className="max-h-[360px] overflow-y-auto divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white p-1">
+                          {workspace.source_lines.map((line, idx) => (
+                            <div key={line.source_line_id || idx} className="p-2.5 text-xs hover:bg-gray-50/80">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-semibold text-[var(--rl-text-strong)]">{line.raw_label}</span>
+                                <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[9px] font-mono text-gray-500">
+                                  {line.disposition || "detected"}
+                                </span>
+                              </div>
+                              {line.candidate_mappings && line.candidate_mappings.length > 0 ? (
+                                <p className="text-[11px] text-indigo-600 font-mono mt-0.5">
+                                  Matched: {line.candidate_mappings.map((m) => m.label || m.matched_alias).join(", ")}
+                                </p>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-dashed border-gray-200 p-6 text-center text-xs text-[var(--rl-text-muted)]">
+                          No raw evidence lines found for this quotation draft.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </Card>
           </section>
         </div>
 
@@ -1624,7 +2137,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
         {/* Column 3: Live Quotation Preview + Insurer Benefits */}
         <div
-          style={{ width: pdfOpen ? `${colSizes.right}%` : `${100 - split2Col}%` }}
+          style={{ width: isDesktop ? (pdfOpen ? `${colSizes.right}%` : `${100 - split2Col}%`) : "100%" }}
           className="w-full lg:w-auto min-w-0 flex-1 pl-0 lg:pl-2"
         >
           <section aria-label="Live preview and benefits manager" className="grid grid-cols-1 gap-4 content-start">
@@ -1725,7 +2238,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                           position: "relative",
                         }}
                       >
-                        {(previewTemplate.config.canvas?.elements || []).map((element) => (
+                        {balanceBenefitGridElements(previewTemplate.config.canvas?.elements || [], workspace.benefit_cards).map((element: CanvasElement) => (
                           <CanvasElementView
                             key={element.id}
                             element={element}
@@ -1830,15 +2343,35 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 <>
                   {/* Global Actions Toolbar */}
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--rl-border)] pb-3">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Button
                         size="sm"
                         variant="secondary"
                         icon={<ArrowCounterClockwise size={14} weight="bold" className="text-amber-600" />}
-                        onClick={handleResetDefaults}
-                        title="Reset to insurance defaults and detections"
+                        onClick={handleReset}
+                        title="Reset to initial insurance defaults and detections"
                       >
-                        Reset Defaults
+                        Reset
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        icon={<ArrowArcLeft size={14} weight="bold" />}
+                        onClick={handleUndo}
+                        disabled={undoStack.length === 0}
+                        title="Undo recent benefit change"
+                      >
+                        Undo
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        icon={<ArrowArcRight size={14} weight="bold" />}
+                        onClick={handleRedo}
+                        disabled={redoStack.length === 0}
+                        title="Redo benefit change"
+                      >
+                        Redo
                       </Button>
                       <span className="text-xs text-[var(--rl-text-muted)]">
                         {currentCards.length} active standard covers
@@ -1897,7 +2430,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                               <Button
                                 size="sm"
                                 variant="secondary"
-                                onClick={handleResetDefaults}
+                                onClick={handleReset}
                                 className="mt-2 text-xs"
                               >
                                 Reset to insurance defaults
@@ -1960,61 +2493,130 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                         </div>
 
                         {workspace.packs.length > 0 ? (
-                          <div className="grid gap-2">
-                            <div className="flex items-center gap-1.5">
-                              <PackageIcon size={15} weight="fill" className="text-[var(--rl-red)]" />
-                              <h4 className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-strong)]">
-                                Add-on Packs
-                              </h4>
+                          <div className="grid gap-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <PackageIcon size={16} weight="fill" className="text-[var(--rl-red)]" />
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-strong)]">
+                                  Add-on Bundle Packages
+                                </h4>
+                              </div>
+                              <span className="text-[10px] font-bold text-[var(--rl-red)] bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
+                                Stack Cards ({workspace.packs.length} bundles)
+                              </span>
                             </div>
-                            <p className="text-[10px] text-[var(--rl-text-muted)] -mt-1">
-                              Bundled add-on plans (e.g. Driver Protection Pack). Adding one adds several benefits at once and upgrades existing defaults in place.
+                            <p className="text-[11px] text-[var(--rl-text-muted)] -mt-1.5">
+                              Pre-bundled multi-benefit packs. Choose a plan tier to see included benefits and add to quotation.
                             </p>
                             {workspace.packs.map((pack) => {
                               const activeGroup = workspace.benefit_cards.groups?.find((g) =>
                                 pack.plans.some((p) => p.plan_id === g.plan_id)
                               );
                               const selectedPlanId = packPlanSelections[pack.package_id] || pack.plans[0]?.plan_id || "";
-                              const selectedPlan = pack.plans.find((p) => p.plan_id === selectedPlanId);
+                              const selectedPlan = pack.plans.find((p) => p.plan_id === selectedPlanId) || pack.plans[0];
                               return (
-                                <div key={pack.package_id} className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-red)]/30 bg-white p-2.5">
-                                  <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <div className="flex items-center gap-1.5">
-                                      <PackageIcon size={14} weight="fill" className="text-[var(--rl-red)]" />
-                                      <span className="text-xs font-bold text-[var(--rl-text-strong)]">{pack.name}</span>
-                                      {activeGroup ? (
-                                        <span className="rounded bg-[var(--rl-red-light)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--rl-red)]">
-                                          Added · {activeGroup.plan_label}
-                                        </span>
-                                      ) : null}
+                                <div
+                                  key={pack.package_id}
+                                  className="relative rounded-[var(--rl-radius-sm)] border-2 border-red-200/80 bg-white p-3.5 shadow-sm transition-all hover:border-[var(--rl-red)]/60"
+                                >
+                                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2">
+                                    <div className="flex items-center gap-2">
+                                      <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--rl-red-light)] text-[var(--rl-red)]">
+                                        <PackageIcon size={16} weight="bold" />
+                                      </div>
+                                      <div>
+                                        <div className="flex items-center gap-1.5">
+                                          <h5 className="text-xs font-bold text-[var(--rl-text-strong)]">{pack.name}</h5>
+                                          <span className="rounded bg-gray-100 px-1.5 py-0.2 text-[9px] font-bold text-gray-600 uppercase">
+                                            Bundle Stack
+                                          </span>
+                                        </div>
+                                        {activeGroup ? (
+                                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700">
+                                            <Check size={11} weight="bold" /> Active on Quote ({activeGroup.plan_label})
+                                          </span>
+                                        ) : null}
+                                      </div>
                                     </div>
+
                                     {activeGroup ? (
                                       <button
                                         type="button"
                                         onClick={() => removePack(activeGroup.plan_id)}
-                                        className="rounded px-2 py-1 text-[11px] font-semibold text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] transition-colors"
+                                        className="rounded border border-red-200 bg-red-50 px-2.5 py-1 text-[11px] font-bold text-[var(--rl-red)] hover:bg-red-100 transition-colors"
                                       >
-                                        Remove pack
+                                        Remove Bundle
                                       </button>
                                     ) : null}
                                   </div>
-                                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                                    <select
-                                      value={selectedPlanId}
-                                      onChange={(e) => setPackPlanSelections((prev) => ({ ...prev, [pack.package_id]: e.target.value }))}
-                                      className="min-w-0 flex-1 rounded border border-[var(--rl-border)] bg-white px-2 py-1.5 text-xs text-[var(--rl-text-strong)]"
+
+                                  {/* Plan Tier Selector Pills */}
+                                  <div className="mt-2.5">
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">Select Plan Tier:</span>
+                                    <div className="mt-1 flex flex-wrap gap-1.5">
+                                      {pack.plans.map((plan) => {
+                                        const isSelected = plan.plan_id === selectedPlanId;
+                                        return (
+                                          <button
+                                            key={plan.plan_id}
+                                            type="button"
+                                            onClick={() => setPackPlanSelections((prev) => ({ ...prev, [pack.package_id]: plan.plan_id }))}
+                                            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold transition-all ${
+                                              isSelected
+                                                ? "bg-[var(--rl-red)] text-white shadow-xs"
+                                                : "bg-gray-100 text-[var(--rl-text-strong)] hover:bg-gray-200"
+                                            }`}
+                                          >
+                                            <span>{plan.name}</span>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+
+                                  {/* Included Member Benefit Boxes Preview */}
+                                  {selectedPlan ? (
+                                    <div className="mt-3 rounded-lg border border-gray-100 bg-neutral-50/70 p-2.5">
+                                      <div className="flex items-center justify-between mb-1.5">
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
+                                          Includes {selectedPlan.members.length} benefits in this tier:
+                                        </span>
+                                      </div>
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                        {selectedPlan.members.map((m, mIdx) => (
+                                          <div
+                                            key={m.offering_id || mIdx}
+                                            className="flex items-center justify-between gap-1.5 rounded bg-white p-1.5 border border-gray-200/70 text-xs shadow-2xs"
+                                          >
+                                            <div className="flex items-center gap-1.5 min-w-0">
+                                              <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[9px] font-bold text-emerald-800">
+                                                ✓
+                                              </span>
+                                              <span className="truncate font-semibold text-[11px] text-[var(--rl-text-strong)]">
+                                                {m.label}
+                                              </span>
+                                            </div>
+                                            {m.typed_value_override && typeof m.typed_value_override.display_text === "string" ? (
+                                              <span className="shrink-0 text-[10px] font-mono font-bold text-gray-500">
+                                                {String(m.typed_value_override.display_text)}
+                                              </span>
+                                            ) : null}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ) : null}
+
+                                  <div className="mt-3 flex items-center justify-end">
+                                    <Button
+                                      size="sm"
+                                      onClick={() => addPack(pack, selectedPlanId)}
+                                      disabled={!selectedPlanId}
+                                      className="text-xs font-bold h-8 px-4 bg-[var(--rl-red)] hover:bg-red-700 text-white shadow-xs"
                                     >
-                                      {pack.plans.map((plan) => (
-                                        <option key={plan.plan_id} value={plan.plan_id}>{plan.name}</option>
-                                      ))}
-                                    </select>
-                                    <Button size="sm" onClick={() => addPack(pack, selectedPlanId)} disabled={!selectedPlanId} className="text-xs">
-                                      {activeGroup ? "Upgrade plan" : "Add pack"}
+                                      {activeGroup ? `Switch to ${selectedPlan?.name || "Tier"}` : `Apply ${selectedPlan?.name || "Bundle"} →`}
                                     </Button>
                                   </div>
-                                  <p className="mt-1.5 text-[10px] text-[var(--rl-text-muted)]">
-                                    {selectedPlan?.members.map((m) => m.label).join(" · ") || "No members configured"}
-                                  </p>
                                 </div>
                               );
                             })}
@@ -2148,6 +2750,13 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 />
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setModalFilter("insurer")}
+                  className={`rounded-md px-2.5 py-1 text-xs font-bold transition-all ${modalFilter === "insurer" ? "bg-[var(--rl-black)] text-white" : "bg-white border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"}`}
+                >
+                  🏢 {companyName ? `${companyName}` : "This Insurer"} ({globalConcepts.filter((c) => insurerConceptKeys.has(c.concept_key) || insurerConceptKeys.has(c.id)).length})
+                </button>
                 <button
                   type="button"
                   onClick={() => setModalFilter("all")}

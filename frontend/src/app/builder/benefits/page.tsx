@@ -171,13 +171,18 @@ function BenefitsPageContent() {
       api<{ vehicle_categories: { items: HierarchyItem[] } }>("/business/vehicle-categories?page=1&page_size=100"),
       api<{ benefit_concepts: { items: Concept[] } }>("/business/benefit-concepts?page=1&page_size=100"),
       api<{ sources: { items: Source[] } }>("/business/sources?page=1&page_size=100"),
-      api<{ templates: { items: TemplateRecord[] } }>("/admin/templates?page=1&page_size=20").catch(() => ({ templates: { items: [] } })),
+      api<{ templates: TemplateRecord[] | { items: TemplateRecord[] } }>("/admin/templates?page=1&page_size=20").catch(() =>
+        api<{ templates: TemplateRecord[] }>("/business/templates/published").catch(() => ({ templates: [] }))
+      ),
     ]);
 
     const activeCompanies = companyResult.companies.items;
     const activeSegments = segmentResult.segments.items.filter((item) => item.status === "active");
     const activeVehicles = vehicleResult.vehicle_categories.items.filter((item) => item.status === "active");
-    const allTemplates = templateResult.templates.items || [];
+    const rawTemplates = (templateResult as { templates?: TemplateRecord[] | { items?: TemplateRecord[] } })?.templates;
+    const allTemplates: TemplateRecord[] = Array.isArray(rawTemplates)
+      ? rawTemplates
+      : (rawTemplates?.items || []);
 
     setCompanies(activeCompanies);
     setSegments(activeSegments);
@@ -187,7 +192,7 @@ function BenefitsPageContent() {
     setTemplates(allTemplates);
 
     const preferredTpl =
-      allTemplates.find((t) => t.name.toLowerCase().includes("copy of standard a4") || t.is_default) ||
+      allTemplates.find((t) => (t.name || "").toLowerCase().includes("motor") || (t.name || "").toLowerCase().includes("copy of standard a4") || t.is_default) ||
       allTemplates[0] ||
       null;
     if (preferredTpl) setSelectedTemplateId(preferredTpl.id);
@@ -595,6 +600,49 @@ function BenefitsPageContent() {
     }
   }
 
+  // ── Inline Price / Cost Editor (Optimistic UI, Zero Reload) ───────────
+  async function updateOfferingPriceInline(offering: Offering, newPriceStr: string) {
+    if (!selectedCatalog || !catalogWorkspace) return;
+    setSaving(true);
+    setError("");
+    const prevOfferings = catalogWorkspace.offerings;
+    const cleanStr = newPriceStr.replace(/RM/i, "").replace(/,/g, "").trim();
+    const num = cleanStr ? parseFloat(cleanStr) : null;
+    const priceObj = num !== null && !isNaN(num) && num > 0 ? { type: "money", value: num, currency: "MYR" } : null;
+
+    setCatalogWorkspace((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        offerings: prev.offerings.map((o) => (o.id === offering.id ? { ...o, optional_price: priceObj } : o)),
+      };
+    });
+
+    try {
+      const payload = {
+        id: offering.id,
+        offering_key: offering.offering_key,
+        offering_kind: offering.offering_kind,
+        concept_id: offering.concept_id,
+        role: offering.role,
+        base_revision: selectedCatalog.revision,
+        display_value: offering.display_value || undefined,
+        typed_value: offering.typed_value || undefined,
+        optional_price: priceObj,
+      };
+      await api(`/business/catalogs/${selectedCatalog.id}/offerings`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      await loadCatalog(selectedCatalog.id, true);
+    } catch (err) {
+      setCatalogWorkspace((prev) => (prev ? { ...prev, offerings: prevOfferings } : prev));
+      setError(apiErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function resetToDefaultOfferings() {
     if (!selectedCatalog || !selectedCompany) return;
     setSaving(true);
@@ -803,9 +851,16 @@ function BenefitsPageContent() {
     try {
       return JSON.parse(text);
     } catch {
-      setError("The benefit value override must be valid JSON (or empty).");
-      return null;
+      return { type: "text", display_text: text, value: text };
     }
+  }
+
+  function formatOverrideDisplay(override: any): string {
+    if (!override) return "";
+    if (typeof override === "string") return override;
+    if (override.display_text) return String(override.display_text);
+    if (override.value !== undefined) return String(override.value);
+    return JSON.stringify(override);
   }
 
   function plansFor(bundle: Package): Array<Record<string, any>> {
@@ -830,8 +885,7 @@ function BenefitsPageContent() {
   function bundleMemberOptions(bundle: Package): Offering[] {
     return (catalogWorkspace?.offerings || []).filter((item) => {
       if (!item || item.status === "retired") return false;
-      if (item.applies_to_id === bundle.id) return true;
-      return item.applies_to_type === "bundle" || item.role === "bundle_component";
+      return true;
     });
   }
 
@@ -1603,22 +1657,36 @@ function BenefitsPageContent() {
                         </div>
                       </div>
 
-                      <div className="mt-2.5 flex items-center justify-between text-[11px] pt-1.5 border-t border-[var(--rl-border)]/60">
+                      <div className="mt-2.5 flex items-center justify-between gap-1.5 text-[11px] pt-1.5 border-t border-[var(--rl-border)]/60">
                         {isActive ? (
-                          <input
-                            type="text"
-                            defaultValue={offering?.display_value || "Included"}
-                            onClick={(e) => e.stopPropagation()}
-                            onBlur={(e) => {
-                              if (offering) updateOfferingValueInline(offering, e.target.value);
-                            }}
-                            className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] w-28"
-                            title="Click to edit value"
-                          />
+                          <>
+                            <input
+                              type="text"
+                              defaultValue={offering?.display_value || "Included"}
+                              onClick={(e) => e.stopPropagation()}
+                              onBlur={(e) => {
+                                if (offering) updateOfferingValueInline(offering, e.target.value);
+                              }}
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] flex-1 min-w-0"
+                              placeholder="Included"
+                              title="Coverage value / limit"
+                            />
+                            <input
+                              type="text"
+                              defaultValue={offering?.optional_price?.value ? `RM ${Number(offering.optional_price.value).toFixed(2)}` : (offering?.optional_price?.amount ? `RM ${offering.optional_price.amount}` : "")}
+                              onClick={(e) => e.stopPropagation()}
+                              onBlur={(e) => {
+                                if (offering) updateOfferingPriceInline(offering, e.target.value);
+                              }}
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] w-16 text-right shrink-0"
+                              placeholder="RM 0"
+                              title="Cost / Price (empty if free)"
+                            />
+                          </>
                         ) : (
                           <span className="text-[11px] text-[var(--rl-text-muted)]">Click to add</span>
                         )}
-                        <span className="text-[10px] font-semibold text-[var(--rl-text-muted)]">Default</span>
+                        <span className="text-[10px] font-semibold text-[var(--rl-text-muted)] shrink-0">Default</span>
                       </div>
                     </div>
                   );
@@ -1718,22 +1786,36 @@ function BenefitsPageContent() {
                         )}
                       </div>
 
-                      <div className="mt-2.5 flex items-center justify-between text-[11px] pt-1.5 border-t border-[var(--rl-border)]/60">
+                      <div className="mt-2.5 flex items-center justify-between gap-1.5 text-[11px] pt-1.5 border-t border-[var(--rl-border)]/60">
                         {isActive ? (
-                          <input
-                            type="text"
-                            defaultValue={offering?.display_value || "Optional"}
-                            onClick={(e) => e.stopPropagation()}
-                            onBlur={(e) => {
-                              if (offering) updateOfferingValueInline(offering, e.target.value);
-                            }}
-                            className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] w-28"
-                            title="Click to edit value"
-                          />
+                          <>
+                            <input
+                              type="text"
+                              defaultValue={offering?.display_value || "Optional"}
+                              onClick={(e) => e.stopPropagation()}
+                              onBlur={(e) => {
+                                if (offering) updateOfferingValueInline(offering, e.target.value);
+                              }}
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] flex-1 min-w-0"
+                              placeholder="Optional"
+                              title="Coverage value / limit"
+                            />
+                            <input
+                              type="text"
+                              defaultValue={offering?.optional_price?.value ? `RM ${Number(offering.optional_price.value).toFixed(2)}` : (offering?.optional_price?.amount ? `RM ${offering.optional_price.amount}` : "")}
+                              onClick={(e) => e.stopPropagation()}
+                              onBlur={(e) => {
+                                if (offering) updateOfferingPriceInline(offering, e.target.value);
+                              }}
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] w-16 text-right shrink-0"
+                              placeholder="RM 0"
+                              title="Cost / Price (empty if free)"
+                            />
+                          </>
                         ) : (
                           <span className="text-[11px] text-[var(--rl-text-muted)]">Click to add</span>
                         )}
-                        <span className="text-[10px] font-semibold text-[var(--rl-text-muted)]">Add-on</span>
+                        <span className="text-[10px] font-semibold text-[var(--rl-text-muted)] shrink-0">Add-on</span>
                       </div>
                     </div>
                   );
@@ -1774,25 +1856,62 @@ function BenefitsPageContent() {
               </div>
 
               {activeTab === "bundles" && (
-                <div className="mt-4 space-y-3 text-xs">
+                <div className="mt-4 space-y-4 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3">
+                    <div>
+                      <h4 className="font-bold text-[var(--rl-text-strong)] flex items-center gap-1.5">
+                        <PackageIcon size={16} weight="fill" className="text-[var(--rl-red)]" />
+                        Custom Add-on Bundles ({bundles.length})
+                      </h4>
+                      <p className="text-[11px] text-[var(--rl-text-muted)] mt-0.5">
+                        Package multiple add-ons (e.g. Driver Passenger Protector / DPA) into tiered multi-benefit bundles with custom prices and limits.
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setFormName("Driver Passenger Protector");
+                        setFormPackageKey("driver-passenger-protector");
+                        setDialog("bundle");
+                      }}
+                      className="gap-1.5"
+                    >
+                      <Plus size={14} weight="bold" />
+                      Create Custom Bundle
+                    </Button>
+                  </div>
+
                   {bundles.length === 0 ? (
-                    <p className="text-[var(--rl-text-muted)]">
-                      No addon bundles configured for this product. Use &quot;New bundle&quot; to create a pack (e.g. Driver Protection Pack), then add plan levels A/B/C/D below.
-                    </p>
+                    <div className="rounded-[var(--rl-radius-sm)] border border-dashed border-[var(--rl-border)] p-6 text-center text-[var(--rl-text-muted)]">
+                      <p className="font-medium text-[var(--rl-text-strong)]">No custom addon bundles configured yet.</p>
+                      <p className="mt-1 text-[11px]">Click &quot;Create Custom Bundle&quot; to create a multi-benefit package (e.g. Driver Passenger Protector) with tiered plan levels A/B/C/D.</p>
+                    </div>
                   ) : (
                     bundles.map((b) => {
                       const plans = plansFor(b);
                       const expanded = expandedPlanId === b.id;
+                      const isCarOnly = b.package_key.toLowerCase().includes("driver") || b.name.toLowerCase().includes("driver");
                       return (
-                        <div key={b.id} className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)]">
-                          <div className="flex flex-wrap items-center justify-between gap-2 p-3">
-                            <div className="flex items-center gap-2">
-                              <PackageIcon size={16} weight="fill" className="text-[var(--rl-red)]" />
-                              <span className="font-bold text-[var(--rl-text-strong)]">{b.name}</span>
-                              <span className="text-[var(--rl-text-muted)]">({b.package_key})</span>
-                              <span className="rounded-[4px] bg-[var(--rl-surface)] border border-[var(--rl-border)] px-2 py-0.5 text-[10px] font-bold text-[var(--rl-text-muted)]">
-                                {plans.length} plan{plans.length === 1 ? "" : "s"}
-                              </span>
+                        <div key={b.id} className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] shadow-sm">
+                          <div className="flex flex-wrap items-center justify-between gap-2 p-3.5 border-b border-[var(--rl-border)]/60">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="grid h-7 w-7 place-items-center rounded-[4px] bg-[var(--rl-red-light)] text-[var(--rl-red)]">
+                                <PackageIcon size={16} weight="fill" />
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-xs text-[var(--rl-text-strong)]">{b.name}</span>
+                                  <span className="font-mono text-[10px] text-[var(--rl-text-muted)]">({b.package_key})</span>
+                                  <span className="rounded-[4px] bg-[var(--rl-surface)] border border-[var(--rl-border)] px-2 py-0.5 text-[10px] font-bold text-[var(--rl-text-muted)]">
+                                    {plans.length} plan tier{plans.length === 1 ? "" : "s"}
+                                  </span>
+                                  {isCarOnly && (
+                                    <span className="rounded-[4px] bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 text-[10px] font-semibold">
+                                      🚗 4-Wheelers (Car Only)
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
                             </div>
                             <div className="flex items-center gap-1.5">
                               <button
@@ -1819,120 +1938,126 @@ function BenefitsPageContent() {
                                 className="flex items-center gap-1 rounded px-2 py-1 font-semibold text-[var(--rl-text-muted)] hover:bg-[var(--rl-surface)] hover:text-[var(--rl-text-strong)] transition-colors"
                               >
                                 {expanded ? <EyeSlash size={14} weight="bold" /> : <Eye size={14} weight="bold" />}
-                                {expanded ? "Collapse" : "Manage plans"}
+                                {expanded ? "Collapse Plans" : "Manage Plans & Limits"}
                               </button>
                             </div>
                           </div>
 
                           {expanded && (
-                            <div className="grid gap-3 border-t border-[var(--rl-border)] p-3">
-                              {/* Create plan */}
-                              <div className="flex flex-wrap items-center gap-2">
+                            <div className="grid gap-3.5 p-4 bg-[var(--rl-surface)]">
+                              {/* Create Plan Tier */}
+                              <div className="flex flex-wrap items-center gap-2 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3">
+                                <span className="font-semibold text-xs text-[var(--rl-text-strong)]">Add Plan Tier:</span>
                                 <Input
                                   value={planFormName}
                                   onChange={(e) => setPlanFormName(e.target.value)}
-                                  placeholder="Plan name, e.g. Driver Protection Plan A"
+                                  placeholder="e.g. Plan A (RM 70)"
                                   className="max-w-xs text-xs"
                                   onKeyDown={(e) => { if (e.key === "Enter") createPlan(b); }}
                                 />
                                 <Button size="sm" onClick={() => createPlan(b)} disabled={planSaving} icon={<Plus size={14} weight="bold" />}>
-                                  Add plan level
+                                  Add Tier Level
                                 </Button>
                               </div>
 
                               {plans.length === 0 ? (
-                                <p className="text-[var(--rl-text-muted)]">No plan levels yet. Add Plan A first, then B/C/D as upgrades.</p>
+                                <p className="text-[var(--rl-text-muted)] italic">No plan levels yet. Add Plan A first, then B, C, D as upgrades.</p>
                               ) : (
-                                plans.map((plan) => {
-                                  const items = planItemsFor(plan);
-                                  const memberOptions = bundleMemberOptions(b);
-                                  return (
-                                    <div key={plan.id} className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-3">
-                                      <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <div className="flex items-center gap-2">
-                                          <span className="font-bold text-[var(--rl-text-strong)]">{plan.name}</span>
-                                          <span className="font-mono text-[10px] text-[var(--rl-text-muted)]">({plan.plan_key})</span>
-                                          <span className="rounded-[4px] bg-[var(--rl-bg)] border border-[var(--rl-border)] px-2 py-0.5 text-[10px] font-bold text-[var(--rl-text-muted)]">
-                                            {items.length} member{items.length === 1 ? "" : "s"}
-                                          </span>
-                                        </div>
-                                        <div className="flex items-center gap-1">
-                                          <button
-                                            type="button"
-                                            onClick={() => renamePlan(b, plan)}
-                                            disabled={planSaving}
-                                            className="rounded px-2 py-1 text-[11px] font-semibold text-[var(--rl-text-muted)] hover:bg-[var(--rl-bg)] hover:text-[var(--rl-text-strong)] transition-colors flex items-center gap-1"
-                                            title="Rename plan"
-                                          >
-                                            <PencilSimple size={12} weight="bold" /> Rename
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => retirePlan(b, plan)}
-                                            disabled={planSaving}
-                                            className="rounded px-2 py-1 text-[11px] font-semibold text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] transition-colors flex items-center gap-1"
-                                          >
-                                            <Trash size={12} weight="bold" /> Retire
-                                          </button>
-                                        </div>
-                                      </div>
-
-                                      {/* Members */}
-                                      <div className="mt-3 grid gap-2">
-                                        {items.map((item) => (
-                                          <div key={item.id} className="flex flex-wrap items-center gap-2 rounded-[4px] border border-[var(--rl-border)] bg-white px-2 py-1.5">
-                                            <span className="min-w-0 flex-1 truncate font-semibold text-[var(--rl-text-strong)]">
-                                              {offeringLabel(String(item.offering_id))}
+                                <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                                  {plans.map((plan) => {
+                                    const items = planItemsFor(plan);
+                                    const memberOptions = bundleMemberOptions(b);
+                                    return (
+                                      <div key={plan.id} className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3.5 shadow-sm space-y-3">
+                                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--rl-border)]/60 pb-2.5">
+                                          <div className="flex items-center gap-2">
+                                            <span className="font-bold text-xs text-[var(--rl-text-strong)]">{plan.name}</span>
+                                            <span className="rounded-[4px] bg-[var(--rl-surface)] border border-[var(--rl-border)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--rl-text-muted)]">
+                                              {items.length} benefit{items.length === 1 ? "" : "s"}
                                             </span>
-                                            <input
-                                              value={item.typed_value_override ? JSON.stringify(item.typed_value_override) : ""}
-                                              onChange={(e) => updatePlanItemOverride(b, plan, item, e.target.value)}
-                                              placeholder="Value override (JSON) — e.g. unlimited towing"
-                                              className="min-w-0 flex-1 rounded border border-[var(--rl-border)] bg-[var(--rl-bg)] px-2 py-1 font-mono text-[10px] text-[var(--rl-text-strong)]"
-                                            />
+                                          </div>
+                                          <div className="flex items-center gap-1">
                                             <button
                                               type="button"
-                                              onClick={() => removePlanItem(b, plan, item)}
+                                              onClick={() => renamePlan(b, plan)}
                                               disabled={planSaving}
-                                              className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)]"
-                                              title="Remove member"
+                                              className="rounded px-2 py-1 text-[11px] font-semibold text-[var(--rl-text-muted)] hover:bg-[var(--rl-surface)] hover:text-[var(--rl-text-strong)] transition-colors flex items-center gap-1"
+                                              title="Rename plan"
                                             >
-                                              <X size={14} weight="bold" />
+                                              <PencilSimple size={12} weight="bold" /> Rename
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => retirePlan(b, plan)}
+                                              disabled={planSaving}
+                                              className="rounded px-2 py-1 text-[11px] font-semibold text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] transition-colors flex items-center gap-1"
+                                            >
+                                              <Trash size={12} weight="bold" /> Retire
                                             </button>
                                           </div>
-                                        ))}
-                                      </div>
+                                        </div>
 
-                                      {/* Add member */}
-                                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                                        <select
-                                          value={planMemberOfferingId}
-                                          onChange={(e) => setPlanMemberOfferingId(e.target.value)}
-                                          className="min-w-0 flex-1 rounded border border-[var(--rl-border)] bg-white px-2 py-1.5 text-xs text-[var(--rl-text-strong)]"
-                                        >
-                                          <option value="">Choose a benefit offering…</option>
-                                          {memberOptions.map((off) => (
-                                            <option key={off.id} value={off.id}>
-                                              {off.label_override || off.concept?.label || off.offering_key}
-                                            </option>
-                                          ))}
-                                        </select>
-                                        <Input
-                                          value={planMemberOverride}
-                                          onChange={(e) => setPlanMemberOverride(e.target.value)}
-                                          placeholder='Override JSON, e.g. {"type":"distance","unlimited":true,"unit":"km"}'
-                                          className="min-w-0 flex-1 text-xs font-mono"
-                                        />
-                                        <Button size="sm" variant="secondary" onClick={() => addPlanItem(b, plan)} disabled={planSaving} icon={<Plus size={14} weight="bold" />}>
-                                          Add
-                                        </Button>
+                                        {/* Member Benefits List */}
+                                        <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                                          {items.length === 0 ? (
+                                            <p className="text-[11px] text-[var(--rl-text-muted)] italic">No benefits attached to this tier yet.</p>
+                                          ) : (
+                                            items.map((item) => (
+                                              <div key={item.id} className="flex items-center justify-between gap-2 rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-2.5 py-1.5 text-[11px]">
+                                                <span className="min-w-0 font-medium text-[var(--rl-text-strong)] truncate">
+                                                  {offeringLabel(String(item.offering_id))}
+                                                </span>
+                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                  <input
+                                                    defaultValue={formatOverrideDisplay(item.typed_value_override)}
+                                                    onBlur={(e) => updatePlanItemOverride(b, plan, item, e.target.value)}
+                                                    placeholder="Limit / Description"
+                                                    className="w-36 rounded border border-[var(--rl-border)] bg-[var(--rl-bg)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] text-right"
+                                                    title="Coverage limit / Short description"
+                                                  />
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => removePlanItem(b, plan, item)}
+                                                    disabled={planSaving}
+                                                    className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)]"
+                                                    title="Remove benefit from plan"
+                                                  >
+                                                    <X size={13} weight="bold" />
+                                                  </button>
+                                                </div>
+                                              </div>
+                                            ))
+                                          )}
+                                        </div>
+
+                                        {/* Add Member Benefit */}
+                                        <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-[var(--rl-border)]/60">
+                                          <select
+                                            value={planMemberOfferingId}
+                                            onChange={(e) => setPlanMemberOfferingId(e.target.value)}
+                                            className="min-w-0 flex-1 rounded border border-[var(--rl-border)] bg-[var(--rl-surface)] px-2 py-1 text-xs text-[var(--rl-text-strong)]"
+                                          >
+                                            <option value="">+ Choose benefit to add…</option>
+                                            {memberOptions.map((off) => (
+                                              <option key={off.id} value={off.id}>
+                                                {off.label_override || off.concept?.label || off.offering_key}
+                                              </option>
+                                            ))}
+                                          </select>
+                                          <Input
+                                            value={planMemberOverride}
+                                            onChange={(e) => setPlanMemberOverride(e.target.value)}
+                                            placeholder="Limit (e.g. RM 10,000)"
+                                            className="w-32 text-xs"
+                                          />
+                                          <Button size="sm" variant="secondary" onClick={() => addPlanItem(b, plan)} disabled={planSaving} icon={<Plus size={13} weight="bold" />}>
+                                            Add
+                                          </Button>
+                                        </div>
                                       </div>
-                                      <p className="mt-2 text-[10px] text-[var(--rl-text-muted)]">
-                                        Tip: leave the override empty to use the offering&apos;s catalog value; set it to upgrade the benefit for this plan level (e.g. Towing 50 km → Unlimited).
-                                      </p>
-                                    </div>
-                                  );
-                                })
+                                    );
+                                  })}
+                                </div>
                               )}
                             </div>
                           )}
