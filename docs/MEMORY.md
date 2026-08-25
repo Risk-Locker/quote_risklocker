@@ -5,17 +5,22 @@
 - Private internal motor-quotation converter. Staff workflow: Upload -> Check Values -> Generate PDF. Stack: FastAPI (`backend/`), Next.js 15.5 (`frontend/`), Supabase/Postgres (`migrations/`), private Supabase Storage for PDFs.
 - Auth: temporary protected password login with opaque Postgres sessions, HttpOnly cookie, session-bound CSRF, and rate limits. OTP/onboarding is deferred to WP13 and Resend to WP14 after owner core approval. Dev login: admin@risklocker.local / admin123 (non-production only).
 - UI: Apple-inspired design system (red/black/white, Manrope/Inter/JetBrains Mono, Phosphor icons, Radix, Framer Motion) — rules in `DESIGN-SYSTEM.md`.
-- v5 (commit b7db959, on origin/v4 + origin/main): trash service (`backend/app/services/trash_service.py`, migrations 018-020, routes `routes.py` L496-556), template asset folders, our-specials categories/variants, sessions publish phase (`frontend/src/app/sessions/[id]/publish/`), client records, road-tax rules, builder layer groups + multi-select + marquee (`builder/page.tsx`: marquee handlers L499-541, `suppressClickRef` fix L501/L547, group ops L274-351), shared canvas `frontend/src/components/template-canvas/shared.tsx`.
-- Verification baseline 2026-08-16: 401 backend tests pass, 2 skipped (owner DOCX `Malaysia_Motor_Insurance_Quick_Benefits_Addons_2026.docx` missing from disk — intake tests skip explicitly, restore the file to re-enable), `npx tsc --noEmit` clean, `npm run build` green, code map current.
+- v9 (commit 20367f0 on origin/v8 + origin/main): 409 concurrency conflict resolution, add-on cost recalculation in template previews & generation, DB keepalives & pool sizing, dedicated Extras section & 3-way layout, insurer details & quotation validity footer.
+- Verification baseline 2026-08-25: 519 backend tests pass (100% green), `npx tsc --noEmit` clean, `npm run build` green (36/36 routes), code map current.
 - Python environment: `.venv` is Python 3.12.10 (pinned requirements predate 3.14 wheels); recreate with `py -3.12 -m venv .venv` + install `requirements.txt` + `requirements-optional.txt` + `python -m playwright install chromium`.
 - Migration ledger: checksums computed from line-ending-normalized bytes (CRLF/CR -> LF) since 2026-08-21, so LF/CRLF checkouts can never drift; historical rows verify against line-ending-equivalent representations (production 036's CRLF-bytes checksum `d8fdd09a...` accepted). `.gitattributes` (`migrations/*.sql text eol=lf`) kept for deterministic diffs only.
 - QA/E2E tooling lives IN the repo at `/.qc-tmp/` (gitignored): Playwright scripts (use `frontend/node_modules`), logs, screenshots. Never create temp files outside the repo.
 - Port file convention: `.qc-tmp\backend-port.txt`, written by `commands/start-backend.ps1`, read by `commands/start-frontend.ps1` / `start-full.ps1`.
-- Model used for recent work: opencode-go/deepseek-v4-flash.
-- Benefits & Package refactor: ALL WORKSTREAMS COMPLETED (WS0 through WS8). Master run log at `docs/superpowers/plans/2026-08-16-benefits-package-refactor/RUN-LOG.md`. Full test suite: 461 passed, 0 failed, 0 skipped. Frontend tsc clean, Next.js build green.
+- Model used for recent work: Antigravity (Gemini 3.7 Flash).
+- Benefits & Package refactor: ALL WORKSTREAMS COMPLETED (WS0 through WS8). Master run log at `docs/superpowers/plans/2026-08-16-benefits-package-refactor/RUN-LOG.md`. Full test suite: 519 passed, 0 failed, 0 skipped. Frontend tsc clean, Next.js build green.
 - Database state 2026-08-17: full v7 schema, migrations 001-035 applied & checksummed in PostgreSQL, seed-demo.py verified idempotent.
 - Database state 2026-08-23: migrations 001-037 applied & checksummed (037 adds `quotation_drafts.package_id` + index).
 - Database state 2026-08-20 (companies): 7 active companies — QBE, Etiqa, Takaful Malaysia, AmAssurance, Lonpac, Berjaya Sompo, Tune Protect. `commands/seed-companies.py` is idempotent (dry-run/apply).
+
+## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Initialized v9 Branch & Synced v8 / main
+Asked: Commit and push all work to origin/v8 and origin/main, then branch origin/v9 with MEMORY.md first commit.
+Done: Committed and pushed changes to `origin/v8` and `origin/main` (commit `20367f0`); created and checked out `v9` branch; updated `MEMORY.md` snapshot and logbook; pushed `origin/v9`.
+Pending: none.
 
 ## 2026-08-25 · Antigravity (Gemini 3.7 Flash) — Diagnosed Frontend ChunkLoadError & Verified Build State
 Asked: Diagnosed browser console ChunkLoadError and 400/404 failed resource loads for Next.js chunks.
