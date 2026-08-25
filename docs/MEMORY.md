@@ -17,6 +17,57 @@
 - Database state 2026-08-23: migrations 001-037 applied & checksummed (037 adds `quotation_drafts.package_id` + index).
 - Database state 2026-08-20 (companies): 7 active companies — QBE, Etiqa, Takaful Malaysia, AmAssurance, Lonpac, Berjaya Sompo, Tune Protect. `commands/seed-companies.py` is idempotent (dry-run/apply).
 
+## 2026-08-25 · Antigravity (Gemini 3.7 Flash) — Diagnosed Frontend ChunkLoadError & Verified Build State
+Asked: Diagnosed browser console ChunkLoadError and 400/404 failed resource loads for Next.js chunks.
+Done: Identified stale browser manifest requesting replaced chunk hashes (`4145-939c1f...` vs new `4145-70f0...`) after server rebuild; ran full frontend production build (`npm run build`, 36/36 static pages green) and backend test suite (519/519 pytest passed). Advised hard refresh / clearing stale client cache.
+Pending: none.
+
+## 2026-08-25 · Antigravity (Gemini 3.7 Flash) — Resolved 409 Concurrency Conflict & Add-on Cost Recalculation
+Asked: Fix 409 Conflict errors on workspace PATCH / template impact and fix add-on prices not adding to top template total when moving/adding add-on covers.
+Done: Updated `build_extras` in `render_context.py:60-80` to support `offerings.optional_price`; passed `offerings` in `workspace_service.py:430-440` and `generation_service.py:255-265`; removed 409 block on read-only `template_selection_impact` in `workspace_service.py:855-870`; updated `AddonCard`, `addConceptAsBenefit`, `addCustomBenefit` in `review-phase.tsx:385-405,1145-1225` to preserve price & cost_status; added 409 auto-retry and optimistic extras recalculation in `provider.tsx:140-230,370-405`; updated `types.ts:25-65`. Verified 519/519 pytest passed, `npx tsc --noEmit` clean, `npm run build` green (36 routes), code map updated.
+Pending: none.
+
+## 2026-08-25 · Antigravity (Gemini 3.7 Flash) — Fixed SSL Decryption Error with DB Keepalives & Query Filtering
+Asked: Diagnose and resolve psycopg OperationalError: "consuming input failed: SSL error: decryption failed or bad record mac".
+Done: Configured TCP keepalives (`keepalives=1`, `keepalives_idle=30`, `keepalives_interval=10`, `keepalives_count=5`), `pool_size=5`, `pool_recycle=60`, and session rollback in `session.py:27-37,72-78`; replaced full-table scans with filtered SQL `.where()` clauses in `workspace_service.py:222-235,310-335,600-745`, `generation_service.py:61-68,133-156`, and `catalog_review_service.py:355-360`. Verified 519/519 pytest passed, code map updated.
+Pending: none.
+
+## 2026-08-25 · Antigravity (Gemini 3.7 Flash) — Added Insurer Row, Quotation Validity Footer & Extras Header
+Asked: Add Insurer Name to Coverage & Vehicle Information table, exact Quotation Validity date in bottom footer, and Extras header in premium cost breakdown.
+Done: Added `lbl_insurer`/`val_insurer` to `_agency_bilingual_config` in `master_template_service.py:149-152`; added `extras_header` row to `_premium_info_block` in `template_renderer.py:381-415` and `shared.tsx:608-655`; added `quotation validity` patterns to `candidate_finder.py:89,544-555` and bound `valid_until` in `review-phase.tsx:1030-1035` and footer `{valid_until}`. Verified 519/519 pytest passed, `npx tsc --noEmit` clean, `npm run build` green (36 routes), code map updated.
+Pending: none.
+
+## 2026-08-25 · Antigravity (Gemini 3.7 Flash) — Added Dedicated Extras Section & 3-Way Grid Layout to Templates
+Asked: Add dedicated Extras section to the Quotation Template when purchased extras / riders exist.
+Done: Separated FOC vs priced extras in `template_renderer.py:239-255,431-525` and `shared.tsx:65,453-468,760-850`; dynamically injected `extras_header` ("Purchased Extras & Add-ons / 额外附加保障") and `extras_grid` (`gridKind: "extras"`), balancing vertical space across Specials, Extras, and Add-ons. Verified 519/519 pytest passed, `npx tsc --noEmit` clean, `npm run build` green (36 routes), code map updated.
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Fixed Extras Threading in PDF Snapshot Render Context
+Asked: Fix missing add-on / extra benefit costing item (e.g. ALL DRIVERS RM 20.00) in the template coverage breakdown.
+Done: Threaded `extras`, `groups`, and `total_premium_adjusted` into `render_context` in `generation_service.py:440-444` and `render_worker.py:128-132`; formatted extra prices as 2-decimal currency (`RM 20.00`) in `template_renderer.py:6,374-385` and `shared.tsx:595-600`. Verified 519/519 pytest passed, `npx tsc --noEmit` clean, `npm run build` green (36 routes), code map updated.
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Fixed Sum Insured Detection & Add-on Cost Breakdown in Templates
+Asked: Fix missing Sum Insured / Market Value in form and template, and fix add-on / extra benefit price accumulation in quotation cost total.
+Done: Added `sum_insured` to `DRAFT_FIELDS`, `MONEY_FIELDS`, and `DEFAULT_ALIASES` in `candidate_finder.py:32,58,88-95`; synced `sum_insured`/`coverage_amount`/`market_value` in `draft_mapper.py:110-125` and `review-phase.tsx:645-675,1015-1035,1825-1835`; computed total premium including extras in `template_renderer.py:10,380-385`, `shared.tsx:605-625`, and `review-phase.tsx:665-680,992-1010`. Verified 519/519 pytest passed, `npx tsc --noEmit` clean, `npm run build` green (36 routes), code map updated.
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Fixed 2-Level Road Tax, Benefit Typing Resilience & Template Extras
+Asked: Fix QBE upload session road tax calculation (2 levels: PDF extraction + CC formula), restore missing defaults/add-ons, and render detected extras in templates.
+Done: Cleaned CC parsing and added 2-level roadtax + runner fee defaults in `draft_mapper.py:110-215`; applied strict money regex in `orchestrator.py:137-165`, `routes.py:718-745`, `catalog_review_service.py:532-555`; added per-card fallback in `render_context.py:145-165`; updated `review-phase.tsx:645-675,2245-2265,2865-2885` to auto-calculate roadtax and thread extras to CanvasElementView. Verified 519/519 pytest passed, `npx tsc --noEmit` clean, `npm run build` green (36 routes), code map updated.
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Resolved Grounding Assistant Attribute Diagnostics
+Asked: Fix IDE diagnostic errors in grounding_assistant.py regarding QuotationDraft.values and InsuranceCompany.code attributes.
+Done: Added `_field_val` helper to safely parse `QuotationDraft.fields` (replacing non-existent `.values`) and updated `InsuranceCompany.code` to `.slug` in `grounding_assistant.py:42-140`. Verified 519/519 backend pytest passed, `npx tsc --noEmit` clean (exit 0).
+Pending: none.
+
+## 2026-08-24 · Antigravity (Gemini 3.6 Flash) — Fixed Chatbot, PDF Zoom, Hardcoded Logo, Debounced Save
+Asked: Execute deferred issue fixes: chatbot not working, PDF can't be enlarged, hardcoded insurer logo detection in template_renderer.py, server 500 on rapid clicks/slow system from immediate save() calls.
+Done: Fixed dead model name `gemini-3.1-flash-lite-preview` → `settings.gemini_model` (fallback `gemini-3.6-flash`) in `grounding_assistant.py:174`, `config.py:65,298`; updated same fallback in `routes.py:778,2184,2256`; raised PDF zoom cap from 1.0× to 2.0× with 0.1 step in `review-phase.tsx:2159,2170` and `preview-phase.tsx:511,522`; changed preview-phase canvas container from `overflow-hidden` to `overflow-auto` (`preview-phase.tsx:541`); replaced hardcoded insurer logo if/elif chain (etiqa/lonpac/qbe/liberty/amassurance) with DB-driven `InsuranceCompany.detection_phrases + logo_asset_id` lookup (`template_renderer.py:167-204`), threaded `db` through `_image_html` and `_element_html`; added 800ms `scheduleSave()` debounce replacing immediate `save()` in `handleReset`, `handleUndo`, `handleRedo`, `addPack`, `removePack` (`review-phase.tsx:499-509,1094-1132,1163-1169`). Verified 519/519 backend pytest passed, `npx tsc --noEmit` clean (exit 0).
+Pending: Issues 6 (UI responsiveness) and 7 (icon picker) remain deferred.
+
+
 ## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Sub-Second Upload Pipeline, NCD Premium Netting & Card Clipping Fix
 Asked: Eliminate 280s upload delay (reduce to < 5-10s), fix quotation cost summary & NCD deduction calculation (net payable insurance premium + roadtax + runner fee), eliminate benefit card clipping on sides, fix recurring 401 on /api/auth/me.
 Done: Skipped unnecessary Tesseract OCR when native text >= 80 chars (`orchestrator.py:34`); updated Gemini candidate models to 3.6/3.5/3.7-flash with 25s timeout and dead-model caching (`gemini_extractor.py:158-185,429-475`); extracted basic_premium, gross_premium, service_tax, total_payable with 0.99 confidence & netted insurance premium (`candidate_finder.py:85-100,420-455`, `draft_mapper.py:147-185`); fixed benefit card container layout & text clamping to eliminate edge clipping and added money thousand separators (`shared.tsx:165-190,508-560`, `template_renderer.py:100-109`); added auth cache clearance on login (`login/page.tsx:26-30`). Verified 519/519 backend pytest passed, `npx tsc --noEmit` clean, `npm run build` green (36 routes), code map updated.
@@ -574,6 +625,11 @@ Pending: commit + push to main, watch the GitHub Actions run, iterate only if re
 Asked: build a standalone, project-agnostic diagnostic script that lives on the VPS (not in the repo), analyzes the whole box or a target folder, prints a long full read-only analysis (system, PM2, ports, processes, systemd, nginx/TLS, docker, health probes, ClamAV, per-project git/env/runtime/logs, DB+ migration-ledger + malware-scanner checks when detectable).
 Done: wrote `/.qc-tmp/vps-doctor.sh` (gitignored scratch, NOT part of the project, never committed) — bash+python3, no deps, `set -u` no `set -e`, `[OK]/[FAIL]/[WARN]` markers, exit 1 on any FAIL, `-n lines` / `-o file` / target-dir arg, secrets never printed (env names only, DB URLs masked), `bash -n` verified. User copies it to the VPS as `/usr/local/bin/vps-doctor` (scp or nano paste).
 Pending: earlier VPS hardening plan still open — deploy 037 (untracked locally, already applied to prod DB) so API/worker boot after the reboot crash-loop, `systemctl enable --now clamav-freshclam`, prefer `clamscan` in `document_security.py:41`, DB pool caps in `db/session.py:27`, ClamAV provisioning in `deploy/setup-vps.sh`.
+
+## 2026-08-24 · Antigravity (Claude Sonnet 4.6) — Verified custom addon pricing fix (plan 777513aa)
+Asked: reviewed implementation_plan.md from prior conversation (777513aa) covering custom addon pricing not adding to total premium.
+Done: verified all three fixes were already applied — `review-phase.tsx:964,979` reads `workspace?.extras` (correct path); `provider.tsx:99-134` adds to `snapshot.extras` + recalculates `total_premium_adjusted` on `create_custom_benefit`; `provider.tsx:211-229` removes from `snapshot.extras` on `benefit_update` state=removed; `types.ts` has no stale `extras` inside `benefit_cards`. `npx tsc --noEmit` exits 0. No code changes needed.
+Pending: manual verification (add addon with price → total increases; remove → total decreases; generate PDF).
 
 ## 2026-08-23 · opencode-go/deepseek-v4-flash — CI/CD hardening + production restore
 Asked: make deploys fully automatic via the existing GitHub Actions pipeline (secrets had never been configured — every "Deploy main to VPS succeeded in 7s" was a silent skip; VPS stuck at f10613e while DB had 037 from local dev → API/worker crash-loop → 502).

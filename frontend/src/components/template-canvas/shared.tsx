@@ -62,7 +62,7 @@ export type CanvasElement = {
   variantId?: string;
   section?: "specials" | "add_ons";
   columns?: number;
-  gridKind?: "current_benefits" | "available_addons";
+  gridKind?: "current_benefits" | "available_addons" | "extras" | "purchased_extras";
   packing?: {
     strategy?: "balanced" | "square_biased" | "staggered";
     alignment?: "start" | "center" | "end";
@@ -80,7 +80,7 @@ export type CanvasElement = {
   prefix?: string;
   suffix?: string;
   rowHeight?: number;
-  labels?: { premium?: string; roadtax?: string; runner?: string; total?: string };
+  labels?: { premium?: string; roadtax?: string; runner?: string; total?: string; extras?: string };
   opacity?: number;
   style?: CanvasStyle;
   variant_label?: string;
@@ -453,8 +453,14 @@ export function CanvasElementView({
       {element.type === "benefit-grid" ? (
         (() => {
           const isAddons = element.gridKind === "available_addons";
+          const isExtras = element.gridKind === "extras" || element.gridKind === "purchased_extras";
+          const currentCards = benefitData?.current_benefits || [];
           const items = benefitData
-            ? (isAddons ? benefitData.available_addons : benefitData.current_benefits)
+            ? (isAddons
+                ? benefitData.available_addons || []
+                : isExtras
+                  ? currentCards.filter((b: any) => b.price || b.badge || b.cost_status === "paid")
+                  : currentCards)
             : [];
           const groups = !isAddons && benefitData?.groups?.length ? benefitData.groups : [];
           const groupById = new Map(groups.map((g) => [String(g.plan_id), g]));
@@ -592,20 +598,39 @@ export function CanvasElementView({
       {element.type === "premium-info-block" ? (
         (() => {
           const extras = benefitData?.extras || [];
-          const fmtMoney = (price?: { amount?: number | string; currency?: string }) => {
-            const amount = price?.amount;
+          const fmtMoney = (price?: { amount?: number | string; currency?: string; value?: number | string }) => {
+            const amount = price?.amount ?? price?.value;
             if (amount === undefined || amount === null || amount === "") return "";
             const number = typeof amount === "string" ? Number(amount.replace(/,/g, "")) : Number(amount);
-            return `RM ${isFinite(number) ? number.toLocaleString("en-MY") : ""}`.trim();
+            return `RM ${isFinite(number) ? number.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""}`.trim();
           };
-          const rows: Array<{ kind: string; label: string; value: string }> = [];
-          extras.slice(0, 3).forEach((extra) => rows.push({ kind: "extra", label: String(extra?.label || ""), value: fmtMoney(extra?.price) }));
-          if (extras.length > 3) rows.push({ kind: "extra", label: `+${extras.length - 3} more`, value: "" });
           const labels = element.labels || {};
+          const rows: Array<{ kind: string; label: string; value: string }> = [];
+          if (extras.length > 0) {
+            rows.push({ kind: "extras_header", label: labels.extras || "Extras / 附加项目", value: "" });
+            extras.slice(0, 3).forEach((extra) => rows.push({ kind: "extra", label: String(extra?.label || ""), value: fmtMoney(extra?.price) }));
+            if (extras.length > 3) rows.push({ kind: "extra", label: `+${extras.length - 3} more`, value: "" });
+          }
           const premium = variableValues?.premium || "";
           const roadtax = variableValues?.roadtax || "";
           const runner = variableValues?.service_fee || "";
-          const total = variableValues?.total_premium_adjusted || variableValues?.total_amount || "";
+
+          const pNum = parseFloat(String(premium).replace(/[^0-9.]/g, "")) || 0;
+          const rtNum = parseFloat(String(roadtax).replace(/[^0-9.]/g, "")) || 0;
+          const sfNum = parseFloat(String(runner).replace(/[^0-9.]/g, "")) || 0;
+          const extrasTotal = extras.reduce((acc, ex) => {
+            const price = ex?.price as { amount?: string | number; value?: string | number } | undefined;
+            const amt = typeof price === "object" && price !== null ? (price.amount ?? price.value) : price;
+            const num = typeof amt === "string" ? parseFloat(amt.replace(/,/g, "")) : (typeof amt === "number" ? amt : 0);
+            return acc + (Number.isFinite(num) ? num : 0);
+          }, 0);
+
+          let total = variableValues?.total_premium_adjusted || "";
+          if (!total && pNum > 0) {
+            total = (pNum + rtNum + sfNum + extrasTotal).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          } else if (!total) {
+            total = variableValues?.total_amount || "";
+          }
           rows.push({ kind: "premium", label: labels.premium || "Coverage Premium / 保费", value: premium ? `RM ${premium}` : "" });
           rows.push({ kind: "divider", label: "", value: "" });
           rows.push({ kind: "roadtax", label: labels.roadtax || "Roadtax", value: roadtax ? `RM ${roadtax}` : "" });
@@ -621,13 +646,17 @@ export function CanvasElementView({
                 const labelStyle =
                   row.kind === "total"
                     ? { fontSize: 10.5, fontWeight: 800, color: "#0F172A" }
-                    : row.kind === "extra"
-                      ? { fontSize: 9, fontWeight: 600, color: "#B91C1C" }
-                      : { fontSize: 9, fontWeight: 600, color: "#334155" };
+                    : row.kind === "extras_header"
+                      ? { fontSize: 8.5, fontWeight: 700, color: "#DC2626", textTransform: "uppercase" as const, letterSpacing: "0.5px" }
+                      : row.kind === "extra"
+                        ? { fontSize: 9, fontWeight: 600, color: "#B91C1C" }
+                        : { fontSize: 9, fontWeight: 600, color: "#334155" };
                 const valueStyle =
                   row.kind === "total"
                     ? { fontSize: 11.5, fontWeight: 800, color: "#DC2626" }
-                    : { fontSize: 9.5, fontWeight: 700, color: "#0F172A" };
+                    : row.kind === "extras_header"
+                      ? { fontSize: 8.5, fontWeight: 700, color: "#DC2626" }
+                      : { fontSize: 9.5, fontWeight: 700, color: "#0F172A" };
                 return (
                   <div key={`row-${index}`} className="flex items-center justify-between w-full" style={{ height: rowHeight }}>
                     <span style={labelStyle}>{row.label}</span>
@@ -741,12 +770,16 @@ export function balanceBenefitGridElements(
   },
 ): CanvasElement[] {
   const extras = benefitData?.extras || [];
-  const extraShift = extras.length * 14;
+  const extraShift = (extras.length + (extras.length > 0 ? 1 : 0)) * 14;
   if (!benefitData && extraShift === 0) return elements;
   const currentCards = benefitData?.current_benefits || [];
   const addonCards = benefitData?.available_addons || [];
-  const n1 = currentCards.length;
-  const n2 = addonCards.length;
+
+  // Separate true FOC benefits from purchased extras / priced add-ons
+  const extrasCards = currentCards.filter((c: any) => c.price || c.badge || c.cost_status === "paid");
+  const focCards = extrasCards.length > 0
+    ? currentCards.filter((c: any) => !(c.price || c.badge || c.cost_status === "paid"))
+    : currentCards;
 
   const grid1 = elements.find((e) => e.type === "benefit-grid" && e.gridKind === "current_benefits");
   const grid2 = elements.find((e) => e.type === "benefit-grid" && e.gridKind === "available_addons");
@@ -761,14 +794,137 @@ export function balanceBenefitGridElements(
   const yTop = baseTop + extraShift;
   const yBottom = Number(grid2.y || 796) + Number(grid2.h || 262);
 
-  const rows1 = n1 > 0 ? Math.max(1, Math.ceil(n1 / 2)) : 0;
-  const rows2 = n2 > 0 ? Math.max(1, Math.ceil(n2 / 2)) : 0;
-
-  const totalSpace = yBottom - yTop;
   const hdrH = 26;
   const gap = 10;
   const pad = 4;
 
+  const hasExplicitExtrasGrid = elements.some((e) => e.gridKind === "extras" || e.gridKind === "purchased_extras");
+  const hasExtrasSection = hasExplicitExtrasGrid && extrasCards.length > 0;
+
+  if (hasExtrasSection) {
+    const n1 = focCards.length;
+    const nExt = extrasCards.length;
+    const n2 = addonCards.length;
+
+    const rows1 = n1 > 0 ? Math.max(1, Math.ceil(n1 / 2)) : 0;
+    const rowsExt = nExt > 0 ? Math.max(1, Math.ceil(nExt / 2)) : 0;
+    const rows2 = n2 > 0 ? Math.max(1, Math.ceil(n2 / 2)) : 0;
+
+    const totalSpace = yBottom - yTop;
+    const availGridsH = totalSpace - 3 * hdrH - 2 * gap - 3 * pad;
+    if (availGridsH <= 120) return elements;
+
+    const totalRows = rows1 + rowsExt + rows2;
+    let h1: number;
+    let hExt: number;
+    let h2: number;
+
+    if (totalRows > 0) {
+      hExt = Math.max(52, Math.min(110, availGridsH * (rowsExt / totalRows)));
+      const remainingH = availGridsH - hExt;
+      if (rows1 > 0 && rows2 > 0) {
+        h1 = Math.max(80, Math.min(remainingH - 70, remainingH * (rows1 / (rows1 + rows2))));
+        h2 = remainingH - h1;
+      } else if (rows1 > 0) {
+        h1 = remainingH - 50;
+        h2 = 50;
+      } else {
+        h1 = 50;
+        h2 = remainingH - 50;
+      }
+    } else {
+      h1 = availGridsH / 3;
+      hExt = availGridsH / 3;
+      h2 = availGridsH / 3;
+    }
+
+    const yG1 = yTop + hdrH + pad;
+    const yHExt = yG1 + h1 + gap;
+    const yGExt = yHExt + hdrH + pad;
+    const yH2 = yGExt + hExt + gap;
+    const yG2 = yH2 + hdrH + pad;
+
+    const adjusted: CanvasElement[] = [];
+    for (const elem of elements) {
+      const e = { ...elem };
+      if (e.id === "cov_table_bg" && extraShift > 0) {
+        e.h = Number(e.h || 246) + extraShift;
+      } else if (e.id === "specials_header_bg" && hdr1Bg) {
+        e.y = yTop;
+        e.h = hdrH;
+      } else if (e.id === "specials_header_txt" && hdr1Txt) {
+        e.y = yTop + 5;
+      } else if (e.type === "benefit-grid" && e.gridKind === "current_benefits") {
+        e.y = yG1;
+        e.h = h1;
+        adjusted.push(e);
+        // Insert Extras section
+        adjusted.push({
+          id: "extras_header_bg",
+          type: "rectangle",
+          x: 40,
+          y: yHExt,
+          w: 714,
+          h: hdrH,
+          z: 2,
+          style: { background: "#1E293B", borderWidth: 0, borderColor: "transparent", borderRadius: 4 },
+        });
+        adjusted.push({
+          id: "extras_header_txt",
+          type: "text",
+          text: "Purchased Extras & Add-ons / 额外附加保障",
+          x: 52,
+          y: yHExt + 5,
+          w: 690,
+          h: 16,
+          z: 5,
+          style: { fontSize: 10.5, fontWeight: "700", color: "#FFFFFF", textAlign: "left" },
+        });
+        adjusted.push({
+          id: "extras_grid",
+          type: "benefit-grid",
+          gridKind: "extras",
+          x: 40,
+          y: yGExt,
+          w: 714,
+          h: hExt,
+          z: 4,
+          packing: grid1.packing || {
+            strategy: "balanced",
+            alignment: "center",
+            aspectRatio: 1.45,
+            referenceWidth: 180,
+            referenceHeight: 124,
+            gapRatio: 0.035,
+            paddingRatio: 0.012,
+            staggerRatio: 0.5,
+          },
+          cardStyle: grid1.cardStyle || "standard",
+          textDensity: grid1.textDensity || "compact",
+          emptyState: "hide",
+        });
+        continue;
+      } else if (e.id === "addons_header_bg" && hdr2Bg) {
+        e.y = yH2;
+        e.h = hdrH;
+      } else if (e.id === "addons_header_txt" && hdr2Txt) {
+        e.y = yH2 + 5;
+      } else if (e.type === "benefit-grid" && e.gridKind === "available_addons") {
+        e.y = yG2;
+        e.h = h2;
+      }
+      adjusted.push(e);
+    }
+    return adjusted;
+  }
+
+  // Standard 2-section layout when no extras exist
+  const n1 = currentCards.length;
+  const n2 = addonCards.length;
+  const rows1 = n1 > 0 ? Math.max(1, Math.ceil(n1 / 2)) : 0;
+  const rows2 = n2 > 0 ? Math.max(1, Math.ceil(n2 / 2)) : 0;
+
+  const totalSpace = yBottom - yTop;
   const availGridsH = totalSpace - 2 * hdrH - gap - 2 * pad;
   if (availGridsH <= 100) return elements;
 

@@ -27,6 +27,7 @@ export type BenefitCardSummary = {
   sort_order?: number;
   typed_value?: Record<string, unknown> | null;
   price?: { amount?: number | string; currency?: string } | null;
+  optional_price?: { amount?: number | string; currency?: string } | null;
 };
 
 export type WorkspaceCapabilities = {
@@ -57,9 +58,8 @@ export type WorkspaceSnapshot = {
     current_benefits: BenefitCardSummary[];
     available_addons: BenefitCardSummary[];
     groups?: Array<{ plan_id: string; plan_key: string; plan_label: string; cards: BenefitCardSummary[] }>;
-    extras?: Array<{ selection_id: string; label: string; price?: { amount?: number | string; currency?: string } }>;
   };
-  extras: Array<{ selection_id: string; label: string; price?: { amount?: number | string; currency?: string } }>;
+  extras: Array<{ selection_id: string; label: string; price?: { amount?: number | string; currency?: string }; sort_order?: number }>;
   total_premium_adjusted: string;
   packs: Array<{
     package_id: string;

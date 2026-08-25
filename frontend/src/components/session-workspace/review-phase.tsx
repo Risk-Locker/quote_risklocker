@@ -387,12 +387,14 @@ function AddonCard({
   const selectionId = card.selection_id;
 
   const handleMoveToDefault = () => {
+    const priceVal = card.price || card.optional_price || null;
+    const costStatus = priceVal ? "paid" : "included";
     if (selectionId) {
-      onQueue({ op: "benefit_update", selection_id: selectionId, state: "current", cost_status: "included" }, `benefits.${selectionId}.state`);
+      onQueue({ op: "benefit_update", selection_id: selectionId, state: "current", cost_status: costStatus, ...(priceVal ? { price: priceVal } : {}) }, `benefits.${selectionId}.state`);
     } else if (card.offering_id) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "included" }, `benefits.offer.${card.offering_id}`);
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: costStatus, ...(priceVal ? { price: priceVal } : {}) }, `benefits.offer.${card.offering_id}`);
     } else {
-      onQueue({ op: "create_custom_benefit", selection_key: `default:${card.concept_key || index}`, state: "current", cost_status: "included", label: card.label }, `benefits.add.${index}`);
+      onQueue({ op: "create_custom_benefit", selection_key: `default:${card.concept_key || index}`, state: "current", cost_status: costStatus, label: card.label, ...(priceVal ? { price: priceVal } : {}) }, `benefits.add.${index}`);
     }
   };
 
@@ -496,6 +498,17 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
   // Quick Action Export States (PNG / PDF)
   const canvasExportRef = useRef<HTMLDivElement>(null);
+  const debouncedSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Coalesce rapid benefit mutations into a single save after 800ms idle. */
+  const scheduleSave = useCallback(() => {
+    if (debouncedSaveRef.current !== null) clearTimeout(debouncedSaveRef.current);
+    debouncedSaveRef.current = setTimeout(() => {
+      debouncedSaveRef.current = null;
+      save().catch(() => undefined);
+    }, 800);
+  }, [save]);
+
   const [copyingPng, setCopyingPng] = useState(false);
   const [copiedPng, setCopiedPng] = useState(false);
   const [downloadingPng, setDownloadingPng] = useState(false);
@@ -635,9 +648,53 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     if (!workspace) return;
     const values: Record<string, string> = {};
     for (const field of FORM_FIELDS) {
-      const stored = (workspace.fields[field.name] as WorkspaceField | undefined)?.value;
+      let stored = (workspace.fields[field.name] as WorkspaceField | undefined)?.value;
+      if (!stored && field.name === "sum_insured") {
+        stored = (workspace.fields["coverage_amount"] as WorkspaceField | undefined)?.value ||
+                 (workspace.fields["market_value"] as WorkspaceField | undefined)?.value ||
+                 (workspace.fields["agreed_value"] as WorkspaceField | undefined)?.value;
+      }
       values[field.name] = displayValue(field.kind, stored ?? null);
     }
+
+    // Level 2 Road Tax auto-calculation on load if missing or 0
+    if (!values.roadtax || values.roadtax === "0.00" || values.roadtax === "0" || values.roadtax.trim() === "") {
+      const ccStr = values.engine_cc || (workspace.fields["engine_cc"] as WorkspaceField | undefined)?.value;
+      const parsedCC = ccStr ? parseInt(ccStr.replace(/[^0-9]/g, ""), 10) : inferCCFromCarModel(values.car_model || (workspace.fields["car_model"] as WorkspaceField | undefined)?.value);
+      if (parsedCC && parsedCC > 0) {
+        const vtype = values.vehicle_type || "Car";
+        const isCompany = vtype.toLowerCase().includes("company") || vtype.toLowerCase().includes("corp");
+        const baseType = vtype.toLowerCase().includes("motor") ? "Motorcycle" : (vtype.toLowerCase().includes("lorry") || vtype.toLowerCase().includes("other")) ? "Lorry" : "Car";
+        const computedRT = computeMalaysianRoadTax(parsedCC, baseType, isCompany ? "Company" : "Individual");
+        if (computedRT > 0) {
+          values.roadtax = computedRT.toFixed(2);
+        }
+      }
+    }
+
+    // Default Runner Fee if missing or 0
+    if (!values.service_fee || values.service_fee === "0.00" || values.service_fee === "0" || values.service_fee.trim() === "") {
+      values.service_fee = "20.00";
+    }
+
+    // Sync Total Premium with extras if present
+    if (workspace.total_premium_adjusted) {
+      values.total_amount = formatMoney(workspace.total_premium_adjusted);
+    } else {
+      const pNum = parseFloat(String(values.premium || "").replace(/[^0-9.]/g, "")) || 0;
+      const rtNum = parseFloat(String(values.roadtax || "").replace(/[^0-9.]/g, "")) || 0;
+      const sfNum = parseFloat(String(values.service_fee || "").replace(/[^0-9.]/g, "")) || 0;
+      const extrasTotal = (workspace.extras || []).reduce((acc, ex) => {
+        const amt = (ex as Record<string, unknown>)?.price;
+        const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
+        const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : (typeof val === "number" ? val : 0);
+        return acc + (Number.isFinite(num) ? num : 0);
+      }, 0);
+      if (pNum > 0) {
+        values.total_amount = (pNum + rtNum + sfNum + extrasTotal).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+    }
+
     setFormValues(values);
   }, [workspace]);
 
@@ -961,7 +1018,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     const pNum = parseFloat(String(fields["premium"] || "").replace(/[^0-9.]/g, "")) || 0;
     const rtNum = parseFloat(String(fields["roadtax"] || "").replace(/[^0-9.]/g, "")) || 0;
     const sfNum = parseFloat(String(fields["service_fee"] || "").replace(/[^0-9.]/g, "")) || 0;
-    const extrasTotal = (workspace?.benefit_cards?.extras || []).reduce((acc, ex) => {
+    const extrasTotal = (workspace?.extras || []).reduce((acc, ex) => {
       const amt = (ex as Record<string, unknown>)?.price;
       const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
       const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : (typeof val === "number" ? val : 0);
@@ -973,16 +1030,28 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       ? calculatedTotal.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
       : (formValues["total_amount"] || fields["total_amount"] || workspace?.total_premium_adjusted || "");
 
+    // Validity date aliases
+    const vUntil = formValues["valid_until"] || fields["valid_until"] || formValues["quotation_validity"] || fields["quotation_validity"] || "";
+    if (vUntil) {
+      fields["valid_until"] = vUntil;
+      fields["quotation_validity"] = vUntil;
+    }
+
     fields["total_amount"] = effTotal;
     fields["total_premium_adjusted"] = effTotal;
     return fields;
-  }, [workspace?.fields, workspace?.total_premium_adjusted, workspace?.benefit_cards?.extras, workspace?.pinned_names?.company_name, formValues, companyName]);
+  }, [workspace?.fields, workspace?.total_premium_adjusted, workspace?.extras, workspace?.pinned_names?.company_name, formValues, companyName]);
 
   function commitField(field: FormField) {
     const current = formValues[field.name];
     if (current === undefined || current.trim() === "") return;
     if (field.kind === "total") return;
     decideField(field.name, "edit", current);
+
+    if (field.name === "sum_insured") {
+      decideField("coverage_amount", "edit", current);
+      decideField("market_value", "edit", current);
+    }
 
     if (field.name === "insurance_company") {
       const match = companies.find(
@@ -997,6 +1066,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   function commitFieldDirectly(name: string, value: string) {
     if (value === undefined || value.trim() === "") return;
     decideField(name, "edit", value);
+    if (name === "sum_insured") {
+      decideField("coverage_amount", "edit", value);
+      decideField("market_value", "edit", value);
+    }
     if (name === "insurance_company") {
       const match = companies.find(
         (c) => c.name.toLowerCase().trim() === value.toLowerCase().trim()
@@ -1078,21 +1151,17 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     setUndoStack((prev) => [...prev, { op, path: `benefits.${key}`, desc: `Added ${concept.label}` }]);
     setRedoStack([]);
     setShowGlobalModal(false);
+    scheduleSave();
   }
 
   // Reset all benefits back to company defaults and detected extraction items (idempotent)
-  async function handleReset() {
+  function handleReset() {
     if (!workspace) return;
     const op = { op: "reset_benefits" };
     queueOperation(op, "benefits");
     setUndoStack((prev) => [...prev, { op, path: "benefits", desc: "Reset benefits" }]);
     setRedoStack([]);
-    try {
-      await save();
-      setToastMessage("Reset all benefits back to initial insurance defaults and detections.");
-    } catch {
-      // Handled by workspace mutation
-    }
+    scheduleSave();
   }
 
   const handleUndo = useCallback(async () => {
@@ -1108,10 +1177,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       queueOperation({ op: "reset_benefits" }, "benefits");
     }
     try {
-      await save();
+      scheduleSave();
       setToastMessage("Undid benefit change.");
     } catch {}
-  }, [undoStack, queueOperation, save]);
+  }, [undoStack, queueOperation, scheduleSave]);
 
   const handleRedo = useCallback(async () => {
     if (!redoStack.length) return;
@@ -1120,10 +1189,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     setUndoStack((prev) => [...prev, next]);
     queueOperation(next.op, next.path);
     try {
-      await save();
+      scheduleSave();
       setToastMessage("Redid benefit change.");
     } catch {}
-  }, [redoStack, queueOperation, save]);
+  }, [redoStack, queueOperation, scheduleSave]);
 
   function addCustomBenefit(targetState: "current" | "available_addon" = "current") {
     const label = customLabel.trim();
@@ -1134,12 +1203,13 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     const price = priceText
       ? { amount: priceText.replace(/,/g, ""), currency: "MYR" }
       : undefined;
+    const costStatus = price ? "paid" : isAddon ? "paid" : "included";
     const op = {
       op: "create_custom_benefit",
       selection_key: key,
       label,
       typed_value: customValue.trim() ? { type: "custom", display_text: customValue.trim() } : { type: "custom", display_text: label },
-      cost_status: isAddon ? "paid" : "included",
+      cost_status: costStatus,
       state: targetState,
       ...(price ? { price } : {}),
     };
@@ -1149,6 +1219,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     setCustomLabel("");
     setCustomValue("");
     setCustomPrice("");
+    scheduleSave();
   }
 
   // ── Benefit Pack (bundle plan) actions ─────────────────────────────────
@@ -1160,12 +1231,12 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       plan_id: planId,
       cost_status: "paid",
     }, `benefits.plan.${planId}`);
-    save().catch(() => undefined);
+    scheduleSave();
   }
 
   function removePack(planId: string) {
     queueOperation({ op: "remove_package_plan", plan_id: planId }, `benefits.plan.${planId}`);
-    save().catch(() => undefined);
+    scheduleSave();
   }
 
   async function saveAndCheckLearning() {
@@ -1798,7 +1869,12 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 <>
                   <div className="grid gap-3 sm:grid-cols-2">
                     {FORM_FIELDS.map((field) => {
-                      const stored = workspace.fields[field.name] as WorkspaceField | undefined;
+                      let stored = workspace.fields[field.name] as WorkspaceField | undefined;
+                      if (!stored?.value && field.name === "sum_insured") {
+                        stored = (workspace.fields["coverage_amount"] as WorkspaceField | undefined) ||
+                                 (workspace.fields["market_value"] as WorkspaceField | undefined) ||
+                                 (workspace.fields["agreed_value"] as WorkspaceField | undefined);
+                      }
                       const empty = !(stored?.value);
                       const needsCheck = !empty && stored?.status === "check_needed";
                       return (
@@ -2156,7 +2232,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                     <>
                       <button
                         type="button"
-                        onClick={() => setPreviewZoom((z) => Math.max(0.25, z - 0.05))}
+                        onClick={() => setPreviewZoom((z) => Math.max(0.25, z - 0.1))}
                         className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-gray-100"
                         title="Zoom Out"
                       >
@@ -2167,7 +2243,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                       </span>
                       <button
                         type="button"
-                        onClick={() => setPreviewZoom((z) => Math.min(1.0, z + 0.05))}
+                        onClick={() => setPreviewZoom((z) => Math.min(2.0, z + 0.1))}
                         className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-gray-100"
                         title="Zoom In"
                       >
@@ -2238,7 +2314,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                           position: "relative",
                         }}
                       >
-                        {balanceBenefitGridElements(previewTemplate.config.canvas?.elements || [], workspace.benefit_cards).map((element: CanvasElement) => (
+                        {balanceBenefitGridElements(previewTemplate.config.canvas?.elements || [], { ...workspace.benefit_cards, extras: workspace.extras }).map((element: CanvasElement) => (
                           <CanvasElementView
                             key={element.id}
                             element={element}
@@ -2246,7 +2322,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                             readOnly={true}
                             onPointerDown={() => { }}
                             variableValues={previewFields}
-                            benefitData={workspace.benefit_cards}
+                            benefitData={{ ...workspace.benefit_cards, extras: workspace.extras }}
                             conceptAssets={conceptAssets}
                             assets={Object.entries(previewTemplate.config.assets || {}).map(([key, id]) => ({
                               id,
@@ -2858,7 +2934,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
               backgroundColor: "#ffffff",
             }}
           >
-            {(previewTemplate.config.canvas?.elements || []).map((element) => (
+            {balanceBenefitGridElements(previewTemplate.config.canvas?.elements || [], { ...workspace.benefit_cards, extras: workspace.extras }).map((element) => (
               <CanvasElementView
                 key={element.id}
                 element={element}
@@ -2866,7 +2942,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 readOnly={true}
                 onPointerDown={() => { }}
                 variableValues={previewFields}
-                benefitData={workspace.benefit_cards}
+                benefitData={{ ...workspace.benefit_cards, extras: workspace.extras }}
                 conceptAssets={conceptAssets}
                 assets={Object.entries(previewTemplate.config.assets || {}).map(([key, id]) => ({
                   id,

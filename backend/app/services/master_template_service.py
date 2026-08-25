@@ -146,45 +146,50 @@ def _agency_bilingual_config() -> dict:
         _text("cov_header_txt", "Coverage & Vehicle Information / 车辆及保单资料", 52, 139, 430, 16, 5, size=10, weight="700", color="#FFFFFF"),
         _rectangle("cov_table_bg", 40, 160, 454, 246, 2, background="#FFFFFF", border=BORDER_COLOR, radius=4),
 
-        # Row 1: Coverage Type
-        _text("lbl_cov_type", "Coverage Type / 保单种类", 52, 166, 160, 15, 5, size=9.5, weight="600", color=LABEL_COLOR),
-        _variable("val_cov_type", "coverage_type", 216, 166, 266, 15, 5, size=10, weight="700", color=DARK),
+        # Row 1: Insurer Name
+        _text("lbl_insurer", "Insurer / 保险公司", 52, 164, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
+        _variable("val_insurer", "insurance_company", 216, 164, 266, 14, 5, size=9.5, weight="700", color=DARK),
 
-        # Row 2: Car Model
-        _text("lbl_car_model", "Car Model / 车型", 52, 183, 160, 15, 5, size=9.5, weight="600", color=LABEL_COLOR),
-        _variable("val_car_model", "car_model", 216, 183, 266, 15, 5, size=10, weight="700", color=DARK),
+        # Row 2: Coverage Type
+        _text("lbl_cov_type", "Coverage Type / 保单种类", 52, 179, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
+        _variable("val_cov_type", "coverage_type", 216, 179, 266, 14, 5, size=9.5, weight="700", color=DARK),
 
-        # Row 3: Vehicle CC
-        _text("lbl_engine_cc", "Vehicle CC / 引擎容量", 52, 200, 160, 15, 5, size=9.5, weight="600", color=LABEL_COLOR),
-        _variable("val_engine_cc", "engine_cc", 216, 200, 266, 15, 5, size=10, weight="700", color=DARK, suffix=" cc"),
+        # Row 3: Car Model
+        _text("lbl_car_model", "Car Model / 车型", 52, 194, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
+        _variable("val_car_model", "car_model", 216, 194, 266, 14, 5, size=9.5, weight="700", color=DARK),
 
-        # Row 4: NCD
-        _text("lbl_ncd", "NCD", 52, 217, 160, 15, 5, size=9.5, weight="600", color=LABEL_COLOR),
-        _variable("val_ncd", "ncd_percent", 216, 217, 266, 15, 5, size=10, weight="700", color=DARK, suffix="%"),
+        # Row 4: Vehicle CC
+        _text("lbl_engine_cc", "Vehicle CC / 引擎容量", 52, 209, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
+        _variable("val_engine_cc", "engine_cc", 216, 209, 266, 14, 5, size=9.5, weight="700", color=DARK, suffix=" cc"),
 
-        # Row 5: Coverage Period
-        _text("lbl_period", "Cover of Period / 保单期限", 52, 234, 160, 15, 5, size=9.5, weight="600", color=LABEL_COLOR),
-        _variable("val_period", "cover_period", 216, 234, 266, 15, 5, size=10, weight="700", color=DARK),
+        # Row 5: NCD
+        _text("lbl_ncd", "NCD", 52, 224, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
+        _variable("val_ncd", "ncd_percent", 216, 224, 266, 14, 5, size=9.5, weight="700", color=DARK, suffix="%"),
 
-        # Row 6: Coverage / Sum Insured
-        _text("lbl_sum_insured", "Coverage / 保额", 52, 251, 160, 15, 5, size=9.5, weight="600", color=LABEL_COLOR),
-        _variable("val_sum_insured", "coverage_amount", 216, 251, 266, 15, 5, size=10, weight="700", color=DARK, prefix="RM "),
+        # Row 6: Coverage Period
+        _text("lbl_period", "Cover of Period / 保单期限", 52, 239, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
+        _variable("val_period", "cover_period", 216, 239, 266, 14, 5, size=9.5, weight="700", color=DARK),
+
+        # Row 7: Coverage / Sum Insured
+        _text("lbl_sum_insured", "Coverage / 保额", 52, 254, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
+        _variable("val_sum_insured", "coverage_amount", 216, 254, 266, 14, 5, size=9.5, weight="700", color=DARK, prefix="RM "),
 
         # Dynamic Premium Block (Extras, Insurance Premium, Roadtax, Runner Fee, Total Premium)
         {
             "id": "premium_info_block",
             "type": "premium-info-block",
             "x": 52,
-            "y": 268,
+            "y": 270,
             "w": 430,
             "h": 132,
             "z": 5,
-            "rowHeight": 15,
+            "rowHeight": 14.5,
             "labels": {
                 "premium": "Insurance Premium / 保费",
                 "roadtax": "Roadtax / 路税",
                 "runner": "Runner Fee / 服务费",
                 "total": "Total Premium / 保费总额",
+                "extras": "Extras / 附加项目",
             },
         },
 
@@ -217,7 +222,7 @@ def _agency_bilingual_config() -> dict:
         _grid("available_addons_grid", "available_addons", 40, 796, 714, 262, 4, dense=True),
 
         # 8. Footer
-        _text("footer_terms", "*Terms & Conditions Apply | Validity: {valid_until}", 40, 1068, 714, 16, 5, size=8.5, weight="500", color=MUTED_COLOR),
+        _text("footer_terms", "*Terms & Conditions Apply | Quotation Validity: {valid_until}", 40, 1068, 714, 16, 5, size=8.5, weight="500", color=MUTED_COLOR),
     ]
 
     config.update({

@@ -128,6 +128,9 @@ def process_render_job(
         render_context={
             "current_benefits": context.get("current_benefits") or [],
             "available_addons": context.get("available_addons") or [],
+            "groups": context.get("groups") or [],
+            "extras": context.get("extras") or [],
+            "total_premium_adjusted": (context.get("fields") or {}).get("total_premium_adjusted", {}).get("value") or context.get("total_premium_adjusted"),
         },
         resolved_assets=resolved_assets,
     )

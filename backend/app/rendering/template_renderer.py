@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import re
+from decimal import Decimal
 from html import escape
 from typing import Any
 
 from app.rendering.grid_layout import GridBounds, GridSpec, pack_fixed_grid
-from app.rendering.render_context import format_money_amount
+from app.rendering.render_context import adjusted_total_text, format_money_amount
 from app.services.template_assets import asset_data_uri, find_asset_by_hint
 from app.services.template_config import default_template_config, normalize_template_config
 
@@ -164,24 +165,41 @@ def _style(element: dict[str, Any]) -> str:
     return ";".join(css)
 
 
-def _asset_id_for_slot(config: dict[str, Any], slot: str | None, fields: dict) -> str:
+def _asset_id_for_slot(config: dict[str, Any], slot: str | None, fields: dict, db: Any = None) -> str:
     if not slot:
         return ""
     assets = config.get("assets") or {}
     if assets.get(slot):
         return str(assets[slot])
     if slot == "insurer_logo":
-        company = _value(fields, "insurance_company").lower()
-        if "etiqa" in company:
-            return find_asset_by_hint(None, ["etiqa"])
-        if "lonpac" in company:
-            return find_asset_by_hint(None, ["lonpac"])
-        if "qbe" in company:
-            return find_asset_by_hint(None, ["qbe"])
-        if "liberty" in company:
-            return find_asset_by_hint(None, ["liberty"])
-        if "amgen" in company or "amassurance" in company or "kurnia" in company:
-            return find_asset_by_hint(None, ["amgen", "amassurance"])
+        company_name = _value(fields, "insurance_company").lower().strip()
+        if company_name and db is not None:
+            # DB-driven: match against InsuranceCompany.detection_phrases (and name)
+            try:
+                from sqlalchemy import select
+                from app.models.tables import InsuranceCompany
+                companies = list(db.scalars(select(InsuranceCompany).where(InsuranceCompany.status == "active")).all())
+                for c in companies:
+                    phrases = list(c.detection_phrases or [])
+                    if not phrases:
+                        phrases = [c.name]
+                    if any(p.lower() in company_name or company_name in p.lower() for p in phrases):
+                        if c.logo_asset_id:
+                            return str(c.logo_asset_id)
+                        # No logo_asset_id — try hint search with company name tokens
+                        hints = [p.lower() for p in phrases[:3]]
+                        result = find_asset_by_hint(db, hints)
+                        if result:
+                            return result
+            except Exception:
+                pass  # DB unavailable — fall through to hint search
+        if company_name:
+            # Fallback: hint search from the company name tokens directly
+            tokens = [t for t in company_name.split() if len(t) >= 3]
+            if tokens:
+                result = find_asset_by_hint(None, tokens[:4])
+                if result:
+                    return result
     hints = config.get("asset_slots", {}).get(slot) or [slot]
     return find_asset_by_hint(None, [str(item) for item in hints])
 
@@ -191,8 +209,9 @@ def _image_html(
     config: dict[str, Any],
     fields: dict,
     resolved_assets: dict[str, str] | None = None,
+    db: Any = None,
 ) -> str:
-    asset_id = str(element.get("assetId") or _asset_id_for_slot(config, element.get("assetSlot"), fields))
+    asset_id = str(element.get("assetId") or _asset_id_for_slot(config, element.get("assetSlot"), fields, db))
     if resolved_assets is not None:
         src = resolved_assets.get(asset_id, "")
     else:
@@ -218,10 +237,16 @@ def _dynamic_benefit_grid(
     resolved_assets: dict[str, str],
 ) -> str:
     kind = str(element.get("gridKind") or "current_benefits")
-    if kind not in {"current_benefits", "available_addons"}:
+    if kind not in {"current_benefits", "available_addons", "extras", "purchased_extras"}:
         return ""
-    cards = list(render_context.get(kind) or [])
-    groups = list(render_context.get("groups") or []) if kind == "current_benefits" else []
+    if kind == "available_addons":
+        cards = list(render_context.get("available_addons") or [])
+    elif kind in {"extras", "purchased_extras"}:
+        current = list(render_context.get("current_benefits") or [])
+        cards = [c for c in current if c.get("badge") or c.get("price") or c.get("cost_status") == "paid"]
+    else:
+        cards = list(render_context.get("current_benefits") or [])
+    groups = list(render_context.get("groups") or []) if kind in {"current_benefits", "extras", "purchased_extras"} else []
     group_by_id = {str(item.get("plan_id")): item for item in groups if item.get("plan_id")}
     ordered = cards
     if groups:
@@ -353,13 +378,30 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
     labels = element.get("labels") or {}
     extras = list((render_context or {}).get("extras") or [])
     rows: list[tuple[str, str, str]] = []
-    for extra in extras:
-        rows.append(("extra", str(extra.get("label") or ""), format_money_amount(extra.get("price"))))
+    if extras:
+        extras_hdr = str(labels.get("extras") or "Extras / 附加项目")
+        rows.append(("extras_header", extras_hdr, ""))
+        for extra in extras:
+            raw_price = extra.get("price") or {}
+            amt = raw_price.get("amount") if isinstance(raw_price, dict) else raw_price
+            if amt is not None:
+                try:
+                    num = Decimal(str(amt))
+                    formatted_price = f"RM {num:,.2f}"
+                except Exception:
+                    formatted_price = format_money_amount(raw_price)
+            else:
+                formatted_price = format_money_amount(raw_price)
+            rows.append(("extra", str(extra.get("label") or ""), formatted_price))
     rows.append(("premium", str(labels.get("premium") or "Coverage Premium"), _format_value(_value(fields, "premium"), "RM ")))
     rows.append(("divider", "", ""))
     rows.append(("roadtax", str(labels.get("roadtax") or "Roadtax"), _format_value(_value(fields, "roadtax"), "RM ")))
     rows.append(("runner", str(labels.get("runner") or "Runner Fee"), _format_value(_value(fields, "service_fee"), "RM ")))
-    total = _value(fields, "total_premium_adjusted") or _value(fields, "total_amount")
+    total = (render_context or {}).get("total_premium_adjusted") or _value(fields, "total_premium_adjusted")
+    if not total:
+        total = adjusted_total_text(fields, extras) if extras else _value(fields, "total_amount")
+    if not total:
+        total = _value(fields, "total_amount")
     rows.append(("total", str(labels.get("total") or "Total Premium"), _format_value(total, "RM ")))
     html: list[str] = []
     for index, (kind, label, value) in enumerate(rows):
@@ -372,6 +414,9 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
         if kind == "total":
             label_style = "font-size:11px;font-weight:800;color:#0F172A"
             value_style = "font-size:13px;font-weight:800;color:#DC2626"
+        elif kind == "extras_header":
+            label_style = "font-size:9px;font-weight:700;color:#DC2626;text-transform:uppercase;letter-spacing:0.5px"
+            value_style = "font-size:9px;font-weight:700;color:#DC2626"
         elif kind == "extra":
             label_style = "font-size:9.5px;font-weight:600;color:#B91C1C"
             value_style = "font-size:10px;font-weight:700;color:#0F172A"
@@ -388,14 +433,16 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
 
 
 def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_context: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """Dynamically balance the heights of current benefits and available add-ons grids."""
+    """Dynamically balance the heights of current benefits, purchased extras, and available add-ons grids."""
     extras = list((render_context or {}).get("extras") or []) if render_context else []
-    extra_shift = len(extras) * 14.0
+    extra_shift = (len(extras) + (1 if extras else 0)) * 14.0
 
     current_cards = list((render_context or {}).get("current_benefits") or []) if render_context else []
     addon_cards = list((render_context or {}).get("available_addons") or []) if render_context else []
-    n1 = len(current_cards)
-    n2 = len(addon_cards)
+
+    # Separate true FOC benefits from purchased extras / priced add-ons
+    extras_cards = [c for c in current_cards if c.get("badge") or c.get("price") or c.get("cost_status") == "paid"]
+    foc_cards = [c for c in current_cards if not (c.get("badge") or c.get("price") or c.get("cost_status") == "paid")] if extras_cards else current_cards
 
     grid1 = next((e for e in elements if e.get("type") == "benefit-grid" and e.get("gridKind") == "current_benefits"), None)
     grid2 = next((e for e in elements if e.get("type") == "benefit-grid" and e.get("gridKind") == "available_addons"), None)
@@ -411,14 +458,130 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     y_top = base_y_top + extra_shift
     y_bottom = float(grid2.get("y") or 796) + float(grid2.get("h") or 262)
 
-    rows1 = max(1, (n1 + 1) // 2) if n1 > 0 else 0
-    rows2 = max(1, (n2 + 1) // 2) if n2 > 0 else 0
-
-    total_space = y_bottom - y_top
     hdr_h = 26.0
     gap = 10.0
     pad = 4.0
 
+    has_explicit_extras_grid = any(e.get("gridKind") in {"extras", "purchased_extras"} for e in elements)
+    has_extras_section = has_explicit_extras_grid and len(extras_cards) > 0
+
+    if has_extras_section:
+        n1 = len(foc_cards)
+        n_ext = len(extras_cards)
+        n2 = len(addon_cards)
+
+        rows1 = max(1, (n1 + 1) // 2) if n1 > 0 else 0
+        rows_ext = max(1, (n_ext + 1) // 2) if n_ext > 0 else 0
+        rows2 = max(1, (n2 + 1) // 2) if n2 > 0 else 0
+
+        total_space = y_bottom - y_top
+        avail_grids_h = total_space - (3 * hdr_h) - (2 * gap) - (3 * pad)
+        if avail_grids_h <= 120:
+            avail_grids_h = 360.0
+
+        total_rows = rows1 + rows_ext + rows2
+        if total_rows > 0:
+            h_ext = max(52.0, min(110.0, avail_grids_h * (rows_ext / total_rows)))
+            remaining_h = avail_grids_h - h_ext
+            if rows1 > 0 and rows2 > 0:
+                h1 = max(80.0, min(remaining_h - 70.0, remaining_h * (rows1 / (rows1 + rows2))))
+                h2 = remaining_h - h1
+            elif rows1 > 0:
+                h1 = remaining_h - 50.0
+                h2 = 50.0
+            else:
+                h1 = 50.0
+                h2 = remaining_h - 50.0
+        else:
+            h1 = avail_grids_h / 3.0
+            h_ext = avail_grids_h / 3.0
+            h2 = avail_grids_h / 3.0
+
+        y_g1 = y_top + hdr_h + pad
+        y_h_ext = y_g1 + h1 + gap
+        y_g_ext = y_h_ext + hdr_h + pad
+        y_h2 = y_g_ext + h_ext + gap
+        y_g2 = y_h2 + hdr_h + pad
+
+        adjusted_elements = []
+        for elem in elements:
+            e = dict(elem)
+            eid = e.get("id")
+            if eid == "cov_table_bg" and extra_shift > 0:
+                e["h"] = float(e.get("h") or 246) + extra_shift
+            elif eid == "specials_header_bg" and hdr1_bg:
+                e["y"] = y_top
+                e["h"] = hdr_h
+            elif eid == "specials_header_txt" and hdr1_txt:
+                e["y"] = y_top + 5
+            elif e.get("type") == "benefit-grid" and e.get("gridKind") == "current_benefits":
+                e["y"] = y_g1
+                e["h"] = h1
+                adjusted_elements.append(e)
+                # Insert Extras section right after current_benefits_grid
+                adjusted_elements.append({
+                    "id": "extras_header_bg",
+                    "type": "rectangle",
+                    "x": 40,
+                    "y": y_h_ext,
+                    "w": 714,
+                    "h": hdr_h,
+                    "z": 2,
+                    "style": {"background": "#1E293B", "borderWidth": 0, "borderColor": "transparent", "borderRadius": 4},
+                })
+                adjusted_elements.append({
+                    "id": "extras_header_txt",
+                    "type": "text",
+                    "text": "Purchased Extras & Add-ons / 额外附加保障",
+                    "x": 52,
+                    "y": y_h_ext + 5,
+                    "w": 690,
+                    "h": 16,
+                    "z": 5,
+                    "style": {"fontSize": 10.5, "fontWeight": "700", "color": "#FFFFFF", "textAlign": "left"},
+                })
+                adjusted_elements.append({
+                    "id": "extras_grid",
+                    "type": "benefit-grid",
+                    "gridKind": "extras",
+                    "x": 40,
+                    "y": y_g_ext,
+                    "w": 714,
+                    "h": h_ext,
+                    "z": 4,
+                    "packing": grid1.get("packing") or {
+                        "strategy": "balanced",
+                        "alignment": "center",
+                        "aspectRatio": 1.45,
+                        "referenceWidth": 180,
+                        "referenceHeight": 124,
+                        "gapRatio": 0.035,
+                        "paddingRatio": 0.012,
+                        "staggerRatio": 0.5,
+                    },
+                    "cardStyle": grid1.get("cardStyle") or "standard",
+                    "textDensity": grid1.get("textDensity") or "compact",
+                    "emptyState": "hide",
+                })
+                continue
+            elif eid == "addons_header_bg" and hdr2_bg:
+                e["y"] = y_h2
+                e["h"] = hdr_h
+            elif eid == "addons_header_txt" and hdr2_txt:
+                e["y"] = y_h2 + 5
+            elif e.get("type") == "benefit-grid" and e.get("gridKind") == "available_addons":
+                e["y"] = y_g2
+                e["h"] = h2
+            adjusted_elements.append(e)
+        return adjusted_elements
+
+    # Standard 2-section layout when no extras exist
+    n1 = len(current_cards)
+    n2 = len(addon_cards)
+    rows1 = max(1, (n1 + 1) // 2) if n1 > 0 else 0
+    rows2 = max(1, (n2 + 1) // 2) if n2 > 0 else 0
+
+    total_space = y_bottom - y_top
     avail_grids_h = total_space - (2 * hdr_h) - gap - (2 * pad)
     if avail_grids_h <= 100:
         avail_grids_h = 360.0
@@ -582,7 +745,7 @@ def _element_html(
     if element.get("visible") is False or element_type == "layer-group":
         return ""
     if element_type == "image":
-        return _image_html(element, config, fields, resolved_assets)
+        return _image_html(element, config, fields, resolved_assets, db)
     if element_type == "line":
         style = element.get("style") or {}
         thickness = max(2.0, float(element.get("h") or 2))

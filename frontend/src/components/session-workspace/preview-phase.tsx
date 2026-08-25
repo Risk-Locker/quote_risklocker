@@ -508,7 +508,7 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => setZoom((z) => Math.max(0.4, z - 0.05))}
+                onClick={() => setZoom((z) => Math.max(0.4, z - 0.1))}
                 className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-gray-100 transition-colors"
                 title="Zoom Out"
               >
@@ -519,7 +519,7 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
               </span>
               <button
                 type="button"
-                onClick={() => setZoom((z) => Math.min(1.0, z + 0.05))}
+                onClick={() => setZoom((z) => Math.min(2.0, z + 0.1))}
                 className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-gray-100 transition-colors"
                 title="Zoom In"
               >
@@ -538,7 +538,7 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
           {/* High-Fidelity Quotation SVG Canvas Container */}
           <div
             ref={canvasContainerRef}
-            className="w-full max-w-[640px] bg-white shadow-card rounded-[4px] overflow-hidden border border-neutral-300 transition-all duration-200"
+            className="w-full max-w-[640px] bg-white shadow-card rounded-[4px] overflow-auto border border-neutral-300 transition-all duration-200"
             style={{
               transform: `scale(${zoom / 0.75})`,
               transformOrigin: "top center",

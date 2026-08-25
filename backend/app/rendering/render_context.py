@@ -57,19 +57,27 @@ def format_money_amount(raw_price: dict | None) -> str:
             return ""
 
 
-def build_extras(selections: Iterable[Any], concepts: Iterable[Any]) -> list[dict]:
+def build_extras(selections: Iterable[Any], concepts: Iterable[Any], offerings: Iterable[Any] | None = None) -> list[dict]:
     """Staff-added priced extras shown above the coverage premium."""
     concept_labels = {str(item.id): item.label for item in concepts}
+    offerings_by_id = {str(item.id): item for item in (offerings or [])}
     extras: list[dict] = []
     for sel in selections:
-        if sel.state != "current" or not sel.price:
+        if sel.state != "current":
             continue
-        label = str(sel.label_override or "").strip() or concept_labels.get(str(sel.concept_id), "Extra benefit")
+        offering = offerings_by_id.get(str(getattr(sel, "catalog_offering_id", None)))
+        price = getattr(sel, "price", None) or getattr(offering, "optional_price", None)
+        cost_status = getattr(sel, "cost_status", None)
+        if cost_status == "included" and not getattr(sel, "price", None):
+            continue
+        if not price:
+            continue
+        label = str(getattr(sel, "label_override", None) or "").strip() or concept_labels.get(str(getattr(sel, "concept_id", None)), "Extra benefit")
         extras.append({
             "selection_id": sel.id,
             "label": label,
-            "price": sel.price,
-            "sort_order": int(sel.sort_order or 0),
+            "price": price,
+            "sort_order": int(getattr(sel, "sort_order", 0) or 0),
         })
     extras.sort(key=lambda item: (item["sort_order"], item["label"].casefold(), item["selection_id"]))
     return extras
@@ -146,6 +154,14 @@ def _card(
     facet_id: str | None = None,
     branch_key: str | None = None,
 ) -> dict:
+    try:
+        card_val = format_benefit_value(typed_value) if typed_value is not None else ""
+    except RenderContextError:
+        if isinstance(typed_value, dict):
+            card_val = str(typed_value.get("display_text") or typed_value.get("value") or "")
+        else:
+            card_val = str(typed_value or "")
+
     return {
         "card_key": f"{getattr(selection, 'id', 'offer')}:{offering.id}:{facet_id or 'parent'}",
         "entitlement_key": str(getattr(selection, "id", f"offer:{offering.id}")),
@@ -157,7 +173,7 @@ def _card(
         "facet_id": facet_id,
         "branch_key": branch_key,
         "label": label or getattr(offering, "label_override", None) or concept.label,
-        "value": format_benefit_value(typed_value) if typed_value is not None else "",
+        "value": card_val,
         "typed_value": typed_value,
         "price": getattr(selection, "price", None) or getattr(offering, "optional_price", None),
         "optional_price": getattr(offering, "optional_price", None),

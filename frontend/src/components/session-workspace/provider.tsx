@@ -22,6 +22,21 @@ import type {
   WorkspaceSnapshot,
 } from "./types";
 
+/** Recalculate the adjusted total premium from base total + extras prices. */
+function _recalcAdjustedTotal(snapshot: WorkspaceSnapshot, nextExtras: WorkspaceSnapshot["extras"]): string {
+  const raw = snapshot.fields?.total_amount;
+  const baseVal = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>).value : raw;
+  const base = parseFloat(String(baseVal ?? "").replace(/[^0-9.]/g, "")) || 0;
+  const extrasSum = nextExtras.reduce((acc, ex) => {
+    const p = ex.price;
+    const amt = p ? (p.amount ?? 0) : 0;
+    const num = typeof amt === "string" ? parseFloat(amt.replace(/,/g, "")) : (typeof amt === "number" ? amt : 0);
+    return acc + (Number.isFinite(num) ? num : 0);
+  }, 0);
+  const total = base + extrasSum;
+  return total > 0 ? total.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
+}
+
 type DataContextValue = {
   workspace: WorkspaceSnapshot | null;
   loading: boolean;
@@ -81,6 +96,19 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
       cost_status: String(operation.cost_status || (isAddon ? "paid" : "included")),
     };
 
+    // Build updated extras: if this is a current benefit with a price, add to extras
+    const price = operation.price as { amount?: number | string; currency?: string } | null | undefined;
+    const isCurrent = operation.state === "current";
+    let nextExtras = [...snapshot.extras];
+    if (price && isCurrent) {
+      nextExtras.push({
+        selection_id: selectionId,
+        label: String(operation.label || "Custom benefit"),
+        price: { amount: price.amount, currency: price.currency || "MYR" },
+      });
+    }
+    const nextAdjusted = _recalcAdjustedTotal(snapshot, nextExtras);
+
     return {
       ...snapshot,
       benefits: [...snapshot.benefits, {
@@ -101,6 +129,8 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
           ? [...snapshot.benefit_cards.available_addons, newCard]
           : snapshot.benefit_cards.available_addons,
       },
+      extras: nextExtras,
+      total_premium_adjusted: nextAdjusted || snapshot.total_premium_adjusted,
     };
   }
   if (operation.op === "select_catalog_offering") {
@@ -115,16 +145,32 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
       id: selectionId, selection_key: `catalog:${offer.offering_key}`, catalog_offering_id: offer.offering_id,
       concept_id: offer.concept_id, state: "current", cost_status: String(operation.cost_status || "unknown"), item_kind: "catalog",
     });
+    const newCard = { ...offer, card_key: selectionId, selection_id: selectionId, cost_status: String(operation.cost_status || "unknown") };
+    let nextExtras = snapshot.extras;
+    const priceVal = (operation.price as Record<string, unknown> | undefined) || newCard.price || newCard.optional_price;
+    if (priceVal && String(operation.cost_status) !== "included") {
+      nextExtras = [...nextExtras.filter((ex) => ex.selection_id !== selectionId), {
+        selection_id: selectionId,
+        label: newCard.label,
+        price: priceVal,
+        sort_order: newCard.sort_order || 0,
+      }];
+    }
+    const nextAdjusted = nextExtras !== snapshot.extras
+      ? _recalcAdjustedTotal(snapshot, nextExtras)
+      : snapshot.total_premium_adjusted;
     return {
       ...snapshot,
       benefits: nextBenefits,
       benefit_cards: {
         current_benefits: [
           ...snapshot.benefit_cards.current_benefits.filter((item) => item.concept_id !== offer.concept_id),
-          { ...offer, card_key: selectionId, selection_id: selectionId, cost_status: String(operation.cost_status || "unknown") },
+          newCard,
         ],
         available_addons: snapshot.benefit_cards.available_addons.filter((item) => item.offering_id !== offeringId),
       },
+      extras: nextExtras,
+      total_premium_adjusted: nextAdjusted || snapshot.total_premium_adjusted,
     };
   }
   if (operation.op === "benefit_update") {
@@ -146,6 +192,7 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
 
     let nextCurrent = snapshot.benefit_cards.current_benefits;
     let nextAddons = snapshot.benefit_cards.available_addons;
+    let nextExtras = snapshot.extras;
 
     if (state === "removed") {
       nextCurrent = nextCurrent.filter((item) => item.selection_id !== selectionId);
@@ -160,10 +207,20 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
     } else if (state === "current" && inAddon) {
       // Move from addon to current
       nextAddons = nextAddons.filter((item) => item.selection_id !== selectionId);
-      nextCurrent = [...nextCurrent, {
+      const movedCard = {
         ...inAddon,
         ...(costStatus ? { cost_status: costStatus } : {}),
-      }];
+      };
+      nextCurrent = [...nextCurrent, movedCard];
+      const priceVal = (operation.price as Record<string, unknown> | undefined) || movedCard.price || movedCard.optional_price;
+      if (priceVal && costStatus !== "included") {
+        nextExtras = [...nextExtras.filter((ex) => ex.selection_id !== selectionId), {
+          selection_id: selectionId,
+          label: movedCard.label,
+          price: priceVal,
+          sort_order: movedCard.sort_order || 0,
+        }];
+      }
     } else {
       // Update in-place
       nextCurrent = nextCurrent.map((item) => item.selection_id === selectionId ? {
@@ -178,6 +235,14 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
       } : item);
     }
 
+    // Remove from extras if a priced benefit was removed or moved to add-on
+    if (state === "removed" || state === "available_addon") {
+      nextExtras = nextExtras.filter((ex) => ex.selection_id !== selectionId);
+    }
+    const nextAdjusted = nextExtras !== snapshot.extras
+      ? _recalcAdjustedTotal(snapshot, nextExtras)
+      : snapshot.total_premium_adjusted;
+
     return {
       ...snapshot,
       benefits: nextBenefits,
@@ -185,6 +250,8 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
         current_benefits: nextCurrent,
         available_addons: nextAddons,
       },
+      extras: nextExtras,
+      total_premium_adjusted: nextAdjusted || snapshot.total_premium_adjusted,
     };
   }
   if (operation.op === "layout_override") {
@@ -304,7 +371,7 @@ export function SessionWorkspaceProvider({ sessionId, children }: { sessionId: s
   }, [queueOperation]);
 
   const runSave = useCallback(async (): Promise<WorkspaceSnapshot> => {
-    const baseSnapshot = serverSnapshotRef.current;
+    let baseSnapshot = serverSnapshotRef.current;
     if (!baseSnapshot) throw new Error("The quotation workspace is not loaded.");
     const sentEntries = [...operationsRef.current.entries()];
     const operations = sentEntries.map(([, operation]) => operation);
@@ -313,10 +380,26 @@ export function SessionWorkspaceProvider({ sessionId, children }: { sessionId: s
     setSaving(true);
     setSaveError(null);
     try {
-      await api<{ workspace: Partial<WorkspaceSnapshot> & { revision: number } }>(`/drafts/${baseSnapshot.draft_id}/workspace`, {
-        method: "PATCH",
-        body: JSON.stringify({ base_revision: baseSnapshot.revision, operations }),
-      });
+      try {
+        await api<{ workspace: Partial<WorkspaceSnapshot> & { revision: number } }>(`/drafts/${baseSnapshot.draft_id}/workspace`, {
+          method: "PATCH",
+          body: JSON.stringify({ base_revision: baseSnapshot.revision, operations }),
+        });
+      } catch (err: unknown) {
+        const msg = apiErrorMessage(err);
+        if (msg.includes("409") || msg.includes("changed elsewhere") || (err as { status?: number })?.status === 409) {
+          const fresh = await api<{ workspace: WorkspaceSnapshot }>(`/sessions/${sessionId}/workspace`);
+          serverSnapshotRef.current = fresh.workspace;
+          setServerSnapshot(fresh.workspace);
+          baseSnapshot = fresh.workspace;
+          await api<{ workspace: Partial<WorkspaceSnapshot> & { revision: number } }>(`/drafts/${baseSnapshot.draft_id}/workspace`, {
+            method: "PATCH",
+            body: JSON.stringify({ base_revision: baseSnapshot.revision, operations }),
+          });
+        } else {
+          throw err;
+        }
+      }
       const canonical = await api<{ workspace: WorkspaceSnapshot }>(`/sessions/${sessionId}/workspace`);
       for (const [path, version] of sentVersions) {
         if (operationVersionsRef.current.get(path) === version) {

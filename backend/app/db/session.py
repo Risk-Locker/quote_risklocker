@@ -27,10 +27,16 @@ def _sqlalchemy_url(database_url: str) -> str:
 engine = create_engine(
     _sqlalchemy_url(settings.database_url),
     pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=10,
+    pool_size=5,
+    max_overflow=5,
     pool_timeout=30,
-    pool_recycle=300,
+    pool_recycle=60,
+    connect_args={
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5,
+    },
 )
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
@@ -73,5 +79,8 @@ def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()

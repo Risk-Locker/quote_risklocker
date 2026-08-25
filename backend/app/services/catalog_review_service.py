@@ -352,11 +352,14 @@ def seed_base_benefits(db, draft: QuotationDraft, revision: BenefitCatalogRevisi
         if not getattr(draft, "package_id", None):
             draft.package_id = primary_pkg_id
 
-    # Filter offerings belonging to this revision that are included/base
-    all_offerings = [
-        item for item in _rows(db, CatalogOffering)
-        if item.catalog_revision_id == revision.id and item.status in {"active", "compatibility"}
-    ]
+    all_offerings = list(
+        db.scalars(
+            select(CatalogOffering).where(
+                CatalogOffering.catalog_revision_id == revision.id,
+                CatalogOffering.status.in_(["active", "compatibility"]),
+            )
+        ).all()
+    )
 
     base_offerings = []
     for item in all_offerings:
@@ -533,16 +536,28 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
             ev_str = str(cov_limit or (line.evidence or {}).get("value") or (line.evidence or {}).get("coverage_limit") or "")
             if ev_str and ev_str.lower() not in {"included", "standard", "yes", "true", "selected"}:
                 clean_limit = ev_str.upper().replace("RM", "").replace(",", "").strip()
-                extracted = {
-                    "type": "money" if any(c.isdigit() for c in clean_limit) else "string",
-                    "value": clean_limit if any(c.isdigit() for c in clean_limit) else ev_str,
-                    "currency": "MYR",
-                    "semantic_role": "limit",
-                    "display_text": f"RM {clean_limit}" if any(c.isdigit() for c in clean_limit) else ev_str,
-                }
+                is_pure_money = bool(re.match(r"^\s*(?:RM\s*)?[\d]+(?:,\d{3})*(?:\.\d{1,2})?\s*$", ev_str, re.IGNORECASE))
+                if is_pure_money:
+                    extracted = {
+                        "type": "money",
+                        "value": clean_limit,
+                        "currency": "MYR",
+                        "semantic_role": "limit",
+                        "display_text": f"RM {clean_limit}",
+                    }
+                else:
+                    extracted = {
+                        "type": "text",
+                        "value": ev_str,
+                        "display_text": ev_str,
+                    }
             elif premium_cost:
                 clean_p = str(premium_cost).upper().replace("RM", "").replace(",", "").strip()
-                extracted = {"type": "money", "value": clean_p, "currency": "MYR", "semantic_role": "premium", "display_text": f"RM {clean_p}"}
+                is_pure_money = bool(re.match(r"^\s*(?:RM\s*)?[\d]+(?:,\d{3})*(?:\.\d{1,2})?\s*$", str(premium_cost), re.IGNORECASE))
+                if is_pure_money:
+                    extracted = {"type": "money", "value": clean_p, "currency": "MYR", "semantic_role": "premium", "display_text": f"RM {clean_p}"}
+                else:
+                    extracted = {"type": "text", "value": str(premium_cost), "display_text": str(premium_cost)}
             else:
                 extracted = {"type": "boolean", "value": True, "display_text": "Included"}
 

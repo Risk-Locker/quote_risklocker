@@ -107,7 +107,24 @@ def build_draft(candidates: dict[str, list[CandidateValue]]) -> tuple[dict, list
 
     fields["cover_period"]["status"] = "ready" if (start_dmy and end_dmy and date_ok) else ("check_needed" if not date_ok else "ready")
 
+    # Sync Sum Insured / Coverage Amount / Market Value / Agreed Value aliases
+    coverage_val = (
+        fields.get("coverage_amount", {}).get("value")
+        or fields.get("sum_insured", {}).get("value")
+        or fields.get("market_value", {}).get("value")
+        or fields.get("agreed_value", {}).get("value")
+    )
+    if coverage_val:
+        for alias in ("coverage_amount", "sum_insured", "market_value", "agreed_value"):
+            if alias in fields:
+                if not fields[alias].get("value"):
+                    fields[alias]["value"] = str(coverage_val)
+                    fields[alias]["status"] = "ready"
+                    fields[alias]["warnings"] = []
+                    fields[alias]["message"] = ""
+
     # Infer vehicle CC and vehicle type
+    import re
     from app.services.vehicle_catalog_service import infer_vehicle_cc_and_type
     from app.services.road_tax_service import calculate_road_tax
 
@@ -117,32 +134,64 @@ def build_draft(candidates: dict[str, list[CandidateValue]]) -> tuple[dict, list
         if not fields["vehicle_type"].get("value"):
             fields["vehicle_type"]["value"] = inferred_type
             fields["vehicle_type"]["status"] = "ready"
-    if "engine_cc" in fields and not fields["engine_cc"].get("value") and inferred_cc:
-        fields["engine_cc"]["value"] = str(inferred_cc)
+
+    # Extract numeric CC safely from raw string (e.g. '998 CC', '1,498 cc', '1.0', '1.5L')
+    cc_val = fields.get("engine_cc", {}).get("value")
+    effective_cc = None
+    if cc_val:
+        cleaned_cc_str = re.sub(r"[^\d.]", "", str(cc_val)).strip()
+        if cleaned_cc_str:
+            try:
+                num_cc = float(cleaned_cc_str)
+                if 0.5 <= num_cc <= 8.0:
+                    # Litres format (e.g. 1.0 -> 998, 1.5 -> 1496)
+                    inferred_from_litres = {1.0: 998, 1.2: 1197, 1.3: 1329, 1.5: 1496, 1.6: 1598, 1.8: 1798, 2.0: 1998, 2.5: 2494, 3.0: 2998}
+                    effective_cc = inferred_from_litres.get(round(num_cc, 1), int(round(num_cc * 1000)))
+                elif num_cc > 8.0:
+                    effective_cc = int(round(num_cc))
+            except (ValueError, TypeError):
+                pass
+
+    if not effective_cc:
+        effective_cc = inferred_cc
+
+    if "engine_cc" in fields and not fields["engine_cc"].get("value") and effective_cc:
+        fields["engine_cc"]["value"] = str(effective_cc)
         fields["engine_cc"]["status"] = "ready"
 
     # Default Runner Fee to RM 20.00 if missing
     if "service_fee" in fields and not fields["service_fee"].get("value"):
         fields["service_fee"]["value"] = "20.00"
         fields["service_fee"]["status"] = "ready"
+        fields["service_fee"]["warnings"] = []
+        fields["service_fee"]["message"] = ""
 
-    # Auto-calculate Road Tax based on vehicle CC and rules if roadtax is missing or not provided
-    if "roadtax" in fields and (not fields["roadtax"].get("value") or fields["roadtax"].get("value") == "0"):
-        cc_val = fields.get("engine_cc", {}).get("value")
-        effective_cc = None
-        try:
-            if cc_val:
-                effective_cc = int(float(cc_val))
-        except (ValueError, TypeError):
-            pass
-        if not effective_cc:
-            effective_cc = inferred_cc
+    # 2-Level Road Tax Calculation:
+    # Level 1: If roadtax is already explicitly present in quotation PDF and > 0, preserve it.
+    # Level 2: If roadtax is missing, empty, or 0.00, compute from vehicle CC and vehicle type schedule.
+    if "roadtax" in fields:
+        raw_rt = fields["roadtax"].get("value")
+        parsed_rt = None
+        if raw_rt:
+            try:
+                cleaned_rt = re.sub(r"[^\d.]", "", str(raw_rt)).strip()
+                if cleaned_rt:
+                    parsed_rt = float(cleaned_rt)
+            except (ValueError, TypeError):
+                pass
 
-        if effective_cc:
+        if parsed_rt is not None and parsed_rt > 0:
+            fields["roadtax"]["value"] = f"{parsed_rt:.2f}"
+            fields["roadtax"]["status"] = "ready"
+            fields["roadtax"]["warnings"] = []
+            fields["roadtax"]["message"] = ""
+        elif effective_cc:
             computed_rt = calculate_road_tax(effective_cc, vehicle_type=inferred_type)
             if computed_rt > 0:
                 fields["roadtax"]["value"] = f"{computed_rt:.2f}"
                 fields["roadtax"]["status"] = "ready"
+                fields["roadtax"]["warnings"] = []
+                fields["roadtax"]["message"] = ""
 
     # Ensure premium is the net payable insurance premium (after NCD, extras, and SST)
     try:
@@ -171,12 +220,15 @@ def build_draft(candidates: dict[str, list[CandidateValue]]) -> tuple[dict, list
             p_val = str(t_val)
 
         # Calculate Risklocker total amount if total_amount is not explicitly in the document
-        if "total_amount" in fields and (not fields["total_amount"].get("value") or fields["total_amount"].get("value") == "0") and p_val:
+        if "total_amount" in fields and (not fields["total_amount"].get("value") or fields["total_amount"].get("value") in {"0", "0.00"}) and p_val:
             r_val = fields.get("roadtax", {}).get("value") or "0"
             s_val = fields.get("service_fee", {}).get("value") or "0"
-            tot = Decimal(str(p_val).replace(",", "")) + Decimal(str(r_val).replace(",", "")) + Decimal(str(s_val).replace(",", ""))
-            fields["total_amount"]["value"] = f"{tot:.2f}"
-            fields["total_amount"]["status"] = "ready"
+            try:
+                tot = Decimal(str(p_val).replace(",", "")) + Decimal(str(r_val).replace(",", "")) + Decimal(str(s_val).replace(",", ""))
+                fields["total_amount"]["value"] = f"{tot:.2f}"
+                fields["total_amount"]["status"] = "ready"
+            except Exception:
+                pass
     except Exception:
         pass
 

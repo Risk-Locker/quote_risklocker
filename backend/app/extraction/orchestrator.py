@@ -138,20 +138,36 @@ class ExtractionOrchestrator:
                         typed_val = None
                         if limit_val:
                             clean_limit = limit_val.upper().replace("RM", "").replace(",", "").strip()
-                            typed_val = {
-                                "type": "money" if any(char.isdigit() for char in clean_limit) else "string",
-                                "value": clean_limit if any(char.isdigit() for char in clean_limit) else limit_val,
-                                "currency": "MYR",
-                                "display_text": limit_val if limit_val.startswith("RM") else f"RM {limit_val}" if any(char.isdigit() for char in clean_limit) else limit_val,
-                            }
+                            is_pure_money = bool(re.match(r"^\s*(?:RM\s*)?[\d]+(?:,\d{3})*(?:\.\d{1,2})?\s*$", limit_val, re.IGNORECASE))
+                            if is_pure_money:
+                                typed_val = {
+                                    "type": "money",
+                                    "value": clean_limit,
+                                    "currency": "MYR",
+                                    "display_text": limit_val if limit_val.startswith("RM") else f"RM {limit_val}",
+                                }
+                            else:
+                                typed_val = {
+                                    "type": "text",
+                                    "value": limit_val,
+                                    "display_text": limit_val,
+                                }
                         elif cost:
                             clean_cost = cost.upper().replace("RM", "").replace(",", "").strip()
-                            typed_val = {
-                                "type": "money",
-                                "value": clean_cost,
-                                "currency": "MYR",
-                                "display_text": f"RM {clean_cost}",
-                            }
+                            is_pure_money = bool(re.match(r"^\s*(?:RM\s*)?[\d]+(?:,\d{3})*(?:\.\d{1,2})?\s*$", cost, re.IGNORECASE))
+                            if is_pure_money:
+                                typed_val = {
+                                    "type": "money",
+                                    "value": clean_cost,
+                                    "currency": "MYR",
+                                    "display_text": f"RM {clean_cost}",
+                                }
+                            else:
+                                typed_val = {
+                                    "type": "text",
+                                    "value": cost,
+                                    "display_text": cost,
+                                }
 
                         benefit_lines.append({
                             "line_id": f"gemini_{len(benefit_lines) + 1}",

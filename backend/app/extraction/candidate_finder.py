@@ -30,6 +30,7 @@ DRAFT_FIELDS = [
     "cover_period",
     "coverage_type",
     "coverage_amount",
+    "sum_insured",
     "market_value",
     "agreed_value",
     "excess_amount",
@@ -55,6 +56,7 @@ DRAFT_FIELDS = [
 
 MONEY_FIELDS = {
     "coverage_amount",
+    "sum_insured",
     "market_value",
     "agreed_value",
     "excess_amount",
@@ -84,8 +86,11 @@ DEFAULT_ALIASES = {
     "engine_cc": ["engine cc", "capacity", "cubic capacity", "engine capacity", "keupayaan enjin", "cc"],
     "engine_no": ["engine/motor no", "engine no", "motor no", "no. enjin"],
     "excess_amount": ["excess amount", "excess all claims", "excess", "policy excess", "ekses", "ekses polisi", "compulsory excess", "lebihan"],
-    "valid_until": ["valid until", "validity period", "validity date", "validity", "this quotation will expire on", "quotation will expire on", "expire on", "expiry date", "tarikh luput", "sah sehingga"],
-    "coverage_amount": ["sum insured", "coverage amount", "insured value", "market value", "agreed value", "sum covered"],
+    "valid_until": ["quotation validity", "tarikh sah quotation", "tarikh sah", "tempoh sah", "sah laku sehingga", "valid until", "validity period", "validity date", "validity", "this quotation will expire on", "quotation will expire on", "expire on", "expiry date", "tarikh luput", "sah sehingga"],
+    "coverage_amount": ["sum insured", "coverage amount", "insured value", "market value", "agreed value", "sum covered", "jumlah diinsuranskan", "nilai yang dipersetujui"],
+    "sum_insured": ["sum insured", "coverage amount", "insured value", "market value", "agreed value", "sum covered", "jumlah diinsuranskan", "nilai yang dipersetujui", "nilai pasaran"],
+    "market_value": ["market value", "nilai pasaran", "agreed value", "sum insured", "jumlah diinsuranskan"],
+    "agreed_value": ["agreed value", "nilai yang dipersetujui", "sum insured", "jumlah diinsuranskan"],
     "basic_premium": ["basic premium", "premium asas", "basic contribution", "sum covered basic"],
     "gross_premium": ["gross premium", "premium kasar", "gross contribution", "jumlah premium kasar"],
     "service_tax": ["service tax", "cukai perkhidmatan", "sst", "cukai servis"],
@@ -537,11 +542,15 @@ def _add_amgen_profile(text: str, page_text: list[dict], results: dict[str, list
         _add_static(results, "vehicle_no", header.group("vehicle"), "profile_header", 0.98, evidence, text, page_text)
 
     valid_until_patterns = [
+        r"quotation\s+validity\s*(?:/\s*tarikh\s+sah\s+quotation)?\s*:?\s*(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
+        r"tarikh\s+sah\s+quotation\s*:?\s*(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
+        r"quotation\s+validity\s*\n\s*(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
         r"(?:this\s+)?quotation\s+(?:will\s+)?expire\s+on\s*:?\s*(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
         r"valid\s+(?:until|to)\s*:?\s*(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
         r"validity\s*(?:period|date)?\s*:?\s*(?:until\s*)?(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
         r"tarikh\s+luput\s*:?\s*(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
         r"expiry\s+date\s*:?\s*(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
+        r"sah\s+sehingga\s*:?\s*(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
     ]
     for v_pat in valid_until_patterns:
         v_match = re.search(v_pat, text, re.IGNORECASE)

@@ -63,7 +63,7 @@ def _rows(db, model) -> list:
 
 
 def _for_draft(db, model, draft_id: str) -> list:
-    return [item for item in _rows(db, model) if item.draft_id == draft_id]
+    return list(db.scalars(select(model).where(model.draft_id == draft_id)).all())
 
 
 def _field_text(fields: dict, name: str) -> str:
@@ -133,25 +133,47 @@ def _template_config(draft: QuotationDraft, revision: TemplateRevision, page: Te
 def _catalog_rows(db, draft: QuotationDraft) -> tuple[list, list, list, list, list]:
     if not draft.catalog_revision_id:
         return [], [], [], [], []
-    offerings = [
-        item for item in _rows(db, CatalogOffering)
-        if item.catalog_revision_id == draft.catalog_revision_id
-    ]
+    offerings = list(
+        db.scalars(
+            select(CatalogOffering).where(CatalogOffering.catalog_revision_id == draft.catalog_revision_id)
+        ).all()
+    )
     offering_ids = {item.id for item in offerings}
     concept_ids = {item.concept_id for item in offerings}
-    concepts = [item for item in _rows(db, BenefitConcept) if item.id in concept_ids]
-    relations = [
-        item for item in _rows(db, BenefitRelation)
-        if item.catalog_revision_id == draft.catalog_revision_id
-        and item.from_offering_id in offering_ids
-        and item.to_offering_id in offering_ids
-    ]
-    facets = [item for item in _rows(db, BenefitFacet) if item.parent_concept_id in concept_ids]
-    plans = [
-        item for item in _rows(db, BenefitPackagePlan)
-        if item.package_id
-        in {p.id for p in _rows(db, BenefitPackage) if p.catalog_revision_id == draft.catalog_revision_id}
-    ]
+    concepts = (
+        list(db.scalars(select(BenefitConcept).where(BenefitConcept.id.in_(concept_ids))).all())
+        if concept_ids
+        else []
+    )
+    relations = (
+        list(
+            db.scalars(
+                select(BenefitRelation).where(
+                    BenefitRelation.catalog_revision_id == draft.catalog_revision_id,
+                    BenefitRelation.from_offering_id.in_(offering_ids),
+                    BenefitRelation.to_offering_id.in_(offering_ids),
+                )
+            ).all()
+        )
+        if offering_ids
+        else []
+    )
+    facets = (
+        list(db.scalars(select(BenefitFacet).where(BenefitFacet.parent_concept_id.in_(concept_ids))).all())
+        if concept_ids
+        else []
+    )
+    package_ids = {
+        item.id
+        for item in db.scalars(
+            select(BenefitPackage).where(BenefitPackage.catalog_revision_id == draft.catalog_revision_id)
+        ).all()
+    }
+    plans = (
+        list(db.scalars(select(BenefitPackagePlan).where(BenefitPackagePlan.package_id.in_(package_ids))).all())
+        if package_ids
+        else []
+    )
     return offerings, concepts, relations, facets, plans
 
 
@@ -235,7 +257,7 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
         raise AppError(str(exc), 409) from exc
     config = _template_config(draft, revision, page)
     config, assets, asset_hashes = _snapshot_assets(db, config, cards, draft)
-    extras = build_extras(selections, concepts)
+    extras = build_extras(selections, concepts, offerings)
     fields = deepcopy(draft.fields or {})
     adjusted_total = adjusted_total_text(fields, extras)
     fields["total_premium_adjusted"] = {
@@ -440,6 +462,9 @@ def render_snapshot_preview_html(db, user, snapshot_id: str, settings) -> str:
         render_context={
             "current_benefits": context.get("current_benefits") or [],
             "available_addons": context.get("available_addons") or [],
+            "groups": context.get("groups") or [],
+            "extras": context.get("extras") or [],
+            "total_premium_adjusted": (context.get("fields") or {}).get("total_premium_adjusted", {}).get("value") or context.get("total_premium_adjusted"),
         },
         resolved_assets=resolved,
     )

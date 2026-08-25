@@ -39,6 +39,16 @@ def _extract_potential_plates(query: str) -> list[str]:
     return plates
 
 
+def _field_val(fields: dict | None, key: str) -> str:
+    """Safely extract scalar string value from draft field dict or nested value object."""
+    if not fields or not isinstance(fields, dict):
+        return ""
+    item = fields.get(key)
+    if isinstance(item, dict):
+        return str(item.get("value") or "")
+    return str(item or "")
+
+
 def answer_grounding_query(
     db: Session,
     query: str,
@@ -64,13 +74,14 @@ def answer_grounding_query(
             .where((QuotationDraft.id == session_id) | (UploadedFile.id == session_id))
         )
         if draft:
-            values = draft.values or {}
+            f = draft.fields or {}
+            veh = _field_val(f, "vehicle_no") or "N/A"
+            cust = _field_val(f, "customer_name") or "N/A"
+            ins = _field_val(f, "insurance_company") or "N/A"
+            prem = _field_val(f, "total_premium") or _field_val(f, "premium") or "N/A"
             facts_lines.append(
-                f"Active Session: Vehicle={values.get('vehicle_no', 'N/A')}, "
-                f"Insured={values.get('customer_name', 'N/A')}, "
-                f"Insurer={values.get('insurance_company', 'N/A')}, "
-                f"Premium=RM {values.get('total_premium', 'N/A')}, "
-                f"Status={draft.status}"
+                f"Active Session: Vehicle={veh}, Insured={cust}, Insurer={ins}, "
+                f"Premium=RM {prem}, Status={draft.status}"
             )
             sources.append("Active Session Draft")
 
@@ -92,20 +103,25 @@ def answer_grounding_query(
             )
             sources.append(f"Client Record ({cr.vehicle_no})")
 
-        # Search QuotationDraft values if not found in ClientRecord
+        # Search QuotationDraft fields if not found in ClientRecord
         if not client_matches:
             drafts = db.scalars(select(QuotationDraft).limit(50)).all()
             for d in drafts:
-                v = d.values or {}
-                v_plate = str(v.get("vehicle_no", "")).replace(" ", "").upper()
-                if plate in v_plate or v_plate in plate:
+                f = d.fields or {}
+                v_no = _field_val(f, "vehicle_no")
+                v_plate = v_no.replace(" ", "").upper()
+                if v_plate and (plate in v_plate or v_plate in plate):
                     found_vehicle = True
+                    cust = _field_val(f, "customer_name") or "N/A"
+                    ins = _field_val(f, "insurance_company") or "N/A"
+                    model = _field_val(f, "car_model") or "N/A"
+                    prem = _field_val(f, "total_premium") or _field_val(f, "premium") or "N/A"
                     facts_lines.append(
-                        f"Quotation Draft for {v.get('vehicle_no')}: Insured={v.get('customer_name', 'N/A')}, "
-                        f"Company={v.get('insurance_company', 'N/A')}, Model={v.get('car_model', 'N/A')}, "
-                        f"Total Premium=RM {v.get('total_premium', 'N/A')}, Status={d.status}"
+                        f"Quotation Draft for {v_no}: Insured={cust}, "
+                        f"Company={ins}, Model={model}, "
+                        f"Total Premium=RM {prem}, Status={d.status}"
                     )
-                    sources.append(f"Quotation Draft ({v.get('vehicle_no')})")
+                    sources.append(f"Quotation Draft ({v_no})")
                     break
 
     # 3. Check for insurer / company mentions
@@ -119,7 +135,7 @@ def answer_grounding_query(
         for mc in matched_companies:
             has_pack = "amassurance" in mc.name.lower()
             facts_lines.append(
-                f"Insurance Company: {mc.name} (Code: {mc.code or 'N/A'}, Mode: {'4-Tier Package Chain' if has_pack else 'Single Add-on Mode'}, "
+                f"Insurance Company: {mc.name} (Slug: {mc.slug or 'N/A'}, Mode: {'4-Tier Package Chain' if has_pack else 'Single Add-on Mode'}, "
                 f"Detection Phrases: {', '.join(mc.detection_phrases or [mc.name])})"
             )
             sources.append(f"Insurer Catalog ({mc.name})")
@@ -133,7 +149,7 @@ def answer_grounding_query(
     if matched_concepts:
         for bc in matched_concepts[:3]:
             facts_lines.append(
-                f"Benefit Concept: {bc.label} (Key: '{bc.concept_key}', Category: {getattr(bc, 'category', 'Add-on')})"
+                f"Benefit Concept: {bc.label} (Key: '{bc.concept_key}', Description: {bc.description or 'Standard Coverage'})"
             )
             sources.append(f"Benefit Concept ({bc.label})")
 
@@ -168,10 +184,10 @@ def answer_grounding_query(
     all_keys = pool.get_all_keys()
     settings = get_settings()
 
-    # If keys exist, call Gemini Flash-Lite with tight token limits
+    # If keys exist, call Gemini with tight token limits
     if all_keys:
         api_key = pool.get_next_key()
-        model_name = "gemini-3.1-flash-lite-preview"
+        model_name = getattr(settings, "gemini_model", None) or "gemini-3.6-flash"
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
         payload = {
             "system_instruction": {"parts": [{"text": system_instruction}]},

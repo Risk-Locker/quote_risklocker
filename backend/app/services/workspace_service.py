@@ -222,12 +222,17 @@ def generation_blockers(
 def _catalog_overview(db, draft: QuotationDraft) -> dict:
     if not draft.catalog_revision_id:
         return {"defaults": [], "addons": []}
-    offerings = [
-        item for item in db.scalars(select(CatalogOffering)).all()
-        if item.catalog_revision_id == draft.catalog_revision_id
-    ]
+    offerings = list(
+        db.scalars(
+            select(CatalogOffering).where(CatalogOffering.catalog_revision_id == draft.catalog_revision_id)
+        ).all()
+    )
     concept_ids = {item.concept_id for item in offerings}
-    concepts = {item.id: item for item in db.scalars(select(BenefitConcept)).all() if item.id in concept_ids}
+    concepts = (
+        {item.id: item for item in db.scalars(select(BenefitConcept).where(BenefitConcept.id.in_(concept_ids))).all()}
+        if concept_ids
+        else {}
+    )
     overview = {"defaults": [], "addons": []}
     for offering in sorted(offerings, key=lambda item: (int(item.sort_order or 0), item.offering_key)):
         concept = concepts.get(offering.concept_id)
@@ -304,27 +309,46 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
         plans: list = []
         valid_selections = [s for s in selections if s.item_kind != "catalog"]
     else:
-        offerings = [
-            item for item in db.scalars(select(CatalogOffering)).all()
-            if item.catalog_revision_id == draft.catalog_revision_id
-        ]
+        offerings = list(
+            db.scalars(
+                select(CatalogOffering).where(CatalogOffering.catalog_revision_id == draft.catalog_revision_id)
+            ).all()
+        )
         offering_ids = {item.id for item in offerings}
         concept_ids = {item.concept_id for item in offerings}
-        relations = [
-            item for item in db.scalars(select(BenefitRelation)).all()
-            if item.catalog_revision_id == draft.catalog_revision_id
-            and item.from_offering_id in offering_ids and item.to_offering_id in offering_ids
-        ]
-        facets = [item for item in db.scalars(select(BenefitFacet)).all() if item.parent_concept_id in concept_ids]
+        relations = (
+            list(
+                db.scalars(
+                    select(BenefitRelation).where(
+                        BenefitRelation.catalog_revision_id == draft.catalog_revision_id,
+                        BenefitRelation.from_offering_id.in_(offering_ids),
+                        BenefitRelation.to_offering_id.in_(offering_ids),
+                    )
+                ).all()
+            )
+            if offering_ids
+            else []
+        )
+        facets = (
+            list(
+                db.scalars(select(BenefitFacet).where(BenefitFacet.parent_concept_id.in_(concept_ids))).all()
+            )
+            if concept_ids
+            else []
+        )
         package_ids = {
             item.id
-            for item in db.scalars(select(BenefitPackage)).all()
-            if item.catalog_revision_id == draft.catalog_revision_id
+            for item in db.scalars(
+                select(BenefitPackage).where(BenefitPackage.catalog_revision_id == draft.catalog_revision_id)
+            ).all()
         }
-        plans = [
-            item for item in db.scalars(select(BenefitPackagePlan)).all()
-            if item.package_id in package_ids
-        ]
+        plans = (
+            list(
+                db.scalars(select(BenefitPackagePlan).where(BenefitPackagePlan.package_id.in_(package_ids))).all()
+            )
+            if package_ids
+            else []
+        )
         valid_selections = [
             s for s in selections
             if s.item_kind != "catalog" or s.catalog_offering_id in offering_ids
@@ -406,7 +430,16 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
     package = db.get(BenefitPackage, draft.package_id) if getattr(draft, "package_id", None) else None
     catalog_overview = _catalog_overview(db, draft)
     concepts = list(db.scalars(select(BenefitConcept)).all())
-    extras = build_extras(selections, concepts)
+    offerings = (
+        list(
+            db.scalars(
+                select(CatalogOffering).where(CatalogOffering.catalog_revision_id == draft.catalog_revision_id)
+            ).all()
+        )
+        if draft.catalog_revision_id
+        else []
+    )
+    extras = build_extras(selections, concepts, offerings)
     adjusted_total = adjusted_total_text(draft.fields or {}, extras)
     
     # Extract car model string safely
@@ -579,24 +612,43 @@ def _workspace_packs(db, draft: QuotationDraft) -> list[dict]:
     """Add-on bundles with their plan ladder, for the sessions add-ons manager."""
     if not draft.catalog_revision_id:
         return []
-    packages = [
-        item for item in db.scalars(select(BenefitPackage)).all()
-        if item.catalog_revision_id == draft.catalog_revision_id
-        and item.package_kind == "addon_bundle" and item.status == "active"
-    ]
+    packages = list(
+        db.scalars(
+            select(BenefitPackage).where(
+                BenefitPackage.catalog_revision_id == draft.catalog_revision_id,
+                BenefitPackage.package_kind == "addon_bundle",
+                BenefitPackage.status == "active",
+            )
+        ).all()
+    )
     package_ids = {item.id for item in packages}
-    plans = [
-        item for item in db.scalars(select(BenefitPackagePlan)).all()
-        if item.package_id in package_ids and item.status == "active"
-    ]
+    plans = (
+        list(
+            db.scalars(
+                select(BenefitPackagePlan).where(
+                    BenefitPackagePlan.package_id.in_(package_ids),
+                    BenefitPackagePlan.status == "active",
+                )
+            ).all()
+        )
+        if package_ids
+        else []
+    )
     plan_ids = {item.id for item in plans}
-    items = [
-        item for item in db.scalars(select(BenefitPackagePlanItem)).all()
-        if item.plan_id in plan_ids
-    ]
+    items = (
+        list(
+            db.scalars(
+                select(BenefitPackagePlanItem).where(BenefitPackagePlanItem.plan_id.in_(plan_ids))
+            ).all()
+        )
+        if plan_ids
+        else []
+    )
     offerings = {
-        item.id: item for item in db.scalars(select(CatalogOffering)).all()
-        if item.catalog_revision_id == draft.catalog_revision_id
+        item.id: item
+        for item in db.scalars(
+            select(CatalogOffering).where(CatalogOffering.catalog_revision_id == draft.catalog_revision_id)
+        ).all()
     }
     concepts = {item.id: item for item in db.scalars(select(BenefitConcept)).all()}
     result: list[dict] = []
@@ -646,7 +698,13 @@ def _workspace_package_tiers(db, draft: QuotationDraft) -> list[dict]:
         if revision is not None:
             catalog = db.get(BenefitCatalog, revision.catalog_id)
             packages = [
-                item for item in db.scalars(select(BenefitPackage)).all()
+                item for item in db.scalars(
+                    select(BenefitPackage).where(
+                        BenefitPackage.catalog_revision_id == revision.id,
+                        BenefitPackage.package_kind == "comprehensive",
+                        BenefitPackage.status == "active",
+                    )
+                ).all()
                 if item.catalog_revision_id == revision.id
                 and item.package_kind == "comprehensive"
                 and item.status == "active"
@@ -663,7 +721,12 @@ def _workspace_package_tiers(db, draft: QuotationDraft) -> list[dict]:
                     current_pkg_id = packages[0].id
 
                 offerings = [
-                    item for item in db.scalars(select(CatalogOffering)).all()
+                    item for item in db.scalars(
+                        select(CatalogOffering).where(
+                            CatalogOffering.catalog_revision_id == revision.id,
+                            CatalogOffering.status.in_(["active", "compatibility"]),
+                        )
+                    ).all()
                     if item.catalog_revision_id == revision.id
                     and item.status in {"active", "compatibility"}
                 ]
@@ -697,7 +760,12 @@ def _workspace_package_tiers(db, draft: QuotationDraft) -> list[dict]:
     if not draft.company_id:
         return []
     catalogs = [
-        item for item in db.scalars(select(BenefitCatalog)).all()
+        item for item in db.scalars(
+            select(BenefitCatalog).where(
+                BenefitCatalog.company_id == draft.company_id,
+                BenefitCatalog.status.in_(["active", "published"]),
+            )
+        ).all()
         if item.company_id == draft.company_id and item.status in {"active", "published"}
     ]
     if draft.product_id:
@@ -708,14 +776,25 @@ def _workspace_package_tiers(db, draft: QuotationDraft) -> list[dict]:
     tiers = []
     for catalog in catalogs:
         revs = [
-            item for item in db.scalars(select(BenefitCatalogRevision)).all()
+            item for item in db.scalars(
+                select(BenefitCatalogRevision).where(
+                    BenefitCatalogRevision.catalog_id == catalog.id,
+                    BenefitCatalogRevision.state == "published",
+                )
+            ).all()
             if item.catalog_id == catalog.id and item.state == "published"
         ]
         if not revs:
             continue
         revision = max(revs, key=lambda item: (int(item.revision_number), str(item.id)))
         rev_packages = [
-            item for item in db.scalars(select(BenefitPackage)).all()
+            item for item in db.scalars(
+                select(BenefitPackage).where(
+                    BenefitPackage.catalog_revision_id == revision.id,
+                    BenefitPackage.package_kind == "comprehensive",
+                    BenefitPackage.status == "active",
+                )
+            ).all()
             if item.catalog_revision_id == revision.id
             and item.package_kind == "comprehensive"
             and item.status == "active"
@@ -731,7 +810,12 @@ def _workspace_package_tiers(db, draft: QuotationDraft) -> list[dict]:
             continue
 
         offerings = [
-            item for item in db.scalars(select(CatalogOffering)).all()
+            item for item in db.scalars(
+                select(CatalogOffering).where(
+                    CatalogOffering.catalog_revision_id == revision.id,
+                    CatalogOffering.status.in_(["active", "compatibility"]),
+                )
+            ).all()
             if item.catalog_revision_id == revision.id
             and item.status in {"active", "compatibility"}
         ]
@@ -782,8 +866,6 @@ def template_selection_impact(
 ) -> dict:
     """Preview the deterministic effects of pinning another master revision."""
     _session, draft = _session_and_draft(db, user, session_id)
-    if draft.revision != base_revision:
-        raise AppError("This quotation changed elsewhere. Reload before changing its template.", 409)
     target = db.get(TemplateRevision, template_revision_id)
     if target is None or target.state != "published":
         raise AppError("Choose a published template revision.", 422)
