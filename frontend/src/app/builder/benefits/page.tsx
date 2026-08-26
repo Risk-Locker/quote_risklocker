@@ -10,28 +10,37 @@ import {
   Check,
   CheckCircle,
   Copy,
+  DownloadSimple,
   Eye,
   EyeSlash,
+  FileDoc,
+  FileXls,
+  Funnel,
   Info,
+  Lightning,
+  MagnifyingGlass,
   Package as PackageIcon,
   PencilSimple,
   Plus,
   ShieldCheck,
   Sparkle,
+  Table,
   Trash,
   TreeStructure,
   X,
 } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
 import { BuilderNav } from "@/components/builder-nav";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tooltip } from "@/components/ui/tooltip";
 import { PageLoading } from "@/components/ui/page-loading";
 import { CanvasElementView, type CanvasElement } from "@/components/template-canvas/shared";
 import { GuidedTour, type TourStep } from "@/components/guided-tour";
-import { api, fileUrl } from "@/lib/api";
+import { api, API_BASE, fileUrl } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 import type {
   AssetSummary as Asset,
@@ -66,6 +75,75 @@ const ROLE_FALLBACK: Record<string, string> = {
   optional: "addon_option",
   package_component: "bundle_component",
   upgrade: "upgrade",
+};
+
+type MatrixOffering = {
+  offering_id: string;
+  offering_key: string;
+  concept_key: string;
+  label: string;
+  description: string;
+  display_value: string;
+  price: number;
+  price_text: string;
+};
+
+type MatrixBundleItem = {
+  offering_key: string;
+  label: string;
+  override_value: string;
+};
+
+type MatrixBundlePlan = {
+  plan_id: string;
+  plan_key: string;
+  name: string;
+  items: MatrixBundleItem[];
+};
+
+type MatrixBundle = {
+  package_id: string;
+  package_key: string;
+  name: string;
+  package_kind: string;
+  plans: MatrixBundlePlan[];
+};
+
+type MatrixScenario = {
+  catalog_id: string;
+  product_id: string | null;
+  product_name: string;
+  product_key: string;
+  scenario_name: string;
+  segment_name: string;
+  segment_key: string;
+  vehicle_category_name: string;
+  vehicle_category_key: string;
+  coverage_type_name: string;
+  coverage_type_key: string;
+  system_type: string;
+  revision_number: number;
+  state: string;
+  defaults: MatrixOffering[];
+  addons: MatrixOffering[];
+  bundles: MatrixBundle[];
+};
+
+type CompanyMatrixData = {
+  company: {
+    id: string;
+    name: string;
+    slug: string;
+    category: string;
+  };
+  summary: {
+    total_products: number;
+    total_scenarios: number;
+    total_defaults: number;
+    total_addons: number;
+    total_bundles: number;
+  };
+  scenarios: MatrixScenario[];
 };
 
 const BENEFITS_TOUR_STEPS: TourStep[] = [
@@ -155,7 +233,43 @@ function BenefitsPageContent() {
   const [planMemberOverride, setPlanMemberOverride] = useState<string>("");
   const [planSaving, setPlanSaving] = useState(false);
 
+  // Matrix and AI sync states
+  const [screenTab, setScreenTab] = useState<"builder" | "matrix">("builder");
+  const [matrixData, setMatrixData] = useState<CompanyMatrixData | null>(null);
+  const [matrixLoading, setMatrixLoading] = useState(false);
+  const [matrixSearch, setMatrixSearch] = useState("");
+  const [matrixFilterCoverage, setMatrixFilterCoverage] = useState("All");
+  const [showAiModal, setShowAiModal] = useState(false);
+  const [aiModalTab, setAiModalTab] = useState<"spec" | "diff">("spec");
+  const [aiDiffInput, setAiDiffInput] = useState("");
+  const [aiDiffResult, setAiDiffResult] = useState<any>(null);
+  const [aiDiffLoading, setAiDiffLoading] = useState(false);
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
+
   // ── 1. Callbacks ───────────────────────────────────────────────────────
+  const loadMatrix = useCallback(async (companyId: string) => {
+    if (!companyId) return;
+    setMatrixLoading(true);
+    try {
+      const res = await api<{ matrix: CompanyMatrixData }>(`/business/companies/${companyId}/matrix`);
+      if (mountedRef.current) setMatrixData(res.matrix);
+    } catch (err) {
+      if (mountedRef.current) setError(apiErrorMessage(err));
+    } finally {
+      if (mountedRef.current) setMatrixLoading(false);
+    }
+  }, []);
+
+  function downloadDocx() {
+    if (!selectedCompanyId) return;
+    window.location.href = `${API_BASE}/business/companies/${selectedCompanyId}/export-matrix?format=docx`;
+  }
+
+  function downloadXlsx() {
+    if (!selectedCompanyId) return;
+    window.location.href = `${API_BASE}/business/companies/${selectedCompanyId}/export-matrix?format=xlsx`;
+  }
+
   const syncUrl = useCallback((company: string, product = "", config = "") => {
     const next = new URLSearchParams();
     if (company) next.set("company", company);
@@ -251,6 +365,94 @@ function BenefitsPageContent() {
     },
     [loadCatalog, selectedCatalogId, selectedProductId, syncUrl]
   );
+
+  useEffect(() => {
+    if (screenTab === "matrix" && selectedCompanyId) {
+      loadMatrix(selectedCompanyId);
+    }
+  }, [screenTab, selectedCompanyId, loadMatrix]);
+
+  const filteredMatrixScenarios = useMemo(() => {
+    if (!matrixData) return [];
+    return matrixData.scenarios.filter((s) => {
+      if (matrixFilterCoverage !== "All") {
+        if (!s.coverage_type_name.toLowerCase().includes(matrixFilterCoverage.toLowerCase())) {
+          return false;
+        }
+      }
+      if (matrixSearch.trim()) {
+        const q = matrixSearch.toLowerCase();
+        const inScenario = s.scenario_name.toLowerCase().includes(q) || s.product_name.toLowerCase().includes(q);
+        const inDefaults = s.defaults.some((d) => d.label.toLowerCase().includes(q) || d.display_value.toLowerCase().includes(q));
+        const inAddons = s.addons.some((a) => a.label.toLowerCase().includes(q) || a.display_value.toLowerCase().includes(q));
+        const inBundles = s.bundles.some((b) => b.name.toLowerCase().includes(q));
+        if (!inScenario && !inDefaults && !inAddons && !inBundles) return false;
+      }
+      return true;
+    });
+  }, [matrixData, matrixFilterCoverage, matrixSearch]);
+
+  const aiMarkdownTable = useMemo(() => {
+    if (!matrixData) return "";
+    let md = `### Insurer Catalog Matrix: ${matrixData.company.name}\n\n`;
+    md += `| Product / Scenario | Coverage | Segment / Vehicle | Defaults (Included, 0 RM) | Add-on Riders & Exact Base Cost | Bundled Plans |\n`;
+    md += `| :--- | :--- | :--- | :--- | :--- | :--- |\n`;
+    for (const s of matrixData.scenarios) {
+      const defs = s.defaults.map((d) => `• ${d.label}: ${d.display_value} (Cost: 0 RM)`).join("<br>");
+      const adds = s.addons.map((a) => `• ${a.label}: ${a.display_value} (Cost: ${a.price_text})`).join("<br>");
+      const bundles = s.bundles.map((b) => `• ${b.name}: ${b.plans.map((p) => p.name).join(", ")}`).join("<br>") || "None";
+      md += `| **${s.scenario_name}** | ${s.coverage_type_name} | ${s.segment_name} ${s.vehicle_category_name} | ${defs || "None"} | ${adds || "None"} | ${bundles} |\n`;
+    }
+    return md;
+  }, [matrixData]);
+
+  const aiSyncPrompt = useMemo(() => {
+    if (!matrixData) return "";
+    return `You are an Underwriting Assistant for ${matrixData.company.name}.
+Review the current package and benefits matrix below.
+When provided with a new product brochure or pricing update, DO NOT reseed existing unchanged values.
+Return a JSON object specifying ONLY additions or changes:
+{
+  "scenarios": [
+    {
+      "scenario_name": "<matching or new scenario name>",
+      "defaults": [
+        {"concept_key": "<benefit_concept_key>", "display_value": "<coverage_limit>"}
+      ],
+      "addons": [
+        {"concept_key": "<benefit_concept_key>", "display_value": "<coverage_limit>", "price": 150.0}
+      ]
+    }
+  ]
+}
+
+CURRENT MATRIX TABLE:
+${aiMarkdownTable}`;
+  }, [matrixData, aiMarkdownTable]);
+
+  function copyAiPrompt() {
+    navigator.clipboard.writeText(aiSyncPrompt);
+    setCopiedPrompt(true);
+    setTimeout(() => setCopiedPrompt(false), 2500);
+  }
+
+  async function runAiDiffCheck() {
+    if (!selectedCompanyId || !aiDiffInput.trim()) return;
+    setAiDiffLoading(true);
+    setAiDiffResult(null);
+    try {
+      const parsed = JSON.parse(aiDiffInput);
+      const res = await api<{ diff: any }>(`/business/companies/${selectedCompanyId}/diff-matrix`, {
+        method: "POST",
+        body: JSON.stringify(parsed),
+      });
+      setAiDiffResult(res.diff);
+    } catch (err) {
+      setAiDiffResult({ error: apiErrorMessage(err) });
+    } finally {
+      setAiDiffLoading(false);
+    }
+  }
 
   // ── 2. Memos ───────────────────────────────────────────────────────────
   const defaultConcepts = useMemo(
@@ -1056,6 +1258,37 @@ function BenefitsPageContent() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* View Switcher: Interactive Builder vs Company Overview Matrix */}
+            <div className="flex items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-0.5 text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setScreenTab("builder")}
+                className={`flex items-center gap-1.5 rounded-[3px] px-3 py-1 transition-all ${
+                  screenTab === "builder"
+                    ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] shadow-sm font-bold border border-[var(--rl-border)]"
+                    : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                }`}
+              >
+                <TreeStructure size={14} weight={screenTab === "builder" ? "bold" : "regular"} />
+                <span>Interactive Builder</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setScreenTab("matrix");
+                  if (selectedCompanyId) loadMatrix(selectedCompanyId);
+                }}
+                className={`flex items-center gap-1.5 rounded-[3px] px-3 py-1 transition-all ${
+                  screenTab === "matrix"
+                    ? "bg-[var(--rl-black)] text-white shadow-sm font-bold"
+                    : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                }`}
+              >
+                <Table size={14} weight={screenTab === "matrix" ? "bold" : "regular"} />
+                <span>Company Overview Matrix</span>
+              </button>
+            </div>
+
             <Button
               variant="secondary"
               size="sm"
@@ -1302,7 +1535,278 @@ function BenefitsPageContent() {
 
       {/* ── Main Workspace Body ────────────────────────────────────────── */}
       <div className="p-6">
-        {workspaceLoading ? (
+        {screenTab === "matrix" ? (
+          <div className="space-y-6">
+            {/* Header & Stats Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">
+                    {matrixData?.company.name || "Insurance Company"} — Benefits & Packages Matrix
+                  </h2>
+                  <Badge variant="default">Underwriting Source of Truth</Badge>
+                </div>
+                <p className="mt-1 text-xs text-[var(--rl-text-muted)]">
+                  Total comprehensive matrix view of all packages, included defaults (Cost: 0 RM), add-on riders, and bundled plan options for this company.
+                </p>
+              </div>
+
+              {/* Action Buttons: Export DOCX, Export XLSX, AI Seed Spec */}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={downloadDocx}
+                  icon={<FileDoc size={15} weight="fill" className="text-blue-600" />}
+                  title="Download standard Word catalog formatted like canonical policy catalogs"
+                >
+                  Download Word (.docx)
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={downloadXlsx}
+                  icon={<FileXls size={15} weight="fill" className="text-emerald-600" />}
+                  title="Download Excel spreadsheet with summary and detailed offering sheets"
+                >
+                  Download Excel (.xlsx)
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => setShowAiModal(true)}
+                  icon={<Sparkle size={15} weight="fill" className="text-amber-300" />}
+                  className="bg-[var(--rl-black)] text-white hover:opacity-90"
+                >
+                  AI Seed & Sync Spec
+                </Button>
+              </div>
+            </div>
+
+            {/* Stats Badges & Filter Controls */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--rl-border)] pb-3">
+              {/* Coverage Filter Pills */}
+              <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)] mr-1">
+                  Coverage:
+                </span>
+                {["All", "Comprehensive", "Third Party, Fire & Theft", "Third Party"].map((cov) => {
+                  const active = matrixFilterCoverage === cov;
+                  return (
+                    <button
+                      key={cov}
+                      onClick={() => setMatrixFilterCoverage(cov)}
+                      className={`rounded-[var(--rl-radius-sm)] px-2.5 py-1 transition-all ${
+                        active
+                          ? "bg-[var(--rl-black)] text-white shadow-sm"
+                          : "border border-[var(--rl-border)] bg-[var(--rl-surface)] text-[var(--rl-text-strong)] hover:border-[var(--rl-text-muted)]"
+                      }`}
+                    >
+                      {cov === "Third Party, Fire & Theft" ? "TPFT" : cov}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Search Bar & Counter */}
+              <div className="flex items-center gap-3">
+                <div className="relative w-64">
+                  <MagnifyingGlass size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--rl-text-muted)]" />
+                  <Input
+                    type="text"
+                    value={matrixSearch}
+                    onChange={(e) => setMatrixSearch(e.target.value)}
+                    placeholder="Search package, default or rider..."
+                    className="pl-8 text-xs h-8"
+                  />
+                  {matrixSearch && (
+                    <button
+                      onClick={() => setMatrixSearch("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+                <span className="text-xs font-semibold text-[var(--rl-text-muted)]">
+                  {filteredMatrixScenarios.length} Scenarios
+                </span>
+              </div>
+            </div>
+
+            {/* Matrix Loading State */}
+            {matrixLoading ? (
+              <div className="py-12">
+                <PageLoading />
+              </div>
+            ) : filteredMatrixScenarios.length === 0 ? (
+              <div className="rounded-[var(--rl-radius)] border border-dashed border-[var(--rl-border)] bg-[var(--rl-surface)] p-8 text-center text-xs text-[var(--rl-text-muted)]">
+                No policy scenarios found matching your filters.
+              </div>
+            ) : (
+              /* The Comprehensive Matrix Table */
+              <Card className="overflow-hidden border border-[var(--rl-border)] shadow-sm">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[1040px] text-xs">
+                    <thead>
+                      <tr className="border-b border-[var(--rl-border)] bg-[#1F2937] text-white">
+                        <th className="w-[24%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                          Product & Policy Scenario
+                        </th>
+                        <th className="w-[36%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                          Default Benefits (Included — Cost: 0 RM)
+                        </th>
+                        <th className="w-[30%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                          Add-on Benefits & Exact Base Cost
+                        </th>
+                        <th className="w-[10%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                          Bundled Add-ons
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--rl-border)]/70 bg-[var(--rl-surface)]">
+                      {filteredMatrixScenarios.map((s) => {
+                        const covBadgeVariant = s.coverage_type_key.includes("comp")
+                          ? "success"
+                          : s.coverage_type_key.includes("fire") || s.coverage_type_key.includes("tpft")
+                          ? "warning"
+                          : "default";
+
+                        return (
+                          <tr key={s.catalog_id} className="hover:bg-[var(--rl-bg)]/40 transition-colors">
+                            {/* Col 1: Product / Scenario */}
+                            <td className="px-4 py-3.5 align-top">
+                              <div className="space-y-1.5">
+                                <div className="font-bold text-[13px] text-[var(--rl-text-strong)] leading-snug">
+                                  {s.scenario_name}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <Badge variant={covBadgeVariant}>
+                                    {s.coverage_type_name}
+                                  </Badge>
+                                  <span className="rounded bg-[var(--rl-bg)] border border-[var(--rl-border)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--rl-text-muted)]">
+                                    {s.system_type}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-[var(--rl-text-muted)] space-y-0.5 pt-1">
+                                  <div>• <span className="font-medium text-[var(--rl-text-strong)]">Segment:</span> {s.segment_name}</div>
+                                  <div>• <span className="font-medium text-[var(--rl-text-strong)]">Vehicle:</span> {s.vehicle_category_name}</div>
+                                  <div>• <span className="font-medium text-[var(--rl-text-strong)]">Revision:</span> rev {s.revision_number} ({s.state})</div>
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Col 2: Defaults */}
+                            <td className="px-4 py-3.5 align-top">
+                              {s.defaults.length === 0 ? (
+                                <span className="text-[var(--rl-text-muted)] italic text-[11px]">
+                                  No default benefits configured.
+                                </span>
+                              ) : (
+                                <div className="space-y-2">
+                                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-800 uppercase tracking-wider">
+                                    <ShieldCheck size={13} weight="fill" />
+                                    <span>{s.defaults.length} Included Benefits</span>
+                                  </div>
+                                  <div className="grid grid-cols-1 gap-1.5">
+                                    {s.defaults.map((d) => (
+                                      <div
+                                        key={d.offering_id}
+                                        className="rounded border border-emerald-200/80 bg-emerald-50/50 p-2 text-emerald-950"
+                                      >
+                                        <div className="flex items-center justify-between gap-1">
+                                          <span className="font-bold text-[12px] text-emerald-950 leading-tight">
+                                            {d.label}
+                                          </span>
+                                          <span className="shrink-0 rounded bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">
+                                            0 RM
+                                          </span>
+                                        </div>
+                                        <div className="mt-0.5 text-[11px] text-emerald-800">
+                                          {d.display_value || d.description || "Included in base policy"}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </td>
+
+                            {/* Col 3: Addons */}
+                            <td className="px-4 py-3.5 align-top">
+                              {s.addons.length === 0 ? (
+                                <span className="text-[var(--rl-text-muted)] italic text-[11px]">
+                                  No optional riders configured.
+                                </span>
+                              ) : (
+                                <div className="space-y-2">
+                                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-blue-800 uppercase tracking-wider">
+                                    <Plus size={13} weight="bold" />
+                                    <span>{s.addons.length} Optional Riders</span>
+                                  </div>
+                                  <div className="grid grid-cols-1 gap-1.5">
+                                    {s.addons.map((a) => (
+                                      <div
+                                        key={a.offering_id}
+                                        className="rounded border border-blue-200/80 bg-blue-50/50 p-2 text-blue-950"
+                                      >
+                                        <div className="flex items-center justify-between gap-1">
+                                          <span className="font-bold text-[12px] text-blue-950 leading-tight">
+                                            {a.label}
+                                          </span>
+                                          <span className="shrink-0 rounded bg-blue-600 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                                            {a.price_text}
+                                          </span>
+                                        </div>
+                                        <div className="mt-0.5 text-[11px] text-blue-800">
+                                          {a.display_value || a.description || "Optional payable endorsement"}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </td>
+
+                            {/* Col 4: Bundles */}
+                            <td className="px-4 py-3.5 align-top">
+                              {s.bundles.length === 0 ? (
+                                <span className="text-[var(--rl-text-muted)] italic text-[11px]">
+                                  None
+                                </span>
+                              ) : (
+                                <div className="space-y-2">
+                                  {s.bundles.map((b) => (
+                                    <div
+                                      key={b.package_id}
+                                      className="rounded border border-purple-200 bg-purple-50/60 p-2 text-purple-950"
+                                    >
+                                      <div className="font-bold text-[11px] text-purple-950">
+                                        {b.name}
+                                      </div>
+                                      {b.plans.length > 0 && (
+                                        <div className="mt-1 space-y-0.5">
+                                          {b.plans.map((p) => (
+                                            <div key={p.plan_id} className="text-[10px] font-medium text-purple-800">
+                                              • {p.name}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            )}
+          </div>
+        ) : workspaceLoading ? (
           <PageLoading />
         ) : !selectedCatalog ? (
           <div className="grid min-h-[360px] place-items-center rounded-[var(--rl-radius)] border border-dashed border-[var(--rl-border)] bg-[var(--rl-surface)] p-8 text-center">
@@ -2216,6 +2720,148 @@ function BenefitsPageContent() {
                 </Button>
               </div>
             </div>
+          </div>
+        </Dialog>
+      )}
+
+      {/* ── Dialog: AI Seed & Sync Spec Modal ───────────────────────── */}
+      {showAiModal && (
+        <Dialog
+          open={showAiModal}
+          onOpenChange={setShowAiModal}
+          title={`AI Seed & Sync Specification — ${matrixData?.company.name || "Insurer"}`}
+        >
+          <div className="max-w-4xl p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-[var(--rl-border)] pb-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAiModalTab("spec")}
+                  className={`rounded-[var(--rl-radius-sm)] px-3 py-1.5 text-xs font-semibold transition-all ${
+                    aiModalTab === "spec"
+                      ? "bg-[var(--rl-black)] text-white"
+                      : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                  }`}
+                >
+                  1. AI Seed Spec & Markdown Table
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAiModalTab("diff")}
+                  className={`rounded-[var(--rl-radius-sm)] px-3 py-1.5 text-xs font-semibold transition-all ${
+                    aiModalTab === "diff"
+                      ? "bg-[var(--rl-black)] text-white"
+                      : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                  }`}
+                >
+                  2. Non-Destructive Diff Tester
+                </button>
+              </div>
+
+              {aiModalTab === "spec" && (
+                <Button
+                  size="sm"
+                  onClick={copyAiPrompt}
+                  icon={copiedPrompt ? <Check size={14} weight="bold" /> : <Copy size={14} weight="bold" />}
+                  className="bg-emerald-700 text-white hover:bg-emerald-800"
+                >
+                  {copiedPrompt ? "Copied Prompt & Table!" : "Copy AI Prompt & Table"}
+                </Button>
+              )}
+            </div>
+
+            {aiModalTab === "spec" ? (
+              <div className="space-y-3">
+                <div className="rounded-[var(--rl-radius-sm)] border border-blue-200 bg-blue-50/70 p-3 text-xs text-blue-950">
+                  <p className="font-semibold">How to use this with an AI agent (Claude, ChatGPT, Gemini):</p>
+                  <p className="mt-1 text-[11px] text-blue-900">
+                    Click <strong>&quot;Copy AI Prompt & Table&quot;</strong> above, then paste it along with any new insurer brochure or policy schedule into your chat.
+                    The AI will understand the exact structure and return only the changes or new benefits needed without re-seeding existing catalog rows!
+                  </p>
+                </div>
+
+                <div className="relative">
+                  <pre className="max-h-[420px] overflow-y-auto rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3.5 font-mono text-[11px] text-[var(--rl-text-strong)] leading-relaxed whitespace-pre-wrap">
+                    {aiSyncPrompt}
+                  </pre>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="rounded-[var(--rl-radius-sm)] border border-emerald-200 bg-emerald-50/70 p-3 text-xs text-emerald-950">
+                  <p className="font-semibold">Non-Destructive Delta Sync Inspector:</p>
+                  <p className="mt-1 text-[11px] text-emerald-900">
+                    Paste the JSON payload returned by an AI or drafted manually to test which benefits will be added or modified in the database.
+                  </p>
+                </div>
+
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-semibold text-[var(--rl-text-strong)]">
+                    Incoming Delta JSON:
+                  </label>
+                  <textarea
+                    value={aiDiffInput}
+                    onChange={(e) => setAiDiffInput(e.target.value)}
+                    placeholder={`{\n  "scenarios": [\n    {\n      "scenario_name": "Private Car Protector",\n      "defaults": [\n        {"concept_key": "new_breakdown_assist", "display_value": "Free Towing 100km"}\n      ],\n      "addons": [\n        {"concept_key": "windscreen", "display_value": "RM 1,200", "price": 180.0}\n      ]\n    }\n  ]\n}`}
+                    className="h-44 w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3 font-mono text-xs text-[var(--rl-text-strong)] focus:outline-none"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2">
+                  <Button
+                    size="sm"
+                    onClick={runAiDiffCheck}
+                    disabled={aiDiffLoading || !aiDiffInput.trim()}
+                    icon={<Lightning size={14} weight="fill" />}
+                    className="bg-[var(--rl-black)] text-white"
+                  >
+                    {aiDiffLoading ? "Analyzing Changes..." : "Run Diff Check"}
+                  </Button>
+                </div>
+
+                {aiDiffResult && (
+                  <div className="mt-3 space-y-2 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-3.5 text-xs">
+                    {aiDiffResult.error ? (
+                      <div className="text-[var(--rl-red)] font-semibold">{aiDiffResult.error}</div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between border-b border-[var(--rl-border)] pb-2">
+                          <span className="font-bold text-[var(--rl-text-strong)]">
+                            Diff Analysis Result: {aiDiffResult.total_changes || 0} change(s) detected
+                          </span>
+                          <Badge variant={aiDiffResult.total_changes > 0 ? "success" : "default"}>
+                            {aiDiffResult.total_changes > 0 ? "Incremental Updates Ready" : "Up-to-date"}
+                          </Badge>
+                        </div>
+
+                        {aiDiffResult.scenarios_diff?.map((sd: any, idx: number) => (
+                          <div key={idx} className="rounded border border-[var(--rl-border)] p-2.5 space-y-1.5 bg-[var(--rl-bg)]">
+                            <div className="font-bold text-[12px] text-[var(--rl-text-strong)]">
+                              Scenario: {sd.scenario_name} ({sd.status})
+                            </div>
+                            {sd.added_defaults?.length > 0 && (
+                              <div className="text-emerald-800 text-[11px]">
+                                + Added Defaults: {sd.added_defaults.map((d: any) => d.concept_key).join(", ")}
+                              </div>
+                            )}
+                            {sd.added_addons?.length > 0 && (
+                              <div className="text-blue-800 text-[11px]">
+                                + Added Add-ons: {sd.added_addons.map((a: any) => `${a.concept_key} (${a.price ? `RM ${a.price}` : a.display_value})`).join(", ")}
+                              </div>
+                            )}
+                            {sd.modified_addons?.length > 0 && (
+                              <div className="text-amber-800 text-[11px]">
+                                • Modified Add-on Pricing: {sd.modified_addons.map((m: any) => `${m.to.concept_key}: RM ${m.from.price} → RM ${m.to.price}`).join(", ")}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </Dialog>
       )}

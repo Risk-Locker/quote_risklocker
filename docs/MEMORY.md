@@ -5,17 +5,57 @@
 - Private internal motor-quotation converter. Staff workflow: Upload -> Check Values -> Generate PDF. Stack: FastAPI (`backend/`), Next.js 15.5 (`frontend/`), Supabase/Postgres (`migrations/`), private Supabase Storage for PDFs.
 - Auth: temporary protected password login with opaque Postgres sessions, HttpOnly cookie, session-bound CSRF, and rate limits. OTP/onboarding is deferred to WP13 and Resend to WP14 after owner core approval. Dev login: admin@risklocker.local / admin123 (non-production only).
 - UI: Apple-inspired design system (red/black/white, Manrope/Inter/JetBrains Mono, Phosphor icons, Radix, Framer Motion) — rules in `DESIGN-SYSTEM.md`.
-- v9 (commit 20367f0 on origin/v8 + origin/main): 409 concurrency conflict resolution, add-on cost recalculation in template previews & generation, DB keepalives & pool sizing, dedicated Extras section & 3-way layout, insurer details & quotation validity footer.
-- Verification baseline 2026-08-25: 519 backend tests pass (100% green), `npx tsc --noEmit` clean, `npm run build` green (36/36 routes), code map current.
+- v10: Package matrix visualization & DOCX/XLSX exports, AI seed & sync diff spec, full 120 JPJ road tax schedules & dynamic calculator, AmAssurance Auto365 Comprehensive tiers, pikepdf structural JS validation, separated Quotation Ref header, 1:1 unscaled retina PNG/PDF exports, and QBE 6+4=10 defaults.
+- Verification baseline 2026-08-26: 528 backend tests pass (100% green), `npx tsc --noEmit` clean, `npm run build` green (36/36 routes), code map current.
 - Python environment: `.venv` is Python 3.12.10 (pinned requirements predate 3.14 wheels); recreate with `py -3.12 -m venv .venv` + install `requirements.txt` + `requirements-optional.txt` + `python -m playwright install chromium`.
 - Migration ledger: checksums computed from line-ending-normalized bytes (CRLF/CR -> LF) since 2026-08-21, so LF/CRLF checkouts can never drift; historical rows verify against line-ending-equivalent representations (production 036's CRLF-bytes checksum `d8fdd09a...` accepted). `.gitattributes` (`migrations/*.sql text eol=lf`) kept for deterministic diffs only.
 - QA/E2E tooling lives IN the repo at `/.qc-tmp/` (gitignored): Playwright scripts (use `frontend/node_modules`), logs, screenshots. Never create temp files outside the repo.
 - Port file convention: `.qc-tmp\backend-port.txt`, written by `commands/start-backend.ps1`, read by `commands/start-frontend.ps1` / `start-full.ps1`.
 - Model used for recent work: Antigravity (Gemini 3.7 Flash).
-- Benefits & Package refactor: ALL WORKSTREAMS COMPLETED (WS0 through WS8). Master run log at `docs/superpowers/plans/2026-08-16-benefits-package-refactor/RUN-LOG.md`. Full test suite: 519 passed, 0 failed, 0 skipped. Frontend tsc clean, Next.js build green.
+- Benefits & Package refactor: ALL WORKSTREAMS COMPLETED (WS0 through WS8). Master run log at `docs/superpowers/plans/2026-08-16-benefits-package-refactor/RUN-LOG.md`. Full test suite: 528 passed, 0 failed, 0 skipped. Frontend tsc clean, Next.js build green.
 - Database state 2026-08-17: full v7 schema, migrations 001-035 applied & checksummed in PostgreSQL, seed-demo.py verified idempotent.
 - Database state 2026-08-23: migrations 001-037 applied & checksummed (037 adds `quotation_drafts.package_id` + index).
 - Database state 2026-08-20 (companies): 7 active companies — QBE, Etiqa, Takaful Malaysia, AmAssurance, Lonpac, Berjaya Sompo, Tune Protect. `commands/seed-companies.py` is idempotent (dry-run/apply).
+
+## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Initialized v10 Branch & Synced v9 / main
+Asked: Commit and push everything to origin v9 then origin main; create new branch v10 and publish properly.
+Done: Committed and pushed all changes to origin/v9 and origin/main; created and checked out branch v10; updated MEMORY.md snapshot and logbook; pushed origin/v10. Verified: 528/528 pytest passed, tsc clean (0 errors), npm run build green (36/36 routes), code map checked.
+Pending: none.
+
+## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Resolved Openpyxl Column Letter Typing Diagnostic in matrix_service.py
+Asked: Resolve IDE problem in matrix_service.py:670 (argument int | None to get_column_letter).
+Done: Added None check and int narrowing for col[0].column in matrix_service.py:669-672 before calling get_column_letter(). Verified: test_matrix_service.py passed (1/1 green).
+Pending: none.
+
+## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Resolved Extraction Bugs, Bogus Benefits, Canvas 1/4 Sizing & QBE 6+4=10 Defaults
+Asked: 1) Implement fixes for extraction failure, bogus benefits, RM [object Object], phantom package detection, and QBE 6+4=10 defaults; 2) Fix generated quotation PDF/PNG sizing issue where content rendered in 1/4th corner of the canvas.
+Done: 1) Added `import re` in orchestrator.py:4 unblocking Gemini vision benefit extraction; 2) Refined _normalized() in benefit_lines.py:88-97 to prevent stripping model numbers from product names; 3) Cleaned coverage_limit & cost in workspace_service.py:568-605 and review-phase.tsx:2245-2252 eliminating `[object Object]`; 4) Strengthened gemini_extractor.py:357-362 forbidding phantom package extraction; 5) Aligned QBE Private Car to 6 core defaults in seed-demo.py:53 & catalog_review_service.py:530-695, yielding exactly 10 defaults (6 core + 4 detected add-ons: Windscreen RM 2,650 limit / RM 397.50, LLTP RM 41.85, LLOP RM 7.50, All Drivers RM 20.00); 6) Fixed review-phase.tsx:1418-1430 generateCanvasBlob() removing conflicting canvasWidth/canvasHeight to eliminate 1/4th corner scaling and fill 100% canvas at 2.5x retina clarity. Verified: 528/528 pytest passed, tsc clean (0 errors), npm run build green (36/36 routes), code map checked.
+Pending: none.
+
+## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Audited IDE Diagnostics & Resolved Typing Nuances
+Asked: Audit @[current_problems] in IDE panel.
+Done: Clarified in-memory pyrefly virtual snippets; fixed dict.get type narrowing in matrix_service.py:102-105; explicitly imported WD_ORIENT in matrix_service.py:10,301; typed active worksheet in matrix_service.py:518; removed redundant float() & typed DB assignment in road_tax_service.py:218,224,717-735; removed redundant int() in draft_mapper.py:149,151. Verified 15/15 targeted pytest green, tsc clean (0 errors).
+Pending: none.
+
+## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Insurer Package Matrix Visualization, Word/Excel Exports & Full Road Tax Schedules
+Asked: 1) Builder/benefits page holistic package/default/addon tabular view with DOCX/Excel exports & AI seed sync template; 2) /extraction/road-tax complete JPJ schedules across all jurisdictions, progressive formulas, live tester & dynamic quotation calculation.
+Done: Created matrix_service.py:1-420 (aggregation, landscape docx, xlsx with openpyxl, non-destructive delta diff); added matrix routes & road-tax calculation/seed routes in routes.py:44-50,193-206,1275-1325,2230-2258 and schemas.py:440-454; expanded road_tax_service.py:1-435 with 120 JPJ rules (West/East Malaysia, Labuan, Commercial) and progressive formula evaluator; wired auto road-tax calculation with location/jurisdiction in draft_mapper.py:186-215; added view switcher, company overview table, Word/Excel downloads, and AI Seed & Sync Spec dialog with live diff tester to builder/benefits/page.tsx:5-35,75-148,230-275,360-445,1250-1285,1530-1805,2720-2865; upgraded extraction/road-tax/page.tsx:1-480 with jurisdiction tabs, live dynamic tester, progressive formulas, and standard seed action; seeded 120 rules into PostgreSQL. Verified: 528/528 pytest passed, tsc clean, npm run build green (22/22 routes), code map updated.
+Pending: none.
+
+## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Audited IDE Diagnostics & Resolved Typing Nuances
+Asked: Check all current problems listed in the system diagnostic panel and in workspace_service.py.
+Done: Audited all items; clarified in-memory pyrefly virtual snippets; fixed type safety in render_context.py:38,409 and workspace_service.py:673; removed redundant str() calls in workspace_service.py:370,1509,1532,1599 and catalog_review_service.py:360,783,819,843; verified commands/seed-demo.py compiles and runs clean (dry-run exit 0). Verified 523/523 pytest passed, code map current.
+Pending: none.
+
+## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — AmAssurance Comprehensive Packages, 3-Col Extras, Guided Tour & Pixel-Perfect Export
+Asked: Implement 11-item plan: AmAssurance Auto365 Lite/Plus/Premier Comprehensive products, bracketed dropdown labels, Vehicle Sum Insured label, 3-col extras with left gap, tour close/overlap fix, unified download & new tab buttons, pixel-perfect 1:1 canvas export, default template selection, and addon card pricing/revert controls.
+Done: Seeded AmAssurance Lite/Plus/Premier in seed-demo.py:53-164, candidate_finder.py:624-633, catalog_review_service.py:231-245; updated master_template_service.py:176, render_context.py:65-210, template_renderer.py:380-435, shared.tsx:620-678; updated guided-tour.tsx:103-207 (z-9999, backdrop click, Escape key, close buttons); updated review-phase.tsx:380-530,1406-1740,1830-1905 with 1:1 unscaled export, 3 unified action buttons, in-canvas downloads, auto-pinned templates, and addon pricing/revert; updated benefit_lines.py:112-380 for multi-amount limit/cost. Verified 523/523 pytest passed, npm run build green (36/36 routes), code map updated.
+Pending: none.
+
+## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Resolved PDF False Rejection, High-Res PNG Sizing & Quotation Ref Header
+Asked: Diagnose why system rejects some OneDrive PDFs with false JavaScript error; fix downloaded/copied PNG quotation being shrunk into top-left corner on a big white page; separate header into Quotation Ref (extracted reference) and Vehicle No. Do not commit or push.
+Done: Replaced raw 3-byte /JS substring check with structural pikepdf JavaScript verification in document_security.py:22-125 and added regression test in test_hardening.py:161-175; updated review-phase.tsx:1320-1425 to export 1:1 unscaled canvas at 2.5x pixel ratio (1985x2808 Ultra-HD); added quotation_reference extraction across candidate_finder.py:17,89,138,563, gemini_extractor.py:109, and draft_mapper.py; updated master_template_service.py:133-145 and ran commands/update-template-header-quotation-ref.py --apply to publish 5 template revisions with separate Quotation Ref and Vehicle No headers. Verified 523/523 pytest green, tsc/build clean (36 routes), code map updated.
+Pending: none.
 
 ## 2026-08-26 · Antigravity (Claude Opus 4.6) — Fixed P0 Pending Catalog IDs, Version 422 & Preview 409
 Asked: Review full 917-line test log, diagnose P0 pending catalog ID UUID crash, P1 version creation 422, and P1 preview-render 409, then fix all three.

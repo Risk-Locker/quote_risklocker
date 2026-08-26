@@ -35,7 +35,7 @@ def _number(value: Any) -> str:
 
 
 def _money(value: Any, currency: str | None) -> str:
-    prefix = "RM" if currency == "MYR" else str(currency or "").upper()
+    prefix = "RM" if currency == "MYR" else (currency.upper() if currency else "")
     return f"{prefix} {_number(value)}".strip()
 
 
@@ -73,9 +73,32 @@ def build_extras(selections: Iterable[Any], concepts: Iterable[Any], offerings: 
         if not price:
             continue
         label = str(getattr(sel, "label_override", None) or "").strip() or concept_labels.get(str(getattr(sel, "concept_id", None)), "Extra benefit")
+
+        limit_val = getattr(sel, "coverage_limit", None)
+        if not limit_val:
+            ev = getattr(sel, "evidence_snapshot", None)
+            if isinstance(ev, dict) and ev.get("coverage_limit"):
+                limit_val = ev.get("coverage_limit")
+        if not limit_val:
+            typed = getattr(sel, "typed_value_override", None) or getattr(offering, "typed_value", None)
+            if isinstance(typed, dict):
+                if typed.get("coverage_limit"):
+                    limit_val = typed.get("coverage_limit")
+                elif typed.get("semantic_role") in {"insured_limit", "limit"} and typed.get("value"):
+                    limit_val = typed.get("value")
+
+        limit_str = ""
+        if limit_val:
+            s = str(limit_val).strip()
+            if s and not s.upper().startswith("RM") and not s.upper().endswith("RM"):
+                limit_str = f"{s}RM"
+            else:
+                limit_str = s
+
         extras.append({
             "selection_id": sel.id,
             "label": label,
+            "coverage_limit": limit_str,
             "price": price,
             "sort_order": int(getattr(sel, "sort_order", 0) or 0),
         })
@@ -177,6 +200,9 @@ def _card(
         "typed_value": typed_value,
         "price": getattr(selection, "price", None) or getattr(offering, "optional_price", None),
         "optional_price": getattr(offering, "optional_price", None),
+        "initial_price": getattr(offering, "optional_price", None),
+        "detected_cost": (getattr(selection, "evidence_snapshot", None) or {}).get("premium_cost"),
+        "detected_limit": (getattr(selection, "evidence_snapshot", None) or {}).get("coverage_limit"),
         "asset_id": asset_id or concept.default_asset_id,
         "cost_status": getattr(selection, "cost_status", None),
         "sort_order": int(getattr(offering, "sort_order", 0) or 0),
@@ -380,7 +406,9 @@ def resolve_benefit_cards(
                 "cards": [],
             }
             groups.append(group)
-        group["cards"].append(card)
+        cards_list = group["cards"]
+        if isinstance(cards_list, list):
+            cards_list.append(card)
     groups.sort(key=lambda item: (int(getattr(plan_rows.get(item["plan_id"]), "sort_order", 0) or 0), item["plan_key"]))
     return {
         "current_benefits": current_sorted,

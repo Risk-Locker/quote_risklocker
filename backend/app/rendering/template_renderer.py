@@ -66,6 +66,9 @@ FIELD_FALLBACK_MAP: dict[str, tuple[str, ...]] = {
     "excess_amount": ("policy_excess", "compulsory_excess", "excess", "lebihan", "ekses", "ekses_polisi"),
     "valid_until": ("validity_date", "expiry_date", "validity", "quotation_validity", "valid_to", "expire_on"),
     "insurance_company": ("company_name", "insurer_name"),
+    "quotation_reference": ("quotation_ref", "quote_ref", "reference_no", "quote_no"),
+    "quotation_ref": ("quotation_reference", "quote_ref", "reference_no", "quote_no"),
+    "vehicle_no": ("vehicle_plate", "car_plate", "plate_no", "registration_no"),
 }
 
 
@@ -306,7 +309,7 @@ def _dynamic_benefit_grid(
         price_badge = ""
         price = card.get("price")
         if price:
-            p_val = price.get("amount") if isinstance(price, dict) else price
+            p_val = (price.get("amount") if price.get("amount") is not None else price.get("value")) if isinstance(price, dict) else price
             try:
                 p_num = float(str(p_val).replace(",", ""))
                 p_str = f"RM {p_num:,.2f}"
@@ -377,10 +380,10 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
     row_height = float(element.get("rowHeight") or 14)
     labels = element.get("labels") or {}
     extras = list((render_context or {}).get("extras") or [])
-    rows: list[tuple[str, str, str]] = []
+    rows: list[tuple[str, str, str, str]] = []  # (kind, label, middle_val, right_val)
     if extras:
         extras_hdr = str(labels.get("extras") or "Extras / 附加项目")
-        rows.append(("extras_header", extras_hdr, ""))
+        rows.append(("extras_header", extras_hdr, "", ""))
         for extra in extras:
             raw_price = extra.get("price") or {}
             amt = raw_price.get("amount") if isinstance(raw_price, dict) else raw_price
@@ -392,19 +395,20 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
                     formatted_price = format_money_amount(raw_price)
             else:
                 formatted_price = format_money_amount(raw_price)
-            rows.append(("extra", str(extra.get("label") or ""), formatted_price))
-    rows.append(("premium", str(labels.get("premium") or "Coverage Premium"), _format_value(_value(fields, "premium"), "RM ")))
-    rows.append(("divider", "", ""))
-    rows.append(("roadtax", str(labels.get("roadtax") or "Roadtax"), _format_value(_value(fields, "roadtax"), "RM ")))
-    rows.append(("runner", str(labels.get("runner") or "Runner Fee"), _format_value(_value(fields, "service_fee"), "RM ")))
+            cov_limit = str(extra.get("coverage_limit") or "")
+            rows.append(("extra", str(extra.get("label") or ""), cov_limit, formatted_price))
+    rows.append(("premium", str(labels.get("premium") or "Coverage Premium"), "", _format_value(_value(fields, "premium"), "RM ")))
+    rows.append(("divider", "", "", ""))
+    rows.append(("roadtax", str(labels.get("roadtax") or "Roadtax"), "", _format_value(_value(fields, "roadtax"), "RM ")))
+    rows.append(("runner", str(labels.get("runner") or "Runner Fee"), "", _format_value(_value(fields, "service_fee"), "RM ")))
     total = (render_context or {}).get("total_premium_adjusted") or _value(fields, "total_premium_adjusted")
     if not total:
         total = adjusted_total_text(fields, extras) if extras else _value(fields, "total_amount")
     if not total:
         total = _value(fields, "total_amount")
-    rows.append(("total", str(labels.get("total") or "Total Premium"), _format_value(total, "RM ")))
+    rows.append(("total", str(labels.get("total") or "Total Premium"), "", _format_value(total, "RM ")))
     html: list[str] = []
-    for index, (kind, label, value) in enumerate(rows):
+    for index, (kind, label, middle_val, right_val) in enumerate(rows):
         row_y = y + index * row_height
         if kind == "divider":
             html.append(
@@ -418,8 +422,18 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
             label_style = "font-size:9px;font-weight:700;color:#DC2626;text-transform:uppercase;letter-spacing:0.5px"
             value_style = "font-size:9px;font-weight:700;color:#DC2626"
         elif kind == "extra":
-            label_style = "font-size:9.5px;font-weight:600;color:#B91C1C"
-            value_style = "font-size:10px;font-weight:700;color:#0F172A"
+            label_style = "font-size:9.5px;font-weight:600;color:#B91C1C;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis"
+            limit_style = "font-size:9px;font-weight:600;color:#64748B;padding:0 8px;white-space:nowrap"
+            value_style = "font-size:10px;font-weight:700;color:#0F172A;white-space:nowrap;text-align:right"
+            limit_html = f'<span style="{limit_style}">{escape(middle_val)}</span>' if middle_val else ""
+            html.append(
+                f'<div style="position:absolute;left:{x}px;top:{row_y}px;width:{width}px;height:{row_height}px;'
+                f'display:flex;align-items:center;justify-content:space-between;box-sizing:border-box;padding-left:12px">'
+                f'<span style="{label_style}">{escape(label)}</span>'
+                f'{limit_html}'
+                f'<span style="{value_style}">{escape(right_val)}</span></div>'
+            )
+            continue
         else:
             label_style = "font-size:9.5px;font-weight:600;color:#334155"
             value_style = "font-size:10px;font-weight:700;color:#0F172A"
@@ -427,7 +441,7 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
             f'<div style="position:absolute;left:{x}px;top:{row_y}px;width:{width}px;height:{row_height}px;'
             f'display:flex;align-items:center;justify-content:space-between">'
             f'<span style="{label_style}">{escape(label)}</span>'
-            f'<span style="{value_style}">{escape(value)}</span></div>'
+            f'<span style="{value_style}">{escape(right_val)}</span></div>'
         )
     return "".join(html)
 

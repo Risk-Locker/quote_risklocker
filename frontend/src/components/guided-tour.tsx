@@ -102,6 +102,15 @@ export function GuidedTour({ storageKey, steps, title, description, launcherLabe
         closeTour();
     }, [storageKey, closeTour]);
 
+    useEffect(() => {
+        if (!tourActive) return;
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "Escape") closeTour();
+        };
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [tourActive, closeTour]);
+
     const tooltipPos = useMemo(() => (rect ? tooltipStyle(rect, step?.position || "bottom") : null), [rect, step]);
 
     return (
@@ -120,7 +129,7 @@ export function GuidedTour({ storageKey, steps, title, description, launcherLabe
 
             {/* "How this page works" panel */}
             {panelOpen ? (
-                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onClick={() => setPanelOpen(false)}>
+                <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/40 p-4" onClick={() => setPanelOpen(false)}>
                     <div
                         className="w-full max-w-md rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-white p-5 shadow-xl"
                         onClick={(e) => e.stopPropagation()}
@@ -166,39 +175,56 @@ export function GuidedTour({ storageKey, steps, title, description, launcherLabe
 
             {/* Guided tour overlay */}
             {tourActive && step ? (
-                <div className="fixed inset-0 z-[80]">
-                    {/* Dimmed backdrop with a "hole" around the target */}
-                    <div className="absolute inset-0 bg-black/50" />
+                <div className="fixed inset-0 z-[9999]">
+                    {/* Dimmed backdrop with a "hole" around the target - click closes tour */}
+                    <div className="absolute inset-0 bg-black/50 cursor-pointer" onClick={closeTour} title="Click anywhere to exit tour" />
                     {rect ? (
                         <div
-                            className="absolute rounded-[var(--rl-radius-sm)] ring-2 ring-[var(--rl-red)]"
+                            className="absolute rounded-[var(--rl-radius-sm)] ring-2 ring-[var(--rl-red)] pointer-events-none"
                             style={{ left: rect.left - 4, top: rect.top - 4, width: rect.width + 8, height: rect.height + 8 }}
                         />
                     ) : null}
                     {/* Tooltip */}
                     <div
-                        className="absolute rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-white p-4 shadow-xl"
+                        className="absolute rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-white p-4 shadow-2xl z-[10000]"
                         style={tooltipPos || { left: "50%", top: "50%", transform: "translate(-50%, -50%)", width: TOOLTIP_WIDTH }}
+                        onClick={(e) => e.stopPropagation()}
                     >
                         <div className="flex items-center justify-between gap-2">
                             <span className="rounded-[4px] bg-[var(--rl-black)] px-2 py-0.5 text-[10px] font-bold text-white">
-                                {stepIndex + 1} / {steps.length}
+                                Step {stepIndex + 1} of {steps.length}
                             </span>
-                            <button type="button" onClick={closeTour} className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-gray-100">
-                                <X size={15} weight="bold" />
+                            <button
+                                type="button"
+                                onClick={closeTour}
+                                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors"
+                                title="Exit tour (Esc)"
+                            >
+                                <span>Close</span>
+                                <X size={14} weight="bold" />
                             </button>
                         </div>
                         <h4 className="mt-2 text-sm font-bold text-[var(--rl-text-strong)]">{step.title}</h4>
                         <p className="mt-1 text-xs leading-relaxed text-[var(--rl-text-muted)]">{step.body}</p>
-                        <div className="mt-3 flex items-center justify-between gap-2">
-                            <Button variant="secondary" size="sm" onClick={prev} disabled={stepIndex === 0} className="h-7 gap-1 text-xs">
-                                <CaretLeft size={13} weight="bold" />
-                                Back
-                            </Button>
-                            <Button size="sm" onClick={next} className="h-7 gap-1 text-xs">
-                                {stepIndex >= steps.length - 1 ? "Finish" : "Next"}
-                                <CaretRight size={13} weight="bold" />
-                            </Button>
+                        <div className="mt-4 flex items-center justify-between gap-2 pt-2.5 border-t border-[var(--rl-border)]">
+                            <button
+                                type="button"
+                                onClick={dismissForever}
+                                className="text-[11px] font-medium text-[var(--rl-text-muted)] hover:text-[var(--rl-red)] transition-colors"
+                                title="Dismiss and don't show this tour again"
+                            >
+                                Don&apos;t show again
+                            </button>
+                            <div className="flex items-center gap-1.5">
+                                <Button variant="secondary" size="sm" onClick={prev} disabled={stepIndex === 0} className="h-7 px-2.5 gap-1 text-xs">
+                                    <CaretLeft size={13} weight="bold" />
+                                    Back
+                                </Button>
+                                <Button size="sm" onClick={next} className="h-7 px-3 gap-1 text-xs">
+                                    {stepIndex >= steps.length - 1 ? "Finish" : "Next"}
+                                    <CaretRight size={13} weight="bold" />
+                                </Button>
+                            </div>
                         </div>
                     </div>
                 </div>

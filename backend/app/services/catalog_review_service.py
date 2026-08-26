@@ -228,7 +228,22 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
             if matching_s:
                 candidate_products = matching_s
 
-        if len(candidate_products) == 1:
+        if len(candidate_products) > 1:
+            tier_val = _field_value(draft.fields or {}, "tier_name", "product_tier", "plan_name")
+            prod_val = _field_value(draft.fields or {}, "product_name", "detected_package_name")
+            if tier_val:
+                matched_tier = [p for p in candidate_products if tier_val.lower() in p.name.lower()]
+                if len(matched_tier) == 1:
+                    draft.product_id = matched_tier[0].id
+            if not draft.product_id and prod_val:
+                matched_exact = [p for p in candidate_products if p.name.lower() == prod_val.lower()]
+                if len(matched_exact) == 1:
+                    draft.product_id = matched_exact[0].id
+            if not draft.product_id and any("auto365" in p.name.lower() for p in candidate_products):
+                lite_p = next((p for p in candidate_products if "lite" in p.name.lower()), None)
+                if lite_p:
+                    draft.product_id = lite_p.id
+        elif len(candidate_products) == 1:
             draft.product_id = candidate_products[0].id
 
     # 3. Resolve legacy tier (if product has tiers)
@@ -341,13 +356,13 @@ def seed_base_benefits(db, draft: QuotationDraft, revision: BenefitCatalogRevisi
     ]
     primary_pkg_id = None
     if revision_packages:
-        valid_ids = {str(item.id) for item in revision_packages}
-        if getattr(draft, "package_id", None) and str(draft.package_id) in valid_ids:
-            primary_pkg_id = str(draft.package_id)
-        elif catalog_pkg_id and str(catalog_pkg_id) in valid_ids:
-            primary_pkg_id = str(catalog_pkg_id)
+        valid_ids = {item.id for item in revision_packages}
+        if getattr(draft, "package_id", None) and draft.package_id in valid_ids:
+            primary_pkg_id = draft.package_id
+        elif catalog_pkg_id and catalog_pkg_id in valid_ids:
+            primary_pkg_id = catalog_pkg_id
         else:
-            primary_pkg_id = str(min(revision_packages, key=lambda item: (int(item.sort_order or 0), item.name)).id)
+            primary_pkg_id = min(revision_packages, key=lambda item: (item.sort_order if item.sort_order is not None else 0, item.name)).id
 
         if not getattr(draft, "package_id", None):
             draft.package_id = primary_pkg_id
@@ -514,6 +529,24 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
             if mapping.get("coverage_limit") or mapping.get("evidence"):
                 cov_limit = mapping.get("coverage_limit") or mapping.get("evidence")
 
+        if not premium_cost:
+            premium_cost = getattr(line, "premium_cost", None)
+        if not premium_cost and isinstance(line.extracted_value, dict):
+            if line.extracted_value.get("semantic_role") == "premium":
+                premium_cost = line.extracted_value.get("value")
+            premium_cost = premium_cost or line.extracted_value.get("premium_cost") or (line.extracted_value.get("premium") or {}).get("amount")
+        if not premium_cost and isinstance(line.evidence, dict):
+            premium_cost = line.evidence.get("premium_cost") or line.evidence.get("cost")
+
+        if not cov_limit:
+            cov_limit = getattr(line, "coverage_limit", None)
+        if not cov_limit and isinstance(line.extracted_value, dict):
+            if line.extracted_value.get("semantic_role") in {"limit", "insured_limit"}:
+                cov_limit = line.extracted_value.get("value")
+            cov_limit = cov_limit or line.extracted_value.get("coverage_limit")
+        if not cov_limit and isinstance(line.evidence, dict):
+            cov_limit = line.evidence.get("coverage_limit") or line.evidence.get("limit")
+
         if not target_concept_id:
             line_norm = _norm(line.raw_label or line.normalized_label)
             if "windscreen" in line_norm or "wndscrn" in line_norm:
@@ -558,8 +591,6 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     extracted = {"type": "money", "value": clean_p, "currency": "MYR", "semantic_role": "premium", "display_text": f"RM {clean_p}"}
                 else:
                     extracted = {"type": "text", "value": str(premium_cost), "display_text": str(premium_cost)}
-            else:
-                extracted = {"type": "boolean", "value": True, "display_text": "Included"}
 
         concept_offerings = [item for item in offerings if str(item.concept_id) == str(target_concept_id)]
         current = next(
@@ -649,7 +680,8 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                 price_dict = None
                 if premium_cost:
                     clean_p = str(premium_cost).upper().replace("RM", "").replace(",", "").strip()
-                    price_dict = {"amount": float(clean_p) if any(c.isdigit() for c in clean_p) else clean_p, "currency": "MYR"}
+                    val_num = float(clean_p) if any(c.isdigit() for c in clean_p) else clean_p
+                    price_dict = {"type": "money", "value": val_num, "amount": val_num, "currency": "MYR"}
                 elif matched.optional_price:
                     price_dict = deepcopy(matched.optional_price)
 
@@ -663,8 +695,8 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     state="current",
                     cost_status="paid",
                     label_override=matched.label_override or line.raw_label,
-                    typed_value_override=typed_val if (not matched.typed_value and typed_val) else None,
-                    evidence_snapshot={"source_line_id": line.id, "source": "extracted_addon", "is_detected": True},
+                    typed_value_override=typed_val if (typed_val and not _value_matches(matched.typed_value, typed_val)) else None,
+                    evidence_snapshot={"source_line_id": line.id, "source": "extracted_addon", "is_detected": True, "coverage_limit": cov_limit, "premium_cost": premium_cost},
                     sort_order=int(matched.sort_order or 0),
                     selected_by=draft.owner_id,
                     price=price_dict,
@@ -694,7 +726,7 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     cost_status="paid" if premium_cost else "included",
                     label_override=line.raw_label,
                     typed_value_override=typed_val,
-                    evidence_snapshot={"source_line_id": line.id, "source": "extracted_custom", "is_detected": True},
+                    evidence_snapshot={"source_line_id": line.id, "source": "extracted_custom", "is_detected": True, "coverage_limit": cov_limit, "premium_cost": premium_cost},
                     sort_order=50 + applied,
                     selected_by=draft.owner_id,
                     price=price_dict,
@@ -756,7 +788,7 @@ def _apply_detected_packs(
 
         # Drop members of other plans of the same bundle first (clean ladder switch).
         sibling_ids = {item.id for item in plans if item.package_id == package.id} - {plan.id}
-        for sel in [s for s in selections if s.package_plan_id and str(s.package_plan_id) in {str(i) for i in sibling_ids}]:
+        for sel in [s for s in selections if s.package_plan_id and s.package_plan_id in sibling_ids]:
             _drop_plan_selection(selections, sel)
 
         for item in sorted(items_by_plan.get(plan.id, []), key=lambda row: (int(row.sort_order or 0), str(row.id))):
@@ -792,7 +824,7 @@ def _apply_detected_packs(
                         "source": "package_plan",
                         "is_detected": True,
                     },
-                    sort_order=int(item.sort_order or 0),
+                    sort_order=item.sort_order if item.sort_order is not None else 0,
                     package_plan_id=plan.id,
                 )
                 db.add(replacement)
@@ -816,7 +848,7 @@ def _apply_detected_packs(
                         "source": "package_plan",
                         "is_detected": True,
                     },
-                    sort_order=int(item.sort_order or 0),
+                    sort_order=item.sort_order if item.sort_order is not None else 0,
                     package_plan_id=plan.id,
                 )
                 db.add(member)

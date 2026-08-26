@@ -146,9 +146,9 @@ def build_draft(candidates: dict[str, list[CandidateValue]]) -> tuple[dict, list
                 if 0.5 <= num_cc <= 8.0:
                     # Litres format (e.g. 1.0 -> 998, 1.5 -> 1496)
                     inferred_from_litres = {1.0: 998, 1.2: 1197, 1.3: 1329, 1.5: 1496, 1.6: 1598, 1.8: 1798, 2.0: 1998, 2.5: 2494, 3.0: 2998}
-                    effective_cc = inferred_from_litres.get(round(num_cc, 1), int(round(num_cc * 1000)))
+                    effective_cc = inferred_from_litres.get(round(num_cc, 1), round(num_cc * 1000))
                 elif num_cc > 8.0:
-                    effective_cc = int(round(num_cc))
+                    effective_cc = round(num_cc)
             except (ValueError, TypeError):
                 pass
 
@@ -186,12 +186,30 @@ def build_draft(candidates: dict[str, list[CandidateValue]]) -> tuple[dict, list
             fields["roadtax"]["warnings"] = []
             fields["roadtax"]["message"] = ""
         elif effective_cc:
-            computed_rt = calculate_road_tax(effective_cc, vehicle_type=inferred_type)
+            inferred_owner = "Individual"
+            cust_name = str(fields.get("customer_name", {}).get("value") or "").upper()
+            if any(term in cust_name for term in ("SDN BHD", "BHD", "ENTERPRISE", "TRADING", "CORP", "SERVICES", "HOLDINGS", "LIMITED", "LLC")):
+                inferred_owner = "Company"
+            inferred_jur = "West Malaysia"
+            reg_loc = str(fields.get("location", {}).get("value") or fields.get("postcode", {}).get("value") or "").upper()
+            if "SABAH" in reg_loc or "KOTA KINABALU" in reg_loc:
+                inferred_jur = "Sabah"
+            elif "SARAWAK" in reg_loc or "KUCHING" in reg_loc or "MIRI" in reg_loc:
+                inferred_jur = "Sarawak"
+            elif "LABUAN" in reg_loc:
+                inferred_jur = "Labuan"
+
+            computed_rt = calculate_road_tax(
+                effective_cc,
+                vehicle_type=inferred_type,
+                owner_type=inferred_owner,
+                jurisdiction=inferred_jur,
+            )
             if computed_rt > 0:
                 fields["roadtax"]["value"] = f"{computed_rt:.2f}"
                 fields["roadtax"]["status"] = "ready"
                 fields["roadtax"]["warnings"] = []
-                fields["roadtax"]["message"] = ""
+                fields["roadtax"]["message"] = f"Calculated via standard JPJ {inferred_jur} schedule ({effective_cc}cc {inferred_type})"
 
     # Ensure premium is the net payable insurance premium (after NCD, extras, and SST)
     try:

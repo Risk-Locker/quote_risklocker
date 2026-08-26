@@ -48,7 +48,7 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Rendering: group borders + corner badge in `backend/app/rendering/template_renderer.py`; new `premium-info-block` element type; extras/adjusted-total helpers in `backend/app/rendering/render_context.py`.
 - Frontend: plan manager in `frontend/src/app/builder/benefits/page.tsx` (Bundles tab); pack selector + tier switcher (`pinPackageTier` via `select_package_tier`) + custom-addon price in `frontend/src/components/session-workspace/review-phase.tsx`; group border + premium block in `frontend/src/components/template-canvas/shared.tsx`.
 - Data repair command: `commands/repin-amassurance-sessions.py` (idempotent, dry-run default, `--apply`) — re-pins drafts with stale revisions or missing `package_id` to the latest published revision (e.g. rev 3) and re-seeds tier defaults.
-- Template update command: `commands/update-template-header-customer.py` (idempotent, dry-run default, `--apply`) — updates existing template revisions to replace the top header insurer name variable with `customer_name` and publishes clean revisions.
+- Template update commands: `commands/update-template-header-customer.py` and `commands/update-template-header-quotation-ref.py` (idempotent, dry-run default, `--apply`) — updates existing template revisions with separated header variables and publishes clean revisions.
 
 ## Benefit Configuration Matrix
 
@@ -68,6 +68,15 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Sessions package tiers: `package_tiers` in the workspace snapshot (`backend/app/services/workspace_service.py`), `catalog_id` support in `_apply_pin_catalog`, role-based `_catalog_overview`, compact tier chips in `frontend/src/components/session-workspace/review-phase.tsx`.
 - Builder preview: real template renderer via `CanvasElementView` in `frontend/src/app/builder/benefits/page.tsx` + inline "Show preview" button.
 - Guided tours: reusable `frontend/src/components/guided-tour.tsx` added to builder/benefits, builder/global-benefits, sessions workspace, upload, and AI Grounding.
+
+## Insurer Matrix Visualization & Comprehensive Road Tax (v8)
+
+- Matrix service: `backend/app/services/matrix_service.py` provides company catalog aggregation (`get_company_matrix_data`), landscape `.docx` catalog generation (`generate_company_matrix_docx`), multi-sheet `.xlsx` generation (`generate_company_matrix_xlsx`), and non-destructive delta comparison (`diff_company_matrix`).
+- Matrix routes: `GET /business/companies/{id}/matrix`, `GET /business/companies/{id}/export-matrix?format=docx|xlsx`, and `POST /business/companies/{id}/diff-matrix` in `backend/app/api/routes.py`. Tests in `tests/test_matrix_service.py`.
+- Road tax schedules & dynamic calculation: `backend/app/services/road_tax_service.py` expanded with 120 official JPJ rules covering West Malaysia, Sabah, Sarawak, Labuan (50% scale), and Commercial Lorries. Automatic calculation fallback in `backend/app/extraction/draft_mapper.py`.
+- Road tax endpoints: `POST /admin/road-tax-rules/seed-standard` and `POST /admin/road-tax-rules/calculate` in `backend/app/api/routes.py`. Tests in `tests/test_road_tax_service.py`.
+- Frontend Benefits Matrix: `frontend/src/app/builder/benefits/page.tsx` updated with view switcher (`Interactive Builder` vs `Company Overview Matrix`), full tabular policy matrix, Word/Excel downloads, and AI Seed & Sync Spec dialog with non-destructive delta tester.
+- Frontend Road Tax Cockpit: `frontend/src/app/extraction/road-tax/page.tsx` updated with jurisdiction tabs, live dynamic road tax tester, progressive calculation formulas, and "Seed Standard JPJ Rules" action.
 
 ## Deployment Additions
 

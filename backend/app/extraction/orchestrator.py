@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 from app.extraction.candidate_finder import find_candidates
 from app.extraction.benefit_lines import extract_benefit_lines

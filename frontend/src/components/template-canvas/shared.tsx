@@ -144,6 +144,9 @@ export const VARIABLE_FALLBACK_MAP: Record<string, string[]> = {
   valid_until: ["validity_date", "expiry_date", "validity", "quotation_validity", "valid_to", "expire_on"],
   insurance_company: ["company_name", "insurer_name", "insurance_name"],
   company_name: ["insurance_company", "insurer_name", "insurance_name"],
+  quotation_reference: ["quotation_ref", "quote_ref", "reference_no", "quote_no"],
+  quotation_ref: ["quotation_reference", "quote_ref", "reference_no", "quote_no"],
+  vehicle_no: ["vehicle_plate", "car_plate", "plate_no", "registration_no"],
 };
 
 export function resolveVariableValue(
@@ -614,10 +617,23 @@ export function CanvasElementView({
             return `RM ${isFinite(number) ? number.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""}`.trim();
           };
           const labels = element.labels || {};
-          const rows: Array<{ kind: string; label: string; value: string }> = [];
+          const rows: Array<{ kind: string; label: string; limit?: string; value: string }> = [];
           if (extras.length > 0) {
             rows.push({ kind: "extras_header", label: labels.extras || "Extras / 附加项目", value: "" });
-            extras.slice(0, 3).forEach((extra) => rows.push({ kind: "extra", label: String(extra?.label || ""), value: fmtMoney(extra?.price) }));
+            extras.slice(0, 3).forEach((extra) => {
+              const rawLimit = (extra as any)?.coverage_limit || ((extra as any)?.typed_value_override?.value ? String((extra as any)?.typed_value_override?.value) : "");
+              let fmtLimit = "";
+              if (rawLimit) {
+                const s = String(rawLimit).trim();
+                fmtLimit = !s.toUpperCase().startsWith("RM") && !s.toUpperCase().endsWith("RM") ? `${s}RM` : s;
+              }
+              rows.push({
+                kind: "extra",
+                label: String(extra?.label || ""),
+                limit: fmtLimit,
+                value: fmtMoney(extra?.price),
+              });
+            });
             if (extras.length > 3) rows.push({ kind: "extra", label: `+${extras.length - 3} more`, value: "" });
           }
           const premium = variableValues?.premium || "";
@@ -666,6 +682,15 @@ export function CanvasElementView({
                     : row.kind === "extras_header"
                       ? { fontSize: 8.5, fontWeight: 700, color: "#DC2626" }
                       : { fontSize: 9.5, fontWeight: 700, color: "#0F172A" };
+                if (row.kind === "extra") {
+                  return (
+                    <div key={`row-${index}`} className="flex items-center justify-between w-full pl-3" style={{ height: rowHeight }}>
+                      <span style={labelStyle} className="truncate flex-1 min-w-0 pr-2">{row.label}</span>
+                      {row.limit ? <span style={{ fontSize: 8.5, fontWeight: 600, color: "#64748B", whiteSpace: "nowrap", paddingRight: 6 }}>{row.limit}</span> : null}
+                      <span style={valueStyle} className="whitespace-nowrap text-right">{row.value}</span>
+                    </div>
+                  );
+                }
                 return (
                   <div key={`row-${index}`} className="flex items-center justify-between w-full" style={{ height: rowHeight }}>
                     <span style={labelStyle}>{row.label}</span>

@@ -25,6 +25,7 @@ import {
   MagnifyingGlassMinus,
   MagnifyingGlassPlus,
   Package as PackageIcon,
+  PencilSimple,
   Plus,
   Sparkle,
   X,
@@ -59,6 +60,7 @@ type FormField = { name: string; label: string; kind: FieldKind };
 
 const FORM_FIELDS: FormField[] = [
   { name: "customer_name", label: "Insured name", kind: "text" },
+  { name: "quotation_reference", label: "Quotation ref", kind: "text" },
   { name: "vehicle_no", label: "Vehicle no. / Car plate", kind: "text" },
   { name: "vehicle_type", label: "Vehicle type", kind: "vehicle_type" },
   { name: "car_model", label: "Car model", kind: "text" },
@@ -387,6 +389,48 @@ function AddonCard({
   const selectionId = card.selection_id;
   const pending = !selectionId || String(selectionId).startsWith("pending:");
 
+  const currentPriceObj = card.price || card.optional_price;
+  const currentAmount = currentPriceObj ? (typeof currentPriceObj === "object" ? (currentPriceObj.amount ?? (currentPriceObj as any).value) : currentPriceObj) : null;
+  const currentPriceNum = currentAmount !== null && currentAmount !== "" && !isNaN(Number(currentAmount)) ? Number(currentAmount) : null;
+
+  const initialPriceObj = card.initial_price || card.optional_price;
+  const initialAmount = initialPriceObj ? (typeof initialPriceObj === "object" ? (initialPriceObj.amount ?? (initialPriceObj as any).value) : initialPriceObj) : null;
+  const initialPriceNum = initialAmount !== null && initialAmount !== "" && !isNaN(Number(initialAmount)) ? Number(initialAmount) : null;
+
+  const [isEditingPrice, setIsEditingPrice] = useState(false);
+  const [priceInput, setPriceInput] = useState(currentPriceNum !== null ? String(currentPriceNum) : "");
+
+  useEffect(() => {
+    setPriceInput(currentPriceNum !== null ? String(currentPriceNum) : "");
+  }, [currentPriceNum]);
+
+  const handlePriceCommit = (newValStr: string) => {
+    setIsEditingPrice(false);
+    const cleanNum = parseFloat(newValStr.replace(/[^0-9.]/g, ""));
+    if (isNaN(cleanNum)) return;
+    const newPrice = { amount: cleanNum, currency: "MYR" };
+    if (selectionId && !pending) {
+      onQueue({ op: "benefit_update", selection_id: selectionId, price: newPrice, cost_status: "paid" }, `benefits.${selectionId}.price`);
+    } else if (card.offering_id) {
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid", price: newPrice }, `benefits.offer.${card.offering_id}`);
+    }
+  };
+
+  const handleRevertPrice = () => {
+    setIsEditingPrice(false);
+    if (initialPriceNum !== null) {
+      setPriceInput(String(initialPriceNum));
+      const resetPrice = { amount: initialPriceNum, currency: "MYR" };
+      if (selectionId && !pending) {
+        onQueue({ op: "benefit_update", selection_id: selectionId, price: resetPrice, cost_status: "paid" }, `benefits.${selectionId}.price`);
+      } else if (card.offering_id) {
+        onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid", price: resetPrice }, `benefits.offer.${card.offering_id}`);
+      }
+    }
+  };
+
+  const hasPriceDiff = initialPriceNum !== null && currentPriceNum !== null && Math.abs(initialPriceNum - currentPriceNum) > 0.01;
+
   const handleMoveToDefault = () => {
     const priceVal = card.price || card.optional_price || null;
     const costStatus = priceVal ? "paid" : "included";
@@ -414,7 +458,7 @@ function AddonCard({
       ? "border-amber-400 bg-amber-50/50 ring-1 ring-amber-300/60"
       : "border-[var(--rl-border)] bg-[var(--rl-surface)] hover:border-[var(--rl-black)] hover:bg-white"
       }`}>
-      <div className="flex items-center gap-2.5 min-w-0">
+      <div className="flex items-center gap-2.5 min-w-0 flex-1">
         <span className="shrink-0 flex h-6 w-6 items-center justify-center rounded bg-neutral-100 font-mono text-[10px] font-bold text-[var(--rl-text-muted)]">
           #{index + 1}
         </span>
@@ -426,8 +470,8 @@ function AddonCard({
             <Sparkle size={16} className="text-[var(--rl-text-muted)]" />
           )}
         </div>
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <h3 className="truncate text-xs font-bold text-[var(--rl-text-strong)]">{card.label}</h3>
             {card.is_detected ? (
               <span className="rounded bg-amber-100 px-1 py-0.2 text-[9px] font-bold text-amber-800 ring-1 ring-amber-400/50">
@@ -436,6 +480,49 @@ function AddonCard({
             ) : null}
           </div>
           <p className="truncate text-[11px] text-[var(--rl-text-muted)] font-medium">{card.value || "Optional payable add-on"}</p>
+          {/* Price Tag & Revert Controls */}
+          <div className="flex items-center gap-1.5 mt-1">
+            {isEditingPrice ? (
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] font-bold text-[var(--rl-text-muted)]">RM</span>
+                <input
+                  type="number"
+                  step="any"
+                  value={priceInput}
+                  autoFocus
+                  onChange={(e) => setPriceInput(e.target.value)}
+                  onBlur={() => handlePriceCommit(priceInput)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handlePriceCommit(priceInput);
+                    if (e.key === "Escape") { setIsEditingPrice(false); setPriceInput(currentPriceNum !== null ? String(currentPriceNum) : ""); }
+                  }}
+                  className="h-5 w-16 rounded border border-[var(--rl-black)] px-1 font-mono text-[11px] font-bold text-[var(--rl-text-strong)] focus:outline-none"
+                />
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsEditingPrice(true)}
+                className="group/price flex items-center gap-1 rounded bg-red-50 hover:bg-red-100/80 px-1.5 py-0.5 text-[10px] font-bold text-[var(--rl-red)] transition-colors"
+                title="Click to edit price"
+              >
+                <span>{currentPriceNum !== null ? `RM ${currentPriceNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "Set price"}</span>
+                <PencilSimple size={10} className="text-[var(--rl-text-muted)] group-hover/price:text-[var(--rl-red)]" />
+              </button>
+            )}
+
+            {hasPriceDiff ? (
+              <button
+                type="button"
+                onClick={handleRevertPrice}
+                className="flex items-center gap-0.5 rounded bg-gray-100 hover:bg-gray-200 px-1.5 py-0.5 text-[9px] font-semibold text-gray-600 transition-colors"
+                title={`Revert to initial catalog price (RM ${initialPriceNum})`}
+              >
+                <ArrowCounterClockwise size={10} weight="bold" />
+                <span>Revert (RM {initialPriceNum})</span>
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
@@ -498,7 +585,6 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [customPrice, setCustomPrice] = useState("");
 
   // Quick Action Export States (PNG / PDF)
-  const canvasExportRef = useRef<HTMLDivElement>(null);
   const debouncedSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** Coalesce rapid benefit mutations into a single save after 800ms idle. */
@@ -751,6 +837,9 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 binding: { template_id: matching.template_id, template_revision_id: matching.template_revision_id, base_hash: matching.config_hash },
               });
             }
+            if (!currentRevisionId && matching.template_revision_id) {
+              selectTemplateDirectly(matching.template_revision_id, list);
+            }
           }
         }
       })
@@ -982,6 +1071,15 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       if (val !== undefined && val !== null && String(val).trim() !== "") {
         fields[name] = String(val);
       }
+    }
+
+    // Quotation reference aliases
+    const qref = formValues["quotation_reference"] || fields["quotation_reference"] || formValues["quotation_ref"] || fields["quotation_ref"] || "";
+    if (qref) {
+      fields["quotation_reference"] = qref;
+      fields["quotation_ref"] = qref;
+      fields["quote_ref"] = qref;
+      fields["reference_no"] = qref;
     }
 
     // Vehicle plate aliases
@@ -1310,16 +1408,30 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     setLearnPrompt(null);
   }
 
-  const getExportCanvasTarget = (): { node: HTMLElement; pixelRatio: number } | null => {
+  async function generateCanvasBlob(): Promise<Blob | null> {
     const live = document.getElementById("rl-live-canvas-inner");
-    if (live) {
-      return { node: live, pixelRatio: 1.5 };
-    }
-    if (canvasExportRef.current) {
-      return { node: canvasExportRef.current, pixelRatio: 1.5 };
-    }
-    return null;
-  };
+    if (!live || !previewTemplate) return null;
+
+    const width = previewTemplate.config.canvas?.width || 794;
+    const height = previewTemplate.config.canvas?.height || 1123;
+
+    return await toBlob(live, {
+      cacheBust: false,
+      backgroundColor: "#ffffff",
+      width,
+      height,
+      pixelRatio: 2.5,
+      skipFonts: false,
+      style: {
+        transform: "none",
+        transformOrigin: "top left",
+        width: `${width}px`,
+        height: `${height}px`,
+        margin: "0",
+        position: "static",
+      },
+    });
+  }
 
   function triggerDownload(url: string, filename: string) {
     const link = document.createElement("a");
@@ -1339,40 +1451,22 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         return;
       }
     }
-    const target = getExportCanvasTarget();
-    if (!target || !workspace) {
-      setActionError("Quotation template is still rendering. Please wait a moment.");
-      return;
-    }
     setCopyingPng(true);
     setActionError(null);
-
-    const renderBlobPromise = toBlob(target.node, {
-      cacheBust: false,
-      backgroundColor: "#ffffff",
-      pixelRatio: target.pixelRatio,
-      skipFonts: true,
-    }).then((blob) => {
-      if (!blob) throw new Error("Could not generate quotation PNG blob");
-      return blob;
-    });
-
     try {
+      const blob = await generateCanvasBlob();
+      if (!blob) throw new Error("Could not capture quotation template canvas.");
+
       if (typeof ClipboardItem !== "undefined" && navigator.clipboard && typeof navigator.clipboard.write === "function") {
         await navigator.clipboard.write([
-          new ClipboardItem({ "image/png": renderBlobPromise }),
+          new ClipboardItem({ "image/png": blob }),
         ]);
         setCopiedPng(true);
         setToastMessage("High-definition quotation PNG copied to clipboard!");
         setTimeout(() => setCopiedPng(false), 2500);
         return;
       }
-    } catch (clipboardErr) {
-      console.warn("Direct clipboard write failed, falling back to direct PNG download:", clipboardErr);
-    }
 
-    try {
-      const blob = await renderBlobPromise;
       const url = URL.createObjectURL(blob);
       triggerDownload(url, `quotation_${formValues.vehicle_no || id}.png`);
       setTimeout(() => URL.revokeObjectURL(url), 10000);
@@ -1394,138 +1488,21 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         return;
       }
     }
-    const target = getExportCanvasTarget();
-    if (!target || !workspace) {
-      setActionError("Quotation template is still rendering. Please wait a moment.");
-      return;
-    }
     setDownloadingPng(true);
     setActionError(null);
     try {
-      const blob = await toBlob(target.node, {
-        cacheBust: false,
-        backgroundColor: "#ffffff",
-        pixelRatio: target.pixelRatio,
-        skipFonts: true,
-      });
-      if (!blob) throw new Error("Could not create quotation image blob");
+      const blob = await generateCanvasBlob();
+      if (!blob) throw new Error("Could not generate quotation image blob");
       const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
       triggerDownload(url, `quotation_${formValues.vehicle_no || id}.png`);
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
-      setToastMessage("High-definition quotation PNG downloaded!");
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      setToastMessage("High-definition quotation PNG opened in new tab and downloaded!");
     } catch (err: unknown) {
       console.error("[handleDownloadPng error]", err);
       setActionError("Could not generate PNG for download: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setDownloadingPng(false);
-    }
-  }
-
-  async function handleViewPdfInNewTab() {
-    const newTab = typeof window !== "undefined" ? window.open("about:blank", "_blank") : null;
-    if (newTab) {
-      try {
-        newTab.document.write(`
-          <!DOCTYPE html>
-          <html>
-            <head><title>Quotation Preview</title>
-              <style>
-                body { margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #475569; }
-                .loader { text-align: center; }
-                .spinner { width: 36px; height: 36px; border: 3px solid #e2e8f0; border-top-color: #0f172a; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
-                @keyframes spin { to { transform: rotate(360deg); } }
-              </style>
-            </head>
-            <body>
-              <div class="loader">
-                <div class="spinner"></div>
-                <p style="font-weight: 600; font-size: 14px;">Preparing quotation preview...</p>
-              </div>
-            </body>
-          </html>
-        `);
-        newTab.document.close();
-      } catch {}
-    }
-
-    let currentRevision = workspace?.revision;
-    if (mutation.dirty) {
-      try {
-        const saved = await save();
-        currentRevision = saved.revision;
-      } catch (err) {
-        if (newTab) newTab.close();
-        setActionError("Please resolve errors before viewing PDF: " + apiErrorMessage(err));
-        return;
-      }
-    }
-    if (!workspace || currentRevision == null) {
-      if (newTab) newTab.close();
-      return;
-    }
-
-    setViewLoading(true);
-    setActionError(null);
-    try {
-      const result = await api<{ preview_url: string }>(`/sessions/${id}/preview-render`, {
-        method: "POST",
-        body: JSON.stringify({ draft_revision: currentRevision }),
-      });
-      const url = fileUrl(result.preview_url);
-      if (newTab) {
-        newTab.location.href = url;
-      } else {
-        window.open(url, "_blank");
-      }
-      setToastMessage("Opened quotation preview in new tab.");
-    } catch (backendError) {
-      console.warn("Backend preview-render failed, rendering canvas directly into tab:", backendError);
-      const target = getExportCanvasTarget();
-      if (target && newTab) {
-        try {
-          const blob = await toBlob(target.node, { cacheBust: false, backgroundColor: "#ffffff", pixelRatio: target.pixelRatio, skipFonts: true });
-          if (blob) {
-            const blobUrl = URL.createObjectURL(blob);
-            newTab.document.open();
-            newTab.document.write(`
-              <!DOCTYPE html>
-              <html>
-                <head>
-                  <title>Quotation Preview - ${formValues.vehicle_no || id}</title>
-                  <style>
-                    body { margin: 0; padding: 20px; background: #525659; display: flex; flex-direction: column; align-items: center; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-                    .bar { position: sticky; top: 12px; z-index: 100; background: #1e293b; color: #fff; padding: 8px 16px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
-                    button { background: #3b82f6; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px; }
-                    button:hover { background: #2563eb; }
-                    img { max-width: 800px; width: 100%; height: auto; box-shadow: 0 4px 24px rgba(0,0,0,0.4); background: #fff; border-radius: 2px; }
-                    @media print {
-                      body { padding: 0; background: #fff; }
-                      .bar { display: none; }
-                      img { width: 100%; max-width: 100%; box-shadow: none; }
-                    }
-                  </style>
-                </head>
-                <body>
-                  <div class="bar">
-                    <span style="font-size: 13px; font-weight: 500;">Quotation Preview</span>
-                    <button onclick="window.print()">Print / Save as PDF</button>
-                  </div>
-                  <img src="${blobUrl}" />
-                </body>
-              </html>
-            `);
-            newTab.document.close();
-            setToastMessage("Rendered quotation preview in new tab.");
-            return;
-          }
-        } catch (canvasErr) {
-          console.error("Canvas preview fallback failed:", canvasErr);
-        }
-      }
-      if (newTab) newTab.close();
-      setActionError(apiErrorMessage(backendError));
-    } finally {
-      setViewLoading(false);
     }
   }
 
@@ -1579,59 +1556,33 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
       if (versionId) {
         await reload();
-        triggerDownload(fileUrl(`/versions/${versionId}/pdf?download=true`), `quotation_${formValues.vehicle_no || id}.pdf`);
-        setToastMessage("Official PDF download started!");
+        const viewUrl = fileUrl(`/versions/${versionId}/pdf`);
+        const downloadUrl = fileUrl(`/versions/${versionId}/pdf?download=true`);
+        window.open(viewUrl, "_blank");
+        triggerDownload(downloadUrl, `quotation_${formValues.vehicle_no || id}.pdf`);
+        setToastMessage("Official PDF opened in new tab and downloaded!");
         return;
       }
     } catch (backendError) {
-      console.warn("Backend PDF generation was unavailable or blocked; generating instant canvas PDF:", backendError);
+      console.warn("Backend PDF generation was unavailable or blocked; generating instant canvas preview:", backendError);
     }
 
-    const target = getExportCanvasTarget();
-    if (target) {
-      try {
-        const blob = await toBlob(target.node, {
-          cacheBust: false,
-          backgroundColor: "#ffffff",
-          pixelRatio: target.pixelRatio,
-          skipFonts: true,
-        });
-        if (blob) {
-          const blobUrl = URL.createObjectURL(blob);
-          const printWindow = window.open("", "_blank");
-          if (printWindow) {
-            printWindow.document.write(`
-              <!DOCTYPE html>
-              <html>
-                <head>
-                  <title>quotation_${formValues.vehicle_no || id}.pdf</title>
-                  <style>
-                    @page { size: A4 portrait; margin: 0; }
-                    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #fff; }
-                    img { width: 100%; height: 100%; object-fit: contain; display: block; }
-                    @media print {
-                      body { margin: 0; }
-                      img { width: 100%; height: 100%; }
-                    }
-                  </style>
-                </head>
-                <body>
-                  <img src="${blobUrl}" onload="setTimeout(() => { window.print(); }, 250);" />
-                </body>
-              </html>
-            `);
-            printWindow.document.close();
-            setToastMessage("Opened high-resolution print window (select 'Save as PDF').");
-            return;
-          }
-        }
-      } catch (canvasErr) {
-        console.error("Canvas PDF fallback error:", canvasErr);
+    try {
+      const blob = await generateCanvasBlob();
+      if (blob) {
+        const blobUrl = URL.createObjectURL(blob);
+        window.open(blobUrl, "_blank");
+        triggerDownload(blobUrl, `quotation_${formValues.vehicle_no || id}.png`);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+        setToastMessage("Quotation opened in new tab and downloaded.");
+        return;
       }
+      throw new Error("Could not render quotation document.");
+    } catch (err: unknown) {
+      setActionError(apiErrorMessage(err));
+    } finally {
+      setPdfLoading(false);
     }
-
-    setActionError("Could not generate PDF. Please ensure the quotation template is rendered.");
-    setPdfLoading(false);
   }
 
   if (loading) return <PageLoading />;
@@ -1696,90 +1647,41 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
             </Button>
 
             {/* PNG Actions Button (Copy as PNG | Download PNG) */}
-            <div
-              className={`relative flex items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white p-0.5 shadow-xs transition-all ${mutation.dirty || mutation.saving
-                ? "opacity-60 bg-neutral-50 cursor-not-allowed"
-                : "hover:border-[var(--rl-border-strong)] hover:shadow-sm"
-                }`}
+            {/* Unified Action 1: Copy as PNG */}
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={copiedPng ? <Check weight="bold" className="text-emerald-600" /> : <Copy weight="bold" />}
+              onClick={handleCopyPng}
+              disabled={copyingPng}
+              title={mutation.dirty ? "Save changes first to copy PNG" : "Copy high-resolution quotation PNG to clipboard"}
             >
-              {/* Copy as PNG */}
-              <button
-                type="button"
-                onClick={handleCopyPng}
-                disabled={copyingPng}
-                className="flex items-center gap-1 rounded-[4px] px-2 py-1.5 text-xs font-semibold text-[var(--rl-text-strong)] hover:bg-neutral-100 hover:text-[var(--rl-black)] transition-all"
-                title={mutation.dirty ? "Save changes first to copy PNG" : "Copy high-resolution quotation PNG to clipboard"}
-              >
-                {copiedPng ? (
-                  <Check size={15} weight="bold" className="text-emerald-600 shrink-0" />
-                ) : (
-                  <Copy size={15} weight="bold" className="shrink-0 text-neutral-600" />
-                )}
-                <span className="text-[11px]">
-                  {copiedPng ? "Copied!" : "Copy"}
-                </span>
-              </button>
+              {copiedPng ? "Copied PNG!" : copyingPng ? "Copying..." : "Copy as PNG"}
+            </Button>
 
-              <div className="h-4 w-[1px] bg-neutral-200 shrink-0 mx-0.5" />
-
-              {/* Download as PNG */}
-              <button
-                type="button"
-                onClick={handleDownloadPng}
-                disabled={downloadingPng}
-                className="flex items-center gap-1.5 rounded-[4px] px-2 py-1.5 text-xs font-semibold text-[var(--rl-text-strong)] hover:bg-neutral-100 hover:text-[var(--rl-black)] transition-all"
-                title={mutation.dirty ? "Save changes first to download PNG" : "Download high-resolution quotation PNG"}
-              >
-                <DownloadSimple size={15} weight="bold" className="shrink-0 text-neutral-600" />
-                <span className="text-[11px]">
-                  {downloadingPng ? "Generating..." : "Download"}
-                </span>
-                <span className="rounded bg-neutral-100 px-1 py-0.2 font-mono text-[9px] font-extrabold text-neutral-600 uppercase">
-                  PNG
-                </span>
-              </button>
-            </div>
-
-            {/* PDF Actions Button (View as PDF / in new tab | Download PDF) */}
-            <div
-              className={`relative flex items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white p-0.5 shadow-xs transition-all ${mutation.dirty || mutation.saving
-                ? "opacity-60 bg-neutral-50 cursor-not-allowed"
-                : "hover:border-[var(--rl-border-strong)] hover:shadow-sm"
-                }`}
+            {/* Unified Action 2: Download as PNG */}
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<DownloadSimple weight="bold" />}
+              onClick={handleDownloadPng}
+              disabled={downloadingPng}
+              title={mutation.dirty ? "Save changes first to download PNG" : "Open in new tab and download high-resolution PNG"}
             >
-              {/* View as PDF in New Tab */}
-              <button
-                type="button"
-                onClick={handleViewPdfInNewTab}
-                disabled={viewLoading}
-                className="flex items-center gap-1 rounded-[4px] px-2 py-1.5 text-xs font-semibold text-[var(--rl-text-strong)] hover:bg-neutral-100 hover:text-[var(--rl-black)] transition-all"
-                title={mutation.dirty ? "Save changes first to view PDF" : "View authoritative PDF quotation in new tab"}
-              >
-                <ArrowSquareOut size={15} weight="bold" className="shrink-0 text-neutral-600" />
-                <span className="text-[11px]">
-                  {viewLoading ? "Opening..." : "View"}
-                </span>
-              </button>
+              {downloadingPng ? "Generating..." : "Download as PNG"}
+            </Button>
 
-              <div className="h-4 w-[1px] bg-neutral-200 shrink-0 mx-0.5" />
-
-              {/* Download PDF */}
-              <button
-                type="button"
-                onClick={handleDownloadPdf}
-                disabled={pdfLoading}
-                className="flex items-center gap-1.5 rounded-[4px] px-2 py-1.5 text-xs font-semibold text-[var(--rl-text-strong)] hover:bg-neutral-100 hover:text-[var(--rl-black)] transition-all"
-                title={mutation.dirty ? "Save changes first to download PDF" : "Generate & download official PDF quotation"}
-              >
-                <FilePdf size={15} weight="bold" className="shrink-0 text-[var(--rl-red)]" />
-                <span className="text-[11px]">
-                  {pdfLoading ? "Generating..." : "Download"}
-                </span>
-                <span className="rounded bg-red-50 px-1 py-0.2 font-mono text-[9px] font-extrabold text-[var(--rl-red)] uppercase">
-                  PDF
-                </span>
-              </button>
-            </div>
+            {/* Unified Action 3: Download PDF */}
+            <Button
+              variant="primary"
+              size="sm"
+              icon={<FilePdf weight="bold" />}
+              onClick={handleDownloadPdf}
+              disabled={pdfLoading}
+              title={mutation.dirty ? "Save changes first to download PDF" : "Open in new tab and download official PDF"}
+            >
+              {pdfLoading ? "Generating..." : "Download PDF"}
+            </Button>
           </div>
         </div>
       </Card>
@@ -1816,10 +1718,27 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
             >
               <div className="relative min-w-0 h-full">
                 <Card className="sticky top-[140px] h-[calc(100vh-180px)] p-2">
+                  <div className="flex items-center justify-between px-1 pb-1.5 border-b border-[var(--rl-border)] mb-1">
+                    <span className="text-xs font-bold text-[var(--rl-text-strong)]">Source Quotation PDF</span>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="h-6 px-2 text-[11px] gap-1"
+                      onClick={() => {
+                        const srcUrl = fileUrl(`/uploaded-files/${workspace.uploaded_file_id}/content`);
+                        window.open(srcUrl, "_blank");
+                        triggerDownload(srcUrl, `source_quotation_${formValues.vehicle_no || id}.pdf`);
+                      }}
+                      title="Open source PDF in new tab and download"
+                    >
+                      <DownloadSimple size={12} weight="bold" />
+                      Download Source PDF
+                    </Button>
+                  </div>
                   <iframe
                     title="Source quotation PDF"
                     src={fileUrl(`/uploaded-files/${workspace.uploaded_file_id}/content`)}
-                    className={`h-full w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white ${isDragging ? "pointer-events-none" : ""}`}
+                    className={`h-[calc(100%-32px)] w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white ${isDragging ? "pointer-events-none" : ""}`}
                   />
                 </Card>
               </div>
@@ -1909,11 +1828,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                   <label className="grid gap-1.5 text-xs font-semibold text-[var(--rl-text-strong)]">
                     Published template revision
                     <Select
-                      value={workspace.pinned.template_revision_id || ""}
+                      value={workspace.pinned.template_revision_id || (publishedTemplates[0]?.template_revision_id ?? "")}
                       disabled={templatesLoading || !publishedTemplates.length}
                       onChange={(event) => selectTemplateDirectly(event.target.value)}
                     >
-                      <option value="">Choose a published template</option>
                       {publishedTemplates.map((option) => (
                         <option key={option.template_revision_id} value={option.template_revision_id}>
                           {option.name} · r{option.revision_number} · {option.page_profile.name}
@@ -1957,7 +1875,25 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                         onChange={(event) => pinCatalog(workspace.pinned.company_id as string, event.target.value)}
                       >
                         <option value="">{productOptions.length ? "Choose package" : "Standard Motor"}</option>
-                        {productOptions.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+                        {productOptions.map((product) => {
+                          const rawName = product.name || "";
+                          let label = rawName;
+                          if (!/\((Comprehensive|TPFT|TPO|Third Party)\)/i.test(rawName)) {
+                            const lowerName = rawName.toLowerCase();
+                            let covLabel = "Comprehensive";
+                            if (lowerName.includes("tpft") || (lowerName.includes("third party") && lowerName.includes("fire"))) {
+                              covLabel = "TPFT";
+                            } else if (lowerName.includes("third") || lowerName.includes("tpo") || lowerName.includes("party")) {
+                              covLabel = "TPO";
+                            }
+                            label = `${rawName} (${covLabel})`;
+                          }
+                          return (
+                            <option key={product.id} value={product.id}>
+                              {label}
+                            </option>
+                          );
+                        })}
                       </Select>
                     </label>
                   </div>
@@ -2306,11 +2242,11 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                 </div>
 
                                 <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-gray-100">
-                                  {extra.coverage_limit ? (
+                                  {extra.coverage_limit && typeof extra.coverage_limit === "string" && !extra.coverage_limit.includes("[object") && extra.coverage_limit.trim() !== "" ? (
                                     <div className="text-right">
                                       <span className="block text-[9px] uppercase font-bold text-[var(--rl-text-muted)]">Limit / Sum</span>
                                       <span className="text-xs font-semibold text-[var(--rl-text-strong)] font-mono">
-                                        {String(extra.coverage_limit).startsWith("RM") ? String(extra.coverage_limit) : `RM ${extra.coverage_limit}`}
+                                        {extra.coverage_limit.startsWith("RM") ? extra.coverage_limit : `RM ${extra.coverage_limit}`}
                                       </span>
                                     </div>
                                   ) : null}
@@ -2419,6 +2355,29 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                   </span>
                 </div>
                 <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="h-7 px-2 text-[11px] gap-1"
+                    onClick={handleDownloadPng}
+                    disabled={downloadingPng}
+                    title="Download quotation as PNG (opens in new tab & saves)"
+                  >
+                    <DownloadSimple size={13} weight="bold" />
+                    PNG
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="h-7 px-2 text-[11px] gap-1 text-[var(--rl-red)]"
+                    onClick={handleDownloadPdf}
+                    disabled={pdfLoading}
+                    title="Download quotation as PDF (opens in new tab & saves)"
+                  >
+                    <FilePdf size={13} weight="bold" />
+                    PDF
+                  </Button>
+                  <div className="h-4 w-px bg-[var(--rl-border)] mx-0.5" />
                   {!previewCollapsed ? (
                     <>
                       <button
@@ -3098,46 +3057,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         </div>
       ) : null}
 
-      {/* Off-screen Full-Resolution 1:1 Canvas for Ultra-HD PNG & Clipboard Generation */}
-      {previewTemplate ? (
-        <div
-          aria-hidden="true"
-          style={{
-            position: "fixed",
-            left: "-99999px",
-            top: "-99999px",
-            width: previewTemplate.config.canvas?.width || 794,
-            height: previewTemplate.config.canvas?.height || 1123,
-            overflow: "hidden",
-            pointerEvents: "none",
-            zIndex: -999,
-          }}
-        >
-          <div
-            ref={canvasExportRef}
-            style={{
-              width: previewTemplate.config.canvas?.width || 794,
-              height: previewTemplate.config.canvas?.height || 1123,
-              position: "relative",
-              backgroundColor: "#ffffff",
-            }}
-          >
-            {balanceBenefitGridElements(previewTemplate.config.canvas?.elements || [], { ...workspace.benefit_cards, extras: workspace.extras }).map((element) => (
-              <CanvasElementView
-                key={element.id}
-                element={element}
-                selected={false}
-                readOnly={true}
-                onPointerDown={() => { }}
-                variableValues={previewFields}
-                benefitData={{ ...workspace.benefit_cards, extras: workspace.extras }}
-                conceptAssets={conceptAssets}
-                assets={previewTemplateAssets}
-              />
-            ))}
-          </div>
-        </div>
-      ) : null}
+
 
       {/* Floating Action Toast Notification */}
       {toastMessage && (

@@ -28,6 +28,9 @@ export type BenefitCardSummary = {
   typed_value?: Record<string, unknown> | null;
   price?: { amount?: number | string; currency?: string } | null;
   optional_price?: { amount?: number | string; currency?: string } | null;
+  initial_price?: { amount?: number | string; currency?: string } | null;
+  detected_cost?: string | number | null;
+  detected_limit?: string | number | null;
 };
 
 export type WorkspaceCapabilities = {

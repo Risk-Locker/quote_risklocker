@@ -53,6 +53,35 @@ NON_BENEFIT_PREFIXES = (
     "stamp duty",
     "service tax",
     "sst",
+    "class of vehicle",
+    "kelas kenderaan",
+    "cover type",
+    "jenis perlindungan",
+    "geographical area",
+    "business/profession",
+    "hire purchase",
+    "period insurance",
+    "sum insured",
+    "excess",
+    "trailer",
+    "cubic capacity",
+    "year of manufacture",
+    "seating capacity",
+    "engine no",
+    "chassis no",
+    "registration no",
+    "regn. card",
+    "make & type",
+    "named driver",
+    "this quotation will expire",
+    "endorsement attaching",
+    "important notice",
+    "cbc regulation",
+    "road transport act",
+    "motor vehicles",
+    "private car protector quotation",
+    "private car comprehensive quotation",
+    "private car quotation",
 )
 NARRATIVE_PREFIXES = ("example:", "example ", "note:", "important:", "disclaimer :", "disclaimer:")
 MONEY_RE = re.compile(r"(?:RM\s*)?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?", re.IGNORECASE)
@@ -61,8 +90,11 @@ MONEY_RE = re.compile(r"(?:RM\s*)?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?", re.
 def _normalized(value: str) -> str:
     value = re.sub(r"^(?:☑|☒|✓|✔|☐|□|\[[xX ]\]|[•\-\*\+])\s*", "", value)
     value = re.sub(r"\s+", " ", value).strip(" :-;.").lower()
-    value = re.sub(r"\s+(?:rm\s*)?\d[\d,.]*(?:\s*(?:km|kilometres?|days?|times?|years?|months?))?.*$", "", value, flags=re.IGNORECASE)
-    return value[:500]
+    # Strip trailing numbers/parameters ONLY if preceded by currency/keywords OR followed by units
+    value = re.sub(r"\s+(?:(?:rm|myr|premium|limit|sum\s+insured)\s*[\d,.]+|[\d,.]+\s*(?:km|kilometres?|days?|times?|years?|months?)).*$", "", value, flags=re.IGNORECASE)
+    # Strip any trailing parens with money like (RM 2,650.00)
+    value = re.sub(r"\s*\(\s*(?:rm|myr)?\s*[\d,.]+\s*\)\s*$", "", value, flags=re.IGNORECASE)
+    return value.strip(" :-;.")[:500]
 
 
 def _stable_line_id(page: int, ordinal: int, raw: str) -> str:
@@ -108,10 +140,25 @@ def _typed_value(raw: str, normalized: str) -> dict | None:
         amount = _money(per_day.group(1))
         return {"type": "per_day", "value": amount, "currency": "MYR", "unit": "day"}
 
-    # 4. Money / Insured Limit
+    # 4. Money / Insured Limit & Cost
     amounts = list(MONEY_RE.finditer(raw))
     if not amounts:
         return None
+    if len(amounts) >= 2:
+        a1 = _money(f"{amounts[0].group(1)}.{amounts[0].group(2) or '00'}")
+        a2 = _money(f"{amounts[1].group(1)}.{amounts[1].group(2) or '00'}")
+        try:
+            d1, d2 = Decimal(a1), Decimal(a2)
+            limit_val, cost_val = (a1, a2) if d1 >= d2 else (a2, a1)
+        except Exception:
+            limit_val, cost_val = a1, a2
+        return {
+            "type": "money",
+            "value": limit_val,
+            "currency": "MYR",
+            "semantic_role": "insured_limit",
+            "premium": {"amount": cost_val, "currency": "MYR"},
+        }
     premium_match = re.search(r"premium\s*RM?\s*(\d[\d,]*(?:\.\d+)?)", raw, re.IGNORECASE)
     first = amounts[0]
     amount = _money(f"{first.group(1)}.{first.group(2) or '00'}")
@@ -332,6 +379,18 @@ def extract_benefit_lines(
                 typed_val=typed_val,
             )
 
+            cov_limit = (
+                typed_val.get("value")
+                if isinstance(typed_val, dict) and typed_val.get("semantic_role") == "insured_limit"
+                else None
+            )
+            prem_cost = (
+                typed_val.get("premium", {}).get("amount")
+                if isinstance(typed_val, dict) and typed_val.get("premium")
+                else (typed_val.get("value") if isinstance(typed_val, dict) and typed_val.get("semantic_role") == "amount" else None)
+            )
+            is_opt = scope == "optional" or section_label == "Optional Covers" or bool(prem_cost)
+
             extracted.append({
                 "line_id": _stable_line_id(page_number, ordinal, raw),
                 "raw_label": raw,
@@ -344,5 +403,8 @@ def extract_benefit_lines(
                 "evidence": {"page": page_number, "line": ordinal, "text": raw},
                 "candidate_mappings": candidate_maps,
                 "extracted_value": typed_val,
+                "coverage_limit": cov_limit,
+                "premium_cost": prem_cost,
+                "is_optional_cover": is_opt,
             })
     return extracted

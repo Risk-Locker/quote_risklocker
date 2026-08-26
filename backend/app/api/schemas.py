@@ -438,3 +438,16 @@ class GroundingChatRequest(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
     session_id: str | None = None
 
+
+# --- Matrix & Road Tax Calculation Requests ---
+
+class RoadTaxCalculateRequest(BaseModel):
+    cc: int = Field(gt=0, le=20000)
+    vehicle_type: str = "Car"
+    owner_type: str = "Individual"
+    jurisdiction: str = "West Malaysia"
+
+
+class CompanyMatrixDiffRequest(BaseModel):
+    scenarios: list[dict] = Field(default_factory=list)
+

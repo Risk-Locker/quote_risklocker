@@ -22,7 +22,6 @@ from app.core.workspace import QC_TEMP_ROOT, qc_temp_directory
 MAX_PDF_PAGES = 100
 FORBIDDEN_PDF_MARKERS = {
     b"/JavaScript": "JavaScript",
-    b"/JS": "JavaScript action",
     b"/Launch": "launch action",
     b"/EmbeddedFiles": "embedded file",
     b"/FileAttachment": "file attachment",
@@ -87,9 +86,42 @@ def _inspect_pdf(path: Path, max_pages: int = MAX_PDF_PAGES) -> dict:
             root = pdf.Root
             if "/OpenAction" in root or "/AA" in root:
                 raise ValueError("PDFs containing automatic actions are not accepted.")
+
+            # Check document-level JavaScript
+            names = root.get("/Names")
+            if names is not None and "/JavaScript" in names:
+                js_tree = names.get("/JavaScript")
+                if js_tree is not None and (
+                    ("/Names" in js_tree and len(js_tree["/Names"]) > 0)
+                    or ("/Kids" in js_tree and len(js_tree["/Kids"]) > 0)
+                ):
+                    raise ValueError("PDF contains a prohibited JavaScript.")
+
             acro_form = root.get("/AcroForm")
-            if acro_form is not None and "/XFA" in acro_form:
-                raise ValueError("PDFs containing XFA forms are not accepted.")
+            if acro_form is not None:
+                if "/XFA" in acro_form:
+                    raise ValueError("PDFs containing XFA forms are not accepted.")
+                fields = acro_form.get("/Fields", [])
+                for field in fields:
+                    if isinstance(field, pikepdf.Dictionary):
+                        action = field.get("/A")
+                        if isinstance(action, pikepdf.Dictionary) and action.get("/S") == "/JavaScript":
+                            raise ValueError("PDF contains a prohibited JavaScript.")
+                        if "/AA" in field:
+                            raise ValueError("PDFs containing automatic actions are not accepted.")
+
+            for page in pdf.pages:
+                if "/AA" in page:
+                    raise ValueError("PDFs containing automatic actions are not accepted.")
+                annots = page.get("/Annots")
+                if annots is not None and isinstance(annots, pikepdf.Array):
+                    for annot in annots:
+                        if isinstance(annot, pikepdf.Dictionary):
+                            a = annot.get("/A")
+                            if isinstance(a, pikepdf.Dictionary) and a.get("/S") == "/JavaScript":
+                                raise ValueError("PDF contains a prohibited JavaScript.")
+                            if "/AA" in annot:
+                                raise ValueError("PDFs containing automatic actions are not accepted.")
     except pikepdf.PasswordError as exc:
         raise ValueError("Encrypted or password-protected PDFs are not accepted.") from exc
     except pikepdf.PdfError as exc:

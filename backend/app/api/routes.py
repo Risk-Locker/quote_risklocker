@@ -44,6 +44,8 @@ from app.api.schemas import (
     PackagePlanSaveRequest,
     PackageSaveRequest,
     RoadTaxRuleSaveRequest,
+    RoadTaxCalculateRequest,
+    CompanyMatrixDiffRequest,
     RecordBulkActionRequest,
     RecordSavedViewRequest,
     SegmentSaveRequest,
@@ -191,11 +193,19 @@ from app.services.client_record_service import (
     set_records_archived,
     update_record,
 )
+from app.services.matrix_service import (
+    get_company_matrix_data,
+    generate_company_matrix_docx,
+    generate_company_matrix_xlsx,
+    diff_company_matrix,
+)
 from app.services.road_tax_service import (
+    calculate_breakdown,
     delete_rule as delete_road_tax_rule,
     export_csv_bytes as export_road_tax_csv,
     import_rules as import_road_tax_rules,
     list_rules,
+    seed_standard_road_tax_rules,
     serialize_rule,
     upsert_rule as upsert_road_tax_rule,
 )
@@ -1266,6 +1276,55 @@ def business_company_workspace(
     return {"workspace": get_business_company_workspace(db, user, company_id)}
 
 
+@router.get("/business/companies/{company_id}/matrix")
+def business_company_matrix(
+    company_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"matrix": get_company_matrix_data(db, company_id)}
+
+
+@router.get("/business/companies/{company_id}/export-matrix")
+def business_company_matrix_export(
+    company_id: str,
+    format: str = "docx",
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> Response:
+    matrix = get_company_matrix_data(db, company_id)
+    slug = matrix["company"].get("slug") or "company"
+    fmt = (format or "docx").lower().strip()
+    today_str = date.today().isoformat()
+    if fmt == "xlsx":
+        xlsx_buf = generate_company_matrix_xlsx(matrix)
+        filename = f"{slug}_benefits_matrix_{today_str}.xlsx"
+        return Response(
+            xlsx_buf.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    docx_buf = generate_company_matrix_docx(matrix)
+    filename = f"{slug}_benefits_matrix_{today_str}.docx"
+    return Response(
+        docx_buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/business/companies/{company_id}/diff-matrix")
+def business_company_matrix_diff(
+    company_id: str,
+    payload: CompanyMatrixDiffRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    existing = get_company_matrix_data(db, company_id)
+    diff = diff_company_matrix(existing, payload.model_dump())
+    return {"diff": diff}
+
+
 @router.post("/business/products")
 def business_product_save(
     payload: BusinessProductSaveRequest,
@@ -2168,6 +2227,32 @@ async def road_tax_rules_import(file: UploadFile = File(...), db: Session = Depe
     data = await file.read()
     rows = parse_tabular(file.filename or "import.csv", data)
     return import_road_tax_rules(db, rows)
+
+
+@router.post("/admin/road-tax-rules/seed-standard")
+def road_tax_rules_seed_standard(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    result = seed_standard_road_tax_rules(db)
+    return {"result": result}
+
+
+@router.post("/admin/road-tax-rules/calculate")
+def road_tax_calculate_preview(
+    payload: RoadTaxCalculateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    breakdown = calculate_breakdown(
+        cc=payload.cc,
+        vehicle_type=payload.vehicle_type,
+        owner_type=payload.owner_type,
+        jurisdiction=payload.jurisdiction,
+        db=db,
+    )
+    return {"breakdown": breakdown}
 
 
 @router.post("/admin/dictionaries/vehicles/import")

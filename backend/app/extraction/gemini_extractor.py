@@ -106,6 +106,10 @@ GEMINI_EXTRACTION_SCHEMA = {
             "type": "string",
             "description": "If this is a packaged insurer (like AmAssurance), specify the package/tier name found in the document (e.g. 'Lite', 'Plus', 'Standard', 'Premier', 'Comprehensive'). Otherwise empty string.",
         },
+        "quotation_reference": {
+            "type": "string",
+            "description": "Quotation reference number or quote number from the underwriter (e.g. 'MPA-25-49-00274660', 'QB413363-8-001', 'FL22026M-00747807-002', 'QJV26040103JHR'). Look for 'Quotation Ref', 'Quotation No', 'Quote No', 'No. Sebutharga', 'Ref No'. This is NOT the vehicle registration plate number.",
+        },
         "vehicle_no": {
             "type": "string",
             "description": "Vehicle registration / plate number (e.g. 'JUM2709', 'WYY1234', 'VAA8888').",
@@ -353,10 +357,9 @@ Extract structured quotation data from the provided insurance document with 100%
    Match detected benefits against the official library where applicable:
 {concepts_str}
 8. **BENEFIT PACKS / BUNDLED ADD-ON PLANS**:
-   - Detect purchased packs from the cost summary and selected-benefits table (e.g. 'DPA pack A -> 288.05 RM', 'Driver Protection Plan B', 'Key Replacement -> 43 RM').
-   - Only report packs that were actually purchased/selected (they carry a price or a selection marker). Never report unselected marketing options.
-   - Tolerate small wording variations in the description text and match the plan level (A/B/C/D) when present.
-   - Known packs and their plan levels:
+   - Detect purchased packs ONLY if an explicit purchased plan name AND explicit premium cost appear in the quotation's extra benefits or cost summary table (e.g. 'DPA pack A -> 288.05 RM', 'Driver Protection Plan B -> RM 120', 'Key Replacement -> 43 RM').
+   - NEVER report or infer a package if it is not purchased with an explicit price. Do NOT report marketing notices, generic headings, or standard policy names as packages. If no explicit purchased package is present, `detected_packs` MUST BE EMPTY `[]`.
+   - Known packs and their plan levels for reference:
 {packs_str}
 9. **EXCESS AMOUNT, VALIDITY & OPTIONAL COVER BREAKDOWN**:
    - Extract `excess_amount` if stated (e.g. 'Excess / Lebihan 0.00' -> '0.00', '*Excess Amount : RM 1,000.00' -> '1,000.00', 'Policy Excess: RM 500.00', 'Ekses Polisi'). Output '0.00' if excess is 0 or zero.

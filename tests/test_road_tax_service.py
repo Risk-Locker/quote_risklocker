@@ -112,3 +112,44 @@ def test_calculate_road_tax_corporate_motorcycle():
     assert calculate_road_tax(650, vehicle_type="Motorcycle", owner_type="Corporate") == 250.00
     assert calculate_road_tax(1000, vehicle_type="Motorcycle", owner_type="Corporate") == 350.00
 
+
+def test_calculate_road_tax_sabah_sarawak():
+    from app.services.road_tax_service import calculate_road_tax
+
+    # Private Car: 1998cc: 224 + (1998 - 1800) * 0.25 = 224 + 49.50 = 273.50
+    assert calculate_road_tax(1998, vehicle_type="Car", owner_type="Individual", jurisdiction="Sabah") == 273.50
+    assert calculate_road_tax(1998, vehicle_type="Car", owner_type="Individual", jurisdiction="Sarawak") == 273.50
+    # Private Car: 1496cc: flat 72.00
+    assert calculate_road_tax(1496, vehicle_type="Car", owner_type="Individual", jurisdiction="Sabah") == 72.00
+
+
+def test_calculate_road_tax_labuan():
+    from app.services.road_tax_service import calculate_road_tax
+
+    # Private Car: 1998cc: 140 + (1998 - 1800) * 0.25 = 140 + 49.50 = 189.50
+    assert calculate_road_tax(1998, vehicle_type="Car", owner_type="Individual", jurisdiction="Labuan") == 189.50
+    # Private Car: 1496cc: flat 45.00
+    assert calculate_road_tax(1496, vehicle_type="Car", owner_type="Individual", jurisdiction="Labuan") == 45.00
+
+
+def test_calculate_road_tax_commercial_lorry():
+    from app.services.road_tax_service import calculate_road_tax
+
+    assert calculate_road_tax(1500, vehicle_type="Lorry", owner_type="Company") == 120.00
+    assert calculate_road_tax(2200, vehicle_type="Lorry", owner_type="Company") == 240.00
+    assert calculate_road_tax(4500, vehicle_type="Lorry", owner_type="Company") == 480.00
+    assert calculate_road_tax(6000, vehicle_type="Lorry", owner_type="Company") == 720.00
+
+
+def test_calculate_breakdown():
+    from app.services.road_tax_service import calculate_breakdown
+
+    bd = calculate_breakdown(1998, vehicle_type="Car", owner_type="Individual", jurisdiction="West Malaysia")
+    assert bd["engine_cc"] == 1998
+    assert bd["base_rate"] == 280.00
+    assert bd["progressive_rate"] == 0.50
+    assert bd["excess_cc"] == 198
+    assert bd["progressive_amount"] == 99.00
+    assert bd["total_road_tax"] == 379.00
+
+

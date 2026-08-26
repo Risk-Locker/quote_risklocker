@@ -367,7 +367,7 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
     catalog = db.get(BenefitCatalog, catalog_rev.catalog_id) if catalog_rev else None
     veh_cat_id = _resolve_vehicle_category(db, "", draft.fields or {})
     mismatched = False
-    if catalog and veh_cat_id and catalog.vehicle_category_id and str(catalog.vehicle_category_id) != str(veh_cat_id):
+    if catalog and veh_cat_id and catalog.vehicle_category_id and catalog.vehicle_category_id != veh_cat_id:
         mismatched = True
 
     if mismatched or (not current_selections and (draft.company_id or session.detected_company)):
@@ -445,6 +445,12 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
     # Extract car model string safely
     raw_car_model = (draft.fields or {}).get("car_model")
     car_model_str = raw_car_model.get("value") if isinstance(raw_car_model, dict) else (raw_car_model or "")
+
+    if not draft.template_revision_id:
+        tmpl_rev = _template_for_draft(db, draft)
+        if tmpl_rev:
+            draft.template_revision_id = tmpl_rev.id
+            db.flush()
     
     return {
         "session_id": session.id,
@@ -561,12 +567,24 @@ def _workspace_extracted_benefits_section(
             continue
         seen_labels.add(norm_label.lower())
 
-        cost = str(line.get("premium_cost") or "")
-        cov_limit = str(line.get("coverage_limit") or "")
+        raw_cov_limit = line.get("coverage_limit")
+        cov_limit = ""
+        if isinstance(raw_cov_limit, str) and raw_cov_limit.strip():
+            cov_limit = raw_cov_limit.strip()
+        elif isinstance(raw_cov_limit, (int, float)):
+            cov_limit = f"{raw_cov_limit:,.2f}" if raw_cov_limit != int(raw_cov_limit) else f"{int(raw_cov_limit):,}"
+
+        raw_cost = line.get("premium_cost")
+        cost = ""
+        if isinstance(raw_cost, str) and raw_cost.strip():
+            cost = raw_cost.strip()
+        elif isinstance(raw_cost, (int, float)):
+            cost = f"{raw_cost:,.2f}" if raw_cost != int(raw_cost) else f"{int(raw_cost):,}"
+
         typed_val = line.get("extracted_value") or {}
         if not cost and isinstance(typed_val, dict) and typed_val.get("semantic_role") == "premium":
             cost = str(typed_val.get("value") or "")
-        if not cov_limit and isinstance(typed_val, dict) and typed_val.get("semantic_role") == "limit":
+        if not cov_limit and isinstance(typed_val, dict) and typed_val.get("semantic_role") in {"limit", "insured_limit"}:
             cov_limit = str(typed_val.get("value") or "")
 
         mappings = line.get("candidate_mappings") or []
@@ -586,7 +604,7 @@ def _workspace_extracted_benefits_section(
             "id": line.get("line_id") or f"ext_{idx}",
             "label": label,
             "raw_text": line.get("raw_text") or label,
-            "coverage_limit": cov_limit or (line.get("evidence") if not cost else ""),
+            "coverage_limit": cov_limit,
             "cost": cost,
             "is_optional_cover": is_optional,
             "concept_key": concept_key,
@@ -664,7 +682,8 @@ def _workspace_packs(db, draft: QuotationDraft) -> list[dict]:
                 offering = offerings.get(item.offering_id)
                 label = None
                 if offering:
-                    label = offering.label_override or (concepts.get(offering.concept_id).label if offering.concept_id in concepts else None)
+                    concept = concepts.get(offering.concept_id) if offering.concept_id else None
+                    label = offering.label_override or (concept.label if concept else None)
                 members.append({
                     "offering_id": item.offering_id,
                     "label": label or "Benefit",
@@ -1499,7 +1518,7 @@ def _apply_select_package_plan(db, draft: QuotationDraft, user, operation: dict)
             select(BenefitPackagePlan).where(BenefitPackagePlan.package_id == package.id)
         ).all()
     } - {str(plan.id)}
-    for sel in [s for s in selections if s.package_plan_id and str(s.package_plan_id) in sibling_plan_ids]:
+    for sel in [s for s in selections if s.package_plan_id and s.package_plan_id in sibling_plan_ids]:
         _drop_plan_selection(db, selections, sel, user)
     selections = _draft_selections_with_pending(db, draft.id)
 
@@ -1522,7 +1541,7 @@ def _apply_select_package_plan(db, draft: QuotationDraft, user, operation: dict)
             raise AppError("This benefit concept has conflicting current selections.", 409)
         if current:
             sel = current[0]
-            if sel.package_plan_id and str(sel.package_plan_id) == plan.id:
+            if sel.package_plan_id and sel.package_plan_id == plan.id:
                 continue
             if sel.typed_value_override is not None:
                 # Custom value already reviewed: keep it, adopt the card into the group.
@@ -1589,7 +1608,7 @@ def _apply_remove_package_plan(db, draft: QuotationDraft, user, operation: dict)
     if plan is None:
         raise AppError("Package plan not found.", 404)
     selections = _draft_selections_with_pending(db, draft.id)
-    for sel in [s for s in selections if s.package_plan_id and str(s.package_plan_id) == plan.id]:
+    for sel in [s for s in selections if s.package_plan_id and s.package_plan_id == plan.id]:
         _drop_plan_selection(db, selections, sel, user)
     return f"benefits.plan.{plan.id}"
 

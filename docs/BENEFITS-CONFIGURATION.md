@@ -112,3 +112,17 @@ The database is seeded idempotently via:
 python commands/seed-demo.py --apply
 ```
 This script handles the PostgreSQL immutable published revision lifecycle cleanly and provisions all dimensions, offerings, and bundle ladders.
+
+---
+
+## 4. Company Overview Matrix, Word/Excel Export & AI Seed Sync
+
+Located in `frontend/src/app/builder/benefits/page.tsx` via the **"Company Overview Matrix"** view switcher:
+
+- **Matrix Aggregation**: Backed by `backend/app/services/matrix_service.py:get_company_matrix_data`, plotting every scenario (Comprehensive, TPFT, TPO across Private, Company, Motorcycle, Commercial) with its included defaults (Cost: 0 RM), optional add-ons (base cost / rate), and bundled plan packages.
+- **Word (.docx) Export**: Available at `GET /business/companies/{id}/export-matrix?format=docx`. Emits a clean, landscape Word catalog with formatted 4-column tables matching the canonical underwriting Word catalogs (`fix/company/*.docx`).
+- **Excel (.xlsx) Export**: Available at `GET /business/companies/{id}/export-matrix?format=xlsx`. Emits a multi-sheet workbook (`Scenarios Overview` and `Detailed Offerings`) with auto-sized columns and dark header styling.
+- **AI Seed & Sync Protocol**:
+  - The matrix view provides copyable Markdown tables formatted for Claude / ChatGPT / Gemini.
+  - Non-destructive delta sync via `POST /business/companies/{id}/diff-matrix` allows AI agents to inspect incoming brochures and return only new/modified rows without re-seeding or overwriting existing catalogs.
+

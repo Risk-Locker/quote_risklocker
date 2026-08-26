@@ -17,6 +17,7 @@ DRAFT_FIELDS = [
     "customer_name",
     "issue_date",
     "valid_until",
+    "quotation_reference",
     "vehicle_no",
     "vehicle_class",
     "car_brand",
@@ -87,6 +88,7 @@ DEFAULT_ALIASES = {
     "engine_no": ["engine/motor no", "engine no", "motor no", "no. enjin"],
     "excess_amount": ["excess amount", "excess all claims", "excess", "policy excess", "ekses", "ekses polisi", "compulsory excess", "lebihan"],
     "valid_until": ["quotation validity", "tarikh sah quotation", "tarikh sah", "tempoh sah", "sah laku sehingga", "valid until", "validity period", "validity date", "validity", "this quotation will expire on", "quotation will expire on", "expire on", "expiry date", "tarikh luput", "sah sehingga"],
+    "quotation_reference": ["quotation ref no", "quotation ref", "quotation reference", "quotation no", "quote no", "quote ref", "no sebutharga", "no. sebutharga", "no sebut harga", "no. sebut harga", "nombor sebut harga", "ref no", "reference no", "no. quotation"],
     "coverage_amount": ["sum insured", "coverage amount", "insured value", "market value", "agreed value", "sum covered", "jumlah diinsuranskan", "nilai yang dipersetujui"],
     "sum_insured": ["sum insured", "coverage amount", "insured value", "market value", "agreed value", "sum covered", "jumlah diinsuranskan", "nilai yang dipersetujui", "nilai pasaran"],
     "market_value": ["market value", "nilai pasaran", "agreed value", "sum insured", "jumlah diinsuranskan"],
@@ -130,9 +132,13 @@ def _page_for_offset(page_text: list[dict], offset: int) -> int | None:
 def _add(results: dict[str, list[CandidateValue]], field: str, value: str | None, source: str, score: float, text: str, start: int, end: int, page_text: list[dict]) -> None:
     if value is None:
         return
-    cleaned = re.sub(r"\s+", " ", value).strip(" :;-")
+    cleaned = re.sub(r"\s+", " ", value).strip(" :;.-_/\\")
     if not cleaned:
         return
+    if field == "quotation_reference":
+        alpha_num = re.sub(r"[^A-Za-z0-9]", "", cleaned)
+        if len(alpha_num) < 4 or alpha_num.upper() in {"MOTOR", "INSURANCE", "QUOTATION", "TAKAFUL", "SCHEDULE", "POLICY", "PRIVATE"}:
+            return
     if field == "customer_name":
         upper_c = cleaned.upper()
         if any(bad in upper_c for bad in ["NAMA EJEN", "AGENT", "NO. AKAUN", "ACCOUNT NO", "RISKLOCKER", "BROKER", "AGENCY", "INSURANCE", "TAKAFUL", "SUM INSURED"]):
@@ -558,6 +564,21 @@ def _add_amgen_profile(text: str, page_text: list[dict], results: dict[str, list
             _add_static(results, "valid_until", v_match.group("date"), "profile_validity", 0.95, v_match.group(0), text, page_text)
             break
 
+    quotation_ref_patterns = [
+        r"(?:quotation\s+ref(?:erence)?\s*(?:no\.?)?|quote\s+(?:no|ref)\.?|no\.?\s*sebut\s*harga|no\.?\s*sebutharga)\s*[:.]?\s*(?P<ref>[A-Z0-9\-_/]{4,35})",
+        r"Quotation\s+No\.?\s*(?:\n\s*No\.?\s*Quotation\s*)?[:.]?\s*(?P<ref>[A-Z0-9\-_/]{4,35})",
+        r"Quotation\s+Ref\s+No\.(?P<ref>[A-Z0-9\-_/]{4,35})",
+        r"(?:Quotation|Quote|Ref)\s*#?\s*[:.]\s*(?P<ref>[A-Z0-9\-_/]{4,35})",
+    ]
+    for qr_pat in quotation_ref_patterns:
+        qr_match = re.search(qr_pat, text, re.IGNORECASE)
+        if qr_match:
+            ref_candidate = qr_match.group("ref").strip()
+            if ref_candidate.upper() not in {"MOTOR", "INSURANCE", "QUOTATION", "TAKAFUL", "SCHEDULE", "POLICY", "PRIVATE"}:
+                _add_static(results, "quotation_reference", ref_candidate, "profile_quotation_ref", 0.95, qr_match.group(0), text, page_text)
+                break
+
+
     vehicle = re.search(
         r"Make\s*&\s*Model\s+Year of make\s+Vehicle Sum Insured\s+Trailer Sum Insured\s+"
         r"(?P<model>[A-Z0-9 /&().+-]+?)\s+"
@@ -603,6 +624,14 @@ def _add_amgen_profile(text: str, page_text: list[dict], results: dict[str, list
         value = re.sub(r"\s+", " ", product.group(1)).strip()
         _add_static(results, "product_name", value, "profile_product", 0.94, product.group(0), text, page_text)
         _add_static(results, "coverage_type", value, "profile_product", 0.9, product.group(0), text, page_text)
+        tier_match = re.search(r"\b(Lite|Plus|Premier|Premium)\b", value, re.IGNORECASE)
+        if tier_match:
+            tier_val = tier_match.group(1).title()
+            if tier_val == "Premium":
+                tier_val = "Premier"
+            _add_static(results, "product_tier", tier_val, "profile_product", 0.95, product.group(0), text, page_text)
+            _add_static(results, "tier_name", tier_val, "profile_product", 0.95, product.group(0), text, page_text)
+            _add_static(results, "detected_package_name", f"Auto365 Comprehensive {tier_val}", "profile_product", 0.95, product.group(0), text, page_text)
 
     premium_window = re.search(r"Quotation Ref No\.[A-Z0-9-]+(?P<window>.+?)Service Tax\s+8%", text, re.IGNORECASE | re.DOTALL)
     if premium_window:

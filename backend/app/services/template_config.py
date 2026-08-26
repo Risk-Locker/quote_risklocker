@@ -70,6 +70,7 @@ REVIEW_GROUPS = [
 
 VARIABLES = [
     {"id": "customer_name", "label": "Customer Name", "type": "text", "source": "field", "field": "customer_name"},
+    {"id": "quotation_reference", "label": "Quotation Reference", "type": "text", "source": "field", "field": "quotation_reference"},
     {"id": "vehicle_no", "label": "Vehicle No", "type": "text", "source": "field", "field": "vehicle_no"},
     {"id": "insurance_company", "label": "Insurance Company", "type": "text", "source": "field", "field": "insurance_company"},
     {"id": "insurer_logo", "label": "Insurer Logo", "type": "image", "source": "manual"},

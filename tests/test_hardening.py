@@ -156,3 +156,20 @@ def test_quarantine_rejects_active_pdf_content(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="prohibited JavaScript"):
         with quarantined_pdf(dangerous, settings):
             pass
+
+
+def test_quarantine_accepts_benign_pdf_with_js_substring(monkeypatch, tmp_path):
+    import fitz
+    monkeypatch.setattr("app.services.document_security._defender_command", lambda _: None)
+    settings = SimpleNamespace(require_malware_scanner=False, max_pdf_pages=100)
+
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 50), "Portal URL: https://example.com/js/portal and /json endpoint")
+    pdf_bytes = doc.write()
+    doc.close()
+
+    with quarantined_pdf(pdf_bytes, settings) as (path, scan):
+        assert path.exists()
+        assert scan["structure"] == "clean"
+
