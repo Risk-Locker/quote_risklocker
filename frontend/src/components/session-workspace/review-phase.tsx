@@ -288,7 +288,7 @@ function IncludedCard({
   const pending = !selectionId || String(selectionId).startsWith("pending:");
 
   const handleMoveToAddon = () => {
-    if (selectionId) {
+    if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, state: "available_addon", cost_status: "paid" }, `benefits.${selectionId}.state`);
     } else if (card.offering_id) {
       onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid" }, `benefits.offer.${card.offering_id}`);
@@ -298,7 +298,7 @@ function IncludedCard({
   };
 
   const handleRemove = () => {
-    if (selectionId) {
+    if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, state: "removed" }, `benefits.${selectionId}.state`);
     } else if (card.offering_id) {
       onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "removed", cost_status: "included" }, `benefits.offer.${card.offering_id}`);
@@ -385,11 +385,12 @@ function AddonCard({
   onQueue: (operation: Record<string, unknown> & { op: string }, path: string) => void;
 }) {
   const selectionId = card.selection_id;
+  const pending = !selectionId || String(selectionId).startsWith("pending:");
 
   const handleMoveToDefault = () => {
     const priceVal = card.price || card.optional_price || null;
     const costStatus = priceVal ? "paid" : "included";
-    if (selectionId) {
+    if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, state: "current", cost_status: costStatus, ...(priceVal ? { price: priceVal } : {}) }, `benefits.${selectionId}.state`);
     } else if (card.offering_id) {
       onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: costStatus, ...(priceVal ? { price: priceVal } : {}) }, `benefits.offer.${card.offering_id}`);
@@ -399,7 +400,7 @@ function AddonCard({
   };
 
   const handleRemove = () => {
-    if (selectionId) {
+    if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, state: "removed" }, `benefits.${selectionId}.state`);
     } else if (card.offering_id) {
       onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "removed", cost_status: "paid" }, `benefits.offer.${card.offering_id}`);
@@ -1202,7 +1203,8 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     setRedoStack((prev) => [...prev, last]);
     if (last.op.selection_id) {
       queueOperation({ op: "revert_benefit", selection_id: last.op.selection_id }, last.path);
-    } else if (last.op.op === "create_custom_benefit") {
+    } else if (last.op.op === "create_custom_benefit" && (last.op as any).selection_key) {
+      // Undo a custom benefit by removing it via its selection_key (not a UUID selection_id)
       queueOperation({ op: "benefit_update", selection_id: (last.op as any).selection_key, state: "removed" }, last.path);
     } else {
       queueOperation({ op: "reset_benefits" }, "benefits");
@@ -1308,6 +1310,26 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     setLearnPrompt(null);
   }
 
+  const getExportCanvasTarget = (): { node: HTMLElement; pixelRatio: number } | null => {
+    const live = document.getElementById("rl-live-canvas-inner");
+    if (live) {
+      return { node: live, pixelRatio: 1.5 };
+    }
+    if (canvasExportRef.current) {
+      return { node: canvasExportRef.current, pixelRatio: 1.5 };
+    }
+    return null;
+  };
+
+  function triggerDownload(url: string, filename: string) {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
   async function handleCopyPng() {
     if (mutation.dirty) {
       try {
@@ -1317,28 +1339,47 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         return;
       }
     }
-    if (!canvasExportRef.current || !workspace) {
+    const target = getExportCanvasTarget();
+    if (!target || !workspace) {
       setActionError("Quotation template is still rendering. Please wait a moment.");
       return;
     }
     setCopyingPng(true);
     setActionError(null);
+
+    const renderBlobPromise = toBlob(target.node, {
+      cacheBust: false,
+      backgroundColor: "#ffffff",
+      pixelRatio: target.pixelRatio,
+      skipFonts: true,
+    }).then((blob) => {
+      if (!blob) throw new Error("Could not generate quotation PNG blob");
+      return blob;
+    });
+
     try {
-      const blob = await toBlob(canvasExportRef.current, {
-        cacheBust: true,
-        backgroundColor: "#ffffff",
-        pixelRatio: 2.5,
-      });
-      if (blob) {
+      if (typeof ClipboardItem !== "undefined" && navigator.clipboard && typeof navigator.clipboard.write === "function") {
         await navigator.clipboard.write([
-          new ClipboardItem({ "image/png": blob }),
+          new ClipboardItem({ "image/png": renderBlobPromise }),
         ]);
         setCopiedPng(true);
         setToastMessage("High-definition quotation PNG copied to clipboard!");
         setTimeout(() => setCopiedPng(false), 2500);
+        return;
       }
-    } catch {
-      setActionError("Could not copy PNG image to clipboard. Check browser permissions.");
+    } catch (clipboardErr) {
+      console.warn("Direct clipboard write failed, falling back to direct PNG download:", clipboardErr);
+    }
+
+    try {
+      const blob = await renderBlobPromise;
+      const url = URL.createObjectURL(blob);
+      triggerDownload(url, `quotation_${formValues.vehicle_no || id}.png`);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setToastMessage("Quotation PNG downloaded (clipboard was restricted by browser).");
+    } catch (err: unknown) {
+      console.error("[handleCopyPng error]", err);
+      setActionError("Could not export quotation PNG: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setCopyingPng(false);
     }
@@ -1353,73 +1394,156 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         return;
       }
     }
-    if (!canvasExportRef.current || !workspace) {
+    const target = getExportCanvasTarget();
+    if (!target || !workspace) {
       setActionError("Quotation template is still rendering. Please wait a moment.");
       return;
     }
     setDownloadingPng(true);
     setActionError(null);
     try {
-      const dataUrl = await toPng(canvasExportRef.current, {
-        cacheBust: true,
+      const blob = await toBlob(target.node, {
+        cacheBust: false,
         backgroundColor: "#ffffff",
-        pixelRatio: 2.5,
+        pixelRatio: target.pixelRatio,
+        skipFonts: true,
       });
-      const link = document.createElement("a");
-      link.href = dataUrl;
-      link.download = `quotation_${formValues.vehicle_no || id}.png`;
-      link.target = "_blank";
-      link.rel = "noreferrer";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      if (!blob) throw new Error("Could not create quotation image blob");
+      const url = URL.createObjectURL(blob);
+      triggerDownload(url, `quotation_${formValues.vehicle_no || id}.png`);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
       setToastMessage("High-definition quotation PNG downloaded!");
-    } catch {
-      setActionError("Could not generate PNG for download.");
+    } catch (err: unknown) {
+      console.error("[handleDownloadPng error]", err);
+      setActionError("Could not generate PNG for download: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setDownloadingPng(false);
     }
   }
 
   async function handleViewPdfInNewTab() {
+    const newTab = typeof window !== "undefined" ? window.open("about:blank", "_blank") : null;
+    if (newTab) {
+      try {
+        newTab.document.write(`
+          <!DOCTYPE html>
+          <html>
+            <head><title>Quotation Preview</title>
+              <style>
+                body { margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #475569; }
+                .loader { text-align: center; }
+                .spinner { width: 36px; height: 36px; border: 3px solid #e2e8f0; border-top-color: #0f172a; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+                @keyframes spin { to { transform: rotate(360deg); } }
+              </style>
+            </head>
+            <body>
+              <div class="loader">
+                <div class="spinner"></div>
+                <p style="font-weight: 600; font-size: 14px;">Preparing quotation preview...</p>
+              </div>
+            </body>
+          </html>
+        `);
+        newTab.document.close();
+      } catch {}
+    }
+
+    let currentRevision = workspace?.revision;
     if (mutation.dirty) {
       try {
-        await save();
+        const saved = await save();
+        currentRevision = saved.revision;
       } catch (err) {
+        if (newTab) newTab.close();
         setActionError("Please resolve errors before viewing PDF: " + apiErrorMessage(err));
         return;
       }
     }
-    if (!workspace) return;
+    if (!workspace || currentRevision == null) {
+      if (newTab) newTab.close();
+      return;
+    }
+
     setViewLoading(true);
     setActionError(null);
     try {
       const result = await api<{ preview_url: string }>(`/sessions/${id}/preview-render`, {
         method: "POST",
-        body: JSON.stringify({ draft_revision: workspace.revision }),
+        body: JSON.stringify({ draft_revision: currentRevision }),
       });
       const url = fileUrl(result.preview_url);
-      window.open(url, "_blank");
-      setToastMessage("Opening PDF in new tab...");
-    } catch (error) {
-      setActionError(apiErrorMessage(error));
+      if (newTab) {
+        newTab.location.href = url;
+      } else {
+        window.open(url, "_blank");
+      }
+      setToastMessage("Opened quotation preview in new tab.");
+    } catch (backendError) {
+      console.warn("Backend preview-render failed, rendering canvas directly into tab:", backendError);
+      const target = getExportCanvasTarget();
+      if (target && newTab) {
+        try {
+          const blob = await toBlob(target.node, { cacheBust: false, backgroundColor: "#ffffff", pixelRatio: target.pixelRatio, skipFonts: true });
+          if (blob) {
+            const blobUrl = URL.createObjectURL(blob);
+            newTab.document.open();
+            newTab.document.write(`
+              <!DOCTYPE html>
+              <html>
+                <head>
+                  <title>Quotation Preview - ${formValues.vehicle_no || id}</title>
+                  <style>
+                    body { margin: 0; padding: 20px; background: #525659; display: flex; flex-direction: column; align-items: center; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+                    .bar { position: sticky; top: 12px; z-index: 100; background: #1e293b; color: #fff; padding: 8px 16px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
+                    button { background: #3b82f6; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px; }
+                    button:hover { background: #2563eb; }
+                    img { max-width: 800px; width: 100%; height: auto; box-shadow: 0 4px 24px rgba(0,0,0,0.4); background: #fff; border-radius: 2px; }
+                    @media print {
+                      body { padding: 0; background: #fff; }
+                      .bar { display: none; }
+                      img { width: 100%; max-width: 100%; box-shadow: none; }
+                    }
+                  </style>
+                </head>
+                <body>
+                  <div class="bar">
+                    <span style="font-size: 13px; font-weight: 500;">Quotation Preview</span>
+                    <button onclick="window.print()">Print / Save as PDF</button>
+                  </div>
+                  <img src="${blobUrl}" />
+                </body>
+              </html>
+            `);
+            newTab.document.close();
+            setToastMessage("Rendered quotation preview in new tab.");
+            return;
+          }
+        } catch (canvasErr) {
+          console.error("Canvas preview fallback failed:", canvasErr);
+        }
+      }
+      if (newTab) newTab.close();
+      setActionError(apiErrorMessage(backendError));
     } finally {
       setViewLoading(false);
     }
   }
 
   async function handleDownloadPdf() {
+    let currentRevision = workspace?.revision;
     if (mutation.dirty) {
       try {
-        await save();
+        const saved = await save();
+        currentRevision = saved.revision;
       } catch (err) {
         setActionError("Please resolve errors before downloading PDF: " + apiErrorMessage(err));
         return;
       }
     }
-    if (!workspace) return;
+    if (!workspace || currentRevision == null) return;
     setPdfLoading(true);
     setActionError(null);
+
     try {
       const nonFatalBlockers = (workspace.generation_blockers || []).filter(
         (b) => b.code !== "scalar_check_needed" && b.code !== "missing_catalog"
@@ -1432,17 +1556,18 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         `/sessions/${id}/versions`,
         {
           method: "POST",
-          body: JSON.stringify({ draft_revision: workspace.revision }),
+          headers: { "Idempotency-Key": crypto.randomUUID() },
+          body: JSON.stringify({ draft_revision: currentRevision }),
         }
       );
 
+      let versionId = requested.version?.id;
       const jobId = requested.job?.id;
-      if (jobId) {
-        let completed = false;
-        for (let attempt = 0; attempt < 60; attempt += 1) {
-          const status = await api<{ job: { state: string; error?: { message?: string } } }>(`/jobs/${jobId}`);
+      if (!versionId && jobId) {
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          const status = await api<{ job: { state: string; result?: { version_id?: string }; error?: { message?: string } } }>(`/jobs/${jobId}`);
           if (status.job.state === "completed") {
-            completed = true;
+            versionId = status.job.result?.version_id;
             break;
           }
           if (status.job.state === "failed" || status.job.state === "cancelled") {
@@ -1452,26 +1577,61 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         }
       }
 
-      await reload();
-
-      const downloadUrl = requested.version?.id
-        ? fileUrl(`/versions/${requested.version.id}/pdf?download=true`)
-        : fileUrl(`/sessions/${id}/preview-render`);
-
-      const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.download = `quotation_${formValues.vehicle_no || id}.pdf`;
-      link.target = "_blank";
-      link.rel = "noreferrer";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setToastMessage("Official PDF download started!");
-    } catch (error) {
-      setActionError(apiErrorMessage(error));
-    } finally {
-      setPdfLoading(false);
+      if (versionId) {
+        await reload();
+        triggerDownload(fileUrl(`/versions/${versionId}/pdf?download=true`), `quotation_${formValues.vehicle_no || id}.pdf`);
+        setToastMessage("Official PDF download started!");
+        return;
+      }
+    } catch (backendError) {
+      console.warn("Backend PDF generation was unavailable or blocked; generating instant canvas PDF:", backendError);
     }
+
+    const target = getExportCanvasTarget();
+    if (target) {
+      try {
+        const blob = await toBlob(target.node, {
+          cacheBust: false,
+          backgroundColor: "#ffffff",
+          pixelRatio: target.pixelRatio,
+          skipFonts: true,
+        });
+        if (blob) {
+          const blobUrl = URL.createObjectURL(blob);
+          const printWindow = window.open("", "_blank");
+          if (printWindow) {
+            printWindow.document.write(`
+              <!DOCTYPE html>
+              <html>
+                <head>
+                  <title>quotation_${formValues.vehicle_no || id}.pdf</title>
+                  <style>
+                    @page { size: A4 portrait; margin: 0; }
+                    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #fff; }
+                    img { width: 100%; height: 100%; object-fit: contain; display: block; }
+                    @media print {
+                      body { margin: 0; }
+                      img { width: 100%; height: 100%; }
+                    }
+                  </style>
+                </head>
+                <body>
+                  <img src="${blobUrl}" onload="setTimeout(() => { window.print(); }, 250);" />
+                </body>
+              </html>
+            `);
+            printWindow.document.close();
+            setToastMessage("Opened high-resolution print window (select 'Save as PDF').");
+            return;
+          }
+        }
+      } catch (canvasErr) {
+        console.error("Canvas PDF fallback error:", canvasErr);
+      }
+    }
+
+    setActionError("Could not generate PDF. Please ensure the quotation template is rendered.");
+    setPdfLoading(false);
   }
 
   if (loading) return <PageLoading />;
@@ -2337,6 +2497,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                       }}
                     >
                       <div
+                        id="rl-live-canvas-inner"
                         style={{
                           width: previewTemplate.config.canvas?.width || 794,
                           height: previewTemplate.config.canvas?.height || 1123,

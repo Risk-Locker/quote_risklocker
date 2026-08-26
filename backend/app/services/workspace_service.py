@@ -1279,6 +1279,24 @@ def _draft_selections_with_pending(db, draft_id: str) -> list[DraftBenefitSelect
     return rows
 
 
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
+
+
+def _resolve_selection(db, draft: QuotationDraft, selection_id: str) -> DraftBenefitSelection | None:
+    """Resolve a selection by UUID pk or by selection_key (handles pending:catalog:* IDs)."""
+    if _UUID_RE.match(selection_id):
+        sel = db.get(DraftBenefitSelection, selection_id)
+        if sel and sel.draft_id == draft.id:
+            return sel
+        return None
+    # Non-UUID: strip 'pending:' prefix and look up by id or selection_key
+    lookup_key = selection_id.removeprefix("pending:")
+    for item in _draft_selections_with_pending(db, draft.id):
+        if item.id == selection_id or item.selection_key == selection_id or item.selection_key == lookup_key:
+            return item
+    return None
+
+
 def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: dict) -> str:
     offering_id = str(operation.get("offering_id") or "")
     offering = db.get(CatalogOffering, offering_id)
@@ -1348,8 +1366,8 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
 
 def _apply_benefit_update(db, draft: QuotationDraft, user, operation: dict) -> str:
     selection_id = str(operation.get("selection_id") or "")
-    selection = db.get(DraftBenefitSelection, selection_id)
-    if not selection or selection.draft_id != draft.id:
+    selection = _resolve_selection(db, draft, selection_id)
+    if not selection:
         raise AppError("Quotation benefit not found.", 404)
     if "state" in operation:
         try:
@@ -1395,8 +1413,8 @@ def _apply_benefit_update(db, draft: QuotationDraft, user, operation: dict) -> s
 
 def _apply_revert_benefit(db, draft: QuotationDraft, user, operation: dict) -> str:
     selection_id = str(operation.get("selection_id") or "")
-    selection = db.get(DraftBenefitSelection, selection_id)
-    if not selection or selection.draft_id != draft.id:
+    selection = _resolve_selection(db, draft, selection_id)
+    if not selection:
         raise AppError("Quotation benefit not found.", 404)
     predecessors = [
         item for item in _draft_selections_with_pending(db, draft.id)

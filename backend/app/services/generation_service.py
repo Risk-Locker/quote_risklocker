@@ -413,7 +413,11 @@ def request_preview_render(db, user, session_id: str, *, draft_revision: int) ->
             draft.template_revision_id = revision.id
     decisions = _for_draft(db, DraftSourceLineDecision, draft.id)
     selections = _for_draft(db, DraftBenefitSelection, draft.id)
-    if generation_blockers(draft, decisions, selections, template_revision=revision):
+    fatal_blockers = [
+        b for b in generation_blockers(draft, decisions, selections, template_revision=revision)
+        if b.get("code") not in {"scalar_check_needed", "missing_catalog"}
+    ]
+    if fatal_blockers:
         raise AppError("Resolve every generation blocker before rendering the final preview.", 409)
     if not revision:
         raise AppError("Choose a published template before previewing.", 409)

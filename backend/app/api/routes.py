@@ -838,16 +838,18 @@ def session_generate_version(
     session_id: str,
     payload: VersionGenerationRequest,
     response: FastAPIResponse,
-    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
+    from app.models.tables import new_id
+    resolved_key = idempotency_key or new_id()
     result = request_version_generation(
         db,
         user,
         session_id,
         draft_revision=payload.draft_revision,
-        idempotency_key=idempotency_key,
+        idempotency_key=resolved_key,
     )
     version = result.get("version")
     if version is not None:

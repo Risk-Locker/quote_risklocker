@@ -64,7 +64,8 @@ def test_final_step_generation_requires_exact_revision_and_key_and_returns_202(m
     assert response.status_code == 202
     assert response.json()["job"]["id"] == "job-1"
     assert called == {"user": "staff-1", "session_id": "session-1", "draft_revision": 7, "idempotency_key": "gen-1"}
-    assert client().post("/api/sessions/session-1/versions", json={"draft_revision": 7}).status_code == 422
+    # Omitting Idempotency-Key is now tolerated — backend auto-generates one
+    assert client().post("/api/sessions/session-1/versions", json={"draft_revision": 7}).status_code == 202
 
 
 def test_idempotent_completed_request_returns_existing_version_without_new_job(monkeypatch):

@@ -551,3 +551,62 @@ def test_date_edits_store_date_only_and_ncd_stores_percentage_number():
     draft = db.get(QuotationDraft, "draft-1")
     assert draft.fields["issue_date"]["value"] == "2026-01-25"
     assert draft.fields["ncd_percent"]["value"] == "25"
+
+
+def test_pending_catalog_id_resolves_via_selection_key_instead_of_crashing():
+    """P0 regression: pending:catalog:* must resolve by selection_key, not crash on UUID cast."""
+    values = list(objects())
+    draft = next(item for item in values if isinstance(item, QuotationDraft))
+    draft.catalog_revision_id = "catalog-revision-1"
+    selection = DraftBenefitSelection(
+        id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        draft_id=draft.id,
+        selection_key="catalog:4d122011-plus-bundle-flood-relief-allowance-1",
+        item_kind="catalog",
+        state="current",
+        cost_status="included",
+        evidence_snapshot={},
+        sort_order=0,
+    )
+    values.append(selection)
+    db = FakeDb(values)
+
+    # Simulate what the frontend sends: pending:catalog:<offering_key>
+    apply_workspace_patch(db, user(), draft.id, base_revision=3, operations=[
+        {"op": "benefit_update", "selection_id": "pending:catalog:4d122011-plus-bundle-flood-relief-allowance-1", "state": "removed"},
+    ])
+    assert selection.state == "removed"
+
+
+def test_completely_invalid_selection_id_returns_404():
+    """Non-UUID, non-pending junk selection_id must produce a clean 404, not a 500."""
+    db = FakeDb(objects())
+    with pytest.raises(AppError, match="not found") as exc_info:
+        apply_workspace_patch(db, user(), "draft-1", base_revision=3, operations=[
+            {"op": "benefit_update", "selection_id": "definitely-not-a-uuid-or-key", "state": "removed"},
+        ])
+    assert exc_info.value.status_code == 404
+
+
+def test_revert_benefit_with_pending_key_resolves_by_selection_key():
+    """revert_benefit with a non-UUID key must also resolve via selection_key."""
+    values = list(objects())
+    draft = next(item for item in values if isinstance(item, QuotationDraft))
+    selection = DraftBenefitSelection(
+        id="11111111-2222-3333-4444-555555555555",
+        draft_id=draft.id,
+        selection_key="catalog:some-offering-key",
+        item_kind="catalog",
+        state="current",
+        cost_status="paid",
+        evidence_snapshot={},
+        sort_order=0,
+    )
+    values.append(selection)
+    db = FakeDb(values)
+
+    apply_workspace_patch(db, user(), draft.id, base_revision=3, operations=[
+        {"op": "revert_benefit", "selection_id": "pending:catalog:some-offering-key"},
+    ])
+    assert selection.state == "removed"
+

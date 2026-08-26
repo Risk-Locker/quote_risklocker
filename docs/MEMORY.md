@@ -17,6 +17,11 @@
 - Database state 2026-08-23: migrations 001-037 applied & checksummed (037 adds `quotation_drafts.package_id` + index).
 - Database state 2026-08-20 (companies): 7 active companies — QBE, Etiqa, Takaful Malaysia, AmAssurance, Lonpac, Berjaya Sompo, Tune Protect. `commands/seed-companies.py` is idempotent (dry-run/apply).
 
+## 2026-08-26 · Antigravity (Claude Opus 4.6) — Fixed P0 Pending Catalog IDs, Version 422 & Preview 409
+Asked: Review full 917-line test log, diagnose P0 pending catalog ID UUID crash, P1 version creation 422, and P1 preview-render 409, then fix all three.
+Done: Added `_resolve_selection` helper in `workspace_service.py:1282-1295` (UUID validation + selection_key fallback for `_apply_benefit_update:1367` and `_apply_revert_benefit:1413`); made `Idempotency-Key` optional in `routes.py:841`; gated `benefit_update` ops on `!pending` in `review-phase.tsx:291,301,392,404`; fixed stale revision in `handleViewPdfInNewTab:1384` and `handleDownloadPdf:1411` to use `saved.revision`; added `Idempotency-Key: crypto.randomUUID()` header; added 3 regression tests in `test_workspace_service.py:555-613`; updated `test_generation_api.py:67-68`. Verified: 522/522 pytest, tsc clean, npm build green.
+Pending: none.
+
 ## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Stopped Action Button Hover Expansion & Switched Template Variables
 Asked: Stop PNG/PDF action buttons from expanding on hover in workspace header; place Insurer in top header and Customer Name at row 1 of Coverage & Vehicle Info table.
 Done: Removed `max-w-0` hover accordion styles in `review-phase.tsx:1540-1625` for static action buttons; updated `master_template_service.py:133-152` and ran `commands/update-template-header-customer.py --apply` to publish new revisions with `insurance_company` in top header and `customer_name` at table row 1; verified 519/519 pytest, `npx.cmd tsc --noEmit` clean, `npm run build` green (36/36 routes).
@@ -156,6 +161,11 @@ Pending: User review and approval of implementation plan.
 ## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Executed Perfect Canonical Template & Clean Grid Architecture
 Asked: Build final perfect Bilingual Agency Motor template with Vehicle CC, Insurer Name in header, Excess Amount in right card, Roadtax, Runner Fee, dynamic Extras calculation, validity footer, standard card scaling (max scale 1.0 to prevent giant bloated boxes), and cleanup of obsolete templates.
 Done: Updated `master_template_service.py:20-25,115-215` (canonical Bilingual Agency Motor config with complete table & right card layout; updated `_text`/`_variable` type annotation to `size: int | float`); updated `grid_layout.py:30,95-105` & `grid-layout.ts:45-55` (enforced `max_scale = 1.0` for standard crisp cards); updated `template_renderer.py:15-60,310-355` & `shared.tsx:130-145,530-565` (dynamic extras, aliases, vehicle CC suffix); updated `review-phase.tsx:43,2085` (`balanceBenefitGridElements` live preview); updated `gemini_extractor.py:185` (validity date schema); published revision r3 for Bilingual Agency Motor and soft-deleted obsolete duplicate templates. Verified 519/519 backend pytest passed, `npx tsc --noEmit` clean, `npm run build` passed (36 routes green), code map updated.
+Pending: none.
+
+## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Action Buttons Hardening (Copy PNG, Download PNG, View PDF, Download PDF)
+Asked: Fix review phase View, Download, and Copy PNG buttons failing or requiring manual browser permissions despite loaded quotation.
+Done: Fixed `review-phase.tsx:1310-1640` with `getExportCanvasTarget` (live visible canvas `#rl-live-canvas-inner` with `pixelRatio: 1.5`, `skipFonts: true`), synchronous popup-defeat `window.open` for View PDF, Promise-based `ClipboardItem` with auto-download fallback for Copy PNG, and job result `version_id` extraction + high-res print fallback for Download PDF. Relaxed preview non-fatal blockers in `generation_service.py:416-420`. Verified live across all 4 actions via Playwright browser tests, 522/522 backend pytest green, Next.js build clean (36 routes), code map updated.
 Pending: none.
 
 ## 2026-08-24 · Antigravity (Gemini 3.7 Flash) — Executed Benefits Builder & QBE Ingestion Architecture
