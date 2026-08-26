@@ -383,6 +383,25 @@ function BenefitsPageContent() {
     [activeTemplate]
   );
 
+  const previewTemplateAssets = useMemo(() => {
+    if (!activeTemplate?.fixed_fields) return [];
+    const list: Array<{ id: string; label: string; url: string }> = Object.entries(activeTemplate.fixed_fields.assets || {}).map(([key, id]) => ({
+      id,
+      label: key,
+      url: id.includes("-") ? `/business/assets/${id}/content?profile=ui` : `/template-assets/${id}`,
+    }));
+    for (const el of activeTemplate.fixed_fields.canvas?.elements || []) {
+      if (el.assetId && !list.some((a) => a.id === el.assetId)) {
+        list.push({
+          id: el.assetId,
+          label: el.name || "Asset",
+          url: el.assetId.includes("-") ? `/business/assets/${el.assetId}/content?profile=ui` : `/template-assets/${el.assetId}`,
+        });
+      }
+    }
+    return list;
+  }, [activeTemplate]);
+
   // ── 3. Effects ─────────────────────────────────────────────────────────
   useEffect(() => {
     mountedRef.current = true;
@@ -1583,11 +1602,7 @@ function BenefitsPageContent() {
                               variableValues={{}}
                               benefitData={previewBenefitData}
                               conceptAssets={previewConceptAssets}
-                              assets={Object.entries(activeTemplate?.fixed_fields?.assets || {}).map(([key, id]) => ({
-                                id,
-                                label: key,
-                                url: `/template-assets/${id}`,
-                              }))}
+                              assets={previewTemplateAssets}
                             />
                           ))}
                         </div>

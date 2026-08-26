@@ -215,7 +215,7 @@ def _image_html(
     if resolved_assets is not None:
         src = resolved_assets.get(asset_id, "")
     else:
-        src = asset_data_uri(None, asset_id)
+        src = asset_data_uri(db, asset_id)
     if not src:
         # Preserve the authored geometry when an optional or legacy image is
         # unavailable. A broken-image glyph must never leak into a customer PDF.

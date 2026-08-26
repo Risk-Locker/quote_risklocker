@@ -42,9 +42,9 @@ def check_gemini_api(settings: Settings) -> tuple[str, str]:
     if not keys:
         return "Needs Setup", "No GEMINI_API_KEY set in .env (offline regex fallback active)."
 
-    model = settings.gemini_model or "gemini-3.6-flash"
-    if model in {"gemini-2.0-flash", "gemini-2.5-flash"}:
-        model = "gemini-3.6-flash"
+    model = settings.gemini_model or "gemini-3.5-flash"
+    if model in {"gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-flash-lite"}:
+        model = "gemini-3.5-flash"
     count = len(keys)
     masked = [f"{k[:6]}...{k[-4:]}" if len(k) > 10 else "***" for k in keys]
     pool_desc = f"{count} key{'s' if count > 1 else ''} in pool ({', '.join(masked)})"

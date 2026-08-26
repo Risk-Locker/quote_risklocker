@@ -386,9 +386,9 @@ def extract_with_gemini_sync(
         return None
 
     settings = get_settings()
-    model = settings.gemini_model or "gemini-3.6-flash"
-    if model in {"gemini-2.0-flash", "gemini-2.5-flash"}:
-        model = "gemini-3.6-flash"
+    model = settings.gemini_model or "gemini-3.5-flash"
+    if model in {"gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-flash-lite"}:
+        model = "gemini-3.5-flash"
     system_prompt = build_rag_system_prompt(db_companies, db_benefit_concepts, db_aliases, db_packs, prompt_override)
 
     if document_text and len(document_text.strip()) > 30:
@@ -429,10 +429,12 @@ def extract_with_gemini_sync(
     }
 
     candidate_models = [
-        "gemini-3.6-flash",
+        model,
         "gemini-3.5-flash",
         "gemini-3.7-flash",
-        model,
+        "gemini-3.5-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3-flash-preview",
     ]
     seen_models: set[str] = set()
     models_to_try = [m for m in candidate_models if m and not (m in seen_models or seen_models.add(m))]
@@ -464,8 +466,9 @@ def extract_with_gemini_sync(
                                 logger.info("Gemini AI extraction succeeded with %s on attempt %d.", m_name, attempt + 1)
                                 return parsed
                     elif response.status_code == 429:
-                        logger.warning("Gemini key rate-limited (429) on %s, rotating to next key...", m_name)
-                        break
+                        logger.warning("Gemini model %s returned rate-limit (429), trying next candidate model...", m_name)
+                        failed_models.add(m_name)
+                        continue
                     elif response.status_code == 404:
                         logger.warning("Gemini model %s returned 404 (unavailable), skipping permanently...", m_name)
                         failed_models.add(m_name)

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.models.enums import AccountStatus
-from app.models.tables import TemplateAsset, User
+from app.models.tables import BusinessAsset, TemplateAsset, User
 from app.storage.supabase import SupabaseStorage
 
 
@@ -165,6 +165,16 @@ def resolve_template_asset(db: Session | None, asset_id: str) -> Path | bytes:
             try:
                 settings = get_settings()
                 return SupabaseStorage(settings).download_bytes(record.storage_path)
+            except Exception as exc:
+                raise FileNotFoundError(asset_id) from exc
+
+        business = db.get(BusinessAsset, asset_id)
+        if business and business.status in {"active", "unassigned"}:
+            try:
+                settings = get_settings()
+                item = (business.derivative_manifest or {}).get("ui") or {}
+                storage_path = str(item.get("storage_path") or business.storage_path)
+                return SupabaseStorage(settings).download_bytes(storage_path)
             except Exception as exc:
                 raise FileNotFoundError(asset_id) from exc
 

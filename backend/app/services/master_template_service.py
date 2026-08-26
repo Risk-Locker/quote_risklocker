@@ -130,9 +130,9 @@ def _agency_bilingual_config() -> dict:
         # 1. Page Background
         _rectangle("page_bg", 0, 0, 794, height, 1, background="#FFFFFF", border=""),
 
-        # 2. Header: Logos, Insurer Name, Quotation Ref, and Top Divider
+        # 2. Header: Logos, Customer Name, Quotation Ref, and Top Divider
         _image("risklocker_logo", "risklocker_logo", 40, 32, 150, 42, 5),
-        _variable("header_insurer_name", "insurance_company", 210, 36, 230, 34, 5, size=16, weight="800", color=DARK, align="left"),
+        _variable("header_customer_name", "customer_name", 210, 36, 260, 34, 5, size=16, weight="800", color=DARK, align="left"),
         _text("ref_label", "Quotation Ref: ", 480, 42, 130, 18, 5, size=11, weight="500", color=MUTED_COLOR, align="right"),
         _variable("ref_val", "vehicle_no", 614, 42, 140, 18, 5, size=11, weight="700", color=MUTED_COLOR, align="left"),
         _line("header_rule", 40, 82, 714, 2, color=BORDER_COLOR, height=1),

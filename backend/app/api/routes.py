@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, Response as FastAPIResponse, UploadFile, status
@@ -796,7 +797,7 @@ def session_extract_gemini(
         "success": True,
         "message": f"Gemini AI extracted {len(fields)} fields successfully.",
         "quota": {
-            "model": getattr(settings, "gemini_model", "gemini-3.6-flash") or "gemini-3.6-flash",
+            "model": getattr(settings, "gemini_model", "gemini-3.5-flash") or "gemini-3.5-flash",
             "keys_count": stats["keys_count"],
             "rpm_limit": stats["rpm_limit"],
             "rpm_used": stats["rpm_used"],
@@ -2202,7 +2203,7 @@ def settings_limits(
         "max_source_pdf_bytes": settings.max_source_pdf_bytes,
         "gemini": {
             "active": bool(count > 0),
-            "model": getattr(settings, "gemini_model", "gemini-3.6-flash") or "gemini-3.6-flash",
+            "model": getattr(settings, "gemini_model", "gemini-3.5-flash") or "gemini-3.5-flash",
             "key_count": count,
             "rpm_limit": stats["rpm_limit"],
             "rpm_used": stats["rpm_used"],
@@ -2274,7 +2275,7 @@ def settings_ai_context(
     return {
         "gemini": {
             "active": quota["keys_count"] > 0,
-            "model": getattr(settings, "gemini_model", "gemini-3.6-flash") or "gemini-3.6-flash",
+            "model": getattr(settings, "gemini_model", "gemini-3.5-flash") or "gemini-3.5-flash",
             "key_count": quota["keys_count"],
             "rpm_limit": quota["rpm_limit"],
             "rpm_used": quota["rpm_used"],

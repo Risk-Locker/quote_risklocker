@@ -867,7 +867,7 @@ def template_selection_impact(
     """Preview the deterministic effects of pinning another master revision."""
     _session, draft = _session_and_draft(db, user, session_id)
     target = db.get(TemplateRevision, template_revision_id)
-    if target is None or target.state != "published":
+    if target is None or target.state not in {"published", "compatibility"}:
         raise AppError("Choose a published template revision.", 422)
     changed = draft.template_revision_id != target.id
     resets_layout = changed and any((

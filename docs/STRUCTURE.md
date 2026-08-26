@@ -48,6 +48,7 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Rendering: group borders + corner badge in `backend/app/rendering/template_renderer.py`; new `premium-info-block` element type; extras/adjusted-total helpers in `backend/app/rendering/render_context.py`.
 - Frontend: plan manager in `frontend/src/app/builder/benefits/page.tsx` (Bundles tab); pack selector + tier switcher (`pinPackageTier` via `select_package_tier`) + custom-addon price in `frontend/src/components/session-workspace/review-phase.tsx`; group border + premium block in `frontend/src/components/template-canvas/shared.tsx`.
 - Data repair command: `commands/repin-amassurance-sessions.py` (idempotent, dry-run default, `--apply`) — re-pins drafts with stale revisions or missing `package_id` to the latest published revision (e.g. rev 3) and re-seeds tier defaults.
+- Template update command: `commands/update-template-header-customer.py` (idempotent, dry-run default, `--apply`) — updates existing template revisions to replace the top header insurer name variable with `customer_name` and publishes clean revisions.
 
 ## Benefit Configuration Matrix
 

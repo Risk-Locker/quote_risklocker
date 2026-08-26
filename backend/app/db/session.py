@@ -9,6 +9,7 @@ from pathlib import Path
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 
@@ -26,11 +27,7 @@ def _sqlalchemy_url(database_url: str) -> str:
 
 engine = create_engine(
     _sqlalchemy_url(settings.database_url),
-    pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=5,
-    pool_timeout=30,
-    pool_recycle=60,
+    poolclass=NullPool,
     connect_args={
         "keepalives": 1,
         "keepalives_idle": 30,

@@ -706,7 +706,7 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                 decision.selection_id = selection_id
                 continue
         if decision.disposition == "unresolved":
-            decision.disposition = "source_only" if selected else "omitted"
+            decision.disposition = "source_only"
 
     # Apply confidently detected benefit packs (bundled add-on plans).
     detected_packs = (extraction.candidates or {}).get("detected_packs") or []

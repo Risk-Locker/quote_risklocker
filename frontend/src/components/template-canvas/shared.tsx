@@ -179,26 +179,28 @@ export function formatVariableValue(value: string | null, prefix = "", suffix = 
   }
 
   if (prefix) {
+    const formattedStr = String(formatted);
     if (prefix.trim().toUpperCase() === "RM" || prefix.trim().toUpperCase() === "RM ") {
-      if (!formatted.toUpperCase().startsWith("RM")) {
+      if (!formattedStr.toUpperCase().startsWith("RM")) {
         const space = prefix.endsWith(" ") ? " " : " ";
-        formatted = `RM${space}${formatted}`;
+        formatted = `RM${space}${formattedStr}`;
       }
-    } else if (!formatted.startsWith(prefix)) {
-      formatted = `${prefix}${formatted}`;
+    } else if (!formattedStr.startsWith(prefix)) {
+      formatted = `${prefix}${formattedStr}`;
     }
   }
   if (suffix) {
+    const formattedStr = String(formatted);
     if (suffix.trim() === "%") {
-      if (!formatted.endsWith("%")) {
-        formatted = `${formatted}${suffix}`;
+      if (!formattedStr.endsWith("%")) {
+        formatted = `${formattedStr}${suffix}`;
       }
     } else if (suffix.trim().toLowerCase() === "cc") {
-      if (!formatted.toLowerCase().endsWith("cc")) {
-        formatted = `${formatted}${suffix}`;
+      if (!formattedStr.toLowerCase().endsWith("cc")) {
+        formatted = `${formattedStr}${suffix}`;
       }
-    } else if (!formatted.endsWith(suffix)) {
-      formatted = `${formatted}${suffix}`;
+    } else if (!formattedStr.endsWith(suffix)) {
+      formatted = `${formattedStr}${suffix}`;
     }
   }
   return formatted;
@@ -298,6 +300,13 @@ export function CanvasElementView({
   if (element.type === "layer-group" || element.visible === false) return null;
   const assetId = element.assetId || (element.assetSlot ? config?.assets?.[element.assetSlot] : "");
   const asset = assets.find((item) => item.id === assetId);
+  const resolvedUrl = asset?.url || (assetId ? (
+    typeof assetId === "string" && (assetId.startsWith("http://") || assetId.startsWith("https://") || assetId.startsWith("/") || assetId.startsWith("data:"))
+      ? assetId
+      : String(assetId).includes("-")
+        ? `/business/assets/${assetId}/content?profile=ui`
+        : `/template-assets/${assetId}`
+  ) : "");
   const isSpecial = element.type === "special";
   const isLine = element.type === "line";
   const style = element.style || {};
@@ -389,8 +398,8 @@ export function CanvasElementView({
       aria-label={readOnly ? undefined : element.name || `${element.type} layer`}
     >
       {element.type === "image" ? (
-        asset ? (
-          <img className="h-full w-full object-contain" src={fileUrl(asset.url)} alt="" />
+        resolvedUrl ? (
+          <img className="h-full w-full object-contain" src={fileUrl(resolvedUrl)} alt="" />
         ) : element.assetSlot ? (
           <div className="flex h-full w-full items-center justify-center rounded border border-dashed border-gray-200 bg-gray-50/60 p-1 text-center font-bold text-gray-500 text-[10px]">
             {element.assetSlot === "risklocker_logo" ? (
@@ -531,7 +540,7 @@ export function CanvasElementView({
                   const price = b?.price?.amount
                     ? `RM ${Number(b.price.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
                     : b?.is_detected && b?.detected_cost
-                      ? (b.detected_cost.startsWith("RM") ? b.detected_cost : `RM ${b.detected_cost}`)
+                      ? (String(b.detected_cost).startsWith("RM") ? String(b.detected_cost) : `RM ${b.detected_cost}`)
                       : null;
 
                   return (

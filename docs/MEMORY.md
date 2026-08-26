@@ -17,6 +17,31 @@
 - Database state 2026-08-23: migrations 001-037 applied & checksummed (037 adds `quotation_drafts.package_id` + index).
 - Database state 2026-08-20 (companies): 7 active companies — QBE, Etiqa, Takaful Malaysia, AmAssurance, Lonpac, Berjaya Sompo, Tune Protect. `commands/seed-companies.py` is idempotent (dry-run/apply).
 
+## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Replaced Top Header Insurer Name with Customer Name
+Asked: Replace the top header Insurer variable with the extracted customer name while preserving the top insurer logo and coverage table rows.
+Done: Updated `master_template_service.py:133-138` to define `header_customer_name` (`customer_name`); created `commands/update-template-header-customer.py` and published new revisions for database templates; verified 519/519 backend pytest passed, `npx.cmd tsc --noEmit` clean, `npm run build` green (36/36 routes).
+Pending: none.
+
+## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Fixed Frontend startsWith TypeError on Numeric Cost/Limit
+Asked: Fix browser console crash "Uncaught TypeError: r.startsWith is not a function" when opening the session workspace.
+Done: Added `String(...)` string coercion to `extra.coverage_limit` and `extra.cost` in `review-phase.tsx:2150-2165` and `b.detected_cost` / `assetId` in `shared.tsx:300-305,538-542` to safely format numeric values without crashing. Verified `npx.cmd tsc --noEmit` clean, `npm run build` green (36/36 routes).
+Pending: none.
+
+## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Resolved Extraction Crash, Worker Retry Loop & Gemini 429 Rate Limits
+Asked: Debug upload repeating 20-26 times, progress hitting 75% then dropping to 0%, Gemini 429 rate limit errors, and session re-extract failures.
+Done: Fixed `NameError: name 'selected' is not defined` in `catalog_review_service.py:709` which caused worker rollback and 3x retry cycles; fixed missing `import re` in `routes.py:6` on `/extract-gemini`; updated candidate model list and 429 fallback handling in `gemini_extractor.py:388-485` and `config.py:65,298` to use active `gemini-3.5-flash` with graceful fallback across `gemini-3.7-flash`, `gemini-3.5-flash-lite`, and `gemini-3-flash-preview`. Verified 519/519 backend pytest passed, `npx.cmd tsc --noEmit` clean, code map current.
+Pending: none.
+
+## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Resolved Workspace 500 & 409 Template Selection Impact
+Asked: Fix session workspace 500 error, template selection impact 409 conflict, and draft patch 409 errors.
+Done: Switched backend engine to `NullPool` in `session.py:27-38` to prevent Supabase pooler SSL socket reuse drops; allowed compatibility revisions in `workspace_service.py:870`; removed redundant parallel `template-selection-impact` call in `review-phase.tsx:775-810`. Verified 519/519 pytest passed, `npx.cmd tsc --noEmit` clean, `npm run build` green (36/36 routes).
+Pending: none.
+
+## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Fixed Template Image Asset Resolution & Canvas Fallback
+Asked: Diagnose why manually updated template image assets render dashed placeholder ("flex h-full w-full items-center justify-center rounded border border-dashed border-gray-200 bg-gray-50/60...").
+Done: Added `BusinessAsset` resolution in `template_assets.py:165-180` and `template_renderer.py:218`; added direct `resolvedUrl` fallback in `shared.tsx:300-310,390-405`; passed full template element asset list in `review-phase.tsx:940-955,2330,2950` and `builder/benefits/page.tsx:385-400,1585`. Verified 519/519 backend pytest passed, `npm run build` green (36/36 routes).
+Pending: none.
+
 ## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Initialized v9 Branch & Synced v8 / main
 Asked: Commit and push all work to origin/v8 and origin/main, then branch origin/v9 with MEMORY.md first commit.
 Done: Committed and pushed changes to `origin/v8` and `origin/main` (commit `20367f0`); created and checked out `v9` branch; updated `MEMORY.md` snapshot and logbook; pushed `origin/v9`.

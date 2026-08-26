@@ -285,7 +285,7 @@ function IncludedCard({
   onQueue: (operation: Record<string, unknown> & { op: string }, path: string) => void;
 }) {
   const selectionId = selection && typeof selection === "object" && "id" in selection ? String(selection.id) : (card.selection_id || null);
-  const pending = !selectionId || selectionId.startsWith("pending:");
+  const pending = !selectionId || String(selectionId).startsWith("pending:");
 
   const handleMoveToAddon = () => {
     if (selectionId) {
@@ -773,6 +773,26 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     return () => { cancelled = true; };
   }, [id, workspace?.pinned.template_revision_id]);
 
+  async function selectTemplate(templateRevisionId: string) {
+    setTemplateError(null);
+    if (!templateRevisionId || templateRevisionId === workspace?.pinned.template_revision_id) return;
+    const option = publishedTemplates.find((item) => item.template_revision_id === templateRevisionId);
+    if (!option) return;
+    try {
+      const res = await api<{ impact: TemplateSelectionImpact }>(`/sessions/${id}/template-selection-impact`, {
+        method: "POST",
+        body: JSON.stringify({ base_revision: workspace?.revision || 1, template_revision_id: option.template_revision_id }),
+      });
+      if (res.impact.requires_confirmation) {
+        setTemplateImpact(res.impact);
+      } else {
+        await selectTemplateDirectly(templateRevisionId);
+      }
+    } catch {
+      await selectTemplateDirectly(templateRevisionId);
+    }
+  }
+
   async function selectTemplateDirectly(templateRevisionId: string, customList?: PublishedTemplateOption[]) {
     setTemplateError(null);
     setTemplateImpact(null);
@@ -794,14 +814,6 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       });
     }
     if (templateRevisionId === workspace?.pinned.template_revision_id) return;
-    try {
-      await api<{ impact: TemplateSelectionImpact }>(`/sessions/${id}/template-selection-impact`, {
-        method: "POST",
-        body: JSON.stringify({ base_revision: workspace?.revision || 1, template_revision_id: option.template_revision_id }),
-      });
-    } catch {
-      // Best effort
-    }
     queueOperation({
       op: "template_selection",
       template_revision_id: option.template_revision_id,
@@ -937,6 +949,25 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     }
     return map;
   }, [globalConcepts]);
+
+  const previewTemplateAssets = useMemo(() => {
+    if (!previewTemplate?.config) return [];
+    const list: Array<{ id: string; label: string; url: string }> = Object.entries(previewTemplate.config.assets || {}).map(([key, id]) => ({
+      id,
+      label: key,
+      url: id.includes("-") ? `/business/assets/${id}/content?profile=ui` : `/template-assets/${id}`,
+    }));
+    for (const el of previewTemplate.config.canvas?.elements || []) {
+      if (el.assetId && !list.some((a) => a.id === el.assetId)) {
+        list.push({
+          id: el.assetId,
+          label: el.name || "Asset",
+          url: el.assetId.includes("-") ? `/business/assets/${el.assetId}/content?profile=ui` : `/template-assets/${el.assetId}`,
+        });
+      }
+    }
+    return list;
+  }, [previewTemplate]);
 
   const previewFields = useMemo(() => {
     const fields: Record<string, string> = {};
@@ -2119,7 +2150,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                     <div className="text-right">
                                       <span className="block text-[9px] uppercase font-bold text-[var(--rl-text-muted)]">Limit / Sum</span>
                                       <span className="text-xs font-semibold text-[var(--rl-text-strong)] font-mono">
-                                        {extra.coverage_limit?.startsWith("RM") ? extra.coverage_limit : `RM ${extra.coverage_limit}`}
+                                        {String(extra.coverage_limit).startsWith("RM") ? String(extra.coverage_limit) : `RM ${extra.coverage_limit}`}
                                       </span>
                                     </div>
                                   ) : null}
@@ -2128,7 +2159,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                     <div className="text-right">
                                       <span className="block text-[9px] uppercase font-bold text-[var(--rl-text-muted)]">Cost</span>
                                       <span className="text-xs font-bold text-[var(--rl-red)] font-mono">
-                                        {extra.cost.startsWith("RM") ? extra.cost : `RM ${extra.cost}`}
+                                        {String(extra.cost).startsWith("RM") ? String(extra.cost) : `RM ${extra.cost}`}
                                       </span>
                                     </div>
                                   ) : (
@@ -2324,11 +2355,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                             variableValues={previewFields}
                             benefitData={{ ...workspace.benefit_cards, extras: workspace.extras }}
                             conceptAssets={conceptAssets}
-                            assets={Object.entries(previewTemplate.config.assets || {}).map(([key, id]) => ({
-                              id,
-                              label: key,
-                              url: `/template-assets/${id}`,
-                            }))}
+                            assets={previewTemplateAssets}
                           />
                         ))}
                       </div>
@@ -2944,11 +2971,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 variableValues={previewFields}
                 benefitData={{ ...workspace.benefit_cards, extras: workspace.extras }}
                 conceptAssets={conceptAssets}
-                assets={Object.entries(previewTemplate.config.assets || {}).map(([key, id]) => ({
-                  id,
-                  label: key,
-                  url: `/template-assets/${id}`,
-                }))}
+                assets={previewTemplateAssets}
               />
             ))}
           </div>

@@ -187,7 +187,7 @@ def answer_grounding_query(
     # If keys exist, call Gemini with tight token limits
     if all_keys:
         api_key = pool.get_next_key()
-        model_name = getattr(settings, "gemini_model", None) or "gemini-3.6-flash"
+        model_name = getattr(settings, "gemini_model", None) or "gemini-3.5-flash"
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
         payload = {
             "system_instruction": {"parts": [{"text": system_instruction}]},
