@@ -44,6 +44,13 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   const contentType = response.headers.get("content-type") || "";
   const payload = contentType.includes("application/json") ? await response.json() : await response.text();
   if (!response.ok) {
+    if (response.status === 401 && typeof window !== "undefined" && !path.startsWith("/auth/")) {
+      const currentPath = window.location.pathname;
+      if (!currentPath.startsWith("/login")) {
+        const target = `/login?redirect=${encodeURIComponent(currentPath + window.location.search)}`;
+        window.location.href = target;
+      }
+    }
     const message = typeof payload === "object" ? payload?.error?.message || "Something went wrong." : String(payload);
     if (process.env.NODE_ENV !== "production") {
       console.error(`[api] ${response.status} ${path}: ${message}`);

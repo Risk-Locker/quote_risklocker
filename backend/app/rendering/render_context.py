@@ -292,10 +292,22 @@ def resolve_benefit_cards(
             continue
         offering = offerings_by_id.get(str(item.catalog_offering_id))
         if not offering or offering.status not in {"active", "compatibility"}:
-            raise RenderContextError("A selected catalog offering is unavailable from the pinned revision.")
+            concept = concepts_by_id.get(str(item.concept_id))
+            if not concept:
+                continue
+            pseudo = type("FallbackOffering", (), {
+                "id": str(item.catalog_offering_id or item.id),
+                "label_override": item.label_override,
+                "typed_value": item.typed_value_override,
+                "sort_order": item.sort_order,
+                "optional_price": item.price,
+                "presentation_facet_ids": [],
+            })()
+            current_cards.append(_card(selection=item, offering=pseudo, concept=concept, typed_value=item.typed_value_override))
+            continue
         concept = concepts_by_id.get(str(offering.concept_id))
         if not concept:
-            raise RenderContextError("A selected benefit concept is unavailable.")
+            continue
         current_cards.extend(_expanded_cards(item, offering, concept, facets_by_id))
 
     outgoing: dict[str, list[Any]] = {}
@@ -304,6 +316,11 @@ def resolve_benefit_cards(
             outgoing.setdefault(str(item.from_offering_id), []).append(item)
     offered_ids: set[str] = set()
     available_cards: list[dict] = []
+
+    available_selected = [item for item in selections if item.state == "available_addon"]
+    available_selected_by_offering = {str(item.catalog_offering_id): item for item in available_selected if item.catalog_offering_id}
+    available_selected_by_concept = {str(item.concept_id): item for item in available_selected if item.concept_id}
+
     for item in current:
         if not item.catalog_offering_id:
             continue
@@ -314,9 +331,13 @@ def resolve_benefit_cards(
                 continue
             concept = concepts_by_id.get(str(target.concept_id))
             if not concept:
-                raise RenderContextError("An upgrade relation references a missing concept.")
+                continue
+            matching_sel = available_selected_by_offering.get(str(target.id)) or available_selected_by_concept.get(str(target.concept_id))
             available_cards.append(_card(
-                selection=None, offering=target, concept=concept, typed_value=target.typed_value,
+                selection=matching_sel,
+                offering=target,
+                concept=concept,
+                typed_value=(matching_sel.typed_value_override if matching_sel else None) or target.typed_value,
                 branch_key=edge.branch_key,
             ))
             offered_ids.add(target.id)
@@ -337,8 +358,12 @@ def resolve_benefit_cards(
             for off in sorted(same_concept_upgrades, key=lambda row: (int(row.sort_order or 0), str(row.offering_key))):
                 concept = concepts_by_id.get(str(off.concept_id))
                 if concept:
+                    matching_sel = available_selected_by_offering.get(str(off.id)) or available_selected_by_concept.get(str(off.concept_id))
                     available_cards.append(_card(
-                        selection=None, offering=off, concept=concept, typed_value=off.typed_value,
+                        selection=matching_sel,
+                        offering=off,
+                        concept=concept,
+                        typed_value=(matching_sel.typed_value_override if matching_sel else None) or off.typed_value,
                         branch_key=getattr(off, "branch_key", None),
                     ))
                     offered_ids.add(off.id)
@@ -358,10 +383,15 @@ def resolve_benefit_cards(
         first = min(items, key=lambda item: (int(item.sort_order or 0), str(item.offering_key)))
         concept = concepts_by_id.get(concept_id)
         if concept and str(first.id) not in selected_offering_ids and str(first.id) not in offered_ids and str(first.id) not in removed_offering_ids:
-            available_cards.append(_card(selection=None, offering=first, concept=concept, typed_value=first.typed_value))
+            matching_sel = available_selected_by_offering.get(str(first.id)) or available_selected_by_concept.get(concept_id)
+            available_cards.append(_card(
+                selection=matching_sel,
+                offering=first,
+                concept=concept,
+                typed_value=(matching_sel.typed_value_override if matching_sel else None) or first.typed_value,
+            ))
             offered_ids.add(first.id)
 
-    available_selected = [item for item in selections if item.state == "available_addon"]
     for item in sorted(available_selected, key=lambda row: (int(row.sort_order or 0), str(row.selection_key))):
         if item.concept_id and (str(item.concept_id) in active_concepts or str(item.concept_id) in removed_concepts):
             continue

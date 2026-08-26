@@ -135,39 +135,83 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
   }
   if (operation.op === "select_catalog_offering") {
     const offeringId = String(operation.offering_id || "");
-    const offer = snapshot.benefit_cards.available_addons.find((item) => item.offering_id === offeringId);
+    const offer = snapshot.benefit_cards.available_addons.find((item) => item.offering_id === offeringId) ||
+                  snapshot.benefit_cards.current_benefits.find((item) => item.offering_id === offeringId);
     if (!offer) return snapshot;
-    const selectionId = `pending:catalog:${offer.offering_key}`;
-    const nextBenefits = snapshot.benefits.map((item) => item.concept_id === offer.concept_id && item.state === "current"
-      ? { ...item, state: "superseded", superseded_by_id: selectionId }
-      : item);
-    nextBenefits.push({
-      id: selectionId, selection_key: `catalog:${offer.offering_key}`, catalog_offering_id: offer.offering_id,
-      concept_id: offer.concept_id, state: "current", cost_status: String(operation.cost_status || "unknown"), item_kind: "catalog",
-    });
-    const newCard = { ...offer, card_key: selectionId, selection_id: selectionId, cost_status: String(operation.cost_status || "unknown") };
+    const isAddon = operation.state === "available_addon";
+    const isRemoved = operation.state === "removed";
+    const selectionId = offer.selection_id && !String(offer.selection_id).startsWith("pending:")
+      ? offer.selection_id
+      : `pending:catalog:${offer.offering_key}`;
+
+    const priceVal = (operation.price as Record<string, unknown> | undefined) || offer.price || offer.optional_price;
+    const costStatus = String(operation.cost_status || (isAddon ? "paid" : (priceVal ? "paid" : "included")));
+
+    const updatedCard: BenefitCardSummary = {
+      ...offer,
+      card_key: selectionId,
+      selection_id: selectionId,
+      cost_status: costStatus,
+      price: priceVal as any,
+    };
+
+    let nextCurrent = snapshot.benefit_cards.current_benefits;
+    let nextAddons = snapshot.benefit_cards.available_addons;
     let nextExtras = snapshot.extras;
-    const priceVal = (operation.price as Record<string, unknown> | undefined) || newCard.price || newCard.optional_price;
-    if (priceVal && String(operation.cost_status) !== "included") {
-      nextExtras = [...nextExtras.filter((ex) => ex.selection_id !== selectionId), {
-        selection_id: selectionId,
-        label: newCard.label,
-        price: priceVal,
-        sort_order: newCard.sort_order || 0,
-      }];
+
+    if (isRemoved) {
+      nextCurrent = nextCurrent.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId);
+      nextAddons = nextAddons.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId);
+      nextExtras = nextExtras.filter((ex) => ex.selection_id !== selectionId);
+    } else if (isAddon) {
+      nextCurrent = nextCurrent.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId);
+      nextAddons = [
+        ...nextAddons.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId),
+        updatedCard,
+      ];
+      nextExtras = nextExtras.filter((ex) => ex.selection_id !== selectionId);
+    } else {
+      nextAddons = nextAddons.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId);
+      nextCurrent = [
+        ...nextCurrent.filter((item) => item.concept_id !== offer.concept_id && item.selection_id !== selectionId),
+        updatedCard,
+      ];
+      if (priceVal && costStatus !== "included") {
+        nextExtras = [
+          ...nextExtras.filter((ex) => ex.selection_id !== selectionId),
+          {
+            selection_id: selectionId,
+            label: updatedCard.label,
+            price: priceVal as any,
+            sort_order: updatedCard.sort_order || 0,
+          },
+        ];
+      }
     }
+
+    const nextBenefits = snapshot.benefits.filter((item) => item.id !== selectionId);
+    if (!isRemoved) {
+      nextBenefits.push({
+        id: selectionId,
+        selection_key: `catalog:${offer.offering_key}`,
+        catalog_offering_id: offer.offering_id,
+        concept_id: offer.concept_id,
+        state: isAddon ? "available_addon" : "current",
+        cost_status: costStatus,
+        item_kind: "catalog",
+      });
+    }
+
     const nextAdjusted = nextExtras !== snapshot.extras
       ? _recalcAdjustedTotal(snapshot, nextExtras)
       : snapshot.total_premium_adjusted;
+
     return {
       ...snapshot,
       benefits: nextBenefits,
       benefit_cards: {
-        current_benefits: [
-          ...snapshot.benefit_cards.current_benefits.filter((item) => item.concept_id !== offer.concept_id),
-          newCard,
-        ],
-        available_addons: snapshot.benefit_cards.available_addons.filter((item) => item.offering_id !== offeringId),
+        current_benefits: nextCurrent,
+        available_addons: nextAddons,
       },
       extras: nextExtras,
       total_premium_adjusted: nextAdjusted || snapshot.total_premium_adjusted,

@@ -3,11 +3,11 @@ import { NextRequest, NextResponse } from "next/server";
 const SESSION_COOKIE = process.env.SESSION_COOKIE_NAME || "risklocker_session";
 
 export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
   if (!request.cookies.get(SESSION_COOKIE)) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
-    url.search = "";
+    url.search = `?redirect=${encodeURIComponent(pathname + search)}`;
     return NextResponse.redirect(url);
   }
   return NextResponse.next();

@@ -370,7 +370,7 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
     if catalog and veh_cat_id and catalog.vehicle_category_id and catalog.vehicle_category_id != veh_cat_id:
         mismatched = True
 
-    if mismatched or (not current_selections and (draft.company_id or session.detected_company)):
+    if mismatched or (not draft.catalog_revision_id and not selections and (draft.company_id or session.detected_company)):
         try:
             if mismatched:
                 draft.product_id = None
@@ -379,15 +379,13 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
                 draft.catalog_revision_id = None
                 for s in selections:
                     db.delete(s)
+                for d in _rows_for_draft(db, DraftSourceLineDecision, draft.id):
+                    db.delete(d)
                 db.flush()
             revision = pin_catalog_context(db, draft)
             if revision:
                 seed_base_benefits(db, draft, revision)
             auto_apply_extracted_benefits(db, draft)
-            for s in _rows_for_draft(db, DraftBenefitSelection, draft.id):
-                if s.state == "available_addon" and (s.evidence_snapshot or s.price):
-                    s.state = "current"
-                    s.cost_status = "paid"
             db.commit()
             selections = _rows_for_draft(db, DraftBenefitSelection, draft.id)
             current_selections = [s for s in selections if s.state == "current"]
@@ -1108,8 +1106,10 @@ def _reconcile_catalog_pin(db, draft: QuotationDraft, *, changed_field: str) -> 
 
     if prev_company_id != draft.company_id:
         for s in _rows_for_draft(db, DraftBenefitSelection, draft.id):
-            if s.item_kind == "catalog":
-                db.delete(s)
+            db.delete(s)
+        for d in _rows_for_draft(db, DraftSourceLineDecision, draft.id):
+            db.delete(d)
+        db.flush()
 
     _sync_detected_company(db, draft)
     initialize_catalog_review(db, draft)
@@ -1130,8 +1130,10 @@ def _apply_pin_catalog(db, draft: QuotationDraft, user, operation: dict) -> str:
     company_changed = draft.company_id != company.id
     if company_changed:
         for s in _rows_for_draft(db, DraftBenefitSelection, draft.id):
-            if s.item_kind == "catalog":
-                db.delete(s)
+            db.delete(s)
+        for d in _rows_for_draft(db, DraftSourceLineDecision, draft.id):
+            db.delete(d)
+        db.flush()
 
     draft.company_id = company.id
     draft.product_id = None
@@ -1322,29 +1324,39 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
     if not offering or offering.catalog_revision_id != draft.catalog_revision_id or offering.status not in {"active", "compatibility"}:
         raise AppError("Choose an available offering from this quotation's pinned catalog.", 422)
     selections = _draft_selections_with_pending(db, draft.id)
+
+    desired_state = ReviewedBenefitState.CURRENT.value
+    if "state" in operation and operation.get("state"):
+        try:
+            desired_state = ReviewedBenefitState(str(operation.get("state"))).value
+        except ValueError as exc:
+            raise AppError("Quotation benefit state is invalid.", 422) from exc
+
     current = [item for item in selections if item.concept_id == offering.concept_id and item.state == ReviewedBenefitState.CURRENT.value]
     if len(current) > 1:
         raise AppError("This benefit concept has conflicting current selections.", 409)
-    if current and current[0].catalog_offering_id != offering.id:
-        valid_edge = any(
-            relation.catalog_revision_id == draft.catalog_revision_id
-            and relation.relation_kind == "replaces"
-            and relation.from_offering_id == current[0].catalog_offering_id
-            and relation.to_offering_id == offering.id
-            for relation in db.scalars(select(BenefitRelation)).all()
-        )
-        same_concept_addon = (
-            offering.concept_id
-            and offering.concept_id == current[0].concept_id
-            and (getattr(offering, "role", None) in {"addon_option", "bundle_component"} or offering.offering_kind in {"optional", "base"})
-        )
-        if not valid_edge and not same_concept_addon:
-            raise AppError("That offering is not an explicit upgrade for the current benefit.", 422)
-    elif not current and offering.offering_kind not in {"optional", "base"} and getattr(offering, "role", None) not in {"addon_option", "bundle_component", "included"}:
-        raise AppError("An upgrade requires its explicit current benefit.", 422)
+
+    if desired_state == ReviewedBenefitState.CURRENT.value:
+        if current and current[0].catalog_offering_id != offering.id:
+            valid_edge = any(
+                relation.catalog_revision_id == draft.catalog_revision_id
+                and relation.relation_kind == "replaces"
+                and relation.from_offering_id == current[0].catalog_offering_id
+                and relation.to_offering_id == offering.id
+                for relation in db.scalars(select(BenefitRelation)).all()
+            )
+            same_concept_addon = (
+                offering.concept_id
+                and offering.concept_id == current[0].concept_id
+                and (getattr(offering, "role", None) in {"addon_option", "bundle_component"} or offering.offering_kind in {"optional", "base"})
+            )
+            if not valid_edge and not same_concept_addon:
+                raise AppError("That offering is not an explicit upgrade for the current benefit.", 422)
+        elif not current and offering.offering_kind not in {"optional", "base"} and getattr(offering, "role", None) not in {"addon_option", "bundle_component", "included"}:
+            raise AppError("An upgrade requires its explicit current benefit.", 422)
 
     try:
-        cost_status = CostStatus(str(operation.get("cost_status") or "unknown")).value
+        cost_status = CostStatus(str(operation.get("cost_status") or ("included" if desired_state == "current" else "paid"))).value
     except ValueError as exc:
         raise AppError("Benefit cost must be included, paid, FOC, or unknown.", 422) from exc
     typed_override = None
@@ -1372,14 +1384,16 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
             sort_order=int(offering.sort_order or 0),
         )
         db.add(selected)
-    selected.state = ReviewedBenefitState.CURRENT.value
+    selected.state = desired_state
     selected.cost_status = cost_status
     selected.typed_value_override = typed_override
     selected.price = price
     selected.selected_by = user.id
-    if current and current[0].id != selected.id:
+    if desired_state == ReviewedBenefitState.CURRENT.value and current and current[0].id != selected.id:
         current[0].state = ReviewedBenefitState.SUPERSEDED.value
         current[0].superseded_by_id = selected.id
+    elif desired_state == ReviewedBenefitState.REMOVED.value and current and current[0].id != selected.id:
+        current[0].state = ReviewedBenefitState.REMOVED.value
     return f"benefits.{selected.id}"
 
 

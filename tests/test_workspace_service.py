@@ -610,3 +610,66 @@ def test_revert_benefit_with_pending_key_resolves_by_selection_key():
     ])
     assert selection.state == "removed"
 
+
+def test_select_catalog_offering_with_available_addon_and_price():
+    """Selecting a catalog offering with state='available_addon' preserves state and custom price."""
+    values = list(objects())
+    draft = next(item for item in values if isinstance(item, QuotationDraft))
+    draft.catalog_revision_id = "catalog-revision-1"
+    offering = CatalogOffering(
+        id="offering-1",
+        catalog_revision_id=draft.catalog_revision_id,
+        offering_key="addon-offering-1",
+        concept_id="concept-1",
+        offering_kind="optional",
+        status="active",
+        label_override="Addon Cover",
+        sort_order=1,
+    )
+    values.append(offering)
+    db = FakeDb(values)
+
+    apply_workspace_patch(db, user(), draft.id, base_revision=3, operations=[
+        {
+            "op": "select_catalog_offering",
+            "offering_id": offering.id,
+            "state": "available_addon",
+            "cost_status": "paid",
+            "price": {"amount": 125.50, "currency": "MYR"},
+        },
+    ])
+    sel = next(item for item in db.values.values() if isinstance(item, DraftBenefitSelection) and item.catalog_offering_id == offering.id)
+    assert sel.state == "available_addon"
+    assert sel.cost_status == "paid"
+    assert sel.price == {"amount": "125.5", "currency": "MYR"}
+
+
+def test_select_catalog_offering_with_removed_state():
+    """Selecting a catalog offering with state='removed' sets state to removed."""
+    values = list(objects())
+    draft = next(item for item in values if isinstance(item, QuotationDraft))
+    draft.catalog_revision_id = "catalog-revision-1"
+    offering = CatalogOffering(
+        id="offering-1",
+        catalog_revision_id=draft.catalog_revision_id,
+        offering_key="addon-offering-1",
+        concept_id="concept-1",
+        offering_kind="optional",
+        status="active",
+        label_override="Addon Cover",
+        sort_order=1,
+    )
+    values.append(offering)
+    db = FakeDb(values)
+
+    apply_workspace_patch(db, user(), draft.id, base_revision=3, operations=[
+        {
+            "op": "select_catalog_offering",
+            "offering_id": offering.id,
+            "state": "removed",
+        },
+    ])
+    sel = next(item for item in db.values.values() if isinstance(item, DraftBenefitSelection) and item.catalog_offering_id == offering.id)
+    assert sel.state == "removed"
+
+

@@ -6,7 +6,7 @@
 - Auth: temporary protected password login with opaque Postgres sessions, HttpOnly cookie, session-bound CSRF, and rate limits. OTP/onboarding is deferred to WP13 and Resend to WP14 after owner core approval. Dev login: admin@risklocker.local / admin123 (non-production only).
 - UI: Apple-inspired design system (red/black/white, Manrope/Inter/JetBrains Mono, Phosphor icons, Radix, Framer Motion) — rules in `DESIGN-SYSTEM.md`.
 - v10: Package matrix visualization & DOCX/XLSX exports, AI seed & sync diff spec, full 120 JPJ road tax schedules & dynamic calculator, AmAssurance Auto365 Comprehensive tiers, pikepdf structural JS validation, separated Quotation Ref header, 1:1 unscaled retina PNG/PDF exports, and QBE 6+4=10 defaults.
-- Verification baseline 2026-08-26: 528 backend tests pass (100% green), `npx tsc --noEmit` clean, `npm run build` green (36/36 routes), code map current.
+- Verification baseline 2026-08-26: 530 backend tests pass (100% green), `npx tsc --noEmit` clean, `npm run build` green (36/36 routes), code map current.
 - Python environment: `.venv` is Python 3.12.10 (pinned requirements predate 3.14 wheels); recreate with `py -3.12 -m venv .venv` + install `requirements.txt` + `requirements-optional.txt` + `python -m playwright install chromium`.
 - Migration ledger: checksums computed from line-ending-normalized bytes (CRLF/CR -> LF) since 2026-08-21, so LF/CRLF checkouts can never drift; historical rows verify against line-ending-equivalent representations (production 036's CRLF-bytes checksum `d8fdd09a...` accepted). `.gitattributes` (`migrations/*.sql text eol=lf`) kept for deterministic diffs only.
 - QA/E2E tooling lives IN the repo at `/.qc-tmp/` (gitignored): Playwright scripts (use `frontend/node_modules`), logs, screenshots. Never create temp files outside the repo.
@@ -16,6 +16,11 @@
 - Database state 2026-08-17: full v7 schema, migrations 001-035 applied & checksummed in PostgreSQL, seed-demo.py verified idempotent.
 - Database state 2026-08-23: migrations 001-037 applied & checksummed (037 adds `quotation_drafts.package_id` + index).
 - Database state 2026-08-20 (companies): 7 active companies — QBE, Etiqa, Takaful Malaysia, AmAssurance, Lonpac, Berjaya Sompo, Tune Protect. `commands/seed-companies.py` is idempotent (dry-run/apply).
+
+## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Fixed CI Deploy docx Dependency, Addon Pricing & Removal State, Insurer Switch Crash & 401 Deep Link Redirects
+Asked: Fix 4 critical issues: 1) CI deploy failed on missing docx module; 2) Addon pricing edits automatically promoting to defaults and becoming unremovable; 3) Switching insurer crashing/stopping workspace; 4) Frequent 401 unauthorized errors and broken link sharing; then verify, commit, and push to origin/v10 and origin/main.
+Done: 1) Added python-docx==1.1.2 to requirements.txt and wrapped imports in matrix_service.py:8-45,322-330,527-535 with safe fallback; 2) Supported operation state ('available_addon' & 'removed') in workspace_service.py:1320-1390, removed rogue mutating loop in workspace_service.py:370-395, fixed render_context.py:290-395 to attach available_selected selections to available cards, and updated provider.tsx:135-185 reducer; 3) Updated workspace_service.py:1105-1135 to cleanly purge old selections/decisions on company change and made render_context.py:290-305 fall back gracefully on missing offerings; 4) Added deep link redirect query preservation in middleware.ts:5-12, login/page.tsx:1-125, and auto 401 redirect in api.ts:44-55; added 2 backend regression tests in test_workspace_service.py:616-655. Verified: 530/530 pytest passed, tsc clean, npm run build green (36/36 routes), code map checked.
+Pending: none.
 
 ## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Initialized v10 Branch & Synced v9 / main
 Asked: Commit and push everything to origin v9 then origin main; create new branch v10 and publish properly.
