@@ -197,3 +197,68 @@ def test_insurer_logo_hint_does_not_crash_for_etiqa():
         ),
     )
     assert "position:absolute" in html
+
+
+def test_quotation_reference_strips_trailing_hyphen():
+    html = render_quotation_html(
+        {"quotation_reference": {"value": "FL22026M-01587863-"}},
+        template_config=_element(
+            {"id": "v1", "type": "variable", "x": 0, "y": 0, "w": 200, "h": 20, "z": 1, "variableId": "quotation_reference"}
+        ),
+    )
+    assert "FL22026M-01587863" in html
+    assert "FL22026M-01587863-" not in html
+
+
+def test_premium_info_block_renders_roadtax_chinese_and_clean_extras():
+    render_context = {
+        "extras": [
+            {"selection_id": "s1", "label": "Windscreen", "coverage_limit": "(Cover up to RM 2,650)", "price": {"amount": "150.00", "currency": "MYR"}},
+            {"selection_id": "s2", "label": "Legal Liability to Passengers (LLTP)", "coverage_limit": "", "price": {"amount": "67.80", "currency": "MYR"}},
+        ],
+        "total_premium_adjusted": "2,845.50",
+    }
+    fields = {
+        "premium": {"value": "2400.00"},
+        "roadtax": {"value": "90.00"},
+        "service_fee": {"value": "20.00"},
+    }
+    html = render_quotation_html(
+        fields,
+        template_config=_element(
+            {"id": "pib", "type": "premium-info-block", "x": 0, "y": 0, "w": 400, "h": 200, "z": 1}
+        ),
+        render_context=render_context,
+    )
+    assert "Roadtax / 路税" in html
+    assert "Windscreen" in html
+    assert "(Cover up to RM 2,650)" in html
+    assert "Legal Liability to Passengers (LLTP)" in html
+    assert "IncludedRM" not in html
+    assert "RM 150.00" in html
+    assert "RM 67.80" in html
+
+
+def test_dynamic_benefit_grid_renders_purchased_extra_with_label_and_badge():
+    render_context = {
+        "current_benefits": [
+            {
+                "id": "c1",
+                "label": "Legal Liability to Passengers",
+                "value": "Passenger coverage",
+                "is_extra": True,
+                "price": {"amount": "67.80", "currency": "MYR"},
+            }
+        ],
+        "available_addons": [],
+    }
+    html = render_quotation_html(
+        {},
+        template_config=_element(
+            {"id": "dbg", "type": "benefit-grid", "gridKind": "current_benefits", "x": 0, "y": 0, "w": 500, "h": 200, "z": 1}
+        ),
+        render_context=render_context,
+    )
+    assert "Legal Liability to Passengers" in html
+    assert "+RM 67.80" in html
+    assert "border:1.5px solid #F59E0B" in html

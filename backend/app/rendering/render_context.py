@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from typing import Any, Iterable
@@ -57,6 +58,26 @@ def format_money_amount(raw_price: dict | None) -> str:
             return ""
 
 
+def _clean_extra_label(raw_label: str) -> str:
+    label = (raw_label or "").strip()
+    lower = label.lower()
+    if "windscreen" in lower and len(label) > 15:
+        return "Windscreen"
+    if "all driver" in lower and len(label) > 15:
+        return "All Drivers"
+    if "legal liability to passenger" in lower or "lltp" in lower:
+        return "Legal Liability to Passengers (LLTP)"
+    if "legal liability of passenger" in lower or "llop" in lower:
+        return "Legal Liability of Passengers (LLOP)"
+    if ("cart" in lower or "assessed repair time" in lower) and len(label) > 10:
+        return "CART"
+    if "special peril" in lower and len(label) > 18:
+        return "Special Perils"
+    if "betterment" in lower and len(label) > 20:
+        return "Betterment Waiver"
+    return label
+
+
 def build_extras(selections: Iterable[Any], concepts: Iterable[Any], offerings: Iterable[Any] | None = None) -> list[dict]:
     """Staff-added priced extras shown above the coverage premium."""
     concept_labels = {str(item.id): item.label for item in concepts}
@@ -72,7 +93,8 @@ def build_extras(selections: Iterable[Any], concepts: Iterable[Any], offerings: 
             continue
         if not price:
             continue
-        label = str(getattr(sel, "label_override", None) or "").strip() or concept_labels.get(str(getattr(sel, "concept_id", None)), "Extra benefit")
+        raw_label = str(getattr(sel, "label_override", None) or "").strip() or concept_labels.get(str(getattr(sel, "concept_id", None)), "Extra benefit")
+        label = _clean_extra_label(raw_label)
 
         limit_val = getattr(sel, "coverage_limit", None)
         if not limit_val:
@@ -90,10 +112,16 @@ def build_extras(selections: Iterable[Any], concepts: Iterable[Any], offerings: 
         limit_str = ""
         if limit_val:
             s = str(limit_val).strip()
-            if s and not s.upper().startswith("RM") and not s.upper().endswith("RM"):
-                limit_str = f"{s}RM"
-            else:
-                limit_str = s
+            if not any(w in s.lower() for w in ("included", "foc", "n/a", "none", "standard", "covered")):
+                clean_num_str = re.sub(r"[^0-9.]", "", s)
+                if clean_num_str:
+                    try:
+                        num = float(clean_num_str)
+                        if num > 0:
+                            limit_formatted = f"RM {int(num):,}" if num == int(num) else f"RM {num:,.2f}"
+                            limit_str = f"(Cover up to {limit_formatted})"
+                    except Exception:
+                        pass
 
         extras.append({
             "selection_id": sel.id,

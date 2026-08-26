@@ -76,12 +76,18 @@ def _value(fields: dict, field_name: str) -> str:
     field = fields.get(field_name, {})
     val = field.get("value") if isinstance(field, dict) else field
     if val is not None and str(val).strip():
-        return str(val).strip()
+        s = str(val).strip()
+        if field_name in {"quotation_reference", "quotation_ref", "reference_no", "quote_no"}:
+            s = s.rstrip(" -:_/")
+        return s
     for alias in FIELD_FALLBACK_MAP.get(field_name, ()):
         alt_field = fields.get(alias, {})
         alt_val = alt_field.get("value") if isinstance(alt_field, dict) else alt_field
         if alt_val is not None and str(alt_val).strip():
-            return str(alt_val).strip()
+            s = str(alt_val).strip()
+            if field_name in {"quotation_reference", "quotation_ref", "reference_no", "quote_no"}:
+                s = s.rstrip(" -:_/")
+            return s
     return ""
 
 
@@ -287,7 +293,6 @@ def _dynamic_benefit_grid(
             f'overflow:hidden;display:flex;align-items:center;justify-content:center;text-align:center">{empty_message}</div>'
         )
     card_style_name = str(element.get("cardStyle") or "standard")
-    card_style = GRID_CARD_STYLES.get(card_style_name, GRID_CARD_STYLES["standard"])
     density_name = str(element.get("textDensity") or "normal")
     density = GRID_TEXT_DENSITIES.get(density_name, GRID_TEXT_DENSITIES["normal"])
     output: list[str] = []
@@ -301,26 +306,39 @@ def _dynamic_benefit_grid(
         cost = str(card.get("cost_status") or "")
         asset_id = str(card.get("asset_id") or "")
         asset_uri = resolved_assets.get(asset_id, "")
-        icon_size = max(24, min(36, density["icon"]))
+
+        is_purchased_extra = bool(card.get("is_extra") or (card.get("cost_status") == "paid" and kind == "current_benefits"))
+        card_border = "border:1.5px solid #F59E0B;background:#FFFDF7" if is_purchased_extra else "border:1px solid #E2E8F0;background:#FFFFFF"
+        if is_purchased_extra:
+            card_border += ";box-shadow:0 1px 3px rgba(245,158,11,0.15)"
+
+        icon_size = 24 if density_name == "compact" else 26
         icon = (
-            f'<img alt="" src="{escape(asset_uri)}" style="width:{icon_size}px;height:{icon_size}px;object-fit:contain" />'
-            if asset_uri else f'<span style="display:grid;place-items:center;width:{icon_size}px;height:{icon_size}px;border-radius:6px;background:#FEE2E2;color:#DC2626;font-size:10px;font-weight:800">{label[:2].upper()}</span>'
+            f'<img alt="" src="{escape(asset_uri)}" style="width:{icon_size}px;height:{icon_size}px;object-fit:contain;flex-shrink:0" />'
+            if asset_uri else f'<span style="display:grid;place-items:center;width:{icon_size}px;height:{icon_size}px;border-radius:4px;background:#FEE2E2;color:#DC2626;font-size:9px;font-weight:800;flex-shrink:0">{label[:2].upper()}</span>'
         )
+
         price_badge = ""
-        price = card.get("price")
-        if price:
+        price = card.get("price") or card.get("optional_price")
+        if price and (is_purchased_extra or kind == "available_addons"):
             p_val = (price.get("amount") if price.get("amount") is not None else price.get("value")) if isinstance(price, dict) else price
             try:
                 p_num = float(str(p_val).replace(",", ""))
-                p_str = f"RM {p_num:,.2f}"
+                p_str = f"RM {int(p_num):,}" if p_num == int(p_num) else f"RM {p_num:,.2f}"
             except Exception:
                 p_str = f"RM {p_val}" if not str(p_val).startswith("RM") else str(p_val)
-            price_badge = f'<span style="font-size:9px;font-weight:800;color:#DC2626;background:#FEF2F2;padding:2px 5px;border-radius:4px;white-space:nowrap;border:1px solid #FECACA">+{p_str}</span>'
+            badge_prefix = "+" if is_purchased_extra else ""
+            badge_bg = "#FEF2F2" if is_purchased_extra else "#F1F5F9"
+            badge_color = "#DC2626" if is_purchased_extra else "#334155"
+            badge_border = "#FECACA" if is_purchased_extra else "#CBD5E1"
+            price_badge = f'<span style="font-size:8.5px;font-weight:700;color:{badge_color};background:{badge_bg};padding:1.5px 4.5px;border-radius:3px;white-space:nowrap;border:1px solid {badge_border};flex-shrink:0">{badge_prefix}{p_str}</span>'
         elif cost == "foc":
-            price_badge = '<span style="font-size:8.5px;font-weight:700;color:#16A34A;background:#F0FDF4;padding:2px 4px;border-radius:4px;white-space:nowrap">FOC</span>'
+            price_badge = '<span style="font-size:8px;font-weight:700;color:#16A34A;background:#F0FDF4;padding:1.5px 4px;border-radius:3px;white-space:nowrap;flex-shrink:0">FOC</span>'
 
-        value_html = f'<span style="display:block;margin-top:1px;font-size:{max(8.5, density["value"] - 1)}px;line-height:1.15;color:#64748B;word-break:break-word">{value}</span>' if value else ""
-        font_size = density["label"] if len(label) <= 24 else max(9.5, density["label"] - 2)
+        title_font_size = 9.0 if len(label) > 30 else (9.5 if len(label) > 18 else 10.0)
+        show_value = bool(value and value not in {"Included standard cover", "Included", "FOC", "As quoted"})
+        value_html = f'<span style="display:block;font-size:8px;line-height:1.1;color:#64748B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px">{value}</span>' if show_value else ""
+
         scale = packed.scale
         output.append(
             f'<article data-benefit-card="1" data-card-scale="{scale:.12f}" '
@@ -328,14 +346,13 @@ def _dynamic_benefit_grid(
             f'style="position:absolute;left:{packed.x:.8f}px;top:{packed.y:.8f}px;'
             f'width:{packed.width:.8f}px;height:{packed.height:.8f}px;overflow:hidden;'
             'display:flex;align-items:stretch;box-sizing:border-box">'
-            f'<div style="width:100%;height:100%;display:grid;align-items:center;'
-            f'grid-template-columns:{icon_size + 8}px minmax(0,1fr) auto;gap:{density["gap"]}px;padding:{density["padding"]}px;'
-            f'box-sizing:border-box;{card_style};overflow:hidden;border-radius:6px;border:1px solid #E2E8F0;background:#FFFFFF">'
-            f'<div style="display:flex;align-items:center;justify-content:center">{icon}</div>'
-            f'<div style="min-width:0;display:flex;flex-direction:column;justify-content:center">'
-            f'<strong style="display:block;font-size:{font_size}px;line-height:1.18;word-break:break-word;color:#0F172A">{label}</strong>'
+            f'<div style="width:100%;height:100%;display:flex;align-items:center;gap:6px;padding:4px 6px;'
+            f'box-sizing:border-box;border-radius:6px;{card_border};overflow:hidden">'
+            f'{icon}'
+            f'<div style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;overflow:hidden">'
+            f'<strong style="display:block;font-size:{title_font_size}px;font-weight:700;line-height:1.15;color:#0F172A;word-break:normal;overflow:hidden;text-overflow:ellipsis">{label}</strong>'
             f'{value_html}</div>'
-            f'<div style="display:flex;align-items:center;justify-content:flex-end;margin-left:4px">{price_badge}</div>'
+            f'{price_badge}'
             f'</div></article>'
         )
     warning = escape(layout.warning or "")
@@ -397,16 +414,16 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
                 formatted_price = format_money_amount(raw_price)
             cov_limit = str(extra.get("coverage_limit") or "")
             rows.append(("extra", str(extra.get("label") or ""), cov_limit, formatted_price))
-    rows.append(("premium", str(labels.get("premium") or "Coverage Premium"), "", _format_value(_value(fields, "premium"), "RM ")))
+    rows.append(("premium", str(labels.get("premium") or "Insurance Premium / 保费"), "", _format_value(_value(fields, "premium"), "RM ")))
     rows.append(("divider", "", "", ""))
-    rows.append(("roadtax", str(labels.get("roadtax") or "Roadtax"), "", _format_value(_value(fields, "roadtax"), "RM ")))
-    rows.append(("runner", str(labels.get("runner") or "Runner Fee"), "", _format_value(_value(fields, "service_fee"), "RM ")))
+    rows.append(("roadtax", str(labels.get("roadtax") or "Roadtax / 路税"), "", _format_value(_value(fields, "roadtax"), "RM ")))
+    rows.append(("runner", str(labels.get("runner") or "Runner Fee / 服务费"), "", _format_value(_value(fields, "service_fee"), "RM ")))
     total = (render_context or {}).get("total_premium_adjusted") or _value(fields, "total_premium_adjusted")
     if not total:
         total = adjusted_total_text(fields, extras) if extras else _value(fields, "total_amount")
     if not total:
         total = _value(fields, "total_amount")
-    rows.append(("total", str(labels.get("total") or "Total Premium"), "", _format_value(total, "RM ")))
+    rows.append(("total", str(labels.get("total") or "Total Premium / 保费总额"), "", _format_value(total, "RM ")))
     html: list[str] = []
     for index, (kind, label, middle_val, right_val) in enumerate(rows):
         row_y = y + index * row_height
@@ -422,15 +439,15 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
             label_style = "font-size:9px;font-weight:700;color:#DC2626;text-transform:uppercase;letter-spacing:0.5px"
             value_style = "font-size:9px;font-weight:700;color:#DC2626"
         elif kind == "extra":
-            label_style = "font-size:9.5px;font-weight:600;color:#B91C1C;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis"
-            limit_style = "font-size:9px;font-weight:600;color:#64748B;padding:0 8px;white-space:nowrap"
-            value_style = "font-size:10px;font-weight:700;color:#0F172A;white-space:nowrap;text-align:right"
-            limit_html = f'<span style="{limit_style}">{escape(middle_val)}</span>' if middle_val else ""
+            label_style = "font-size:9px;font-weight:600;color:#B91C1C;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+            limit_html = f'<span style="font-size:8.5px;font-weight:500;color:#64748B;margin-left:4px;white-space:nowrap">{escape(middle_val)}</span>' if middle_val else ""
+            value_style = "font-size:9.5px;font-weight:700;color:#0F172A;white-space:nowrap;text-align:right"
             html.append(
                 f'<div style="position:absolute;left:{x}px;top:{row_y}px;width:{width}px;height:{row_height}px;'
-                f'display:flex;align-items:center;justify-content:space-between;box-sizing:border-box;padding-left:12px">'
+                f'display:flex;align-items:center;justify-content:space-between;box-sizing:border-box;padding-left:10px">'
+                f'<div style="display:flex;align-items:center;min-width:0;overflow:hidden">'
                 f'<span style="{label_style}">{escape(label)}</span>'
-                f'{limit_html}'
+                f'{limit_html}</div>'
                 f'<span style="{value_style}">{escape(right_val)}</span></div>'
             )
             continue

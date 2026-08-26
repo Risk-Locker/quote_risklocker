@@ -62,7 +62,7 @@ class Settings:
     trash_retention_days: int
     cors_origins: tuple[str, ...]
     gemini_api_keys: tuple[str, ...] = ()
-    gemini_model: str = "gemini-3.5-flash"
+    gemini_model: str = "gemini-2.5-flash"
 
     @property
     def max_upload_bytes(self) -> int:
@@ -295,5 +295,5 @@ def get_settings() -> Settings:
         gemini_api_keys=tuple(
             k.strip() for k in (os.getenv("GEMINI_API_KEYS") or os.getenv("GEMINI_API_KEY") or "").split(",") if k.strip()
         ),
-        gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash").strip() or "gemini-3.5-flash",
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash",
     )

@@ -6,43 +6,17 @@ import io
 from datetime import date, datetime, timezone
 from typing import Any
 
-try:
-    import docx
-    from docx.enum.section import WD_ORIENT
-    from docx.enum.table import WD_TABLE_ALIGNMENT
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.oxml import OxmlElement, parse_xml
-    from docx.oxml.ns import nsdecls, qn
-    from docx.shared import Inches, Pt, RGBColor
-    _DOCX_AVAILABLE = True
-except ImportError:
-    docx = None  # type: ignore
-    WD_ORIENT = None  # type: ignore
-    WD_TABLE_ALIGNMENT = None  # type: ignore
-    WD_ALIGN_PARAGRAPH = None  # type: ignore
-    OxmlElement = None  # type: ignore
-    parse_xml = None  # type: ignore
-    nsdecls = None  # type: ignore
-    qn = None  # type: ignore
-    Inches = None  # type: ignore
-    Pt = None  # type: ignore
-    RGBColor = None  # type: ignore
-    _DOCX_AVAILABLE = False
+import docx
+from docx.enum.section import WD_ORIENT
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement, parse_xml
+from docx.oxml.ns import nsdecls, qn
+from docx.shared import Inches, Pt, RGBColor
 
-try:
-    import openpyxl
-    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-    from openpyxl.utils import get_column_letter
-    _OPENPYXL_AVAILABLE = True
-except ImportError:
-    openpyxl = None  # type: ignore
-    Alignment = None  # type: ignore
-    Border = None  # type: ignore
-    Font = None  # type: ignore
-    PatternFill = None  # type: ignore
-    Side = None  # type: ignore
-    get_column_letter = None  # type: ignore
-    _OPENPYXL_AVAILABLE = False
+import openpyxl
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -322,8 +296,6 @@ def get_company_matrix_data(db: Session, company_id: str) -> dict[str, Any]:
 
 def generate_company_matrix_docx(data: dict[str, Any]) -> io.BytesIO:
     """Generate a clean, standardized Word (.docx) document matching the canonical reference format."""
-    if not _DOCX_AVAILABLE or docx is None or WD_ORIENT is None:
-        raise AppError("Word (.docx) export is unavailable because python-docx is not installed.", 500)
     doc = docx.Document()
 
     # Configure Landscape Page Layout with 0.5 in margins
@@ -527,8 +499,6 @@ def generate_company_matrix_docx(data: dict[str, Any]) -> io.BytesIO:
 
 def generate_company_matrix_xlsx(data: dict[str, Any]) -> io.BytesIO:
     """Generate a clean, multi-tab Excel workbook representing the complete company matrix."""
-    if not _OPENPYXL_AVAILABLE or openpyxl is None:
-        raise AppError("Excel (.xlsx) export is unavailable because openpyxl is not installed.", 500)
     wb = openpyxl.Workbook()
 
     # Setup styles

@@ -41,9 +41,9 @@ def _grid(node_id: str, kind: str, x: float, y: float, w: float, h: float, z: in
     return {
         "id": node_id, "type": "benefit-grid", "gridKind": kind, "x": x, "y": y, "w": w, "h": h, "z": z,
         "packing": {
-            "strategy": "balanced", "alignment": "center", "aspectRatio": 1.45,
-            "referenceWidth": 180, "referenceHeight": 124,
-            "gapRatio": 0.035 if dense else 0.055, "paddingRatio": 0.012 if dense else 0.02, "staggerRatio": 0.5,
+            "strategy": "balanced", "alignment": "start", "aspectRatio": 3.2 if dense else 3.0,
+            "referenceWidth": 220, "referenceHeight": 64,
+            "gapRatio": 0.025 if dense else 0.04, "paddingRatio": 0.01 if dense else 0.015, "staggerRatio": 0.0,
         },
         "cardStyle": "outlined" if dense else "standard", "textDensity": "compact" if dense else "normal", "emptyState": "hide",
     }

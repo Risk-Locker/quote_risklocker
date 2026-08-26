@@ -389,9 +389,7 @@ def extract_with_gemini_sync(
         return None
 
     settings = get_settings()
-    model = settings.gemini_model or "gemini-3.5-flash"
-    if model in {"gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-flash-lite"}:
-        model = "gemini-3.5-flash"
+    configured_model = settings.gemini_model or "gemini-2.5-flash"
     system_prompt = build_rag_system_prompt(db_companies, db_benefit_concepts, db_aliases, db_packs, prompt_override)
 
     if document_text and len(document_text.strip()) > 30:
@@ -432,12 +430,11 @@ def extract_with_gemini_sync(
     }
 
     candidate_models = [
-        model,
-        "gemini-3.5-flash",
-        "gemini-3.7-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-3.6-flash",
-        "gemini-3-flash-preview",
+        configured_model,
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-2.5-flash-lite",
     ]
     seen_models: set[str] = set()
     models_to_try = [m for m in candidate_models if m and not (m in seen_models or seen_models.add(m))]
