@@ -33,18 +33,34 @@ def update_template_headers(db, user, *, apply: bool = False) -> list[dict]:
         modified = False
 
         for el in elements:
-            # Check for top header insurer name variable (y < 100)
-            if (
-                (el.get("id") == "header_insurer_name" or el.get("variableId") == "insurance_company")
-                and (el.get("y") or 0) < 100
-            ):
-                old_id = el.get("id")
-                old_var = el.get("variableId")
-                el["id"] = "header_customer_name"
-                el["variableId"] = "customer_name"
-                el["w"] = max(el.get("w", 230), 260)
-                modified = True
-                print(f"[{'APPLY' if apply else 'DRY-RUN'}] Updating Template '{tmpl.name}' (ID: {tmpl.id}): {old_id} ({old_var}) -> header_customer_name (customer_name)")
+            y = el.get("y") or 0
+            el_id = el.get("id") or ""
+            var_id = el.get("variableId") or ""
+            text = el.get("text") or ""
+
+            # 1. Top header (y < 100): ensure insurer name is shown
+            if y < 100 and (el_id in {"header_customer_name", "header_insurer_name"} or var_id in {"customer_name", "insurance_company"}):
+                if var_id != "insurance_company" or el_id != "header_insurer_name":
+                    el["id"] = "header_insurer_name"
+                    el["variableId"] = "insurance_company"
+                    el["w"] = 230
+                    modified = True
+                    print(f"[{'APPLY' if apply else 'DRY-RUN'}] Template '{tmpl.name}': Top Header -> header_insurer_name (insurance_company)")
+
+            # 2. Coverage Table Row 1 (y around 160-175): ensure customer name is shown
+            if 150 <= y <= 175:
+                if el_id in {"lbl_insurer", "lbl_customer"} or "保险公司" in text or "客户" in text or "insurer" in text.lower():
+                    if text != "Customer / 客户姓名" or el_id != "lbl_customer":
+                        el["id"] = "lbl_customer"
+                        el["text"] = "Customer / 客户姓名"
+                        modified = True
+                        print(f"[{'APPLY' if apply else 'DRY-RUN'}] Template '{tmpl.name}': Table Row 1 Label -> Customer")
+                elif el_id in {"val_insurer", "val_customer"} or var_id in {"insurance_company", "customer_name"}:
+                    if var_id != "customer_name" or el_id != "val_customer":
+                        el["id"] = "val_customer"
+                        el["variableId"] = "customer_name"
+                        modified = True
+                        print(f"[{'APPLY' if apply else 'DRY-RUN'}] Template '{tmpl.name}': Table Row 1 Value -> val_customer (customer_name)")
 
         if modified:
             fixed_fields["canvas"]["elements"] = elements

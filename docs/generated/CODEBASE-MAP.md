@@ -341,5 +341,5 @@ Generated file map. Line spans are navigational hints and are refreshed by the m
 - `commands/test-all.ps1` L1-34: developer operations and maintenance command.
 - `commands/update-asset-manifest.py` L1-24: developer operations and maintenance command. Symbols: `main` L16-20.
 - `commands/update-code-map.py` L1-165: developer operations and maintenance command. Symbols: `responsibility` L19-45; `python_symbols` L48-58; `text_symbols` L61-79; `route_symbols` L82-91; `generate` L94-132; `rendered_document` L135-141; `main` L144-161.
-- `commands/update-template-header-customer.py` L1-85: developer operations and maintenance command. Symbols: `update_template_headers` L25-68; `main` L71-81.
+- `commands/update-template-header-customer.py` L1-101: developer operations and maintenance command. Symbols: `update_template_headers` L25-84; `main` L87-97.
 <!-- GENERATED:END -->

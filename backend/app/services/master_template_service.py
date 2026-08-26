@@ -130,9 +130,9 @@ def _agency_bilingual_config() -> dict:
         # 1. Page Background
         _rectangle("page_bg", 0, 0, 794, height, 1, background="#FFFFFF", border=""),
 
-        # 2. Header: Logos, Customer Name, Quotation Ref, and Top Divider
+        # 2. Header: Logos, Insurer Name, Quotation Ref, and Top Divider
         _image("risklocker_logo", "risklocker_logo", 40, 32, 150, 42, 5),
-        _variable("header_customer_name", "customer_name", 210, 36, 260, 34, 5, size=16, weight="800", color=DARK, align="left"),
+        _variable("header_insurer_name", "insurance_company", 210, 36, 230, 34, 5, size=16, weight="800", color=DARK, align="left"),
         _text("ref_label", "Quotation Ref: ", 480, 42, 130, 18, 5, size=11, weight="500", color=MUTED_COLOR, align="right"),
         _variable("ref_val", "vehicle_no", 614, 42, 140, 18, 5, size=11, weight="700", color=MUTED_COLOR, align="left"),
         _line("header_rule", 40, 82, 714, 2, color=BORDER_COLOR, height=1),
@@ -146,9 +146,9 @@ def _agency_bilingual_config() -> dict:
         _text("cov_header_txt", "Coverage & Vehicle Information / 车辆及保单资料", 52, 139, 430, 16, 5, size=10, weight="700", color="#FFFFFF"),
         _rectangle("cov_table_bg", 40, 160, 454, 246, 2, background="#FFFFFF", border=BORDER_COLOR, radius=4),
 
-        # Row 1: Insurer Name
-        _text("lbl_insurer", "Insurer / 保险公司", 52, 164, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
-        _variable("val_insurer", "insurance_company", 216, 164, 266, 14, 5, size=9.5, weight="700", color=DARK),
+        # Row 1: Customer Name
+        _text("lbl_customer", "Customer / 客户姓名", 52, 164, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
+        _variable("val_customer", "customer_name", 216, 164, 266, 14, 5, size=9.5, weight="700", color=DARK),
 
         # Row 2: Coverage Type
         _text("lbl_cov_type", "Coverage Type / 保单种类", 52, 179, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),

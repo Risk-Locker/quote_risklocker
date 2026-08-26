@@ -1535,7 +1535,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
               {mutation.dirty ? "Save Changes" : "Saved"}
             </Button>
 
-            {/* PNG Actions Button (Copy as PNG | Download as PNG with Hover Reveal) */}
+            {/* PNG Actions Button (Copy as PNG | Download PNG) */}
             <div
               className={`relative flex items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white p-0.5 shadow-xs transition-all ${mutation.dirty || mutation.saving
                 ? "opacity-60 bg-neutral-50 cursor-not-allowed"
@@ -1547,7 +1547,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 type="button"
                 onClick={handleCopyPng}
                 disabled={copyingPng}
-                className="group/copy flex items-center gap-1 rounded-[4px] px-2 py-1.5 text-xs font-semibold text-[var(--rl-text-strong)] hover:bg-neutral-100 hover:text-[var(--rl-black)] transition-all"
+                className="flex items-center gap-1 rounded-[4px] px-2 py-1.5 text-xs font-semibold text-[var(--rl-text-strong)] hover:bg-neutral-100 hover:text-[var(--rl-black)] transition-all"
                 title={mutation.dirty ? "Save changes first to copy PNG" : "Copy high-resolution quotation PNG to clipboard"}
               >
                 {copiedPng ? (
@@ -1555,8 +1555,8 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 ) : (
                   <Copy size={15} weight="bold" className="shrink-0 text-neutral-600" />
                 )}
-                <span className="max-w-0 opacity-0 overflow-hidden whitespace-nowrap group-hover/copy:max-w-[120px] group-hover/copy:opacity-100 transition-all duration-200 ease-out text-[11px]">
-                  {copiedPng ? "Copied!" : "Copy as PNG"}
+                <span className="text-[11px]">
+                  {copiedPng ? "Copied!" : "Copy"}
                 </span>
               </button>
 
@@ -1567,12 +1567,12 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 type="button"
                 onClick={handleDownloadPng}
                 disabled={downloadingPng}
-                className="group/dlpng flex items-center gap-1.5 rounded-[4px] px-2 py-1.5 text-xs font-semibold text-[var(--rl-text-strong)] hover:bg-neutral-100 hover:text-[var(--rl-black)] transition-all"
+                className="flex items-center gap-1.5 rounded-[4px] px-2 py-1.5 text-xs font-semibold text-[var(--rl-text-strong)] hover:bg-neutral-100 hover:text-[var(--rl-black)] transition-all"
                 title={mutation.dirty ? "Save changes first to download PNG" : "Download high-resolution quotation PNG"}
               >
                 <DownloadSimple size={15} weight="bold" className="shrink-0 text-neutral-600" />
-                <span className="max-w-0 opacity-0 overflow-hidden whitespace-nowrap group-hover/dlpng:max-w-[130px] group-hover/dlpng:opacity-100 transition-all duration-200 ease-out text-[11px]">
-                  {downloadingPng ? "Generating..." : "Download as PNG"}
+                <span className="text-[11px]">
+                  {downloadingPng ? "Generating..." : "Download"}
                 </span>
                 <span className="rounded bg-neutral-100 px-1 py-0.2 font-mono text-[9px] font-extrabold text-neutral-600 uppercase">
                   PNG
@@ -1580,7 +1580,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
               </button>
             </div>
 
-            {/* PDF Actions Button (View as PDF / in new tab | Download PDF with Hover Reveal) */}
+            {/* PDF Actions Button (View as PDF / in new tab | Download PDF) */}
             <div
               className={`relative flex items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white p-0.5 shadow-xs transition-all ${mutation.dirty || mutation.saving
                 ? "opacity-60 bg-neutral-50 cursor-not-allowed"
@@ -1592,12 +1592,12 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 type="button"
                 onClick={handleViewPdfInNewTab}
                 disabled={viewLoading}
-                className="group/viewpdf flex items-center gap-1 rounded-[4px] px-2 py-1.5 text-xs font-semibold text-[var(--rl-text-strong)] hover:bg-neutral-100 hover:text-[var(--rl-black)] transition-all"
+                className="flex items-center gap-1 rounded-[4px] px-2 py-1.5 text-xs font-semibold text-[var(--rl-text-strong)] hover:bg-neutral-100 hover:text-[var(--rl-black)] transition-all"
                 title={mutation.dirty ? "Save changes first to view PDF" : "View authoritative PDF quotation in new tab"}
               >
                 <ArrowSquareOut size={15} weight="bold" className="shrink-0 text-neutral-600" />
-                <span className="max-w-0 opacity-0 overflow-hidden whitespace-nowrap group-hover/viewpdf:max-w-[130px] group-hover/viewpdf:opacity-100 transition-all duration-200 ease-out text-[11px]">
-                  {viewLoading ? "Opening..." : "View as PDF"}
+                <span className="text-[11px]">
+                  {viewLoading ? "Opening..." : "View"}
                 </span>
               </button>
 
@@ -1608,12 +1608,12 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 type="button"
                 onClick={handleDownloadPdf}
                 disabled={pdfLoading}
-                className="group/dlpdf flex items-center gap-1.5 rounded-[4px] px-2 py-1.5 text-xs font-semibold text-[var(--rl-text-strong)] hover:bg-neutral-100 hover:text-[var(--rl-black)] transition-all"
+                className="flex items-center gap-1.5 rounded-[4px] px-2 py-1.5 text-xs font-semibold text-[var(--rl-text-strong)] hover:bg-neutral-100 hover:text-[var(--rl-black)] transition-all"
                 title={mutation.dirty ? "Save changes first to download PDF" : "Generate & download official PDF quotation"}
               >
                 <FilePdf size={15} weight="bold" className="shrink-0 text-[var(--rl-red)]" />
-                <span className="max-w-0 opacity-0 overflow-hidden whitespace-nowrap group-hover/dlpdf:max-w-[120px] group-hover/dlpdf:opacity-100 transition-all duration-200 ease-out text-[11px]">
-                  {pdfLoading ? "Generating..." : "Download PDF"}
+                <span className="text-[11px]">
+                  {pdfLoading ? "Generating..." : "Download"}
                 </span>
                 <span className="rounded bg-red-50 px-1 py-0.2 font-mono text-[9px] font-extrabold text-[var(--rl-red)] uppercase">
                   PDF

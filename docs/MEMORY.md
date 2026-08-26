@@ -17,6 +17,11 @@
 - Database state 2026-08-23: migrations 001-037 applied & checksummed (037 adds `quotation_drafts.package_id` + index).
 - Database state 2026-08-20 (companies): 7 active companies — QBE, Etiqa, Takaful Malaysia, AmAssurance, Lonpac, Berjaya Sompo, Tune Protect. `commands/seed-companies.py` is idempotent (dry-run/apply).
 
+## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Stopped Action Button Hover Expansion & Switched Template Variables
+Asked: Stop PNG/PDF action buttons from expanding on hover in workspace header; place Insurer in top header and Customer Name at row 1 of Coverage & Vehicle Info table.
+Done: Removed `max-w-0` hover accordion styles in `review-phase.tsx:1540-1625` for static action buttons; updated `master_template_service.py:133-152` and ran `commands/update-template-header-customer.py --apply` to publish new revisions with `insurance_company` in top header and `customer_name` at table row 1; verified 519/519 pytest, `npx.cmd tsc --noEmit` clean, `npm run build` green (36/36 routes).
+Pending: none.
+
 ## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Replaced Top Header Insurer Name with Customer Name
 Asked: Replace the top header Insurer variable with the extracted customer name while preserving the top insurer logo and coverage table rows.
 Done: Updated `master_template_service.py:133-138` to define `header_customer_name` (`customer_name`); created `commands/update-template-header-customer.py` and published new revisions for database templates; verified 519/519 backend pytest passed, `npx.cmd tsc --noEmit` clean, `npm run build` green (36/36 routes).
