@@ -1596,25 +1596,14 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         return;
       }
     } catch (backendError) {
-      console.warn("Backend PDF generation was unavailable or blocked; generating instant canvas preview:", backendError);
+      setActionError("PDF generation failed: " + apiErrorMessage(backendError) + " — Please try again or contact support.");
+      setPdfLoading(false);
+      return;
     }
 
-    try {
-      const blob = await generateCanvasBlob();
-      if (blob) {
-        const blobUrl = URL.createObjectURL(blob);
-        window.open(blobUrl, "_blank");
-        triggerDownload(blobUrl, `quotation_${formValues.vehicle_no || id}.png`);
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
-        setToastMessage("Quotation opened in new tab and downloaded.");
-        return;
-      }
-      throw new Error("Could not render quotation document.");
-    } catch (err: unknown) {
-      setActionError(apiErrorMessage(err));
-    } finally {
-      setPdfLoading(false);
-    }
+    // If we reach here without a versionId, something unexpected happened
+    setActionError("PDF generation did not return a version. Please try again.");
+    setPdfLoading(false);
   }
 
   if (loading) return <PageLoading />;

@@ -748,15 +748,15 @@ export function CanvasElementView({
             rows.push({ kind: "extras_header", label: labels.extras || "Extras / 附加项目", value: "" });
             extras.slice(0, 3).forEach((extra) => {
               const rawLimit = (extra as any)?.coverage_limit || ((extra as any)?.typed_value_override?.value ? String((extra as any)?.typed_value_override?.value) : "");
-              let fmtLimit = "";
+              let limitLabel = "";
               if (rawLimit) {
-                const s = String(rawLimit).trim();
-                fmtLimit = !s.toUpperCase().startsWith("RM") && !s.toUpperCase().endsWith("RM") ? `${s}RM` : s;
+                const s = String(rawLimit).trim().replace(/^RM\s*/i, "");
+                const num = parseFloat(s.replace(/,/g, ""));
+                limitLabel = Number.isFinite(num) ? ` (RM ${num.toLocaleString("en-MY")})` : ` (RM ${s})`;
               }
               rows.push({
                 kind: "extra",
-                label: String(extra?.label || ""),
-                limit: fmtLimit,
+                label: String(extra?.label || "") + limitLabel,
                 value: fmtMoney(extra?.price),
               });
             });
@@ -812,7 +812,6 @@ export function CanvasElementView({
                   return (
                     <div key={`row-${index}`} className="flex items-center justify-between w-full pl-3" style={{ height: rowHeight }}>
                       <span style={labelStyle} className="truncate flex-1 min-w-0 pr-2">{row.label}</span>
-                      {row.limit ? <span style={{ fontSize: 8.5, fontWeight: 600, color: "#64748B", whiteSpace: "nowrap", paddingRight: 6 }}>{row.limit}</span> : null}
                       <span style={valueStyle} className="whitespace-nowrap text-right">{row.value}</span>
                     </div>
                   );
@@ -955,8 +954,8 @@ export function balanceBenefitGridElements(
   const yBottom = Number(grid2.y || 796) + Number(grid2.h || 262);
 
   const hdrH = 26;
-  const gap = 10;
-  const pad = 4;
+  const gap = 6;
+  const pad = 3;
 
   const hasExplicitExtrasGrid = elements.some((e) => e.gridKind === "extras" || e.gridKind === "purchased_extras");
   const hasExtrasSection = hasExplicitExtrasGrid && extrasCards.length > 0;
@@ -970,7 +969,7 @@ export function balanceBenefitGridElements(
     const rowsExt = nExt > 0 ? Math.max(1, Math.ceil(nExt / 2)) : 0;
     const rows2 = n2 > 0 ? Math.max(1, Math.ceil(n2 / 2)) : 0;
 
-    const rowHeight = 125;
+    const rowHeight = 100;
     const h1 = rows1 > 0 ? rows1 * rowHeight : 50;
     const hExt = rowsExt > 0 ? rowsExt * rowHeight : 50;
     const h2 = rows2 > 0 ? rows2 * rowHeight : 50;
@@ -1061,7 +1060,7 @@ export function balanceBenefitGridElements(
   const rows1 = n1 > 0 ? Math.max(1, Math.ceil(n1 / 2)) : 0;
   const rows2 = n2 > 0 ? Math.max(1, Math.ceil(n2 / 2)) : 0;
 
-  const rowHeight = 125;
+  const rowHeight = 100;
   const h1 = rows1 > 0 ? rows1 * rowHeight : 50;
   const h2 = rows2 > 0 ? rows2 * rowHeight : 50;
 
