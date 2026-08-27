@@ -40,6 +40,7 @@ def _line(node_id: str, x: float, y: float, w: float, z: int, *, color: str = RE
 def _grid(node_id: str, kind: str, x: float, y: float, w: float, h: float, z: int, *, dense: bool = False) -> dict:
     return {
         "id": node_id, "type": "benefit-grid", "gridKind": kind, "x": x, "y": y, "w": w, "h": h, "z": z,
+        "layoutMode": "masonry", "columns": 3,
         "packing": {
             "strategy": "balanced", "alignment": "start", "aspectRatio": 3.2 if dense else 3.0,
             "referenceWidth": 220, "referenceHeight": 64,

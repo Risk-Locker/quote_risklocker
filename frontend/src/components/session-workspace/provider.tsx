@@ -22,18 +22,36 @@ import type {
   WorkspaceSnapshot,
 } from "./types";
 
-/** Recalculate the adjusted total premium from base total + extras prices. */
+/** Recalculate the adjusted final price from base premium + roadtax + runner fee + extras prices. */
 function _recalcAdjustedTotal(snapshot: WorkspaceSnapshot, nextExtras: WorkspaceSnapshot["extras"]): string {
-  const raw = snapshot.fields?.total_amount;
-  const baseVal = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>).value : raw;
-  const base = parseFloat(String(baseVal ?? "").replace(/[^0-9.]/g, "")) || 0;
+  const pRaw = snapshot.fields?.premium;
+  const pVal = typeof pRaw === "object" && pRaw !== null ? (pRaw as Record<string, unknown>).value : pRaw;
+  const basePremium = parseFloat(String(pVal ?? "").replace(/[^0-9.]/g, "")) || 0;
+
+  const rtRaw = snapshot.fields?.roadtax;
+  const rtVal = typeof rtRaw === "object" && rtRaw !== null ? (rtRaw as Record<string, unknown>).value : rtRaw;
+  const rt = parseFloat(String(rtVal ?? "").replace(/[^0-9.]/g, "")) || 0;
+
+  const sfRaw = snapshot.fields?.service_fee;
+  const sfVal = typeof sfRaw === "object" && sfRaw !== null ? (sfRaw as Record<string, unknown>).value : sfRaw;
+  const sf = parseFloat(String(sfVal ?? "").replace(/[^0-9.]/g, "")) || 0;
+
   const extrasSum = nextExtras.reduce((acc, ex) => {
     const p = ex.price;
-    const amt = p ? (p.amount ?? 0) : 0;
+    const amt = p ? (p.amount ?? (p as any).value ?? 0) : 0;
     const num = typeof amt === "string" ? parseFloat(amt.replace(/,/g, "")) : (typeof amt === "number" ? amt : 0);
     return acc + (Number.isFinite(num) ? num : 0);
   }, 0);
-  const total = base + extrasSum;
+
+  let total = 0;
+  if (basePremium > 0) {
+    total = basePremium + rt + sf + extrasSum;
+  } else {
+    const raw = snapshot.fields?.total_amount;
+    const baseVal = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>).value : raw;
+    const base = parseFloat(String(baseVal ?? "").replace(/[^0-9.]/g, "")) || 0;
+    total = base + extrasSum;
+  }
   return total > 0 ? total.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
 }
 

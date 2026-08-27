@@ -124,6 +124,36 @@ def _template_config(draft: QuotationDraft, revision: TemplateRevision, page: Te
         canvas.setdefault("width", page_w)
         canvas.setdefault("height", page_h)
         canvas.setdefault("elements", [])
+        preset_id = None
+        if draft.fields and isinstance(draft.fields, dict):
+            raw_p = draft.fields.get("benefit_preset")
+            preset_id = raw_p.get("value") if isinstance(raw_p, dict) else raw_p
+        if preset_id:
+            for el in canvas.get("elements") or []:
+                if el.get("type") == "benefit-grid":
+                    el["benefitPreset"] = str(preset_id)
+                    if preset_id == "compact-minimal":
+                        el["layoutMode"] = "masonry"
+                        el["columns"] = 3
+                        el["cardStyle"] = "minimal"
+                        el["textDensity"] = "compact"
+                    elif preset_id == "signature-2col":
+                        el["layoutMode"] = "normal"
+                        el["columns"] = 2
+                        el["cardStyle"] = "standard"
+                        el["textDensity"] = "normal"
+                    elif preset_id == "elevated-3d":
+                        el["layoutMode"] = "masonry"
+                        el["columns"] = 3
+                        el["cardStyle"] = "soft"
+                    elif preset_id == "grid-tile":
+                        el["layoutMode"] = "masonry"
+                        el["columns"] = 3
+                        el["cardStyle"] = "outlined"
+                    elif preset_id == "dark-signature":
+                        el["layoutMode"] = "masonry"
+                        el["columns"] = 3
+                        el["cardStyle"] = "standard"
     try:
         return validate_template_config(config, compatibility=revision.state == "compatibility")
     except ValueError as exc:

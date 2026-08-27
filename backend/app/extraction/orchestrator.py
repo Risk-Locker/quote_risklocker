@@ -235,7 +235,7 @@ class ExtractionOrchestrator:
         except Exception as exc:
             warnings.append(f"Gemini multimodal extraction note: {exc}")
 
-        fields, draft_warnings, draft_status = build_draft(candidates)
+        fields, draft_warnings, draft_status = build_draft(candidates, benefit_lines=benefit_lines)
         warnings.extend(draft_warnings)
 
         candidate_payload = {

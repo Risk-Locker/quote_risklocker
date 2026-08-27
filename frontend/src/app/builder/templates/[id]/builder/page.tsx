@@ -44,6 +44,7 @@ import { api, fileUrl } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { CanvasElementView, FONT_LIBRARY, type CanvasElement, type CanvasStyle, SNAP, snapValue, computeGuides } from "@/components/template-canvas/shared";
 import { LayersPanel, type LayerAction } from "@/components/template-builder/layers-panel";
+import { SYSTEM_BENEFIT_PRESETS, getBenefitPreset } from "@/lib/benefit-presets";
 
 type TemplateVariable = { id: string; label: string; type: string; source: string; field?: string; fixed_value?: string };
 type BenefitCard = { icon?: string; title?: string; subtitle?: string; lines?: string[]; asset_id?: string };
@@ -1947,6 +1948,31 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                 ) : null}
                 {selected.type === "benefit-grid" ? (
                   <EditorShell title="Dynamic benefit grid">
+                    <div className="grid gap-1">
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-red)]">
+                        Benefit Template Preset
+                      </label>
+                      <Select
+                        value={selected.benefitPreset || "masonry-flow"}
+                        disabled={readOnly || Boolean(selected.locked)}
+                        onChange={(event) => {
+                          const preset = getBenefitPreset(event.target.value);
+                          updateElement(selected.id, {
+                            benefitPreset: preset.id,
+                            layoutMode: preset.layoutMode,
+                            columns: preset.columns,
+                            cardStyle: preset.cardStyle,
+                            textDensity: preset.textDensity,
+                          });
+                        }}
+                      >
+                        {SYSTEM_BENEFIT_PRESETS.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
                     <label className="grid gap-1 font-bold">
                       Content
                       <Select value={selected.gridKind || "current_benefits"} disabled>

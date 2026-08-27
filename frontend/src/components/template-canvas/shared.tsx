@@ -76,6 +76,7 @@ export type CanvasElement = {
   cardStyle?: "standard" | "outlined" | "soft" | "minimal";
   textDensity?: "comfortable" | "normal" | "compact";
   layoutMode?: "normal" | "masonry";
+  benefitPreset?: string;
   emptyState?: "hide" | "message";
   emptyMessage?: string;
   prefix?: string;
@@ -379,10 +380,10 @@ export function CanvasElementView({
   const handles = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
   const scenarioLayout = packFixedGrid(scenarioCount, element.w, element.h, element.packing);
   const density = {
-    comfortable: { padding: 12, gap: 8,  icon: 56, label: 13, value: 11, desc: 9.5 },
-    normal:      { padding: 9,  gap: 6,  icon: 48, label: 12, value: 10, desc: 9   },
-    compact:     { padding: 6,  gap: 4,  icon: 36, label: 11, value: 9,  desc: 8   },
-  }[element.textDensity || "normal"]!
+    comfortable: { padding: 7, gap: 6,  icon: 24, label: 11,   value: 10,  desc: 8.5 },
+    normal:      { padding: 5, gap: 5,  icon: 22, label: 10.5, value: 9.5, desc: 8   },
+    compact:     { padding: 4, gap: 4.5, icon: 20, label: 10,   value: 9,   desc: 7.8 },
+  }[element.textDensity || "compact"] || { padding: 4, gap: 4.5, icon: 20, label: 10, value: 9, desc: 7.8 };
   return (
     <div
       className={
@@ -528,206 +529,228 @@ export function CanvasElementView({
                 element.emptyState === "message"
                   ? <div className="grid h-full place-items-center text-center text-[10px] text-[var(--rl-text-muted)]">{element.emptyMessage || "Empty grid message"}</div>
                   : <div className="grid h-full place-items-center text-[10px] text-[var(--rl-text-muted)]">Hidden when empty</div>
-              ) : (
-                element.layoutMode === "masonry" ? (
-                  <div
-                    style={{
-                      columnCount: element.columns ?? 2,
-                      columnGap: density.gap,
-                      width: "100%",
-                      height: "100%",
-                      overflow: "hidden",
-                    }}
-                  >
-                    {orderedItems.map((b: any, idx: number) => {
-                      const label = b ? b.label : `Benefit ${idx + 1}`;
-                      const val = b?.value && !["", "Included standard cover", "Included", "FOC", "As quoted"].includes(b.value) ? b.value : "";
-                      const descRaw = b?.description || "";
-                      const desc = descRaw.length > 95 ? descRaw.substring(0, 92) + "..." : descRaw;
-                      const assetUrl = b
-                        ? b.asset_url ||
-                          (b.asset_id ? `/business/assets/${b.asset_id}/content?profile=ui` : null) ||
-                          (conceptAssets?.[b.concept_key] || conceptAssets?.[b.concept_id] || null) ||
-                          null
-                        : null;
-                      const costBadge = b?.price?.amount
-                        ? `Cost : MYR ${Number(b.price.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
-                        : null;
-                      return (
-                        <div
-                          key={idx}
-                          className="box-border"
-                          style={{ breakInside: "avoid", marginBottom: density.gap }}
-                        >
-                          <div
-                            className={`flex flex-col rounded-[8px] ${
-                              b?.is_detected
-                                ? "border-2 border-amber-400 bg-amber-50/40"
-                                : element.cardStyle === "minimal"
-                                  ? "bg-transparent border border-transparent"
-                                  : element.cardStyle === "soft"
-                                    ? "bg-[#f3f0f0] border border-gray-200 shadow-xs"
-                                    : "border border-[var(--rl-border)] bg-white shadow-xs"
-                            }`}
-                            style={{ padding: density.padding }}
-                          >
-                            <div
-                              className="font-bold leading-snug text-[var(--rl-text-strong)]"
-                              style={{ fontSize: density.label, marginBottom: 4 }}
-                            >
-                              {label}
-                            </div>
-                            <div className="flex gap-1.5 items-start min-h-0">
-                              <div
-                                className="shrink-0 overflow-hidden rounded"
-                                style={{ width: density.icon, height: density.icon }}
-                              >
-                                {assetUrl ? (
-                                  <img
-                                    src={fileUrl(assetUrl)}
-                                    alt={label}
-                                    className="h-full w-full object-contain"
-                                    onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
-                                  />
-                                ) : (
-                                  <span
-                                    className="grid h-full w-full place-items-center rounded bg-[var(--rl-red-light)] font-black text-[var(--rl-red)]"
-                                    style={{ fontSize: density.desc }}
-                                  >
-                                    {label ? label.slice(0, 2).toUpperCase() : `B${idx + 1}`}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="flex flex-col min-w-0 flex-1 overflow-hidden">
-                                {val && (
-                                  <span
-                                    className="font-bold leading-tight text-[var(--rl-red)]"
-                                    style={{ fontSize: density.value }}
-                                  >
-                                    {val}
-                                  </span>
-                                )}
-                                {desc && (
-                                  <span
-                                    className="leading-snug text-[var(--rl-text-muted)]"
-                                    style={{ fontSize: density.desc }}
-                                  >
-                                    {desc}
-                                  </span>
-                                )}
-                                {costBadge && (
-                                  <span
-                                    className={`mt-0.5 inline-block self-start font-semibold whitespace-nowrap text-slate-900`}
-                                    style={{ fontSize: density.desc }}
-                                  >
-                                    {costBadge}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  actualLayout.cards.map((card, idx) => {
-                    const b = orderedItems[idx];
-                    const label = b ? b.label : `Benefit ${card.index + 1}`;
-                    const val = b?.value && !["", "Included standard cover", "Included", "FOC", "As quoted"].includes(b.value) ? b.value : "";
-                    const descRaw = b?.description || "";
-                    const desc = descRaw.length > 95 ? descRaw.substring(0, 92) + "..." : descRaw;
-                    const assetUrl = b
-                      ? b.asset_url ||
-                        (b.asset_id ? `/business/assets/${b.asset_id}/content?profile=ui` : null) ||
-                        (conceptAssets?.[b.concept_key] || conceptAssets?.[b.concept_id] || null) ||
-                        (b.label ? conceptAssets?.[b.label.toLowerCase()] || conceptAssets?.[b.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] || null : null) ||
-                        (assets.find((a) => a.id === b.asset_id)?.url || null)
+              ) : element.layoutMode === "normal" ? (
+                /* Legacy Fixed Grid fallback */
+                actualLayout.cards.map((card, idx) => {
+                  const b = orderedItems[idx];
+                  const label = b ? b.label : `Benefit ${card.index + 1}`;
+                  const val = b?.value && !["", "Included standard cover", "Included", "FOC", "As quoted"].includes(b.value) ? b.value : "";
+                  const descRaw = b?.description || "";
+                  const desc = descRaw.length > 95 ? descRaw.substring(0, 92) + "..." : descRaw;
+                  const assetUrl = b
+                    ? b.asset_url ||
+                      (b.asset_id ? `/business/assets/${b.asset_id}/content?profile=ui` : null) ||
+                      (conceptAssets?.[b.concept_key] || conceptAssets?.[b.concept_id] || null) ||
+                      (b.label ? conceptAssets?.[b.label.toLowerCase()] || conceptAssets?.[b.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] || null : null) ||
+                      (assets.find((a) => a.id === b.asset_id)?.url || null)
+                    : null;
+                  const price = b?.price?.amount
+                    ? `Cost : MYR ${Number(b.price.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
+                    : b?.is_detected && b?.detected_cost
+                      ? `Cost : MYR ${String(b.detected_cost).replace(/RM\s*/i, "")}`
                       : null;
-                    const price = b?.price?.amount
-                      ? `Cost : MYR ${Number(b.price.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
-                      : b?.is_detected && b?.detected_cost
-                        ? `Cost : MYR ${String(b.detected_cost).replace(/RM\s*/i, "")}`
-                        : null;
-                    const costBadge = price || null;
+                  const costBadge = price || null;
 
-                    return (
-                      <article
-                        key={card.index}
-                        className="absolute box-border"
-                        style={{ left: card.x, top: card.y, width: card.width, height: card.height }}
+                  return (
+                    <article
+                      key={card.index}
+                      className="absolute box-border"
+                      style={{ left: card.x, top: card.y, width: card.width, height: card.height }}
+                    >
+                      <div
+                        className={`w-full h-full flex flex-col rounded-[6px] overflow-hidden ${
+                          b?.is_detected
+                            ? "border-2 border-amber-400 bg-amber-50/40 shadow-xs ring-1 ring-amber-300/50"
+                            : element.cardStyle === "minimal"
+                              ? "bg-transparent border border-transparent"
+                              : element.cardStyle === "soft"
+                                ? "bg-[#f3f0f0] border border-gray-200 shadow-xs"
+                                : "border border-[var(--rl-border)] bg-white shadow-xs"
+                        }`}
+                        style={{ padding: density.padding }}
                       >
                         <div
-                          className={`w-full h-full flex flex-col rounded-[8px] overflow-hidden ${
-                            b?.is_detected
-                              ? "border-2 border-amber-400 bg-amber-50/40 shadow-xs ring-1 ring-amber-300/50"
-                              : element.cardStyle === "minimal"
-                                ? "bg-transparent border border-transparent"
-                                : element.cardStyle === "soft"
-                                  ? "bg-[#f3f0f0] border border-gray-200 shadow-xs"
-                                  : "border border-[var(--rl-border)] bg-white shadow-xs"
-                          }`}
-                          style={{ padding: density.padding }}
+                          className="font-bold leading-snug text-[var(--rl-text-strong)] shrink-0 truncate"
+                          style={{ fontSize: density.label, marginBottom: 3 }}
                         >
+                          {label}
+                        </div>
+                        <div className="flex flex-1 min-h-0 gap-1.5 items-start overflow-hidden">
                           <div
-                            className="font-bold leading-snug text-[var(--rl-text-strong)] shrink-0"
-                            style={{ fontSize: density.label, marginBottom: 4 }}
+                            className="shrink-0 overflow-hidden rounded"
+                            style={{ width: density.icon, height: density.icon }}
                           >
-                            {label}
+                            {assetUrl ? (
+                              <img
+                                src={fileUrl(assetUrl)}
+                                alt={label}
+                                className="h-full w-full object-contain"
+                                onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
+                              />
+                            ) : (
+                              <span
+                                className="grid h-full w-full place-items-center rounded bg-[var(--rl-red-light)] font-black text-[var(--rl-red)]"
+                                style={{ fontSize: density.desc }}
+                              >
+                                {label ? label.slice(0, 2).toUpperCase() : `B${card.index + 1}`}
+                              </span>
+                            )}
                           </div>
-                          <div className="flex flex-1 min-h-0 gap-1.5 items-start overflow-hidden">
-                            <div
-                              className="shrink-0 overflow-hidden rounded"
-                              style={{ width: density.icon, height: density.icon }}
-                            >
-                              {assetUrl ? (
-                                <img
-                                  src={fileUrl(assetUrl)}
-                                  alt={label}
-                                  className="h-full w-full object-contain"
-                                  onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
-                                />
-                              ) : (
-                                <span
-                                  className="grid h-full w-full place-items-center rounded bg-[var(--rl-red-light)] font-black text-[var(--rl-red)]"
-                                  style={{ fontSize: density.desc }}
-                                >
-                                  {label ? label.slice(0, 2).toUpperCase() : `B${card.index + 1}`}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex flex-col min-w-0 flex-1 overflow-hidden justify-start">
-                              {val && (
-                                <span
-                                  className="font-bold leading-tight text-[var(--rl-red)]"
-                                  style={{ fontSize: density.value }}
-                                >
-                                  {val}
-                                </span>
-                              )}
-                              {desc && (
-                                <span
-                                  className="leading-snug text-[var(--rl-text-muted)]"
-                                  style={{ fontSize: density.desc }}
-                                >
-                                  {desc}
-                                </span>
-                              )}
-                              {costBadge && (
-                                <span
-                                  className={`mt-0.5 inline-block self-start font-semibold whitespace-nowrap text-slate-900`}
-                                  style={{ fontSize: density.desc }}
-                                >
-                                  {costBadge}
-                                </span>
-                              )}
-                            </div>
+                          <div className="flex flex-col min-w-0 flex-1 overflow-hidden justify-start">
+                            {val && (
+                              <span
+                                className="font-bold leading-tight text-[var(--rl-red)] truncate"
+                                style={{ fontSize: density.value }}
+                              >
+                                {val}
+                              </span>
+                            )}
+                            {desc && (
+                              <span
+                                className="leading-snug text-[var(--rl-text-muted)] line-clamp-2"
+                                style={{ fontSize: density.desc }}
+                              >
+                                {desc}
+                              </span>
+                            )}
+                            {costBadge && (
+                              <span
+                                className={`mt-0.5 inline-block self-start font-semibold whitespace-nowrap text-slate-900 leading-tight`}
+                                style={{ fontSize: density.desc }}
+                              >
+                                {costBadge}
+                              </span>
+                            )}
                           </div>
                         </div>
-                      </article>
-                    );
-                  })
-                )
+                      </div>
+                    </article>
+                  );
+                })
+              ) : (
+                /* PURE 3-COLUMN MASONRY SYSTEM (Default) */
+                (() => {
+                  const numCols = element.columns ?? 3;
+                  const isDark = element.benefitPreset === "dark-signature";
+                  const isMinimal = element.benefitPreset === "compact-minimal" || element.cardStyle === "minimal";
+                  const isElevated = element.benefitPreset === "elevated-3d" || element.cardStyle === "soft";
+                  const isGridTile = element.benefitPreset === "grid-tile" || element.cardStyle === "outlined";
+
+                  const cols: Array<Array<{ b: any; idx: number }>> = Array.from({ length: numCols }, () => []);
+                  orderedItems.forEach((b: any, idx: number) => {
+                    cols[idx % numCols].push({ b, idx });
+                  });
+
+                  return (
+                    <div
+                      className="flex flex-row w-full items-start"
+                      style={{ gap: density.gap }}
+                    >
+                      {cols.map((colItems, colIdx) => (
+                        <div
+                          key={`masonry-col-${colIdx}`}
+                          className="flex-1 flex flex-col min-w-0"
+                          style={{ gap: density.gap }}
+                        >
+                          {colItems.map(({ b, idx }) => {
+                            const label = b ? b.label : `Benefit ${idx + 1}`;
+                            const val = b?.value && !["", "Included standard cover", "Included", "FOC", "As quoted"].includes(b.value) ? b.value : "";
+                            const descRaw = b?.description || "";
+                            const desc = descRaw.length > 95 ? descRaw.substring(0, 92) + "..." : descRaw;
+                            const assetUrl = b
+                              ? b.asset_url ||
+                                (b.asset_id ? `/business/assets/${b.asset_id}/content?profile=ui` : null) ||
+                                (conceptAssets?.[b.concept_key] || conceptAssets?.[b.concept_id] || null) ||
+                                (b.label ? conceptAssets?.[b.label.toLowerCase()] || conceptAssets?.[b.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] || null : null) ||
+                                (assets.find((a) => a.id === b.asset_id)?.url || null)
+                              : null;
+                            const price = b?.price?.amount
+                              ? `Cost : MYR ${Number(b.price.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
+                              : b?.is_detected && b?.detected_cost
+                                ? `Cost : MYR ${String(b.detected_cost).replace(/RM\s*/i, "")}`
+                                : null;
+                            const costBadge = price || null;
+
+                            return (
+                              <article
+                                key={`masonry-card-${idx}`}
+                                className={`w-full rounded-[6px] overflow-hidden transition-all ${
+                                  b?.is_detected
+                                    ? "border-2 border-amber-400 bg-amber-50/40 shadow-xs ring-1 ring-amber-300/50"
+                                    : isDark
+                                      ? "border border-slate-700 bg-slate-900 shadow-xs"
+                                      : isMinimal
+                                        ? "border border-slate-200/90 bg-white/90 shadow-none hover:border-slate-300"
+                                        : isElevated
+                                          ? "border border-slate-200/90 bg-white shadow-sm hover:shadow"
+                                          : isGridTile
+                                            ? "border border-slate-300 bg-[#f8fafc] shadow-none"
+                                            : "border border-[var(--rl-border)] bg-white shadow-xs"
+                                }`}
+                                style={{ padding: isMinimal ? "3px 5px" : density.padding }}
+                              >
+                                <div
+                                  className={`font-bold leading-tight truncate ${isDark ? "text-white" : "text-[var(--rl-text-strong)]"}`}
+                                  style={{ fontSize: isMinimal ? density.label - 0.5 : density.label, marginBottom: isMinimal ? 1 : 3 }}
+                                >
+                                  {label}
+                                </div>
+                                <div className={`flex items-start ${isMinimal ? "gap-1" : "gap-1.5"}`}>
+                                  <div
+                                    className={`shrink-0 overflow-hidden ${isGridTile ? "rounded-full" : "rounded"}`}
+                                    style={{ width: isMinimal ? density.icon - 2 : density.icon, height: isMinimal ? density.icon - 2 : density.icon }}
+                                  >
+                                    {assetUrl ? (
+                                      <img
+                                        src={fileUrl(assetUrl)}
+                                        alt={label}
+                                        className="h-full w-full object-contain"
+                                        onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
+                                      />
+                                    ) : (
+                                      <span
+                                        className="grid h-full w-full place-items-center rounded bg-[var(--rl-red-light)] font-black text-[var(--rl-red)]"
+                                        style={{ fontSize: density.desc }}
+                                      >
+                                        {label ? label.slice(0, 2).toUpperCase() : `B${idx + 1}`}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex flex-col min-w-0 flex-1 justify-start">
+                                    {val && (
+                                      <span
+                                        className={`font-bold leading-tight truncate ${isDark ? "text-amber-400" : "text-[var(--rl-red)]"}`}
+                                        style={{ fontSize: density.value }}
+                                      >
+                                        {val}
+                                      </span>
+                                    )}
+                                    {!isMinimal && desc && (
+                                      <span
+                                        className={`leading-snug line-clamp-2 ${isDark ? "text-slate-400" : "text-[var(--rl-text-muted)]"}`}
+                                        style={{ fontSize: density.desc }}
+                                      >
+                                        {desc}
+                                      </span>
+                                    )}
+                                    {costBadge && (
+                                      <span
+                                        className={`mt-0.5 inline-block font-semibold whitespace-nowrap leading-tight ${isDark ? "text-amber-300" : "text-slate-900"}`}
+                                        style={{ fontSize: density.desc }}
+                                      >
+                                        {costBadge}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </article>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()
               )}
             </div>
           );
@@ -750,9 +773,13 @@ export function CanvasElementView({
               const rawLimit = (extra as any)?.coverage_limit || ((extra as any)?.typed_value_override?.value ? String((extra as any)?.typed_value_override?.value) : "");
               let limitLabel = "";
               if (rawLimit) {
-                const s = String(rawLimit).trim().replace(/^RM\s*/i, "");
-                const num = parseFloat(s.replace(/,/g, ""));
-                limitLabel = Number.isFinite(num) ? ` (RM ${num.toLocaleString("en-MY")})` : ` (RM ${s})`;
+                const clean = String(rawLimit).replace(/[()]/g, "").replace(/^RM\s*/i, "").trim();
+                const num = parseFloat(clean.replace(/,/g, ""));
+                if (Number.isFinite(num) && num > 0) {
+                  limitLabel = ` (RM ${num.toLocaleString("en-MY")})`;
+                } else if (clean && !/^(included|foc|none|n\/a)$/i.test(clean)) {
+                  limitLabel = ` (${clean.startsWith("RM") ? clean : `RM ${clean}`})`;
+                }
               }
               rows.push({
                 kind: "extra",
@@ -786,7 +813,7 @@ export function CanvasElementView({
           rows.push({ kind: "divider", label: "", value: "" });
           rows.push({ kind: "roadtax", label: labels.roadtax || "Roadtax", value: roadtax ? `RM ${roadtax}` : "" });
           rows.push({ kind: "runner", label: labels.runner || "Runner Fee", value: runner ? `RM ${runner}` : "" });
-          rows.push({ kind: "total", label: labels.total || "Total Premium 总额", value: total ? `RM ${total}` : "" });
+          rows.push({ kind: "total", label: labels.total || "Final Price / 最终总额", value: total ? `RM ${total}` : "" });
           const rowHeight = Number(element.rowHeight) || 14;
           return (
             <div className="relative w-full h-full flex flex-col justify-start">
@@ -951,11 +978,14 @@ export function balanceBenefitGridElements(
 
   const baseTop = hdr1Bg ? Number(hdr1Bg.y || 414) : Number(grid1.y || 444);
   const yTop = baseTop + extraShift;
-  const yBottom = Number(grid2.y || 796) + Number(grid2.h || 262);
 
   const hdrH = 26;
   const gap = 6;
   const pad = 3;
+  const cols = Number(grid1.columns || 3);
+  const isMinimal = grid1.benefitPreset === "compact-minimal" || grid1.cardStyle === "minimal";
+  const rowHeight = isMinimal ? 40 : (cols === 2 ? 68 : 66);
+  const cardGap = 5;
 
   const hasExplicitExtrasGrid = elements.some((e) => e.gridKind === "extras" || e.gridKind === "purchased_extras");
   const hasExtrasSection = hasExplicitExtrasGrid && extrasCards.length > 0;
@@ -965,20 +995,22 @@ export function balanceBenefitGridElements(
     const nExt = extrasCards.length;
     const n2 = addonCards.length;
 
-    const rows1 = n1 > 0 ? Math.max(1, Math.ceil(n1 / 2)) : 0;
-    const rowsExt = nExt > 0 ? Math.max(1, Math.ceil(nExt / 2)) : 0;
-    const rows2 = n2 > 0 ? Math.max(1, Math.ceil(n2 / 2)) : 0;
+    const rows1 = n1 > 0 ? Math.ceil(n1 / cols) : 0;
+    const rowsExt = nExt > 0 ? Math.ceil(nExt / cols) : 0;
+    const rows2 = n2 > 0 ? Math.ceil(n2 / cols) : 0;
 
-    const rowHeight = 100;
-    const h1 = rows1 > 0 ? rows1 * rowHeight : 50;
-    const hExt = rowsExt > 0 ? rowsExt * rowHeight : 50;
-    const h2 = rows2 > 0 ? rows2 * rowHeight : 50;
+    const h1 = rows1 > 0 ? rows1 * rowHeight + Math.max(0, rows1 - 1) * cardGap : 40;
+    const hExt = rowsExt > 0 ? rowsExt * rowHeight + Math.max(0, rowsExt - 1) * cardGap : 40;
+    const h2 = rows2 > 0 ? rows2 * rowHeight + Math.max(0, rows2 - 1) * cardGap : 40;
 
     const yG1 = yTop + hdrH + pad;
     const yHExt = yG1 + h1 + gap;
     const yGExt = yHExt + hdrH + pad;
     const yH2 = yGExt + hExt + gap;
     const yG2 = yH2 + hdrH + pad;
+
+    const gridBottom = yG2 + h2;
+    const footerShift = gridBottom > 1050 ? gridBottom + 16 - 1068 : 0;
 
     const adjusted: CanvasElement[] = [];
     for (const elem of elements) {
@@ -1008,7 +1040,7 @@ export function balanceBenefitGridElements(
         adjusted.push({
           id: "extras_header_txt",
           type: "text",
-          text: "Purchased Extras & Add-ons / 额外附加保障",
+          text: "Purchased Extras & Add-ons / 特别附加项目",
           x: 52,
           y: yHExt + 5,
           w: 690,
@@ -1025,16 +1057,9 @@ export function balanceBenefitGridElements(
           w: 714,
           h: hExt,
           z: 4,
-          packing: grid1.packing || {
-            strategy: "balanced",
-            alignment: "center",
-            aspectRatio: 1.45,
-            referenceWidth: 180,
-            referenceHeight: 124,
-            gapRatio: 0.035,
-            paddingRatio: 0.012,
-            staggerRatio: 0.5,
-          },
+          benefitPreset: grid1.benefitPreset,
+          layoutMode: grid1.layoutMode,
+          columns: cols,
           cardStyle: grid1.cardStyle || "standard",
           textDensity: grid1.textDensity || "compact",
           emptyState: "hide",
@@ -1048,6 +1073,8 @@ export function balanceBenefitGridElements(
       } else if (e.type === "benefit-grid" && e.gridKind === "available_addons") {
         e.y = yG2;
         e.h = h2;
+      } else if (footerShift > 0 && (Number(e.y || 0) >= 1050 || String(e.id || "").startsWith("footer") || String(e.id || "").startsWith("tc_"))) {
+        e.y = Number(e.y || 1068) + footerShift;
       }
       adjusted.push(e);
     }
@@ -1057,16 +1084,19 @@ export function balanceBenefitGridElements(
   // Standard 2-section layout when no extras exist
   const n1 = currentCards.length;
   const n2 = addonCards.length;
-  const rows1 = n1 > 0 ? Math.max(1, Math.ceil(n1 / 2)) : 0;
-  const rows2 = n2 > 0 ? Math.max(1, Math.ceil(n2 / 2)) : 0;
 
-  const rowHeight = 100;
-  const h1 = rows1 > 0 ? rows1 * rowHeight : 50;
-  const h2 = rows2 > 0 ? rows2 * rowHeight : 50;
+  const rows1 = n1 > 0 ? Math.ceil(n1 / cols) : 0;
+  const rows2 = n2 > 0 ? Math.ceil(n2 / cols) : 0;
+
+  const h1 = rows1 > 0 ? rows1 * rowHeight + Math.max(0, rows1 - 1) * cardGap : 40;
+  const h2 = rows2 > 0 ? rows2 * rowHeight + Math.max(0, rows2 - 1) * cardGap : 40;
 
   const yG1 = yTop + hdrH + pad;
   const yH2 = yG1 + h1 + gap;
   const yG2 = yH2 + hdrH + pad;
+
+  const gridBottom = yG2 + h2;
+  const footerShift = gridBottom > 1050 ? gridBottom + 16 - 1068 : 0;
 
   return elements.map((elem) => {
     const e = { ...elem };
@@ -1088,6 +1118,8 @@ export function balanceBenefitGridElements(
     } else if (e.type === "benefit-grid" && e.gridKind === "available_addons") {
       e.y = yG2;
       e.h = h2;
+    } else if (footerShift > 0 && (Number(e.y || 0) >= 1050 || String(e.id || "").startsWith("footer") || String(e.id || "").startsWith("tc_"))) {
+      e.y = Number(e.y || 1068) + footerShift;
     }
     return e;
   });

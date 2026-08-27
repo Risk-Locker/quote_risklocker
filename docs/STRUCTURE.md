@@ -50,6 +50,13 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Data repair command: `commands/repin-amassurance-sessions.py` (idempotent, dry-run default, `--apply`) — re-pins drafts with stale revisions or missing `package_id` to the latest published revision (e.g. rev 3) and re-seeds tier defaults.
 - Template update commands: `commands/update-template-header-customer.py` and `commands/update-template-header-quotation-ref.py` (idempotent, dry-run default, `--apply`) — updates existing template revisions with separated header variables and publishes clean revisions.
 
+## Benefit Presets (v10) Additions
+
+- Centralized Presets: `frontend/src/lib/benefit-presets.ts` (`SYSTEM_BENEFIT_PRESETS`, `getBenefitPreset`, `applyPresetToCanvasElement`). 6 presets: Masonry Flow, Compact Minimalist, Signature 2-Col, Elevated 3D, Grid Tile, Dark Luxury.
+- Template Builder: Preset selector in `frontend/src/app/builder/templates/[id]/builder/page.tsx` (`Dynamic benefit grid` inspector) and template applier in `frontend/src/app/builder/templates/page.tsx`.
+- Review Workspace: Interactive Benefit Template Switcher in `frontend/src/components/session-workspace/review-phase.tsx` (sidebar + canvas toolbar) with live preview updates.
+- Rendering: Double RM fix in `shared.tsx:765`, dynamic row height allocation (~66px standard, 40px minimal) and dynamic footer shifting (`footer_shift`) in `shared.tsx` and `template_renderer.py`. PDF generator applies preset in `generation_service.py:_template_config`.
+
 ## Benefit Configuration Matrix
 
 - `docs/BENEFITS-CONFIGURATION.md` — canonical per-insurer benefits/add-on matrix: global benefit library (34 concepts), dimensions, and every company × coverage type × vehicle category row including add-on system (`single` vs `package`), package tiers, and seed status (seeded / draft / pending). Registered in `docs/START-HERE.md`.

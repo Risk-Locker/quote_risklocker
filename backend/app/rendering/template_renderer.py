@@ -24,7 +24,7 @@ FIELD_LABELS = {
     "premium": "Insurance Premium",
     "roadtax": "Roadtax",
     "service_fee": "Runner Fee",
-    "total_amount": "Total Premium",
+    "total_amount": "Final Price",
     "insurance_company": "Insurer Name",
     "valid_until": "Validity Date",
 }
@@ -37,15 +37,15 @@ SHADOW_MAP = {
     "lg": "0 8px 24px rgba(0,0,0,0.18)",
 }
 GRID_CARD_STYLES = {
-    "standard": "border:1px solid #D8DDE6;border-radius:12px;background:#F6F8FB",
-    "outlined": "border:2px solid #D8DDE6;border-radius:10px;background:#FFFFFF",
-    "soft": "border:0;border-radius:16px;background:#F3F0F0;box-shadow:0 2px 8px rgba(27,23,23,.10)",
+    "standard": "border:1px solid #E2E8F0;border-radius:6px;background:#FFFFFF;box-shadow:0 1px 2px rgba(0,0,0,0.03)",
+    "outlined": "border:1px solid #E2E8F0;border-radius:6px;background:#FFFFFF;box-shadow:0 1px 2px rgba(0,0,0,0.03)",
+    "soft": "border:1px solid #E2E8F0;border-radius:6px;background:#F8FAFC",
     "minimal": "border:0;border-radius:0;background:transparent",
 }
 GRID_TEXT_DENSITIES = {
-    "comfortable": {"padding": 12, "gap": 8, "icon": 56, "label": 13, "value": 11, "desc": 9.5},
-    "normal":      {"padding": 9,  "gap": 6, "icon": 48, "label": 12, "value": 10, "desc": 9},
-    "compact":     {"padding": 6,  "gap": 4, "icon": 36, "label": 11, "value": 9,  "desc": 8},
+    "comfortable": {"padding": 7, "gap": 6, "icon": 24, "label": 11, "value": 10, "desc": 8.5},
+    "normal":      {"padding": 5, "gap": 5, "icon": 22, "label": 10.5, "value": 9.5, "desc": 8},
+    "compact":     {"padding": 4, "gap": 4.5, "icon": 20, "label": 10, "value": 9, "desc": 7.8},
 }
 
 
@@ -293,9 +293,9 @@ def _dynamic_benefit_grid(
             f'overflow:hidden;display:flex;align-items:center;justify-content:center;text-align:center">{empty_message}</div>'
         )
     card_style_name = str(element.get("cardStyle") or "standard")
-    density_name = str(element.get("textDensity") or "normal")
-    layout_mode = str(element.get("layoutMode") or "normal")
-    density = GRID_TEXT_DENSITIES.get(density_name, GRID_TEXT_DENSITIES["normal"])
+    density_name = str(element.get("textDensity") or "compact")
+    layout_mode = str(element.get("layoutMode") or "masonry")
+    density = GRID_TEXT_DENSITIES.get(density_name, GRID_TEXT_DENSITIES["compact"])
     card_style_css = GRID_CARD_STYLES.get(card_style_name, GRID_CARD_STYLES["standard"])
 
     output: list[str] = []
@@ -314,45 +314,62 @@ def _dynamic_benefit_grid(
         asset_uri_c = resolved_assets.get(asset_id_c, "")
 
         is_purchased_extra = bool(card.get("is_extra") or (card.get("cost_status") == "paid" and kind == "current_benefits"))
+        is_dark = element.get("benefitPreset") == "dark-signature"
+        is_minimal = element.get("benefitPreset") == "compact-minimal" or element.get("cardStyle") == "minimal"
+        is_elevated = element.get("benefitPreset") == "elevated-3d" or element.get("cardStyle") == "soft"
+        is_grid_tile = element.get("benefitPreset") == "grid-tile" or element.get("cardStyle") == "outlined"
+
         if is_purchased_extra:
             card_border_css = "border:1.5px solid #F59E0B;background:#FFFDF7;box-shadow:0 1px 3px rgba(245,158,11,0.15)"
+        elif is_dark:
+            card_border_css = "border:1px solid #334155;background:#0F172A;box-shadow:0 1px 3px rgba(0,0,0,0.3)"
+        elif is_elevated:
+            card_border_css = "border:1px solid #E2E8F0;background:#FFFFFF;box-shadow:0 4px 12px rgba(0,0,0,0.08)"
+        elif is_grid_tile:
+            card_border_css = "border:1px solid #CBD5E1;background:#F8FAFC;box-shadow:none"
+        elif is_minimal:
+            card_border_css = "border:1px solid #F1F5F9;background:#FFFFFF;box-shadow:none"
         else:
             card_border_css = card_style_css
 
-        pad = density["padding"]
-        icon_sz = density["icon"]
-        lbl_fs = density["label"]
+        pad = 3 if is_minimal else density["padding"]
+        icon_sz = (density["icon"] - 2) if is_minimal else density["icon"]
+        lbl_fs = (density["label"] - 0.5) if is_minimal else density["label"]
         val_fs = density["value"]
         desc_fs = density["desc"]
+        title_color = "#FFFFFF" if is_dark else "#0F172A"
+        desc_color = "#94A3B8" if is_dark else "#64748B"
+        val_color = "#F59E0B" if is_dark else "#DC2626"
 
         # --- Image cell (bottom-left) ---
+        icon_radius = "999px" if is_grid_tile else "4px"
         if asset_uri_c:
             image_html = (
                 f'<img alt="" src="{escape(asset_uri_c)}" '
-                f'style="width:{icon_sz}px;height:{icon_sz}px;object-fit:contain;display:block;flex-shrink:0" />'
+                f'style="width:{icon_sz}px;height:{icon_sz}px;object-fit:contain;display:block;flex-shrink:0;border-radius:{icon_radius}" />'
             )
         else:
             initials = label_str[:2].upper() if label_str else "?"
             image_html = (
                 f'<span style="display:grid;place-items:center;width:{icon_sz}px;height:{icon_sz}px;'
-                f'border-radius:6px;background:#FEE2E2;color:#DC2626;font-size:{desc_fs}px;'
+                f'border-radius:{icon_radius};background:#FEE2E2;color:#DC2626;font-size:{desc_fs}px;'
                 f'font-weight:800;flex-shrink:0">{initials}</span>'
             )
 
         # --- Coverage value row ---
         show_value = bool(value_str and value_str not in {"Included standard cover", "Included", "FOC", "As quoted"})
         coverage_html = (
-            f'<span style="display:block;font-size:{val_fs}px;font-weight:700;line-height:1.1;'
-            f'color:#DC2626;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{value_str}</span>'
+            f'<span style="display:block;font-size:{val_fs}px;font-weight:700;line-height:1.15;'
+            f'color:{val_color};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{value_str}</span>'
             if show_value else ""
         )
 
         # --- Short description row ---
         desc_html = (
-            f'<span style="display:block;font-size:{desc_fs}px;line-height:1.25;color:#64748B;'
+            f'<span style="display:block;font-size:{desc_fs}px;line-height:1.2;color:{desc_color};'
             f'overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">'
             f'{desc_str}</span>'
-            if desc_str else ""
+            if (desc_str and not is_minimal) else ""
         )
 
         # --- Cost / price badge ---
@@ -367,23 +384,23 @@ def _dynamic_benefit_grid(
                 clean_pval = str(p_val).replace("RM ", "").replace("RM", "")
                 p_str = f"Cost : MYR {clean_pval}"
             price_badge = (
-                f'<span style="display:block;margin-top:2px;font-size:{desc_fs}px;font-weight:600;'
-                f'color:#0F172A;">{p_str}</span>'
+                f'<span style="display:block;margin-top:1px;font-size:{desc_fs}px;font-weight:600;'
+                f'color:{"#FBBF24" if is_dark else "#0F172A"};line-height:1.15;white-space:nowrap">{p_str}</span>'
             )
-
 
         # Title font: shrink for long labels
         title_fs = lbl_fs - 1.0 if len(label_str) > 30 else (lbl_fs - 0.5 if len(label_str) > 18 else float(lbl_fs))
+        title_margin = 1 if is_minimal else 3
 
         inner_html = (
-            # — Title row (full width) —
-            f'<div style="display:block;font-size:{title_fs}px;font-weight:700;line-height:1.2;'
-            f'color:#0F172A;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
-            f'margin-bottom:4px">{label_str}</div>'
-            # — Bottom row: image left, detail right —
-            f'<div style="display:flex;flex:1;min-height:0;gap:6px;align-items:flex-start">'
+            # Title row (full width)
+            f'<div style="display:block;font-size:{title_fs}px;font-weight:700;line-height:1.15;'
+            f'color:{title_color};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+            f'margin-bottom:{title_margin}px">{label_str}</div>'
+            # Bottom row: image left, detail right
+            f'<div style="display:flex;gap:5px;align-items:flex-start">'
             f'{image_html}'
-            f'<div style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:flex-start;overflow:hidden">'
+            f'<div style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:flex-start;gap:1px;overflow:hidden">'
             f'{coverage_html}'
             f'{desc_html}'
             f'{price_badge}'
@@ -395,31 +412,41 @@ def _dynamic_benefit_grid(
         return (
             f'<article data-benefit-card="1" data-card-scale="{scale:.12f}" '
             f'data-card-style="{escape(card_style_name)}" data-text-density="{escape(density_name)}" '
-            f'style="{pos_style}overflow:hidden;box-sizing:border-box">'
-            f'<div style="width:100%;height:100%;display:flex;flex-direction:column;'
-            f'padding:{pad}px;box-sizing:border-box;border-radius:8px;{card_border_css};overflow:hidden">'
+            f'style="{pos_style}box-sizing:border-box">'
+            f'<div style="width:100%;display:flex;flex-direction:column;'
+            f'padding:{pad}px;box-sizing:border-box;border-radius:6px;{card_border_css};overflow:hidden">'
             f'{inner_html}'
             f'</div></article>'
         )
 
-    if layout_mode == "masonry":
-        # Masonry: CSS multi-column flow; _build_card_html supplies the full <article>
-        col_count = max(1, int(element.get("columns") or 2))
+    if layout_mode != "normal":
+        # Pure 3-Column Masonry System (Default)
+        col_count = max(1, int(element.get("columns") or 3))
         gap = density["gap"]
-        masonry_html = "".join(
-            _build_card_html(
-                card, 0, 0, 0, 0, 1.0,
-                extra_style=f"position:relative;width:100%;break-inside:avoid;margin-bottom:{gap}px;",
+        cols: list[list[dict[str, Any]]] = [[] for _ in range(col_count)]
+        for idx, card in enumerate(ordered):
+            cols[idx % col_count].append(card)
+
+        cols_html = []
+        for col_cards in cols:
+            cards_html = "".join(
+                _build_card_html(
+                    card, 0, 0, 0, 0, 1.0,
+                    extra_style="position:relative;width:100%;box-sizing:border-box;",
+                )
+                for card in col_cards
             )
-            for card in ordered
-        )
+            cols_html.append(
+                f'<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:{gap}px;">'
+                f'{cards_html}</div>'
+            )
+
         warning = escape(layout.warning or "")
         return (
             f'<section data-grid-kind="{escape(kind)}" data-density-warning="{warning}" '
             f'style="position:absolute;left:{bounds.x:.8f}px;top:{bounds.y:.8f}px;'
-            f'width:{bounds.width:.8f}px;height:{bounds.height:.8f}px;overflow:hidden;'
-            f'column-count:{col_count};column-gap:{gap}px">'
-            f'{masonry_html}</section>'
+            f'width:{bounds.width:.8f}px;display:flex;flex-direction:row;gap:{gap}px;align-items:flex-start;">'
+            f'{"".join(cols_html)}</section>'
         )
 
 
@@ -486,6 +513,13 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
             else:
                 formatted_price = format_money_amount(raw_price)
             cov_limit = str(extra.get("coverage_limit") or "")
+            if cov_limit:
+                clean_cov = re.sub(r"[()]", "", cov_limit).replace("RM", "").strip()
+                try:
+                    num_cov = float(clean_cov.replace(",", ""))
+                    cov_limit = f"(RM {int(num_cov):,})" if num_cov == int(num_cov) else f"(RM {num_cov:,.2f})"
+                except Exception:
+                    cov_limit = f"({cov_limit.strip()})" if not cov_limit.startswith("(") else cov_limit
             rows.append(("extra", str(extra.get("label") or ""), cov_limit, formatted_price))
     rows.append(("premium", str(labels.get("premium") or "Insurance Premium / 保费"), "", _format_value(_value(fields, "premium"), "RM ")))
     rows.append(("divider", "", "", ""))
@@ -496,7 +530,7 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
         total = adjusted_total_text(fields, extras) if extras else _value(fields, "total_amount")
     if not total:
         total = _value(fields, "total_amount")
-    rows.append(("total", str(labels.get("total") or "Total Premium / 保费总额"), "", _format_value(total, "RM ")))
+    rows.append(("total", str(labels.get("total") or "Final Price / 最终总额"), "", _format_value(total, "RM ")))
     html: list[str] = []
     for index, (kind, label, middle_val, right_val) in enumerate(rows):
         row_y = y + index * row_height
@@ -569,43 +603,32 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     has_explicit_extras_grid = any(e.get("gridKind") in {"extras", "purchased_extras"} for e in elements)
     has_extras_section = has_explicit_extras_grid and len(extras_cards) > 0
 
+    cols = max(1, int(grid1.get("columns") or 3)) if grid1 else 3
+    is_minimal = bool(grid1 and (grid1.get("benefitPreset") == "compact-minimal" or grid1.get("cardStyle") == "minimal"))
+    row_height = 40.0 if is_minimal else (68.0 if cols == 2 else 66.0)
+    card_gap = 5.0
+
     if has_extras_section:
         n1 = len(foc_cards)
         n_ext = len(extras_cards)
         n2 = len(addon_cards)
 
-        rows1 = max(1, (n1 + 1) // 2) if n1 > 0 else 0
-        rows_ext = max(1, (n_ext + 1) // 2) if n_ext > 0 else 0
-        rows2 = max(1, (n2 + 1) // 2) if n2 > 0 else 0
+        rows1 = max(1, (n1 + cols - 1) // cols) if n1 > 0 else 0
+        rows_ext = max(1, (n_ext + cols - 1) // cols) if n_ext > 0 else 0
+        rows2 = max(1, (n2 + cols - 1) // cols) if n2 > 0 else 0
 
-        total_space = y_bottom - y_top
-        avail_grids_h = total_space - (3 * hdr_h) - (2 * gap) - (3 * pad)
-        if avail_grids_h <= 120:
-            avail_grids_h = 360.0
-
-        total_rows = rows1 + rows_ext + rows2
-        if total_rows > 0:
-            h_ext = max(52.0, min(110.0, avail_grids_h * (rows_ext / total_rows)))
-            remaining_h = avail_grids_h - h_ext
-            if rows1 > 0 and rows2 > 0:
-                h1 = max(80.0, min(remaining_h - 70.0, remaining_h * (rows1 / (rows1 + rows2))))
-                h2 = remaining_h - h1
-            elif rows1 > 0:
-                h1 = remaining_h - 50.0
-                h2 = 50.0
-            else:
-                h1 = 50.0
-                h2 = remaining_h - 50.0
-        else:
-            h1 = avail_grids_h / 3.0
-            h_ext = avail_grids_h / 3.0
-            h2 = avail_grids_h / 3.0
+        h1 = rows1 * row_height + max(0, rows1 - 1) * card_gap if rows1 > 0 else 40.0
+        h_ext = rows_ext * row_height + max(0, rows_ext - 1) * card_gap if rows_ext > 0 else 40.0
+        h2 = rows2 * row_height + max(0, rows2 - 1) * card_gap if rows2 > 0 else 40.0
 
         y_g1 = y_top + hdr_h + pad
         y_h_ext = y_g1 + h1 + gap
         y_g_ext = y_h_ext + hdr_h + pad
         y_h2 = y_g_ext + h_ext + gap
         y_g2 = y_h2 + hdr_h + pad
+
+        grid_bottom = y_g2 + h2
+        footer_shift = grid_bottom + 16.0 - 1068.0 if grid_bottom > 1050.0 else 0.0
 
         adjusted_elements = []
         for elem in elements:
@@ -636,7 +659,7 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
                 adjusted_elements.append({
                     "id": "extras_header_txt",
                     "type": "text",
-                    "text": "Purchased Extras & Add-ons / 额外附加保障",
+                    "text": "Purchased Extras & Add-ons / 特别附加项目",
                     "x": 52,
                     "y": y_h_ext + 5,
                     "w": 690,
@@ -653,16 +676,9 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
                     "w": 714,
                     "h": h_ext,
                     "z": 4,
-                    "packing": grid1.get("packing") or {
-                        "strategy": "balanced",
-                        "alignment": "center",
-                        "aspectRatio": 1.45,
-                        "referenceWidth": 180,
-                        "referenceHeight": 124,
-                        "gapRatio": 0.035,
-                        "paddingRatio": 0.012,
-                        "staggerRatio": 0.5,
-                    },
+                    "benefitPreset": grid1.get("benefitPreset"),
+                    "layoutMode": grid1.get("layoutMode"),
+                    "columns": cols,
                     "cardStyle": grid1.get("cardStyle") or "standard",
                     "textDensity": grid1.get("textDensity") or "compact",
                     "emptyState": "hide",
@@ -676,39 +692,29 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
             elif e.get("type") == "benefit-grid" and e.get("gridKind") == "available_addons":
                 e["y"] = y_g2
                 e["h"] = h2
+            elif footer_shift > 0.0 and (float(e.get("y") or 0) >= 1050.0 or str(eid or "").startswith("footer") or str(eid or "").startswith("tc_")):
+                e["y"] = float(e.get("y") or 1068.0) + footer_shift
             adjusted_elements.append(e)
         return adjusted_elements
 
     # Standard 2-section layout when no extras exist
     n1 = len(current_cards)
     n2 = len(addon_cards)
-    rows1 = max(1, (n1 + 1) // 2) if n1 > 0 else 0
-    rows2 = max(1, (n2 + 1) // 2) if n2 > 0 else 0
 
-    total_space = y_bottom - y_top
-    avail_grids_h = total_space - (2 * hdr_h) - gap - (2 * pad)
-    if avail_grids_h <= 100:
-        avail_grids_h = 360.0
+    rows1 = max(1, (n1 + cols - 1) // cols) if n1 > 0 else 0
+    rows2 = max(1, (n2 + cols - 1) // cols) if n2 > 0 else 0
 
-    if rows1 > 0 and rows2 > 0:
-        ratio1 = rows1 / (rows1 + rows2)
-        h1 = max(100.0, min(avail_grids_h - 80.0, avail_grids_h * ratio1))
-        h2 = avail_grids_h - h1
-    elif rows1 > 0 and rows2 == 0:
-        h1 = avail_grids_h + hdr_h + gap + pad - 60.0
-        h2 = 60.0
-    elif rows1 == 0 and rows2 > 0:
-        h1 = 60.0
-        h2 = avail_grids_h + hdr_h + gap + pad - 60.0
-    else:
-        h1 = avail_grids_h / 2.0
-        h2 = avail_grids_h / 2.0
+    h1 = rows1 * row_height + max(0, rows1 - 1) * card_gap if rows1 > 0 else 40.0
+    h2 = rows2 * row_height + max(0, rows2 - 1) * card_gap if rows2 > 0 else 40.0
 
-    adjusted_elements = []
     y_g1 = y_top + hdr_h + pad
     y_h2 = y_g1 + h1 + gap
     y_g2 = y_h2 + hdr_h + pad
 
+    grid_bottom = y_g2 + h2
+    footer_shift = grid_bottom + 16.0 - 1068.0 if grid_bottom > 1050.0 else 0.0
+
+    adjusted_elements = []
     for elem in elements:
         e = dict(elem)
         eid = e.get("id")
@@ -730,6 +736,8 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
         elif e.get("type") == "benefit-grid" and e.get("gridKind") == "available_addons":
             e["y"] = y_g2
             e["h"] = h2
+        elif footer_shift > 0.0 and (float(e.get("y") or 0) >= 1050.0 or str(eid or "").startswith("footer") or str(eid or "").startswith("tc_")):
+            e["y"] = float(e.get("y") or 1068.0) + footer_shift
         adjusted_elements.append(e)
 
     return adjusted_elements
@@ -909,9 +917,9 @@ def render_quotation_html(
         if elem_bottom > max_element_y:
             max_element_y = elem_bottom
             
-    # Remove A4 constraint: Auto-expand height to fit all benefits (with padding)
-    if max_element_y + 120 > height:
-        height = int(max_element_y + 120)
+    # Auto-expand height only if elements strictly exceed A4 base height
+    if max_element_y + 20 > height:
+        height = int(max_element_y + 20)
 
     elements = sorted(balanced, key=lambda item: int(item.get("z", 1)))
     body = "".join(

@@ -45,6 +45,7 @@ import {
   balanceBenefitGridElements,
   type CanvasElement,
 } from "@/components/template-canvas/shared";
+import { SYSTEM_BENEFIT_PRESETS, applyPresetToCanvasElement } from "@/lib/benefit-presets";
 import {
   useWorkspaceActions,
   useWorkspaceData,
@@ -75,7 +76,7 @@ const FORM_FIELDS: FormField[] = [
   { name: "premium", label: "Insurance premium", kind: "money" },
   { name: "roadtax", label: "Road tax", kind: "money" },
   { name: "service_fee", label: "Runner fee", kind: "money" },
-  { name: "total_amount", label: "Total premium", kind: "total" },
+  { name: "total_amount", label: "Final price", kind: "total" },
 ];
 
 // The 7 Core Baseline Comprehensive Benefits
@@ -347,37 +348,12 @@ function IncludedCard({
           </p>
         )}
       </div>
-      {/* Actions */}
+      {/* RL-DISABLED default_benefit_actions — disabled 2026-08-28; restore when owner requests mutable default benefits */}
+      {/* Static indicator for constant default covers */}
       <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
-        <Button
-          variant="secondary"
-          size="sm"
-          title="Move this benefit to Optional Add-ons"
-          onClick={handleMoveToAddon}
-          className="text-[11px] h-7 px-2"
-        >
-          → Add-on
-        </Button>
-        {canUndo ? (
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={pending}
-            onClick={() => selectionId && onQueue({ op: "revert_benefit", selection_id: selectionId }, `benefits.${selectionId}.revert`)}
-            className="text-[11px] h-7 px-2"
-          >
-            Undo
-          </Button>
-        ) : null}
-        <button
-          type="button"
-          aria-label={`Remove ${card.label} from this quotation`}
-          onClick={handleRemove}
-          className="rounded-full p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] transition-colors"
-          title="Remove benefit completely"
-        >
-          <X size={14} weight="bold" />
-        </button>
+        <span className="rounded bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9.5px] font-bold text-emerald-700 shrink-0">
+          Standard
+        </span>
       </div>
     </article>
   );
@@ -593,7 +569,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [templateCollapsed, setTemplateCollapsed] = useState(false);
   const [extractedValuesCollapsed, setExtractedValuesCollapsed] = useState(false);
   const [extractedBenefitsCollapsed, setExtractedBenefitsCollapsed] = useState(false);
-  const [extractedBenefitsViewMode, setExtractedBenefitsViewMode] = useState<"extras" | "all_evidence">("extras");
+  // RL-DISABLED extractedBenefitsViewMode — disabled 2026-08-28; unused after removing evidence tab
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [benefitsCollapsed, setBenefitsCollapsed] = useState(false);
 
@@ -748,19 +724,43 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [previewZoom, setPreviewZoom] = useState(0.48);
   const [previewLoading, setPreviewLoading] = useState(false);
 
+  const [selectedBenefitPreset, setSelectedBenefitPreset] = useState<string>(() => {
+    try {
+      const stored = (workspace?.fields?.benefit_preset as any)?.value;
+      if (stored) return stored;
+      return localStorage.getItem("risklocker_default_benefit_preset") || "masonry-flow";
+    } catch {
+      return "masonry-flow";
+    }
+  });
+
+  const handleSelectBenefitPreset = useCallback((presetId: string) => {
+    setSelectedBenefitPreset(presetId);
+    try {
+      localStorage.setItem("risklocker_default_benefit_preset", presetId);
+    } catch {}
+    decideField("benefit_preset", "edit", presetId);
+  }, [decideField]);
+
   const balancedElements = useMemo(() => {
     if (!previewTemplate?.config?.canvas) return [];
-    return balanceBenefitGridElements(previewTemplate.config.canvas.elements || [], {
+    const rawElements = (previewTemplate.config.canvas.elements || []).map((el: any) => {
+      if (el.type === "benefit-grid") {
+        return applyPresetToCanvasElement(el, selectedBenefitPreset);
+      }
+      return el;
+    });
+    return balanceBenefitGridElements(rawElements, {
       ...workspace?.benefit_cards,
       extras: workspace?.extras,
     } as any);
-  }, [previewTemplate, workspace?.benefit_cards, workspace?.extras]);
+  }, [previewTemplate, workspace?.benefit_cards, workspace?.extras, selectedBenefitPreset]);
 
   const canvasH = useMemo(() => {
     const baseHeight = previewTemplate?.config?.canvas?.height || 1123;
     if (!balancedElements.length) return baseHeight;
     const maxElementBottom = Math.max(0, ...balancedElements.map((e: any) => (e.y || 0) + (e.h || 0)));
-    return Math.max(baseHeight, maxElementBottom + 40);
+    return maxElementBottom + 16 > baseHeight ? maxElementBottom + 16 : baseHeight;
   }, [balancedElements, previewTemplate]);
 
   const syncForm = useCallback(() => {
@@ -1967,6 +1967,44 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                       </div>
                     </div>
                   ) : null}
+
+                  {/* Benefits Card Template Switcher */}
+                  <div className="grid gap-2 pt-2 border-t border-[var(--rl-border)]">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-[var(--rl-text-strong)] flex items-center gap-1.5">
+                        <Sparkle size={13} className="text-[var(--rl-red)]" weight="fill" />
+                        Benefits Card Template
+                      </label>
+                      <span className="text-[11px] text-[var(--rl-text-muted)] font-medium">
+                        {SYSTEM_BENEFIT_PRESETS.find((p) => p.id === selectedBenefitPreset)?.name || "Masonry Flow"}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                      {SYSTEM_BENEFIT_PRESETS.map((preset) => {
+                        const isSelected = selectedBenefitPreset === preset.id;
+                        return (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            onClick={() => handleSelectBenefitPreset(preset.id)}
+                            title={preset.description}
+                            className={`flex flex-col items-start rounded-[var(--rl-radius-sm)] border p-2 text-left transition-all ${
+                              isSelected
+                                ? "border-[var(--rl-red)] bg-red-50/70 shadow-xs ring-1 ring-[var(--rl-red)]/30"
+                                : "border-[var(--rl-border)] bg-white hover:border-gray-300 hover:bg-gray-50/80"
+                            }`}
+                          >
+                            <span className={`text-[11px] font-bold leading-tight ${isSelected ? "text-[var(--rl-red)]" : "text-[var(--rl-text-strong)]"}`}>
+                              {preset.shortName}
+                            </span>
+                            <span className="text-[9.5px] text-[var(--rl-text-muted)] mt-0.5 leading-snug line-clamp-2">
+                              {preset.description}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </>
               )}
             </Card>
@@ -2011,7 +2049,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded bg-gray-50 p-2.5 text-xs">
                   <div><span className="text-[var(--rl-text-muted)]">Plate:</span> <strong className="text-[var(--rl-text-strong)] font-mono">{formValues.vehicle_no || "—"}</strong></div>
                   <div><span className="text-[var(--rl-text-muted)]">Insured:</span> <strong className="text-[var(--rl-text-strong)] truncate max-w-[140px] inline-block align-bottom">{formValues.customer_name || "—"}</strong></div>
-                  <div><span className="text-[var(--rl-text-muted)]">Total:</span> <strong className="text-[var(--rl-red)] font-mono font-bold">RM {formValues.total_amount || "0.00"}</strong></div>
+                  <div><span className="text-[var(--rl-text-muted)]">Final Price:</span> <strong className="text-[var(--rl-red)] font-mono font-bold">RM {previewFields["total_amount"] || formValues.total_amount || "0.00"}</strong></div>
                 </div>
               ) : (
                 <>
@@ -2062,17 +2100,17 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                             </Select>
                           ) : (
                             <span className="relative">
-                              {field.kind === "money" ? (
+                              {field.kind === "money" || field.kind === "total" ? (
                                 <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-[var(--rl-text-muted)]">
                                   RM
                                 </span>
                               ) : null}
                               <Input
-                                value={formValues[field.name] ?? ""}
+                                value={field.kind === "total" ? (previewFields["total_amount"] || formValues[field.name] || "") : (formValues[field.name] ?? "")}
                                 disabled={field.kind === "total"}
                                 placeholder={empty ? "Missing" : ""}
                                 list={field.name === "insurance_company" ? "company-suggestions" : undefined}
-                                className={`${field.kind === "money" ? "pl-8 text-xs font-mono font-medium" : "text-xs font-medium"} ${needsCheck ? "border-amber-400 bg-amber-50/50 ring-1 ring-amber-300" : ""}`}
+                                className={`${field.kind === "money" || field.kind === "total" ? "pl-8 text-xs font-mono font-medium" : "text-xs font-medium"} ${needsCheck ? "border-amber-400 bg-amber-50/50 ring-1 ring-amber-300" : ""}`}
                                 onChange={(event) => setFormValues((values) => ({ ...values, [field.name]: event.target.value }))}
                                 onBlur={() => {
                                   commitField(field);
@@ -2123,7 +2161,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                   </div>
                   <div>
                     <h2 className="text-sm font-bold text-[var(--rl-text-strong)] flex items-center gap-2">
-                      Extracted Benefits, Extras & Packages
+                      Detected Add-ons & Riders
                       {workspace.extracted_benefits_section?.extras?.length ? (
                         <span className="rounded-full bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-bold text-indigo-700 font-mono">
                           {workspace.extracted_benefits_section.extras.length} detected
@@ -2131,7 +2169,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                       ) : null}
                     </h2>
                     <p className="text-[11px] text-[var(--rl-text-muted)]">
-                      Riders, add-on packages, and optional covers detected from the uploaded quotation.
+                      Optional covers detected from the uploaded quotation.
                     </p>
                   </div>
                 </div>
@@ -2191,165 +2229,96 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                     </div>
                   ) : null}
 
-                  {/* View Mode Toggle */}
-                  <div className="flex items-center justify-between border-b border-[var(--rl-border)] pb-2">
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setExtractedBenefitsViewMode("extras")}
-                        className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
-                          extractedBenefitsViewMode === "extras"
-                            ? "bg-[var(--rl-black)] text-white shadow-sm"
-                            : "bg-gray-100 text-[var(--rl-text-muted)] hover:bg-gray-200"
-                        }`}
-                      >
-                        Purchased Extras & Add-ons
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setExtractedBenefitsViewMode("all_evidence")}
-                        className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
-                          extractedBenefitsViewMode === "all_evidence"
-                            ? "bg-[var(--rl-black)] text-white shadow-sm"
-                            : "bg-gray-100 text-[var(--rl-text-muted)] hover:bg-gray-200"
-                        }`}
-                      >
-                        All Extracted Evidence ({workspace.extracted_benefits_section?.extras?.length || 0})
-                      </button>
-                    </div>
+                  {/* RL-DISABLED raw_evidence_toggle — disabled 2026-08-28; restore when debug evidence tab is needed */}
 
-                    <span className="text-[11px] text-[var(--rl-text-muted)] font-mono">
-                      {extractedBenefitsViewMode === "extras" ? "Cost & Coverage Breakdown" : "Source Verbatim Quotes"}
-                    </span>
-                  </div>
-
-                  {/* Scenario 1: Purchased Extras & Add-ons */}
-                  {extractedBenefitsViewMode === "extras" ? (
-                    <div className="grid gap-2">
-                      {workspace.extracted_benefits_section?.extras && workspace.extracted_benefits_section.extras.length > 0 ? (
-                        <div className="divide-y divide-gray-100 rounded-lg border border-gray-200 overflow-hidden bg-white shadow-xs">
-                          {workspace.extracted_benefits_section.extras.map((extra, idx) => {
-                            const hasCost = extra.cost && extra.cost !== "0.00" && extra.cost !== "0";
-                            return (
-                              <div
-                                key={extra.id || idx}
-                                className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 hover:bg-gray-50/80 transition-colors"
-                              >
-                                <div className="grid gap-0.5 min-w-0 flex-1">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-xs font-bold text-[var(--rl-text-strong)]">
-                                      {extra.label}
+                  {/* Detected Add-ons List */}
+                  <div className="grid gap-2">
+                    {workspace.extracted_benefits_section?.extras && workspace.extracted_benefits_section.extras.length > 0 ? (
+                      <div className="divide-y divide-gray-100 rounded-lg border border-gray-200 overflow-hidden bg-white shadow-xs">
+                        {workspace.extracted_benefits_section.extras.map((extra, idx) => {
+                          const hasCost = extra.cost && extra.cost !== "0.00" && extra.cost !== "0";
+                          return (
+                            <div
+                              key={extra.id || idx}
+                              className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 hover:bg-gray-50/80 transition-colors"
+                            >
+                              <div className="grid gap-0.5 min-w-0 flex-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-xs font-bold text-[var(--rl-text-strong)]">
+                                    {extra.label}
+                                  </span>
+                                  {extra.is_applied ? (
+                                    <span className="rounded bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">
+                                      ✓ Included in Grid
                                     </span>
-                                    {extra.is_applied ? (
-                                      <span className="rounded bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">
-                                        ✓ Included in Grid
-                                      </span>
-                                    ) : (
-                                      <span className="rounded bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
-                                        Detected in PDF
-                                      </span>
-                                    )}
-                                    {extra.concept_key ? (
-                                      <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[9px] font-mono text-gray-600">
-                                        {extra.concept_key}
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                  {extra.raw_text && extra.raw_text !== extra.label ? (
-                                    <p className="text-[11px] text-[var(--rl-text-muted)] italic truncate">
-                                      &ldquo;{extra.raw_text}&rdquo;
-                                    </p>
-                                  ) : null}
-                                </div>
-
-                                <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-gray-100">
-                                  {(() => {
-                                    const rawLimit = extra.coverage_limit && typeof extra.coverage_limit === "string" && !extra.coverage_limit.includes("[object") ? extra.coverage_limit.trim() : "";
-                                    const costNum = extra.cost ? parseFloat(String(extra.cost).replace(/[^0-9.]/g, "")) : null;
-                                    const limitNum = rawLimit ? parseFloat(rawLimit.replace(/[^0-9.]/g, "")) : null;
-                                    const isGenuine = Boolean(rawLimit && limitNum !== null && limitNum > 0 && (costNum === null || Math.abs(limitNum - costNum) > 0.01));
-                                    if (!isGenuine) return null;
-                                    return (
-                                      <div className="text-right">
-                                        <span className="block text-[9px] uppercase font-bold text-[var(--rl-text-muted)]">Limit / Sum</span>
-                                        <span className="text-xs font-semibold text-[var(--rl-text-strong)] font-mono">
-                                          {rawLimit.startsWith("RM") ? rawLimit : `RM ${rawLimit}`}
-                                        </span>
-                                      </div>
-                                    );
-                                  })()}
-
-                                  {hasCost && extra.cost ? (
-                                    <div className="text-right">
-                                      <span className="block text-[9px] uppercase font-bold text-[var(--rl-text-muted)]">Cost</span>
-                                      <span className="text-xs font-bold text-[var(--rl-red)] font-mono">
-                                        {String(extra.cost).startsWith("RM") ? String(extra.cost) : `RM ${extra.cost}`}
-                                      </span>
-                                    </div>
                                   ) : (
-                                    <div className="text-right">
-                                      <span className="block text-[9px] uppercase font-bold text-[var(--rl-text-muted)]">Cost</span>
-                                      <span className="text-[11px] font-medium text-gray-400">Included</span>
-                                    </div>
+                                    <span className="rounded bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
+                                      Detected in PDF
+                                    </span>
                                   )}
-
-                                  {!extra.is_applied && extra.concept_key ? (
-                                    <Button
-                                      size="sm"
-                                      variant="secondary"
-                                      onClick={() => {
-                                        const concept = globalConcepts.find((c) => c.concept_key === extra.concept_key);
-                                        if (concept) {
-                                          const cleanCost = extra.cost ? Number(String(extra.cost).replace(/[^0-9.]/g, "")) : null;
-                                          const priceObj = cleanCost && Number.isFinite(cleanCost) ? { amount: cleanCost, currency: "MYR" } : null;
-                                          addConceptAsBenefit(concept, "current", priceObj);
-                                        }
-                                      }}
-                                      className="text-[11px] h-7 px-2.5 shrink-0 font-medium"
-                                      title="Add this detected benefit to default benefits list"
-                                    >
-                                      + Add to defaults
-                                    </Button>
-                                  ) : null}
                                 </div>
                               </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div className="rounded-lg border border-dashed border-gray-200 p-6 text-center text-xs text-[var(--rl-text-muted)]">
-                          No add-ons or optional covers detected yet. Upload an insurance quotation PDF or run Gemini extraction.
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    /* Scenario 2: All Extracted Evidence */
-                    <div className="grid gap-2">
-                      {workspace.source_lines && workspace.source_lines.length > 0 ? (
-                        <div className="max-h-[360px] overflow-y-auto divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white p-1">
-                          {workspace.source_lines.map((line, idx) => (
-                            <div key={line.source_line_id || idx} className="p-2.5 text-xs hover:bg-gray-50/80">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="font-semibold text-[var(--rl-text-strong)]">{line.raw_label}</span>
-                                <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[9px] font-mono text-gray-500">
-                                  {line.disposition || "detected"}
-                                </span>
+
+                              <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-gray-100">
+                                {(() => {
+                                  const rawLimit = extra.coverage_limit && typeof extra.coverage_limit === "string" && !extra.coverage_limit.includes("[object") ? extra.coverage_limit.trim() : "";
+                                  const costNum = extra.cost ? parseFloat(String(extra.cost).replace(/[^0-9.]/g, "")) : null;
+                                  const limitNum = rawLimit ? parseFloat(rawLimit.replace(/[^0-9.]/g, "")) : null;
+                                  const isGenuine = Boolean(rawLimit && limitNum !== null && limitNum > 0 && (costNum === null || Math.abs(limitNum - costNum) > 0.01));
+                                  if (!isGenuine) return null;
+                                  return (
+                                    <div className="text-right">
+                                      <span className="block text-[9px] uppercase font-bold text-[var(--rl-text-muted)]">Limit / Sum</span>
+                                      <span className="text-xs font-semibold text-[var(--rl-text-strong)] font-mono">
+                                        {rawLimit.startsWith("RM") ? rawLimit : `RM ${rawLimit}`}
+                                      </span>
+                                    </div>
+                                  );
+                                })()}
+
+                                {hasCost && extra.cost ? (
+                                  <div className="text-right">
+                                    <span className="block text-[9px] uppercase font-bold text-[var(--rl-text-muted)]">Cost</span>
+                                    <span className="text-xs font-bold text-[var(--rl-red)] font-mono">
+                                      {String(extra.cost).startsWith("RM") ? String(extra.cost) : `RM ${extra.cost}`}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div className="text-right">
+                                    <span className="block text-[9px] uppercase font-bold text-[var(--rl-text-muted)]">Cost</span>
+                                    <span className="text-[11px] font-medium text-gray-400">Included</span>
+                                  </div>
+                                )}
+
+                                {!extra.is_applied && extra.concept_key ? (
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => {
+                                      const concept = globalConcepts.find((c) => c.concept_key === extra.concept_key);
+                                      if (concept) {
+                                        const cleanCost = extra.cost ? Number(String(extra.cost).replace(/[^0-9.]/g, "")) : null;
+                                        const priceObj = cleanCost && Number.isFinite(cleanCost) ? { amount: cleanCost, currency: "MYR" } : null;
+                                        addConceptAsBenefit(concept, "available_addon", priceObj);
+                                      }
+                                    }}
+                                    className="text-[11px] h-7 px-2.5 shrink-0 font-medium"
+                                    title="Add this detected cover to optional add-ons list"
+                                  >
+                                    + Add to add-ons
+                                  </Button>
+                                ) : null}
                               </div>
-                              {line.candidate_mappings && line.candidate_mappings.length > 0 ? (
-                                <p className="text-[11px] text-indigo-600 font-mono mt-0.5">
-                                  Matched: {line.candidate_mappings.map((m) => m.label || m.matched_alias).join(", ")}
-                                </p>
-                              ) : null}
                             </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="rounded-lg border border-dashed border-gray-200 p-6 text-center text-xs text-[var(--rl-text-muted)]">
-                          No raw evidence lines found for this quotation draft.
-                        </div>
-                      )}
-                    </div>
-                  )}
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-gray-200 p-6 text-center text-xs text-[var(--rl-text-muted)]">
+                        No add-ons or optional covers detected yet. Upload an insurance quotation PDF or run Gemini extraction.
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </Card>
@@ -2434,6 +2403,19 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                       >
                         Fit
                       </button>
+                      <div className="h-4 w-px bg-[var(--rl-border)] mx-1" />
+                      <div className="hidden sm:flex items-center gap-1 bg-gray-100/90 rounded px-1.5 py-0.5 border border-gray-200 text-[10px]">
+                        <span className="font-bold text-[var(--rl-text-muted)]">Style:</span>
+                        <select
+                          value={selectedBenefitPreset}
+                          onChange={(e) => handleSelectBenefitPreset(e.target.value)}
+                          className="bg-transparent font-semibold text-[var(--rl-text-strong)] cursor-pointer outline-hidden"
+                        >
+                          {SYSTEM_BENEFIT_PRESETS.map((p) => (
+                            <option key={p.id} value={p.id}>{p.shortName}</option>
+                          ))}
+                        </select>
+                      </div>
                       <div className="h-4 w-px bg-[var(--rl-border)] mx-1" />
                       <button
                         type="button"
@@ -2635,7 +2617,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                         variant="secondary"
                         icon={<Sparkle size={14} weight="bold" className="text-[var(--rl-red)]" />}
                         onClick={() => {
-                          setModalTarget("current");
+                          setModalTarget("available_addon");
                           setShowGlobalModal(true);
                         }}
                       >
@@ -2657,20 +2639,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                             </h3>
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
-                              {currentCards.length} covers
+                            <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                              {currentCards.length} standard covers (constant)
                             </span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setModalTarget("current");
-                                setShowGlobalModal(true);
-                              }}
-                              className="rounded p-1 text-emerald-700 hover:bg-emerald-100"
-                              title="Add from Global Library to Defaults"
-                            >
-                              <Plus size={14} weight="bold" />
-                            </button>
+                            {/* RL-DISABLED add_to_defaults_button — disabled 2026-08-28; restore when defaults can receive additions */}
                           </div>
                         </div>
 
