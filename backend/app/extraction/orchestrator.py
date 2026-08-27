@@ -134,39 +134,65 @@ class ExtractionOrchestrator:
                         cov_limit = str(b_item.get("coverage_limit") or "").strip()
                         cost = str(b_item.get("premium_cost") or "").strip()
                         is_optional = bool(b_item.get("is_optional_cover", False))
-                        
-                        limit_val = cov_limit or (b_val if b_val.lower() not in {"included", "standard", "yes", "true"} else "")
+
+                        clean_cov = re.sub(r"[^0-9.]", "", cov_limit)
+                        clean_cost = re.sub(r"[^0-9.]", "", cost)
+                        clean_val = re.sub(r"[^0-9.]", "", b_val)
+
+                        # Genuine coverage limit must be non-zero and distinct from premium price
+                        final_cov_limit = ""
+                        if clean_cov:
+                            try:
+                                c_num = float(clean_cov)
+                                p_num = float(clean_cost) if clean_cost else None
+                                if c_num > 0 and (p_num is None or abs(c_num - p_num) > 0.01):
+                                    final_cov_limit = cov_limit
+                            except Exception:
+                                final_cov_limit = cov_limit
+                        elif clean_val and clean_cost:
+                            try:
+                                v_num = float(clean_val)
+                                p_num = float(clean_cost)
+                                if v_num > 0 and abs(v_num - p_num) > 0.01 and b_val.lower() not in {"included", "standard", "yes", "true"}:
+                                    final_cov_limit = b_val
+                            except Exception:
+                                pass
+
                         typed_val = None
-                        if limit_val:
-                            clean_limit = limit_val.upper().replace("RM", "").replace(",", "").strip()
-                            is_pure_money = bool(re.match(r"^\s*(?:RM\s*)?[\d]+(?:,\d{3})*(?:\.\d{1,2})?\s*$", limit_val, re.IGNORECASE))
+                        if final_cov_limit:
+                            clean_limit = final_cov_limit.upper().replace("RM", "").replace(",", "").strip()
+                            is_pure_money = bool(re.match(r"^\s*(?:RM\s*)?[\d]+(?:,\d{3})*(?:\.\d{1,2})?\s*$", final_cov_limit, re.IGNORECASE))
                             if is_pure_money:
                                 typed_val = {
                                     "type": "money",
                                     "value": clean_limit,
                                     "currency": "MYR",
-                                    "display_text": limit_val if limit_val.startswith("RM") else f"RM {limit_val}",
+                                    "semantic_role": "limit",
+                                    "display_text": final_cov_limit if final_cov_limit.startswith("RM") else f"RM {final_cov_limit}",
                                 }
                             else:
                                 typed_val = {
                                     "type": "text",
-                                    "value": limit_val,
-                                    "display_text": limit_val,
+                                    "value": final_cov_limit,
+                                    "semantic_role": "limit",
+                                    "display_text": final_cov_limit,
                                 }
                         elif cost:
-                            clean_cost = cost.upper().replace("RM", "").replace(",", "").strip()
+                            clean_cost_val = cost.upper().replace("RM", "").replace(",", "").strip()
                             is_pure_money = bool(re.match(r"^\s*(?:RM\s*)?[\d]+(?:,\d{3})*(?:\.\d{1,2})?\s*$", cost, re.IGNORECASE))
                             if is_pure_money:
                                 typed_val = {
                                     "type": "money",
-                                    "value": clean_cost,
+                                    "value": clean_cost_val,
                                     "currency": "MYR",
-                                    "display_text": f"RM {clean_cost}",
+                                    "semantic_role": "premium",
+                                    "display_text": f"RM {clean_cost_val}",
                                 }
                             else:
                                 typed_val = {
                                     "type": "text",
                                     "value": cost,
+                                    "semantic_role": "premium",
                                     "display_text": cost,
                                 }
 
@@ -186,7 +212,7 @@ class ExtractionOrchestrator:
                             "confidence": 1.0,
                             "source_disposition": "auto_apply",
                             "is_detected": True,
-                            "coverage_limit": cov_limit or b_val,
+                            "coverage_limit": final_cov_limit,
                             "premium_cost": cost,
                             "is_optional_cover": is_optional,
                             "extracted_value": typed_val,
@@ -198,9 +224,9 @@ class ExtractionOrchestrator:
                                     "matched_alias": b_label,
                                     "score": 100,
                                     "match_type": "gemini_multimodal",
-                                    "evidence": b_val,
-                                    "shaped_description": f"{b_label} ({b_val})" if b_val and b_val.lower() != "included" else b_label,
-                                    "coverage_limit": cov_limit or b_val,
+                                    "evidence": final_cov_limit or b_val,
+                                    "shaped_description": f"{b_label} ({final_cov_limit})" if final_cov_limit else b_label,
+                                    "coverage_limit": final_cov_limit,
                                     "premium_cost": cost,
                                     "is_detected": True,
                                 }

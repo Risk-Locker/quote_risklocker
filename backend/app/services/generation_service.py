@@ -244,6 +244,17 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
         raise AppError("The quotation source record is unavailable.", 409)
     selections = _for_draft(db, DraftBenefitSelection, draft.id)
     offerings, concepts, relations, facets, plans = _catalog_rows(db, draft)
+    from app.services.formula_evaluator import extract_evaluation_context
+    from app.services.benefit_catalog_matrix import get_catalog_for_product
+    from app.services.workspace_service import _workspace_extracted_benefits_section
+    
+    # Needs to be called with db, draft, decisions (empty list is fine for generation), selections
+    extras_section = _workspace_extracted_benefits_section(db, draft, [], selections)
+    eval_context = extract_evaluation_context(draft.fields or {}, extras_section.get("extras", []))
+    insurer_key = str(getattr(draft.company, "company_key", "") or "etiqa") if hasattr(draft, "company") and draft.company else "etiqa"
+    product_type = str(getattr(draft.product, "name", "private_car") or "private_car") if hasattr(draft, "product") and draft.product else "private_car"
+    insurer_catalog = get_catalog_for_product(insurer_key, product_type)
+
     try:
         cards = resolve_benefit_cards(
             selections=selections,
@@ -252,6 +263,8 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
             relations=relations,
             facets=facets,
             plans=plans,
+            eval_context=eval_context,
+            insurer_catalog=insurer_catalog,
         )
     except RenderContextError as exc:
         raise AppError(str(exc), 409) from exc

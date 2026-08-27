@@ -87,7 +87,7 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
   const [generatingPng, setGeneratingPng] = useState(false);
 
   const canvasWidth = Number(template?.config?.canvas?.width || 794);
-  const canvasHeight = Number(template?.config?.canvas?.height || 1123);
+  const baseCanvasHeight = Number(template?.config?.canvas?.height || 1123);
   const latestVersion = workspace?.versions?.at(-1) || null;
 
   const loadTemplate = useCallback(async () => {
@@ -272,6 +272,14 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
 
   const currentBenefits = workspace.benefit_cards?.current_benefits || [];
   const addonBenefits = workspace.benefit_cards?.available_addons || [];
+  
+  const allBenefits = [
+    ...currentBenefits.map(b => ({ ...b, isAddon: false })),
+    ...addonBenefits.map(b => ({ ...b, isAddon: true }))
+  ];
+  
+  const dynamicCanvasHeight = Math.max(baseCanvasHeight, 350 + allBenefits.length * 56 + 100);
+  const canvasHeight = dynamicCanvasHeight;
 
   return (
     <section className="grid gap-5">
@@ -630,25 +638,46 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
                 INCLUDED COMPREHENSIVE BENEFITS &amp; SPECIALS
               </text>
 
-              {/* Render Benefit Cards Grid */}
-              {currentBenefits.slice(0, 8).map((b, idx) => {
-                const col = idx % 2;
-                const row = Math.floor(idx / 2);
-                const x = 32 + col * ((canvasWidth - 80) / 2 + 16);
-                const y = 304 + row * 46;
-                const w = (canvasWidth - 80) / 2;
-                const h = 38;
+              {/* Render Benefit Cards List */}
+              {allBenefits.map((b, idx) => {
+                const x = 32;
+                const y = 304 + idx * 56;
+                const w = canvasWidth - 64;
+                const h = 48;
+                
+                const title = (b.label || "Special Cover").slice(0, 45);
+                const coverage = (b.value || (b.isAddon ? "Optional" : "FOC")).slice(0, 28);
+                const desc = (b.description || "Comprehensive benefit inclusion subject to policy terms.").slice(0, 85);
+                
+                const rawPrice = typeof b.price === "object" && b.price !== null ? (b.price as any).amount : b.price;
+                const price = b.isAddon && rawPrice ? formatMoney(rawPrice as string | number) : "";
 
                 return (
                   <g key={b.card_key || idx}>
                     <rect x={x} y={y} width={w} height={h} fill="#fcfcfd" stroke="#e5e5ea" strokeWidth="1" rx="4" />
-                    <circle cx={x + 16} cy={y + 19} r="8" fill="#ecfdf5" />
-                    <text x={x + 16} y={y + 22} fontSize="10" fontWeight="bold" fill="#059669" textAnchor="middle" fontFamily="Inter, sans-serif">✓</text>
-                    <text x={x + 32} y={y + 19} fontSize="10" fontWeight="bold" fill="#1b1717" fontFamily="Inter, sans-serif">
-                      {(b.label || "Special Cover").slice(0, 24)}
+                    
+                    {/* Image Placeholder */}
+                    <circle cx={x + 24} cy={y + 24} r="12" fill={b.isAddon ? "#eff6ff" : "#ecfdf5"} />
+                    <text x={x + 24} y={y + 28} fontSize="12" fontWeight="bold" fill={b.isAddon ? "#3b82f6" : "#059669"} textAnchor="middle" fontFamily="Inter, sans-serif">
+                      {b.isAddon ? "+" : "✓"}
                     </text>
-                    <text x={x + 32} y={y + 30} fontSize="8" fill="#6e6e73" fontFamily="Inter, sans-serif">
-                      {(b.value || "Included Free").slice(0, 28)}
+                    
+                    {/* Title & Short Description */}
+                    <text x={x + 48} y={y + 20} fontSize="11" fontWeight="bold" fill="#1b1717" fontFamily="Inter, sans-serif">
+                      {title}
+                    </text>
+                    <text x={x + 48} y={y + 36} fontSize="9" fill="#6e6e73" fontFamily="Inter, sans-serif">
+                      {desc}
+                    </text>
+                    
+                    {/* Coverage Amount - Dark Color */}
+                    <text x={x + w - 100} y={y + 28} fontSize="11" fontWeight="bold" fill="#1b1717" fontFamily="Inter, sans-serif" textAnchor="end">
+                      {coverage}
+                    </text>
+                    
+                    {/* Price - Red Color */}
+                    <text x={x + w - 16} y={y + 28} fontSize="12" fontWeight="bold" fill="#ed1c24" fontFamily="Inter, sans-serif" textAnchor="end">
+                      {price}
                     </text>
                   </g>
                 );

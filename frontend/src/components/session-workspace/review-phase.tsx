@@ -310,37 +310,45 @@ function IncludedCard({
   };
 
   return (
-    <article className={`flex items-center justify-between gap-2.5 rounded-[var(--rl-radius-sm)] border p-2.5 shadow-xs transition-all ${card.is_detected
+    <article className={`flex items-start justify-between gap-2.5 rounded-[var(--rl-radius-sm)] border p-2.5 shadow-xs transition-all ${card.is_detected
       ? "border-amber-300 bg-amber-50/50 ring-1 ring-amber-300/60"
       : "border-[var(--rl-border)] bg-[var(--rl-surface)] hover:border-[var(--rl-border-strong)]"
       }`}>
-      <div className="flex items-center gap-2.5 min-w-0">
-        <span className="shrink-0 flex h-6 w-6 items-center justify-center rounded bg-neutral-100 font-mono text-[10px] font-bold text-[var(--rl-text-muted)]">
+      {/* Left: index + image */}
+      <div className="flex items-start gap-2 shrink-0">
+        <span className="flex h-6 w-6 items-center justify-center rounded bg-neutral-100 font-mono text-[10px] font-bold text-[var(--rl-text-muted)] mt-0.5">
           #{index + 1}
         </span>
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--rl-border)] bg-white p-1">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--rl-border)] bg-white p-1">
           {assetUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={fileUrl(assetUrl)} alt={card.label} className="h-full w-full object-contain" />
           ) : (
-            <Sparkle size={16} className="text-[var(--rl-text-muted)]" />
+            <Sparkle size={18} className="text-[var(--rl-text-muted)]" />
           )}
         </div>
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5">
-            <h3 className="truncate text-xs font-bold text-[var(--rl-text-strong)]">{card.label}</h3>
-            {card.is_detected ? (
-              <span className="rounded bg-amber-100 px-1 py-0.2 text-[9px] font-bold text-amber-800 ring-1 ring-amber-400/50">
-                ★ Detected
-              </span>
-            ) : (
-              <span className="rounded bg-emerald-50 px-1 py-0.2 text-[9px] font-bold text-emerald-700">Default/FOC</span>
-            )}
-          </div>
-          <p className="truncate text-[11px] text-[var(--rl-text-muted)] font-medium">{card.value || "Included standard cover"}</p>
-        </div>
       </div>
-      <div className="flex items-center gap-1.5 shrink-0">
+      {/* Body: title, detected badge, value, description */}
+      <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <h3 className="text-xs font-bold text-[var(--rl-text-strong)] leading-tight truncate">{card.label}</h3>
+          {card.is_detected ? (
+            <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-800 ring-1 ring-amber-400/50 shrink-0">★ Detected</span>
+          ) : null}
+        </div>
+        {card.value && !["", "Included standard cover", "Included", "FOC", "As quoted"].includes(card.value) && (
+          <p className="text-[11px] font-bold text-[var(--rl-red)] leading-tight truncate">
+            {card.value}
+          </p>
+        )}
+        {card.description && (
+          <p className="text-[10px] text-[var(--rl-text-muted)] leading-snug line-clamp-2">
+            {card.description}
+          </p>
+        )}
+      </div>
+      {/* Actions */}
+      <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
         <Button
           variant="secondary"
           size="sm"
@@ -454,78 +462,87 @@ function AddonCard({
   };
 
   return (
-    <article className={`group flex items-center justify-between gap-2.5 rounded-[var(--rl-radius-sm)] border border-dashed p-2.5 transition-all ${card.is_detected
+    <article className={`group flex items-start justify-between gap-2.5 rounded-[var(--rl-radius-sm)] border border-dashed p-2.5 transition-all ${card.is_detected
       ? "border-amber-400 bg-amber-50/50 ring-1 ring-amber-300/60"
       : "border-[var(--rl-border)] bg-[var(--rl-surface)] hover:border-[var(--rl-black)] hover:bg-white"
       }`}>
-      <div className="flex items-center gap-2.5 min-w-0 flex-1">
-        <span className="shrink-0 flex h-6 w-6 items-center justify-center rounded bg-neutral-100 font-mono text-[10px] font-bold text-[var(--rl-text-muted)]">
+      {/* Left: index + image */}
+      <div className="flex items-start gap-2 shrink-0">
+        <span className="flex h-6 w-6 items-center justify-center rounded bg-neutral-100 font-mono text-[10px] font-bold text-[var(--rl-text-muted)] mt-0.5">
           #{index + 1}
         </span>
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--rl-border)] bg-white p-1">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--rl-border)] bg-white p-1">
           {assetUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={fileUrl(assetUrl)} alt={card.label} className="h-full w-full object-contain" />
           ) : (
-            <Sparkle size={16} className="text-[var(--rl-text-muted)]" />
+            <Sparkle size={18} className="text-[var(--rl-text-muted)]" />
           )}
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <h3 className="truncate text-xs font-bold text-[var(--rl-text-strong)]">{card.label}</h3>
-            {card.is_detected ? (
-              <span className="rounded bg-amber-100 px-1 py-0.2 text-[9px] font-bold text-amber-800 ring-1 ring-amber-400/50">
-                ★ Detected
-              </span>
-            ) : null}
-          </div>
-          <p className="truncate text-[11px] text-[var(--rl-text-muted)] font-medium">{card.value || "Optional payable add-on"}</p>
-          {/* Price Tag & Revert Controls */}
-          <div className="flex items-center gap-1.5 mt-1">
-            {isEditingPrice ? (
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] font-bold text-[var(--rl-text-muted)]">RM</span>
-                <input
-                  type="number"
-                  step="any"
-                  value={priceInput}
-                  autoFocus
-                  onChange={(e) => setPriceInput(e.target.value)}
-                  onBlur={() => handlePriceCommit(priceInput)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handlePriceCommit(priceInput);
-                    if (e.key === "Escape") { setIsEditingPrice(false); setPriceInput(currentPriceNum !== null ? String(currentPriceNum) : ""); }
-                  }}
-                  className="h-5 w-16 rounded border border-[var(--rl-black)] px-1 font-mono text-[11px] font-bold text-[var(--rl-text-strong)] focus:outline-none"
-                />
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setIsEditingPrice(true)}
-                className="group/price flex items-center gap-1 rounded bg-red-50 hover:bg-red-100/80 px-1.5 py-0.5 text-[10px] font-bold text-[var(--rl-red)] transition-colors"
-                title="Click to edit price"
-              >
-                <span>{currentPriceNum !== null ? `RM ${currentPriceNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "Set price"}</span>
-                <PencilSimple size={10} className="text-[var(--rl-text-muted)] group-hover/price:text-[var(--rl-red)]" />
-              </button>
-            )}
-
-            {hasPriceDiff ? (
-              <button
-                type="button"
-                onClick={handleRevertPrice}
-                className="flex items-center gap-0.5 rounded bg-gray-100 hover:bg-gray-200 px-1.5 py-0.5 text-[9px] font-semibold text-gray-600 transition-colors"
-                title={`Revert to initial catalog price (RM ${initialPriceNum})`}
-              >
-                <ArrowCounterClockwise size={10} weight="bold" />
-                <span>Revert (RM {initialPriceNum})</span>
-              </button>
-            ) : null}
-          </div>
+      </div>
+      {/* Body: title, detected badge, coverage, description, price */}
+      <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <h3 className="text-xs font-bold text-[var(--rl-text-strong)] leading-tight truncate">{card.label}</h3>
+          {card.is_detected ? (
+            <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-800 ring-1 ring-amber-400/50 shrink-0">★ Detected</span>
+          ) : null}
+        </div>
+        {card.value && !["", "Optional payable add-on", "Included", "FOC", "As quoted"].includes(card.value) && (
+          <p className="text-[11px] font-bold text-[var(--rl-red)] leading-tight truncate">
+            {card.value}
+          </p>
+        )}
+        {card.description && (
+          <p className="text-[10px] text-[var(--rl-text-muted)] leading-snug line-clamp-2">
+            {card.description}
+          </p>
+        )}
+        {/* Price Tag & Revert Controls */}
+        <div className="flex items-center gap-1.5 mt-1">
+          {isEditingPrice ? (
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] font-bold text-[var(--rl-text-muted)]">RM</span>
+              <input
+                type="number"
+                step="any"
+                value={priceInput}
+                autoFocus
+                onChange={(e) => setPriceInput(e.target.value)}
+                onBlur={() => handlePriceCommit(priceInput)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handlePriceCommit(priceInput);
+                  if (e.key === "Escape") { setIsEditingPrice(false); setPriceInput(currentPriceNum !== null ? String(currentPriceNum) : ""); }
+                }}
+                className="h-5 w-16 rounded border border-[var(--rl-black)] px-1 font-mono text-[11px] font-bold text-[var(--rl-text-strong)] focus:outline-none"
+              />
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsEditingPrice(true)}
+              className="group/price flex items-center gap-1 rounded bg-red-50 hover:bg-red-100/80 px-1.5 py-0.5 text-[10px] font-bold text-[var(--rl-red)] transition-colors"
+              title="Click to edit price"
+            >
+              <span>{currentPriceNum !== null ? `RM ${currentPriceNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "Set price"}</span>
+              <PencilSimple size={10} className="text-[var(--rl-text-muted)] group-hover/price:text-[var(--rl-red)]" />
+            </button>
+          )}
+          {hasPriceDiff ? (
+            <button
+              type="button"
+              onClick={handleRevertPrice}
+              className="flex items-center gap-0.5 rounded bg-gray-100 hover:bg-gray-200 px-1.5 py-0.5 text-[9px] font-semibold text-gray-600 transition-colors"
+              title={`Revert to initial catalog price (RM ${initialPriceNum})`}
+            >
+              <ArrowCounterClockwise size={10} weight="bold" />
+              <span>Revert (RM {initialPriceNum})</span>
+            </button>
+          ) : null}
         </div>
       </div>
-      <div className="flex items-center gap-1.5 shrink-0">
+      {/* Actions */}
+      <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
         <Button
           size="sm"
           variant="secondary"
@@ -570,7 +587,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [redoStack, setRedoStack] = useState<Array<{ op: Record<string, unknown> & { op: string }; path: string; desc: string }>>([]);
   const [activeTab, setActiveTab] = useState<"included" | "addons">("included");
   const [modalTarget, setModalTarget] = useState<"current" | "available_addon">("current");
-  const [benefitsViewMode, setBenefitsViewMode] = useState<"defaults" | "addons" | "both">("defaults");
+  const [benefitsViewMode, setBenefitsViewMode] = useState<"defaults" | "addons" | "both">("both");
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [benefitsExpanded, setBenefitsExpanded] = useState(false);
   const [templateCollapsed, setTemplateCollapsed] = useState(false);
@@ -730,6 +747,21 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [previewTemplate, setPreviewTemplate] = useState<TemplatePayload | null>(null);
   const [previewZoom, setPreviewZoom] = useState(0.48);
   const [previewLoading, setPreviewLoading] = useState(false);
+
+  const balancedElements = useMemo(() => {
+    if (!previewTemplate?.config?.canvas) return [];
+    return balanceBenefitGridElements(previewTemplate.config.canvas.elements || [], {
+      ...workspace?.benefit_cards,
+      extras: workspace?.extras,
+    } as any);
+  }, [previewTemplate, workspace?.benefit_cards, workspace?.extras]);
+
+  const canvasH = useMemo(() => {
+    const baseHeight = previewTemplate?.config?.canvas?.height || 1123;
+    if (!balancedElements.length) return baseHeight;
+    const maxElementBottom = Math.max(0, ...balancedElements.map((e: any) => (e.y || 0) + (e.h || 0)));
+    return Math.max(baseHeight, maxElementBottom + 40);
+  }, [balancedElements, previewTemplate]);
 
   const syncForm = useCallback(() => {
     if (!workspace) return;
@@ -1413,7 +1445,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     if (!live || !previewTemplate) return null;
 
     const width = previewTemplate.config.canvas?.width || 794;
-    const height = previewTemplate.config.canvas?.height || 1123;
+    const height = canvasH;
 
     return await toBlob(live, {
       cacheBust: false,
@@ -2242,14 +2274,21 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                 </div>
 
                                 <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-gray-100">
-                                  {extra.coverage_limit && typeof extra.coverage_limit === "string" && !extra.coverage_limit.includes("[object") && extra.coverage_limit.trim() !== "" ? (
-                                    <div className="text-right">
-                                      <span className="block text-[9px] uppercase font-bold text-[var(--rl-text-muted)]">Limit / Sum</span>
-                                      <span className="text-xs font-semibold text-[var(--rl-text-strong)] font-mono">
-                                        {extra.coverage_limit.startsWith("RM") ? extra.coverage_limit : `RM ${extra.coverage_limit}`}
-                                      </span>
-                                    </div>
-                                  ) : null}
+                                  {(() => {
+                                    const rawLimit = extra.coverage_limit && typeof extra.coverage_limit === "string" && !extra.coverage_limit.includes("[object") ? extra.coverage_limit.trim() : "";
+                                    const costNum = extra.cost ? parseFloat(String(extra.cost).replace(/[^0-9.]/g, "")) : null;
+                                    const limitNum = rawLimit ? parseFloat(rawLimit.replace(/[^0-9.]/g, "")) : null;
+                                    const isGenuine = Boolean(rawLimit && limitNum !== null && limitNum > 0 && (costNum === null || Math.abs(limitNum - costNum) > 0.01));
+                                    if (!isGenuine) return null;
+                                    return (
+                                      <div className="text-right">
+                                        <span className="block text-[9px] uppercase font-bold text-[var(--rl-text-muted)]">Limit / Sum</span>
+                                        <span className="text-xs font-semibold text-[var(--rl-text-strong)] font-mono">
+                                          {rawLimit.startsWith("RM") ? rawLimit : `RM ${rawLimit}`}
+                                        </span>
+                                      </div>
+                                    );
+                                  })()}
 
                                   {hasCost && extra.cost ? (
                                     <div className="text-right">
@@ -2422,7 +2461,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                   <button
                     type="button"
                     onClick={() => setPreviewCollapsed((v) => !v)}
-                    className="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors"
+                    className="flex items-center gap-1 rounded px-2 py-1 text-[11px] font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors"
                     title={previewCollapsed ? "Expand live preview canvas" : "Collapse live preview canvas"}
                   >
                     {previewCollapsed ? <CaretDown size={14} weight="bold" /> : <CaretUp size={14} weight="bold" />}
@@ -2446,7 +2485,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                     <div
                       style={{
                         width: (previewTemplate.config.canvas?.width || 794) * previewZoom,
-                        height: (previewTemplate.config.canvas?.height || 1123) * previewZoom,
+                        height: canvasH * previewZoom,
                         position: "relative",
                         backgroundColor: "#ffffff",
                         boxShadow: "0 4px 14px rgba(0,0,0,0.08)",
@@ -2459,13 +2498,13 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                         id="rl-live-canvas-inner"
                         style={{
                           width: previewTemplate.config.canvas?.width || 794,
-                          height: previewTemplate.config.canvas?.height || 1123,
+                          height: canvasH,
                           transform: `scale(${previewZoom})`,
                           transformOrigin: "top left",
                           position: "relative",
                         }}
                       >
-                        {balanceBenefitGridElements(previewTemplate.config.canvas?.elements || [], { ...workspace.benefit_cards, extras: workspace.extras }).map((element: CanvasElement) => (
+                        {balancedElements.map((element: CanvasElement) => (
                           <CanvasElementView
                             key={element.id}
                             element={element}

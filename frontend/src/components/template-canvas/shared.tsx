@@ -75,6 +75,7 @@ export type CanvasElement = {
   };
   cardStyle?: "standard" | "outlined" | "soft" | "minimal";
   textDensity?: "comfortable" | "normal" | "compact";
+  layoutMode?: "normal" | "masonry";
   emptyState?: "hide" | "message";
   emptyMessage?: string;
   prefix?: string;
@@ -378,10 +379,10 @@ export function CanvasElementView({
   const handles = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
   const scenarioLayout = packFixedGrid(scenarioCount, element.w, element.h, element.packing);
   const density = {
-    comfortable: { padding: 14, gap: 12, icon: 52, label: 17, value: 14 },
-    normal: { padding: 12, gap: 10, icon: 48, label: 16, value: 13 },
-    compact: { padding: 8, gap: 6, icon: 40, label: 14, value: 11 },
-  }[element.textDensity || "normal"];
+    comfortable: { padding: 12, gap: 8,  icon: 56, label: 13, value: 11, desc: 9.5 },
+    normal:      { padding: 9,  gap: 6,  icon: 48, label: 12, value: 10, desc: 9   },
+    compact:     { padding: 6,  gap: 4,  icon: 36, label: 11, value: 9,  desc: 8   },
+  }[element.textDensity || "normal"]!
   return (
     <div
       className={
@@ -528,80 +529,205 @@ export function CanvasElementView({
                   ? <div className="grid h-full place-items-center text-center text-[10px] text-[var(--rl-text-muted)]">{element.emptyMessage || "Empty grid message"}</div>
                   : <div className="grid h-full place-items-center text-[10px] text-[var(--rl-text-muted)]">Hidden when empty</div>
               ) : (
-                actualLayout.cards.map((card, idx) => {
-                  const b = orderedItems[idx];
-                  const label = b ? b.label : `Benefit ${card.index + 1}`;
-                  const val = b ? (b.value || "Included") : "Coverage value";
-                  const assetUrl = b
-                    ? b.asset_url ||
-                    (b.asset_id ? `/business/assets/${b.asset_id}/content?profile=ui` : null) ||
-                    (conceptAssets?.[b.concept_key] || conceptAssets?.[b.concept_id] || null) ||
-                    (b.label ? conceptAssets?.[b.label.toLowerCase()] || conceptAssets?.[b.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] || null : null) ||
-                    (assets.find((a) => a.id === b.asset_id)?.url || null)
-                    : null;
-
-                  const price = b?.price?.amount
-                    ? `RM ${Number(b.price.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
-                    : b?.is_detected && b?.detected_cost
-                      ? (String(b.detected_cost).startsWith("RM") ? String(b.detected_cost) : `RM ${b.detected_cost}`)
-                      : null;
-
-                  return (
-                    <article
-                      key={card.index}
-                      className="absolute p-0.5 box-border"
-                      style={{ left: card.x, top: card.y, width: card.width, height: card.height }}
-                    >
-                      <div
-                        className={`w-full h-full flex items-center gap-2 rounded-[8px] px-2 py-1 transition-shadow ${
-                          b?.is_detected
-                            ? "border-2 border-amber-400 bg-amber-50/40 shadow-xs ring-1 ring-amber-300/50"
-                            : element.cardStyle === "minimal"
-                              ? "bg-transparent border border-transparent"
-                              : element.cardStyle === "soft"
-                                ? "bg-[#f3f0f0] border border-gray-200 shadow-xs"
-                                : "border border-[var(--rl-border)] bg-white shadow-xs"
-                        }`}
-                      >
-                        <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center overflow-hidden rounded">
-                          {assetUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={fileUrl(assetUrl)}
-                              alt={label}
-                              className="h-full w-full object-contain"
-                              onError={(e) => {
-                                (e.currentTarget as HTMLElement).style.display = "none";
-                              }}
-                            />
-                          ) : (
-                            <span className="grid h-full w-full place-items-center rounded bg-[var(--rl-red-light)] text-[10px] font-black text-[var(--rl-red)]">
-                              {label ? label.slice(0, 2).toUpperCase() : `B${card.index + 1}`}
-                            </span>
-                          )}
+                element.layoutMode === "masonry" ? (
+                  <div
+                    style={{
+                      columnCount: element.columns ?? 2,
+                      columnGap: density.gap,
+                      width: "100%",
+                      height: "100%",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {orderedItems.map((b: any, idx: number) => {
+                      const label = b ? b.label : `Benefit ${idx + 1}`;
+                      const val = b?.value && !["", "Included standard cover", "Included", "FOC", "As quoted"].includes(b.value) ? b.value : "";
+                      const descRaw = b?.description || "";
+                      const desc = descRaw.length > 95 ? descRaw.substring(0, 92) + "..." : descRaw;
+                      const assetUrl = b
+                        ? b.asset_url ||
+                          (b.asset_id ? `/business/assets/${b.asset_id}/content?profile=ui` : null) ||
+                          (conceptAssets?.[b.concept_key] || conceptAssets?.[b.concept_id] || null) ||
+                          null
+                        : null;
+                      const costBadge = b?.price?.amount
+                        ? `Cost : MYR ${Number(b.price.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
+                        : null;
+                      return (
+                        <div
+                          key={idx}
+                          className="box-border"
+                          style={{ breakInside: "avoid", marginBottom: density.gap }}
+                        >
+                          <div
+                            className={`flex flex-col rounded-[8px] ${
+                              b?.is_detected
+                                ? "border-2 border-amber-400 bg-amber-50/40"
+                                : element.cardStyle === "minimal"
+                                  ? "bg-transparent border border-transparent"
+                                  : element.cardStyle === "soft"
+                                    ? "bg-[#f3f0f0] border border-gray-200 shadow-xs"
+                                    : "border border-[var(--rl-border)] bg-white shadow-xs"
+                            }`}
+                            style={{ padding: density.padding }}
+                          >
+                            <div
+                              className="font-bold leading-snug text-[var(--rl-text-strong)]"
+                              style={{ fontSize: density.label, marginBottom: 4 }}
+                            >
+                              {label}
+                            </div>
+                            <div className="flex gap-1.5 items-start min-h-0">
+                              <div
+                                className="shrink-0 overflow-hidden rounded"
+                                style={{ width: density.icon, height: density.icon }}
+                              >
+                                {assetUrl ? (
+                                  <img
+                                    src={fileUrl(assetUrl)}
+                                    alt={label}
+                                    className="h-full w-full object-contain"
+                                    onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
+                                  />
+                                ) : (
+                                  <span
+                                    className="grid h-full w-full place-items-center rounded bg-[var(--rl-red-light)] font-black text-[var(--rl-red)]"
+                                    style={{ fontSize: density.desc }}
+                                  >
+                                    {label ? label.slice(0, 2).toUpperCase() : `B${idx + 1}`}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex flex-col min-w-0 flex-1 overflow-hidden">
+                                {val && (
+                                  <span
+                                    className="font-bold leading-tight text-[var(--rl-red)]"
+                                    style={{ fontSize: density.value }}
+                                  >
+                                    {val}
+                                  </span>
+                                )}
+                                {desc && (
+                                  <span
+                                    className="leading-snug text-[var(--rl-text-muted)]"
+                                    style={{ fontSize: density.desc }}
+                                  >
+                                    {desc}
+                                  </span>
+                                )}
+                                {costBadge && (
+                                  <span
+                                    className={`mt-0.5 inline-block self-start font-semibold whitespace-nowrap text-slate-900`}
+                                    style={{ fontSize: density.desc }}
+                                  >
+                                    {costBadge}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                        <div className="min-w-0 flex-1 flex flex-col justify-center">
-                          <strong
-                            className="block text-[11px] font-bold leading-tight text-[var(--rl-text-strong)] line-clamp-2"
-                            title={label}
+                      );
+                    })}
+                  </div>
+                ) : (
+                  actualLayout.cards.map((card, idx) => {
+                    const b = orderedItems[idx];
+                    const label = b ? b.label : `Benefit ${card.index + 1}`;
+                    const val = b?.value && !["", "Included standard cover", "Included", "FOC", "As quoted"].includes(b.value) ? b.value : "";
+                    const descRaw = b?.description || "";
+                    const desc = descRaw.length > 95 ? descRaw.substring(0, 92) + "..." : descRaw;
+                    const assetUrl = b
+                      ? b.asset_url ||
+                        (b.asset_id ? `/business/assets/${b.asset_id}/content?profile=ui` : null) ||
+                        (conceptAssets?.[b.concept_key] || conceptAssets?.[b.concept_id] || null) ||
+                        (b.label ? conceptAssets?.[b.label.toLowerCase()] || conceptAssets?.[b.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] || null : null) ||
+                        (assets.find((a) => a.id === b.asset_id)?.url || null)
+                      : null;
+                    const price = b?.price?.amount
+                      ? `Cost : MYR ${Number(b.price.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
+                      : b?.is_detected && b?.detected_cost
+                        ? `Cost : MYR ${String(b.detected_cost).replace(/RM\s*/i, "")}`
+                        : null;
+                    const costBadge = price || null;
+
+                    return (
+                      <article
+                        key={card.index}
+                        className="absolute box-border"
+                        style={{ left: card.x, top: card.y, width: card.width, height: card.height }}
+                      >
+                        <div
+                          className={`w-full h-full flex flex-col rounded-[8px] overflow-hidden ${
+                            b?.is_detected
+                              ? "border-2 border-amber-400 bg-amber-50/40 shadow-xs ring-1 ring-amber-300/50"
+                              : element.cardStyle === "minimal"
+                                ? "bg-transparent border border-transparent"
+                                : element.cardStyle === "soft"
+                                  ? "bg-[#f3f0f0] border border-gray-200 shadow-xs"
+                                  : "border border-[var(--rl-border)] bg-white shadow-xs"
+                          }`}
+                          style={{ padding: density.padding }}
+                        >
+                          <div
+                            className="font-bold leading-snug text-[var(--rl-text-strong)] shrink-0"
+                            style={{ fontSize: density.label, marginBottom: 4 }}
                           >
                             {label}
-                          </strong>
-                          {val ? (
-                            <span className="block text-[10px] text-[var(--rl-text-muted)] leading-tight truncate mt-0.5">
-                              {val}
-                            </span>
-                          ) : null}
+                          </div>
+                          <div className="flex flex-1 min-h-0 gap-1.5 items-start overflow-hidden">
+                            <div
+                              className="shrink-0 overflow-hidden rounded"
+                              style={{ width: density.icon, height: density.icon }}
+                            >
+                              {assetUrl ? (
+                                <img
+                                  src={fileUrl(assetUrl)}
+                                  alt={label}
+                                  className="h-full w-full object-contain"
+                                  onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
+                                />
+                              ) : (
+                                <span
+                                  className="grid h-full w-full place-items-center rounded bg-[var(--rl-red-light)] font-black text-[var(--rl-red)]"
+                                  style={{ fontSize: density.desc }}
+                                >
+                                  {label ? label.slice(0, 2).toUpperCase() : `B${card.index + 1}`}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex flex-col min-w-0 flex-1 overflow-hidden justify-start">
+                              {val && (
+                                <span
+                                  className="font-bold leading-tight text-[var(--rl-red)]"
+                                  style={{ fontSize: density.value }}
+                                >
+                                  {val}
+                                </span>
+                              )}
+                              {desc && (
+                                <span
+                                  className="leading-snug text-[var(--rl-text-muted)]"
+                                  style={{ fontSize: density.desc }}
+                                >
+                                  {desc}
+                                </span>
+                              )}
+                              {costBadge && (
+                                <span
+                                  className={`mt-0.5 inline-block self-start font-semibold whitespace-nowrap text-slate-900`}
+                                  style={{ fontSize: density.desc }}
+                                >
+                                  {costBadge}
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        {price ? (
-                          <span className="shrink-0 rounded bg-red-50 border border-red-200 px-1 py-0.5 text-[9px] font-bold text-red-600 whitespace-nowrap">
-                            +{price}
-                          </span>
-                        ) : null}
-                      </div>
-                    </article>
-                  );
-                })
+                      </article>
+                    );
+                  })
+                )
               )}
             </div>
           );
@@ -844,33 +970,10 @@ export function balanceBenefitGridElements(
     const rowsExt = nExt > 0 ? Math.max(1, Math.ceil(nExt / 2)) : 0;
     const rows2 = n2 > 0 ? Math.max(1, Math.ceil(n2 / 2)) : 0;
 
-    const totalSpace = yBottom - yTop;
-    const availGridsH = totalSpace - 3 * hdrH - 2 * gap - 3 * pad;
-    if (availGridsH <= 120) return elements;
-
-    const totalRows = rows1 + rowsExt + rows2;
-    let h1: number;
-    let hExt: number;
-    let h2: number;
-
-    if (totalRows > 0) {
-      hExt = Math.max(52, Math.min(110, availGridsH * (rowsExt / totalRows)));
-      const remainingH = availGridsH - hExt;
-      if (rows1 > 0 && rows2 > 0) {
-        h1 = Math.max(80, Math.min(remainingH - 70, remainingH * (rows1 / (rows1 + rows2))));
-        h2 = remainingH - h1;
-      } else if (rows1 > 0) {
-        h1 = remainingH - 50;
-        h2 = 50;
-      } else {
-        h1 = 50;
-        h2 = remainingH - 50;
-      }
-    } else {
-      h1 = availGridsH / 3;
-      hExt = availGridsH / 3;
-      h2 = availGridsH / 3;
-    }
+    const rowHeight = 125;
+    const h1 = rows1 > 0 ? rows1 * rowHeight : 50;
+    const hExt = rowsExt > 0 ? rowsExt * rowHeight : 50;
+    const h2 = rows2 > 0 ? rows2 * rowHeight : 50;
 
     const yG1 = yTop + hdrH + pad;
     const yHExt = yG1 + h1 + gap;
@@ -958,26 +1061,9 @@ export function balanceBenefitGridElements(
   const rows1 = n1 > 0 ? Math.max(1, Math.ceil(n1 / 2)) : 0;
   const rows2 = n2 > 0 ? Math.max(1, Math.ceil(n2 / 2)) : 0;
 
-  const totalSpace = yBottom - yTop;
-  const availGridsH = totalSpace - 2 * hdrH - gap - 2 * pad;
-  if (availGridsH <= 100) return elements;
-
-  let h1: number;
-  let h2: number;
-  if (rows1 > 0 && rows2 > 0) {
-    const ratio1 = rows1 / (rows1 + rows2);
-    h1 = Math.max(100, Math.min(availGridsH - 80, availGridsH * ratio1));
-    h2 = availGridsH - h1;
-  } else if (rows1 > 0 && rows2 == 0) {
-    h1 = availGridsH + hdrH + gap + pad - 60;
-    h2 = 60;
-  } else if (rows1 === 0 && rows2 > 0) {
-    h1 = 60;
-    h2 = availGridsH + hdrH + gap + pad - 60;
-  } else {
-    h1 = availGridsH / 2;
-    h2 = availGridsH / 2;
-  }
+  const rowHeight = 125;
+  const h1 = rows1 > 0 ? rows1 * rowHeight : 50;
+  const h2 = rows2 > 0 ? rows2 * rowHeight : 50;
 
   const yG1 = yTop + hdrH + pad;
   const yH2 = yG1 + h1 + gap;

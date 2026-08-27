@@ -96,6 +96,16 @@ def build_extras(selections: Iterable[Any], concepts: Iterable[Any], offerings: 
         raw_label = str(getattr(sel, "label_override", None) or "").strip() or concept_labels.get(str(getattr(sel, "concept_id", None)), "Extra benefit")
         label = _clean_extra_label(raw_label)
 
+        price_num = None
+        if isinstance(price, dict):
+            p_val = price.get("amount") or price.get("value")
+            try:
+                price_num = float(re.sub(r"[^0-9.]", "", str(p_val)))
+            except Exception:
+                price_num = None
+        elif isinstance(price, (int, float)):
+            price_num = float(price)
+
         limit_val = getattr(sel, "coverage_limit", None)
         if not limit_val:
             ev = getattr(sel, "evidence_snapshot", None)
@@ -117,9 +127,10 @@ def build_extras(selections: Iterable[Any], concepts: Iterable[Any], offerings: 
                 if clean_num_str:
                     try:
                         num = float(clean_num_str)
-                        if num > 0:
+                        # Only show coverage limit if it is positive and distinct from the add-on price
+                        if num > 0 and (price_num is None or abs(num - price_num) > 0.01):
                             limit_formatted = f"RM {int(num):,}" if num == int(num) else f"RM {num:,.2f}"
-                            limit_str = f"(Cover up to {limit_formatted})"
+                            limit_str = f"({limit_formatted})"
                     except Exception:
                         pass
 
@@ -204,7 +215,42 @@ def _card(
     asset_id: str | None = None,
     facet_id: str | None = None,
     branch_key: str | None = None,
+    eval_context: dict | None = None,
+    insurer_catalog: list[dict] | None = None,
 ) -> dict:
+    price = getattr(selection, "price", None) or getattr(offering, "optional_price", None)
+    cost_status = getattr(selection, "cost_status", None)
+    is_detected = bool(
+        (getattr(selection, "evidence_snapshot", None) or {}).get("is_detected")
+        or (getattr(selection, "evidence_snapshot", None) or {}).get("source") in {"extracted_addon", "gemini_multimodal", "extracted_upgrade"}
+    )
+    is_purchased_extra = cost_status == "paid" or getattr(selection, "is_purchased_extra", False)
+    
+    catalog_def = None
+    if insurer_catalog and concept and hasattr(concept, "concept_key"):
+        for item in insurer_catalog:
+            if item.get("concept_key") == concept.concept_key:
+                catalog_def = item
+                break
+
+    if catalog_def and eval_context:
+        from app.services.formula_evaluator import evaluate_formula
+        if catalog_def.get("coverage_formula"):
+            cov_res = evaluate_formula(catalog_def["coverage_formula"], eval_context)
+            if isinstance(cov_res, float):
+                typed_value = {"type": "money", "value": cov_res, "currency": "MYR"}
+            elif isinstance(cov_res, str):
+                typed_value = {"type": "string", "display_text": cov_res, "value": cov_res}
+                
+        if catalog_def.get("cost_formula") and not is_detected and not is_purchased_extra:
+            cost_res = evaluate_formula(catalog_def["cost_formula"], eval_context)
+            if isinstance(cost_res, float):
+                price = {"amount": cost_res, "currency": "MYR"}
+                if cost_res == 0.0:
+                    cost_status = "foc"
+                else:
+                    cost_status = "paid"
+
     try:
         card_val = format_benefit_value(typed_value) if typed_value is not None else ""
     except RenderContextError:
@@ -212,6 +258,8 @@ def _card(
             card_val = str(typed_value.get("display_text") or typed_value.get("value") or "")
         else:
             card_val = str(typed_value or "")
+
+    is_pure_default = catalog_def.get("category") == "default" and not is_detected and not is_purchased_extra if catalog_def else False
 
     return {
         "card_key": f"{getattr(selection, 'id', 'offer')}:{offering.id}:{facet_id or 'parent'}",
@@ -224,29 +272,29 @@ def _card(
         "facet_id": facet_id,
         "branch_key": branch_key,
         "label": label or getattr(offering, "label_override", None) or concept.label,
+        "description": str(getattr(concept, "description", None) or ""),
         "value": card_val,
         "typed_value": typed_value,
-        "price": getattr(selection, "price", None) or getattr(offering, "optional_price", None),
+        "price": price,
         "optional_price": getattr(offering, "optional_price", None),
         "initial_price": getattr(offering, "optional_price", None),
         "detected_cost": (getattr(selection, "evidence_snapshot", None) or {}).get("premium_cost"),
         "detected_limit": (getattr(selection, "evidence_snapshot", None) or {}).get("coverage_limit"),
         "asset_id": asset_id or concept.default_asset_id,
-        "cost_status": getattr(selection, "cost_status", None),
+        "cost_status": cost_status,
         "sort_order": int(getattr(offering, "sort_order", 0) or 0),
-        "is_detected": bool(
-            (getattr(selection, "evidence_snapshot", None) or {}).get("is_detected")
-            or (getattr(selection, "evidence_snapshot", None) or {}).get("source") in {"extracted_addon", "gemini_multimodal", "extracted_upgrade"}
-        ),
+        "is_detected": is_detected,
+        "is_pure_default": is_pure_default,
         "group_id": getattr(selection, "package_plan_id", None),
     }
 
 
-def _expanded_cards(selection: Any, offering: Any, concept: Any, facets_by_id: dict[str, Any]) -> list[dict]:
+
+def _expanded_cards(selection: Any, offering: Any, concept: Any, facets_by_id: dict[str, Any], eval_context: dict | None = None, insurer_catalog: list[dict] | None = None) -> list[dict]:
     typed_value = getattr(selection, "typed_value_override", None) or offering.typed_value
     facet_ids = list(offering.presentation_facet_ids or [])
     if not facet_ids:
-        return [_card(selection=selection, offering=offering, concept=concept, typed_value=typed_value)]
+        return [_card(selection=selection, offering=offering, concept=concept, typed_value=typed_value, eval_context=eval_context, insurer_catalog=insurer_catalog)]
     cards: list[dict] = []
     for facet_id in facet_ids:
         facet = facets_by_id.get(str(facet_id))
@@ -260,6 +308,8 @@ def _expanded_cards(selection: Any, offering: Any, concept: Any, facets_by_id: d
             label=facet.label,
             asset_id=facet.asset_id or concept.default_asset_id,
             facet_id=facet.id,
+            eval_context=eval_context,
+            insurer_catalog=insurer_catalog,
         ))
     return cards
 
@@ -272,8 +322,22 @@ def resolve_benefit_cards(
     relations: list[Any],
     facets: list[Any],
     plans: list[Any] | None = None,
+    eval_context: dict | None = None,
+    insurer_catalog: list[dict] | None = None,
 ) -> dict[str, list[dict]]:
     """Resolve current and available cards solely from pinned rows and decisions."""
+    _global_card = globals().get("_card")
+    _global_expanded_cards = globals().get("_expanded_cards")
+
+    def _card(**kwargs):
+        kwargs["eval_context"] = eval_context
+        kwargs["insurer_catalog"] = insurer_catalog
+        assert _global_card is not None
+        return _global_card(**kwargs)
+
+    def _expanded_cards(selection, offering, concept, facets_by_id):
+        assert _global_expanded_cards is not None
+        return _global_expanded_cards(selection, offering, concept, facets_by_id, eval_context=eval_context, insurer_catalog=insurer_catalog)
 
     offerings_by_id = _index(offerings)
     concepts_by_id = _index(concepts)

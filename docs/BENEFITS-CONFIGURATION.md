@@ -120,7 +120,7 @@ This script handles the PostgreSQL immutable published revision lifecycle cleanl
 Located in `frontend/src/app/builder/benefits/page.tsx` via the **"Company Overview Matrix"** view switcher:
 
 - **Matrix Aggregation**: Backed by `backend/app/services/matrix_service.py:get_company_matrix_data`, plotting every scenario (Comprehensive, TPFT, TPO across Private, Company, Motorcycle, Commercial) with its included defaults (Cost: 0 RM), optional add-ons (base cost / rate), and bundled plan packages.
-- **Word (.docx) Export**: Available at `GET /business/companies/{id}/export-matrix?format=docx`. Emits a clean, landscape Word catalog with formatted 4-column tables matching the canonical underwriting Word catalogs (`fix/company/*.docx`).
+- **Word (.docx) & Markdown (.md) Catalogs**: Available at `GET /business/companies/{id}/export-matrix?format=docx` and stored canonical markdown specifications in `fix/company/*.md` with companion master catalog in `fix/company/GLOBAL_BENEFITS_CATALOG.md`.
 - **Excel (.xlsx) Export**: Available at `GET /business/companies/{id}/export-matrix?format=xlsx`. Emits a multi-sheet workbook (`Scenarios Overview` and `Detailed Offerings`) with auto-sized columns and dark header styling.
 - **AI Seed & Sync Protocol**:
   - The matrix view provides copyable Markdown tables formatted for Claude / ChatGPT / Gemini.

@@ -17,6 +17,7 @@ export type BenefitCardSummary = {
   concept_id: string;
   concept_key: string;
   label: string;
+  description?: string | null;
   value: string;
   cost_status: string | null;
   branch_key?: string | null;
@@ -32,6 +33,7 @@ export type BenefitCardSummary = {
   detected_cost?: string | number | null;
   detected_limit?: string | number | null;
 };
+
 
 export type WorkspaceCapabilities = {
   can_edit_fields: boolean;

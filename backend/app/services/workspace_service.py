@@ -300,7 +300,7 @@ def _decision_summary(db, decision: DraftSourceLineDecision) -> dict:
     }
 
 
-def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBenefitSelection]) -> dict[str, list[dict]]:
+def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBenefitSelection], decisions: list[DraftSourceLineDecision]) -> dict[str, list[dict]]:
     concepts = list(db.scalars(select(BenefitConcept)).all())
     if not draft.catalog_revision_id:
         offerings: list = []
@@ -353,9 +353,21 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
             s for s in selections
             if s.item_kind != "catalog" or s.catalog_offering_id in offering_ids
         ]
+    from app.services.formula_evaluator import extract_evaluation_context
+    from app.services.benefit_catalog_matrix import get_catalog_for_product
+    
+    extras_section = _workspace_extracted_benefits_section(db, draft, decisions, selections)
+    eval_context = extract_evaluation_context(draft.fields or {}, extras_section.get("extras", []))
+    
+    # Try to determine insurer_key and product_type
+    insurer_key = str(getattr(draft.company, "company_key", "") or "etiqa") if hasattr(draft, "company") and draft.company else "etiqa"
+    product_type = str(getattr(draft.product, "name", "private_car") or "private_car") if hasattr(draft, "product") and draft.product else "private_car"
+    
+    insurer_catalog = get_catalog_for_product(insurer_key, product_type)
+
     return resolve_benefit_cards(
         selections=valid_selections, offerings=offerings, concepts=concepts, relations=relations, facets=facets,
-        plans=plans,
+        plans=plans, eval_context=eval_context, insurer_catalog=insurer_catalog,
     )
 
 
@@ -396,7 +408,7 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
     template_revision = _template_for_draft(db, draft)
     blockers = generation_blockers(draft, decisions, selections, template_revision=template_revision)
     try:
-        benefit_cards = _workspace_benefit_cards(db, draft, selections)
+        benefit_cards = _workspace_benefit_cards(db, draft, selections, decisions)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -585,6 +597,18 @@ def _workspace_extracted_benefits_section(
         if not cov_limit and isinstance(typed_val, dict) and typed_val.get("semantic_role") in {"limit", "insured_limit"}:
             cov_limit = str(typed_val.get("value") or "")
 
+        # Clean cost and limit to avoid showing false limit matching cost
+        clean_lim_str = re.sub(r"[^0-9.]", "", cov_limit)
+        clean_cost_str = re.sub(r"[^0-9.]", "", cost)
+        if clean_lim_str and clean_cost_str:
+            try:
+                l_n = float(clean_lim_str)
+                c_n = float(clean_cost_str)
+                if abs(l_n - c_n) <= 0.01 or l_n == 0:
+                    cov_limit = ""
+            except Exception:
+                pass
+
         mappings = line.get("candidate_mappings") or []
         first_map = mappings[0] if mappings else {}
         concept_id = first_map.get("concept_id")
@@ -595,6 +619,10 @@ def _workspace_extracted_benefits_section(
         if concept_id and str(concept_id) in selection_concepts:
             is_applied = True
             selection_id = selection_concepts[str(concept_id)].id
+            
+        # Also auto-apply if there's a defined cost (e.g. LLTP was purchased)
+        if bool(cost):
+            is_applied = True
 
         is_optional = bool(line.get("is_optional_cover")) or line.get("section") == "Optional Covers" or bool(cost)
 

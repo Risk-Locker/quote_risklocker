@@ -208,7 +208,7 @@ GEMINI_EXTRACTION_SCHEMA = {
         },
         "detected_benefits": {
             "type": "array",
-            "description": "List of all benefits, add-ons, extra covers, and riders explicitly present in this quotation (e.g. Windscreen Damage RM 4,000 cost RM 600, Private Car 365 Plan 2 cost RM 166, Legal Liability Of Passengers RM 7.50, Legal Liability To Passengers RM 71.85, All Drivers RM 20, 24-hr Towing, Special Perils, Workmanship Warranty, etc.).",
+            "description": "List of all benefits, add-ons, extra covers, and riders explicitly present in this quotation (e.g. Windscreen Damage RM 4,000 cost RM 600, Legal Liability Of Passengers cost RM 7.50, Legal Liability To Passengers cost RM 41.85, All Drivers cost RM 20, 24-hr Towing, Special Perils, Key Replacement RM 1,000, etc.).",
             "items": {
                 "type": "object",
                 "properties": {
@@ -222,15 +222,15 @@ GEMINI_EXTRACTION_SCHEMA = {
                     },
                     "value": {
                         "type": "string",
-                        "description": "The coverage value, limit amount, or description (e.g. 'RM 4,000.00', 'Unlimited Towing', 'Included', 'Plan 2').",
+                        "description": "The coverage value, limit amount, or description (e.g. 'RM 4,000.00', 'Unlimited Towing', 'Included', 'Plan 2'). If no coverage amount exists (e.g. LLTP/LLOP endorsements), output 'Included' or 'Selected'.",
                     },
                     "coverage_limit": {
                         "type": "string",
-                        "description": "Sum covered / coverage limit if any (e.g. 'RM 4,000.00', 'RM 10,000', '200 km').",
+                        "description": "Explicit sum insured or coverage limit amount ONLY (e.g. '2,650' or 'RM 2,650' for Windscreen, '1,000' for Key Replacement, '14 Days / RM 200 daily' for CART). If the add-on has NO explicit coverage amount or sum insured stated in the quotation (e.g. Legal Liability to Passengers, Legal Liability of Passengers, All Drivers, 24-hr Towing), this MUST be empty string (\"\"). NEVER copy the premium price into coverage_limit.",
                     },
                     "premium_cost": {
                         "type": "string",
-                        "description": "Additional premium cost in RM for this add-on (e.g. '600.00', '166.00', '7.50', '71.85', '20.00'). Empty string if included/FOC.",
+                        "description": "Additional premium cost in RM for this add-on (e.g. '600.00', '166.00', '7.50', '41.85', '20.00'). Empty string if included/FOC.",
                     },
                     "is_optional_cover": {
                         "type": "boolean",
@@ -258,9 +258,13 @@ GEMINI_EXTRACTION_SCHEMA = {
                         "type": "string",
                         "description": "The plan level if present (e.g. 'Plan A', 'A', 'Plan B', 'B'). Empty string if the pack has no level.",
                     },
+                    "price": {
+                        "type": "string",
+                        "description": "The price or additional premium amount for this pack (e.g. '288.05', '120.00', '43.00').",
+                    },
                     "raw_text": {
                         "type": "string",
-                        "description": "The verbatim line from the cost summary or benefits table (e.g. 'DPA pack A 288.05 RM').",
+                        "description": "The excerpt showing the purchased pack line.",
                     },
                 },
                 "required": ["package_name"],
@@ -269,10 +273,10 @@ GEMINI_EXTRACTION_SCHEMA = {
     },
     "required": [
         "customer_name",
-        "insurance_company",
-        "vehicle_no",
         "coverage_type",
-        "coverage_amount",
+        "vehicle_no",
+        "car_model",
+        "insurance_company",
         "total_amount",
     ],
 }
@@ -285,12 +289,7 @@ def build_rag_system_prompt(
     db_packs: list[dict] | None = None,
     prompt_override: str | None = None,
 ) -> str:
-    """Build grounded insurance domain prompt with live active database context.
-
-    When ``prompt_override`` is provided it replaces the fixed instruction
-    block; the live grounding sections (companies, concepts, packs) are always
-    appended so the model still has authoritative database context.
-    """
+    """Construct dynamic grounding prompt with database-seeded business catalog context."""
     company_hints: list[str] = []
     for c in (db_companies or []):
         name = c.get("name", "")
@@ -301,42 +300,43 @@ def build_rag_system_prompt(
             company_hints.append(f"{name} (aliases: {', '.join(aliases)})")
         else:
             company_hints.append(name)
-    companies_str = "; ".join(company_hints) or "QBE, Etiqa, AmAssurance, Lonpac, Allianz, Zurich, Liberty"
-    
+    companies_str = "; ".join(company_hints) if company_hints else "All active Malaysian motor insurers (e.g. AmAssurance, Etiqa, QBE, Takaful Malaysia, Berjaya Sompo, Lonpac, Tune Protect)"
+
     concepts_list = []
-    for c in (db_benefit_concepts or []):
-        key = c.get("key", "")
-        name = c.get("name", "")
-        if name:
-            concepts_list.append(f"- {name} (concept_key: '{key}')")
-    concepts_str = "\n".join(concepts_list) if concepts_list else "- Windscreen Coverage ('wndscrn')\n- Towing Service ('towing')\n- Special Perils ('spcl_peril')\n- All Drivers ('all_driver')\n- Legal Liability ('llp')"
+    for bc in (db_benefit_concepts or []):
+        k = bc.get("concept_key") or bc.get("key") or ""
+        lbl = bc.get("label") or bc.get("name") or ""
+        if k or lbl:
+            concepts_list.append(f"- {lbl} (concept_key: '{k}')" if k and lbl else f"- {lbl or k}")
+    concepts_str = "\n".join(concepts_list) if concepts_list else "- Standard Malaysian Motor Benefit Library"
 
     packs_list = []
-    for pack in (db_packs or []):
-        name = pack.get("name", "")
-        plans = pack.get("plans", [])
-        if name:
-            plan_names = ", ".join(str(p.get("name", "")) for p in plans if p.get("name"))
-            packs_list.append(f"- {name}" + (f" (plans: {plan_names})" if plan_names else ""))
+    for pk in (db_packs or []):
+        pn = pk.get("name") or ""
+        tiers = pk.get("tiers") or pk.get("plans") or []
+        if pn:
+            tier_names = ", ".join(str(t.get("name") or "") for t in tiers if str(t.get("name") or ""))
+            packs_list.append(f"- {pn}" + (f" (plans: {tier_names})" if tier_names else ""))
     packs_str = "\n".join(packs_list) if packs_list else ""
 
-    grounding = f"""
+    grounding_context = f"""
 ### LIVE DATABASE GROUNDING CONTEXT (always authoritative):
 - Active insurance companies: {companies_str}
 - Benefit concepts library:
 {concepts_str}
 - Known benefit packs and plan levels:
 {packs_str}
-Return strictly structured JSON adhering to the provided schema.
 """
 
     if prompt_override and prompt_override.strip():
         return f"""{prompt_override.strip()}
 
-{grounding}"""
+{grounding_context}
+Return strictly structured JSON adhering to the provided schema.
+"""
 
-    return f"""You are the RiskLocker High-Precision Malaysian Motor Insurance Quotation Extractor.
-Extract structured quotation data from the provided insurance document with 100% accuracy.
+    return f"""You are RiskLocker AI, an expert underwriting extraction system specializing in Malaysian Motor Insurance Quotation PDFs.
+Extract accurate, grounded JSON data matching the provided schema from the quotation document text or image.
 
 ### CRITICAL GROUNDING RULES:
 1. **CUSTOMER NAME (The Insured)**:
@@ -365,7 +365,12 @@ Extract structured quotation data from the provided insurance document with 100%
    - Extract `excess_amount` if stated (e.g. 'Excess / Lebihan 0.00' -> '0.00', '*Excess Amount : RM 1,000.00' -> '1,000.00', 'Policy Excess: RM 500.00', 'Ekses Polisi'). Output '0.00' if excess is 0 or zero.
    - Extract `valid_until` date (e.g. 'This quotation will expire on 18-03-2026' -> '18-03-2026', 'Valid Until 05-07-2026', 'Tarikh Luput').
    - Extract `total_optional_cover_amount` (e.g. 'Total Optional Cover Amount : RM 845.35' or 'Extra Benefit / Manfaat Tambahan : RM 20.00').
-   - In `detected_benefits`, extract EVERY item in the Optional Cover List or Extra Benefit section with its name (`label`, e.g. 'ALL DRIVERS', 'Windscreen', 'Legal Liability to Passengers'), coverage limit (`coverage_limit`), cost (`premium_cost`, e.g. '20.00', '150.00', '7.50'), and mark `is_optional_cover: true`.
+10. **DISTINGUISHING COVERAGE LIMIT vs PREMIUM COST**:
+   - In `detected_benefits`, read the extras table with extreme precision.
+   - **Coverage Limit (`coverage_limit`)**: Sum covered or insured limit explicitly stated (e.g. `Windscreen (Sum Insured: RM 2,650) ... RM 397.50` -> `coverage_limit: "2,650"`, `premium_cost: "397.50"`; `Key Replacement (Coverage: RM 1,000) ... RM 45.00` -> `coverage_limit: "1,000"`, `premium_cost: "45.00"`).
+   - **No Coverage Limit**: If the benefit is a legal liability endorsement or service rider without an explicit sum insured (e.g. `Legal Liability to Passengers ... RM 41.85`, `Legal Liability of Passengers ... RM 7.50`, `All Drivers ... RM 20.00`, `24-hr Towing`), `coverage_limit` MUST BE EMPTY `""` or null. NEVER put the premium cost or price into `coverage_limit`.
+
+{grounding_context}
 Return strictly structured JSON adhering to the provided schema.
 """
 

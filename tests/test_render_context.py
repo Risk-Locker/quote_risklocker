@@ -172,3 +172,31 @@ def test_context_hash_is_stable_across_dictionary_order_and_changes_on_content()
     assert canonical_context_hash(left) == canonical_context_hash(right)
     right["cards"][0]["id"] = "y"
     assert canonical_context_hash(left) != canonical_context_hash(right)
+
+
+def test_build_extras_formats_coverage_limit_as_parenthesized_rm_and_ignores_price_matches():
+    from app.rendering.render_context import build_extras
+
+    class FakeSel:
+        def __init__(self, id, state, label_override, price, coverage_limit=None):
+            self.id = id
+            self.state = state
+            self.label_override = label_override
+            self.price = price
+            self.coverage_limit = coverage_limit
+            self.cost_status = "paid"
+            self.catalog_offering_id = None
+            self.concept_id = None
+            self.sort_order = 0
+
+    selections = [
+        FakeSel("s1", "current", "Windscreen", {"amount": "397.50", "currency": "MYR"}, "2650"),
+        FakeSel("s2", "current", "Legal Liability to Passengers (LLTP)", {"amount": "41.85", "currency": "MYR"}, "41.85"),
+        FakeSel("s3", "current", "Legal Liability of Passengers (LLOP)", {"amount": "7.50", "currency": "MYR"}, None),
+    ]
+    extras = build_extras(selections, [])
+    assert len(extras) == 3
+    by_label = {e["label"]: e for e in extras}
+    assert by_label["Windscreen"]["coverage_limit"] == "(RM 2,650)"
+    assert by_label["Legal Liability to Passengers (LLTP)"]["coverage_limit"] == ""  # Price match suppressed
+    assert by_label["Legal Liability of Passengers (LLOP)"]["coverage_limit"] == ""

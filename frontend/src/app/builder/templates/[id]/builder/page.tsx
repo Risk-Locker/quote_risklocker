@@ -2004,6 +2004,17 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                           <option value="compact">Compact</option>
                         </Select>
                       </label>
+                      <label className="grid gap-1 text-xs font-bold uppercase">
+                        Layout mode
+                        <Select
+                          value={selected.layoutMode || "normal"}
+                          disabled={readOnly || Boolean(selected.locked)}
+                          onChange={(event) => updateElement(selected.id, { layoutMode: event.target.value as CanvasElement["layoutMode"] })}
+                        >
+                          <option value="normal">Normal grid</option>
+                          <option value="masonry">Masonry flow</option>
+                        </Select>
+                      </label>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <NumField label="Aspect" value={selected.packing?.aspectRatio ?? 1.45} disabled={readOnly || Boolean(selected.locked)} onChange={(value) => updateElement(selected.id, { packing: { ...(selected.packing || {}), aspectRatio: Math.max(0.1, value) } })} />

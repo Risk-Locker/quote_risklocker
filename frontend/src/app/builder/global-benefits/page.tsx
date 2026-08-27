@@ -432,7 +432,13 @@ export default function GlobalBenefitsPage() {
                           </span>
                         ) : null}
                       </div>
+                      {item.description && (
+                        <p className="mt-0.5 truncate text-[10px] text-[var(--rl-text-muted)] italic leading-snug">
+                          {item.description}
+                        </p>
+                      )}
                     </div>
+
                   </button>
                 );
               }) : (

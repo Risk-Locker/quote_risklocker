@@ -94,12 +94,12 @@ export type BenefitCardStyle = {
   is_default?: boolean;
   is_custom?: boolean;
   shape: "rounded" | "racetrack" | "square" | "soft" | "oval";
-  layout: "horizontal" | "tile" | "compact";
+  layout: "merged-2col" | "masonry" | "horizontal" | "tile" | "compact";
   borderWidth: number;
   borderStyle: "solid" | "dashed" | "none";
   elevation: "flat" | "shadow" | "lift";
-  uniformHeight: number; // in px, e.g. 64, 72, 80, 0 for auto
-  iconSize: number; // in px, e.g. 28, 32, 40, 48
+  uniformHeight: number; // in px, e.g. 0 for auto, 72, 84, 96, 110
+  iconSize: number; // in px, e.g. 28, 32, 40, 48, 56
   imageFit: "contain" | "cover" | "scale-down";
   iconPadShape: "box" | "circle" | "none" | "dark";
   titleSize: number;
@@ -107,6 +107,8 @@ export type BenefitCardStyle = {
   textWrap: "truncate" | "wrap";
   valueBadgeStyle: "green" | "pill" | "subtle" | "red" | "hidden";
   showDescription: boolean;
+  showCoverage: boolean;
+  showCost: boolean;
   bgColor: string;
   borderColor: string;
   textColor: string;
@@ -115,97 +117,80 @@ export type BenefitCardStyle = {
 
 const SYSTEM_BENEFIT_PRESETS: BenefitCardStyle[] = [
   {
-    id: "standard-rounded",
-    name: "Standard Rounded (Default)",
+    id: "signature-2col",
+    name: "Signature 2-Column (Default)",
     is_default: true,
     is_custom: false,
     shape: "rounded",
-    layout: "horizontal",
+    layout: "merged-2col",
     borderWidth: 1,
     borderStyle: "solid",
-    elevation: "flat",
-    uniformHeight: 64,
-    iconSize: 32,
+    elevation: "shadow",
+    uniformHeight: 0,
+    iconSize: 44,
     imageFit: "contain",
     iconPadShape: "box",
     titleSize: 12,
-    titleWeight: "semibold",
-    textWrap: "truncate",
-    valueBadgeStyle: "green",
-    showDescription: false,
+    titleWeight: "bold",
+    textWrap: "wrap",
+    valueBadgeStyle: "red",
+    showDescription: true,
+    showCoverage: true,
+    showCost: true,
     bgColor: "#ffffff",
-    borderColor: "#e5e5ea",
-    textColor: "#1b1717",
-    accentColor: "#ed1c24",
+    borderColor: "#e2e8f0",
+    textColor: "#0f172a",
+    accentColor: "#dc2626",
   },
   {
-    id: "racetrack-pill",
-    name: "Racetrack Stadium (Pill)",
+    id: "masonry-flow",
+    name: "Masonry Flow (Dynamic)",
     is_custom: false,
-    shape: "racetrack",
-    layout: "horizontal",
-    borderWidth: 1.5,
+    shape: "rounded",
+    layout: "masonry",
+    borderWidth: 1,
     borderStyle: "solid",
-    elevation: "flat",
-    uniformHeight: 56,
-    iconSize: 32,
+    elevation: "shadow",
+    uniformHeight: 0,
+    iconSize: 40,
     imageFit: "contain",
-    iconPadShape: "circle",
+    iconPadShape: "box",
     titleSize: 12,
     titleWeight: "bold",
-    textWrap: "truncate",
-    valueBadgeStyle: "pill",
-    showDescription: false,
-    bgColor: "#fafafc",
-    borderColor: "#1b1717",
-    textColor: "#1b1717",
-    accentColor: "#1b1717",
+    textWrap: "wrap",
+    valueBadgeStyle: "green",
+    showDescription: true,
+    showCoverage: true,
+    showCost: true,
+    bgColor: "#ffffff",
+    borderColor: "#e2e8f0",
+    textColor: "#0f172a",
+    accentColor: "#dc2626",
   },
   {
     id: "elevated-3d",
     name: "Elevated 3D Card (Shadow)",
     is_custom: false,
     shape: "soft",
-    layout: "horizontal",
+    layout: "merged-2col",
     borderWidth: 1,
     borderStyle: "solid",
-    elevation: "shadow",
-    uniformHeight: 70,
-    iconSize: 36,
+    elevation: "lift",
+    uniformHeight: 0,
+    iconSize: 44,
     imageFit: "contain",
     iconPadShape: "box",
     titleSize: 13,
     titleWeight: "bold",
     textWrap: "wrap",
-    valueBadgeStyle: "green",
-    showDescription: false,
+    valueBadgeStyle: "red",
+    showDescription: true,
+    showCoverage: true,
+    showCost: true,
     bgColor: "#ffffff",
-    borderColor: "#e5e5ea",
-    textColor: "#1b1717",
-    accentColor: "#ed1c24",
-  },
-  {
-    id: "compact-minimal",
-    name: "Compact Minimalist Row",
-    is_custom: false,
-    shape: "square",
-    layout: "compact",
-    borderWidth: 1,
-    borderStyle: "solid",
-    elevation: "flat",
-    uniformHeight: 48,
-    iconSize: 26,
-    imageFit: "contain",
-    iconPadShape: "none",
-    titleSize: 11,
-    titleWeight: "medium",
-    textWrap: "truncate",
-    valueBadgeStyle: "subtle",
-    showDescription: false,
-    bgColor: "#ffffff",
-    borderColor: "#f0f0f2",
-    textColor: "#1b1717",
-    accentColor: "#6e6e73",
+    borderColor: "#e2e8f0",
+    textColor: "#0f172a",
+    accentColor: "#dc2626",
   },
   {
     id: "grid-tile",
@@ -216,21 +201,74 @@ const SYSTEM_BENEFIT_PRESETS: BenefitCardStyle[] = [
     borderWidth: 1,
     borderStyle: "solid",
     elevation: "flat",
-    uniformHeight: 110,
-    iconSize: 44,
+    uniformHeight: 0,
+    iconSize: 48,
     imageFit: "contain",
     iconPadShape: "circle",
-    titleSize: 11,
+    titleSize: 12,
     titleWeight: "bold",
     textWrap: "wrap",
     valueBadgeStyle: "pill",
+    showDescription: true,
+    showCoverage: true,
+    showCost: true,
+    bgColor: "#f8fafc",
+    borderColor: "#e2e8f0",
+    textColor: "#0f172a",
+    accentColor: "#dc2626",
+  },
+  {
+    id: "compact-minimal",
+    name: "Compact Minimalist Row",
+    is_custom: false,
+    shape: "square",
+    layout: "compact",
+    borderWidth: 1,
+    borderStyle: "solid",
+    elevation: "flat",
+    uniformHeight: 52,
+    iconSize: 28,
+    imageFit: "contain",
+    iconPadShape: "none",
+    titleSize: 11,
+    titleWeight: "semibold",
+    textWrap: "truncate",
+    valueBadgeStyle: "subtle",
     showDescription: false,
-    bgColor: "#f9f9fb",
-    borderColor: "#e5e5ea",
-    textColor: "#1b1717",
-    accentColor: "#ed1c24",
+    showCoverage: true,
+    showCost: true,
+    bgColor: "#ffffff",
+    borderColor: "#f1f5f9",
+    textColor: "#0f172a",
+    accentColor: "#6e6e73",
+  },
+  {
+    id: "dark-signature",
+    name: "Dark Luxury Executive",
+    is_custom: false,
+    shape: "rounded",
+    layout: "merged-2col",
+    borderWidth: 1,
+    borderStyle: "solid",
+    elevation: "shadow",
+    uniformHeight: 0,
+    iconSize: 44,
+    imageFit: "contain",
+    iconPadShape: "dark",
+    titleSize: 12,
+    titleWeight: "bold",
+    textWrap: "truncate",
+    valueBadgeStyle: "red",
+    showDescription: true,
+    showCoverage: true,
+    showCost: true,
+    bgColor: "#0f172a",
+    borderColor: "#334155",
+    textColor: "#ffffff",
+    accentColor: "#ef4444",
   },
 ];
+
 
 function templateState(template: TemplateRecord) {
   if (template.status === "retired") return "retired";
@@ -304,7 +342,7 @@ export default function BuilderTemplatesPage() {
   // Benefit Card Templates State
   const [systemPresets] = useState<BenefitCardStyle[]>(SYSTEM_BENEFIT_PRESETS);
   const [customPresets, setCustomPresets] = useState<BenefitCardStyle[]>([]);
-  const [selectedPresetId, setSelectedPresetId] = useState<string>("standard-rounded");
+  const [selectedPresetId, setSelectedPresetId] = useState<string>("signature-2col");
   const [customStyle, setCustomStyle] = useState<BenefitCardStyle>(SYSTEM_BENEFIT_PRESETS[0]);
   const [pendingDeletePreset, setPendingDeletePreset] = useState<BenefitCardStyle | null>(null);
 
@@ -452,9 +490,9 @@ export default function BuilderTemplatesPage() {
   }
 
   function saveAsNewBenefitPreset() {
-    const name = prompt("Enter a name for this new Benefit Card Template:", `${customStyle.name} Copy`);
+    const name = window.prompt("Enter a name for this custom benefit card preset:", `${customStyle.name} (Copy)`);
     if (!name?.trim()) return;
-    const newId = `custom-preset-${Date.now()}`;
+    const newId = `custom-${Date.now()}`;
     const newPreset: BenefitCardStyle = {
       ...customStyle,
       id: newId,
@@ -511,22 +549,404 @@ export default function BuilderTemplatesPage() {
     }
   }
 
-  // Active preview list: prefer real global benefits from DB, fallback to defaults
+  // Fallback 5-Attribute standard mock data with full coverage, descriptions & pricing
+  const SAMPLE_5ATTR_BENEFITS = [
+    {
+      id: "b1",
+      label: "Own Damage",
+      category: "default" as const,
+      coverage: "RM 50,000.00",
+      description: "Accidental collision, overturning, fire, explosion & theft protection.",
+      cost: "Included (FOC)",
+      costStatus: "foc" as const,
+    },
+    {
+      id: "b2",
+      label: "Third Party Bodily Injury",
+      category: "default" as const,
+      coverage: "Statutory Unlimited",
+      description: "Unlimited coverage for third-party injury, hospitalization & accidental death.",
+      cost: "Included (FOC)",
+      costStatus: "foc" as const,
+    },
+    {
+      id: "b3",
+      label: "Third Party Property Damage",
+      category: "default" as const,
+      coverage: "RM 3,000,000.00",
+      description: "Third-party vehicle, roadside fixture, and public property damage.",
+      cost: "Included (FOC)",
+      costStatus: "foc" as const,
+    },
+    {
+      id: "b4",
+      label: "Emergency Towing Assistance",
+      category: "default" as const,
+      coverage: "200 km / RM 500",
+      description: "24/7 unlimited breakdown roadside towing to nearest authorized workshop.",
+      cost: "Included (FOC)",
+      costStatus: "foc" as const,
+    },
+    {
+      id: "b5",
+      label: "Windscreen & Glass Protection",
+      category: "addon" as const,
+      coverage: "RM 1,000.00",
+      description: "Repair & replacement of front, rear and all side door glass with 0% excess.",
+      cost: "+RM 150.00",
+      costStatus: "paid" as const,
+    },
+    {
+      id: "b6",
+      label: "Special Perils (Flood & Storm)",
+      category: "addon" as const,
+      coverage: "RM 50,000.00",
+      description: "Full protection against floods, typhoons, landslides, fallen trees & tempests.",
+      cost: "+RM 125.00",
+      costStatus: "paid" as const,
+    },
+    {
+      id: "b7",
+      label: "Driver Passenger Protector (DPP)",
+      category: "addon" as const,
+      coverage: "RM 20,000.00",
+      description: "Personal accident, accidental death, disablement & medical reimbursement.",
+      cost: "+RM 70.00",
+      costStatus: "paid" as const,
+    },
+    {
+      id: "b8",
+      label: "Legal Liability to Passengers",
+      category: "addon" as const,
+      coverage: "Statutory Unlimited",
+      description: "Legal protection against third-party negligence lawsuits by passengers.",
+      cost: "+RM 20.00",
+      costStatus: "paid" as const,
+    },
+  ];
+
+  // Active preview list: blend real DB Global Benefits with 5-attribute structure
   const previewItems = useMemo(() => {
     if (globalBenefits.length) {
-      return globalBenefits.slice(0, 8);
+      const defs = globalBenefits.filter(gb => (gb.category || (gb.sort_order <= 11 ? "default" : "addon")) === "default").slice(0, 4);
+      const adds = globalBenefits.filter(gb => (gb.category || (gb.sort_order <= 11 ? "default" : "addon")) !== "default").slice(0, 4);
+      return [...defs, ...adds].map((gb, idx) => {
+        const fallback = SAMPLE_5ATTR_BENEFITS[idx % SAMPLE_5ATTR_BENEFITS.length];
+        const isDefault = (gb.category || (gb.sort_order <= 11 ? "default" : "addon")) === "default";
+        return {
+          id: gb.id,
+          label: gb.label || fallback.label,
+          category: isDefault ? ("default" as const) : ("addon" as const),
+          coverage: isDefault
+            ? (gb.variants?.[0] || fallback.coverage)
+            : (gb.variants?.[0] ? `Limit: ${gb.variants[0]}` : fallback.coverage),
+          description: gb.description || fallback.description,
+          cost: isDefault ? "Included (FOC)" : fallback.cost,
+          costStatus: isDefault ? ("foc" as const) : ("paid" as const),
+          asset_url: gb.default_asset?.url || null,
+        };
+      });
     }
-    return [
-      { id: "b1", label: "Towing", category: "default", description: "Up to 50 km complimentary breakdown assistance", sort_order: 1, status: "active" },
-      { id: "b2", label: "Roadside Assistance", category: "default", description: "24/7 on-site emergency repair and jump-start", sort_order: 2, status: "active" },
-      { id: "b3", label: "Workmanship Warranty", category: "default", description: "12 months guarantee on panel repair & paintwork", sort_order: 3, status: "active" },
-      { id: "b4", label: "Windscreen", category: "addon", description: "RM 1,000.00 front & rear replacement protection", sort_order: 4, status: "active" },
-      { id: "b5", label: "Driver Passenger Protector", category: "addon", description: "Accidental death and permanent disability cover", sort_order: 5, status: "active" },
-      { id: "b6", label: "Special Perils", category: "addon", description: "Flood, typhoon, storm, landslide and tempest cover", sort_order: 6, status: "active" },
-    ] as GlobalBenefit[];
+    return SAMPLE_5ATTR_BENEFITS.map((item) => ({ ...item, asset_url: null }));
   }, [globalBenefits]);
 
+  function renderBenefitCardPreview(benefit: (typeof previewItems)[0]) {
+    const isDark = customStyle.bgColor === "#0f172a" || customStyle.bgColor === "#1b1717";
+    const textColor = isDark ? "#ffffff" : customStyle.textColor;
+    const subTextColor = isDark ? "#94a3b8" : "#64748b";
+    const isDefault = benefit.category === "default";
+
+    // 1. Signature 2-Column or Masonry (Merged 2-Column: Title Top, Image Left, Stacked Details Right)
+    if (customStyle.layout === "merged-2col" || customStyle.layout === "masonry") {
+      return (
+        <div
+          key={benefit.id}
+          style={{
+            borderRadius: getCardRadius(customStyle.shape),
+            boxShadow: getCardShadow(customStyle.elevation),
+            backgroundColor: customStyle.bgColor,
+            borderColor: customStyle.borderColor,
+            borderWidth: `${customStyle.borderWidth}px`,
+            borderStyle: customStyle.borderStyle,
+            height: customStyle.uniformHeight ? `${customStyle.uniformHeight}px` : "auto",
+            ...(customStyle.layout === "masonry" ? { breakInside: "avoid" as const, marginBottom: "12px" } : {}),
+          }}
+          className={`flex flex-col justify-between p-3.5 transition-all ${
+            benefit.category === "addon"
+              ? isDark ? "border-amber-500/40 bg-amber-950/10" : "border-amber-300/80 bg-amber-50/20"
+              : ""
+          }`}
+        >
+          {/* Row 1: Full-Width Title & Category Badge */}
+          <div className="flex items-center justify-between gap-2 mb-2 pb-1.5 border-b border-black/5 dark:border-white/10">
+            <h5
+              style={{
+                fontSize: `${customStyle.titleSize}px`,
+                fontWeight: customStyle.titleWeight === "bold" ? 700 : customStyle.titleWeight === "semibold" ? 600 : 500,
+                color: textColor,
+              }}
+              className={customStyle.textWrap === "truncate" ? "truncate" : "leading-tight"}
+              title={benefit.label}
+            >
+              {benefit.label}
+            </h5>
+            <span
+              className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                isDefault
+                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                  : "bg-amber-50 text-amber-800 border border-amber-200"
+              }`}
+            >
+              {isDefault ? "Default" : "Add-on"}
+            </span>
+          </div>
+
+          {/* Row 2: Image Left + Details Stack Right */}
+          <div className="flex items-start gap-3 min-h-0 flex-1">
+            {/* Benefit Image */}
+            <div
+              style={{
+                width: `${customStyle.iconSize}px`,
+                height: `${customStyle.iconSize}px`,
+                borderRadius: customStyle.iconPadShape === "circle" ? "999px" : customStyle.iconPadShape === "box" ? "6px" : "0px",
+                backgroundColor:
+                  customStyle.iconPadShape === "dark"
+                    ? "#020617"
+                    : customStyle.iconPadShape === "box" || customStyle.iconPadShape === "circle"
+                    ? isDark ? "#1e293b" : "#f1f5f9"
+                    : "transparent",
+              }}
+              className="grid place-items-center shrink-0 overflow-hidden border border-black/5"
+            >
+              {benefit.asset_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={fileUrl(benefit.asset_url)}
+                  alt={benefit.label}
+                  style={{
+                    width: `${customStyle.iconSize}px`,
+                    height: `${customStyle.iconSize}px`,
+                    objectFit: customStyle.imageFit,
+                  }}
+                  className="transition-all"
+                />
+              ) : isDefault ? (
+                <ShieldCheck
+                  size={customStyle.iconSize * 0.58}
+                  weight="bold"
+                  className={customStyle.iconPadShape === "dark" ? "text-white" : isDark ? "text-white" : "text-[var(--rl-black)]"}
+                />
+              ) : (
+                <Sparkle
+                  size={customStyle.iconSize * 0.58}
+                  weight="bold"
+                  className={customStyle.iconPadShape === "dark" ? "text-white" : "text-[var(--rl-red)]"}
+                />
+              )}
+            </div>
+
+            {/* Right Column: Coverage, Description, Cost */}
+            <div className="flex-1 min-w-0 flex flex-col justify-start">
+              {customStyle.showCoverage && (
+                <span
+                  className="font-bold tracking-tight text-[var(--rl-red)] leading-tight"
+                  style={{ fontSize: `${Math.max(11, customStyle.titleSize)}px` }}
+                >
+                  {benefit.coverage}
+                </span>
+              )}
+
+              {customStyle.showDescription && benefit.description && (
+                <p
+                  style={{ color: subTextColor }}
+                  className="text-[10.5px] leading-snug mt-0.5"
+                >
+                  {benefit.description}
+                </p>
+              )}
+
+              {customStyle.showCost && benefit.costStatus !== "foc" && (
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <span className="inline-block rounded bg-red-50 border border-red-200 px-2 py-0.5 text-[9.5px] font-bold text-red-600">
+                    {benefit.cost}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // 2. Vertical Tile Layout
+    if (customStyle.layout === "tile") {
+      return (
+        <div
+          key={benefit.id}
+          style={{
+            borderRadius: getCardRadius(customStyle.shape),
+            boxShadow: getCardShadow(customStyle.elevation),
+            backgroundColor: customStyle.bgColor,
+            borderColor: customStyle.borderColor,
+            borderWidth: `${customStyle.borderWidth}px`,
+            borderStyle: customStyle.borderStyle,
+            height: customStyle.uniformHeight ? `${customStyle.uniformHeight}px` : "auto",
+          }}
+          className="flex flex-col items-center text-center justify-between p-4 transition-all"
+        >
+          <div
+            style={{
+              width: `${customStyle.iconSize}px`,
+              height: `${customStyle.iconSize}px`,
+              borderRadius: customStyle.iconPadShape === "circle" ? "999px" : "6px",
+              backgroundColor: isDark ? "#1e293b" : "#f1f5f9",
+            }}
+            className="grid place-items-center shrink-0 overflow-hidden mb-2"
+          >
+            {benefit.asset_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={fileUrl(benefit.asset_url)} alt="" style={{ width: "100%", height: "100%", objectFit: customStyle.imageFit }} />
+            ) : isDefault ? (
+              <ShieldCheck size={customStyle.iconSize * 0.55} weight="bold" className="text-[var(--rl-black)]" />
+            ) : (
+              <Sparkle size={customStyle.iconSize * 0.55} weight="bold" className="text-[var(--rl-red)]" />
+            )}
+          </div>
+
+          <h5
+            style={{ fontSize: `${customStyle.titleSize}px`, color: textColor }}
+            className="font-bold truncate w-full"
+          >
+            {benefit.label}
+          </h5>
+
+          {customStyle.showCoverage && (
+            <span className="text-[11px] font-bold text-[var(--rl-red)] mt-0.5 block truncate w-full">
+              {benefit.coverage}
+            </span>
+          )}
+
+          {customStyle.showDescription && benefit.description && (
+            <p style={{ color: subTextColor }} className="text-[10px] line-clamp-2 mt-1 w-full leading-snug">
+              {benefit.description}
+            </p>
+          )}
+
+          {customStyle.showCost && benefit.costStatus !== "foc" && (
+            <div className="mt-2">
+              <span className="text-[9px] font-bold rounded px-2 py-0.5 bg-red-50 text-red-600 border border-red-200">
+                {benefit.cost}
+              </span>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // 3. Horizontal Split Layout
+    if (customStyle.layout === "horizontal") {
+      return (
+        <div
+          key={benefit.id}
+          style={{
+            borderRadius: getCardRadius(customStyle.shape),
+            boxShadow: getCardShadow(customStyle.elevation),
+            backgroundColor: customStyle.bgColor,
+            borderColor: customStyle.borderColor,
+            borderWidth: `${customStyle.borderWidth}px`,
+            borderStyle: customStyle.borderStyle,
+            height: customStyle.uniformHeight ? `${customStyle.uniformHeight}px` : "auto",
+          }}
+          className="flex items-center justify-between p-3 transition-all gap-3"
+        >
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div
+              style={{ width: `${customStyle.iconSize}px`, height: `${customStyle.iconSize}px` }}
+              className="grid place-items-center rounded bg-neutral-100 shrink-0 overflow-hidden"
+            >
+              {benefit.asset_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={fileUrl(benefit.asset_url)} alt="" style={{ width: "100%", height: "100%", objectFit: customStyle.imageFit }} />
+              ) : isDefault ? (
+                <ShieldCheck size={customStyle.iconSize * 0.55} weight="bold" className="text-[var(--rl-black)]" />
+              ) : (
+                <Sparkle size={customStyle.iconSize * 0.55} weight="bold" className="text-[var(--rl-red)]" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <h5 style={{ fontSize: `${customStyle.titleSize}px`, color: textColor }} className="font-bold truncate">
+                {benefit.label}
+              </h5>
+              {customStyle.showCoverage && (
+                <span className="text-[11px] font-bold text-[var(--rl-red)] block truncate">
+                  {benefit.coverage}
+                </span>
+              )}
+              {customStyle.showDescription && (
+                <p style={{ color: subTextColor }} className="text-[10px] truncate leading-snug">
+                  {benefit.description}
+                </p>
+              )}
+            </div>
+          </div>
+          {customStyle.showCost && benefit.costStatus !== "foc" && (
+            <span className="shrink-0 text-[10px] font-bold rounded px-2 py-0.5 bg-red-50 text-red-600 border border-red-200">
+              {benefit.cost}
+            </span>
+          )}
+        </div>
+      );
+    }
+
+    // 4. Compact Minimalist Row
+    return (
+      <div
+        key={benefit.id}
+        style={{
+          borderRadius: getCardRadius(customStyle.shape),
+          boxShadow: getCardShadow(customStyle.elevation),
+          backgroundColor: customStyle.bgColor,
+          borderColor: customStyle.borderColor,
+          borderWidth: `${customStyle.borderWidth}px`,
+          borderStyle: customStyle.borderStyle,
+          height: customStyle.uniformHeight ? `${customStyle.uniformHeight}px` : "auto",
+        }}
+        className="flex items-center justify-between px-3.5 py-2 transition-all gap-2"
+      >
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <div
+            style={{ width: `${Math.min(customStyle.iconSize, 32)}px`, height: `${Math.min(customStyle.iconSize, 32)}px` }}
+            className="grid place-items-center rounded bg-neutral-100 shrink-0 overflow-hidden"
+          >
+            {benefit.asset_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={fileUrl(benefit.asset_url)} alt="" style={{ width: "100%", height: "100%", objectFit: customStyle.imageFit }} />
+            ) : (
+              <ShieldCheck size={16} weight="bold" className="text-[var(--rl-black)]" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <h5 style={{ fontSize: `${customStyle.titleSize}px`, color: textColor }} className="font-bold truncate">
+              {benefit.label}
+            </h5>
+            {customStyle.showCoverage && (
+              <span className="text-[10.5px] font-bold text-[var(--rl-red)] truncate block">
+                {benefit.coverage}
+              </span>
+            )}
+          </div>
+        </div>
+        {customStyle.showCost && benefit.costStatus !== "foc" && (
+          <span className="shrink-0 text-[9.5px] font-bold rounded px-1.5 py-0.5 bg-red-50 text-red-600 border border-red-200">
+            {benefit.cost}
+          </span>
+        )}
+      </div>
+    );
+  }
+
   return (
+
     <AppShell>
       <section className="grid gap-6">
         {/* ── Top Header ────────────────────────────────────────────── */}
@@ -745,6 +1165,42 @@ export default function BuilderTemplatesPage() {
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
               {/* Left Column (5 cols): Click-First Style Controls */}
               <div className="lg:col-span-5 space-y-4">
+
+                {/* Section 0: Layout Architecture & Presentation */}
+                <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-4 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
+                      0. Layout Architecture & Flow
+                    </h4>
+                    <span className="rounded bg-red-50 border border-red-200 px-1.5 py-0.2 text-[9px] font-bold uppercase text-[var(--rl-red)]">
+                      5-Attribute
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-1.5 text-xs">
+                    {[
+                      { key: "merged-2col", label: "★ Signature 2-Col" },
+                      { key: "masonry", label: "Masonry Flow" },
+                      { key: "horizontal", label: "Horizontal Split" },
+                      { key: "tile", label: "Vertical Grid Tile" },
+                      { key: "compact", label: "Compact Row" },
+                    ].map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => setCustomStyle({ ...customStyle, layout: item.key as BenefitCardStyle["layout"] })}
+                        className={`rounded-[var(--rl-radius-sm)] border p-2 text-center text-xs font-medium transition-all ${
+                          customStyle.layout === item.key
+                            ? "border-[var(--rl-black)] bg-[var(--rl-black)] text-white shadow-xs font-bold"
+                            : "border-[var(--rl-border)] bg-[var(--rl-bg)] text-[var(--rl-text-strong)] hover:border-[var(--rl-text-muted)]"
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Section 1: Container & Shape */}
                 <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-4 shadow-sm space-y-3">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
@@ -813,10 +1269,10 @@ export default function BuilderTemplatesPage() {
                     <div className="mt-1.5 grid grid-cols-5 gap-1 text-xs">
                       {[
                         { val: 0, label: "Auto" },
-                        { val: 52, label: "52px" },
-                        { val: 64, label: "64px" },
-                        { val: 72, label: "72px" },
+                        { val: 68, label: "68px" },
                         { val: 84, label: "84px" },
+                        { val: 96, label: "96px" },
+                        { val: 112, label: "112px" },
                       ].map((item) => (
                         <button
                           key={item.val}
@@ -849,7 +1305,7 @@ export default function BuilderTemplatesPage() {
                   <div>
                     <label className="block text-xs font-semibold text-[var(--rl-text-strong)]">Icon Artwork Size</label>
                     <div className="mt-1.5 grid grid-cols-5 gap-1 text-xs">
-                      {[24, 32, 40, 48, 56].map((size) => (
+                      {[28, 36, 44, 52, 60].map((size) => (
                         <button
                           key={size}
                           type="button"
@@ -918,23 +1374,23 @@ export default function BuilderTemplatesPage() {
                   </div>
                 </div>
 
-                {/* Section 3: Typography & Badges */}
+                {/* Section 3: Typography & 5-Attribute Visibility */}
                 <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-4 shadow-sm space-y-3">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
-                    3. Typography & Value Tag
+                    3. Typography & 5-Attribute Visibility
                   </h4>
 
                   <div className="grid grid-cols-2 gap-3 text-xs">
                     <div>
                       <label className="block font-semibold text-[var(--rl-text-strong)]">Title Size</label>
-                      <div className="mt-1.5 grid grid-cols-3 gap-1">
-                        {[11, 12, 13].map((size) => (
+                      <div className="mt-1.5 grid grid-cols-4 gap-1">
+                        {[11, 12, 13, 14].map((size) => (
                           <button
                             key={size}
                             type="button"
                             onClick={() => setCustomStyle({ ...customStyle, titleSize: size })}
                             className={`rounded border py-1 text-center font-medium ${
-                              customStyle.titleSize === size ? "bg-[var(--rl-black)] text-white" : "bg-[var(--rl-bg)] border-[var(--rl-border)]"
+                              customStyle.titleSize === size ? "bg-[var(--rl-black)] text-white font-bold" : "bg-[var(--rl-bg)] border-[var(--rl-border)]"
                             }`}
                           >
                             {size}px
@@ -955,7 +1411,7 @@ export default function BuilderTemplatesPage() {
                             type="button"
                             onClick={() => setCustomStyle({ ...customStyle, textWrap: item.key as "truncate" | "wrap" })}
                             className={`rounded border py-1 text-center font-medium ${
-                              customStyle.textWrap === item.key ? "bg-[var(--rl-black)] text-white" : "bg-[var(--rl-bg)] border-[var(--rl-border)]"
+                              customStyle.textWrap === item.key ? "bg-[var(--rl-black)] text-white font-bold" : "bg-[var(--rl-bg)] border-[var(--rl-border)]"
                             }`}
                           >
                             {item.label}
@@ -965,14 +1421,48 @@ export default function BuilderTemplatesPage() {
                     </div>
                   </div>
 
+                  {/* 5-Attribute Feature Visibility Toggles */}
+                  <div className="pt-2 border-t border-[var(--rl-border)] space-y-1.5">
+                    <label className="block text-xs font-semibold text-[var(--rl-text-strong)]">5-Attribute Visibility</label>
+                    <div className="grid grid-cols-3 gap-1.5 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setCustomStyle({ ...customStyle, showCoverage: !customStyle.showCoverage })}
+                        className={`rounded border py-1.5 text-center font-medium transition-all ${
+                          customStyle.showCoverage ? "bg-red-50 border-red-300 text-red-700 font-bold" : "bg-[var(--rl-bg)] border-[var(--rl-border)] text-neutral-500"
+                        }`}
+                      >
+                        Coverage: {customStyle.showCoverage ? "ON" : "OFF"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCustomStyle({ ...customStyle, showDescription: !customStyle.showDescription })}
+                        className={`rounded border py-1.5 text-center font-medium transition-all ${
+                          customStyle.showDescription ? "bg-blue-50 border-blue-300 text-blue-700 font-bold" : "bg-[var(--rl-bg)] border-[var(--rl-border)] text-neutral-500"
+                        }`}
+                      >
+                        Desc: {customStyle.showDescription ? "ON" : "OFF"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCustomStyle({ ...customStyle, showCost: !customStyle.showCost })}
+                        className={`rounded border py-1.5 text-center font-medium transition-all ${
+                          customStyle.showCost ? "bg-emerald-50 border-emerald-300 text-emerald-700 font-bold" : "bg-[var(--rl-bg)] border-[var(--rl-border)] text-neutral-500"
+                        }`}
+                      >
+                        Cost: {customStyle.showCost ? "ON" : "OFF"}
+                      </button>
+                    </div>
+                  </div>
+
                   <div>
-                    <label className="block text-xs font-semibold text-[var(--rl-text-strong)]">Value / Limit Tag Style</label>
+                    <label className="block text-xs font-semibold text-[var(--rl-text-strong)]">Cost / Tag Badge Style</label>
                     <div className="mt-1.5 grid grid-cols-4 gap-1 text-xs">
                       {[
-                        { key: "green", label: "Green Included" },
+                        { key: "red", label: "Red Accent" },
+                        { key: "green", label: "Green FOC" },
                         { key: "pill", label: "Dark Pill" },
                         { key: "subtle", label: "Subtle Gray" },
-                        { key: "red", label: "Red Accent" },
                       ].map((item) => (
                         <button
                           key={item.key}
@@ -1001,7 +1491,7 @@ export default function BuilderTemplatesPage() {
                     <div>
                       <label className="block font-semibold text-[var(--rl-text-strong)]">Card Background</label>
                       <div className="mt-1.5 flex gap-1.5">
-                        {["#ffffff", "#fafafc", "#f5f5f7", "#1b1717"].map((col) => (
+                        {["#ffffff", "#fafafc", "#f8fafc", "#0f172a"].map((col) => (
                           <button
                             key={col}
                             type="button"
@@ -1019,7 +1509,7 @@ export default function BuilderTemplatesPage() {
                     <div>
                       <label className="block font-semibold text-[var(--rl-text-strong)]">Border Color</label>
                       <div className="mt-1.5 flex gap-1.5">
-                        {["#e5e5ea", "#d1d1d6", "#1b1717", "#ed1c24"].map((col) => (
+                        {["#e2e8f0", "#d1d5db", "#334155", "#dc2626"].map((col) => (
                           <button
                             key={col}
                             type="button"
@@ -1046,139 +1536,38 @@ export default function BuilderTemplatesPage() {
                         Live Benefit Cards Template Preview
                       </h3>
                       <p className="text-xs text-[var(--rl-text-muted)]">
-                        Rendering live assets from Global Benefits using: <span className="font-semibold text-[var(--rl-text-strong)]">{customStyle.name}</span>
+                        Rendering 5-attribute presentation using: <span className="font-semibold text-[var(--rl-text-strong)]">{customStyle.name}</span>
                       </p>
                     </div>
-                    <span className="rounded bg-[var(--rl-bg)] border border-[var(--rl-border)] px-2 py-0.5 text-xs font-bold text-[var(--rl-text-strong)]">
-                      {customStyle.shape.toUpperCase()} · {customStyle.uniformHeight ? `${customStyle.uniformHeight}px` : "AUTO"}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded bg-red-50 border border-red-200 px-2 py-0.5 text-xs font-bold text-[var(--rl-red)] uppercase">
+                        {customStyle.layout.toUpperCase()}
+                      </span>
+                      <span className="rounded bg-[var(--rl-bg)] border border-[var(--rl-border)] px-2 py-0.5 text-xs font-bold text-[var(--rl-text-strong)]">
+                        {customStyle.shape.toUpperCase()} · {customStyle.uniformHeight ? `${customStyle.uniformHeight}px` : "AUTO"}
+                      </span>
+                    </div>
                   </div>
 
-                  {/* Sample Benefit Cards Grid using REAL Global Benefits and Assets */}
-                  <div className={`grid gap-3 ${customStyle.layout === "tile" ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3" : "grid-cols-1 sm:grid-cols-2"}`}>
-                    {previewItems.map((benefit) => {
-                      const isDark = customStyle.bgColor === "#1b1717";
-                      const textColor = isDark ? "#ffffff" : customStyle.textColor;
-                      const subTextColor = isDark ? "#a1a1aa" : "#6e6e73";
-                      const isDefault = (benefit.category || (benefit.sort_order <= 11 ? "default" : "addon")) === "default";
-                      const valueTag = isDefault ? "Included" : (benefit.variants?.[0] || "Optional");
-
-                      return (
-                        <div
-                          key={benefit.id}
-                          style={{
-                            borderRadius: getCardRadius(customStyle.shape),
-                            boxShadow: getCardShadow(customStyle.elevation),
-                            backgroundColor: customStyle.bgColor,
-                            borderColor: customStyle.borderColor,
-                            borderWidth: `${customStyle.borderWidth}px`,
-                            borderStyle: customStyle.borderStyle,
-                            height: customStyle.uniformHeight ? `${customStyle.uniformHeight}px` : "auto",
-                          }}
-                          className={`flex ${
-                            customStyle.layout === "tile" ? "flex-col items-center text-center justify-between p-3.5" : "items-center justify-between px-3.5 py-2.5"
-                          } transition-all`}
-                        >
-                          <div className={`flex ${customStyle.layout === "tile" ? "flex-col items-center gap-2" : "items-center gap-3"} min-w-0`}>
-                            {/* Icon Artwork Container with REAL UPLOADED BENEFIT ASSET */}
-                            <div
-                              style={{
-                                width: `${customStyle.iconSize}px`,
-                                height: `${customStyle.iconSize}px`,
-                                borderRadius: customStyle.iconPadShape === "circle" ? "999px" : customStyle.iconPadShape === "box" ? "6px" : "0px",
-                                backgroundColor:
-                                  customStyle.iconPadShape === "dark"
-                                    ? "#1b1717"
-                                    : customStyle.iconPadShape === "box" || customStyle.iconPadShape === "circle"
-                                    ? isDark
-                                      ? "#2c2c2e"
-                                      : "#f0f0f2"
-                                    : "transparent",
-                              }}
-                              className="grid place-items-center shrink-0 overflow-hidden"
-                            >
-                              {benefit.default_asset?.url ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                  src={fileUrl(benefit.default_asset.url)}
-                                  alt={benefit.label}
-                                  style={{
-                                    width: `${customStyle.iconSize}px`,
-                                    height: `${customStyle.iconSize}px`,
-                                    objectFit: customStyle.imageFit,
-                                  }}
-                                  className="transition-all"
-                                />
-                              ) : isDefault ? (
-                                <ShieldCheck
-                                  size={customStyle.iconSize * 0.6}
-                                  weight="bold"
-                                  className={customStyle.iconPadShape === "dark" ? "text-white" : isDark ? "text-white" : "text-[var(--rl-black)]"}
-                                />
-                              ) : (
-                                <Sparkle
-                                  size={customStyle.iconSize * 0.6}
-                                  weight="bold"
-                                  className={customStyle.iconPadShape === "dark" ? "text-white" : "text-[var(--rl-red)]"}
-                                />
-                              )}
-                            </div>
-
-                            {/* Text Labels */}
-                            <div className="min-w-0">
-                              <h5
-                                style={{
-                                  fontSize: `${customStyle.titleSize}px`,
-                                  fontWeight: customStyle.titleWeight === "bold" ? 700 : customStyle.titleWeight === "semibold" ? 600 : 500,
-                                  color: textColor,
-                                }}
-                                className={customStyle.textWrap === "truncate" ? "truncate" : "line-clamp-2 leading-tight"}
-                              >
-                                {benefit.label}
-                              </h5>
-                              {customStyle.showDescription && benefit.description && (
-                                <p style={{ color: subTextColor }} className="text-[10px] truncate mt-0.5">
-                                  {benefit.description}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Value / Limit Badge */}
-                          {customStyle.valueBadgeStyle !== "hidden" && (
-                            <div className="shrink-0 ml-2">
-                              {customStyle.valueBadgeStyle === "green" ? (
-                                <span className="rounded bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
-                                  {valueTag}
-                                </span>
-                              ) : customStyle.valueBadgeStyle === "pill" ? (
-                                <span className="rounded-full bg-[var(--rl-black)] px-2.5 py-0.5 text-[10px] font-bold text-white">
-                                  {valueTag}
-                                </span>
-                              ) : customStyle.valueBadgeStyle === "red" ? (
-                                <span className="rounded bg-[var(--rl-red-light)] border border-[var(--rl-red)] px-2 py-0.5 text-[10px] font-bold text-[var(--rl-red)]">
-                                  {valueTag}
-                                </span>
-                              ) : (
-                                <span style={{ color: subTextColor }} className="text-[11px] font-semibold">
-                                  {valueTag}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                  {/* Dynamic Benefit Cards Container based on Layout Mode */}
+                  {customStyle.layout === "masonry" ? (
+                    <div style={{ columnCount: 2, columnGap: "12px" }}>
+                      {previewItems.map((benefit) => renderBenefitCardPreview(benefit))}
+                    </div>
+                  ) : (
+                    <div className={`grid gap-3 ${customStyle.layout === "tile" ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3" : "grid-cols-1 sm:grid-cols-2"}`}>
+                      {previewItems.map((benefit) => renderBenefitCardPreview(benefit))}
+                    </div>
+                  )}
 
                   {/* Admin Guidance Box */}
                   <div className="mt-5 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3 text-xs text-[var(--rl-text-muted)] space-y-1">
                     <div className="flex items-center gap-1.5 font-bold text-[var(--rl-text-strong)]">
                       <ImageSquare size={15} />
-                      <span>Admin Asset & Aspect Ratio Notice:</span>
+                      <span>5-Attribute Presentation Spec:</span>
                     </div>
                     <p className="text-[11px] leading-relaxed">
-                      The template automatically fits and scales uploaded image assets (via <span className="font-semibold text-[var(--rl-text-strong)]">{customStyle.imageFit}</span> mode at <span className="font-semibold text-[var(--rl-text-strong)]">{customStyle.iconSize}px</span>). For the cleanest output across standard quotations, upload crisp 1:1 transparent PNG assets in <Link href="/builder/assets" className="underline font-semibold text-[var(--rl-text-strong)]">Assets Builder</Link>.
+                      Every card displays <span className="font-bold text-[var(--rl-text-strong)]">1) Benefit Image</span>, <span className="font-bold text-[var(--rl-text-strong)]">2) Title</span>, <span className="font-bold text-[var(--rl-red)]">3) Coverage Limit (RM)</span>, <span className="font-bold text-[var(--rl-text-strong)]">4) Short Description</span>, and <span className="font-bold text-emerald-700">5) Cost Structure</span>. All artwork scales via <span className="font-semibold">{customStyle.imageFit}</span> at <span className="font-semibold">{customStyle.iconSize}px</span>.
                     </p>
                   </div>
                 </div>
@@ -1197,60 +1586,58 @@ export default function BuilderTemplatesPage() {
                   <div className="rounded-[var(--rl-radius-sm)] border border-dashed border-[var(--rl-red)] bg-[#fafafc] p-4">
                     <div className="mb-2 flex items-center justify-between">
                       <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-red)]">
-                        Your Benefits (Dynamic Slot)
+                        Your Benefits (Dynamic Slot · 5-Attribute)
                       </span>
                       <span className="text-[10px] text-[var(--rl-text-muted)]">A4 Canvas Bounding Box</span>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2">
-                      {previewItems.slice(0, 4).map((benefit) => {
-                        const isDefault = (benefit.category || (benefit.sort_order <= 11 ? "default" : "addon")) === "default";
-                        const valueTag = isDefault ? "Included" : (benefit.variants?.[0] || "Optional");
-
-                        return (
+                    <div className="grid grid-cols-2 gap-2.5">
+                      {previewItems.slice(0, 4).map((benefit) => (
+                        <div
+                          key={`canvas-${benefit.id}`}
+                          style={{
+                            borderRadius: getCardRadius(customStyle.shape),
+                            boxShadow: getCardShadow(customStyle.elevation),
+                            backgroundColor: customStyle.bgColor,
+                            borderColor: customStyle.borderColor,
+                            borderWidth: `${customStyle.borderWidth}px`,
+                            borderStyle: customStyle.borderStyle,
+                          }}
+                          className="flex items-start gap-2.5 p-2.5 text-xs shadow-xs"
+                        >
                           <div
-                            key={`canvas-${benefit.id}`}
-                            style={{
-                              borderRadius: getCardRadius(customStyle.shape),
-                              boxShadow: getCardShadow(customStyle.elevation),
-                              backgroundColor: customStyle.bgColor,
-                              borderColor: customStyle.borderColor,
-                              borderWidth: `${customStyle.borderWidth}px`,
-                              borderStyle: customStyle.borderStyle,
-                              height: customStyle.uniformHeight ? `${Math.min(customStyle.uniformHeight, 56)}px` : "auto",
-                            }}
-                            className="flex items-center justify-between px-3 py-1.5 text-xs"
+                            style={{ width: "36px", height: "36px" }}
+                            className="grid place-items-center rounded bg-neutral-100 border border-neutral-200 shrink-0 overflow-hidden"
                           >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <div
-                                style={{ width: `${Math.min(customStyle.iconSize, 24)}px`, height: `${Math.min(customStyle.iconSize, 24)}px` }}
-                                className="grid place-items-center rounded bg-neutral-200 shrink-0 overflow-hidden"
-                              >
-                                {benefit.default_asset?.url ? (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img
-                                    src={fileUrl(benefit.default_asset.url)}
-                                    alt={benefit.label}
-                                    style={{
-                                      width: `${Math.min(customStyle.iconSize, 24)}px`,
-                                      height: `${Math.min(customStyle.iconSize, 24)}px`,
-                                      objectFit: customStyle.imageFit,
-                                    }}
-                                  />
-                                ) : (
-                                  <ShieldCheck size={14} className="text-[var(--rl-black)]" />
-                                )}
-                              </div>
-                              <span className="text-xs font-semibold text-[var(--rl-text-strong)] truncate">
+                            {benefit.asset_url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={fileUrl(benefit.asset_url)}
+                                alt={benefit.label}
+                                style={{ width: "36px", height: "36px", objectFit: customStyle.imageFit }}
+                              />
+                            ) : (
+                              <ShieldCheck size={18} className="text-[var(--rl-black)]" />
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-xs font-bold text-[var(--rl-text-strong)] truncate">
                                 {benefit.label}
                               </span>
+                              <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1 shrink-0">
+                                {benefit.cost}
+                              </span>
                             </div>
-                            <span className="text-[10px] font-bold text-emerald-800 shrink-0 ml-1">
-                              {valueTag}
+                            <span className="text-[11px] font-bold text-[var(--rl-red)] block truncate mt-0.5">
+                              {benefit.coverage}
                             </span>
+                            <p className="text-[9.5px] text-neutral-500 truncate leading-snug">
+                              {benefit.description}
+                            </p>
                           </div>
-                        );
-                      })}
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -1258,6 +1645,7 @@ export default function BuilderTemplatesPage() {
             </div>
           </div>
         )}
+
       </section>
 
       {/* ── Dialogs for Quotation Templates ──────────────────────────── */}

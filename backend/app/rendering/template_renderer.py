@@ -43,9 +43,9 @@ GRID_CARD_STYLES = {
     "minimal": "border:0;border-radius:0;background:transparent",
 }
 GRID_TEXT_DENSITIES = {
-    "comfortable": {"padding": 14, "gap": 12, "icon": 52, "label": 17, "value": 14},
-    "normal": {"padding": 12, "gap": 10, "icon": 48, "label": 16, "value": 13},
-    "compact": {"padding": 8, "gap": 6, "icon": 40, "label": 14, "value": 11},
+    "comfortable": {"padding": 12, "gap": 8, "icon": 56, "label": 13, "value": 11, "desc": 9.5},
+    "normal":      {"padding": 9,  "gap": 6, "icon": 48, "label": 12, "value": 10, "desc": 9},
+    "compact":     {"padding": 6,  "gap": 4, "icon": 36, "label": 11, "value": 9,  "desc": 8},
 }
 
 
@@ -294,67 +294,140 @@ def _dynamic_benefit_grid(
         )
     card_style_name = str(element.get("cardStyle") or "standard")
     density_name = str(element.get("textDensity") or "normal")
+    layout_mode = str(element.get("layoutMode") or "normal")
     density = GRID_TEXT_DENSITIES.get(density_name, GRID_TEXT_DENSITIES["normal"])
+    card_style_css = GRID_CARD_STYLES.get(card_style_name, GRID_CARD_STYLES["standard"])
+
     output: list[str] = []
     group_rects: dict[str, list[tuple[float, float, float, float]]] = {}
-    for packed, card in zip(layout.cards, ordered, strict=True):
-        group_id = str(card.get("group_id") or "")
-        if group_id and group_id in group_by_id:
-            group_rects.setdefault(group_id, []).append((packed.x, packed.y, packed.width, packed.height))
-        label = escape(str(card.get("label") or ""))
-        value = escape(str(card.get("value") or ""))
-        cost = str(card.get("cost_status") or "")
-        asset_id = str(card.get("asset_id") or "")
-        asset_uri = resolved_assets.get(asset_id, "")
+
+    def _build_card_html(card: dict, px: float, py: float, pw: float, ph: float, scale: float, extra_style: str = "") -> str:
+        group_id_c = str(card.get("group_id") or "")
+        if group_id_c and group_id_c in group_by_id:
+            group_rects.setdefault(group_id_c, []).append((px, py, pw, ph))
+
+        label_str = escape(str(card.get("label") or ""))
+        value_str = escape(str(card.get("value") or ""))
+        desc_str = escape(str(card.get("description") or ""))
+        cost_status = str(card.get("cost_status") or "")
+        asset_id_c = str(card.get("asset_id") or "")
+        asset_uri_c = resolved_assets.get(asset_id_c, "")
 
         is_purchased_extra = bool(card.get("is_extra") or (card.get("cost_status") == "paid" and kind == "current_benefits"))
-        card_border = "border:1.5px solid #F59E0B;background:#FFFDF7" if is_purchased_extra else "border:1px solid #E2E8F0;background:#FFFFFF"
         if is_purchased_extra:
-            card_border += ";box-shadow:0 1px 3px rgba(245,158,11,0.15)"
+            card_border_css = "border:1.5px solid #F59E0B;background:#FFFDF7;box-shadow:0 1px 3px rgba(245,158,11,0.15)"
+        else:
+            card_border_css = card_style_css
 
-        icon_size = 24 if density_name == "compact" else 26
-        icon = (
-            f'<img alt="" src="{escape(asset_uri)}" style="width:{icon_size}px;height:{icon_size}px;object-fit:contain;flex-shrink:0" />'
-            if asset_uri else f'<span style="display:grid;place-items:center;width:{icon_size}px;height:{icon_size}px;border-radius:4px;background:#FEE2E2;color:#DC2626;font-size:9px;font-weight:800;flex-shrink:0">{label[:2].upper()}</span>'
+        pad = density["padding"]
+        icon_sz = density["icon"]
+        lbl_fs = density["label"]
+        val_fs = density["value"]
+        desc_fs = density["desc"]
+
+        # --- Image cell (bottom-left) ---
+        if asset_uri_c:
+            image_html = (
+                f'<img alt="" src="{escape(asset_uri_c)}" '
+                f'style="width:{icon_sz}px;height:{icon_sz}px;object-fit:contain;display:block;flex-shrink:0" />'
+            )
+        else:
+            initials = label_str[:2].upper() if label_str else "?"
+            image_html = (
+                f'<span style="display:grid;place-items:center;width:{icon_sz}px;height:{icon_sz}px;'
+                f'border-radius:6px;background:#FEE2E2;color:#DC2626;font-size:{desc_fs}px;'
+                f'font-weight:800;flex-shrink:0">{initials}</span>'
+            )
+
+        # --- Coverage value row ---
+        show_value = bool(value_str and value_str not in {"Included standard cover", "Included", "FOC", "As quoted"})
+        coverage_html = (
+            f'<span style="display:block;font-size:{val_fs}px;font-weight:700;line-height:1.1;'
+            f'color:#DC2626;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{value_str}</span>'
+            if show_value else ""
         )
 
+        # --- Short description row ---
+        desc_html = (
+            f'<span style="display:block;font-size:{desc_fs}px;line-height:1.25;color:#64748B;'
+            f'overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">'
+            f'{desc_str}</span>'
+            if desc_str else ""
+        )
+
+        # --- Cost / price badge ---
         price_badge = ""
         price = card.get("price") or card.get("optional_price")
         if price and (is_purchased_extra or kind == "available_addons"):
             p_val = (price.get("amount") if price.get("amount") is not None else price.get("value")) if isinstance(price, dict) else price
             try:
                 p_num = float(str(p_val).replace(",", ""))
-                p_str = f"RM {int(p_num):,}" if p_num == int(p_num) else f"RM {p_num:,.2f}"
+                p_str = f"Cost : MYR {int(p_num):,}" if p_num == int(p_num) else f"Cost : MYR {p_num:,.2f}"
             except Exception:
-                p_str = f"RM {p_val}" if not str(p_val).startswith("RM") else str(p_val)
-            badge_prefix = "+" if is_purchased_extra else ""
-            badge_bg = "#FEF2F2" if is_purchased_extra else "#F1F5F9"
-            badge_color = "#DC2626" if is_purchased_extra else "#334155"
-            badge_border = "#FECACA" if is_purchased_extra else "#CBD5E1"
-            price_badge = f'<span style="font-size:8.5px;font-weight:700;color:{badge_color};background:{badge_bg};padding:1.5px 4.5px;border-radius:3px;white-space:nowrap;border:1px solid {badge_border};flex-shrink:0">{badge_prefix}{p_str}</span>'
-        elif cost == "foc":
-            price_badge = '<span style="font-size:8px;font-weight:700;color:#16A34A;background:#F0FDF4;padding:1.5px 4px;border-radius:3px;white-space:nowrap;flex-shrink:0">FOC</span>'
+                clean_pval = str(p_val).replace("RM ", "").replace("RM", "")
+                p_str = f"Cost : MYR {clean_pval}"
+            price_badge = (
+                f'<span style="display:block;margin-top:2px;font-size:{desc_fs}px;font-weight:600;'
+                f'color:#0F172A;">{p_str}</span>'
+            )
 
-        title_font_size = 9.0 if len(label) > 30 else (9.5 if len(label) > 18 else 10.0)
-        show_value = bool(value and value not in {"Included standard cover", "Included", "FOC", "As quoted"})
-        value_html = f'<span style="display:block;font-size:8px;line-height:1.1;color:#64748B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px">{value}</span>' if show_value else ""
 
-        scale = packed.scale
-        output.append(
+        # Title font: shrink for long labels
+        title_fs = lbl_fs - 1.0 if len(label_str) > 30 else (lbl_fs - 0.5 if len(label_str) > 18 else float(lbl_fs))
+
+        inner_html = (
+            # — Title row (full width) —
+            f'<div style="display:block;font-size:{title_fs}px;font-weight:700;line-height:1.2;'
+            f'color:#0F172A;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+            f'margin-bottom:4px">{label_str}</div>'
+            # — Bottom row: image left, detail right —
+            f'<div style="display:flex;flex:1;min-height:0;gap:6px;align-items:flex-start">'
+            f'{image_html}'
+            f'<div style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:flex-start;overflow:hidden">'
+            f'{coverage_html}'
+            f'{desc_html}'
+            f'{price_badge}'
+            f'</div>'
+            f'</div>'
+        )
+
+        pos_style = f"position:absolute;left:{px:.8f}px;top:{py:.8f}px;width:{pw:.8f}px;height:{ph:.8f}px;" if extra_style == "" else extra_style
+        return (
             f'<article data-benefit-card="1" data-card-scale="{scale:.12f}" '
             f'data-card-style="{escape(card_style_name)}" data-text-density="{escape(density_name)}" '
-            f'style="position:absolute;left:{packed.x:.8f}px;top:{packed.y:.8f}px;'
-            f'width:{packed.width:.8f}px;height:{packed.height:.8f}px;overflow:hidden;'
-            'display:flex;align-items:stretch;box-sizing:border-box">'
-            f'<div style="width:100%;height:100%;display:flex;align-items:center;gap:6px;padding:4px 6px;'
-            f'box-sizing:border-box;border-radius:6px;{card_border};overflow:hidden">'
-            f'{icon}'
-            f'<div style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;overflow:hidden">'
-            f'<strong style="display:block;font-size:{title_font_size}px;font-weight:700;line-height:1.15;color:#0F172A;word-break:normal;overflow:hidden;text-overflow:ellipsis">{label}</strong>'
-            f'{value_html}</div>'
-            f'{price_badge}'
+            f'style="{pos_style}overflow:hidden;box-sizing:border-box">'
+            f'<div style="width:100%;height:100%;display:flex;flex-direction:column;'
+            f'padding:{pad}px;box-sizing:border-box;border-radius:8px;{card_border_css};overflow:hidden">'
+            f'{inner_html}'
             f'</div></article>'
         )
+
+    if layout_mode == "masonry":
+        # Masonry: CSS multi-column flow; _build_card_html supplies the full <article>
+        col_count = max(1, int(element.get("columns") or 2))
+        gap = density["gap"]
+        masonry_html = "".join(
+            _build_card_html(
+                card, 0, 0, 0, 0, 1.0,
+                extra_style=f"position:relative;width:100%;break-inside:avoid;margin-bottom:{gap}px;",
+            )
+            for card in ordered
+        )
+        warning = escape(layout.warning or "")
+        return (
+            f'<section data-grid-kind="{escape(kind)}" data-density-warning="{warning}" '
+            f'style="position:absolute;left:{bounds.x:.8f}px;top:{bounds.y:.8f}px;'
+            f'width:{bounds.width:.8f}px;height:{bounds.height:.8f}px;overflow:hidden;'
+            f'column-count:{col_count};column-gap:{gap}px">'
+            f'{masonry_html}</section>'
+        )
+
+
+    # Normal fixed-grid mode
+    for packed, card in zip(layout.cards, ordered, strict=True):
+        output.append(_build_card_html(card, packed.x, packed.y, packed.width, packed.height, packed.scale))
+
+
     warning = escape(layout.warning or "")
     borders: list[str] = []
     for group_id, rects in group_rects.items():
@@ -439,8 +512,8 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
             label_style = "font-size:9px;font-weight:700;color:#DC2626;text-transform:uppercase;letter-spacing:0.5px"
             value_style = "font-size:9px;font-weight:700;color:#DC2626"
         elif kind == "extra":
-            label_style = "font-size:9px;font-weight:600;color:#B91C1C;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-            limit_html = f'<span style="font-size:8.5px;font-weight:500;color:#64748B;margin-left:4px;white-space:nowrap">{escape(middle_val)}</span>' if middle_val else ""
+            label_style = "font-size:9px;font-weight:600;color:#B91C1C;white-space:nowrap"
+            limit_html = f'<span style="font-size:9px;font-weight:600;color:#B91C1C;margin-left:4px;white-space:nowrap">{escape(middle_val)}</span>' if middle_val else ""
             value_style = "font-size:9.5px;font-weight:700;color:#0F172A;white-space:nowrap;text-align:right"
             html.append(
                 f'<div style="position:absolute;left:{x}px;top:{row_y}px;width:{width}px;height:{row_height}px;'
@@ -829,6 +902,17 @@ def render_quotation_html(
     height = int(canvas.get("height") or 1123)
     raw_elements = canvas.get("elements") or []
     balanced = _balance_benefit_grid_elements(raw_elements, render_context)
+    
+    max_element_y = 0
+    for elem in balanced:
+        elem_bottom = float(elem.get("y") or 0) + float(elem.get("h") or 0)
+        if elem_bottom > max_element_y:
+            max_element_y = elem_bottom
+            
+    # Remove A4 constraint: Auto-expand height to fit all benefits (with padding)
+    if max_element_y + 120 > height:
+        height = int(max_element_y + 120)
+
     elements = sorted(balanced, key=lambda item: int(item.get("z", 1)))
     body = "".join(
         _element_html(element, draft_fields, config, db, render_context, resolved_assets)

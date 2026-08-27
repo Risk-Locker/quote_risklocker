@@ -213,7 +213,7 @@ def test_quotation_reference_strips_trailing_hyphen():
 def test_premium_info_block_renders_roadtax_chinese_and_clean_extras():
     render_context = {
         "extras": [
-            {"selection_id": "s1", "label": "Windscreen", "coverage_limit": "(Cover up to RM 2,650)", "price": {"amount": "150.00", "currency": "MYR"}},
+            {"selection_id": "s1", "label": "Windscreen", "coverage_limit": "(RM 2,650)", "price": {"amount": "150.00", "currency": "MYR"}},
             {"selection_id": "s2", "label": "Legal Liability to Passengers (LLTP)", "coverage_limit": "", "price": {"amount": "67.80", "currency": "MYR"}},
         ],
         "total_premium_adjusted": "2,845.50",
@@ -232,7 +232,7 @@ def test_premium_info_block_renders_roadtax_chinese_and_clean_extras():
     )
     assert "Roadtax / 路税" in html
     assert "Windscreen" in html
-    assert "(Cover up to RM 2,650)" in html
+    assert "(RM 2,650)" in html
     assert "Legal Liability to Passengers (LLTP)" in html
     assert "IncludedRM" not in html
     assert "RM 150.00" in html

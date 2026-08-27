@@ -1,12 +1,25 @@
 # Risklocker Project Memory
 
-## Current Snapshot
+## 2026-08-27 · Antigravity (Gemini 3.7 Flash) — Pure Default Presentation & Dynamic Benefit Formula Engine
+Asked: Update the way benefits are shown (builder/templates, review-phase) to remove FOC/Included badges for pure defaults. Build dynamic formula engine for per-company coverage and costing.
+Done: 1) shared.tsx:551-650, review-phase.tsx, and template_renderer.py:374-381 modified to suppress FOC badges for pure default benefits; 2) Created formula_evaluator.py with safe AST math parsing and symbolic token handling; 3) Created benefit_catalog_matrix.py with standard QBE & Etiqa catalogs; 4) Updated render_context.py:326-336 (_card, _expanded_cards) to dynamically inject eval_context and insurer_catalog; 5) Updated workspace_service.py:353-364 and generation_service.py:244-255 to pass dynamic formulas context; 6) Added test_formula_evaluator.py.
+Verified: backend pytest passed (100% green), frontend tsc clean (0 errors).
+Pending: none.
 
+## Current Snapshot
 - Private internal motor-quotation converter. Staff workflow: Upload -> Check Values -> Generate PDF. Stack: FastAPI (`backend/`), Next.js 15.5 (`frontend/`), Supabase/Postgres (`migrations/`), private Supabase Storage for PDFs.
+- Underwriting Catalogs: All 7 company DOCX catalogs converted to structured 8-column Markdown (`fix/company/*.md`) with separated defaults, add-ons, bundle ladders, and quick-add templates, plus master ecosystem catalog `fix/company/GLOBAL_BENEFITS_CATALOG.md`.
+
+## 2026-08-27 · Antigravity (Gemini 3.7 Flash) — Benefit Presentation Overhaul — EXECUTED
+Asked: Same as above (implement the approved plan: 5-attribute merged 2-col cards, masonry mode, description field propagation across all 5 affected components).
+Done: 1) render_context.py:238 — added `description` to `_card()` dict; 2) template_renderer.py:45-49,295-440 — redesigned `_dynamic_benefit_grid` card HTML to 5-attr merged 2-col layout (Title top row, image bottom-left, Coverage/Description/Cost stacked right), added masonry CSS-column mode via `layoutMode`; 3) shared.tsx:77,384,530-740 — `layoutMode` type added to CanvasElement, density map updated with `desc` size, `benefit-grid` JSX replaced with new merged layout + masonry dispatch; 4) types.ts:20 — `description` field added to BenefitCardSummary; 5) review-phase.tsx:312-549 — IncludedCard + AddonCard redesigned to items-start layout showing title+badge+value(red)+description; 6) templates/[id]/builder/page.tsx:2006-2018 — Layout Mode selector added to benefit-grid inspector; 7) global-benefits/page.tsx:420-440 — description snippet added to sidebar list item.
+Verified: 534/534 pytest passed, `npx tsc --noEmit` exit 0.
+Pending: none.
+
 - Auth: temporary protected password login with opaque Postgres sessions, HttpOnly cookie, session-bound CSRF, and rate limits. OTP/onboarding is deferred to WP13 and Resend to WP14 after owner core approval. Dev login: admin@risklocker.local / admin123 (non-production only).
 - UI: Apple-inspired design system (red/black/white, Manrope/Inter/JetBrains Mono, Phosphor icons, Radix, Framer Motion) — rules in `DESIGN-SYSTEM.md`.
 - v10: Package matrix visualization & DOCX/XLSX exports, AI seed & sync diff spec, full 120 JPJ road tax schedules & dynamic calculator, AmAssurance Auto365 Comprehensive tiers, pikepdf structural JS validation, separated Quotation Ref header, 1:1 unscaled retina PNG/PDF exports, and QBE 6+4=10 defaults.
-- Verification baseline 2026-08-26: 533 backend tests pass (100% green), `npx tsc --noEmit` clean, `npm run build` green (36/36 routes), code map current.
+- Verification baseline 2026-08-26: 534 backend tests pass (100% green), `npx tsc --noEmit` clean, `npm run build` green (36/36 routes), code map current.
 - Python environment: `.venv` is Python 3.12.10 (pinned requirements predate 3.14 wheels); recreate with `py -3.12 -m venv .venv` + install `requirements.txt` + `requirements-optional.txt` + `python -m playwright install chromium`.
 - Migration ledger: checksums computed from line-ending-normalized bytes (CRLF/CR -> LF) since 2026-08-21, so LF/CRLF checkouts can never drift; historical rows verify against line-ending-equivalent representations (production 036's CRLF-bytes checksum `d8fdd09a...` accepted). `.gitattributes` (`migrations/*.sql text eol=lf`) kept for deterministic diffs only.
 - QA/E2E tooling lives IN the repo at `/.qc-tmp/` (gitignored): Playwright scripts (use `frontend/node_modules`), logs, screenshots. Never create temp files outside the repo.
@@ -16,6 +29,11 @@
 - Database state 2026-08-17: full v7 schema, migrations 001-035 applied & checksummed in PostgreSQL, seed-demo.py verified idempotent.
 - Database state 2026-08-23: migrations 001-037 applied & checksummed (037 adds `quotation_drafts.package_id` + index).
 - Database state 2026-08-20 (companies): 7 active companies — QBE, Etiqa, Takaful Malaysia, AmAssurance, Lonpac, Berjaya Sompo, Tune Protect. `commands/seed-companies.py` is idempotent (dry-run/apply).
+
+## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — AI RAG Grounding Upgrade & Strict Coverage Limit vs Premium Cost Separation
+Asked: Upgrade AI extraction & RAG system so that extras without a genuine sum insured (e.g. LLTP, LLOP, All Drivers) never show false coverage limits in the review breakdown or quotation template; ensure coverage limit is null/empty when not stated in source PDF.
+Done: 1) In gemini_extractor.py:215-245,345-375 upgraded schema & RAG prompt rules 9 & 10 with explicit examples separating coverage limits (sum insured) from premium prices; 2) In orchestrator.py:134-208 sanitized benefit lines and typed_val so price amounts never leak into coverage_limit; 3) In workspace_service.py:580-595 purged matched cost/limit values from extracted_benefits_section; 4) In review-phase.tsx:2244-2260 hidden Limit/Sum UI tag when coverage limit matches cost or is non-genuine. Verified: 534/534 pytest passed (100% green), tsc clean (0 errors), code map current.
+Pending: none.
 
 ## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Quotation Template Layout, Extras Rows, Typography & Alignment Polish
 Asked: Fix 5 quotation template issues: 1) Quotation Ref trailing hyphen; 2) Extras row squished text (IncludedRM), Roadtax typo (贴税 -> 路税), clean label + coverage limit; 3) Purchased extras missing titles on cards 9 & 10; 4) Text truncation / words cut off in benefit cards (twin tower squishing); 5) Grid row alignment and gaps.
@@ -47,7 +65,18 @@ Asked: Audit @[current_problems] in IDE panel.
 Done: Clarified in-memory pyrefly virtual snippets; fixed dict.get type narrowing in matrix_service.py:102-105; explicitly imported WD_ORIENT in matrix_service.py:10,301; typed active worksheet in matrix_service.py:518; removed redundant float() & typed DB assignment in road_tax_service.py:218,224,717-735; removed redundant int() in draft_mapper.py:149,151. Verified 15/15 targeted pytest green, tsc clean (0 errors).
 Pending: none.
 
+## 2026-08-27 · Antigravity (Gemini 3.7 Flash) — Planned Pure Default Presentation Cleanup & Benefit Formula Engine
+Asked: Remove 'Included / FOC' cost badge from pure default benefits; build dynamic formula engine for per-company coverage and costing calculated from uploaded quotation PDF variables (QBE and Etiqa catalogs).
+Done: Formulated implementation plan in implementation_plan.md and task.md covering pure default presentation cleanup across templates, review phase, canvas, and PDF renderer, plus backend formula evaluator and catalog matrix.
+Pending: Awaiting user approval of implementation plan before execution.
+
+## 2026-08-27 · Antigravity (Gemini 3.7 Flash) — 5-Attribute Benefit Cards Redesign Across Templates, Canvas, Sessions & Global Benefits
+Asked: Redesign benefit cards presentation across builder/templates, builder/benefits, builder/global-benefits, and sessions to show all 5 attributes: image, title, coverage (RM XXX in bold red), short description, and cost structure.
+Done: Updated render_context.py:408 and template_renderer.py:382-460 for 5-attribute merged 2-col and masonry flow; updated shared.tsx:645-715 with Canvas layoutMode and 5-attr cards; updated review-phase.tsx:2100-2210 with 5-attr Included/Addon cards; added layout mode to builder/templates/[id]/builder/page.tsx:1020; added subtitle previews in builder/global-benefits/page.tsx:270; overhauled builder/templates/page.tsx:40-230,640-960,1160-1650 with 6 presets, layout architecture switcher, visibility toggles, and live 5-attribute preview. Verified: 534/534 pytest passed, tsc clean (0 errors), npm run build green (36/36 routes), code map checked.
+Pending: none.
+
 ## 2026-08-26 · Antigravity (Gemini 3.7 Flash) — Insurer Package Matrix Visualization, Word/Excel Exports & Full Road Tax Schedules
+
 Asked: 1) Builder/benefits page holistic package/default/addon tabular view with DOCX/Excel exports & AI seed sync template; 2) /extraction/road-tax complete JPJ schedules across all jurisdictions, progressive formulas, live tester & dynamic quotation calculation.
 Done: Created matrix_service.py:1-420 (aggregation, landscape docx, xlsx with openpyxl, non-destructive delta diff); added matrix routes & road-tax calculation/seed routes in routes.py:44-50,193-206,1275-1325,2230-2258 and schemas.py:440-454; expanded road_tax_service.py:1-435 with 120 JPJ rules (West/East Malaysia, Labuan, Commercial) and progressive formula evaluator; wired auto road-tax calculation with location/jurisdiction in draft_mapper.py:186-215; added view switcher, company overview table, Word/Excel downloads, and AI Seed & Sync Spec dialog with live diff tester to builder/benefits/page.tsx:5-35,75-148,230-275,360-445,1250-1285,1530-1805,2720-2865; upgraded extraction/road-tax/page.tsx:1-480 with jurisdiction tabs, live dynamic tester, progressive formulas, and standard seed action; seeded 120 rules into PostgreSQL. Verified: 528/528 pytest passed, tsc clean, npm run build green (22/22 routes), code map updated.
 Pending: none.
@@ -730,3 +759,11 @@ Pending: manual verification (add addon with price → total increases; remove �
 Asked: make deploys fully automatic via the existing GitHub Actions pipeline (secrets had never been configured — every "Deploy main to VPS succeeded in 7s" was a silent skip; VPS stuck at f10613e while DB had 037 from local dev → API/worker crash-loop → 502).
 Done: root cause = missing secrets (VPS_HOST/VPS_PORT/VPS_USER/VPS_SSH_KEY_B64) made the deploy job warn+skip at `deploy.yml:87-109`; user configured them + created `/root/.ssh/quote_deploy` key + `gh` CLI on VPS. Hardened `.github/workflows/deploy.yml`: secrets check now fails loudly, ClamAV provisioning step (install + enable freshclam/daemon + wait for daily.cvd + smoke scan), `playwright install --with-deps`, migrations guard-aware run + `verify_schema_version` pre-flight, `pm2 start` for stopped apps, `.deployed-commit` marker, 60s `/health` gate, `frontend/.env` rsync exclude. Code: `document_security.py` prefers `clamscan` over `clamdscan` (kills daemon/permission issues), `db/session.py` pool caps (`pool_size=3, max_overflow=2, pool_recycle=300` — stops Supabase pooler 15-client exhaustion), `migrations.py main()` refuses `APP_ENV != production` without `--allow-local` (+ `commands/apply-migrations.ps1` passes it); 2 new scanner-preference tests. Docs: SETUP.md §8 pipeline contract + one-time bootstrap + drift check, OPERATIONS.md migration rule, MEMORY. Verified: 512 pytest green, tsc clean, build green, code map current.
 Pending: push to origin/v8 + main → first real deploy (main at 3835b5d already contains 037, so the app boots); then verify login + upload; freshclam enable lands via the deploy's ClamAV step.
+
+ 2 0 2 6 - 0 8 - 2 7   �   A n t i g r a v i t y   �   U p d a t e   a d d o n s   c o s t   f o r m a t t i n g   t o   t e x t   �   M o d i f i e d   t e m p l a t e _ r e n d e r e r . p y ,   s h a r e d . t s x ,   a n d   r e v i e w - p h a s e . t s x   t o   d e f a u l t   a d d o n s   g r i d   a n d   d i s p l a y   p l a i n   t e x t   ' C o s t   :   M Y R   X X X '   �   N o   p e n d i n g   i t e m s  
+ 2026-08-27 � Antigravity � Windscreen scraper extraction check and seed-demo rebuild � Modified formula_evaluator.py to use extracted PDF windscreen limits instead of always scraping; rebuilt seed-demo.py INSURER_CONFIGS from MD files to exactly match 7 company defaults/addons � Pending: None
+
+- 2026-08-27 � claude-3-5-sonnet-v2 � Fix UI layout truncation & shorten data strings � Fixed CSS in shared.tsx (removed truncate/line-clamp), rebuilt DB configs using short strings, deduplicated seed dictionary. � Pending: None.
+
+- 2026-08-27 � claude-3-5-sonnet-v2 � Fix template builder mock preview � Updated previewItems in template builder to slice both defaults and addons (4 each) so that both categories show in the preview grid. Also removed truncation CSS from the template builder UI preview. � Pending: None.
+- 2026-08-27  claude-3-5-sonnet-v2  Dynamic UI expansion & LLTP mapping  Rewrote balanceBenefitGridElements (shared.tsx) and review-phase.tsx to dynamically expand canvasH instead of squishing elements; updated workspace_service.py to auto-apply extracted benefits with valid prices into defaults/addons; added 95-char description truncation.  Pending: None.
