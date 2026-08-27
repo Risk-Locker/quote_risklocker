@@ -260,5 +260,5 @@ def test_dynamic_benefit_grid_renders_purchased_extra_with_label_and_badge():
         render_context=render_context,
     )
     assert "Legal Liability to Passengers" in html
-    assert "+RM 67.80" in html
+    assert "Cost : MYR 67.80" in html
     assert "border:1.5px solid #F59E0B" in html
