@@ -76,7 +76,7 @@ const FORM_FIELDS: FormField[] = [
   { name: "premium", label: "Insurance premium", kind: "money" },
   { name: "roadtax", label: "Road tax", kind: "money" },
   { name: "service_fee", label: "Runner fee", kind: "money" },
-  { name: "total_amount", label: "Final price", kind: "total" },
+  { name: "total_amount", label: "Total Payable", kind: "total" },
 ];
 
 // The 7 Core Baseline Comprehensive Benefits
@@ -776,26 +776,6 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       values[field.name] = displayValue(field.kind, stored ?? null);
     }
 
-    // Level 2 Road Tax auto-calculation on load if missing or 0
-    if (!values.roadtax || values.roadtax === "0.00" || values.roadtax === "0" || values.roadtax.trim() === "") {
-      const ccStr = values.engine_cc || (workspace.fields["engine_cc"] as WorkspaceField | undefined)?.value;
-      const parsedCC = ccStr ? parseInt(ccStr.replace(/[^0-9]/g, ""), 10) : inferCCFromCarModel(values.car_model || (workspace.fields["car_model"] as WorkspaceField | undefined)?.value);
-      if (parsedCC && parsedCC > 0) {
-        const vtype = values.vehicle_type || "Car";
-        const isCompany = vtype.toLowerCase().includes("company") || vtype.toLowerCase().includes("corp");
-        const baseType = vtype.toLowerCase().includes("motor") ? "Motorcycle" : (vtype.toLowerCase().includes("lorry") || vtype.toLowerCase().includes("other")) ? "Lorry" : "Car";
-        const computedRT = computeMalaysianRoadTax(parsedCC, baseType, isCompany ? "Company" : "Individual");
-        if (computedRT > 0) {
-          values.roadtax = computedRT.toFixed(2);
-        }
-      }
-    }
-
-    // Default Runner Fee if missing or 0
-    if (!values.service_fee || values.service_fee === "0.00" || values.service_fee === "0" || values.service_fee.trim() === "") {
-      values.service_fee = "20.00";
-    }
-
     // Sync Total Premium with extras if present
     if (workspace.total_premium_adjusted) {
       values.total_amount = formatMoney(workspace.total_premium_adjusted);
@@ -1187,7 +1167,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       return acc + (Number.isFinite(num) ? num : 0);
     }, 0);
 
-    const calculatedTotal = pNum + rtNum + sfNum + extrasTotal;
+    const calculatedTotal = pNum + extrasTotal + rtNum + sfNum;
     const effTotal = calculatedTotal > 0
       ? calculatedTotal.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
       : (formValues["total_amount"] || fields["total_amount"] || workspace?.total_premium_adjusted || "");
@@ -1548,6 +1528,11 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         setActionError("Please resolve errors before downloading PDF: " + apiErrorMessage(err));
         return;
       }
+    } else {
+      try {
+        const latest = await api<{ revision: number }>(`/sessions/${id}/workspace`);
+        currentRevision = latest.revision;
+      } catch (e) {}
     }
     if (!workspace || currentRevision == null) return;
     setPdfLoading(true);
@@ -2049,7 +2034,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded bg-gray-50 p-2.5 text-xs">
                   <div><span className="text-[var(--rl-text-muted)]">Plate:</span> <strong className="text-[var(--rl-text-strong)] font-mono">{formValues.vehicle_no || "—"}</strong></div>
                   <div><span className="text-[var(--rl-text-muted)]">Insured:</span> <strong className="text-[var(--rl-text-strong)] truncate max-w-[140px] inline-block align-bottom">{formValues.customer_name || "—"}</strong></div>
-                  <div><span className="text-[var(--rl-text-muted)]">Final Price:</span> <strong className="text-[var(--rl-red)] font-mono font-bold">RM {previewFields["total_amount"] || formValues.total_amount || "0.00"}</strong></div>
+                  <div><span className="text-[var(--rl-text-muted)]">Total Payable:</span> <strong className="text-[var(--rl-red)] font-mono font-bold">RM {previewFields["total_amount"] || formValues.total_amount || "0.00"}</strong></div>
                 </div>
               ) : (
                 <>
@@ -2161,7 +2146,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                   </div>
                   <div>
                     <h2 className="text-sm font-bold text-[var(--rl-text-strong)] flex items-center gap-2">
-                      Detected Add-ons & Riders
+                      Extra Benefits
                       {workspace.extracted_benefits_section?.extras?.length ? (
                         <span className="rounded-full bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-bold text-indigo-700 font-mono">
                           {workspace.extracted_benefits_section.extras.length} detected

@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from typing import Any
 
 import fitz
 import pytest
@@ -92,7 +93,7 @@ def test_filename_company_detection_is_specific(filename: str, company: str):
 
 def test_native_pdf_extraction_uses_real_text_layer(tmp_path):
     path = tmp_path / "quotation.pdf"
-    document = fitz.open()
+    document: Any = fitz.open()
     page = document.new_page()
     page.insert_text((72, 72), "MOTOR QUOTATION TEST CUSTOMER TST1234")
     document.save(path)
@@ -118,3 +119,54 @@ def test_review_ui_contains_pdf_text_and_template_workflow():
 def test_byte_fallback_is_not_used_for_draft_candidates():
     native_pdf = (ROOT / "backend" / "app" / "extraction" / "native_pdf.py").read_text(encoding="utf-8")
     assert "fallback byte text" not in native_pdf
+
+
+def test_quotation_final_price_and_insurance_premium_netting():
+    from app.extraction.candidate_finder import CandidateValue
+    from app.extraction.draft_mapper import build_draft
+
+    candidates = {
+        "customer_name": [CandidateValue(page=1, field="customer_name", score=0.99, value="HING GUAN SENG", evidence="", warnings=[], source_method="test")],
+        "vehicle_no": [CandidateValue(page=1, field="vehicle_no", score=0.99, value="JXA8233", evidence="", warnings=[], source_method="test")],
+        "insurance_company": [CandidateValue(page=1, field="insurance_company", score=0.99, value="AmAssurance", evidence="", warnings=[], source_method="test")],
+        "total_amount": [CandidateValue(page=1, field="total_amount", score=0.99, value="2,922.85", evidence="", warnings=[], source_method="test")],
+        "premium": [CandidateValue(page=1, field="premium", score=0.99, value="2,922.85", evidence="", warnings=[], source_method="test")],
+    }
+    benefit_lines = [
+        {"raw_label": "Windscreen", "premium_cost": "600.00"},
+        {"raw_label": "LLTP", "premium_cost": "71.85"},
+        {"raw_label": "LLOP", "premium_cost": "7.50"},
+        {"raw_label": "Private Car 365 Plan 2", "premium_cost": "166.00"},
+    ]
+    fields, _, _ = build_draft(candidates, benefit_lines=benefit_lines)
+    # Total Payable is preserved as Final Price
+    assert fields["total_amount"]["value"] == "2922.85"
+    # Insurance Premium is Final Price - Extras (2922.85 - 845.35 = 2077.50)
+    assert fields["premium"]["value"] == "2077.50"
+    # Unmentioned roadtax/runner fee are not auto-injected
+    assert fields["roadtax"]["value"] == ""
+    assert fields["service_fee"]["value"] == ""
+
+
+def test_adjusted_total_text_reactive_and_no_double_count():
+    from app.rendering.render_context import adjusted_total_text
+
+    fields = {
+        "premium": {"value": "2077.50"},
+        "total_amount": {"value": "2922.85"},
+        "roadtax": {"value": ""},
+        "service_fee": {"value": ""},
+    }
+    extras = [
+        {"price": {"amount": 600.0}},
+        {"price": {"amount": 71.85}},
+        {"price": {"amount": 7.5}},
+        {"price": {"amount": 166.0}},
+    ]
+    # Sum is exactly 2,922.85 (no double-counting)
+    assert adjusted_total_text(fields, extras) == "2,922.85"
+
+    # Adding an add-on reactively increases only the final price
+    extras_with_addon = extras + [{"price": {"amount": 50.0}}]
+    assert adjusted_total_text(fields, extras_with_addon) == "2,972.85"
+

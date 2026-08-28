@@ -18,6 +18,7 @@
 - Native PDF extraction uses text and layout data; enhanced reading is optional staff-facing OCR behavior.
 - Store full extraction detail separately from the editable draft. Staff sees concise fields, source text, and friendly hints rather than parser internals.
 - Clear values can be populated automatically. Missing, conflicting, or ambiguous required values stay `Check Needed`.
+- Extracted Final Price (`total_amount`) is the source quotation's Total Payable / Total Contribution (which already includes base premium, taxes, stamp duty, and quotation optional covers). Insurance Premium (`premium`) is the net base insurance premium (`Final Price - Extracted Extras`). When add-ons or extras are added/removed, only the Final Price reactively updates while Insurance Premium remains stable. Road tax and runner fees are only populated if explicitly present in the document or entered by staff.
 - Quotation and source benefit lines are suggestions until reviewed. Narrative, PDS, illustrative, not-included, and unmapped lines never become selected benefits automatically.
 - Staff-facing copy uses `Review / Edit`, `Please check this value.`, `Enhanced reading`, `PDF Expired`, and the statuses `Ready`, `Check Needed`, `Cannot Read`, and `Generated`.
 - Never show OCR, parser, regex, confidence, coordinates, storage keys, provider URLs, or technical stack traces to Staff.

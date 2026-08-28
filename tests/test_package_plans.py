@@ -59,7 +59,7 @@ def _draft():
         fields={
             "customer_name": {"value": "Test Customer", "status": "ready", "message": ""},
             "insurance_company": {"value": "Nova Mutual", "status": "ready", "message": ""},
-            "premium": {"value": "4286.55", "status": "ready", "message": ""},
+            "premium": {"value": "2629.37", "status": "ready", "message": ""},
             "roadtax": {"value": "70.00", "status": "ready", "message": ""},
             "service_fee": {"value": "50.00", "status": "ready", "message": ""},
             "total_amount": {"value": "2749.37", "status": "ready", "message": ""},
@@ -203,7 +203,9 @@ def test_plan_crud_requires_an_addon_bundle_and_plans_freezes_into_publish_hash(
         save_plan(db, user(), "catalog-1", "package-main", {"base_revision": 1, "name": "Nope"})
     assert error.value.status_code == 422
 
-    payload = _revision_content_payload(db, db.get(BenefitCatalogRevision, "catalog-revision-1"))
+    rev = db.get(BenefitCatalogRevision, "catalog-revision-1")
+    assert rev is not None
+    payload = _revision_content_payload(db, rev)
     assert any(item["plan_key"] == "plan-a" for item in payload["plans"])
     assert any(item["offering_id"] == "offering-towing-200" for item in payload["plan_items"])
 
@@ -220,7 +222,9 @@ def test_plan_crud_requires_an_addon_bundle_and_plans_freezes_into_publish_hash(
     assert error.value.status_code == 409
 
     retire_plan(db, user(), "catalog-1", "package-bundle", plan["id"])
-    assert db.get(BenefitPackagePlan, plan["id"]).status == "retired"
+    retired_plan = db.get(BenefitPackagePlan, plan["id"])
+    assert retired_plan is not None
+    assert retired_plan.status == "retired"
 
 
 def test_plan_items_replace_atomically_and_validate_overrides():
@@ -297,6 +301,7 @@ def test_select_package_plan_adds_members_supersedes_defaults_and_switches_clean
     current = [item for item in selections if item.state == "current"]
     towing_current = next(item for item in current if item.concept_id == "concept-towing")
     base = db.get(DraftBenefitSelection, "selection-base")
+    assert base is not None
     assert base.state == "superseded" and base.superseded_by_id == towing_current.id
     assert towing_current.package_plan_id == "plan-a"
     assert towing_current.catalog_offering_id == "offering-towing-200"
@@ -329,6 +334,7 @@ def test_select_package_plan_adds_members_supersedes_defaults_and_switches_clean
     assert towing_current.catalog_offering_id == "offering-towing-50"
     assert towing_current.package_plan_id is None
     base = db.get(DraftBenefitSelection, "selection-base")
+    assert base is not None
     assert base.state == "current" and base.superseded_by_id is None
 
 
@@ -339,15 +345,19 @@ def test_select_package_plan_keeps_staff_custom_value_and_remove_restores_defaul
         {"op": "select_package_plan", "package_id": "package-bundle", "plan_id": "plan-a"},
     ])
     base = db.get(DraftBenefitSelection, "selection-base")
+    assert base is not None
     assert base.state == "current"
     assert base.package_plan_id == "plan-a"
+    assert base.typed_value_override is not None
     assert base.typed_value_override["display_text"] == "Staff custom 999 km"
 
     apply_workspace_patch(db, user(), "draft-1", base_revision=4, operations=[
         {"op": "remove_package_plan", "plan_id": "plan-a"},
     ])
     selections = [item for item in db.values.values() if isinstance(item, DraftBenefitSelection)]
-    assert base.state == "current" and base.package_plan_id is None
+    base_after = db.get(DraftBenefitSelection, "selection-base")
+    assert base_after is not None
+    assert base_after.state == "current" and base_after.package_plan_id is None
     assert not any(item.package_plan_id == "plan-a" and item.state == "current" for item in selections)
 
 
@@ -406,6 +416,7 @@ def test_ai_detected_pack_auto_applies_plan_members():
     assert towing.catalog_offering_id == "offering-towing-200"
     assert towing.evidence_snapshot.get("is_detected") is True
     base = db.get(DraftBenefitSelection, "selection-base")
+    assert base is not None
     assert base.state == "superseded" and base.superseded_by_id == towing.id
     assert any(item.concept_id == "concept-pa" and item.package_plan_id == "plan-a" for item in current)
 

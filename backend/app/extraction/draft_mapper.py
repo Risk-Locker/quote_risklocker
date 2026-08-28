@@ -162,16 +162,14 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
         fields["engine_cc"]["value"] = str(effective_cc)
         fields["engine_cc"]["status"] = "ready"
 
-    # Default Runner Fee to RM 20.00 if missing
+    # Service fee / Runner fee: preserve if explicitly extracted from PDF
     if "service_fee" in fields and not fields["service_fee"].get("value"):
-        fields["service_fee"]["value"] = "20.00"
+        fields["service_fee"]["value"] = ""
         fields["service_fee"]["status"] = "ready"
         fields["service_fee"]["warnings"] = []
         fields["service_fee"]["message"] = ""
 
-    # 2-Level Road Tax Calculation:
-    # Level 1: If roadtax is already explicitly present in quotation PDF and > 0, preserve it.
-    # Level 2: If roadtax is missing, empty, or 0.00, compute from vehicle CC and vehicle type schedule.
+    # Road tax: preserve if explicitly extracted from PDF; do not auto-inject if absent from quotation
     if "roadtax" in fields:
         raw_rt = fields["roadtax"].get("value")
         parsed_rt = None
@@ -188,31 +186,11 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
             fields["roadtax"]["status"] = "ready"
             fields["roadtax"]["warnings"] = []
             fields["roadtax"]["message"] = ""
-        elif effective_cc:
-            inferred_owner = "Individual"
-            cust_name = str(fields.get("customer_name", {}).get("value") or "").upper()
-            if any(term in cust_name for term in ("SDN BHD", "BHD", "ENTERPRISE", "TRADING", "CORP", "SERVICES", "HOLDINGS", "LIMITED", "LLC")):
-                inferred_owner = "Company"
-            inferred_jur = "West Malaysia"
-            reg_loc = str(fields.get("location", {}).get("value") or fields.get("postcode", {}).get("value") or "").upper()
-            if "SABAH" in reg_loc or "KOTA KINABALU" in reg_loc:
-                inferred_jur = "Sabah"
-            elif "SARAWAK" in reg_loc or "KUCHING" in reg_loc or "MIRI" in reg_loc:
-                inferred_jur = "Sarawak"
-            elif "LABUAN" in reg_loc:
-                inferred_jur = "Labuan"
-
-            computed_rt = calculate_road_tax(
-                effective_cc,
-                vehicle_type=inferred_type,
-                owner_type=inferred_owner,
-                jurisdiction=inferred_jur,
-            )
-            if computed_rt > 0:
-                fields["roadtax"]["value"] = f"{computed_rt:.2f}"
-                fields["roadtax"]["status"] = "ready"
-                fields["roadtax"]["warnings"] = []
-                fields["roadtax"]["message"] = f"Calculated via standard JPJ {inferred_jur} schedule ({effective_cc}cc {inferred_type})"
+        else:
+            fields["roadtax"]["value"] = ""
+            fields["roadtax"]["status"] = "ready"
+            fields["roadtax"]["warnings"] = []
+            fields["roadtax"]["message"] = ""
 
     # Ensure premium is the net base insurance premium (excluding extras)
     try:
@@ -250,7 +228,7 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
             except Exception:
                 pass
 
-        # If total_amount in PDF was the insurer total contribution / total payable (e.g. 2,336.30)
+        # If total_amount in PDF was the insurer total contribution / total payable (e.g. 2,922.85)
         # and optional extras were detected, net out extras so premium is the true base insurance premium:
         # Insurance Premium = Final Price (Total Contribution) - Extras
         if t_val and "premium" in fields:
@@ -262,23 +240,19 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
                         fields["premium"]["value"] = f"{base_p:.2f}"
                         fields["premium"]["status"] = "ready"
                         p_val = f"{base_p:.2f}"
-                        r_val = fields.get("roadtax", {}).get("value") or "0"
-                        s_val = fields.get("service_fee", {}).get("value") or "0"
-                        try:
-                            r_num = Decimal(str(r_val).replace(",", "")) if str(r_val).strip() else Decimal("0")
-                        except Exception:
-                            r_num = Decimal("0")
-                        try:
-                            s_num = Decimal(str(s_val).replace(",", "")) if str(s_val).strip() else Decimal("0")
-                        except Exception:
-                            s_num = Decimal("0")
-                        if "total_amount" in fields:
-                            fields["total_amount"]["value"] = f"{(base_p + r_num + s_num):.2f}"
-                            fields["total_amount"]["status"] = "ready"
                 elif bp_val and str(p_val) == str(bp_val) and str(t_val) != str(bp_val):
                     fields["premium"]["value"] = str(t_val)
                     fields["premium"]["status"] = "ready"
                     p_val = str(t_val)
+                elif not p_val or str(p_val) in {"0", "0.00"}:
+                    fields["premium"]["value"] = f"{tot_num:.2f}"
+                    fields["premium"]["status"] = "ready"
+                    p_val = f"{tot_num:.2f}"
+
+                # Always preserve extracted total_amount as the Final Price / Total Payable from PDF
+                if "total_amount" in fields:
+                    fields["total_amount"]["value"] = f"{tot_num:.2f}"
+                    fields["total_amount"]["status"] = "ready"
             except Exception:
                 pass
 
@@ -287,7 +261,9 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
             r_val = fields.get("roadtax", {}).get("value") or "0"
             s_val = fields.get("service_fee", {}).get("value") or "0"
             try:
-                tot = Decimal(str(p_val).replace(",", "")) + Decimal(str(r_val).replace(",", "")) + Decimal(str(s_val).replace(",", ""))
+                r_num = Decimal(str(r_val).replace(",", "")) if str(r_val).strip() else Decimal("0")
+                s_num = Decimal(str(s_val).replace(",", "")) if str(s_val).strip() else Decimal("0")
+                tot = Decimal(str(p_val).replace(",", "")) + extras_cost + r_num + s_num
                 fields["total_amount"]["value"] = f"{tot:.2f}"
                 fields["total_amount"]["status"] = "ready"
             except Exception:

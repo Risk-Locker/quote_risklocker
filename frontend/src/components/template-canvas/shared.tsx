@@ -478,12 +478,12 @@ export function CanvasElementView({
             : [];
           const groups = !isAddons && benefitData?.groups?.length ? benefitData.groups : [];
           const groupById = new Map(groups.map((g) => [String(g.plan_id), g]));
-          const orderedItems = groups.length
+          const orderedItems = (groups.length
             ? [
               ...items.filter((item) => !item?.group_id || !groupById.has(String(item.group_id))),
               ...groups.flatMap((g) => items.filter((item) => String(item?.group_id || "") === String(g.plan_id))),
             ]
-            : items;
+            : items).filter((b: any) => !b?.label || !/own damage|third\s?-?\s?party bodily|third\s?-?\s?party property/i.test(b.label));
           const actualCount = benefitData ? orderedItems.length : scenarioCount;
           const actualLayout = packFixedGrid(actualCount, element.w, element.h, element.packing);
           const groupRects = new Map<string, { x1: number; y1: number; x2: number; y2: number }>();
@@ -534,9 +534,28 @@ export function CanvasElementView({
                 actualLayout.cards.map((card, idx) => {
                   const b = orderedItems[idx];
                   const label = b ? b.label : `Benefit ${card.index + 1}`;
-                  const val = b?.value && !["", "Included standard cover", "Included", "FOC", "As quoted"].includes(b.value) ? b.value : "";
-                  const descRaw = b?.description || "";
-                  const desc = descRaw.length > 95 ? descRaw.substring(0, 92) + "..." : descRaw;
+                  let val = b?.value && !["", "Included standard cover", "Included", "FOC", "As quoted"].includes(b.value) ? b.value : "";
+                  if (val) {
+                    if (/towing|breakdown/i.test(label)) {
+                      if (/unlimited/i.test(val)) val = "Unlimited";
+                      else {
+                        const m = val.match(/(\d+)\s*km/i);
+                        if (m) val = m[0].toLowerCase();
+                      }
+                    } else if (/workmanship/i.test(label)) {
+                      const m = val.match(/(\d+)[- ]year/i);
+                      if (m) val = `${m[1]} years`;
+                    } else if (/legal defense|flood|ambulance|belonging|theft|key/i.test(label)) {
+                      let m = val.match(/RM\s*[\d,]+/i);
+                      if (!m) m = val.match(/[\d,]+/);
+                      if (m) val = val.includes("RM") ? m[0] : `RM ${m[0]}`;
+                      if (/total loss|theft allowance/i.test(label) && val.includes("%")) {
+                         const pctMatch = b?.value?.match(/\d+%/);
+                         if (pctMatch) val = pctMatch[0];
+                      }
+                    }
+                  }
+                  const desc = b?.description || "";
                   const assetUrl = b
                     ? b.asset_url ||
                       (b.asset_id ? `/business/assets/${b.asset_id}/content?profile=ui` : null) ||
@@ -544,11 +563,17 @@ export function CanvasElementView({
                       (b.label ? conceptAssets?.[b.label.toLowerCase()] || conceptAssets?.[b.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] || null : null) ||
                       (assets.find((a) => a.id === b.asset_id)?.url || null)
                     : null;
+                  let extraMatch = null;
+                  if (b?.is_addon && benefitData?.extras) {
+                    extraMatch = benefitData.extras.find((ex: any) => ex.concept_id === b.concept_id || ex.label === b.label);
+                  }
                   const price = b?.price?.amount
                     ? `Cost : MYR ${Number(b.price.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
-                    : b?.is_detected && b?.detected_cost
-                      ? `Cost : MYR ${String(b.detected_cost).replace(/RM\s*/i, "")}`
-                      : null;
+                    : (extraMatch as any)?.price?.amount || (extraMatch as any)?.price?.value
+                      ? `Cost : MYR ${Number((extraMatch as any).price.amount || (extraMatch as any).price.value).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
+                      : b?.is_detected && b?.detected_cost
+                        ? `Cost : MYR ${String(b.detected_cost).replace(/RM\s*/i, "")}`
+                        : null;
                   const costBadge = price || null;
 
                   return (
@@ -607,7 +632,7 @@ export function CanvasElementView({
                             )}
                             {desc && (
                               <span
-                                className="leading-snug text-[var(--rl-text-muted)] line-clamp-2"
+                                className="leading-snug text-[var(--rl-text-muted)]"
                                 style={{ fontSize: density.desc }}
                               >
                                 {desc}
@@ -654,9 +679,29 @@ export function CanvasElementView({
                         >
                           {colItems.map(({ b, idx }) => {
                             const label = b ? b.label : `Benefit ${idx + 1}`;
-                            const val = b?.value && !["", "Included standard cover", "Included", "FOC", "As quoted"].includes(b.value) ? b.value : "";
-                            const descRaw = b?.description || "";
-                            const desc = descRaw.length > 95 ? descRaw.substring(0, 92) + "..." : descRaw;
+                            let val = b?.value && !["", "Included standard cover", "Included", "FOC", "As quoted"].includes(b.value) ? b.value : "";
+                            if (val) {
+                              if (/towing|breakdown/i.test(label)) {
+                                if (/unlimited/i.test(val)) val = "Unlimited";
+                                else {
+                                  const m = val.match(/(\d+)\s*km/i);
+                                  if (m) val = m[0].toLowerCase();
+                                }
+                              } else if (/workmanship/i.test(label)) {
+                                const m = val.match(/(\d+)[- ]year/i);
+                                if (m) val = `${m[1]} years`;
+                              } else if (/legal defense|flood|ambulance|belonging|theft|key/i.test(label)) {
+                                let cleanVal = val.replace(/up to/gi, "").trim();
+                                let m = cleanVal.match(/RM\s*[\d,]+/i);
+                                if (!m) m = cleanVal.match(/[\d,]+/);
+                                if (m) val = cleanVal.includes("RM") ? m[0] : `RM ${m[0]}`;
+                                if (/total loss|theft allowance/i.test(label) && val.includes("%")) {
+                                   const pctMatch = b?.value?.match(/\d+%/);
+                                   if (pctMatch) val = pctMatch[0];
+                                }
+                              }
+                            }
+                            const desc = b?.description || "";
                             const assetUrl = b
                               ? b.asset_url ||
                                 (b.asset_id ? `/business/assets/${b.asset_id}/content?profile=ui` : null) ||
@@ -664,11 +709,17 @@ export function CanvasElementView({
                                 (b.label ? conceptAssets?.[b.label.toLowerCase()] || conceptAssets?.[b.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] || null : null) ||
                                 (assets.find((a) => a.id === b.asset_id)?.url || null)
                               : null;
+                            let extraMatch = null;
+                            if (b?.is_addon && benefitData?.extras) {
+                              extraMatch = benefitData.extras.find((ex: any) => ex.concept_id === b.concept_id || ex.label === b.label);
+                            }
                             const price = b?.price?.amount
                               ? `Cost : MYR ${Number(b.price.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
-                              : b?.is_detected && b?.detected_cost
-                                ? `Cost : MYR ${String(b.detected_cost).replace(/RM\s*/i, "")}`
-                                : null;
+                              : (extraMatch as any)?.price?.amount || (extraMatch as any)?.price?.value
+                                ? `Cost : MYR ${Number((extraMatch as any).price.amount || (extraMatch as any).price.value).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
+                                : b?.is_detected && b?.detected_cost
+                                  ? `Cost : MYR ${String(b.detected_cost).replace(/RM\s*/i, "")}`
+                                  : null;
                             const costBadge = price || null;
 
                             return (
@@ -727,7 +778,7 @@ export function CanvasElementView({
                                     )}
                                     {!isMinimal && desc && (
                                       <span
-                                        className={`leading-snug line-clamp-2 ${isDark ? "text-slate-400" : "text-[var(--rl-text-muted)]"}`}
+                                        className={`leading-snug ${isDark ? "text-slate-400" : "text-[var(--rl-text-muted)]"}`}
                                         style={{ fontSize: density.desc }}
                                       >
                                         {desc}
@@ -769,7 +820,7 @@ export function CanvasElementView({
           const rows: Array<{ kind: string; label: string; limit?: string; value: string }> = [];
           if (extras.length > 0) {
             rows.push({ kind: "extras_header", label: labels.extras || "Extras / 附加项目", value: "" });
-            extras.slice(0, 3).forEach((extra) => {
+            extras.forEach((extra) => {
               const rawLimit = (extra as any)?.coverage_limit || ((extra as any)?.typed_value_override?.value ? String((extra as any)?.typed_value_override?.value) : "");
               let limitLabel = "";
               if (rawLimit) {
@@ -787,7 +838,6 @@ export function CanvasElementView({
                 value: fmtMoney(extra?.price),
               });
             });
-            if (extras.length > 3) rows.push({ kind: "extra", label: `+${extras.length - 3} more`, value: "" });
           }
           const premium = variableValues?.premium || "";
           const roadtax = variableValues?.roadtax || "";
@@ -803,17 +853,18 @@ export function CanvasElementView({
             return acc + (Number.isFinite(num) ? num : 0);
           }, 0);
 
-          let total = variableValues?.total_premium_adjusted || "";
-          if (!total && pNum > 0) {
+          let total = "";
+          if (pNum > 0) {
             total = (pNum + rtNum + sfNum + extrasTotal).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          } else if (!total) {
-            total = variableValues?.total_amount || "";
+          } else {
+            total = variableValues?.total_premium_adjusted || variableValues?.total_amount || "";
           }
-          rows.push({ kind: "premium", label: labels.premium || "Coverage Premium / 保费", value: premium ? `RM ${premium}` : "" });
+          const displayPremium = pNum > 0 ? (pNum + extrasTotal).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : premium;
+          rows.push({ kind: "premium", label: labels.premium || "Coverage Premium / 保费", value: displayPremium ? `RM ${displayPremium}` : "" });
           rows.push({ kind: "divider", label: "", value: "" });
           rows.push({ kind: "roadtax", label: labels.roadtax || "Roadtax", value: roadtax ? `RM ${roadtax}` : "" });
           rows.push({ kind: "runner", label: labels.runner || "Runner Fee", value: runner ? `RM ${runner}` : "" });
-          rows.push({ kind: "total", label: labels.total || "Final Price / 最终总额", value: total ? `RM ${total}` : "" });
+          rows.push({ kind: "total", label: (labels as any).total_premium || labels.total || "Total Payable / 应付总额", value: total ? `RM ${total}` : "" });
           const rowHeight = Number(element.rowHeight) || 14;
           return (
             <div className="relative w-full h-full flex flex-col justify-start">

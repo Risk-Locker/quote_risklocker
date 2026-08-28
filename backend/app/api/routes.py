@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, Response as FastAPIResponse, UploadFile, status
@@ -670,6 +672,69 @@ def session_extract_gemini(
         clean_val = str(val).strip()
         if clean_val:
             fields[key] = {"value": clean_val, "status": "ready", "message": ""}
+
+    # Sum detected optional extras cost to net out from total_amount
+    gemini_benefits = gemini_res.get("detected_benefits") or []
+    extras_cost = Decimal("0")
+    for b_item in gemini_benefits:
+        cost = str(b_item.get("premium_cost") or "").strip()
+        if cost:
+            clean = re.sub(r"[^\d.]", "", cost)
+            if clean:
+                try:
+                    num = Decimal(clean)
+                    if num > 0:
+                        extras_cost += num
+                except Exception:
+                    pass
+
+    # Fallback to total_optional_cover_amount if individual items did not specify premium_cost
+    if extras_cost == 0 and gemini_res.get("total_optional_cover_amount"):
+        clean_tot_opt = re.sub(r"[^\d.]", "", str(gemini_res["total_optional_cover_amount"]))
+        if clean_tot_opt:
+            try:
+                extras_cost = Decimal(clean_tot_opt)
+            except Exception:
+                pass
+
+    t_val = gemini_res.get("total_amount")
+    if t_val:
+        clean_tot = re.sub(r"[^\d.]", "", str(t_val))
+        if clean_tot:
+            try:
+                tot_num = Decimal(clean_tot)
+                fields["total_amount"] = {"value": f"{tot_num:.2f}", "status": "ready", "message": ""}
+                # Insurance Premium = Final Price (Total Contribution) - Extras
+                if extras_cost > 0:
+                    base_p = tot_num - extras_cost
+                    if base_p > 0:
+                        fields["premium"] = {"value": f"{base_p:.2f}", "status": "ready", "message": ""}
+                    else:
+                        fields["premium"] = {"value": f"{tot_num:.2f}", "status": "ready", "message": ""}
+                else:
+                    fields["premium"] = {"value": f"{tot_num:.2f}", "status": "ready", "message": ""}
+            except Exception:
+                pass
+
+    if "roadtax" not in gemini_res or not gemini_res.get("roadtax") or str(gemini_res.get("roadtax")).strip() in {"0", "0.00"}:
+        cc_val = fields.get("engine_cc", {}).get("value")
+        rt_calc = 0.0
+        if cc_val:
+            try:
+                from app.services.road_tax_service import calculate_road_tax
+                clean_cc = int(re.sub(r"[^\d]", "", str(cc_val)))
+                vtype = str(fields.get("vehicle_type", {}).get("value") or "Car")
+                owner_type = "Company" if "company" in vtype.lower() or "corp" in vtype.lower() else "Individual"
+                base_type = "Motorcycle" if "motor" in vtype.lower() else ("Lorry" if "lorry" in vtype.lower() or "other" in vtype.lower() else "Car")
+                rt_calc = calculate_road_tax(cc=clean_cc, vehicle_type=base_type, owner_type=owner_type, jurisdiction="West Malaysia", db=db)
+            except Exception:
+                rt_calc = 0.0
+        if rt_calc > 0:
+            fields["roadtax"] = {"value": f"{rt_calc:.2f}", "status": "ready", "message": ""}
+        else:
+            fields["roadtax"] = {"value": "", "status": "ready", "message": ""}
+    if "service_fee" not in gemini_res or not gemini_res.get("service_fee"):
+        fields["service_fee"] = {"value": "", "status": "ready", "message": ""}
 
     # Period
     start_d = str(gemini_res.get("cover_start_date") or "").strip()

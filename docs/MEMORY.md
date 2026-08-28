@@ -1,5 +1,20 @@
 # Risklocker Project Memory
 
+## 2026-08-28 · Antigravity (Gemini 3.7 Flash) · Insurance MD Catalogs Cleanup & Sessions UI Refinement — EXECUTED
+Asked: Clean up default benefits from specific insurance company MD catalogs to remove obvious facts while preserving logic. Rename "Detected Add ons and riders" to "Extra Benefits" and "Final price" to "Total Payable". Make extras section auto-expand, add manual sum-insured input for Accessories in sessions page, and add a dynamic masonry grid template.
+Done: 1) Cleaned up `QBE`, `Etiqa`, `BerjayaSompo`, `Lonpac`, `tune_protect`, `STMB`, and `AmAssurance` MD files by removing redundant defaults and shrinking descriptions; 2) Updated `review-phase.tsx` and `shared.tsx` replacing "Final price" with "Total Payable" and "Detected Add-ons & Riders" with "Extra Benefits"; 3) Added `accessories_sum_insured` to `FORM_FIELDS` in `review-phase.tsx`; 4) Added `Dynamic Expandable Masonry` template to `benefit-presets.ts`.
+Pending: none.
+
+## 2026-08-28 · Antigravity (Gemini 3.7 Flash) · Playwright Diagnostic, Browser Installation & Visual UI Test Harness — EXECUTED
+Asked: Diagnose Playwright browser issues and test readiness for real-time visual UI checking and 100% verified testing on upcoming tasks.
+Done: 1) Diagnosed subagent 404 driver download issue and missing browser binaries; 2) Installed Playwright Firefox v1538 and WebKit v2336 via npx playwright install; 3) Verified Chromium (151), Firefox (153), and WebKit (26.5) launch cleanly; 4) Cleared stale login rate limit buckets in Postgres; 5) Created .qc-tmp/test_realtime_visual_ui.js capturing 2x retina full-page screenshots across /upload, /builder/templates, /builder/benefits, /extraction/company-detection, and live review workspace; passed 536/536 backend pytest and npx tsc --noEmit.
+Pending: none.
+
+## 2026-08-28 · Antigravity (Gemini 3.7 Flash) · Quotation Final Price & Insurance Premium Calculation Logic Fix — EXECUTED
+Asked: Fix quotation extraction and pricing logic: Total Payable from PDF is Final Price (already includes extras); Insurance Premium is [Final Price - Extras]; adding add-ons reactively increases only Final Price; ensure real-time update in review workspace and template preview, and verify AI re-extract.
+Done: 1) backend/app/extraction/draft_mapper.py:165-295: preserved extracted total_amount as Total Payable, set premium = total_amount - extras_cost, removed forced roadtax and runner fee injection; 2) backend/app/api/routes.py:7,665-720: imported Decimal & date and applied same netting rule in session_extract_gemini; 3) backend/app/rendering/render_context.py:148-210: updated adjusted_total_text to compute base_premium + sum(extras) + roadtax + runner without double-counting extras; 4) frontend/src/components/session-workspace/review-phase.tsx:770-805, 1180-1205: removed on-load force-fill of roadtax/service fee and unified live calculatedTotal; 5) frontend/src/components/session-workspace/provider.tsx:50-56 & template-canvas/shared.tsx:806-815: harmonized live reactivity; 6) tests/test_package_plans.py:206-410 & tests/test_extraction_regression.py:3,95,120-165: resolved None-narrowing, typing, and added tests for netting and reactive total; passed 536/536 backend pytest, npx tsc --noEmit (0 errors), npm run build (36/36 routes).
+Pending: none.
+
 ## 2026-08-28 · Antigravity (Gemini 3.7 Flash) · Backend Real-Time Unbuffered Logging & Request Middleware — EXECUTED
 Asked: Fix backend not providing real-time logs in terminal.
 Done: 1) start-backend.ps1:28-36 and start-worker.ps1:10-14 set `$env:PYTHONUNBUFFERED = "1"`, passed `-u` flag to Python, and added `--access-log --log-level info` to uvicorn; 2) main.py:26-53 added `_setup_logging()` and `RequestLoggingMiddleware` streaming every HTTP request (`method path -> status (ms)`) to unbuffered stdout in real time.
@@ -803,3 +818,5 @@ Pending: push to origin/v8 + main → first real deploy (main at 3835b5d already
 - 2026-08-27  claude-3-5-sonnet-v2  Dynamic UI expansion & LLTP mapping  Rewrote balanceBenefitGridElements (shared.tsx) and review-phase.tsx to dynamically expand canvasH instead of squishing elements; updated workspace_service.py to auto-apply extracted benefits with valid prices into defaults/addons; added 95-char description truncation.  Pending: None.
 - 2026-08-27  Antigravity  Fix coverage format, grid gap, and PDF fallback  shared.tsx: coverage_limit now formatted as (RM X,XXX) inside label, no separate RM col; rowHeight 125->100px, gap 10->6px; review-phase.tsx: PDF failure now shows error instead of silent PNG fallback.  Pending: None.
 - 2026-08-28  Antigravity  Pickup user changes - masonry, presets, coverage formatting  User refactored shared.tsx & review-phase.tsx to use SYSTEM_BENEFIT_PRESETS from @/lib/benefit-presets; added per-session preset switcher; switched default to 3-col masonry; template_renderer.py now uses compact density + masonry by default; footer auto-shift for overflow pages.  Pending: tests + commit.
+
+2026-08-28 � Antigravity � Update Insurance Premium logic to include extras, Total Payable includes roadtax/runner fee, fix 409 conflict, clean text in benefits. � Modified frontend/src/components/session-workspace/review-phase.tsx and shared.tsx. � None.

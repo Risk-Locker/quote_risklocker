@@ -50,7 +50,7 @@ function _recalcAdjustedTotal(snapshot: WorkspaceSnapshot, nextExtras: Workspace
     const raw = snapshot.fields?.total_amount;
     const baseVal = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>).value : raw;
     const base = parseFloat(String(baseVal ?? "").replace(/[^0-9.]/g, "")) || 0;
-    total = base + extrasSum;
+    total = base;
   }
   return total > 0 ? total.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
 }

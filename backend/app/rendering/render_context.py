@@ -147,19 +147,62 @@ def build_extras(selections: Iterable[Any], concepts: Iterable[Any], offerings: 
 
 def adjusted_total_text(fields: dict, extras: list[dict]) -> str:
     """Total premium including staff-added extras; deterministic from extracted values."""
-    raw = (fields or {}).get("total_amount")
-    value = raw.get("value") if isinstance(raw, dict) else raw
-    try:
-        total = Decimal(str(value or "").replace(",", ""))
-    except (InvalidOperation, TypeError, ValueError):
-        return ""
+    extras_total = Decimal("0")
     for extra in extras:
         raw_price = extra.get("price") or {}
         amount = raw_price.get("amount") if raw_price.get("amount") is not None else raw_price.get("value")
+        if amount is not None:
+            try:
+                extras_total += Decimal(re.sub(r"[^\d.]", "", str(amount)))
+            except (InvalidOperation, TypeError, ValueError):
+                pass
+
+    p_raw = (fields or {}).get("premium")
+    p_val = p_raw.get("value") if isinstance(p_raw, dict) else p_raw
+    base_prem = None
+    if p_val:
         try:
-            total += Decimal(str(amount))
+            clean_p = re.sub(r"[^\d.]", "", str(p_val))
+            if clean_p:
+                base_prem = Decimal(clean_p)
         except (InvalidOperation, TypeError, ValueError):
-            continue
+            base_prem = None
+
+    rt_raw = (fields or {}).get("roadtax")
+    rt_val = rt_raw.get("value") if isinstance(rt_raw, dict) else rt_raw
+    rt_num = Decimal("0")
+    if rt_val:
+        try:
+            clean_rt = re.sub(r"[^\d.]", "", str(rt_val))
+            if clean_rt:
+                rt_num = Decimal(clean_rt)
+        except Exception:
+            pass
+
+    sf_raw = (fields or {}).get("service_fee") or (fields or {}).get("runner_fee")
+    sf_val = sf_raw.get("value") if isinstance(sf_raw, dict) else sf_raw
+    sf_num = Decimal("0")
+    if sf_val:
+        try:
+            clean_sf = re.sub(r"[^\d.]", "", str(sf_val))
+            if clean_sf:
+                sf_num = Decimal(clean_sf)
+        except Exception:
+            pass
+
+    if base_prem is not None and base_prem > 0:
+        total = base_prem + extras_total + rt_num + sf_num
+    else:
+        tot_raw = (fields or {}).get("total_amount")
+        tot_val = tot_raw.get("value") if isinstance(tot_raw, dict) else tot_raw
+        try:
+            clean_tot = re.sub(r"[^\d.]", "", str(tot_val or ""))
+            total = Decimal(clean_tot) if clean_tot else Decimal("0")
+        except (InvalidOperation, TypeError, ValueError):
+            return ""
+        if total == 0:
+            return ""
+
     if total == total.to_integral_value():
         return f"{int(total):,}"
     return format(total, ",f")
