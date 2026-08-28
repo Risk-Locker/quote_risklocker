@@ -30,7 +30,23 @@ function _recalcAdjustedTotal(snapshot: WorkspaceSnapshot, nextExtras: Workspace
 
   const rtRaw = snapshot.fields?.roadtax;
   const rtVal = typeof rtRaw === "object" && rtRaw !== null ? (rtRaw as Record<string, unknown>).value : rtRaw;
-  const rt = parseFloat(String(rtVal ?? "").replace(/[^0-9.]/g, "")) || 0;
+  let rt = parseFloat(String(rtVal ?? "").replace(/[^0-9.]/g, "")) || 0;
+  if (rt === 0) {
+    const ccRaw = snapshot.fields?.engine_cc;
+    const ccVal = typeof ccRaw === "object" && ccRaw !== null ? (ccRaw as Record<string, unknown>).value : ccRaw;
+    const parsedCC = ccVal ? parseInt(String(ccVal).replace(/[^0-9]/g, ""), 10) : 0;
+    if (parsedCC > 0) {
+      if (parsedCC <= 1000) rt = 20;
+      else if (parsedCC <= 1200) rt = 55;
+      else if (parsedCC <= 1400) rt = 70;
+      else if (parsedCC <= 1600) rt = 90;
+      else if (parsedCC <= 1800) rt = 200 + (parsedCC - 1600) * 0.40;
+      else if (parsedCC <= 2000) rt = 280 + (parsedCC - 1800) * 0.50;
+      else if (parsedCC <= 2500) rt = 380 + (parsedCC - 2000) * 1.00;
+      else if (parsedCC <= 3000) rt = 880 + (parsedCC - 2500) * 2.50;
+      else rt = 2130 + (parsedCC - 3000) * 4.50;
+    }
+  }
 
   const sfRaw = snapshot.fields?.service_fee;
   const sfVal = typeof sfRaw === "object" && sfRaw !== null ? (sfRaw as Record<string, unknown>).value : sfRaw;
@@ -77,8 +93,12 @@ const MutationContext = createContext<MutationState | null>(null);
 function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: WorkspaceOperation): WorkspaceSnapshot {
   if (operation.op === "scalar_decision") {
     const fieldName = String(operation.field || "");
-    const current = snapshot.fields[fieldName];
-    if (!current) return snapshot;
+    const current = snapshot.fields[fieldName] || {
+      value: null,
+      status: "ready",
+      message: "",
+      warnings: [],
+    };
     const decision = operation.decision as ScalarDecision;
     const next = { ...current, decision: { decision } };
     if (decision === "edit") next.value = operation.value as string | null;
@@ -105,7 +125,7 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
     const newCard: BenefitCardSummary = {
       card_key: selectionId,
       selection_id: selectionId,
-      offering_id: selectionId,
+      offering_id: `custom:${key}`,
       offering_key: key,
       concept_id: selectionId,
       concept_key: key,
@@ -257,8 +277,9 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
     let nextExtras = snapshot.extras;
 
     if (state === "removed") {
-      nextCurrent = nextCurrent.filter((item) => item.selection_id !== selectionId);
-      nextAddons = nextAddons.filter((item) => item.selection_id !== selectionId);
+      nextCurrent = nextCurrent.filter((item) => item.selection_id !== selectionId && item.card_key !== selectionId);
+      nextAddons = nextAddons.filter((item) => item.selection_id !== selectionId && item.card_key !== selectionId);
+      nextExtras = nextExtras.filter((item) => item.selection_id !== selectionId);
     } else if (state === "available_addon" && inCurrent) {
       // Move from current to addon
       nextCurrent = nextCurrent.filter((item) => item.selection_id !== selectionId);
@@ -360,7 +381,7 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
       } : null,
       layout_override: null,
       layout_binding: { template_id: null, template_revision_id: null, base_hash: null },
-      generation_blockers: snapshot.generation_blockers.filter((blocker) => !["missing_template", "stale_layout_override"].includes(blocker.code)),
+      generation_blockers: snapshot.generation_blockers.filter((blocker) => !["missing_template", "stale_layout_override", "scalar_check_needed", "missing_catalog"].includes(blocker.code)),
     };
   }
   return snapshot;
@@ -417,6 +438,23 @@ export function SessionWorkspaceProvider({ sessionId, children }: { sessionId: s
 
   const queueOperation = useCallback((operation: WorkspaceOperation, dirtyPath: string) => {
     operationSequenceRef.current += 1;
+    if (operation.op === "benefit_update" && operation.state === "removed") {
+      const selId = String(operation.selection_id || "");
+      if (selId.startsWith("pending:")) {
+        const rawKey = selId.replace("pending:", "");
+        for (const k of [...operationsRef.current.keys()]) {
+          if (k.includes(rawKey)) {
+            operationsRef.current.delete(k);
+            operationVersionsRef.current.delete(k);
+          }
+        }
+        setDirtyPaths([...operationsRef.current.keys()]);
+        const current = workingSnapshotRef.current;
+        if (current) updateWorkingSnapshot(applyWorkingOperation(current, operation));
+        setSaveError(null);
+        return;
+      }
+    }
     operationsRef.current.set(dirtyPath, operation);
     operationVersionsRef.current.set(dirtyPath, operationSequenceRef.current);
     setDirtyPaths([...operationsRef.current.keys()]);
@@ -427,7 +465,7 @@ export function SessionWorkspaceProvider({ sessionId, children }: { sessionId: s
 
   const decideField = useCallback((field: string, decision: ScalarDecision, value?: string | null) => {
     queueOperation(
-      { op: "scalar_decision", field, decision, ...(decision === "edit" ? { value: value ?? "" } : {}) },
+      { op: "scalar_decision", field, decision, ...(value !== undefined ? { value: value ?? "" } : {}) },
       `fields.${field}`,
     );
   }, [queueOperation]);

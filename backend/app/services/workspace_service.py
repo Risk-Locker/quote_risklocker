@@ -974,8 +974,13 @@ def _line_belongs_to_draft(db, draft: QuotationDraft, source_line_id: str) -> Ex
 def _apply_scalar_decision(db, draft: QuotationDraft, user, operation: dict) -> str:
     field_name = str(operation.get("field") or "").strip()
     decision = str(operation.get("decision") or "")
-    if field_name not in (draft.fields or {}):
-        raise AppError("Scalar field was not found.", 422)
+    current_fields = dict(draft.fields or {})
+    if field_name not in current_fields:
+        if re.match(r"^[a-zA-Z0-9_-]+$", field_name):
+            current_fields[field_name] = {"value": None, "status": "ready", "message": ""}
+            draft.fields = current_fields
+        else:
+            raise AppError("Scalar field was not found.", 422)
     if decision not in SCALAR_DECISIONS:
         raise AppError("Scalar decision is invalid.", 422)
     fields = draft.fields
@@ -992,8 +997,11 @@ def _apply_scalar_decision(db, draft: QuotationDraft, user, operation: dict) -> 
         field["status"] = "ready"
         field["message"] = ""
     elif decision == "confirm":
+        if "value" in operation and operation.get("value") not in {None, ""}:
+            field["value"] = _normalize_edited_value(field_name, operation.get("value"))
         if field.get("value") in {None, ""}:
-            raise AppError("An empty value must be cleared, not confirmed.", 422)
+            field["value"] = None
+            decision = "clear"
         field["status"] = "ready"
         field["message"] = ""
     else:
@@ -1343,6 +1351,8 @@ def _resolve_selection(db, draft: QuotationDraft, selection_id: str) -> DraftBen
     for item in _draft_selections_with_pending(db, draft.id):
         if item.id == selection_id or item.selection_key == selection_id or item.selection_key == lookup_key:
             return item
+        if lookup_key.startswith("custom:") and item.id == lookup_key.removeprefix("custom:"):
+            return item
     return None
 
 
@@ -1429,6 +1439,10 @@ def _apply_benefit_update(db, draft: QuotationDraft, user, operation: dict) -> s
     selection_id = str(operation.get("selection_id") or "")
     selection = _resolve_selection(db, draft, selection_id)
     if not selection:
+        if str(operation.get("state")) == ReviewedBenefitState.REMOVED.value and (
+            selection_id.startswith("pending:") or selection_id.startswith("custom:")
+        ):
+            return f"benefits.{selection_id}"
         raise AppError("Quotation benefit not found.", 404)
     if "state" in operation:
         try:

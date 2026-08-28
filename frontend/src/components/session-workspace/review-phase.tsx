@@ -73,7 +73,8 @@ const FORM_FIELDS: FormField[] = [
   { name: "valid_until", label: "Quotation validity", kind: "text" },
   { name: "excess_amount", label: "Excess amount", kind: "money" },
   { name: "ncd_percent", label: "NCD", kind: "percent" },
-  { name: "premium", label: "Insurance premium", kind: "money" },
+  { name: "premium", label: "Insurance premium (no extras)", kind: "money" },
+  { name: "insurance_premium_total", label: "Insurance premium", kind: "total" },
   { name: "roadtax", label: "Road tax", kind: "money" },
   { name: "service_fee", label: "Runner fee", kind: "money" },
   { name: "total_amount", label: "Total Payable", kind: "total" },
@@ -285,28 +286,55 @@ function IncludedCard({
   assetUrl?: string | null;
   selection?: { id: string; cost_status: string } | Record<string, unknown> | null;
   canUndo: boolean;
-  onQueue: (operation: Record<string, unknown> & { op: string }, path: string) => void;
+  onQueue: (operation: Record<string, unknown> & { op: string }, path: string, revertOp?: Record<string, unknown> & { op: string }) => void;
 }) {
   const selectionId = selection && typeof selection === "object" && "id" in selection ? String(selection.id) : (card.selection_id || null);
   const pending = !selectionId || String(selectionId).startsWith("pending:");
 
   const handleMoveToAddon = () => {
-    if (selectionId && !pending) {
-      onQueue({ op: "benefit_update", selection_id: selectionId, state: "available_addon", cost_status: "paid" }, `benefits.${selectionId}.state`);
-    } else if (card.offering_id) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid" }, `benefits.offer.${card.offering_id}`);
+    if (!window.confirm(`Are you sure you want to move "${card.label}" to add-ons?`)) return;
+    if (selectionId) {
+      onQueue(
+        { op: "benefit_update", selection_id: selectionId, state: "available_addon", cost_status: "paid" },
+        `benefits.${selectionId}.state`,
+        { op: "benefit_update", selection_id: selectionId, state: "current", cost_status: "included" }
+      );
+    } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
+      onQueue(
+        { op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid" },
+        `benefits.offer.${card.offering_id}`,
+        { op: "select_catalog_offering", offering_id: card.offering_id, state: "removed", cost_status: "included" }
+      );
     } else {
-      onQueue({ op: "create_custom_benefit", selection_key: `addon:${card.concept_key || index}`, state: "available_addon", cost_status: "paid", label: card.label }, `benefits.add.${index}`);
+      const customKey = `addon:${card.concept_key || index}`;
+      onQueue(
+        { op: "create_custom_benefit", selection_key: customKey, state: "available_addon", cost_status: "paid", label: card.label },
+        `benefits.add.${index}`,
+        { op: "benefit_update", selection_id: customKey, state: "removed" }
+      );
     }
   };
 
   const handleRemove = () => {
-    if (selectionId && !pending) {
-      onQueue({ op: "benefit_update", selection_id: selectionId, state: "removed" }, `benefits.${selectionId}.state`);
-    } else if (card.offering_id) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "removed", cost_status: "included" }, `benefits.offer.${card.offering_id}`);
-    } else {
-      onQueue({ op: "create_custom_benefit", selection_key: `removed:${card.concept_key || index}`, state: "removed", label: card.label }, `benefits.remove.${index}`);
+    if (!window.confirm(`Are you sure you want to remove "${card.label}" completely?`)) return;
+    if (selectionId) {
+      onQueue(
+        { op: "benefit_update", selection_id: selectionId, state: "removed" },
+        `benefits.${selectionId}.state`,
+        { op: "benefit_update", selection_id: selectionId, state: "current", cost_status: "included" }
+      );
+    } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
+      onQueue(
+        { op: "select_catalog_offering", offering_id: card.offering_id, state: "removed", cost_status: "included" },
+        `benefits.offer.${card.offering_id}`,
+        { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "included" }
+      );
+    } else if (card.concept_key) {
+      onQueue(
+        { op: "benefit_update", selection_id: card.concept_key, state: "removed" },
+        `benefits.${card.concept_key}.state`,
+        { op: "benefit_update", selection_id: card.concept_key, state: "current", cost_status: "included" }
+      );
     }
   };
 
@@ -348,12 +376,26 @@ function IncludedCard({
           </p>
         )}
       </div>
-      {/* RL-DISABLED default_benefit_actions — disabled 2026-08-28; restore when owner requests mutable default benefits */}
-      {/* Static indicator for constant default covers */}
+      {/* Actions */}
       <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
-        <span className="rounded bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9.5px] font-bold text-emerald-700 shrink-0">
-          Standard
-        </span>
+        <Button
+          variant="secondary"
+          size="sm"
+          title="Move this benefit to Optional Add-ons"
+          onClick={handleMoveToAddon}
+          className="text-[11px] h-7 px-2"
+        >
+          → Add-on
+        </Button>
+        <button
+          type="button"
+          aria-label={`Remove ${card.label} from this quotation`}
+          onClick={handleRemove}
+          className="rounded-full p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] transition-colors cursor-pointer"
+          title="Remove benefit completely"
+        >
+          <X size={14} weight="bold" />
+        </button>
       </div>
     </article>
   );
@@ -368,7 +410,7 @@ function AddonCard({
   card: BenefitCardSummary;
   index: number;
   assetUrl?: string | null;
-  onQueue: (operation: Record<string, unknown> & { op: string }, path: string) => void;
+  onQueue: (operation: Record<string, unknown> & { op: string }, path: string, revertOp?: Record<string, unknown> & { op: string }) => void;
 }) {
   const selectionId = card.selection_id;
   const pending = !selectionId || String(selectionId).startsWith("pending:");
@@ -418,22 +460,47 @@ function AddonCard({
   const handleMoveToDefault = () => {
     const priceVal = card.price || card.optional_price || null;
     const costStatus = priceVal ? "paid" : "included";
-    if (selectionId && !pending) {
-      onQueue({ op: "benefit_update", selection_id: selectionId, state: "current", cost_status: costStatus, ...(priceVal ? { price: priceVal } : {}) }, `benefits.${selectionId}.state`);
-    } else if (card.offering_id) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: costStatus, ...(priceVal ? { price: priceVal } : {}) }, `benefits.offer.${card.offering_id}`);
+    if (selectionId) {
+      onQueue(
+        { op: "benefit_update", selection_id: selectionId, state: "current", cost_status: costStatus, ...(priceVal ? { price: priceVal } : {}) },
+        `benefits.${selectionId}.state`,
+        { op: "benefit_update", selection_id: selectionId, state: "available_addon", cost_status: "paid" }
+      );
+    } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
+      onQueue(
+        { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: costStatus, ...(priceVal ? { price: priceVal } : {}) },
+        `benefits.offer.${card.offering_id}`,
+        { op: "select_catalog_offering", offering_id: card.offering_id, state: "removed", cost_status: "included" }
+      );
     } else {
-      onQueue({ op: "create_custom_benefit", selection_key: `default:${card.concept_key || index}`, state: "current", cost_status: costStatus, label: card.label, ...(priceVal ? { price: priceVal } : {}) }, `benefits.add.${index}`);
+      const customKey = `default:${card.concept_key || index}`;
+      onQueue(
+        { op: "create_custom_benefit", selection_key: customKey, state: "current", cost_status: costStatus, label: card.label, ...(priceVal ? { price: priceVal } : {}) },
+        `benefits.add.${index}`,
+        { op: "benefit_update", selection_id: customKey, state: "removed" }
+      );
     }
   };
 
   const handleRemove = () => {
-    if (selectionId && !pending) {
-      onQueue({ op: "benefit_update", selection_id: selectionId, state: "removed" }, `benefits.${selectionId}.state`);
-    } else if (card.offering_id) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "removed", cost_status: "paid" }, `benefits.offer.${card.offering_id}`);
-    } else {
-      onQueue({ op: "create_custom_benefit", selection_key: `removed:${card.concept_key || index}`, state: "removed", label: card.label }, `benefits.remove.${index}`);
+    if (selectionId) {
+      onQueue(
+        { op: "benefit_update", selection_id: selectionId, state: "removed" },
+        `benefits.${selectionId}.state`,
+        { op: "benefit_update", selection_id: selectionId, state: "available_addon", cost_status: "paid" }
+      );
+    } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
+      onQueue(
+        { op: "select_catalog_offering", offering_id: card.offering_id, state: "removed", cost_status: "paid" },
+        `benefits.offer.${card.offering_id}`,
+        { op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid" }
+      );
+    } else if (card.concept_key) {
+      onQueue(
+        { op: "benefit_update", selection_id: card.concept_key, state: "removed" },
+        `benefits.${card.concept_key}.state`,
+        { op: "benefit_update", selection_id: card.concept_key, state: "available_addon", cost_status: "paid" }
+      );
     }
   };
 
@@ -559,8 +626,8 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [showGlobalModal, setShowGlobalModal] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
   const [modalFilter, setModalFilter] = useState<"all" | "insurer" | "global" | "addons">("all");
-  const [undoStack, setUndoStack] = useState<Array<{ op: Record<string, unknown> & { op: string }; path: string; desc: string }>>([]);
-  const [redoStack, setRedoStack] = useState<Array<{ op: Record<string, unknown> & { op: string }; path: string; desc: string }>>([]);
+  const [undoStack, setUndoStack] = useState<{ op: Record<string, unknown> & { op: string }; path: string; desc: string; revertOp?: Record<string, unknown> & { op: string } }[]>([]);
+  const [redoStack, setRedoStack] = useState<{ op: Record<string, unknown> & { op: string }; path: string; desc: string; revertOp?: Record<string, unknown> & { op: string } }[]>([]);
   const [activeTab, setActiveTab] = useState<"included" | "addons">("included");
   const [modalTarget, setModalTarget] = useState<"current" | "available_addon">("current");
   const [benefitsViewMode, setBenefitsViewMode] = useState<"defaults" | "addons" | "both">("both");
@@ -588,6 +655,13 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       save().catch(() => undefined);
     }, 800);
   }, [save]);
+
+  function onQueue(op: Record<string, unknown> & { op: string }, path: string, revertOp?: Record<string, unknown> & { op: string }) {
+    queueOperation(op, path);
+    setUndoStack((prev) => [...prev, { op, path, revertOp, desc: "Benefit update" }]);
+    setRedoStack([]);
+    scheduleSave();
+  }
 
   const [copyingPng, setCopyingPng] = useState(false);
   const [copiedPng, setCopiedPng] = useState(false);
@@ -760,7 +834,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     const baseHeight = previewTemplate?.config?.canvas?.height || 1123;
     if (!balancedElements.length) return baseHeight;
     const maxElementBottom = Math.max(0, ...balancedElements.map((e: any) => (e.y || 0) + (e.h || 0)));
-    return maxElementBottom + 16 > baseHeight ? maxElementBottom + 16 : baseHeight;
+    return maxElementBottom + 30 > baseHeight ? maxElementBottom + 30 : baseHeight;
   }, [balancedElements, previewTemplate]);
 
   const syncForm = useCallback(() => {
@@ -776,22 +850,39 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       values[field.name] = displayValue(field.kind, stored ?? null);
     }
 
-    // Sync Total Premium with extras if present
-    if (workspace.total_premium_adjusted) {
-      values.total_amount = formatMoney(workspace.total_premium_adjusted);
-    } else {
-      const pNum = parseFloat(String(values.premium || "").replace(/[^0-9.]/g, "")) || 0;
-      const rtNum = parseFloat(String(values.roadtax || "").replace(/[^0-9.]/g, "")) || 0;
-      const sfNum = parseFloat(String(values.service_fee || "").replace(/[^0-9.]/g, "")) || 0;
-      const extrasTotal = (workspace.extras || []).reduce((acc, ex) => {
-        const amt = (ex as Record<string, unknown>)?.price;
-        const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
-        const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : (typeof val === "number" ? val : 0);
-        return acc + (Number.isFinite(num) ? num : 0);
-      }, 0);
-      if (pNum > 0) {
-        values.total_amount = (pNum + rtNum + sfNum + extrasTotal).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // Auto-compute road tax if missing or 0
+    const currentRT = parseFloat(String(values.roadtax || "").replace(/[^0-9.]/g, "")) || 0;
+    if (currentRT === 0) {
+      const ccStr = values.engine_cc || (workspace.fields?.engine_cc as WorkspaceField | undefined)?.value || "";
+      const parsedCC = ccStr ? parseInt(String(ccStr).replace(/[^0-9]/g, ""), 10) : 0;
+      if (parsedCC > 0) {
+        const vtype = values.vehicle_type || (workspace.fields?.vehicle_type as WorkspaceField | undefined)?.value || "Car";
+        const isCompany = String(vtype).toLowerCase().includes("company") || String(vtype).toLowerCase().includes("corp");
+        const baseType = String(vtype).toLowerCase().includes("motor") ? "Motorcycle" : (String(vtype).toLowerCase().includes("lorry") || String(vtype).toLowerCase().includes("other")) ? "Lorry" : "Car";
+        const computedRT = computeMalaysianRoadTax(parsedCC, baseType, isCompany ? "Company" : "Individual");
+        if (computedRT > 0) {
+          values.roadtax = computedRT.toFixed(2);
+        }
       }
+    }
+
+    // Sync Total Premium with roadtax, runner fee, and extras
+    const pNum = parseFloat(String(values.premium || "").replace(/[^0-9.]/g, "")) || 0;
+    const rtNum = parseFloat(String(values.roadtax || "").replace(/[^0-9.]/g, "")) || 0;
+    const sfNum = parseFloat(String(values.service_fee || "").replace(/[^0-9.]/g, "")) || 0;
+    const extrasTotal = (workspace.extras || []).reduce((acc, ex) => {
+      const amt = (ex as Record<string, unknown>)?.price;
+      const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
+      const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : (typeof val === "number" ? val : 0);
+      return acc + (Number.isFinite(num) ? num : 0);
+    }, 0);
+
+    if (pNum > 0) {
+      const combinedPremium = pNum + extrasTotal;
+      values.insurance_premium_total = combinedPremium > 0 ? combinedPremium.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
+      values.total_amount = (pNum + rtNum + sfNum + extrasTotal).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    } else if (workspace.total_premium_adjusted) {
+      values.total_amount = formatMoney(workspace.total_premium_adjusted);
     }
 
     setFormValues(values);
@@ -1143,7 +1234,20 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     }
 
     // Road tax aliases
-    const rtax = formValues["roadtax"] || fields["roadtax"] || formValues["road_tax_amount"] || fields["road_tax_amount"] || "";
+    let rtax = formValues["roadtax"] || fields["roadtax"] || formValues["road_tax_amount"] || fields["road_tax_amount"] || "";
+    if (!rtax || rtax === "0" || rtax === "0.00") {
+      const ccStr = formValues["engine_cc"] || fields["engine_cc"] || "";
+      const parsedCC = ccStr ? parseInt(String(ccStr).replace(/[^0-9]/g, ""), 10) : 0;
+      if (parsedCC > 0) {
+        const vtype = formValues["vehicle_type"] || fields["vehicle_type"] || "Car";
+        const isCompany = String(vtype).toLowerCase().includes("company") || String(vtype).toLowerCase().includes("corp");
+        const baseType = String(vtype).toLowerCase().includes("motor") ? "Motorcycle" : (String(vtype).toLowerCase().includes("lorry") || String(vtype).toLowerCase().includes("other")) ? "Lorry" : "Car";
+        const computedRT = computeMalaysianRoadTax(parsedCC, baseType, isCompany ? "Company" : "Individual");
+        if (computedRT > 0) {
+          rtax = computedRT.toFixed(2);
+        }
+      }
+    }
     if (rtax) {
       fields["roadtax"] = rtax;
       fields["road_tax_amount"] = rtax;
@@ -1171,6 +1275,11 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     const effTotal = calculatedTotal > 0
       ? calculatedTotal.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
       : (formValues["total_amount"] || fields["total_amount"] || workspace?.total_premium_adjusted || "");
+
+    const calculatedPremium = pNum + extrasTotal;
+    fields["insurance_premium_total"] = calculatedPremium > 0
+      ? calculatedPremium.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : "";
 
     // Validity date aliases
     const vUntil = formValues["valid_until"] || fields["valid_until"] || formValues["quotation_validity"] || fields["quotation_validity"] || "";
@@ -1235,7 +1344,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       }));
     }
 
-    queueOperation({
+    onQueue({
       op: "pin_catalog",
       company_id: companyId,
       ...(productId ? { product_id: productId } : {}),
@@ -1258,7 +1367,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   async function pinPackageTier(packageId: string) {
     if (!workspace?.pinned.company_id) return;
     setPinLoading(true);
-    queueOperation({
+    onQueue({
       op: "select_package_tier",
       package_id: packageId,
     }, "package_tier");
@@ -1274,26 +1383,29 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   function addConceptAsBenefit(
     concept: GlobalConcept,
     state: "current" | "available_addon" = "current",
-    price?: { amount: number; currency: string } | null
+    price?: { amount: number; currency: string } | null,
+    coverageLimit?: string | null
   ) {
     const key = `concept:${concept.concept_key}:${crypto.randomUUID().slice(0, 8)}`;
     const costStatus = price ? "paid" : state === "current" ? "included" : "paid";
+    const cleanLimit = coverageLimit && typeof coverageLimit === "string" && !coverageLimit.includes("[object") ? coverageLimit.trim() : "";
+    const typedValue = cleanLimit
+      ? { type: "custom", display_text: cleanLimit.startsWith("RM") ? cleanLimit : `RM ${cleanLimit}` }
+      : { type: "custom", display_text: concept.label };
     const op = {
       op: "create_custom_benefit",
       selection_key: key,
       concept_id: concept.id,
       concept_key: concept.concept_key,
       label: concept.label,
-      typed_value: { type: "custom", display_text: concept.label },
+      typed_value: typedValue,
       cost_status: costStatus,
       state,
       price: price || null,
     };
-    queueOperation(op, `benefits.${key}`);
-    setUndoStack((prev) => [...prev, { op, path: `benefits.${key}`, desc: `Added ${concept.label}` }]);
+    onQueue(op, `benefits.${key}`);
     setRedoStack([]);
     setShowGlobalModal(false);
-    scheduleSave();
   }
 
   // Reset all benefits back to company defaults and detected extraction items (idempotent)
@@ -1311,11 +1423,15 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     const last = undoStack[undoStack.length - 1];
     setUndoStack((prev) => prev.slice(0, -1));
     setRedoStack((prev) => [...prev, last]);
-    if (last.op.selection_id) {
+    if (last.revertOp) {
+      queueOperation(last.revertOp, last.path);
+    } else if (last.op.selection_id) {
       queueOperation({ op: "revert_benefit", selection_id: last.op.selection_id }, last.path);
     } else if (last.op.op === "create_custom_benefit" && (last.op as any).selection_key) {
       // Undo a custom benefit by removing it via its selection_key (not a UUID selection_id)
       queueOperation({ op: "benefit_update", selection_id: (last.op as any).selection_key, state: "removed" }, last.path);
+    } else if (last.op.op === "select_catalog_offering" && last.op.offering_id) {
+      queueOperation({ op: "select_catalog_offering", offering_id: last.op.offering_id, state: "removed", cost_status: "included" }, last.path);
     } else {
       queueOperation({ op: "reset_benefits" }, "benefits");
     }
@@ -1459,8 +1575,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       try {
         await save();
       } catch (err) {
-        setActionError("Please resolve errors before copying PNG: " + apiErrorMessage(err));
-        return;
+        console.warn("Could not save workspace before copying PNG, proceeding with live canvas:", err);
       }
     }
     setCopyingPng(true);
@@ -1496,8 +1611,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       try {
         await save();
       } catch (err) {
-        setActionError("Please resolve errors before downloading PNG: " + apiErrorMessage(err));
-        return;
+        console.warn("Could not save workspace before downloading PNG, proceeding with live canvas:", err);
       }
     }
     setDownloadingPng(true);
@@ -1519,13 +1633,33 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   }
 
   async function handleDownloadPdf() {
-    let currentRevision = workspace?.revision;
-    if (mutation.dirty) {
+    if (!workspace) return;
+    setPdfLoading(true);
+    setActionError(null);
+
+    // Auto-confirm all non-empty fields in formValues and clear empty fields so all fields have an explicit scalar decision
+    let queuedAny = false;
+    for (const field of FORM_FIELDS) {
+      const decision = workspace.fields[field.name]?.decision?.decision;
+      if (!decision) {
+        const val = formValues[field.name];
+        if (val && String(val).trim()) {
+          decideField(field.name, "edit", String(val).trim());
+        } else {
+          decideField(field.name, "clear", null);
+        }
+        queuedAny = true;
+      }
+    }
+
+    let currentRevision = workspace.revision;
+    if (mutation.dirty || queuedAny) {
       try {
         const saved = await save();
         currentRevision = saved.revision;
       } catch (err) {
         setActionError("Please resolve errors before downloading PDF: " + apiErrorMessage(err));
+        setPdfLoading(false);
         return;
       }
     } else {
@@ -1534,9 +1668,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         currentRevision = latest.revision;
       } catch (e) {}
     }
-    if (!workspace || currentRevision == null) return;
-    setPdfLoading(true);
-    setActionError(null);
+    if (currentRevision == null) {
+      setPdfLoading(false);
+      return;
+    }
 
     try {
       const nonFatalBlockers = (workspace.generation_blockers || []).filter(
@@ -2091,7 +2226,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                 </span>
                               ) : null}
                               <Input
-                                value={field.kind === "total" ? (previewFields["total_amount"] || formValues[field.name] || "") : (formValues[field.name] ?? "")}
+                                value={field.kind === "total" ? (previewFields[field.name] || formValues[field.name] || "") : (formValues[field.name] ?? "")}
                                 disabled={field.kind === "total"}
                                 placeholder={empty ? "Missing" : ""}
                                 list={field.name === "insurance_company" ? "company-suggestions" : undefined}
@@ -2284,7 +2419,8 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                       if (concept) {
                                         const cleanCost = extra.cost ? Number(String(extra.cost).replace(/[^0-9.]/g, "")) : null;
                                         const priceObj = cleanCost && Number.isFinite(cleanCost) ? { amount: cleanCost, currency: "MYR" } : null;
-                                        addConceptAsBenefit(concept, "available_addon", priceObj);
+                                        const cleanLimit = extra.coverage_limit && typeof extra.coverage_limit === "string" ? extra.coverage_limit.trim() : null;
+                                        addConceptAsBenefit(concept, "available_addon", priceObj, cleanLimit);
                                       }
                                     }}
                                     className="text-[11px] h-7 px-2.5 shrink-0 font-medium"
@@ -2663,7 +2799,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                   assetUrl={assetUrl}
                                   selection={selection}
                                   canUndo={Boolean(card.branch_key)}
-                                  onQueue={queueOperation}
+                                  onQueue={onQueue}
                                 />
                               );
                             })
@@ -2863,7 +2999,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                   card={card}
                                   index={idx}
                                   assetUrl={assetUrl}
-                                  onQueue={queueOperation}
+                                  onQueue={onQueue}
                                 />
                               );
                             })

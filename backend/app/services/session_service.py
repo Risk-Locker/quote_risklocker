@@ -33,6 +33,7 @@ def list_sessions(db: Session, user_id: str, search: str | None = None, limit: i
         select(SessionModel)
         .join(UploadedFile, SessionModel.uploaded_file_id == UploadedFile.id)
         .outerjoin(QuotationDraft, SessionModel.draft_id == QuotationDraft.id)
+        .where(UploadedFile.deleted_at.is_(None))
     )
     if search:
         like = f"%{search.strip()}%"

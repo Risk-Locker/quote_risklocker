@@ -11,6 +11,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from sqlalchemy import select, text
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.errors import AppError
 from app.models.tables import (
@@ -22,6 +23,7 @@ from app.models.tables import (
     BenefitRelation,
     BusinessAsset,
     CatalogOffering,
+    BenefitCatalogRevision,
     DraftBenefitSelection,
     DraftSourceLineDecision,
     GeneratedPdfVersion,
@@ -48,7 +50,7 @@ from app.services.template_assets import resolve_template_asset
 from app.services.template_revision_service import validate_template_config
 from app.services.workspace_service import BUSINESS_ROLES, generation_blockers
 from app.storage.supabase import StorageError, SupabaseStorage
-from app.rendering.template_renderer import render_quotation_html
+from app.rendering.template_renderer import _balance_benefit_grid_elements, render_quotation_html
 
 
 RENDERER_VERSION = "risklocker-v7.1"
@@ -308,6 +310,19 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
         "status": "ready",
         "message": "",
     }
+    canvas = config.get("canvas") or {}
+    raw_elements = canvas.get("elements") or []
+    render_ctx = {
+        "current_benefits": cards["current_benefits"],
+        "available_addons": cards["available_addons"],
+        "extras": extras,
+    }
+    balanced = _balance_benefit_grid_elements(raw_elements, render_ctx)
+    max_element_y = max((float(e.get("y") or 0) + float(e.get("h") or 0) for e in balanced), default=0.0)
+    base_height = float(config.get("page_profile", {}).get("height") or 1123.0)
+    if max_element_y + 30.0 > base_height:
+        config["page_profile"]["height"] = float(int(max_element_y + 30.0))
+
     context = {
         "schema_version": 1,
         "renderer_version": RENDERER_VERSION,
@@ -363,10 +378,20 @@ def request_version_generation(
         ).first()
         if revision:
             draft.template_revision_id = revision.id
+    if not draft.catalog_revision_id:
+        active_cat = db.scalars(
+            select(BenefitCatalogRevision)
+            .where(BenefitCatalogRevision.state.in_(["published", "compatibility"]))
+            .order_by(BenefitCatalogRevision.revision_number.desc())
+        ).first()
+        if active_cat:
+            draft.catalog_revision_id = active_cat.id
+
     decisions = _for_draft(db, DraftSourceLineDecision, draft.id)
     selections = _for_draft(db, DraftBenefitSelection, draft.id)
     blockers = generation_blockers(draft, decisions, selections, template_revision=revision)
-    if blockers:
+    fatal_blockers = [b for b in blockers if b.get("code") not in {"scalar_check_needed", "missing_catalog"}]
+    if fatal_blockers:
         raise AppError("Resolve every generation blocker before creating the PDF.", 409)
     if not revision:
         raise AppError("Choose a published template before generating.", 409)

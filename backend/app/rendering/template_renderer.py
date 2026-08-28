@@ -357,6 +357,20 @@ def _dynamic_benefit_grid(
             )
 
         # --- Coverage value row ---
+        cov_limit = card.get("detected_limit") or card.get("coverage_limit")
+        if cov_limit:
+            value_str = str(cov_limit) if str(cov_limit).startswith("RM") else f"RM {cov_limit}"
+        elif value_str and (card.get("price") or card.get("optional_price")):
+            try:
+                v_num = float(re.sub(r"[^0-9.]", "", value_str))
+                price_obj = card.get("price") or card.get("optional_price")
+                p_raw = (price_obj.get("amount") if price_obj.get("amount") is not None else price_obj.get("value")) if isinstance(price_obj, dict) else price_obj
+                p_num = float(re.sub(r"[^0-9.]", "", str(p_raw)))
+                if abs(v_num - p_num) < 0.01:
+                    value_str = ""
+            except Exception:
+                pass
+
         show_value = bool(value_str and value_str not in {"Included standard cover", "Included", "FOC", "As quoted"})
         coverage_html = (
             f'<span style="display:block;font-size:{val_fs}px;font-weight:700;line-height:1.15;'
@@ -375,18 +389,30 @@ def _dynamic_benefit_grid(
         # --- Cost / price badge ---
         price_badge = ""
         price = card.get("price") or card.get("optional_price")
-        if price and (is_purchased_extra or kind == "available_addons"):
-            p_val = (price.get("amount") if price.get("amount") is not None else price.get("value")) if isinstance(price, dict) else price
-            try:
-                p_num = float(str(p_val).replace(",", ""))
-                p_str = f"Cost : MYR {int(p_num):,}" if p_num == int(p_num) else f"Cost : MYR {p_num:,.2f}"
-            except Exception:
-                clean_pval = str(p_val).replace("RM ", "").replace("RM", "")
-                p_str = f"Cost : MYR {clean_pval}"
-            price_badge = (
-                f'<span style="display:block;margin-top:1px;font-size:{desc_fs}px;font-weight:600;'
-                f'color:{"#FBBF24" if is_dark else "#0F172A"};line-height:1.15;white-space:nowrap">{p_str}</span>'
-            )
+        is_addon_card = card.get("is_addon") or kind == "available_addons" or is_purchased_extra or bool(card.get("price"))
+        if is_addon_card and not card.get("is_pure_default"):
+            p_val = None
+            if price:
+                p_val = (price.get("amount") if price.get("amount") is not None else price.get("value")) if isinstance(price, dict) else price
+            elif card.get("detected_cost"):
+                p_val = card.get("detected_cost")
+
+            if p_val is not None and str(p_val).strip() and str(p_val).strip() not in {"0", "0.00", "0.0"}:
+                try:
+                    p_num = float(re.sub(r"[^0-9.]", "", str(p_val)))
+                    p_str = f"Cost : MYR {p_num:,.2f}"
+                except Exception:
+                    clean_pval = str(p_val).replace("RM ", "").replace("RM", "")
+                    p_str = f"Cost : MYR {clean_pval}"
+                price_badge = (
+                    f'<span style="display:block;margin-top:1px;font-size:{desc_fs}px;font-weight:600;'
+                    f'color:{"#FBBF24" if is_dark else "#0F172A"};line-height:1.15;white-space:nowrap">{p_str}</span>'
+                )
+            elif kind == "available_addons":
+                price_badge = (
+                    f'<span style="display:block;margin-top:1px;font-size:{desc_fs}px;font-weight:600;'
+                    f'color:{"#FBBF24" if is_dark else "#0F172A"};line-height:1.15;white-space:nowrap">Cost : As quoted</span>'
+                )
 
         # Title font: shrink for long labels
         title_fs = lbl_fs - 1.0 if len(label_str) > 30 else (lbl_fs - 0.5 if len(label_str) > 18 else float(lbl_fs))
@@ -523,7 +549,23 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
             rows.append(("extra", str(extra.get("label") or ""), cov_limit, formatted_price))
     rows.append(("premium", str(labels.get("premium") or "Insurance Premium / 保费"), "", _format_value(_value(fields, "premium"), "RM ")))
     rows.append(("divider", "", "", ""))
-    rows.append(("roadtax", str(labels.get("roadtax") or "Roadtax / 路税"), "", _format_value(_value(fields, "roadtax"), "RM ")))
+    rt_display = _value(fields, "roadtax")
+    if not rt_display and (fields or {}).get("engine_cc"):
+        from app.services.road_tax_service import calculate_road_tax
+        cc_raw = (fields or {}).get("engine_cc")
+        cc_val = cc_raw.get("value") if isinstance(cc_raw, dict) else cc_raw
+        if cc_val:
+            try:
+                clean_cc = float(re.sub(r"[^\d.]", "", str(cc_val)))
+                if clean_cc > 0:
+                    vtype_raw = (fields or {}).get("vehicle_type")
+                    vtype_val = vtype_raw.get("value") if isinstance(vtype_raw, dict) else vtype_raw
+                    calc_rt = calculate_road_tax(clean_cc, str(vtype_val or "Car"))
+                    if calc_rt > 0:
+                        rt_display = f"{calc_rt:.2f}"
+            except Exception:
+                pass
+    rows.append(("roadtax", str(labels.get("roadtax") or "Roadtax / 路税"), "", _format_value(rt_display, "RM ")))
     rows.append(("runner", str(labels.get("runner") or "Runner Fee / 服务费"), "", _format_value(_value(fields, "service_fee"), "RM ")))
     total = (render_context or {}).get("total_premium_adjusted") or _value(fields, "total_premium_adjusted")
     if not total:
@@ -573,7 +615,7 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
 def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_context: dict[str, Any] | None) -> list[dict[str, Any]]:
     """Dynamically balance the heights of current benefits, purchased extras, and available add-ons grids."""
     extras = list((render_context or {}).get("extras") or []) if render_context else []
-    extra_shift = (len(extras) + (1 if extras else 0)) * 14.0
+    extra_shift = (len(extras) + (1 if extras else 0)) * 15.0
 
     current_cards = list((render_context or {}).get("current_benefits") or []) if render_context else []
     addon_cards = list((render_context or {}).get("available_addons") or []) if render_context else []
@@ -605,7 +647,8 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
 
     cols = max(1, int(grid1.get("columns") or 3)) if grid1 else 3
     is_minimal = bool(grid1 and (grid1.get("benefitPreset") == "compact-minimal" or grid1.get("cardStyle") == "minimal"))
-    row_height = 40.0 if is_minimal else (68.0 if cols == 2 else 66.0)
+    default_row_height = 40.0 if is_minimal else (72.0 if cols == 2 else 68.0)
+    addon_row_height = 40.0 if is_minimal else (88.0 if cols == 2 else 84.0)
     card_gap = 5.0
 
     if has_extras_section:
@@ -617,9 +660,9 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
         rows_ext = max(1, (n_ext + cols - 1) // cols) if n_ext > 0 else 0
         rows2 = max(1, (n2 + cols - 1) // cols) if n2 > 0 else 0
 
-        h1 = rows1 * row_height + max(0, rows1 - 1) * card_gap if rows1 > 0 else 40.0
-        h_ext = rows_ext * row_height + max(0, rows_ext - 1) * card_gap if rows_ext > 0 else 40.0
-        h2 = rows2 * row_height + max(0, rows2 - 1) * card_gap if rows2 > 0 else 40.0
+        h1 = rows1 * default_row_height + max(0, rows1 - 1) * card_gap if rows1 > 0 else 40.0
+        h_ext = rows_ext * addon_row_height + max(0, rows_ext - 1) * card_gap if rows_ext > 0 else 40.0
+        h2 = rows2 * addon_row_height + max(0, rows2 - 1) * card_gap if rows2 > 0 else 40.0
 
         y_g1 = y_top + hdr_h + pad
         y_h_ext = y_g1 + h1 + gap
@@ -628,14 +671,14 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
         y_g2 = y_h2 + hdr_h + pad
 
         grid_bottom = y_g2 + h2
-        footer_shift = grid_bottom + 16.0 - 1068.0 if grid_bottom > 1050.0 else 0.0
+        footer_shift = grid_bottom + 24.0 - 1050.0 if grid_bottom > 1020.0 else 0.0
 
         adjusted_elements = []
         for elem in elements:
             e = dict(elem)
             eid = e.get("id")
-            if eid == "cov_table_bg" and extra_shift > 0:
-                e["h"] = float(e.get("h") or 246) + extra_shift
+            if (eid in {"cov_table_bg", "premium_info_block"} or e.get("type") == "premium-info-block") and extra_shift > 0:
+                e["h"] = float(e.get("h") or (246 if eid == "cov_table_bg" else 132)) + extra_shift
             elif eid == "specials_header_bg" and hdr1_bg:
                 e["y"] = y_top
                 e["h"] = hdr_h
@@ -704,22 +747,22 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     rows1 = max(1, (n1 + cols - 1) // cols) if n1 > 0 else 0
     rows2 = max(1, (n2 + cols - 1) // cols) if n2 > 0 else 0
 
-    h1 = rows1 * row_height + max(0, rows1 - 1) * card_gap if rows1 > 0 else 40.0
-    h2 = rows2 * row_height + max(0, rows2 - 1) * card_gap if rows2 > 0 else 40.0
+    h1 = rows1 * default_row_height + max(0, rows1 - 1) * card_gap if rows1 > 0 else 40.0
+    h2 = rows2 * addon_row_height + max(0, rows2 - 1) * card_gap if rows2 > 0 else 40.0
 
     y_g1 = y_top + hdr_h + pad
     y_h2 = y_g1 + h1 + gap
     y_g2 = y_h2 + hdr_h + pad
 
     grid_bottom = y_g2 + h2
-    footer_shift = grid_bottom + 16.0 - 1068.0 if grid_bottom > 1050.0 else 0.0
+    footer_shift = grid_bottom + 24.0 - 1050.0 if grid_bottom > 1020.0 else 0.0
 
     adjusted_elements = []
     for elem in elements:
         e = dict(elem)
         eid = e.get("id")
-        if eid == "cov_table_bg" and extra_shift > 0:
-            e["h"] = float(e.get("h") or 246) + extra_shift
+        if (eid in {"cov_table_bg", "premium_info_block"} or e.get("type") == "premium-info-block") and extra_shift > 0:
+            e["h"] = float(e.get("h") or (246 if eid == "cov_table_bg" else 132)) + extra_shift
         elif eid == "specials_header_bg" and hdr1_bg:
             e["y"] = y_top
             e["h"] = hdr_h
@@ -918,8 +961,8 @@ def render_quotation_html(
             max_element_y = elem_bottom
             
     # Auto-expand height only if elements strictly exceed A4 base height
-    if max_element_y + 20 > height:
-        height = int(max_element_y + 20)
+    if max_element_y + 30 > height:
+        height = int(max_element_y + 30)
 
     elements = sorted(balanced, key=lambda item: int(item.get("z", 1)))
     body = "".join(

@@ -169,7 +169,7 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
         fields["service_fee"]["warnings"] = []
         fields["service_fee"]["message"] = ""
 
-    # Road tax: preserve if explicitly extracted from PDF; do not auto-inject if absent from quotation
+    # Road tax: preserve if explicitly extracted from PDF; otherwise automatically compute from engine CC
     if "roadtax" in fields:
         raw_rt = fields["roadtax"].get("value")
         parsed_rt = None
@@ -187,7 +187,15 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
             fields["roadtax"]["warnings"] = []
             fields["roadtax"]["message"] = ""
         else:
-            fields["roadtax"]["value"] = ""
+            # Auto-compute road tax from engine CC and vehicle type
+            auto_rt = 0.0
+            if effective_cc:
+                vtype = (fields.get("vehicle_type", {}).get("value") or inferred_type or "Car")
+                auto_rt = calculate_road_tax(cc=effective_cc, vehicle_type=vtype)
+            if auto_rt > 0:
+                fields["roadtax"]["value"] = f"{auto_rt:.2f}"
+            else:
+                fields["roadtax"]["value"] = ""
             fields["roadtax"]["status"] = "ready"
             fields["roadtax"]["warnings"] = []
             fields["roadtax"]["message"] = ""

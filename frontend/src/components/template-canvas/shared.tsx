@@ -368,7 +368,7 @@ export function CanvasElementView({
     lineHeight: style.lineHeight,
     transform: style.rotation ? `rotate(${style.rotation}deg)` : undefined,
     opacity: element.opacity ?? 1,
-    overflow: "hidden",
+    overflow: element.type === "premium-info-block" ? "visible" : "hidden",
     whiteSpace: "pre-wrap",
     display: isSpecial ? "flex" : undefined,
     flexDirection: isSpecial ? "column" : undefined,
@@ -563,18 +563,52 @@ export function CanvasElementView({
                       (b.label ? conceptAssets?.[b.label.toLowerCase()] || conceptAssets?.[b.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] || null : null) ||
                       (assets.find((a) => a.id === b.asset_id)?.url || null)
                     : null;
+                  const isAddonCard = Boolean(isAddons || b?.is_addon || b?.price || (b?.cost_status === "paid") || b?.detected_cost);
                   let extraMatch = null;
-                  if (b?.is_addon && benefitData?.extras) {
-                    extraMatch = benefitData.extras.find((ex: any) => ex.concept_id === b.concept_id || ex.label === b.label);
+                  if (benefitData?.extras) {
+                    extraMatch = benefitData.extras.find((ex: any) =>
+                      (b?.concept_id && ex.concept_id === b.concept_id) ||
+                      (b?.concept_key && ex.concept_key === b.concept_key) ||
+                      (b?.label && ex.label?.toLowerCase() === b.label?.toLowerCase())
+                    );
                   }
-                  const price = b?.price?.amount
-                    ? `Cost : MYR ${Number(b.price.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
-                    : (extraMatch as any)?.price?.amount || (extraMatch as any)?.price?.value
-                      ? `Cost : MYR ${Number((extraMatch as any).price.amount || (extraMatch as any).price.value).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
-                      : b?.is_detected && b?.detected_cost
-                        ? `Cost : MYR ${String(b.detected_cost).replace(/RM\s*/i, "")}`
-                        : null;
-                  const costBadge = price || null;
+                  const extractCost = (item: any): number | null => {
+                    if (!item) return null;
+                    const p = item.price ?? item.optional_price;
+                    if (p !== null && p !== undefined) {
+                      if (typeof p === "object") {
+                        const amt = p.amount ?? p.value;
+                        if (amt !== null && amt !== undefined && amt !== "") {
+                          const n = typeof amt === "string" ? parseFloat(amt.replace(/,/g, "")) : Number(amt);
+                          if (Number.isFinite(n) && n > 0) return n;
+                        }
+                      } else if (typeof p === "number" && Number.isFinite(p) && p > 0) {
+                        return p;
+                      } else if (typeof p === "string") {
+                        const n = parseFloat(p.replace(/[^0-9.]/g, ""));
+                        if (Number.isFinite(n) && n > 0) return n;
+                      }
+                    }
+                    if (item.detected_cost) {
+                      const n = parseFloat(String(item.detected_cost).replace(/[^0-9.]/g, ""));
+                      if (Number.isFinite(n) && n > 0) return n;
+                    }
+                    return null;
+                  };
+                  const costNum = extractCost(b) ?? (extraMatch ? extractCost(extraMatch) : null);
+                  const costBadge = costNum !== null
+                    ? `Cost : MYR ${costNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : (isAddonCard && !b?.is_pure_default ? "Cost : As quoted" : null);
+
+                  const rawLimit = b?.detected_limit || b?.coverage_limit;
+                  if (rawLimit && typeof rawLimit === "string" && rawLimit.trim()) {
+                    val = rawLimit.trim().startsWith("RM") ? rawLimit.trim() : `RM ${rawLimit.trim()}`;
+                  } else if (costNum !== null && val) {
+                    const valNum = parseFloat(String(val).replace(/[^0-9.]/g, ""));
+                    if (Number.isFinite(valNum) && Math.abs(valNum - costNum) < 0.01) {
+                      val = "";
+                    }
+                  }
 
                   return (
                     <article
@@ -709,18 +743,52 @@ export function CanvasElementView({
                                 (b.label ? conceptAssets?.[b.label.toLowerCase()] || conceptAssets?.[b.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] || null : null) ||
                                 (assets.find((a) => a.id === b.asset_id)?.url || null)
                               : null;
+                            const isAddonCard = Boolean(isAddons || b?.is_addon || b?.price || (b?.cost_status === "paid") || b?.detected_cost);
                             let extraMatch = null;
-                            if (b?.is_addon && benefitData?.extras) {
-                              extraMatch = benefitData.extras.find((ex: any) => ex.concept_id === b.concept_id || ex.label === b.label);
+                            if (benefitData?.extras) {
+                              extraMatch = benefitData.extras.find((ex: any) =>
+                                (b?.concept_id && ex.concept_id === b.concept_id) ||
+                                (b?.concept_key && ex.concept_key === b.concept_key) ||
+                                (b?.label && ex.label?.toLowerCase() === b.label?.toLowerCase())
+                              );
                             }
-                            const price = b?.price?.amount
-                              ? `Cost : MYR ${Number(b.price.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
-                              : (extraMatch as any)?.price?.amount || (extraMatch as any)?.price?.value
-                                ? `Cost : MYR ${Number((extraMatch as any).price.amount || (extraMatch as any).price.value).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
-                                : b?.is_detected && b?.detected_cost
-                                  ? `Cost : MYR ${String(b.detected_cost).replace(/RM\s*/i, "")}`
-                                  : null;
-                            const costBadge = price || null;
+                            const extractCost = (item: any): number | null => {
+                              if (!item) return null;
+                              const p = item.price ?? item.optional_price;
+                              if (p !== null && p !== undefined) {
+                                if (typeof p === "object") {
+                                  const amt = p.amount ?? p.value;
+                                  if (amt !== null && amt !== undefined && amt !== "") {
+                                    const n = typeof amt === "string" ? parseFloat(amt.replace(/,/g, "")) : Number(amt);
+                                    if (Number.isFinite(n) && n > 0) return n;
+                                  }
+                                } else if (typeof p === "number" && Number.isFinite(p) && p > 0) {
+                                  return p;
+                                } else if (typeof p === "string") {
+                                  const n = parseFloat(p.replace(/[^0-9.]/g, ""));
+                                  if (Number.isFinite(n) && n > 0) return n;
+                                }
+                              }
+                              if (item.detected_cost) {
+                                const n = parseFloat(String(item.detected_cost).replace(/[^0-9.]/g, ""));
+                                if (Number.isFinite(n) && n > 0) return n;
+                              }
+                              return null;
+                            };
+                            const costNum = extractCost(b) ?? (extraMatch ? extractCost(extraMatch) : null);
+                            const costBadge = costNum !== null
+                              ? `Cost : MYR ${costNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                              : (isAddonCard && !b?.is_pure_default ? "Cost : As quoted" : null);
+
+                            const rawLimit = b?.detected_limit || b?.coverage_limit;
+                            if (rawLimit && typeof rawLimit === "string" && rawLimit.trim()) {
+                              val = rawLimit.trim().startsWith("RM") ? rawLimit.trim() : `RM ${rawLimit.trim()}`;
+                            } else if (costNum !== null && val) {
+                              const valNum = parseFloat(String(val).replace(/[^0-9.]/g, ""));
+                              if (Number.isFinite(valNum) && Math.abs(valNum - costNum) < 0.01) {
+                                val = "";
+                              }
+                            }
 
                             return (
                               <article
@@ -840,7 +908,22 @@ export function CanvasElementView({
             });
           }
           const premium = variableValues?.premium || "";
-          const roadtax = variableValues?.roadtax || "";
+          let roadtax = variableValues?.roadtax || "";
+          if (!roadtax || roadtax === "0" || roadtax === "0.00") {
+            const ccStr = variableValues?.engine_cc || "";
+            const parsedCC = ccStr ? parseInt(String(ccStr).replace(/[^0-9]/g, ""), 10) : 0;
+            if (parsedCC > 0) {
+              if (parsedCC <= 1000) roadtax = "20.00";
+              else if (parsedCC <= 1200) roadtax = "55.00";
+              else if (parsedCC <= 1400) roadtax = "70.00";
+              else if (parsedCC <= 1600) roadtax = "90.00";
+              else if (parsedCC <= 1800) roadtax = (200 + (parsedCC - 1600) * 0.40).toFixed(2);
+              else if (parsedCC <= 2000) roadtax = (280 + (parsedCC - 1800) * 0.50).toFixed(2);
+              else if (parsedCC <= 2500) roadtax = (380 + (parsedCC - 2000) * 1.00).toFixed(2);
+              else if (parsedCC <= 3000) roadtax = (880 + (parsedCC - 2500) * 2.50).toFixed(2);
+              else roadtax = (2130 + (parsedCC - 3000) * 4.50).toFixed(2);
+            }
+          }
           const runner = variableValues?.service_fee || "";
 
           const pNum = parseFloat(String(premium).replace(/[^0-9.]/g, "")) || 0;
@@ -1007,7 +1090,7 @@ export function balanceBenefitGridElements(
   },
 ): CanvasElement[] {
   const extras = benefitData?.extras || [];
-  const extraShift = (extras.length + (extras.length > 0 ? 1 : 0)) * 14;
+  const extraShift = (extras.length + (extras.length > 0 ? 1 : 0)) * 15;
   if (!benefitData && extraShift === 0) return elements;
   const currentCards = benefitData?.current_benefits || [];
   const addonCards = benefitData?.available_addons || [];
@@ -1035,7 +1118,8 @@ export function balanceBenefitGridElements(
   const pad = 3;
   const cols = Number(grid1.columns || 3);
   const isMinimal = grid1.benefitPreset === "compact-minimal" || grid1.cardStyle === "minimal";
-  const rowHeight = isMinimal ? 40 : (cols === 2 ? 68 : 66);
+  const defaultRowHeight = isMinimal ? 40 : (cols === 2 ? 72 : 68);
+  const addonRowHeight = isMinimal ? 40 : (cols === 2 ? 88 : 84);
   const cardGap = 5;
 
   const hasExplicitExtrasGrid = elements.some((e) => e.gridKind === "extras" || e.gridKind === "purchased_extras");
@@ -1050,9 +1134,9 @@ export function balanceBenefitGridElements(
     const rowsExt = nExt > 0 ? Math.ceil(nExt / cols) : 0;
     const rows2 = n2 > 0 ? Math.ceil(n2 / cols) : 0;
 
-    const h1 = rows1 > 0 ? rows1 * rowHeight + Math.max(0, rows1 - 1) * cardGap : 40;
-    const hExt = rowsExt > 0 ? rowsExt * rowHeight + Math.max(0, rowsExt - 1) * cardGap : 40;
-    const h2 = rows2 > 0 ? rows2 * rowHeight + Math.max(0, rows2 - 1) * cardGap : 40;
+    const h1 = rows1 > 0 ? rows1 * defaultRowHeight + Math.max(0, rows1 - 1) * cardGap : 40;
+    const hExt = rowsExt > 0 ? rowsExt * addonRowHeight + Math.max(0, rowsExt - 1) * cardGap : 40;
+    const h2 = rows2 > 0 ? rows2 * addonRowHeight + Math.max(0, rows2 - 1) * cardGap : 40;
 
     const yG1 = yTop + hdrH + pad;
     const yHExt = yG1 + h1 + gap;
@@ -1061,13 +1145,13 @@ export function balanceBenefitGridElements(
     const yG2 = yH2 + hdrH + pad;
 
     const gridBottom = yG2 + h2;
-    const footerShift = gridBottom > 1050 ? gridBottom + 16 - 1068 : 0;
+    const footerShift = gridBottom > 1020 ? gridBottom + 24 - 1050 : 0;
 
     const adjusted: CanvasElement[] = [];
     for (const elem of elements) {
       const e = { ...elem };
-      if (e.id === "cov_table_bg" && extraShift > 0) {
-        e.h = Number(e.h || 246) + extraShift;
+      if ((e.id === "cov_table_bg" || e.id === "premium_info_block" || e.type === "premium-info-block") && extraShift > 0) {
+        e.h = Number(e.h || (e.id === "cov_table_bg" ? 246 : 132)) + extraShift;
       } else if (e.id === "specials_header_bg" && hdr1Bg) {
         e.y = yTop;
         e.h = hdrH;
@@ -1139,20 +1223,20 @@ export function balanceBenefitGridElements(
   const rows1 = n1 > 0 ? Math.ceil(n1 / cols) : 0;
   const rows2 = n2 > 0 ? Math.ceil(n2 / cols) : 0;
 
-  const h1 = rows1 > 0 ? rows1 * rowHeight + Math.max(0, rows1 - 1) * cardGap : 40;
-  const h2 = rows2 > 0 ? rows2 * rowHeight + Math.max(0, rows2 - 1) * cardGap : 40;
+  const h1 = rows1 > 0 ? rows1 * defaultRowHeight + Math.max(0, rows1 - 1) * cardGap : 40;
+  const h2 = rows2 > 0 ? rows2 * addonRowHeight + Math.max(0, rows2 - 1) * cardGap : 40;
 
   const yG1 = yTop + hdrH + pad;
   const yH2 = yG1 + h1 + gap;
   const yG2 = yH2 + hdrH + pad;
 
   const gridBottom = yG2 + h2;
-  const footerShift = gridBottom > 1050 ? gridBottom + 16 - 1068 : 0;
+  const footerShift = gridBottom > 1020 ? gridBottom + 24 - 1050 : 0;
 
   return elements.map((elem) => {
     const e = { ...elem };
-    if (e.id === "cov_table_bg" && extraShift > 0) {
-      e.h = Number(e.h || 246) + extraShift;
+    if ((e.id === "cov_table_bg" || e.id === "premium_info_block" || e.type === "premium-info-block") && extraShift > 0) {
+      e.h = Number(e.h || (e.id === "cov_table_bg" ? 246 : 132)) + extraShift;
     } else if (e.id === "specials_header_bg" && hdr1Bg) {
       e.y = yTop;
       e.h = hdrH;

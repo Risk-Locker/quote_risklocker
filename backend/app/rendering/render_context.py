@@ -178,6 +178,21 @@ def adjusted_total_text(fields: dict, extras: list[dict]) -> str:
                 rt_num = Decimal(clean_rt)
         except Exception:
             pass
+    if rt_num == Decimal("0") and (fields or {}).get("engine_cc"):
+        from app.services.road_tax_service import calculate_road_tax
+        cc_raw = (fields or {}).get("engine_cc")
+        cc_val = cc_raw.get("value") if isinstance(cc_raw, dict) else cc_raw
+        if cc_val:
+            try:
+                clean_cc = float(re.sub(r"[^\d.]", "", str(cc_val)))
+                if clean_cc > 0:
+                    vtype_raw = (fields or {}).get("vehicle_type")
+                    vtype_val = vtype_raw.get("value") if isinstance(vtype_raw, dict) else vtype_raw
+                    rt_calc = calculate_road_tax(clean_cc, str(vtype_val or "Car"))
+                    if rt_calc > 0:
+                        rt_num = Decimal(f"{rt_calc:.2f}")
+            except Exception:
+                pass
 
     sf_raw = (fields or {}).get("service_fee") or (fields or {}).get("runner_fee")
     sf_val = sf_raw.get("value") if isinstance(sf_raw, dict) else sf_raw
@@ -294,6 +309,25 @@ def _card(
                 else:
                     cost_status = "paid"
 
+    # Disambiguate coverage amount (typed_value / card_val) from price / cost
+    opt_p = getattr(offering, "optional_price", None) or price
+    if opt_p and typed_value:
+        p_val = (opt_p.get("amount") if opt_p.get("amount") is not None else opt_p.get("value")) if isinstance(opt_p, dict) else opt_p
+        t_val = (typed_value.get("amount") if typed_value.get("amount") is not None else typed_value.get("value")) if isinstance(typed_value, dict) else typed_value
+        if p_val is not None and t_val is not None:
+            try:
+                if abs(float(str(p_val).replace(",", "")) - float(str(t_val).replace(",", ""))) < 0.01:
+                    ev_lim = (getattr(selection, "evidence_snapshot", None) or {}).get("coverage_limit")
+                    disp = getattr(offering, "display_value", None)
+                    if ev_lim:
+                        typed_value = {"type": "string", "display_text": str(ev_lim)}
+                    elif disp and str(disp).strip() and str(disp).strip() != str(p_val).strip():
+                        typed_value = {"type": "string", "display_text": str(disp)}
+                    else:
+                        typed_value = None
+            except Exception:
+                pass
+
     try:
         card_val = format_benefit_value(typed_value) if typed_value is not None else ""
     except RenderContextError:
@@ -302,7 +336,18 @@ def _card(
         else:
             card_val = str(typed_value or "")
 
+    # If card_val is empty, but evidence_snapshot has an extracted coverage limit (e.g. RM 4,000):
+    ev_lim = (getattr(selection, "evidence_snapshot", None) or {}).get("coverage_limit")
+    if ev_lim and (not card_val or card_val in {"Included standard cover", "Included", "FOC", "As quoted"}):
+        card_val = str(ev_lim) if str(ev_lim).startswith("RM") else f"RM {ev_lim}"
+
     is_pure_default = catalog_def.get("category") == "default" and not is_detected and not is_purchased_extra if catalog_def else False
+    is_addon = bool(
+        getattr(selection, "state", None) == "available_addon"
+        or getattr(offering, "role", None) in {"addon_option", "bundle_component"}
+        or getattr(offering, "offering_kind", None) in {"optional", "upgrade"}
+        or (catalog_def and catalog_def.get("category") == "addon")
+    )
 
     return {
         "card_key": f"{getattr(selection, 'id', 'offer')}:{offering.id}:{facet_id or 'parent'}",
@@ -328,6 +373,7 @@ def _card(
         "sort_order": int(getattr(offering, "sort_order", 0) or 0),
         "is_detected": is_detected,
         "is_pure_default": is_pure_default,
+        "is_addon": is_addon,
         "group_id": getattr(selection, "package_plan_id", None),
     }
 
