@@ -186,29 +186,6 @@ def import_vehicles_workbook(db: Session, user, sheets: list[tuple[str, list[dic
     return {"created": created, "updated": updated, "errors": errors}
 
 
-def get_runner_fee_default(db: Session) -> float:
-    setting = db.get(AppSetting, "runner_fee_default")
-    if setting is None:
-        return 20.0
-    try:
-        return float((setting.value or {}).get("amount", 20.0))
-    except (TypeError, ValueError):
-        return 20.0
-
-
-def set_runner_fee_default(db: Session, user, amount: float) -> float:
-    require_admin(user)
-    if amount < 0 or amount > 100000:
-        raise AppError("Runner fee must be between 0 and 100000.", 400)
-    setting = db.get(AppSetting, "runner_fee_default")
-    if setting is None:
-        setting = AppSetting(key="runner_fee_default", value={})
-        db.add(setting)
-    setting.value = {"amount": round(amount, 2)}
-    db.commit()
-    return float(setting.value["amount"])
-
-
 def serialize_template(template: OutputTemplateConfig, db: Session | None = None) -> dict:
     config = normalize_template_config(template.fixed_fields, template.name)
     company_name = None

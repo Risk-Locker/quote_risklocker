@@ -530,7 +530,7 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
         total = adjusted_total_text(fields, extras) if extras else _value(fields, "total_amount")
     if not total:
         total = _value(fields, "total_amount")
-    rows.append(("total", str(labels.get("total") or "Final Price / 最终总额"), "", _format_value(total, "RM ")))
+    rows.append(("total", str(labels.get("total") or "TOTAL PAYABLE"), "", _format_value(total, "RM ")))
     html: list[str] = []
     for index, (kind, label, middle_val, right_val) in enumerate(rows):
         row_y = y + index * row_height

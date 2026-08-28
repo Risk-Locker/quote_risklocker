@@ -191,7 +191,7 @@ def _agency_bilingual_config() -> dict:
                 "premium": "Insurance Premium / 保费",
                 "roadtax": "Roadtax / 路税",
                 "runner": "Runner Fee / 服务费",
-                "total": "Total Premium / 保费总额",
+                "total": "TOTAL PAYABLE",
                 "extras": "Extras / 附加项目",
             },
         },

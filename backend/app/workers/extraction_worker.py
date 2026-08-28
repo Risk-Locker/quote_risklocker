@@ -200,7 +200,7 @@ def process_extraction_job(
     for field in fields.values():
         if isinstance(field, dict) and field.get("value") not in (None, ""):
             field["status"] = "ready"
-    fee_setting = db.get(AppSetting, "runner_fee_default")
+    fee_setting = db.get(AppSetting, "default_runner_fee")
     if fee_setting is not None and str(fields.get("service_fee", {}).get("value") or "").strip() == "":
         try:
             fields["service_fee"] = {"value": f"{float((fee_setting.value or {}).get('amount', 0)):.2f}", "status": "ready", "message": ""}

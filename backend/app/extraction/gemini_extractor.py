@@ -148,7 +148,7 @@ GEMINI_EXTRACTION_SCHEMA = {
         },
         "coverage_amount": {
             "type": "string",
-            "description": "Sum insured / agreed value / market value (e.g. '53,000.00').",
+            "description": "Vehicle Sum Insured / Agreed Value / Market Value of the CAR itself (e.g. '53,000.00', '71,000.00'). Look for 'Sum Insured', 'Jumlah Diinsuranskan'. DO NOT extract the premium/price of an extra coverage option as the sum insured. A car sum insured is almost never a small number like 400 or 1000. It is usually tens of thousands (e.g. 10000+).",
         },
         "cover_start_date": {
             "type": "string",

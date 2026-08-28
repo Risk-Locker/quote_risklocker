@@ -2034,7 +2034,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded bg-gray-50 p-2.5 text-xs">
                   <div><span className="text-[var(--rl-text-muted)]">Plate:</span> <strong className="text-[var(--rl-text-strong)] font-mono">{formValues.vehicle_no || "—"}</strong></div>
                   <div><span className="text-[var(--rl-text-muted)]">Insured:</span> <strong className="text-[var(--rl-text-strong)] truncate max-w-[140px] inline-block align-bottom">{formValues.customer_name || "—"}</strong></div>
-                  <div><span className="text-[var(--rl-text-muted)]">Total Payable:</span> <strong className="text-[var(--rl-red)] font-mono font-bold">RM {previewFields["total_amount"] || formValues.total_amount || "0.00"}</strong></div>
+                  <div><span className="text-[var(--rl-text-muted)]">TOTAL PAYABLE:</span> <strong className="text-[var(--rl-red)] font-mono font-bold">RM {previewFields["total_amount"] || formValues.total_amount || "0.00"}</strong></div>
                 </div>
               ) : (
                 <>
