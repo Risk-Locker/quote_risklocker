@@ -1653,10 +1653,12 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     }
 
     let currentRevision = workspace.revision;
+    let currentBlockers = workspace.generation_blockers || [];
     if (mutation.dirty || queuedAny) {
       try {
         const saved = await save();
         currentRevision = saved.revision;
+        currentBlockers = saved.generation_blockers || [];
       } catch (err) {
         setActionError("Please resolve errors before downloading PDF: " + apiErrorMessage(err));
         setPdfLoading(false);
@@ -1664,8 +1666,9 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       }
     } else {
       try {
-        const latest = await api<{ revision: number }>(`/sessions/${id}/workspace`);
+        const latest = await api<{ revision: number, generation_blockers: any[] }>(`/sessions/${id}/workspace`);
         currentRevision = latest.revision;
+        currentBlockers = latest.generation_blockers || [];
       } catch (e) {}
     }
     if (currentRevision == null) {
@@ -1674,7 +1677,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     }
 
     try {
-      const nonFatalBlockers = (workspace.generation_blockers || []).filter(
+      const nonFatalBlockers = currentBlockers.filter(
         (b) => b.code !== "scalar_check_needed" && b.code !== "missing_catalog"
       );
       if (nonFatalBlockers.length > 0) {
