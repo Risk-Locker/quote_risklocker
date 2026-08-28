@@ -21,6 +21,7 @@ from app.core.errors import AppError  # noqa: E402
 from app.models.enums import RecordStatus  # noqa: E402
 from app.models.tables import (  # noqa: E402
     DraftBenefitSelection,
+    DraftSourceLineDecision,
     GeneratedPdfVersion,
     Job,
     OutputTemplateConfig,
@@ -40,6 +41,7 @@ NOW = datetime.now(timezone.utc)
 class Scalars:
     def __init__(self, rows): self.rows = rows
     def all(self): return list(self.rows)
+    def first(self): return self.rows[0] if self.rows else None
 
 
 class FakeDb:
@@ -76,7 +78,7 @@ def objects(*, blockers=False):
     draft = QuotationDraft(
         id="draft-1", uploaded_file_id=uploaded.id, owner_id="owner-1", revision=7,
         fields=fields, scalar_decisions=decisions, warnings=[], status=RecordStatus.READY.value,
-        template_revision_id="template-revision-1", catalog_revision_id="catalog-revision-1",
+        template_revision_id=None if blockers else "template-revision-1", catalog_revision_id="catalog-revision-1",
         reviewed_at=NOW, reviewed_by="staff-1",
     )
     session = Session(id="session-1", owner_id="owner-1", uploaded_file_id=uploaded.id, draft_id=draft.id, status="active")
@@ -87,6 +89,9 @@ def objects(*, blockers=False):
         id="template-revision-1", template_id=template.id, revision_number=1, state="published",
         page_profile_id=page.id, config=config, config_hash="a" * 64, published_at=NOW,
     )
+    if blockers:
+        line = DraftSourceLineDecision(id="line-1", draft_id=draft.id, source_line_id="s1", disposition="unresolved")
+        return uploaded, draft, session, template, page, revision, line
     return uploaded, draft, session, template, page, revision
 
 
