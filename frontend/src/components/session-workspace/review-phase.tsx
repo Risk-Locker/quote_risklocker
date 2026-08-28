@@ -1769,7 +1769,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
               onPointerDown={handlePointerDown("pdf")}
               role="separator"
               aria-orientation="vertical"
-              className="group w-3.5 -mx-1 flex items-center justify-center cursor-col-resize self-stretch z-20 shrink-0 hidden lg:flex"
+              className="group w-3.5 -mx-1 flex items-center justify-center cursor-col-resize self-stretch z-10 shrink-0 hidden lg:flex"
             >
               <div className={`w-1 h-full rounded-full transition-colors ${isDragging === "pdf" ? "bg-[var(--rl-red)]" : "bg-[var(--rl-border)] group-hover:bg-[var(--rl-red)]"}`} />
             </div>
@@ -2330,7 +2330,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
           onPointerDown={handlePointerDown("main")}
           role="separator"
           aria-orientation="vertical"
-          className="group w-3.5 -mx-1 flex items-center justify-center cursor-col-resize self-stretch z-20 shrink-0 hidden lg:flex"
+          className="group w-3.5 -mx-1 flex items-center justify-center cursor-col-resize self-stretch z-10 shrink-0 hidden lg:flex"
         >
           <div className={`w-1 h-full rounded-full transition-colors ${isDragging === "main" ? "bg-[var(--rl-red)]" : "bg-[var(--rl-border)] group-hover:bg-[var(--rl-red)]"}`} />
         </div>

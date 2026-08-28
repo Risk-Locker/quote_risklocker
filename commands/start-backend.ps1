@@ -27,10 +27,14 @@ Write-Host "Starting Risklocker backend on http://127.0.0.1:$port ..."
 
 $env:PYTHONPATH = "backend"
 $env:PYTHONDONTWRITEBYTECODE = "1"
+$env:PYTHONUNBUFFERED = "1"
+
+$pythonExe = Join-Path $root ".venv\Scripts\python.exe"
+
 if ($env:BACKEND_RELOAD -eq "1" -or $env:BACKEND_RELOAD -eq "true") {
     Write-Host "Backend reload mode is enabled. If a port is left open, run: npm run stop"
-    & (Join-Path $root ".venv\Scripts\python.exe") -m uvicorn app.main:app --reload --host 127.0.0.1 --port $port
+    & $pythonExe -u -m uvicorn app.main:app --reload --host 127.0.0.1 --port $port --log-level info --access-log
 }
 else {
-    & (Join-Path $root ".venv\Scripts\python.exe") -m uvicorn app.main:app --host 127.0.0.1 --port $port
+    & $pythonExe -u -m uvicorn app.main:app --host 127.0.0.1 --port $port --log-level info --access-log
 }

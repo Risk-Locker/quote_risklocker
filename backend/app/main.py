@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import sys
+import time
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.routes import router
@@ -21,11 +26,42 @@ from app.services.storage_retention import purge_expired_pdfs  # RL-DISABLED aut
 from app.storage.supabase import SupabaseStorage, close_shared_storage_client
 
 
+def _setup_logging() -> None:
+    """Ensure root and application loggers stream to stdout in real time."""
+    root_logger = logging.getLogger()
+    if not root_logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setLevel(logging.INFO)
+        formatter = logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
+        )
+        handler.setFormatter(formatter)
+        root_logger.addHandler(handler)
+    root_logger.setLevel(logging.INFO)
+    logging.getLogger("app").setLevel(logging.INFO)
+
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """Log every incoming HTTP request and response status in real time."""
+
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        start_time = time.perf_counter()
+        response = await call_next(request)
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger = logging.getLogger("app.http")
+        logger.info("%s %s -> %d (%.1fms)", request.method, request.url.path, response.status_code, duration_ms)
+        return response
+
+
 def create_app() -> FastAPI:
+    _setup_logging()
     settings = get_settings()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        logger = logging.getLogger("app.main")
+        logger.info("Risklocker backend starting (env=%s)", settings.app_env)
         verify_database_connection()
         verify_schema_version()
         SupabaseStorage(settings).ensure_bucket()
@@ -79,6 +115,7 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "Idempotency-Key", "Range", "X-CSRF-Token"],
     )
+    app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(
         RequestSecurityMiddleware,
         settings=settings,

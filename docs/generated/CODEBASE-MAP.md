@@ -54,7 +54,7 @@ Generated file map. Line spans are navigational hints and are refreshed by the m
 - `backend/app/extraction/types.py` L1-50: PDF layout extraction candidate mapping and validation. Symbols: `CandidateValue` L10-20; `ExtractionBundle` L24-32; `FieldSelection` L36-50.
 - `backend/app/extraction/validators.py` L1-89: PDF layout extraction candidate mapping and validation. Symbols: `normalize_money` L13-24; `normalize_date` L27-36; `validate_vehicle_number` L39-45; `validate_money` L48-52; `validate_date` L55-58; `validate_date_range` L61-68; `validate_ncd` L71-80; `validate_engine_cc` L83-89.
 - `backend/app/extraction/windscreen_scraper.py` L1-102: PDF layout extraction candidate mapping and validation. Symbols: `WindscreenScraper` L5-90.
-- `backend/app/main.py` L1-98: project file. Symbols: `create_app` L24-95.
+- `backend/app/main.py` L1-135: project file. Symbols: `_setup_logging` L29-42; `RequestLoggingMiddleware` L45-54; `create_app` L57-132.
 - `backend/app/models/__init__.py` L1-1: SQLAlchemy tables and shared enums.
 - `backend/app/models/enums.py` L1-62: SQLAlchemy tables and shared enums. Symbols: `Role` L8-12; `AccountStatus` L15-18; `NotificationEventType` L21-24; `DeliveryState` L27-29; `RecordStatus` L32-39; `FieldStatus` L42-45; `StorageStatus` L48-54; `InsuranceType` L57-62.
 - `backend/app/models/tables.py` L1-983: SQLAlchemy tables and shared enums. Symbols: `utcnow` L15-16; `new_id` L19-20; `Base` L23-24; `TimestampMixin` L27-29; `SoftDeleteMixin` L32-44; `User` L47-59; `AuthSession` L62-76; `RateLimitBucket` L79-87; `InsuranceCategory` L90-95; `InsuranceCompany` L98-111; `OutputTemplateConfig` L114-128; `TemplateGroup` L131-136.
@@ -341,10 +341,10 @@ Generated file map. Line spans are navigational hints and are refreshed by the m
 - `commands/seed-demo.py` L1-561: developer operations and maintenance command. Symbols: `_normalize_phrase` L48-49; `cleanup_junk` L55-59; `seed_global_benefits` L62-130; `seed_company_package_chains` L133-449; `seed_company_aliases` L495-518; `main` L521-557.
 - `commands/seed-docx-draft.py` L1-643: developer operations and maintenance command. Symbols: `seed_docx_drafts` L443-606; `main` L609-639.
 - `commands/smoke-test.py` L1-172: developer operations and maintenance command. Symbols: `create_smoke_pdf` L37-60; `cleanup` L63-91; `run` L94-165.
-- `commands/start-backend.ps1` L1-36: developer operations and maintenance command.
+- `commands/start-backend.ps1` L1-40: developer operations and maintenance command.
 - `commands/start-frontend.ps1` L1-126: developer operations and maintenance command.
 - `commands/start-full.ps1` L1-55: developer operations and maintenance command.
-- `commands/start-worker.ps1` L1-13: developer operations and maintenance command.
+- `commands/start-worker.ps1` L1-14: developer operations and maintenance command.
 - `commands/stop-app.ps1` L1-77: developer operations and maintenance command.
 - `commands/test-all.ps1` L1-34: developer operations and maintenance command.
 - `commands/update-asset-manifest.py` L1-24: developer operations and maintenance command. Symbols: `main` L16-20.

@@ -1,5 +1,15 @@
 # Risklocker Project Memory
 
+## 2026-08-28 · Antigravity (Gemini 3.7 Flash) · Backend Real-Time Unbuffered Logging & Request Middleware — EXECUTED
+Asked: Fix backend not providing real-time logs in terminal.
+Done: 1) start-backend.ps1:28-36 and start-worker.ps1:10-14 set `$env:PYTHONUNBUFFERED = "1"`, passed `-u` flag to Python, and added `--access-log --log-level info` to uvicorn; 2) main.py:26-53 added `_setup_logging()` and `RequestLoggingMiddleware` streaming every HTTP request (`method path -> status (ms)`) to unbuffered stdout in real time.
+Pending: none.
+
+## 2026-08-28 · Antigravity (Gemini 3.7 Flash) · Review Phase Column Resizers Z-Index Fix — EXECUTED
+Asked: Fix column resizers overlapping sticky workspace header when scrolled down so they slide underneath.
+Done: Changed resizer sliders' z-index from `z-20` to `z-10` in `frontend/src/components/session-workspace/review-phase.tsx:1772,2333` so sticky header (`z-20`) cleanly layers above resizers on scroll.
+Pending: none.
+
 ## 2026-08-28 · Antigravity (Gemini 3.7 Flash) · Code Audit, Import Fix, Calculation Harmonization & v10 / main Release — EXECUTED
 Asked: Perform final verification for coding/logic/build/module issues; if all okay, commit and push to origin v10 then commit and push to origin main.
 Done: Audited all modified files; fixed missing `import re` and aligned base `total_amount` in `draft_mapper.py:5,260-290`; verified 534/534 backend pytest, `npx tsc --noEmit` (0 errors), `npm run build` (36/36 routes), and code map current; committed and pushed to `origin/v10` and synced to `origin/main`.
@@ -792,3 +802,4 @@ Pending: push to origin/v8 + main → first real deploy (main at 3835b5d already
 - 2026-08-27 � claude-3-5-sonnet-v2 � Fix template builder mock preview � Updated previewItems in template builder to slice both defaults and addons (4 each) so that both categories show in the preview grid. Also removed truncation CSS from the template builder UI preview. � Pending: None.
 - 2026-08-27  claude-3-5-sonnet-v2  Dynamic UI expansion & LLTP mapping  Rewrote balanceBenefitGridElements (shared.tsx) and review-phase.tsx to dynamically expand canvasH instead of squishing elements; updated workspace_service.py to auto-apply extracted benefits with valid prices into defaults/addons; added 95-char description truncation.  Pending: None.
 - 2026-08-27  Antigravity  Fix coverage format, grid gap, and PDF fallback  shared.tsx: coverage_limit now formatted as (RM X,XXX) inside label, no separate RM col; rowHeight 125->100px, gap 10->6px; review-phase.tsx: PDF failure now shows error instead of silent PNG fallback.  Pending: None.
+- 2026-08-28  Antigravity  Pickup user changes - masonry, presets, coverage formatting  User refactored shared.tsx & review-phase.tsx to use SYSTEM_BENEFIT_PRESETS from @/lib/benefit-presets; added per-session preset switcher; switched default to 3-col masonry; template_renderer.py now uses compact density + masonry by default; footer auto-shift for overflow pages.  Pending: tests + commit.
