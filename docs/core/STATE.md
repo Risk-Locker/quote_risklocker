@@ -10,6 +10,11 @@ Current high-signal snapshot of active development. Rotate old entries to `docs/
 
 ## Recent Interaction Logs (Active Window)
 
+### 2026-09-01 · Antigravity (Gemini 3.7 Flash) · Fix Malware Scan Subprocess Failure on VPS Without Clamd Daemon — EXECUTED
+Asked: Fix 400 Bad Request error on upload endpoint caused by `clamdscan` executing when `clamav-daemon` is offline.
+Done: Updated `document_security.py:59-75` to immediately bypass subprocess when `required=False` and automatically fallback from `clamdscan` (exit 2) to `clamscan` when `required=True`; verified 541/541 pytest green.
+Pending: none.
+
 ### 2026-09-01 · Antigravity (Gemini 3.7 Flash) · Resolve IDE Type Diagnostics in Document Security & Tests — EXECUTED
 Asked: Fix IDE diagnostic warnings and type errors in `document_security.py` and `test_hardening.py`.
 Done: Updated `document_security.py:10-170` (fixed `acro_form.get` array typing, `@contextmanager` `Generator` return type) and `test_hardening.py:1-176` (added `Settings` type casting for `SimpleNamespace` mock objects and safe `new_page` attribute access); verified 541/541 pytest green, TypeScript clean.

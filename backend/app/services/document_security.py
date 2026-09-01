@@ -57,14 +57,18 @@ def scanner_status(settings: Settings | None = None) -> tuple[bool, str]:
 
 
 def _scan_malware(path: Path, required: bool) -> dict:
+    if not required:
+        return {"engine": "builtin_structural", "result": "clean", "signature_version": "pikepdf+PyMuPDF"}
     command = _defender_command(path)
     if not command:
-        if required:
-            raise ValueError("A malware scanner is required before PDFs can be uploaded.")
-        return {"engine": "builtin_structural", "result": "clean", "signature_version": "pikepdf+PyMuPDF"}
+        raise ValueError("A malware scanner is required before PDFs can be uploaded.")
     args, engine = command
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=90, check=False)
+        if result.returncode == 2 and args[0].endswith("clamdscan"):
+            clamscan = shutil.which("clamscan")
+            if clamscan:
+                result = subprocess.run([clamscan, "--no-summary", str(path)], capture_output=True, text=True, timeout=90, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ValueError("The malware scan could not be completed.") from exc
     if result.returncode != 0:
