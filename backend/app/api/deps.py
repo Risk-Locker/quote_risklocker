@@ -31,6 +31,7 @@ def ensure_trusted_origin(request: Request, settings: Settings) -> None:
         return
     origin = (request.headers.get("origin") or "").rstrip("/")
     if origin and origin not in settings.cors_origins:
+        print(f"DEBUG(deps): Rejected origin {origin!r}. Allowed: {settings.cors_origins}", flush=True)
         raise AppError("This request origin is not allowed.", 403)
     if settings.app_env == "production" and not origin:
         raise AppError("This request origin is not allowed.", 403)

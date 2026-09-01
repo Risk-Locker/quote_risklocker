@@ -150,11 +150,21 @@ def _app_network_settings(app_env: str) -> tuple[str, tuple[str, ...], tuple[str
             raise RuntimeError("TRUSTED_PROXY_IPS must not trust the entire internet.")
 
     raw_origins = os.getenv("CORS_ORIGINS", "").strip()
-    origins = tuple(origin.strip().rstrip("/") for origin in raw_origins.split(",") if origin.strip())
-    if not origins:
-        origins = (raw_origin,) if app_env in {"staging", "production"} else tuple(
-            dict.fromkeys((raw_origin, "http://localhost:3000", "http://127.0.0.1:3000"))
-        )
+    base_origins = [origin.strip().rstrip("/") for origin in raw_origins.split(",") if origin.strip()]
+    
+    if not base_origins and app_env in {"staging", "production"}:
+        base_origins = [raw_origin]
+        
+    if app_env not in {"staging", "production"}:
+        for port in range(3000, 3011):
+            base_origins.append(f"http://localhost:{port}")
+            base_origins.append(f"http://127.0.0.1:{port}")
+        for port in range(8100, 8111):
+            base_origins.append(f"http://localhost:{port}")
+            base_origins.append(f"http://127.0.0.1:{port}")
+            
+    origins = tuple(dict.fromkeys(base_origins))
+    
     if app_env == "production" and any(origin != raw_origin for origin in origins):
         raise RuntimeError("CORS_ORIGINS must use the same origin as APP_ORIGIN in production.")
     return raw_origin, hosts, proxies, origins
@@ -226,7 +236,7 @@ def get_settings() -> Settings:
     source_limit_name = "MAX_SOURCE_PDF_BYTES" if os.getenv("MAX_SOURCE_PDF_BYTES") is not None else "MAX_UPLOAD_BYTES"
     max_source_pdf_bytes = _bounded_int(source_limit_name, 20 * 1024 * 1024, 1024, 100 * 1024 * 1024)
     max_pdf_pages = _bounded_int("MAX_PDF_PAGES", 100, 1, 2_000)
-    max_generated_pdf_bytes = _bounded_int("MAX_GENERATED_PDF_BYTES", 25 * 1024 * 1024, 1024, 100 * 1024 * 1024)
+    max_generated_pdf_bytes = _bounded_int("MAX_GENERATED_PDF_BYTES", 80 * 1024 * 1024, 1024, 100 * 1024 * 1024)
     max_asset_bytes = _bounded_int("MAX_ASSET_BYTES", 10 * 1024 * 1024, 1024, 50 * 1024 * 1024)
     max_asset_pixels = _bounded_int("MAX_ASSET_PIXELS", 32_000_000, 1, 100_000_000)
     max_catalog_import_bytes = _bounded_int("MAX_CATALOG_IMPORT_BYTES", 5 * 1024 * 1024, 1024, 20 * 1024 * 1024)

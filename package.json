@@ -11,6 +11,7 @@
     "stop": "powershell -NoProfile -ExecutionPolicy Bypass -File commands/stop-app.ps1",
     "test": "powershell -NoProfile -ExecutionPolicy Bypass -File commands/test-all.ps1",
     "code-map": ".venv\\Scripts\\python.exe commands/update-code-map.py --write",
-    "code-map:check": ".venv\\Scripts\\python.exe commands/update-code-map.py --check"
+    "code-map:check": ".venv\\Scripts\\python.exe commands/update-code-map.py --check",
+    "verify-brain": ".venv\\Scripts\\python.exe commands/verify-brain.py"
   }
 }

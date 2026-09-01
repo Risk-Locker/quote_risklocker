@@ -107,7 +107,7 @@ To activate the Microsoft connection, an administrator must first register a Mic
 
 ## Deployment
 
-Production runs on a VPS under PM2 + nginx (full runbook in `docs/SETUP.md`):
+Production runs on a VPS under PM2 + nginx (full runbook in `docs/architecture/SETUP.md`):
 
 - Three PM2 processes (`ecosystem.config.cjs`): `rl-quote-api` (uvicorn :8100), `rl-quote-worker` (extraction + PDF render), `rl-quote-frontend` (Next.js :3000).
 - nginx reverse proxy for `quote.risklocker.com` (`deploy/nginx-quote-risklocker.conf`), HTTPS via certbot.
@@ -116,7 +116,7 @@ Production runs on a VPS under PM2 + nginx (full runbook in `docs/SETUP.md`):
 
 ## Repository Guide
 
-Codex, other repository-capable AI agents, and maintainers start with [docs/START-HERE.md](docs/START-HERE.md). Product behavior, design rules, code mapping, template references, and operational guidance live under `docs/`. Operational scripts live under `commands/`.
+Codex, other repository-capable AI agents, and maintainers start with [docs/core/START-HERE.md](docs/core/START-HERE.md). Product behavior, design rules, code mapping, template references, and operational guidance live under `docs/`. Operational scripts live under `commands/`.
 
 Private customer/process references are outside this repository at:
 

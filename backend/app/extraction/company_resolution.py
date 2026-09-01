@@ -29,7 +29,7 @@ def company_alias_matches(selected: str, company_rows: list[dict]) -> list[dict]
     Each item: {"company", "alias", "length", "compact"}; sorted by
     (length, spaced-over-compact) descending.
     """
-    raw = str(selected or "").strip()
+    raw = (selected or "").strip()
     if not raw:
         return []
     spaced = normalize_detection(raw)
@@ -48,9 +48,15 @@ def company_alias_matches(selected: str, company_rows: list[dict]) -> list[dict]
             if f" {normalized} " in padded:
                 out.append({"company": company, "alias": raw_alias, "length": len(normalized), "compact": False})
             compact = normalized.replace(" ", "")
-            if len(compact) >= 5 and compact in compact_text:
-                out.append({"company": company, "alias": raw_alias, "length": len(compact), "compact": True})
-    out.sort(key=lambda item: (item["length"], item["compact"]), reverse=True)
+            
+            # If the search text is very long (e.g. a full document), short compact matches 
+            # (like 'amgen') are likely false positives formed by crossing word boundaries.
+            if len(compact) >= 5 and (len(compact) >= 8 or len(compact_text) < 200):
+                if compact in compact_text:
+                    out.append({"company": company, "alias": raw_alias, "length": len(compact), "compact": True})
+    
+    # Sort by length (descending), then spaced (not compact) over compact
+    out.sort(key=lambda item: (item["length"], not item["compact"]), reverse=True)
     return out
 
 
@@ -91,7 +97,7 @@ def resolve_company(selected: str, companies: list[dict]) -> dict:
 
     ``companies`` entries: {"company_id", "name", "aliases": list[str], ...}.
     """
-    raw = str(selected or "").strip()
+    raw = (selected or "").strip()
     if not raw:
         return {"status": "unresolved", "company_id": None, "display_name": None}
     matches = company_alias_matches(raw, companies)

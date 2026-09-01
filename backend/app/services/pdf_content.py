@@ -33,6 +33,18 @@ def load_pdf_bytes(record, settings: Settings) -> bytes:
             raise AppError("PDF integrity verification failed.", 503)
         return data
 
+    if record.storage_provider == "local_ephemeral":
+        import os
+        from pathlib import Path
+        if not os.path.exists(record.storage_path):
+            raise AppError("PDF Ephemeral File Expired", 410)
+        data = Path(record.storage_path).read_bytes()
+        if record.storage_sha256 and sha256(data).hexdigest() != record.storage_sha256:
+            raise AppError("PDF integrity verification failed.", 503)
+        # For zero-persistence, we delete the PDF once it's downloaded by the user
+        Path(record.storage_path).unlink(missing_ok=True)
+        return data
+
     if record.archive_status == StorageStatus.ARCHIVED.value and record.archive_item_id:
         raise AppError("The permanent archive is not available in this deployment.", 503)
     raise AppError("PDF Expired", 410)

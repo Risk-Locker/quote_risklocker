@@ -6,7 +6,9 @@ Set-Location (Join-Path $root "backend")
 $candidatePorts = if ($env:BACKEND_PORT) { @([int]$env:BACKEND_PORT) } else { 8100..8110 }
 $port = $null
 foreach ($candidatePort in $candidatePorts) {
-    $listener = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $candidatePort -State Listen -ErrorAction SilentlyContinue
+    $listener = Get-NetTCPConnection -LocalPort $candidatePort -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $_.LocalAddress -in @("127.0.0.1", "0.0.0.0", "::", "::1") } |
+        Select-Object -First 1
     if (-not $listener) {
         $port = $candidatePort
         break

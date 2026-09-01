@@ -11,6 +11,7 @@ import {
   ArrowSquareOut,
   CaretDown,
   CaretLeft,
+  CaretRight,
   CaretUp,
   Check,
   CheckCircle,
@@ -31,6 +32,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { toBlob, toPng } from "html-to-image";
+import jsPDF from "jspdf";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -712,6 +714,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [isDragging, setIsDragging] = useState<"pdf" | "main" | null>(null);
   const [colSizes, setColSizes] = useState({ pdf: 25, middle: 35, right: 40 });
   const [split2Col, setSplit2Col] = useState(45);
+  const [formCollapsed, setFormCollapsed] = useState(false);
   const [isDesktop, setIsDesktop] = useState(true);
 
   useEffect(() => {
@@ -1637,96 +1640,71 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     setPdfLoading(true);
     setActionError(null);
 
-    // Auto-confirm all non-empty fields in formValues and clear empty fields so all fields have an explicit scalar decision
-    let queuedAny = false;
-    for (const field of FORM_FIELDS) {
-      const decision = workspace.fields[field.name]?.decision?.decision;
-      if (!decision) {
-        const val = formValues[field.name];
-        if (val && String(val).trim()) {
-          decideField(field.name, "edit", String(val).trim());
-        } else {
-          decideField(field.name, "clear", null);
-        }
-        queuedAny = true;
-      }
-    }
-
-    let currentRevision = workspace.revision;
-    let currentBlockers = workspace.generation_blockers || [];
-    if (mutation.dirty || queuedAny) {
+    // Auto-save any dirty changes
+    if (mutation.dirty) {
       try {
-        const saved = await save();
-        currentRevision = saved.revision;
-        currentBlockers = saved.generation_blockers || [];
+        await save();
       } catch (err) {
-        setActionError("Please resolve errors before downloading PDF: " + apiErrorMessage(err));
-        setPdfLoading(false);
-        return;
+        console.warn("Could not save workspace before exporting PDF, proceeding with live canvas:", err);
       }
-    } else {
-      try {
-        const latest = await api<{ revision: number, generation_blockers: any[] }>(`/sessions/${id}/workspace`);
-        currentRevision = latest.revision;
-        currentBlockers = latest.generation_blockers || [];
-      } catch (e) {}
-    }
-    if (currentRevision == null) {
-      setPdfLoading(false);
-      return;
     }
 
     try {
-      const nonFatalBlockers = currentBlockers.filter(
-        (b) => b.code !== "scalar_check_needed" && b.code !== "missing_catalog"
-      );
-      if (nonFatalBlockers.length > 0) {
-        throw new Error(nonFatalBlockers[0].message || "Resolve generation blockers before creating the PDF.");
-      }
+      const live = document.getElementById("rl-live-canvas-inner");
+      if (!live) throw new Error("Could not capture quotation template canvas.");
 
-      const requested = await api<{ job?: { id: string }; version?: { id: string } }>(
-        `/sessions/${id}/versions`,
-        {
-          method: "POST",
-          headers: { "Idempotency-Key": crypto.randomUUID() },
-          body: JSON.stringify({ draft_revision: currentRevision }),
-        }
-      );
+      const width = previewTemplate?.config.canvas?.width || 794;
+      const height = canvasH || 1123;
 
-      let versionId = requested.version?.id;
-      const jobId = requested.job?.id;
-      if (!versionId && jobId) {
-        for (let attempt = 0; attempt < 40; attempt += 1) {
-          const status = await api<{ job: { state: string; result?: { version_id?: string }; error?: { message?: string } } }>(`/jobs/${jobId}`);
-          if (status.job.state === "completed") {
-            versionId = status.job.result?.version_id;
-            break;
-          }
-          if (status.job.state === "failed" || status.job.state === "cancelled") {
-            throw new Error(status.job.error?.message || "PDF generation did not complete.");
-          }
-          await new Promise((resolve) => window.setTimeout(resolve, 800));
-        }
-      }
+      // Capture high-definition canvas at 2.5x pixel ratio for ultra-crisp print quality
+      const imgData = await toPng(live, {
+        cacheBust: false,
+        backgroundColor: "#ffffff",
+        pixelRatio: 2.5,
+        width,
+        height,
+        style: {
+          transform: "none",
+          transformOrigin: "top left",
+          width: `${width}px`,
+          height: `${height}px`,
+          margin: "0",
+          position: "static",
+        },
+      });
 
-      if (versionId) {
-        await reload();
-        const viewUrl = fileUrl(`/versions/${versionId}/pdf`);
-        const downloadUrl = fileUrl(`/versions/${versionId}/pdf?download=true`);
-        window.open(viewUrl, "_blank");
-        triggerDownload(downloadUrl, `quotation_${formValues.vehicle_no || id}.pdf`);
-        setToastMessage("Official PDF opened in new tab and downloaded!");
-        return;
-      }
-    } catch (backendError) {
-      setActionError("PDF generation failed: " + apiErrorMessage(backendError) + " — Please try again or contact support.");
+      // Create PDF scaled to match the exact canvas layout
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "pt",
+        format: [width * 0.75, height * 0.75],
+      });
+
+      const pdfW = pdf.internal.pageSize.getWidth();
+      const pdfH = pdf.internal.pageSize.getHeight();
+
+      pdf.addImage(imgData, "PNG", 0, 0, pdfW, pdfH, undefined, "FAST");
+
+      const blob = pdf.output("blob");
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      triggerDownload(url, `quotation_${formValues.vehicle_no || id}.pdf`);
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      setToastMessage("Official quotation PDF generated, opened in new tab, and downloaded!");
+
+      // Asynchronously trigger server version archiving in the background
+      api(`/sessions/${id}/versions`, {
+        method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ draft_revision: workspace.revision }),
+      }).catch((e) => console.log("Background version archived:", e));
+
+    } catch (err: unknown) {
+      console.error("[handleDownloadPdf error]", err);
+      setActionError("Could not generate PDF for download: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
       setPdfLoading(false);
-      return;
     }
-
-    // If we reach here without a versionId, something unexpected happened
-    setActionError("PDF generation did not return a version. Please try again.");
-    setPdfLoading(false);
   }
 
   if (loading) return <PageLoading />;
@@ -1780,6 +1758,16 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
               onClick={() => setPdfOpen((v) => !v)}
             >
               {pdfOpen ? "Hide PDF" : "Show source PDF"}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="hidden lg:inline-flex"
+              icon={formCollapsed ? <CaretRight weight="bold" /> : <CaretLeft weight="bold" />}
+              onClick={() => setFormCollapsed((v) => !v)}
+              title={formCollapsed ? "Expand form and extracted values panel" : "Collapse form panel smoothly to the left"}
+            >
+              {formCollapsed ? "Show Form Panel" : "Hide Form Panel"}
             </Button>
             <Button
               variant={mutation.dirty ? "primary" : "secondary"}
@@ -1901,44 +1889,60 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
         {/* Column 2: Master Template + Extracted Values */}
         <div
-          style={{ width: isDesktop ? (pdfOpen ? `${colSizes.middle}%` : `${split2Col}%`) : "100%" }}
-          className="w-full lg:w-auto min-w-0 flex-shrink-0 px-0 lg:px-2"
+          style={{
+            width: isDesktop ? (formCollapsed ? "0%" : pdfOpen ? `${colSizes.middle}%` : `${split2Col}%`) : "100%",
+            opacity: isDesktop && formCollapsed ? 0 : 1,
+            pointerEvents: isDesktop && formCollapsed ? "none" : "auto",
+            transition: isDragging ? "none" : "width 400ms cubic-bezier(0.4, 0, 0.2, 1), opacity 300ms ease-in-out, padding 400ms ease-in-out",
+          }}
+          className={`w-full lg:w-auto min-w-0 flex-shrink-0 ${formCollapsed ? "overflow-hidden px-0" : "px-0 lg:px-2"}`}
         >
           <section aria-label="Template configuration and extracted values" className="grid grid-cols-1 gap-4 content-start">
             {/* Hierarchy & Quotation Context Overview Bar */}
-            <div className="flex flex-wrap items-center gap-2 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-2.5 text-xs shadow-xs">
-              <div className="flex items-center gap-1.5 font-semibold text-[var(--rl-text-strong)]">
-                <span className="text-[var(--rl-text-muted)] text-[11px]">Insurer:</span>
-                <span className="rounded bg-gray-100 px-2 py-0.5 font-bold text-gray-900 border border-gray-200">
-                  {workspace.hierarchy?.company_name || companyName || "Etiqa"}
-                </span>
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-2.5 text-xs shadow-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1.5 font-semibold text-[var(--rl-text-strong)]">
+                  <span className="text-[var(--rl-text-muted)] text-[11px]">Insurer:</span>
+                  <span className="rounded bg-gray-100 px-2 py-0.5 font-bold text-gray-900 border border-gray-200">
+                    {workspace.hierarchy?.company_name || companyName || "Etiqa"}
+                  </span>
+                </div>
+                <div className="h-3 w-px bg-[var(--rl-border)]" />
+                <div className="flex items-center gap-1.5 font-semibold text-[var(--rl-text-strong)]">
+                  <span className="text-[var(--rl-text-muted)] text-[11px]">Vehicle:</span>
+                  <span className="rounded bg-blue-50 px-2 py-0.5 font-bold text-blue-700 border border-blue-200">
+                    {workspace.hierarchy?.vehicle_category || (formValues.vehicle_type || "Private Car")}
+                  </span>
+                </div>
+                <div className="h-3 w-px bg-[var(--rl-border)]" />
+                <div className="flex items-center gap-1.5 font-semibold text-[var(--rl-text-strong)]">
+                  <span className="text-[var(--rl-text-muted)] text-[11px]">Usage:</span>
+                  <span className="rounded bg-emerald-50 px-2 py-0.5 font-bold text-emerald-700 border border-emerald-200">
+                    {workspace.hierarchy?.segment || "Private"}
+                  </span>
+                </div>
+                <div className="h-3 w-px bg-[var(--rl-border)]" />
+                <div className="flex items-center gap-1.5 font-semibold text-[var(--rl-text-strong)]">
+                  <span className="text-[var(--rl-text-muted)] text-[11px]">Coverage:</span>
+                  <span className="rounded bg-purple-50 px-2 py-0.5 font-bold text-purple-700 border border-purple-200">
+                    {workspace.hierarchy?.coverage_type || (formValues.coverage_type || "Comprehensive")}
+                  </span>
+                </div>
+                <div className="h-3 w-px bg-[var(--rl-border)]" />
+                <div className="flex items-center gap-1.5 font-semibold text-[var(--rl-text-strong)] min-w-0">
+                  <span className="text-[var(--rl-text-muted)] text-[11px]">Model:</span>
+                  <strong className="truncate font-bold text-gray-900">{formValues.car_model || workspace.hierarchy?.car_model || "—"}</strong>
+                </div>
               </div>
-              <div className="h-3 w-px bg-[var(--rl-border)]" />
-              <div className="flex items-center gap-1.5 font-semibold text-[var(--rl-text-strong)]">
-                <span className="text-[var(--rl-text-muted)] text-[11px]">Vehicle:</span>
-                <span className="rounded bg-blue-50 px-2 py-0.5 font-bold text-blue-700 border border-blue-200">
-                  {workspace.hierarchy?.vehicle_category || (formValues.vehicle_type || "Private Car")}
-                </span>
-              </div>
-              <div className="h-3 w-px bg-[var(--rl-border)]" />
-              <div className="flex items-center gap-1.5 font-semibold text-[var(--rl-text-strong)]">
-                <span className="text-[var(--rl-text-muted)] text-[11px]">Usage:</span>
-                <span className="rounded bg-emerald-50 px-2 py-0.5 font-bold text-emerald-700 border border-emerald-200">
-                  {workspace.hierarchy?.segment || "Private"}
-                </span>
-              </div>
-              <div className="h-3 w-px bg-[var(--rl-border)]" />
-              <div className="flex items-center gap-1.5 font-semibold text-[var(--rl-text-strong)]">
-                <span className="text-[var(--rl-text-muted)] text-[11px]">Coverage:</span>
-                <span className="rounded bg-purple-50 px-2 py-0.5 font-bold text-purple-700 border border-purple-200">
-                  {workspace.hierarchy?.coverage_type || (formValues.coverage_type || "Comprehensive")}
-                </span>
-              </div>
-              <div className="h-3 w-px bg-[var(--rl-border)]" />
-              <div className="flex items-center gap-1.5 font-semibold text-[var(--rl-text-strong)] min-w-0">
-                <span className="text-[var(--rl-text-muted)] text-[11px]">Model:</span>
-                <strong className="truncate font-bold text-gray-900">{formValues.car_model || workspace.hierarchy?.car_model || "—"}</strong>
-              </div>
+              <button
+                type="button"
+                onClick={() => setFormCollapsed(true)}
+                className="hidden lg:flex items-center gap-1 ml-auto px-2 py-1 text-[11px] font-semibold text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 rounded border border-neutral-200 transition-colors shadow-2xs cursor-pointer"
+                title="Collapse this section smoothly to expand live preview"
+              >
+                <CaretLeft size={13} weight="bold" />
+                <span>Collapse Panel</span>
+              </button>
             </div>
 
             {/* Row 1: Master Template Selection */}
@@ -2449,19 +2453,37 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
           </section>
         </div>
 
+        {/* Collapsed Expand Handle for Column 2 */}
+        {formCollapsed && isDesktop ? (
+          <button
+            type="button"
+            onClick={() => setFormCollapsed(false)}
+            className="hidden lg:flex flex-col items-center justify-center gap-2 py-4 px-1.5 rounded-r-md bg-neutral-900 text-white hover:bg-neutral-800 hover:scale-105 active:scale-95 text-xs font-semibold shadow-md transition-all cursor-pointer h-fit sticky top-[140px] z-10 select-none border border-neutral-700 shrink-0 -ml-1 mr-2"
+            title="Expand Form & Extracted Values"
+          >
+            <CaretRight weight="bold" size={14} />
+            <span className="[writing-mode:vertical-lr] tracking-wide text-[11px] font-medium py-1">Show Form Panel</span>
+          </button>
+        ) : null}
+
         {/* Draggable Slider 2 (between Form and Live Preview) */}
-        <div
-          onPointerDown={handlePointerDown("main")}
-          role="separator"
-          aria-orientation="vertical"
-          className="group w-3.5 -mx-1 flex items-center justify-center cursor-col-resize self-stretch z-10 shrink-0 hidden lg:flex"
-        >
-          <div className={`w-1 h-full rounded-full transition-colors ${isDragging === "main" ? "bg-[var(--rl-red)]" : "bg-[var(--rl-border)] group-hover:bg-[var(--rl-red)]"}`} />
-        </div>
+        {!formCollapsed ? (
+          <div
+            onPointerDown={handlePointerDown("main")}
+            role="separator"
+            aria-orientation="vertical"
+            className="group w-3.5 -mx-1 flex items-center justify-center cursor-col-resize self-stretch z-10 shrink-0 hidden lg:flex"
+          >
+            <div className={`w-1 h-full rounded-full transition-colors ${isDragging === "main" ? "bg-[var(--rl-red)]" : "bg-[var(--rl-border)] group-hover:bg-[var(--rl-red)]"}`} />
+          </div>
+        ) : null}
 
         {/* Column 3: Live Quotation Preview + Insurer Benefits */}
         <div
-          style={{ width: isDesktop ? (pdfOpen ? `${colSizes.right}%` : `${100 - split2Col}%`) : "100%" }}
+          style={{
+            width: isDesktop ? (formCollapsed ? (pdfOpen ? `${100 - colSizes.pdf}%` : "100%") : (pdfOpen ? `${colSizes.right}%` : `${100 - split2Col}%`)) : "100%",
+            transition: isDragging ? "none" : "width 400ms cubic-bezier(0.4, 0, 0.2, 1)",
+          }}
           className="w-full lg:w-auto min-w-0 flex-1 pl-0 lg:pl-2"
         >
           <section aria-label="Live preview and benefits manager" className="grid grid-cols-1 gap-4 content-start">

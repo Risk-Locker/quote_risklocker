@@ -22,7 +22,7 @@ from app.services.job_service import complete_job, heartbeat_job
 from app.storage.supabase import StorageError, SupabaseStorage
 
 
-@dataclass(frozen=True)
+@dataclass
 class JobProcessingError(RuntimeError):
     code: str
     safe_message: str
@@ -45,13 +45,41 @@ def _resolve_assets(snapshot: RenderSnapshot, storage: SupabaseStorage) -> dict[
     assets = snapshot.context.get("assets") or {}
     resolved = dict(assets.get("embedded") or {})
     manifest = assets.get("manifest") or {}
+    cache_dir = Path(".qc-tmp/asset_cache")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
     for asset_id, item in sorted(manifest.items()):
-        data = storage.download_bytes(str(item.get("storage_path") or ""))
         expected = str(item.get("content_hash") or "")
-        if not expected or hashlib.sha256(data).hexdigest() != expected:
-            raise JobProcessingError("render_asset_integrity_failed", "A frozen render asset failed its integrity check.")
         content_type = str(item.get("content_type") or "application/octet-stream")
+        cache_file = cache_dir / f"{expected}.bin" if expected else None
+
+        data: bytes | None = None
+        if cache_file and cache_file.exists():
+            cached = cache_file.read_bytes()
+            if hashlib.sha256(cached).hexdigest() == expected:
+                data = cached
+
+        if data is None:
+            for attempt in range(3):
+                try:
+                    data = storage.download_bytes(str(item.get("storage_path") or ""))
+                    break
+                except Exception:
+                    if attempt == 2:
+                        raise
+                    import time
+                    time.sleep(0.5)
+
+            if not expected or not data or hashlib.sha256(data).hexdigest() != expected:
+                raise JobProcessingError("render_asset_integrity_failed", "A frozen render asset failed its integrity check.")
+            if cache_file and data:
+                try:
+                    cache_file.write_bytes(data)
+                except Exception:
+                    pass
+
         resolved[asset_id] = f"data:{content_type};base64,{base64.b64encode(data).decode('ascii')}"
+
     for asset_id, expected in (snapshot.asset_hashes or {}).items():
         if asset_id in manifest:
             continue
@@ -163,10 +191,28 @@ def process_render_job(
     filename = _filename(str(context.get("source_filename") or "quotation.pdf"), next_number)
     now = datetime.now(timezone.utc)
     object_key = f"generated/{now:%Y}/{now:%m}/{snapshot.draft_id}/v{next_number}-{uuid4()}.pdf"
-    try:
-        stored = storage_client.upload_generated_pdf(object_key, data)
-    except StorageError as exc:
-        raise JobProcessingError("generated_storage_unavailable", "Generated PDF storage is temporarily unavailable.") from exc
+    if storage is not None:
+        try:
+            stored = storage_client.upload_generated_pdf(object_key, data)
+            stored_key = stored.object_key
+            storage_provider = "supabase"
+            storage_bucket = stored.bucket
+            storage_etag = stored.etag
+            storage_sha256 = stored.sha256
+        except StorageError as exc:
+            raise JobProcessingError("generated_storage_unavailable", "PDF storage is temporarily unavailable.") from exc
+    else:
+        try:
+            ephemeral_dir = Path(".qc-tmp/stateless_generated")
+            ephemeral_dir.mkdir(parents=True, exist_ok=True)
+            stored_key = f".qc-tmp/stateless_generated/v{next_number}-{uuid4()}.pdf"
+            Path(stored_key).write_bytes(data)
+            storage_provider = "local_ephemeral"
+            storage_bucket = None
+            storage_etag = None
+            storage_sha256 = hashlib.sha256(data).hexdigest()
+        except Exception as exc:
+            raise JobProcessingError("generated_storage_unavailable", "Local ephemeral storage is temporarily unavailable.") from exc
 
     version = GeneratedPdfVersion(
         draft_id=snapshot.draft_id,
@@ -177,12 +223,12 @@ def process_render_job(
         template_revision_id=snapshot.template_revision_id,
         idempotency_key=job.idempotency_key,
         filename=filename,
-        storage_path=stored.object_key,
-        storage_provider="supabase",
-        storage_bucket=stored.bucket,
+        storage_path=stored_key,
+        storage_provider=storage_provider,
+        storage_bucket=storage_bucket,
         storage_status=StorageStatus.AVAILABLE.value,
-        storage_sha256=stored.sha256,
-        storage_etag=stored.etag,
+        storage_sha256=storage_sha256,
+        storage_etag=storage_etag,
         storage_stored_at=now,
         storage_expires_at=None,
         draft_snapshot=deepcopy(context.get("fields") or {}),
@@ -201,8 +247,8 @@ def process_render_job(
     try:
         complete_job(db, job, worker_id, {"version_id": version.id, "version_number": next_number})
     except Exception:
-        try:
-            storage_client.delete_pdf(stored.object_key)
-        except StorageError:
-            pass
+        if storage is not None:
+            storage_client.delete_pdf(stored_key)
+        else:
+            Path(stored_key).unlink(missing_ok=True)
         raise

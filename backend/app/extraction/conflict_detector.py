@@ -18,6 +18,21 @@ def select_field(field: str, candidates: list[CandidateValue]) -> FieldSelection
     if not candidates:
         return FieldSelection(None, "check_needed" if field in REQUIRED_FIELDS else "ready", [], ["Missing value."])
 
+    # Special handling for company detection:
+    # If an exact match was found in the upload filename or text via database_company_*,
+    # prefer the verified database match over an ungrounded or conflicting Gemini guess.
+    if field in ("insurance_company", "source_template_category"):
+        db_cand = next((c for c in candidates if getattr(c, "source_method", "") in ("database_company_filename", "database_company_text") and c.value and str(c.value).strip()), None)
+        gemini_cand = next((c for c in candidates if getattr(c, "source_method", "") == "gemini_vision" and c.value and str(c.value).strip()), None)
+        if db_cand and gemini_cand:
+            if _norm(db_cand.value) == _norm(gemini_cand.value):
+                return FieldSelection(gemini_cand.value, "ready", candidates, [])
+            return FieldSelection(db_cand.value, "ready", candidates, [])
+        if db_cand:
+            return FieldSelection(db_cand.value, "ready", candidates, [])
+        if gemini_cand:
+            return FieldSelection(gemini_cand.value, "ready", candidates, [])
+
     # Prioritize Gemini Multimodal AI extraction directly over heuristic candidates
     gemini_cand = next((c for c in candidates if getattr(c, "source_method", "") == "gemini_vision" and c.value and str(c.value).strip()), None)
     if gemini_cand:

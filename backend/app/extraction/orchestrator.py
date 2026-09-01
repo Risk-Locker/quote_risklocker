@@ -65,6 +65,7 @@ class ExtractionOrchestrator:
                 gemini_res = extract_with_gemini_sync(
                     pdf_bytes,
                     document_text=combined_text,
+                    source_filename=source_filename or file_path.name,
                     db_companies=db_companies,
                     db_benefit_concepts=db_benefit_concepts,
                     db_aliases=db_aliases,

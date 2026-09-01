@@ -3,7 +3,7 @@
 ## Non-Negotiable Constraints
 
 - Use Supabase/Postgres only for application data; SQLite and local persistent data fallbacks are prohibited.
-- Persist source and generated PDFs only in private Supabase Storage. Do not persist PDFs in the repository or application-server directories.
+- Source and generated PDFs are fully stateless and ephemeral. Never persist PDF files or images in the database or storage buckets.
 - Never expose service-role keys, backend credentials, storage keys, or provider URLs to the browser.
 - Never silently guess an uncertain extracted value. Mark it `Check Needed` for review.
 - Generate final PDFs deterministically from reviewed draft data and saved template configuration. Do not use AI-generated layout for final PDFs.
@@ -70,7 +70,7 @@
 ## Security and Retention
 
 - Uploads are PDF-only, size-limited, validated, quarantined in the OS temporary directory, malware-scanned when required, extraction-limited, and always cleaned up after processing.
-- Source and generated PDF binaries remain until explicit manual deletion.
-- Trash remains until explicit, audited permanent purge. There is no automatic PDF expiry or automatic trash purge.
+- Source and generated PDF binaries are completely stateless and ephemeral. They are provided for immediate download only and are never saved on the server.
+- There is no permanent trash or audit trail for PDF binaries because they are not persisted.
 - Referenced legacy data/assets remain hidden and immutable until compatibility/reference checks prove physical deletion safe.
 - SharePoint/OneDrive archive support is optional, backend-only, and requires Microsoft Entra credentials, checksum verification, and object metadata before activation.

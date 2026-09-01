@@ -351,6 +351,7 @@ Extract accurate, grounded JSON data matching the provided schema from the quota
    - Look for 'NCD', 'NCB', 'No Claim Bonus', 'No Claim Discount', 'NCB (25.00%)'. Output the percentage value (e.g. '25.00').
 5. **INSURANCE COMPANY**:
    - Match one of the active insurance companies: {companies_str}.
+   - The upload filename (e.g. `_QBE.pdf`, `_Sompo_`, `_Etiqa`, `_Amgen`, `_Lonpac`, `_STMB`) often directly indicates the underwriting insurer when logos or headers are graphical. Cross-reference the filename and document header.
 6. **PACKAGE DETECTION (For Packaged Insurers like AmAssurance)**:
    - Check if any specific package/tier is mentioned anywhere in the document (e.g. 'Lite', 'Plus', 'Standard', 'Comprehensive', 'Premier').
 7. **BENEFIT CONCEPTS LIBRARY**:
@@ -379,6 +380,7 @@ def extract_with_gemini_sync(
     pdf_bytes: bytes,
     *,
     document_text: str | None = None,
+    source_filename: str | None = None,
     db_companies: list[dict] | None = None,
     db_benefit_concepts: list[dict] | None = None,
     db_aliases: dict | None = None,
@@ -397,25 +399,23 @@ def extract_with_gemini_sync(
     configured_model = settings.gemini_model or "gemini-2.5-flash"
     system_prompt = build_rag_system_prompt(db_companies, db_benefit_concepts, db_aliases, db_packs, prompt_override)
 
-    if document_text and len(document_text.strip()) > 30:
-        parts: list[dict[str, Any]] = [
-            {
-                "text": f"Extract all insurance quotation values, vehicle details, coverage, and detected benefits from this document according to the JSON schema:\n\n--- DOCUMENT TEXT ---\n{document_text}\n--- END DOCUMENT TEXT ---"
-            }
-        ]
-    else:
+    fn_prefix = f"Original Upload Filename: {source_filename}\n\n" if source_filename else ""
+    parts: list[dict[str, Any]] = []
+    if pdf_bytes and len(pdf_bytes) > 100:
         b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
-        parts = [
+        parts.append(
             {
                 "inline_data": {
                     "mime_type": "application/pdf",
                     "data": b64_pdf,
                 }
-            },
-            {
-                "text": "Extract all quotation information and benefits from this Malaysian motor insurance document according to the JSON schema."
             }
-        ]
+        )
+
+    instruction = f"{fn_prefix}Extract all insurance quotation values, vehicle details, coverage, and detected benefits from this document according to the JSON schema."
+    if document_text and len(document_text.strip()) > 30:
+        instruction += f"\n\n--- DIGITAL TEXT LAYER (Supplemental Context) ---\n{document_text}\n--- END DIGITAL TEXT LAYER ---"
+    parts.append({"text": instruction})
 
     payload = {
         "system_instruction": {
@@ -436,8 +436,8 @@ def extract_with_gemini_sync(
 
     candidate_models = [
         configured_model,
-        "gemini-2.5-flash",
         "gemini-2.0-flash",
+        "gemini-2.5-flash",
         "gemini-1.5-flash",
         "gemini-2.5-flash-lite",
     ]

@@ -129,3 +129,42 @@ def test_text_amgeneral_variant_detects_amassurance():
     )
     company_values = [c.value for c in results.get("insurance_company", [])]
     assert "AmAssurance" in company_values
+
+
+def test_upload_filename_qbe_detects_qbe():
+    results = find_candidates(
+        "PRIVATE CAR PROTECTOR QUOTATION without company in text",
+        page_text=[],
+        source_filename="20260506_VKL7831_Quotation_QBE.pdf",
+        db_companies=COMPANIES,
+    )
+    company_values = [c.value for c in results.get("insurance_company", [])]
+    assert "QBE" in company_values
+
+
+def test_conflict_detector_prefers_database_company_filename_over_conflicting_gemini():
+    from app.extraction.conflict_detector import select_field
+    from app.extraction.types import CandidateValue
+
+    candidates = [
+        CandidateValue(
+            field="insurance_company",
+            value="AmAssurance",
+            source_method="gemini_vision",
+            score=0.99,
+            page=1,
+            evidence="Gemini multimodal extraction: AmAssurance",
+        ),
+        CandidateValue(
+            field="insurance_company",
+            value="QBE",
+            source_method="database_company_filename",
+            score=0.99,
+            page=1,
+            evidence="20260506_VKL7831_Quotation_QBE.pdf",
+        ),
+    ]
+    selection = select_field("insurance_company", candidates)
+    assert selection.value == "QBE"
+    assert selection.status == "ready"
+

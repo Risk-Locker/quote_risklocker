@@ -5,22 +5,24 @@ This file plus the whole `docs/` folder is a portable agent brain. Copy `AGENTS.
 ## 1. Reading Order (always)
 
 1. Read this file first.
-2. Read `docs/START-HERE.md` — it routes every request to the smallest relevant context.
+2. Read `docs/core/START-HERE.md` — it routes every request to the smallest relevant context.
 3. Read only the topic docs the routing table points to. The docs tell you exactly which folder, file, and line range to touch.
 4. Read code only after the docs located it. Never scan or grep the whole repo to build context; that is a waste and a failure of this system.
 
-## 2. Logbook Duty (mandatory, every interaction)
+## 2. Working Memory & Logbook Duty (mandatory, every interaction)
 
-- `docs/MEMORY.md` is the project logbook and current snapshot.
-- After EVERY interaction — including "hi", a question, or a rejected idea — append one ultra-short log entry: `date · model · what was asked (1-2 lines, gist only) · what was done (1-2 lines, files changed with file:line) · pending items (if any)`. Max ~4 lines. No bullet points. Never paste prompts or code blocks.
-- Updating MEMORY.md is your responsibility. It never waits for git commit or push. Do it before finishing the interaction.
-- Record file additions, file deletions, and byproducts in the same log.
+- `docs/core/STATE.md` is the active working memory (<80 lines) containing the current sprint state and recent logs.
+- `docs/history/MEMORY-YYYY-MM.md` holds cold episodic log archives (e.g. `docs/history/MEMORY-2026-08.md`).
+- After EVERY interaction — including "hi", a question, or a rejected idea — append one ultra-short log entry to `docs/core/STATE.md`: `date · model · what was asked (1-2 lines, gist only) · what was done (1-2 lines, files changed with file:line) · pending items (if any)`. Max ~4 lines. No bullet points. Never paste prompts or code blocks.
+- When `docs/core/STATE.md` exceeds ~80 lines, rotate older entries into `docs/history/MEMORY-YYYY-MM.md`.
+- Updating `docs/core/STATE.md` is your responsibility. It never waits for git commit or push. Do it before finishing the interaction.
 
 ## 3. Documentation Duty (mandatory)
 
 - Docs are the map. Every durable fact must live in a doc with file:line references so future agents never need to hunt.
-- BEFORE executing a plan: record the plan and affected files in MEMORY.md, and update any topic doc whose behavior will change.
-- AFTER executing: update every affected doc — MEMORY.md (log entry), topic docs (behavior/routes/schema/env), `docs/STRUCTURE.md` (file add/delete), `docs/SETUP.md` (infrastructure), `docs/SKILLS.md` (skills used or added), and regenerate `docs/generated/CODEBASE-MAP.md` with `python commands/update-code-map.py --write` when structure changes.
+- BEFORE executing a plan: record the plan and affected files in `docs/core/STATE.md`, and update any topic doc whose behavior will change.
+- AFTER executing: update every affected doc — `docs/core/STATE.md` (log entry), topic docs (behavior/routes/schema/env), `docs/architecture/STRUCTURE.md` (file add/delete), `docs/architecture/SETUP.md` (infrastructure), `docs/core/SKILLS.md` (skills used or added), and regenerate `docs/generated/CODEBASE-MAP.md` with `python commands/update-code-map.py --write` when structure changes.
+- Run `python commands/verify-brain.py` to ensure doc links and registries stay valid.
 - Undocumented work is unacceptable, even for one-line changes.
 
 ## 4. Temporary Files Convention
@@ -37,19 +39,19 @@ This file plus the whole `docs/` folder is a portable agent brain. Copy `AGENTS.
 
 ## 6. Interaction Rules
 
-- Read `docs/INSTRUCTIONS.md` — it defines how the owner talks and how to interpret him.
+- Read `docs/core/INSTRUCTIONS.md` — it defines how the owner talks and how to interpret him.
 - NEVER take the owner's words literally. References, sarcasm, analogies, and examples are references to intent, not literal requirements. Do not invent or hunt for things the owner did not actually ask for.
 - Ask questions before big or ambiguous work. For design/UX changes, analyze first, research options, present 6-8 concrete options, get approval, then execute.
 
 ## 7. Skills
 
-- Load a skill only when the task matches its description (`docs/SKILLS.md` registry). Read the selected skill completely before using it.
-- When a capability is missing, use the `find-skills` skill before proposing anything new, then record the result in `docs/SKILLS.md`.
+- Load a skill only when the task matches its description (`docs/core/SKILLS.md` registry). Read the selected skill completely before using it.
+- When a capability is missing, use the `find-skills` skill before proposing anything new, then record the result in `docs/core/SKILLS.md`.
 
 ## 8. Verification
 
-- Never declare done without: backend `python -m pytest -q` (green), frontend `npx tsc --noEmit` and `npm run build` (green), and `python commands/update-code-map.py --check` when structure changed.
-- E2E/QA scripts live in `/.qc-tmp/` (see OPERATIONS.md for the runbook).
+- Never declare done without: backend `python -m pytest -q` (green), frontend `npx tsc --noEmit` and `npm run build` (green), `python commands/verify-brain.py` (green), and `python commands/update-code-map.py --check` when structure changed.
+- E2E/QA scripts live in `/.qc-tmp/` (see `docs/architecture/OPERATIONS.md` for the runbook).
 
 ## 9. Project-Specific (adapt when copying to another project)
 
@@ -57,4 +59,5 @@ This file plus the whole `docs/` folder is a portable agent brain. Copy `AGENTS.
 - Dev servers: backend :8100, frontend :3000, started with `commands/start-backend.ps1` and `commands/start-frontend.ps1` (port file `.qc-tmp\backend-port.txt`).
 - Dev login: admin@risklocker.local / admin123.
 - Default motor template id `4a16bc96-7ca1-44db-be1b-c0a462e71e2f` — contains ONLY 5 image, 24 text, 11 variable, 4 group elements (no specials); E2E group tests must add text elements first.
-- Non-negotiable business rules (full list in BUSINESS-RULES.md): Supabase/Postgres only for app data; private Supabase Storage for persistent PDFs; never expose backend secrets to the frontend; never silently guess uncertain extracted values; deterministic PDF generation from reviewed drafts; no hardcoded fees; preserve Upload -> Check Values -> Generate PDF.
+- Non-negotiable business rules (full list in `docs/domain/BUSINESS-RULES.md`): Supabase/Postgres only for app data; private Supabase Storage for persistent PDFs; never expose backend secrets to the frontend; never silently guess uncertain extracted values; deterministic PDF generation from reviewed drafts; no hardcoded fees; preserve Upload -> Check Values -> Generate PDF.
+

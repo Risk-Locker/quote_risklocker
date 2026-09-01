@@ -16,22 +16,6 @@ BENEFIT_CATALOGS: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
                 "description": "Accidental collision, overturning, fire, explosion & theft protection."
             },
             {
-                "concept_key": "third-party-bi",
-                "label": "Third Party Bodily Injury",
-                "category": "default",
-                "coverage_formula": "statutory_unlimited",
-                "cost_formula": "0.00",
-                "description": "Unlimited coverage for third-party injury, hospitalization & accidental death."
-            },
-            {
-                "concept_key": "third-party-pd",
-                "label": "Third Party Property Damage",
-                "category": "default",
-                "coverage_formula": "3000000.00",
-                "cost_formula": "0.00",
-                "description": "Third-party vehicle, roadside fixture, and public property damage."
-            },
-            {
                 "concept_key": "towing",
                 "label": "Emergency Towing Assistance",
                 "category": "default",
@@ -72,9 +56,7 @@ BENEFIT_CATALOGS: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
                 "description": "Protects you against legal liability incurred by your passengers."
             }
         ],
-        "commercial_car": [
-            # Similar to private car, but pricing rates may differ slightly in a full implementation
-        ],
+        "commercial_car": [],
         "motorcycle": [
             {
                 "concept_key": "own-damage",
@@ -83,14 +65,6 @@ BENEFIT_CATALOGS: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
                 "coverage_formula": "vehicle_sum_insured",
                 "cost_formula": "0.00",
                 "description": "Accidental collision, overturning, fire, explosion & theft protection."
-            },
-            {
-                "concept_key": "third-party-bi",
-                "label": "Third Party Bodily Injury",
-                "category": "default",
-                "coverage_formula": "statutory_unlimited",
-                "cost_formula": "0.00",
-                "description": "Unlimited coverage for third-party injury."
             }
         ],
         "lorry": []

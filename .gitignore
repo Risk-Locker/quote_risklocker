@@ -26,6 +26,7 @@ copy.md
 .skill-sources
 manual.md
 /.qc-tmp/
+/backend/.qc-tmp/
 venv
 Malaysia_Motor_Insurance_Quick_Benefits_Addons_2026.docx
 /fix/

@@ -59,7 +59,18 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 
 ## Benefit Configuration Matrix
 
-- `docs/BENEFITS-CONFIGURATION.md` — canonical per-insurer benefits/add-on matrix: global benefit library (34 concepts), dimensions, and every company × coverage type × vehicle category row including add-on system (`single` vs `package`), package tiers, and seed status (seeded / draft / pending). Registered in `docs/START-HERE.md`.
+- `docs/domain/benefits/BENEFITS-CONFIGURATION.md` — canonical per-insurer benefits/add-on matrix: global benefit library (51 concepts), dimensions, and every company × coverage type × vehicle category row including add-on system (`single` vs `package`), package tiers, and seed status (seeded / draft / pending). Registered in `docs/core/START-HERE.md`.
+- `docs/domain/benefits/INSURER-CATALOG-DETAILS.md` — exhaustive per-insurer plan and rider specifications.
+
+## 3-Tier Agent Brain Documentation System
+
+- `docs/core/` — Universal portable agent engine (`START-HERE.md`, `INSTRUCTIONS.md`, `SKILLS.md`, `STATE.md`).
+- `docs/architecture/` — System boundaries, API contracts, design tokens, operations, structure, testing.
+- `docs/domain/` — Insurance catalogs, benefit matrices, business rules, diagrams.
+- `docs/history/` — Monthly cold logbook archives (`MEMORY-YYYY-MM.md`).
+- `docs/generated/` — AST symbol, route, and line mapping (`CODEBASE-MAP.md`).
+- Verification: `commands/verify-brain.py` ensures 100% link validity and doc registry synchronization.
+
 
 ## Company Seeding (v8)
 

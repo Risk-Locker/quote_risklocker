@@ -6,6 +6,7 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy import select
 
@@ -158,8 +159,14 @@ def process_extraction_job(
         raise JobProcessingError("draft_changed", "This quotation changed before extraction completed. Start a fresh upload.")
 
     heartbeat_job(db, job, worker_id=worker_id, progress=5, phase="validating_source", lease_seconds=300)
-    storage_client = storage or SupabaseStorage(settings)
-    source_bytes = storage_client.download_bytes(uploaded.storage_path)
+    if uploaded.storage_provider == "local_ephemeral":
+        import os
+        if not os.path.exists(uploaded.storage_path):
+            raise JobProcessingError("source_missing", "The ephemeral uploaded document is no longer available.")
+        source_bytes = Path(uploaded.storage_path).read_bytes()
+    else:
+        storage_client = storage or SupabaseStorage(settings)
+        source_bytes = storage_client.download_bytes(uploaded.storage_path)
     expected_hash = uploaded.storage_sha256 or ""
     if not expected_hash or not hashlib.sha256(source_bytes).hexdigest() == expected_hash:
         raise JobProcessingError("source_integrity_failed", "The uploaded document failed its integrity check.")
@@ -281,6 +288,9 @@ def process_extraction_job(
         worker_id,
         {"session_id": session.id, "draft_id": draft.id},
     )
+    
+    if uploaded.storage_provider == "local_ephemeral":
+        Path(uploaded.storage_path).unlink(missing_ok=True)
 
 
 def run_one_job(

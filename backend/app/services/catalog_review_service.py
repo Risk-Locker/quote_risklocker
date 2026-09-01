@@ -518,8 +518,10 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
         premium_cost = None
         cov_limit = None
         for mapping in list(line.candidate_mappings or []):
-            if mapping.get("concept_id"):
-                target_concept_id = mapping.get("concept_id")
+            m_cid = str(mapping.get("concept_id") or "").strip()
+            if m_cid:
+                if not all_concepts or m_cid in all_concepts:
+                    target_concept_id = all_concepts[m_cid].id if m_cid in all_concepts else m_cid
             elif mapping.get("concept_key"):
                 c_k = str(mapping["concept_key"]).lower().replace("_", "-")
                 if c_k in concepts_by_key:
@@ -528,6 +530,9 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                 premium_cost = mapping.get("premium_cost")
             if mapping.get("coverage_limit") or mapping.get("evidence"):
                 cov_limit = mapping.get("coverage_limit") or mapping.get("evidence")
+
+        if all_concepts and target_concept_id and str(target_concept_id) not in all_concepts:
+            target_concept_id = None
 
         if not premium_cost:
             premium_cost = getattr(line, "premium_cost", None)

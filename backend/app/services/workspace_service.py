@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, delete
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.errors import AppError
@@ -1117,6 +1117,34 @@ def _reset_catalog_pin(draft: QuotationDraft, *, clear_company: bool = True) -> 
     draft.catalog_revision_id = None
 
 
+def _reset_draft_benefits_for_catalog(db, draft: QuotationDraft) -> None:
+    if hasattr(db, "execute"):
+        db.execute(delete(DraftSourceLineDecision).where(DraftSourceLineDecision.draft_id == draft.id))
+        db.execute(delete(DraftBenefitSelection).where(DraftBenefitSelection.draft_id == draft.id))
+    else:
+        for d in _rows_for_draft(db, DraftSourceLineDecision, draft.id):
+            db.delete(d)
+        for s in _rows_for_draft(db, DraftBenefitSelection, draft.id):
+            db.delete(s)
+    if hasattr(db, "flush"):
+        db.flush()
+
+    rec = db.scalar(select(ExtractionRecord).where(ExtractionRecord.uploaded_file_id == draft.uploaded_file_id))
+    if rec:
+        lines = list(db.scalars(select(ExtractionBenefitLine).where(ExtractionBenefitLine.extraction_record_id == rec.id)).all())
+        for line in lines:
+            db.add(DraftSourceLineDecision(
+                id=new_id(),
+                draft_id=draft.id,
+                source_line_id=line.id,
+                disposition="unresolved",
+            ))
+        db.flush()
+    initialize_catalog_review(db, draft)
+    auto_apply_extracted_benefits(db, draft)
+    db.flush()
+
+
 def _reconcile_catalog_pin(db, draft: QuotationDraft, *, changed_field: str) -> None:
     """Re-resolve the pinned catalog after a staff edit; never guess ambiguous names."""
     prev_company_id = draft.company_id
@@ -1141,11 +1169,7 @@ def _reconcile_catalog_pin(db, draft: QuotationDraft, *, changed_field: str) -> 
         draft.catalog_revision_id = None
 
     if prev_company_id != draft.company_id:
-        for s in _rows_for_draft(db, DraftBenefitSelection, draft.id):
-            db.delete(s)
-        for d in _rows_for_draft(db, DraftSourceLineDecision, draft.id):
-            db.delete(d)
-        db.flush()
+        _reset_draft_benefits_for_catalog(db, draft)
 
     _sync_detected_company(db, draft)
     initialize_catalog_review(db, draft)
@@ -1165,11 +1189,7 @@ def _apply_pin_catalog(db, draft: QuotationDraft, user, operation: dict) -> str:
 
     company_changed = draft.company_id != company.id
     if company_changed:
-        for s in _rows_for_draft(db, DraftBenefitSelection, draft.id):
-            db.delete(s)
-        for d in _rows_for_draft(db, DraftSourceLineDecision, draft.id):
-            db.delete(d)
-        db.flush()
+        _reset_draft_benefits_for_catalog(db, draft)
 
     draft.company_id = company.id
     draft.product_id = None

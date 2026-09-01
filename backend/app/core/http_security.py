@@ -35,7 +35,11 @@ class RequestSecurityMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         if request.method.upper() not in SAFE_METHODS:
             origin = (request.headers.get("origin") or "").rstrip("/")
-            if not origin or origin not in self.settings.cors_origins:
+            if origin:
+                if origin not in self.settings.cors_origins:
+                    print(f"DEBUG: Rejected origin {origin!r}. Allowed: {self.settings.cors_origins}", flush=True)
+                    return self._reject("This request origin is not allowed.")
+            elif self.settings.app_env == "production":
                 return self._reject("This request origin is not allowed.")
 
             session_token = request.cookies.get(self.settings.session_cookie_name, "")

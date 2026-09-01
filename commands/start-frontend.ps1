@@ -80,15 +80,25 @@ if (-not $backendPort) {
 Set-Content -Path $backendPortFile -Value $backendPort -Encoding ASCII
 $env:BACKEND_API_ORIGIN = "http://127.0.0.1:$backendPort"
 
-$port = 3000
-Write-Host "Starting Risklocker frontend on http://127.0.0.1:$port ..."
+$candidatePorts = if ($env:FRONTEND_PORT) { @([int]$env:FRONTEND_PORT) } else { 3000..3010 }
+$port = $null
+foreach ($candidatePort in $candidatePorts) {
+    $listener = Get-NetTCPConnection -LocalPort $candidatePort -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $_.LocalAddress -in @("127.0.0.1", "0.0.0.0", "::", "::1") } |
+        Select-Object -First 1
+    if (-not $listener) {
+        $port = $candidatePort
+        break
+    }
+}
 
-$listener = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $port -State Listen -ErrorAction SilentlyContinue
-if ($listener) {
-    Write-Host "Frontend cannot start because http://127.0.0.1:$port is already in use." -ForegroundColor Red
+if (-not $port) {
+    Write-Host "Frontend cannot start because ports $($candidatePorts -join ', ') are already in use." -ForegroundColor Red
     Write-Host "Close the old frontend terminal, press Ctrl+C there, or run from project root: npm run stop" -ForegroundColor Yellow
     exit 1
 }
+
+Write-Host "Starting Risklocker frontend on http://127.0.0.1:$port ..."
 
 # Production is the default daily experience: build once, then serve the fast
 # server. Use `npm run dev` (Turbopack) for feature development.

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, ContextManager
 
@@ -120,9 +122,26 @@ async def create_queued_upload(
 
     try:
         with quarantine(data, settings) as (_quarantine_path, scan):
-            object_key = _source_key(now, session_id, uploaded_file_id)
-            stored = storage_client.upload_pdf(object_key, data)
-            stored_key = stored.object_key
+            if storage is not None:
+                object_key = f"source/{now:%Y}/{now:%m}/{uploaded_file_id}/{filename}"
+                uploader = getattr(storage_client, "upload_source_pdf", getattr(storage_client, "upload_pdf", None))
+                if uploader is None:
+                    raise AppError("PDF storage upload function is unavailable.")
+                stored = uploader(object_key, data)
+                stored_key = stored.object_key
+                storage_provider = "supabase"
+                storage_bucket = getattr(stored, "bucket", None)
+                storage_etag = getattr(stored, "etag", None)
+                storage_sha = getattr(stored, "sha256", hashlib.sha256(data).hexdigest())
+            else:
+                ephemeral_dir = Path(".qc-tmp/stateless_uploads")
+                ephemeral_dir.mkdir(parents=True, exist_ok=True)
+                stored_key = f".qc-tmp/stateless_uploads/{uploaded_file_id}.pdf"
+                Path(stored_key).write_bytes(data)
+                storage_provider = "local_ephemeral"
+                storage_bucket = None
+                storage_etag = None
+                storage_sha = hashlib.sha256(data).hexdigest()
 
         batch = Batch(
             id=batch_id,
@@ -137,16 +156,16 @@ async def create_queued_upload(
             owner_id=owner_id,
             original_filename=filename,
             content_type="application/pdf",
-            storage_path=stored.object_key,
-            storage_provider="supabase",
-            storage_bucket=stored.bucket,
+            storage_path=stored_key,
+            storage_provider=storage_provider,
+            storage_bucket=storage_bucket,
             storage_status=StorageStatus.AVAILABLE.value,
-            storage_sha256=stored.sha256,
-            storage_etag=stored.etag,
+            storage_sha256=storage_sha,
+            storage_etag=storage_etag,
             storage_stored_at=now,
             storage_expires_at=None,
             security_scan=scan,
-            size_bytes=stored.size_bytes,
+            size_bytes=len(data),
             status=RecordStatus.PREPARING.value,
             enhanced_reading=enhanced_reading,
         )
@@ -200,16 +219,16 @@ async def create_queued_upload(
     except ValueError as exc:
         db.rollback()
         if stored_key:
-            try:
+            if storage is not None:
                 storage_client.delete_pdf(stored_key)
-            except Exception:
-                logger.exception("Failed to reconcile rejected upload object")
+            else:
+                Path(stored_key).unlink(missing_ok=True)
         raise AppError(str(exc)) from exc
     except Exception:
         db.rollback()
         if stored_key:
-            try:
+            if storage is not None:
                 storage_client.delete_pdf(stored_key)
-            except Exception:
-                logger.exception("Failed to reconcile upload after database failure")
+            else:
+                Path(stored_key).unlink(missing_ok=True)
         raise

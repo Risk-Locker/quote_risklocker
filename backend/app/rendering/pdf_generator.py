@@ -19,7 +19,7 @@ def html_to_pdf(
     *,
     width: float = 794,
     height: float = 1123,
-    timeout_ms: int = 15_000,
+    timeout_ms: int = 30_000,
 ) -> tuple[Path, list[str]]:
     if width <= 0 or height <= 0:
         raise ValueError("PDF page dimensions must be positive.")
@@ -40,7 +40,7 @@ def html_to_pdf(
                 device_scale_factor=1,
             )
             page.set_default_timeout(timeout_ms)
-            page.set_content(html, wait_until="networkidle", timeout=timeout_ms)
+            page.set_content(html, wait_until="domcontentloaded", timeout=timeout_ms)
             page.emulate_media(media="print")
             page.pdf(
                 path=str(output_path),

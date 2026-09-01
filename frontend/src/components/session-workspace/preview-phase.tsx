@@ -22,6 +22,7 @@ import {
   useWorkspaceActions,
   useWorkspaceData,
 } from "@/components/session-workspace/provider";
+import type { PanelImperativeHandle } from "react-resizable-panels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -84,7 +85,8 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
   const generationRequestRef = useRef<{ revision: number; key: string } | null>(null);
   const generationCancelledRef = useRef(false);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
-  const [generatingPng, setGeneratingPng] = useState(false);
+  const leftPanelRef = useRef<PanelImperativeHandle>(null);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   const canvasWidth = Number(template?.config?.canvas?.width || 794);
   const baseCanvasHeight = Number(template?.config?.canvas?.height || 1123);
@@ -120,32 +122,6 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
     link.click();
     document.body.removeChild(link);
   }, [id]);
-
-  const handleDownloadPng = useCallback(async () => {
-    if (!canvasContainerRef.current) return;
-    setGeneratingPng(true);
-    setActionError(null);
-    try {
-      const previousZoom = zoom;
-      setZoom(1);
-      
-      // Delay to allow DOM update
-      await new Promise(resolve => setTimeout(resolve, 150));
-      
-      const dataUrl = await toPng(canvasContainerRef.current, {
-        cacheBust: true,
-        backgroundColor: '#ececee',
-      });
-      
-      triggerBrowserDownload(dataUrl, `quotation_${id}.png`);
-      
-      setZoom(previousZoom);
-    } catch (err) {
-      setActionError("Failed to generate PNG preview.");
-    } finally {
-      setGeneratingPng(false);
-    }
-  }, [id, zoom, triggerBrowserDownload]);
 
   // Main Generate & Download Function
   async function handleDownloadPdf() {
@@ -338,22 +314,10 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
             ) : null}
 
             <Button
-              variant="secondary"
-              size="sm"
-              icon={<ImageIcon weight="bold" />}
-              loading={generatingPng}
-              onClick={handleDownloadPng}
-              className="bg-white hover:bg-gray-50 text-[var(--rl-text-strong)] border border-[var(--rl-border)] shadow-sm"
-            >
-              Download PNG
-            </Button>
-
-            <Button
               variant="primary"
               size="sm"
               icon={<DownloadSimple weight="bold" />}
               loading={generating}
-              disabled={generatingPng}
               onClick={handleDownloadPdf}
               className="bg-[var(--rl-red)] text-white hover:bg-[var(--rl-red-dark)] shadow-sm font-bold"
             >
@@ -384,7 +348,15 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
       <Group orientation="horizontal" className="min-h-[580px] items-stretch gap-5 !flex-col lg:!flex-row">
         
         {/* Left Column: Quotation Summary & Included Add-ons */}
-        <Panel defaultSize={35} minSize={25} maxSize={50} className="grid gap-4 content-start w-full">
+        <Panel 
+          panelRef={leftPanelRef}
+          collapsible={true}
+          onResize={() => setIsSidebarCollapsed(leftPanelRef.current?.isCollapsed() ?? false)}
+          defaultSize={35} 
+          minSize={25} 
+          maxSize={50} 
+          className="grid gap-4 content-start w-full"
+        >
           
           {/* Policy Summary Card */}
           <Card className="grid gap-3 p-4 border border-[var(--rl-border)] bg-white shadow-xs">
@@ -509,6 +481,20 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
           {/* Zoom & View Controls Bar */}
           <div className="mb-4 flex w-full max-w-[640px] items-center justify-between rounded-md bg-white/90 px-3 py-1.5 shadow-xs backdrop-blur-xs border border-neutral-200">
             <div className="flex items-center gap-1.5 text-xs font-bold text-[var(--rl-text-strong)]">
+              <button
+                type="button"
+                onClick={() => {
+                  if (isSidebarCollapsed) {
+                    leftPanelRef.current?.expand();
+                  } else {
+                    leftPanelRef.current?.collapse();
+                  }
+                }}
+                className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-gray-100 transition-colors mr-2 hidden lg:block"
+                title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+              >
+                <ArrowLeft size={16} weight="bold" className={`transition-transform ${isSidebarCollapsed ? 'rotate-180' : ''}`} />
+              </button>
               <Sparkle size={14} className="text-amber-500" />
               <span>A4 Motor Quotation Document</span>
             </div>

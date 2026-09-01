@@ -654,6 +654,7 @@ def session_extract_gemini(
     gemini_res = extract_with_gemini_sync(
         pdf_bytes,
         document_text=doc_text,
+        source_filename=uploaded.original_filename if uploaded else None,
         db_companies=db_companies,
         db_benefit_concepts=db_benefit_concepts,
         prompt_override=prompt_override,
