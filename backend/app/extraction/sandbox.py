@@ -82,7 +82,7 @@ def extract_with_limits(
             prompt_override=prompt_override,
         )
 
-    context = multiprocessing.get_context("fork")
+    context: Any = multiprocessing.get_context("fork")
     parent, child = context.Pipe(duplex=False)
     process = context.Process(
         target=_worker,

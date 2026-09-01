@@ -17,6 +17,7 @@ from app.db.migrations import (
     AppliedMigration,
     MigrationError,
     build_plan,
+    connect_with_retry,
     discover_migrations,
     migration_checksums,
     validate_schema_history,
@@ -243,4 +244,43 @@ def test_real_037_discovery_and_planning():
     m37 = next(item for item in migrations if item.version == 37)
     assert m37.name == "037_draft_package_pin.sql"
     assert len(m37.checksum) == 64
+
+
+def test_connect_with_retry_recovers_after_transient_failures(monkeypatch):
+    from unittest.mock import MagicMock
+    from sqlalchemy.exc import OperationalError
+
+    engine = MagicMock()
+    mock_conn = MagicMock()
+    attempts = [0]
+
+    def mock_connect():
+        attempts[0] += 1
+        if attempts[0] < 3:
+            raise OperationalError("FATAL: (EMAXCONNSESSION) max clients reached", params=None, orig=Exception())
+        return mock_conn
+
+    engine.connect = mock_connect
+    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    conn = connect_with_retry(engine, max_attempts=5, initial_delay=0.01, max_delay=0.05)
+    assert conn is mock_conn
+    assert attempts[0] == 3
+
+
+def test_connect_with_retry_exhausts_and_raises(monkeypatch):
+    from unittest.mock import MagicMock
+    from sqlalchemy.exc import OperationalError
+
+    engine = MagicMock()
+
+    def mock_connect():
+        raise OperationalError("FATAL: (EMAXCONNSESSION) max clients reached", params=None, orig=Exception())
+
+    engine.connect = mock_connect
+    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    with pytest.raises(OperationalError, match="EMAXCONNSESSION"):
+        connect_with_retry(engine, max_attempts=3, initial_delay=0.01, max_delay=0.05)
+
 

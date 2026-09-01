@@ -5,10 +5,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy import Connection, Engine, create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
@@ -142,8 +144,47 @@ def _history(connection: Connection) -> list[AppliedMigration]:
     return [AppliedMigration(version=row["version"], name=row["name"], checksum=row["checksum"]) for row in rows]
 
 
-def apply_migrations(engine: Engine, migrations: list[Migration], *, dry_run: bool = False) -> list[Migration]:
-    with engine.connect() as connection:
+def connect_with_retry(
+    engine: Engine,
+    *,
+    max_attempts: int = 15,
+    initial_delay: float = 2.0,
+    max_delay: float = 10.0,
+    backoff_factor: float = 1.5,
+) -> Connection:
+    """Connect to the database with exponential backoff on transient connection failures or pool exhaustion (e.g. EMAXCONNSESSION)."""
+    delay = initial_delay
+    last_error: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return engine.connect()
+        except SQLAlchemyError as exc:
+            last_error = exc
+            if attempt == max_attempts:
+                break
+            err_msg = str(exc).strip().replace("\n", " ")
+            if len(err_msg) > 160:
+                err_msg = err_msg[:157] + "..."
+            print(
+                f"[db:migrations] Database connection busy or pool limit reached ({err_msg}). "
+                f"Retrying in {delay:.1f}s (attempt {attempt}/{max_attempts})...",
+                flush=True,
+            )
+            time.sleep(delay)
+            delay = min(delay * backoff_factor, max_delay)
+    if last_error:
+        raise last_error
+    raise RuntimeError("Failed to connect to database after retries.")
+
+
+def apply_migrations(
+    engine: Engine,
+    migrations: list[Migration],
+    *,
+    dry_run: bool = False,
+    max_connect_attempts: int = 15,
+) -> list[Migration]:
+    with connect_with_retry(engine, max_attempts=max_connect_attempts) as connection:
         connection.execute(text("SELECT pg_advisory_lock(:key)"), {"key": MIGRATION_LOCK_KEY})
         try:
             with connection.begin_nested():

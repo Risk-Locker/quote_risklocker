@@ -230,6 +230,9 @@ jobs:
             # cap the Next build can trip the OOM killer mid-deploy.
             NODE_OPTIONS="--max-old-space-size=1536" npm run build
 
+            # Stop worker during migration/pre-flight to release pool connections cleanly
+            pm2 stop rl-quote-worker 2>/dev/null || true
+
             # Database migrations (ledger-based + checksummed; safe every deploy).
             # Guarded: refuses to run when APP_ENV != production.
             cd ..

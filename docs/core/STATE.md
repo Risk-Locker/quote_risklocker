@@ -6,9 +6,14 @@ Current high-signal snapshot of active development. Rotate old entries to `docs/
 - **Architecture**: Next.js 15.5 frontend (:3000) + FastAPI backend (:8100) + Supabase/PostgreSQL pooler + Private Storage.
 - **Active Features**: v10 Benefit Presets (6 presets) + v8 Benefit Packs / Tiers + Dynamic Canvas Expansion + JPJ Road Tax calc.
 - **Current Milestone**: 3-Tier Modular Agent Brain Upgrade (`docs/core/`, `docs/architecture/`, `docs/domain/`, `docs/history/`).
-- **Test Baseline**: 538/538 backend pytest passing, TypeScript clean (0 errors), 36/36 Next.js routes building cleanly.
+- **Test Baseline**: 540/540 backend pytest passing, TypeScript clean (0 errors), 36/36 Next.js routes building cleanly.
 
 ## Recent Interaction Logs (Active Window)
+
+### 2026-09-01 · Antigravity (Gemini 3.7 Flash) · Fix Supabase Deploy Pool Exhaustion & Sandbox Type Warning — EXECUTED
+Asked: Fix production migration EMAXCONNSESSION failure on deploy, fix sandbox.py BaseContext warning, and prepare for deployment.
+Done: (1) Added `connect_with_retry` (15 retries, exponential backoff) in `backend/app/db/migrations.py:147-176` and `session.py:46-80` to safely handle pool exhaustion; (2) added `pm2 stop rl-quote-worker` in `.github/workflows/deploy.yml:234` so deploy frees worker connection before migrations run; (3) resolved Pyright `BaseContext.Process` IDE warning in `sandbox.py:85`; (4) added retry tests in `test_migration_runner.py`; 540/540 pytest green, TypeScript clean, Next.js build clean.
+Pending: none.
 
 ### 2026-09-01 · Antigravity · Remove TP from Comprehensive + Refresh All Sessions — EXECUTED
 Asked: Remove Third-Party BI/PD from all Comprehensive catalog packages (7 insurers); refresh all 85 active Comprehensive sessions. Retain TP only on TPFT and TPO.
