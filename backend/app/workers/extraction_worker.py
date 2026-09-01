@@ -10,7 +10,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from app.core.workspace import qc_temp_directory
+from app.core.workspace import qc_temp_directory, resolve_qc_path
 from app.extraction.company_resolution import build_companies_payload, resolve_company
 from app.extraction.sandbox import extract_with_limits
 from app.models.enums import AccountStatus, RecordStatus
@@ -159,20 +159,27 @@ def process_extraction_job(
         raise JobProcessingError("draft_changed", "This quotation changed before extraction completed. Start a fresh upload.")
 
     heartbeat_job(db, job, worker_id=worker_id, progress=5, phase="validating_source", lease_seconds=300)
+    # Track the local ephemeral path for post-extraction Supabase promotion.
+    _ephemeral_path: Path | None = None
     if uploaded.storage_provider == "local_ephemeral":
-        import os
-        if not os.path.exists(uploaded.storage_path):
+        resolved_file = resolve_qc_path(uploaded.storage_path)
+        if not resolved_file.exists():
             raise JobProcessingError("source_missing", "The ephemeral uploaded document is no longer available.")
-        source_bytes = Path(uploaded.storage_path).read_bytes()
+        _ephemeral_path = resolved_file
+        source_bytes = _ephemeral_path.read_bytes()
     else:
-        storage_client = storage or SupabaseStorage(settings)
-        source_bytes = storage_client.download_bytes(uploaded.storage_path)
+        source_bytes = (storage or SupabaseStorage(settings)).download_bytes(uploaded.storage_path)
+
     expected_hash = uploaded.storage_sha256 or ""
     if not expected_hash or not hashlib.sha256(source_bytes).hexdigest() == expected_hash:
         raise JobProcessingError("source_integrity_failed", "The uploaded document failed its integrity check.")
     maximum = getattr(settings, "max_source_pdf_bytes", None)
     if maximum and len(source_bytes) > maximum:
         raise JobProcessingError("source_limit_exceeded", "The uploaded document exceeds the configured source limit.")
+
+    if job.cancelled_at is not None or job.state == "cancelled":
+        logger.info("Job %s was cancelled before extraction started; aborting.", job.id)
+        return
 
     context = context_loader(db)
     heartbeat_job(db, job, worker_id=worker_id, progress=15, phase="extracting", lease_seconds=300)
@@ -185,6 +192,12 @@ def process_extraction_job(
             source_filename=uploaded.original_filename,
             **context,
         )
+
+    # If job was cancelled while extractor was running, discard results immediately
+    db.refresh(job)
+    if job.cancelled_at is not None or job.state == "cancelled":
+        logger.info("Job %s was cancelled during extraction; discarding results.", job.id)
+        return
 
     full = result.get("full_record") or {}
     draft_data = result.get("draft") or {}
@@ -288,9 +301,31 @@ def process_extraction_job(
         worker_id,
         {"session_id": session.id, "draft_id": draft.id},
     )
-    
-    if uploaded.storage_provider == "local_ephemeral":
-        Path(uploaded.storage_path).unlink(missing_ok=True)
+
+    # Deferred Supabase promotion: runs AFTER the job is marked complete so the
+    # user sees results immediately. Uses a fresh httpx.Client (not the shared
+    # singleton) to avoid thread-safety issues from asyncio.to_thread context.
+    # RL-NOTE: _ephemeral_path is set only when storage_provider=="local_ephemeral".
+    if _ephemeral_path is not None:
+        try:
+            import httpx as _httpx
+            with _httpx.Client(timeout=_httpx.Timeout(60.0, connect=10.0)) as _http:
+                _sc = SupabaseStorage(settings, client=_http)
+                now = datetime.now(timezone.utc)
+                _object_key = f"source/{now:%Y}/{now:%m}/{uploaded.id}/{uploaded.original_filename}"
+                _uploader = getattr(_sc, "upload_source_pdf", getattr(_sc, "upload_pdf", None))
+                if _uploader is not None:
+                    _stored = _uploader(_object_key, source_bytes)
+                    uploaded.storage_path = _stored.object_key
+                    uploaded.storage_provider = "supabase"
+                    uploaded.storage_bucket = getattr(_stored, "bucket", None)
+                    uploaded.storage_etag = getattr(_stored, "etag", None)
+                    db.commit()
+                    _ephemeral_path.unlink(missing_ok=True)
+                    logger.info("Source PDF promoted to Supabase after extraction: %s", _stored.object_key)
+        except Exception as _upload_exc:
+            logger.warning("Post-extraction Supabase promotion failed (ephemeral file retained): %s", _upload_exc)
+
 
 
 def run_one_job(

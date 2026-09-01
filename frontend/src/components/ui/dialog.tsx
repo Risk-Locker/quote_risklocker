@@ -33,22 +33,22 @@ export function Dialog({
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/40 animate-fade-in" />
         <DialogPrimitive.Content
-          className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-6 shadow-lift animate-fade-in"
+          className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-6 shadow-lift animate-fade-in overflow-hidden"
         >
           <DialogPrimitive.Close asChild>
             <button
               type="button"
-              className="absolute right-4 top-4 rounded p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-bg)] transition-colors"
+              className="absolute right-4 top-4 rounded p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-bg)] transition-colors z-10"
               aria-label="Close"
             >
               <X size={16} weight="bold" />
             </button>
           </DialogPrimitive.Close>
-          <DialogPrimitive.Title className="text-[18px] font-bold text-[var(--rl-text-strong)] font-[var(--font-manrope)]">
+          <DialogPrimitive.Title className="text-[18px] font-bold text-[var(--rl-text-strong)] font-[var(--font-manrope)] pr-8 break-words [overflow-wrap:anywhere]">
             {title}
           </DialogPrimitive.Title>
           {description ? (
-            <DialogPrimitive.Description className="mt-2 text-[14px] text-[var(--rl-text)]">{description}</DialogPrimitive.Description>
+            <DialogPrimitive.Description className="mt-2 text-[14px] text-[var(--rl-text)] break-words [overflow-wrap:anywhere]">{description}</DialogPrimitive.Description>
           ) : null}
           {children ? <div className="mt-4">{children}</div> : null}
           {onConfirm ? (

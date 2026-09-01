@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.core.config import Settings
 from app.core.errors import AppError
+from app.core.workspace import QC_TEMP_ROOT
 from app.models.enums import AccountStatus, RecordStatus, StorageStatus
 from app.models.tables import (
     Batch,
@@ -111,7 +112,11 @@ async def create_queued_upload(
     except ValueError as exc:
         raise AppError(str(exc)) from exc
 
-    storage_client = storage or SupabaseStorage(settings)
+    # NOTE: Always save to local ephemeral first so the 202 response returns
+    # immediately (<500ms). The background extraction worker uploads to Supabase
+    # before running extraction, then deletes the local copy.
+    # Do NOT move this back into the Supabase upload path — it was ~20s blocking.
+    _storage_client = storage  # retained only for backward-compat in tests
     stored_key: str | None = None
     now = datetime.now(timezone.utc)
     batch_id = new_id()
@@ -122,26 +127,15 @@ async def create_queued_upload(
 
     try:
         with quarantine(data, settings) as (_quarantine_path, scan):
-            if storage is not None:
-                object_key = f"source/{now:%Y}/{now:%m}/{uploaded_file_id}/{filename}"
-                uploader = getattr(storage_client, "upload_source_pdf", getattr(storage_client, "upload_pdf", None))
-                if uploader is None:
-                    raise AppError("PDF storage upload function is unavailable.")
-                stored = uploader(object_key, data)
-                stored_key = stored.object_key
-                storage_provider = "supabase"
-                storage_bucket = getattr(stored, "bucket", None)
-                storage_etag = getattr(stored, "etag", None)
-                storage_sha = getattr(stored, "sha256", hashlib.sha256(data).hexdigest())
-            else:
-                ephemeral_dir = Path(".qc-tmp/stateless_uploads")
-                ephemeral_dir.mkdir(parents=True, exist_ok=True)
-                stored_key = f".qc-tmp/stateless_uploads/{uploaded_file_id}.pdf"
-                Path(stored_key).write_bytes(data)
-                storage_provider = "local_ephemeral"
-                storage_bucket = None
-                storage_etag = None
-                storage_sha = hashlib.sha256(data).hexdigest()
+            ephemeral_dir = QC_TEMP_ROOT / "stateless_uploads"
+            ephemeral_dir.mkdir(parents=True, exist_ok=True)
+            target_path = ephemeral_dir / f"{uploaded_file_id}.pdf"
+            target_path.write_bytes(data)
+            stored_key = f".qc-tmp/stateless_uploads/{uploaded_file_id}.pdf"
+            storage_provider = "local_ephemeral"
+            storage_bucket = None
+            storage_etag = None
+            storage_sha = hashlib.sha256(data).hexdigest()
 
         batch = Batch(
             id=batch_id,
@@ -219,16 +213,10 @@ async def create_queued_upload(
     except ValueError as exc:
         db.rollback()
         if stored_key:
-            if storage is not None:
-                storage_client.delete_pdf(stored_key)
-            else:
-                Path(stored_key).unlink(missing_ok=True)
+            Path(stored_key).unlink(missing_ok=True)
         raise AppError(str(exc)) from exc
     except Exception:
         db.rollback()
         if stored_key:
-            if storage is not None:
-                storage_client.delete_pdf(stored_key)
-            else:
-                Path(stored_key).unlink(missing_ok=True)
+            Path(stored_key).unlink(missing_ok=True)
         raise

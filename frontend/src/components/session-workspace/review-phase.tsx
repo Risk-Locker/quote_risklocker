@@ -715,6 +715,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [colSizes, setColSizes] = useState({ pdf: 25, middle: 35, right: 40 });
   const [split2Col, setSplit2Col] = useState(45);
   const [formCollapsed, setFormCollapsed] = useState(false);
+  const [previewColCollapsed, setPreviewColCollapsed] = useState(false);
   const [isDesktop, setIsDesktop] = useState(true);
 
   useEffect(() => {
@@ -1890,7 +1891,9 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         {/* Column 2: Master Template + Extracted Values */}
         <div
           style={{
-            width: isDesktop ? (formCollapsed ? "0%" : pdfOpen ? `${colSizes.middle}%` : `${split2Col}%`) : "100%",
+            width: isDesktop
+              ? (formCollapsed ? "0%" : previewColCollapsed ? (pdfOpen ? `${100 - colSizes.pdf}%` : "100%") : (pdfOpen ? `${colSizes.middle}%` : `${split2Col}%`))
+              : "100%",
             opacity: isDesktop && formCollapsed ? 0 : 1,
             pointerEvents: isDesktop && formCollapsed ? "none" : "auto",
             transition: isDragging ? "none" : "width 400ms cubic-bezier(0.4, 0, 0.2, 1), opacity 300ms ease-in-out, padding 400ms ease-in-out",
@@ -2467,7 +2470,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         ) : null}
 
         {/* Draggable Slider 2 (between Form and Live Preview) */}
-        {!formCollapsed ? (
+        {!formCollapsed && !previewColCollapsed ? (
           <div
             onPointerDown={handlePointerDown("main")}
             role="separator"
@@ -2481,108 +2484,75 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         {/* Column 3: Live Quotation Preview + Insurer Benefits */}
         <div
           style={{
-            width: isDesktop ? (formCollapsed ? (pdfOpen ? `${100 - colSizes.pdf}%` : "100%") : (pdfOpen ? `${colSizes.right}%` : `${100 - split2Col}%`)) : "100%",
-            transition: isDragging ? "none" : "width 400ms cubic-bezier(0.4, 0, 0.2, 1)",
+            width: isDesktop
+              ? (previewColCollapsed ? "0%" : formCollapsed ? (pdfOpen ? `${100 - colSizes.pdf}%` : "100%") : (pdfOpen ? `${colSizes.right}%` : `${100 - split2Col}%`))
+              : "100%",
+            opacity: isDesktop && previewColCollapsed ? 0 : 1,
+            pointerEvents: isDesktop && previewColCollapsed ? "none" : "auto",
+            transition: isDragging ? "none" : "width 400ms cubic-bezier(0.4, 0, 0.2, 1), opacity 300ms ease-in-out, padding 400ms ease-in-out",
           }}
-          className="w-full lg:w-auto min-w-0 flex-1 pl-0 lg:pl-2"
+          className={`w-full lg:w-auto min-w-0 flex-1 ${previewColCollapsed ? "overflow-hidden px-0" : "pl-0 lg:pl-2"}`}
         >
           <section aria-label="Live preview and benefits manager" className="grid grid-cols-1 gap-4 content-start">
             {/* Row 1: Real-time Live Preview Canvas */}
             <Card className="rl-tour-preview grid gap-2.5 p-3.5 border border-[var(--rl-border)] bg-white shadow-xs overflow-hidden">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <h2 className="text-sm font-bold text-[var(--rl-text-strong)]">Live Quotation Preview</h2>
                   <span className="flex items-center gap-1 rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                     Real-time
                   </span>
+                  <span
+                    className="hidden sm:inline-flex text-[10px] font-mono text-[var(--rl-text-muted)] bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200"
+                    title="Hold Ctrl and scroll mouse wheel inside canvas to zoom in/out"
+                  >
+                    {Math.round(previewZoom * 100)}%
+                  </span>
                 </div>
-                <div className="flex items-center gap-1">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="h-7 px-2 text-[11px] gap-1"
-                    onClick={handleDownloadPng}
-                    disabled={downloadingPng}
-                    title="Download quotation as PNG (opens in new tab & saves)"
-                  >
-                    <DownloadSimple size={13} weight="bold" />
-                    PNG
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="h-7 px-2 text-[11px] gap-1 text-[var(--rl-red)]"
-                    onClick={handleDownloadPdf}
-                    disabled={pdfLoading}
-                    title="Download quotation as PDF (opens in new tab & saves)"
-                  >
-                    <FilePdf size={13} weight="bold" />
-                    PDF
-                  </Button>
-                  <div className="h-4 w-px bg-[var(--rl-border)] mx-0.5" />
+                <div className="flex items-center gap-1.5 flex-wrap">
                   {!previewCollapsed ? (
                     <>
-                      <button
-                        type="button"
-                        onClick={() => setPreviewZoom((z) => Math.max(0.25, z - 0.1))}
-                        className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-gray-100"
-                        title="Zoom Out"
-                      >
-                        <MagnifyingGlassMinus size={16} />
-                      </button>
-                      <span className="text-[11px] font-mono text-[var(--rl-text-muted)] w-10 text-center">
-                        {Math.round(previewZoom * 100)}%
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setPreviewZoom((z) => Math.min(2.0, z + 0.1))}
-                        className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-gray-100"
-                        title="Zoom In"
-                      >
-                        <MagnifyingGlassPlus size={16} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPreviewZoom(0.48)}
-                        className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100"
-                      >
-                        Fit
-                      </button>
-                      <div className="h-4 w-px bg-[var(--rl-border)] mx-1" />
-                      <div className="hidden sm:flex items-center gap-1 bg-gray-100/90 rounded px-1.5 py-0.5 border border-gray-200 text-[10px]">
+                      <div className="flex items-center gap-1 bg-gray-100/90 rounded px-1.5 py-0.5 border border-gray-200 text-[10px]">
                         <span className="font-bold text-[var(--rl-text-muted)]">Style:</span>
                         <select
                           value={selectedBenefitPreset}
                           onChange={(e) => handleSelectBenefitPreset(e.target.value)}
-                          className="bg-transparent font-semibold text-[var(--rl-text-strong)] cursor-pointer outline-hidden"
+                          className="bg-transparent font-semibold text-[var(--rl-text-strong)] cursor-pointer outline-hidden text-[10px]"
                         >
                           {SYSTEM_BENEFIT_PRESETS.map((p) => (
                             <option key={p.id} value={p.id}>{p.shortName}</option>
                           ))}
                         </select>
                       </div>
-                      <div className="h-4 w-px bg-[var(--rl-border)] mx-1" />
                       <button
                         type="button"
                         onClick={() => setPreviewExpanded((v) => !v)}
-                        className="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors"
+                        className="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors border border-gray-200 shadow-2xs cursor-pointer"
                         title={previewExpanded ? "Compress live preview" : "Expand live preview"}
                       >
-                        {previewExpanded ? <ArrowsInSimple size={14} weight="bold" /> : <ArrowsOutSimple size={14} weight="bold" />}
+                        {previewExpanded ? <ArrowsInSimple size={13} weight="bold" /> : <ArrowsOutSimple size={13} weight="bold" />}
                         <span>{previewExpanded ? "Compress" : "Expand"}</span>
                       </button>
-                      <div className="h-4 w-px bg-[var(--rl-border)] mx-1" />
                     </>
                   ) : null}
                   <button
                     type="button"
                     onClick={() => setPreviewCollapsed((v) => !v)}
-                    className="flex items-center gap-1 rounded px-2 py-1 text-[11px] font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors"
+                    className="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors border border-gray-200 shadow-2xs cursor-pointer"
                     title={previewCollapsed ? "Expand live preview canvas" : "Collapse live preview canvas"}
                   >
-                    {previewCollapsed ? <CaretDown size={14} weight="bold" /> : <CaretUp size={14} weight="bold" />}
+                    {previewCollapsed ? <CaretDown size={13} weight="bold" /> : <CaretUp size={13} weight="bold" />}
                     <span>{previewCollapsed ? "Expand" : "Collapse"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewColCollapsed(true)}
+                    className="hidden lg:flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 rounded border border-neutral-200 transition-colors shadow-2xs cursor-pointer ml-1"
+                    title="Collapse this section smoothly to expand form section"
+                  >
+                    <CaretRight size={13} weight="bold" />
+                    <span>Collapse Panel</span>
                   </button>
                 </div>
               </div>
@@ -2593,7 +2563,16 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 </div>
               ) : (
                 /* Canvas Render Container */
-                <div className={`flex ${previewExpanded ? "h-[640px]" : "h-[380px]"} w-full items-start justify-center overflow-auto rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-gray-50/80 p-3 transition-all duration-200`}>
+                <div
+                  onWheel={(e) => {
+                    if (e.ctrlKey || e.metaKey) {
+                      e.preventDefault();
+                      const delta = e.deltaY < 0 ? 0.05 : -0.05;
+                      setPreviewZoom((z) => Math.min(2.0, Math.max(0.25, Number((z + delta).toFixed(2)))));
+                    }
+                  }}
+                  className={`flex ${previewExpanded ? "h-[680px]" : "h-[400px]"} w-full items-start justify-center overflow-auto rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-gray-50/80 p-3 transition-all duration-200`}
+                >
                   {previewLoading && !previewTemplate ? (
                     <div className="flex h-full items-center justify-center text-xs text-[var(--rl-text-muted)]">
                       Loading preview template...
@@ -3084,6 +3063,19 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
             </div>
           </section>
         </div>
+
+        {/* Collapsed Expand Handle for Column 3 */}
+        {previewColCollapsed && isDesktop ? (
+          <button
+            type="button"
+            onClick={() => setPreviewColCollapsed(false)}
+            className="hidden lg:flex flex-col items-center justify-center gap-2 py-4 px-1.5 rounded-l-md bg-neutral-900 text-white hover:bg-neutral-800 hover:scale-105 active:scale-95 text-xs font-semibold shadow-md transition-all cursor-pointer h-fit sticky top-[140px] z-10 select-none border border-neutral-700 shrink-0 -mr-1 ml-2"
+            title="Expand Preview & Benefits Panel"
+          >
+            <CaretLeft weight="bold" size={14} />
+            <span className="[writing-mode:vertical-lr] tracking-wide text-[11px] font-medium py-1">Show Preview Panel</span>
+          </button>
+        ) : null}
       </div>
 
       {/* Global Benefit Library Modal */}

@@ -85,6 +85,7 @@ def create_app() -> FastAPI:
                     except asyncio.CancelledError:
                         break
                     except Exception:
+                        logger.exception("Embedded worker loop iteration failed — sleeping 2s before retry")
                         await asyncio.sleep(2.0)
 
             worker_task = asyncio.create_task(_embedded_worker_loop())

@@ -198,6 +198,11 @@ export default function UploadPage() {
   async function cancelPreparation() {
     cancelRequested.current = true;
     const jobId = activeJobId.current;
+    activeJobId.current = null;
+    setLoading(false);
+    setJob(null);
+    setFile(null);
+    setError("");
     if (jobId) {
       try {
         await api(`/jobs/${jobId}/cancel`, { method: "POST" });
@@ -205,10 +210,8 @@ export default function UploadPage() {
         // Ignored
       }
     }
-    setLoading(false);
-    setJob((current) => current ? { ...current, state: "cancelled", phase: "cancelled" } : current);
-    setError("Preparation cancelled. The uploaded source remains available in Sessions.");
   }
+
 
   const elapsed = job?.elapsed_seconds ?? (pollingStartedAt.current ? (Date.now() - pollingStartedAt.current) / 1000 : 0);
   const maximum = limits?.max_source_pdf_bytes || limits?.max_upload_bytes || 20 * 1024 * 1024;

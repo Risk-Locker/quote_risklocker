@@ -9,21 +9,24 @@ logger = logging.getLogger(__name__)
 
 
 def words_to_lines(words: list[dict], tolerance: float = 2.5) -> list[dict]:
+    if not words:
+        return []
+    sorted_words = sorted(words, key=lambda item: (int(item.get("page", 1)), float(item.get("top", 0)), float(item.get("x0", 0))))
     lines: list[dict] = []
-    for word in sorted(words, key=lambda item: (int(item.get("page", 1)), float(item.get("top", 0)), float(item.get("x0", 0)))):
+    current_line: dict | None = None
+
+    for word in sorted_words:
         page = int(word.get("page", 1))
         top = float(word.get("top", 0))
-        target = None
-        for line in lines:
-            if line["page"] == page and abs(float(line["top"]) - top) <= tolerance:
-                target = line
-                break
-        if not target:
-            target = {"page": page, "top": top, "bottom": float(word.get("bottom", top)), "words": []}
-            lines.append(target)
-        target["words"].append(word)
-        target["top"] = min(float(target["top"]), top)
-        target["bottom"] = max(float(target["bottom"]), float(word.get("bottom", top)))
+        bottom = float(word.get("bottom", top))
+
+        if current_line is not None and current_line["page"] == page and abs(float(current_line["top"]) - top) <= tolerance:
+            current_line["words"].append(word)
+            current_line["top"] = min(float(current_line["top"]), top)
+            current_line["bottom"] = max(float(current_line["bottom"]), bottom)
+        else:
+            current_line = {"page": page, "top": top, "bottom": bottom, "words": [word]}
+            lines.append(current_line)
 
     regions: list[dict] = []
     for line in lines:
@@ -42,6 +45,7 @@ def words_to_lines(words: list[dict], tolerance: float = 2.5) -> list[dict]:
             }
         )
     return regions
+
 
 
 def detect_layout(words: list[dict] | None = None) -> tuple[list[dict], list[str]]:

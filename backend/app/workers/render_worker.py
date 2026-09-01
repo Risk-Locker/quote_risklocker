@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from sqlalchemy import func, select
 
-from app.core.workspace import qc_temp_directory
+from app.core.workspace import QC_TEMP_ROOT, qc_temp_directory
 from app.models.enums import RecordStatus, StorageStatus
 from app.models.tables import GeneratedPdfVersion, Job, QuotationDraft, RenderSnapshot, Session
 from app.rendering.pdf_generator import PdfOutputInvalid, PdfRendererUnavailable, html_to_pdf
@@ -45,7 +45,7 @@ def _resolve_assets(snapshot: RenderSnapshot, storage: SupabaseStorage) -> dict[
     assets = snapshot.context.get("assets") or {}
     resolved = dict(assets.get("embedded") or {})
     manifest = assets.get("manifest") or {}
-    cache_dir = Path(".qc-tmp/asset_cache")
+    cache_dir = QC_TEMP_ROOT / "asset_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     for asset_id, item in sorted(manifest.items()):
@@ -203,10 +203,11 @@ def process_render_job(
             raise JobProcessingError("generated_storage_unavailable", "PDF storage is temporarily unavailable.") from exc
     else:
         try:
-            ephemeral_dir = Path(".qc-tmp/stateless_generated")
+            ephemeral_dir = QC_TEMP_ROOT / "stateless_generated"
             ephemeral_dir.mkdir(parents=True, exist_ok=True)
-            stored_key = f".qc-tmp/stateless_generated/v{next_number}-{uuid4()}.pdf"
-            Path(stored_key).write_bytes(data)
+            target_filename = f"v{next_number}-{uuid4()}.pdf"
+            (ephemeral_dir / target_filename).write_bytes(data)
+            stored_key = f".qc-tmp/stateless_generated/{target_filename}"
             storage_provider = "local_ephemeral"
             storage_bucket = None
             storage_etag = None

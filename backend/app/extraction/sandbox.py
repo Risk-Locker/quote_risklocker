@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import multiprocessing
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -15,8 +16,12 @@ def _apply_process_limits() -> None:
     try:
         import resource
 
-        resource.setrlimit(resource.RLIMIT_AS, (EXTRACTION_MEMORY_BYTES, EXTRACTION_MEMORY_BYTES))
-        resource.setrlimit(resource.RLIMIT_CPU, (EXTRACTION_TIMEOUT_SECONDS, EXTRACTION_TIMEOUT_SECONDS + 5))
+        setrlimit = getattr(resource, "setrlimit", None)
+        rlimit_as = getattr(resource, "RLIMIT_AS", None)
+        rlimit_cpu = getattr(resource, "RLIMIT_CPU", None)
+        if setrlimit and rlimit_as is not None and rlimit_cpu is not None:
+            setrlimit(rlimit_as, (EXTRACTION_MEMORY_BYTES, EXTRACTION_MEMORY_BYTES))
+            setrlimit(rlimit_cpu, (EXTRACTION_TIMEOUT_SECONDS, EXTRACTION_TIMEOUT_SECONDS + 5))
     except (ImportError, OSError, ValueError):
         # Windows relies on the parent-enforced timeout; deployment containers
         # additionally receive operating-system memory limits.
@@ -62,7 +67,22 @@ def extract_with_limits(
     db_benefit_concepts: list[dict] | None = None,
     prompt_override: str | None = None,
 ) -> dict[str, Any]:
-    context = multiprocessing.get_context("spawn")
+    if sys.platform == "win32":
+        from app.extraction.orchestrator import ExtractionOrchestrator
+
+        return ExtractionOrchestrator().extract_file(
+            Path(path),
+            enhanced_reading=enhanced_reading,
+            source_filename=source_filename,
+            db_aliases=db_aliases,
+            db_brands=db_brands,
+            db_models=db_models,
+            db_companies=db_companies,
+            db_benefit_concepts=db_benefit_concepts,
+            prompt_override=prompt_override,
+        )
+
+    context = multiprocessing.get_context("fork")
     parent, child = context.Pipe(duplex=False)
     process = context.Process(
         target=_worker,

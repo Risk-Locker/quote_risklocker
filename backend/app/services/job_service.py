@@ -191,7 +191,43 @@ def cancel_job(db, job: Job) -> None:
     _transition_phase(job, "cancelled", now)
     job.lease_owner = None
     job.lease_expires_at = None
+
+    # Clean up any local ephemeral upload files
+    if job.uploaded_file_id:
+        from app.core.workspace import QC_TEMP_ROOT, REPOSITORY_ROOT
+        for search_dir in [QC_TEMP_ROOT / "stateless_uploads", REPOSITORY_ROOT / "backend" / ".qc-tmp" / "stateless_uploads"]:
+            if search_dir.exists():
+                for candidate in search_dir.glob(f"{job.uploaded_file_id}.pdf"):
+                    candidate.unlink(missing_ok=True)
+
+    # Clean up orphan preparing session/draft if cancelled before completion
+    if job.session_id and hasattr(db, "get"):
+        from app.models.tables import Batch, QuotationDraft, Session, UploadedFile
+        session = db.get(Session, job.session_id)
+        if session:
+            draft_id = session.draft_id
+            uploaded_id = session.uploaded_file_id
+            db.delete(session)
+            db.flush()
+            if draft_id:
+                draft = db.get(QuotationDraft, draft_id)
+                if draft and draft.revision == 1:
+                    db.delete(draft)
+                    db.flush()
+            if uploaded_id:
+                uf = db.get(UploadedFile, uploaded_id)
+                if uf:
+                    batch_id = uf.batch_id
+                    db.delete(uf)
+                    db.flush()
+                    if batch_id:
+                        batch = db.get(Batch, batch_id)
+                        if batch and not getattr(batch, "files", []):
+                            db.delete(batch)
+                            db.flush()
     db.commit()
+
+
 
 
 def serialize_job(job: Job) -> dict:

@@ -121,10 +121,12 @@ async def test_new_upload_creates_one_queued_session_transaction_and_no_expiry()
     assert result.job.uploaded_file_id == result.uploaded_file.id
     assert result.uploaded_file.storage_expires_at is None
     assert result.uploaded_file.security_scan == {"pages": 2, "result": "clean"}
+    assert result.uploaded_file.storage_provider == "local_ephemeral"
     assert result.draft.revision == 1
     assert result.session.draft_id == result.draft.id
     assert db.commits == 1
-    assert len(storage.uploads) == 1
+    # Supabase upload is DEFERRED to the worker — the request handler must not block on it.
+    assert storage.uploads == [], "storage must not be touched in the request handler (deferred to worker)"
     assert storage.deletes == []
 
 
@@ -191,7 +193,9 @@ async def test_database_failure_rolls_back_and_reconciles_uploaded_object():
         )
 
     assert db.rollbacks == 1
-    assert storage.deletes == [storage.uploads[0][0]]
+    # Supabase upload is deferred to the worker; on rollback we only delete the local ephemeral file.
+    assert storage.uploads == [], "storage must not be touched in the request handler"
+    assert storage.deletes == []
 
 
 @pytest.mark.anyio
