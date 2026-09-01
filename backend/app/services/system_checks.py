@@ -111,7 +111,7 @@ def get_system_checks(settings: Settings, db: Session) -> list[dict]:
             "group": "Required Setup",
         }
     )
-    scan_ready, scan_message = scanner_status()
+    scan_ready, scan_message = scanner_status(settings)
     checks.append(
         {
             "name": "PDF malware scanner",

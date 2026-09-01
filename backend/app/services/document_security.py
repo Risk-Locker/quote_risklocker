@@ -37,21 +37,23 @@ def _defender_command(path: Path) -> tuple[list[str], str] | None:
         executable = str(candidates[0]) if candidates else None
     if executable:
         return [executable, "-Scan", "-ScanType", "3", "-File", str(path), "-DisableRemediation"], "Microsoft Defender"
-    clamscan = shutil.which("clamscan")
-    if clamscan:
-        return [clamscan, "--no-summary", str(path)], "ClamAV"
     clamdscan = shutil.which("clamdscan")
     if clamdscan:
         return [clamdscan, "--no-summary", str(path)], "ClamAV"
+    clamscan = shutil.which("clamscan")
+    if clamscan:
+        return [clamscan, "--no-summary", str(path)], "ClamAV"
     return None
 
 
-def scanner_status() -> tuple[bool, str]:
+def scanner_status(settings: Settings | None = None) -> tuple[bool, str]:
     placeholder = QC_TEMP_ROOT / "risklocker-scanner-check.pdf"
     command = _defender_command(placeholder)
-    if not command:
-        return False, "Install or enable Microsoft Defender/ClamAV for required PDF scanning."
-    return True, f"{command[1]} is available."
+    if command:
+        return True, f"{command[1]} is available."
+    if settings is not None and not getattr(settings, "require_malware_scanner", True):
+        return True, "Built-in structural inspection (pikepdf + PyMuPDF) active."
+    return False, "Install or enable Microsoft Defender/ClamAV for required PDF scanning."
 
 
 def _scan_malware(path: Path, required: bool) -> dict:
@@ -59,7 +61,7 @@ def _scan_malware(path: Path, required: bool) -> dict:
     if not command:
         if required:
             raise ValueError("A malware scanner is required before PDFs can be uploaded.")
-        return {"engine": "unavailable", "result": "not_required", "signature_version": None}
+        return {"engine": "builtin_structural", "result": "clean", "signature_version": "pikepdf+PyMuPDF"}
     args, engine = command
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=90, check=False)

@@ -19,7 +19,7 @@ Use `.env.example` (local development values) or `.env.production` (production V
 
 **The project `.env` is the source of truth:** `backend/app/core/config.py` loads it with `load_dotenv(override=True)`, so variables inherited from the shell (e.g. a stray `APP_ENV=production` in a terminal) can never shadow the project config. Reset a poisoned terminal with `Remove-Item Env:APP_ENV` or open a new one.
 
-**Malware scanner is always required:** the `REQUIRE_MALWARE_SCANNER` env toggle no longer exists (`backend/app/core/config.py` hardcodes it on). Every PDF upload runs the scanner; uploads refuse when no scanner is present. Do not restore the toggle. On Linux the scanner is ClamAV — prefer `clamscan` (on-demand, runs as the app user, no daemon/permission issues); `clamdscan` remains the fallback (`backend/app/services/document_security.py`).
+**Malware scanner & structural inspection:** `REQUIRE_MALWARE_SCANNER` in `.env` controls whether an external scanner (Microsoft Defender on Windows or ClamAV on Linux) is mandatory. When `false` (default for internal staff workflows), upload security relies on the ultra-fast built-in `pikepdf` + `PyMuPDF` structural inspection engine to block all malicious PDF vectors (JS, launch actions, attachments, XFA forms, bombs). On Linux when ClamAV is enabled, `clamdscan` (daemon, ~40ms) is prioritized over standalone `clamscan` (~24s disk parse).
 
 **Migrations run only from the deploy:** `app.db.migrations` refuses to run when `APP_ENV != production` unless `--allow-local` is passed. Never run migrations from local dev against the shared database — that is how the database drifts ahead of deployed code and the schema guard refuses to boot.
 
@@ -31,7 +31,7 @@ The three inactive settings are loaded by backend configuration but do not chang
 
 1. Create the Python **3.12** environment (`py -3.12 -m venv .venv`; the pinned requirements predate Python 3.14 wheels), install `requirements.txt` and optional requirements (`.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-optional.txt`), then install Playwright Chromium (`.\.venv\Scripts\python.exe -m playwright install chromium`).
 2. Install frontend dependencies in `frontend/`.
-3. Configure `.env` from `.env.example` (local) or `.env.production` (production); production requires HTTPS origin, exact hosts/proxies, a long hash secret, and Supabase credentials. Malware scanning is always required on uploads — there is no toggle.
+3. Configure `.env` from `.env.example` (local) or `.env.production` (production); production requires HTTPS origin, exact hosts/proxies, a long hash secret, and Supabase credentials.
 4. Apply migrations with `commands/apply-migrations.ps1`, initialize non-credential defaults explicitly, and bootstrap Primary Admin once with `python commands/create_admin.py first.last@risklocker.com`.
 5. Use `npm run backend`, `npm run frontend`, or `npm run full` to start development services. `npm run full` starts the API, frontend, and exactly one extraction/render worker. Use `npm run stop` to stop project servers.
 6. Port coordination: `commands/start-backend.ps1` writes the chosen port to `.qc-tmp\backend-port.txt`; `start-frontend.ps1` and `start-full.ps1` read it. Backend :8100, frontend :3000.

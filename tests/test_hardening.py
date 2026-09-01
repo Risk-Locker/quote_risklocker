@@ -123,29 +123,29 @@ def test_supabase_bucket_reconciles_asset_mime_types():
     client.close()
 
 
-def test_scanner_prefers_clamscan_over_clamdscan(monkeypatch):
+def test_scanner_prefers_clamdscan_over_clamscan(monkeypatch):
     monkeypatch.setenv("ProgramData", r"C:\__no_such_programdata__")
     monkeypatch.setattr(
         "app.services.document_security.shutil.which",
-        lambda name: "/usr/bin/clamscan" if name == "clamscan" else ("/usr/bin/clamdscan" if name == "clamdscan" else None),
-    )
-    command = _defender_command(Path("sample.pdf"))
-    assert command is not None
-    args, engine = command
-    assert args[0] == "/usr/bin/clamscan"
-    assert engine == "ClamAV"
-
-
-def test_scanner_falls_back_to_clamdscan_when_clamscan_missing(monkeypatch):
-    monkeypatch.setenv("ProgramData", r"C:\__no_such_programdata__")
-    monkeypatch.setattr(
-        "app.services.document_security.shutil.which",
-        lambda name: "/usr/bin/clamdscan" if name == "clamdscan" else None,
+        lambda name: "/usr/bin/clamdscan" if name == "clamdscan" else ("/usr/bin/clamscan" if name == "clamscan" else None),
     )
     command = _defender_command(Path("sample.pdf"))
     assert command is not None
     args, engine = command
     assert args[0] == "/usr/bin/clamdscan"
+    assert engine == "ClamAV"
+
+
+def test_scanner_falls_back_to_clamscan_when_clamdscan_missing(monkeypatch):
+    monkeypatch.setenv("ProgramData", r"C:\__no_such_programdata__")
+    monkeypatch.setattr(
+        "app.services.document_security.shutil.which",
+        lambda name: "/usr/bin/clamscan" if name == "clamscan" else None,
+    )
+    command = _defender_command(Path("sample.pdf"))
+    assert command is not None
+    args, engine = command
+    assert args[0] == "/usr/bin/clamscan"
     assert engine == "ClamAV"
 
 

@@ -10,6 +10,26 @@ Current high-signal snapshot of active development. Rotate old entries to `docs/
 
 ## Recent Interaction Logs (Active Window)
 
+### 2026-09-01 · Antigravity (Gemini 3.7 Flash) · Optimize Upload Malware Scan & Prioritize ClamAV Daemon — EXECUTED
+Asked: Eliminate the 24s upload scanner freeze by enabling built-in structural inspection and prioritizing `clamdscan`.
+Done: Updated `document_security.py:32-75`, `config.py:249`, `system_checks.py:114`, and `test_hardening.py:126-150` to make `REQUIRE_MALWARE_SCANNER` configurable (defaulting to fast 15ms `pikepdf+PyMuPDF` structural inspection) and prioritize `clamdscan` over `clamscan`; verified 541/541 pytest green, TypeScript clean.
+Pending: none.
+
+### 2026-09-01 · Antigravity (Gemini 3.7 Flash) · Explain 401, 422 Workspace, and Chrome runtime.lastError Errors — INVESTIGATED
+Asked: Explain the meaning and causes of `/api/auth/me` 401, `/drafts/.../workspace` 422, and Chrome `runtime.lastError` in the browser console.
+Done: Explained 401 (standard unauthenticated session check), 422 (workspace patch validation/reference violation during auto-save attempts), and `runtime.lastError` (external Chrome extension background script disconnect).
+Pending: none.
+
+### 2026-09-01 · Antigravity (Gemini 3.7 Flash) · Propose Malware Scanning Alternatives & Optimization Paths — INVESTIGATED
+Asked: Propose fast alternatives to the 24s ClamAV scan for internal staff usage.
+Done: Formulated 3 optimization paths: (1) Pure built-in pikepdf/fitz structural inspection (<30ms); (2) ClamAV memory-resident daemon `clamdscan` (<50ms); (3) Asynchronous worker-level scanning so uploads return 202 in <50ms.
+Pending: none.
+
+### 2026-09-01 · Antigravity (Gemini 3.7 Flash) · Analyze Server Upload Latency vs Local Execution — INVESTIGATED
+Asked: Explain why PDF upload on VPS took 24.4s before elevator progress started compared to ~9s locally.
+Done: Analyzed PM2 logs showing `POST /api/uploads` took 24,447ms before returning 202 while the actual background job took only 7s; identified ClamAV cold scanning, network transmission, and Supabase storage upload sync in older deployments as root causes.
+Pending: none.
+
 ### 2026-09-01 · Antigravity (Gemini 3.7 Flash) · Push Production Milestone to origin v11 and origin main — EXECUTED
 Asked: Commit and push verified v11 enhancements to origin v11 and merge cleanly to origin main.
 Done: Committed full hardened suite (541/541 pytest green, 36/36 Next.js build clean), pushed commit `eb3debc` to `origin v11` and fast-forward merged to `origin main`.

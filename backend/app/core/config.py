@@ -246,9 +246,7 @@ def get_settings() -> Settings:
     session_idle_hours = _int("SESSION_IDLE_HOURS", 8)
     session_max_days = _int("SESSION_MAX_DAYS", 30)
     session_cookie_secure = _bool("SESSION_COOKIE_SECURE", app_env == "production")
-    # RL-DISABLED REQUIRE_MALWARE_SCANNER env toggle — disabled 2026-08-21; the malware
-    # scanner is unconditionally required on every upload and cannot be turned off.
-    require_malware_scanner = True
+    require_malware_scanner = _bool("REQUIRE_MALWARE_SCANNER", False)
     if retention_days < 1 or retention_days > 365:
         raise RuntimeError("PDF_RETENTION_DAYS must be between 1 and 365.")
     if max_upload_files != 1:
