@@ -10,6 +10,11 @@ Current high-signal snapshot of active development. Rotate old entries to `docs/
 
 ## Recent Interaction Logs (Active Window)
 
+### 2026-09-01 · Antigravity (Gemini 3.7 Flash) · Resolve IDE Type Diagnostics in Document Security & Tests — EXECUTED
+Asked: Fix IDE diagnostic warnings and type errors in `document_security.py` and `test_hardening.py`.
+Done: Updated `document_security.py:10-170` (fixed `acro_form.get` array typing, `@contextmanager` `Generator` return type) and `test_hardening.py:1-176` (added `Settings` type casting for `SimpleNamespace` mock objects and safe `new_page` attribute access); verified 541/541 pytest green, TypeScript clean.
+Pending: none.
+
 ### 2026-09-01 · Antigravity (Gemini 3.7 Flash) · Optimize Upload Malware Scan & Prioritize ClamAV Daemon — EXECUTED
 Asked: Eliminate the 24s upload scanner freeze by enabling built-in structural inspection and prioritizing `clamdscan`.
 Done: Updated `document_security.py:32-75`, `config.py:249`, `system_checks.py:114`, and `test_hardening.py:126-150` to make `REQUIRE_MALWARE_SCANNER` configurable (defaulting to fast 15ms `pikepdf+PyMuPDF` structural inspection) and prioritize `clamdscan` over `clamscan`; verified 541/541 pytest green, TypeScript clean.

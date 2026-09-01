@@ -9,7 +9,7 @@ import subprocess
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
+from typing import Generator
 from uuid import uuid4
 
 import fitz
@@ -103,14 +103,15 @@ def _inspect_pdf(path: Path, max_pages: int = MAX_PDF_PAGES) -> dict:
             if acro_form is not None:
                 if "/XFA" in acro_form:
                     raise ValueError("PDFs containing XFA forms are not accepted.")
-                fields = acro_form.get("/Fields", [])
-                for field in fields:
-                    if isinstance(field, pikepdf.Dictionary):
-                        action = field.get("/A")
-                        if isinstance(action, pikepdf.Dictionary) and action.get("/S") == "/JavaScript":
-                            raise ValueError("PDF contains a prohibited JavaScript.")
-                        if "/AA" in field:
-                            raise ValueError("PDFs containing automatic actions are not accepted.")
+                fields = acro_form.get("/Fields")
+                if fields is not None:
+                    for field in fields:
+                        if isinstance(field, pikepdf.Dictionary):
+                            action = field.get("/A")
+                            if isinstance(action, pikepdf.Dictionary) and action.get("/S") == "/JavaScript":
+                                raise ValueError("PDF contains a prohibited JavaScript.")
+                            if "/AA" in field:
+                                raise ValueError("PDFs containing automatic actions are not accepted.")
 
             for page in pdf.pages:
                 if "/AA" in page:
@@ -153,7 +154,7 @@ def _inspect_pdf(path: Path, max_pages: int = MAX_PDF_PAGES) -> dict:
 
 
 @contextmanager
-def quarantined_pdf(data: bytes, settings: Settings) -> Iterator[tuple[Path, dict]]:
+def quarantined_pdf(data: bytes, settings: Settings) -> Generator[tuple[Path, dict], None, None]:
     with qc_temp_directory("quarantine-") as directory:
         path = directory / f"{uuid4()}.pdf"
         path.write_bytes(data)

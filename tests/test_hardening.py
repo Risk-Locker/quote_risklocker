@@ -1,9 +1,12 @@
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import httpx
 import pytest
+
+from app.core.config import Settings
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,12 +20,15 @@ from app.storage import supabase as supabase_module
 from app.storage.supabase import StorageError, SupabaseStorage
 
 
-def storage_settings():
-    return SimpleNamespace(
-        supabase_url="https://project.supabase.co",
-        supabase_service_role_key="backend-only-key",
-        supabase_storage_bucket="risklocker-pdfs",
-        max_upload_bytes=1024 * 1024,
+def storage_settings() -> Settings:
+    return cast(
+        Settings,
+        SimpleNamespace(
+            supabase_url="https://project.supabase.co",
+            supabase_service_role_key="backend-only-key",
+            supabase_storage_bucket="risklocker-pdfs",
+            max_upload_bytes=1024 * 1024,
+        ),
     )
 
 
@@ -151,7 +157,7 @@ def test_scanner_falls_back_to_clamscan_when_clamdscan_missing(monkeypatch):
 
 def test_quarantine_rejects_active_pdf_content(monkeypatch, tmp_path):
     monkeypatch.setattr("app.services.document_security._defender_command", lambda _: None)
-    settings = SimpleNamespace(require_malware_scanner=False, max_pdf_pages=100)
+    settings = cast(Settings, SimpleNamespace(require_malware_scanner=False, max_pdf_pages=100))
     dangerous = b"%PDF-1.4\n/JavaScript\n%%EOF"
     with pytest.raises(ValueError, match="prohibited JavaScript"):
         with quarantined_pdf(dangerous, settings):
@@ -161,10 +167,10 @@ def test_quarantine_rejects_active_pdf_content(monkeypatch, tmp_path):
 def test_quarantine_accepts_benign_pdf_with_js_substring(monkeypatch, tmp_path):
     import fitz
     monkeypatch.setattr("app.services.document_security._defender_command", lambda _: None)
-    settings = SimpleNamespace(require_malware_scanner=False, max_pdf_pages=100)
+    settings = cast(Settings, SimpleNamespace(require_malware_scanner=False, max_pdf_pages=100))
 
     doc = fitz.open()
-    page = doc.new_page()
+    page = getattr(doc, "new_page")()
     page.insert_text((50, 50), "Portal URL: https://example.com/js/portal and /json endpoint")
     pdf_bytes = doc.write()
     doc.close()
