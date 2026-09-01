@@ -28,10 +28,10 @@ def _sqlalchemy_url(database_url: str) -> str:
 engine = create_engine(
     _sqlalchemy_url(settings.database_url),
     poolclass=QueuePool,
-    pool_size=10,
-    max_overflow=20,
-    pool_timeout=30,
-    pool_recycle=300,
+    pool_size=3,
+    max_overflow=2,
+    pool_timeout=20,
+    pool_recycle=180,
     pool_pre_ping=True,
     connect_args={
         "keepalives": 1,

@@ -35,7 +35,7 @@ Generated file map. Line spans are navigational hints and are refreshed by the m
 - `backend/app/core/workspace.py` L1-46: runtime configuration security and API errors. Symbols: `resolve_qc_path` L18-37; `qc_temp_directory` L41-46.
 - `backend/app/db/__init__.py` L1-1: Postgres engine sessions and seed data.
 - `backend/app/db/init_db.py` L1-150: Postgres engine sessions and seed data. Symbols: `create_schema` L72-73; `seed_defaults` L76-147.
-- `backend/app/db/migrations.py` L1-201: Postgres engine sessions and seed data. Symbols: `MigrationError` L21-22; `Migration` L26-31; `AppliedMigration` L35-38; `_normalize_line_endings` L41-43; `migration_checksums` L46-60; `discover_migrations` L63-89; `build_plan` L92-105; `validate_schema_history` L108-113; `default_migration_root` L116-117; `_ensure_ledger` L120-134; `_history` L137-141; `apply_migrations` L144-170.
+- `backend/app/db/migrations.py` L1-206: Postgres engine sessions and seed data. Symbols: `MigrationError` L22-23; `Migration` L27-32; `AppliedMigration` L36-39; `_normalize_line_endings` L42-44; `migration_checksums` L47-61; `discover_migrations` L64-90; `build_plan` L93-106; `validate_schema_history` L109-114; `default_migration_root` L117-118; `_ensure_ledger` L121-135; `_history` L138-142; `apply_migrations` L145-171.
 - `backend/app/db/session.py` L1-88: Postgres engine sessions and seed data. Symbols: `_sqlalchemy_url` L20-25; `verify_database_connection` L46-59; `verify_schema_version` L62-77; `get_db` L80-88.
 - `backend/app/domain/__init__.py` L1-1: project file.
 - `backend/app/domain/benefits.py` L1-129: project file. Symbols: `ReviewedBenefitState` L12-17; `CostStatus` L20-24; `SourceLineDisposition` L27-32; `MoneyAmount` L35-37; `BenefitValue` L40-129.

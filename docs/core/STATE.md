@@ -55,10 +55,11 @@ Asked: POST /api/uploads takes 21s, job polls 30s+ and never completes (user can
 Done: (1) upload_intake_service.py:114 — always write locally, return 202 in <1s; (2) extraction_worker.py:161 — read local file instantly, run extraction immediately, Supabase promotion deferred until AFTER complete_job using a fresh httpx.Client (not shared singleton — was crashing from asyncio.to_thread and silently exhausting job retries); (3) sandbox.py:68 — fork on Linux cuts subprocess cold-start from ~5-8s to ~100ms; (4) main.py:88 — added logger.exception to worker loop so crashes are now visible; updated test_upload_intake.py assertions. 538/538 pytest green, TypeScript+Next.js build clean.
 Pending: none.
 
-### 2026-09-01 · Antigravity (Gemini 3.7 Flash) · Preview Panel Collapse, Ctrl-Wheel Zoom & Dialog Wrap Fix — EXECUTED
-Asked: Add matching collapse panel button to right preview panel, remove redundant preview buttons, add Ctrl+Mouse Wheel zoom, and fix dialog text overflow.
-Done: (1) Added `previewColCollapsed` state, smooth collapse transition, and expand handle tab in `review-phase.tsx:718,1893,2484,3068`; (2) streamlined preview header to compact Style preset, Expand canvas, and Collapse Panel buttons in `review-phase.tsx:2490-2580`; (3) implemented direct Ctrl+Mouse Wheel zoom in canvas container in `review-phase.tsx:2590-2600`; (4) added `[overflow-wrap:anywhere] break-words pr-8` in `dialog.tsx:36,47,51`; verified 538 backend tests and 36/36 Next.js build clean.
+### 2026-09-01 · Antigravity (Gemini 3.7 Flash) · Fix Supabase EMAXCONNSESSION Pool Exhaustion — EXECUTED
+Asked: Fix production migration failure: "FATAL: (EMAXCONNSESSION) max clients reached in session mode - max clients are limited to pool_size: 15".
+Done: (1) Scaled QueuePool in `backend/app/db/session.py:30-36` to lean `pool_size=3, max_overflow=2, pool_recycle=180` so backend app instances consume max 3-5 connections (preventing 15-limit exhaustion on Supabase port 5432); (2) configured `NullPool` in `backend/app/db/migrations.py:189-195` so migration jobs release connection immediately upon exit without reserving pool slots; verified 538 backend tests and Next.js build clean.
 Pending: none.
+
 
 
 

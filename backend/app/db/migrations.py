@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy import Connection, Engine, create_engine, text
+from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 from app.db.session import _sqlalchemy_url
@@ -188,7 +189,11 @@ def main() -> None:
             "Re-run with --allow-local only when intentionally migrating a local/development database."
             % settings.app_env
         )
-    engine = create_engine(_sqlalchemy_url(settings.database_url), pool_pre_ping=True)
+    engine = create_engine(
+        _sqlalchemy_url(settings.database_url),
+        poolclass=NullPool,
+        pool_pre_ping=True,
+    )
     plan = apply_migrations(engine, discover_migrations(args.root), dry_run=args.dry_run)
     verb = "Would apply" if args.dry_run else "Applied"
     for migration in plan:
