@@ -5,10 +5,11 @@ const SESSION_COOKIE = process.env.SESSION_COOKIE_NAME || "risklocker_session";
 export function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   if (!request.cookies.get(SESSION_COOKIE)) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    url.search = `?redirect=${encodeURIComponent(pathname + search)}`;
-    return NextResponse.redirect(url);
+    const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
+    const proto = request.headers.get("x-forwarded-proto") || (request.url.startsWith("https") ? "https" : "http");
+    const origin = host ? `${proto}://${host}` : request.nextUrl.origin;
+    const loginUrl = new URL(`/login?redirect=${encodeURIComponent(pathname + search)}`, origin);
+    return NextResponse.redirect(loginUrl);
   }
   return NextResponse.next();
 }

@@ -10,6 +10,11 @@ Current high-signal snapshot of active development. Rotate old entries to `docs/
 
 ## Recent Interaction Logs (Active Window)
 
+### 2026-09-01 · Antigravity (Gemini 3.7 Flash) · Fix Reverse Proxy Host Detection in Next.js Middleware — EXECUTED
+Asked: Fix browser cross-origin frame error ("Unsafe attempt to load URL https://localhost:3000/login from https://quote.risklocker.com/upload").
+Done: Updated `frontend/src/middleware.ts:5-15` to detect `x-forwarded-host` and `x-forwarded-proto` headers behind Nginx reverse proxy; verified 36/36 Next.js build clean.
+Pending: none.
+
 ### 2026-09-01 · Antigravity (Gemini 3.7 Flash) · Fix Malware Scan Subprocess Failure on VPS Without Clamd Daemon — EXECUTED
 Asked: Fix 400 Bad Request error on upload endpoint caused by `clamdscan` executing when `clamav-daemon` is offline.
 Done: Updated `document_security.py:59-75` to immediately bypass subprocess when `required=False` and automatically fallback from `clamdscan` (exit 2) to `clamscan` when `required=True`; verified 541/541 pytest green.
