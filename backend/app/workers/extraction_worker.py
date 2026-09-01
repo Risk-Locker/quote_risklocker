@@ -10,7 +10,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from app.core.workspace import qc_temp_directory, resolve_qc_path
+from app.core.workspace import QC_TEMP_ROOT, REPOSITORY_ROOT, qc_temp_directory, resolve_qc_path
 from app.extraction.company_resolution import build_companies_payload, resolve_company
 from app.extraction.sandbox import extract_with_limits
 from app.models.enums import AccountStatus, RecordStatus
@@ -170,12 +170,29 @@ def process_extraction_job(
         _ephemeral_path = resolved_file
         source_bytes = None
         import time
-        for _ in range(15):
-            try:
-                source_bytes = _ephemeral_path.read_bytes()
+        for _ in range(6):
+            if _ephemeral_path.exists():
+                try:
+                    source_bytes = _ephemeral_path.read_bytes()
+                    break
+                except (PermissionError, FileNotFoundError, OSError):
+                    pass
+            if source_bytes is None:
+                for candidate in [
+                    QC_TEMP_ROOT / "stateless_uploads" / f"{uploaded.id}.pdf",
+                    REPOSITORY_ROOT / "backend" / ".qc-tmp" / "stateless_uploads" / f"{uploaded.id}.pdf",
+                    Path(".qc-tmp/stateless_uploads") / f"{uploaded.id}.pdf",
+                ]:
+                    if candidate.exists():
+                        try:
+                            source_bytes = candidate.read_bytes()
+                            _ephemeral_path = candidate
+                            break
+                        except Exception:
+                            pass
+            if source_bytes is not None:
                 break
-            except (PermissionError, FileNotFoundError, OSError):
-                time.sleep(0.5)
+            time.sleep(0.3)
                 
         if source_bytes is None:
             import os

@@ -35,9 +35,10 @@ module.exports = {
         PYTHONPATH: BACKEND,
         PYTHONDONTWRITEBYTECODE: "1",
         APP_ENV,
-        // Jobs are claimed by the dedicated worker below; keep the API from
-        // running its own embedded worker loop (avoids double-processing).
-        ENABLE_EMBEDDED_WORKER: "0",
+        // Enable embedded worker in the API so uploads are processed immediately
+        // even if rl-quote-worker is not running. Row-level leases (SKIP LOCKED)
+        // ensure zero duplication.
+        ENABLE_EMBEDDED_WORKER: "1",
       },
       max_memory_restart: "600M",
       kill_timeout: 15000,

@@ -10,6 +10,11 @@ Current high-signal snapshot of active development. Rotate old entries to `docs/
 
 ## Recent Interaction Logs (Active Window)
 
+### 2026-09-01 · Antigravity (Gemini 3.7 Flash) · Enable Embedded Worker & Expand Rate Limits for Concurrent Staff — EXECUTED
+Asked: Fix long job queue delays and allow concurrent multi-device staff uploads without rate-limit throttling.
+Done: Updated `ecosystem.config.cjs:38-41` (`ENABLE_EMBEDDED_WORKER="1"`), `extraction_worker.py:170-195` (multi-candidate fallback for reading ephemeral source files), and `config.py:282-294` (increased rate limits to 500 uploads/hr, 500 gens/hr); verified 541/541 pytest green.
+Pending: none.
+
 ### 2026-09-01 · Antigravity (Gemini 3.7 Flash) · Fix Reverse Proxy Host Detection in Next.js Middleware — EXECUTED
 Asked: Fix browser cross-origin frame error ("Unsafe attempt to load URL https://localhost:3000/login from https://quote.risklocker.com/upload").
 Done: Updated `frontend/src/middleware.ts:5-15` to detect `x-forwarded-host` and `x-forwarded-proto` headers behind Nginx reverse proxy; verified 36/36 Next.js build clean.
