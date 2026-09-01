@@ -10,6 +10,11 @@ Current high-signal snapshot of active development. Rotate old entries to `docs/
 
 ## Recent Interaction Logs (Active Window)
 
+### 2026-09-01 · Antigravity (Gemini 3.7 Flash) · Push Production Milestone to origin v11 and origin main — EXECUTED
+Asked: Commit and push verified v11 enhancements to origin v11 and merge cleanly to origin main.
+Done: Committed full hardened suite (541/541 pytest green, 36/36 Next.js build clean), pushed commit `eb3debc` to `origin v11` and fast-forward merged to `origin main`.
+Pending: none.
+
 ### 2026-09-01 · Antigravity (Gemini 3.7 Flash) · Fix Intermittent 422 FK Violation & Idempotent Benefit Operations — EXECUTED
 Asked: Diagnose and eliminate intermittent 422 ("This record references a value that does not exist") during draft workspace saves/benefit customization.
 Done: Hardened `backend/app/services/workspace_service.py:1328-1540` with `_safe_concept_id`, `_safe_source_line_id`, in-place idempotent updates for `create_custom_benefit` keys (`addon:*`, `default:*`, `concept:*`), and extended `_resolve_selection`; verified 541/541 pytest green, 36/36 Next.js build clean.
