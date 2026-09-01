@@ -220,6 +220,7 @@ def test_published_options_return_only_latest_revision_without_company_filtering
             "safe_margins": {},
             "background_behavior": "clip",
         },
+        "is_default": False,
     }]
     assert list_page_profiles(db, user())[0]["profile_key"] == "a4"
 

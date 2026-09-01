@@ -18,7 +18,7 @@ def test_clean_insurer_independent_masters_are_defined():
     specs = master_template_specs()
     assert [item["key"] for item in specs] == ["standard_a4", "dense_a4", "agency_bilingual", "extended_portrait"]
     assert [item["name"] for item in specs] == ["Standard A4", "Dense A4", "Bilingual Agency Motor", "Extended Portrait"]
-    assert [item["is_default"] for item in specs] == [True, False, False, False]
+    assert [item["is_default"] for item in specs] == [False, False, True, False]
     assert [item["config"]["page_profile"]["height"] for item in specs] == [1123, 1123, 1123, 1480]
 
 

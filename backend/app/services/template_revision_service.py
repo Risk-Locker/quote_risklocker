@@ -312,6 +312,7 @@ def list_published_templates(db, user) -> list[dict]:
         if profile is None:
             continue
         template = templates[template_id]
+        is_default = bool((template.fixed_fields or {}).get("is_default"))
         result.append({
             "template_id": template.id,
             "template_revision_id": revision.id,
@@ -319,8 +320,9 @@ def list_published_templates(db, user) -> list[dict]:
             "revision_number": revision.revision_number,
             "config_hash": revision.config_hash,
             "page_profile": serialize_page_profile(profile),
+            "is_default": is_default,
         })
-    result.sort(key=lambda item: (item["name"].casefold(), item["template_id"]))
+    result.sort(key=lambda item: (not item.get("is_default", False), item["name"].casefold(), item["template_id"]))
     return result
 
 

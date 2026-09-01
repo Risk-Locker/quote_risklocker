@@ -1954,14 +1954,14 @@ def business_publish_template(
 @router.get("/admin/templates")
 def admin_templates(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
-    return {
-        "templates": [
-            serialize_template(item, db)
-            for item in db.scalars(
-                select(OutputTemplateConfig).where(OutputTemplateConfig.deleted_at.is_(None)).order_by(OutputTemplateConfig.name)
-            ).all()
-        ]
-    }
+    templates = [
+        serialize_template(item, db)
+        for item in db.scalars(
+            select(OutputTemplateConfig).where(OutputTemplateConfig.deleted_at.is_(None))
+        ).all()
+    ]
+    templates.sort(key=lambda item: (not item.get("is_default", False), item.get("name", "").casefold()))
+    return {"templates": templates}
 
 
 @router.delete("/admin/templates/{template_id}")
@@ -2036,6 +2036,12 @@ def admin_template_copy(template_id: str, db: Session = Depends(get_db), user: U
 
 @router.post("/admin/templates/{template_id}/make-master")
 def admin_template_make_master(template_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    template = make_template_master(db, user, template_id)
+    return {"template": serialize_template(template, db)}
+
+
+@router.post("/admin/templates/{template_id}/set-default")
+def admin_template_set_default(template_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     template = make_template_master(db, user, template_id)
     return {"template": serialize_template(template, db)}
 

@@ -126,6 +126,7 @@ type PublishedTemplateOption = {
   config_hash: string;
   config?: TemplateConfig;
   page_profile: { name: string; width: number; height: number; unit: string };
+  is_default?: boolean;
 };
 
 type TemplateSelectionImpact = {
@@ -943,9 +944,6 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 config: matching.config,
                 binding: { template_id: matching.template_id, template_revision_id: matching.template_revision_id, base_hash: matching.config_hash },
               });
-            }
-            if (!currentRevisionId && matching.template_revision_id) {
-              selectTemplateDirectly(matching.template_revision_id, list);
             }
           }
         }
@@ -1985,7 +1983,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                     >
                       {publishedTemplates.map((option) => (
                         <option key={option.template_revision_id} value={option.template_revision_id}>
-                          {option.name} · r{option.revision_number} · {option.page_profile.name}
+                          {option.name} {option.is_default ? "★ (Default)" : ""} · r{option.revision_number} · {option.page_profile.name}
                         </option>
                       ))}
                     </Select>
@@ -2326,8 +2324,8 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                   {workspace.extracted_benefits_section?.detected_package?.name ? (
                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-200 bg-gradient-to-r from-blue-50/80 to-indigo-50/80 p-3">
                       <div className="flex items-center gap-2.5">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-600 text-white font-bold text-xs shadow-sm">
-                          PRO
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-blue-200 bg-white text-blue-600 shadow-xs">
+                          <PackageIcon size={18} weight="duotone" />
                         </div>
                         <div>
                           <div className="flex items-center gap-2">

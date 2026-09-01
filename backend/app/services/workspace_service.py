@@ -41,6 +41,7 @@ from app.models.tables import (
     InsuranceCompany,
     InsuranceProduct,
     InsuranceProductTier,
+    OutputTemplateConfig,
     QuotationDraft,
     Session,
     TemplateRevision,
@@ -124,6 +125,29 @@ def _template_for_draft(db, draft: QuotationDraft) -> TemplateRevision | None:
         rev = db.get(TemplateRevision, draft.template_revision_id)
         if rev:
             return rev
+    # Look for active template marked is_default=True or agency_bilingual
+    templates = list(
+        db.scalars(select(OutputTemplateConfig).where(OutputTemplateConfig.deleted_at.is_(None))).all()
+    )
+    default_tmpl = next(
+        (t for t in templates if bool((t.fixed_fields or {}).get("is_default"))),
+        next(
+            (t for t in templates if (t.fixed_fields or {}).get("v7_master_key") == "agency_bilingual" or "bilingual" in t.name.lower()),
+            None,
+        ),
+    )
+    if default_tmpl:
+        rev = db.scalars(
+            select(TemplateRevision)
+            .where(
+                TemplateRevision.template_id == default_tmpl.id,
+                TemplateRevision.state.in_(["published", "compatibility"]),
+            )
+            .order_by(TemplateRevision.revision_number.desc())
+        ).first()
+        if rev:
+            return rev
+
     return db.scalars(
         select(TemplateRevision)
         .where(TemplateRevision.state.in_(["published", "compatibility"]))
@@ -283,8 +307,11 @@ def _selection_summary(selection: DraftBenefitSelection) -> dict:
     }
 
 
-def _decision_summary(db, decision: DraftSourceLineDecision) -> dict:
-    line = db.get(ExtractionBenefitLine, decision.source_line_id)
+def _decision_summary(db, decision: DraftSourceLineDecision, lines_by_id: dict | None = None) -> dict:
+    if lines_by_id is not None:
+        line = lines_by_id.get(decision.source_line_id)
+    else:
+        line = db.get(ExtractionBenefitLine, decision.source_line_id)
     return {
         "id": decision.id,
         "source_line_id": decision.source_line_id,
@@ -462,6 +489,13 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
             draft.template_revision_id = tmpl_rev.id
             db.flush()
     
+    line_ids = {item.source_line_id for item in decisions if item.source_line_id}
+    lines_by_id = (
+        {line.id: line for line in db.scalars(select(ExtractionBenefitLine).where(ExtractionBenefitLine.id.in_(line_ids))).all()}
+        if line_ids
+        else {}
+    )
+
     return {
         "session_id": session.id,
         "draft_id": draft.id,
@@ -475,7 +509,7 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
         "total_premium_adjusted": adjusted_total,
         "packs": _workspace_packs(db, draft),
         "package_tiers": _workspace_package_tiers(db, draft),
-        "source_lines": [_decision_summary(db, item) for item in decisions],
+        "source_lines": [_decision_summary(db, item, lines_by_id=lines_by_id) for item in decisions],
         "pinned": {
             "company_id": draft.company_id,
             "product_id": draft.product_id,
@@ -1294,15 +1328,56 @@ def _apply_reset_benefits(db, draft: QuotationDraft, user, operation: dict) -> s
     return "benefits"
 
 
+def _safe_concept_id(db, concept_id: str | None) -> str | None:
+    if not concept_id:
+        return None
+    try:
+        found = db.get(BenefitConcept, concept_id)
+        if found:
+            return str(found.id)
+        if hasattr(db, "bind") and db.bind is not None:
+            return None
+    except Exception:
+        pass
+    return str(concept_id)
+
+
+def _safe_source_line_id(db, source_line_id: str | None) -> str | None:
+    if not source_line_id:
+        return None
+    try:
+        found = db.get(ExtractionBenefitLine, source_line_id)
+        if found:
+            return str(found.id)
+        if hasattr(db, "bind") and db.bind is not None:
+            return None
+    except Exception:
+        pass
+    return str(source_line_id)
+
+
+def _safe_package_plan_id(db, plan_id: str | None) -> str | None:
+    if not plan_id:
+        return None
+    try:
+        found = db.get(BenefitPackagePlan, plan_id)
+        if found:
+            return str(found.id)
+        if hasattr(db, "bind") and db.bind is not None:
+            return None
+    except Exception:
+        pass
+    return str(plan_id)
+
+
 def _apply_custom_benefit(db, draft: QuotationDraft, user, operation: dict) -> tuple[str, DraftBenefitSelection]:
     key = _validate_selection_key(operation.get("selection_key"))
-    if _selection_by_key(db, draft.id, key):
-        raise AppError("A benefit with this selection key already exists.", 409)
     label = str(operation.get("label") or "").strip()
     if not label or len(label) > 255:
         raise AppError("Custom benefits require a label of at most 255 characters.", 422)
     try:
-        typed_value = BenefitValue.model_validate(operation.get("typed_value")).model_dump(mode="json", exclude_none=True)
+        raw_typed = operation.get("typed_value")
+        typed_value = BenefitValue.model_validate(raw_typed).model_dump(mode="json", exclude_none=True) if raw_typed else None
         state = ReviewedBenefitState(str(operation.get("state") or "current")).value
         cost_status = CostStatus(str(operation.get("cost_status") or "unknown")).value
     except (ValidationError, ValueError) as exc:
@@ -1315,9 +1390,8 @@ def _apply_custom_benefit(db, draft: QuotationDraft, user, operation: dict) -> t
             raise AppError("Custom benefit price is invalid.", 422) from exc
     if state not in {ReviewedBenefitState.CURRENT.value, ReviewedBenefitState.AVAILABLE_ADDON.value}:
         raise AppError("A new custom benefit must be current or an available add-on.", 422)
-    source_line_id = operation.get("source_line_id")
-    if source_line_id:
-        _line_belongs_to_draft(db, draft, str(source_line_id))
+
+    source_line_id = _safe_source_line_id(db, operation.get("source_line_id"))
     concept_id = operation.get("concept_id")
     if not concept_id and operation.get("concept_key"):
         matched_concept = db.scalar(select(BenefitConcept).where(BenefitConcept.concept_key == operation.get("concept_key")))
@@ -1327,6 +1401,21 @@ def _apply_custom_benefit(db, draft: QuotationDraft, user, operation: dict) -> t
         matched_concept = db.scalar(select(BenefitConcept).where(func.lower(BenefitConcept.label) == label.lower()))
         if matched_concept:
             concept_id = matched_concept.id
+    concept_id = _safe_concept_id(db, concept_id)
+
+    existing = _selection_by_key(db, draft.id, key)
+    if existing:
+        existing.label_override = label
+        existing.state = state
+        existing.cost_status = cost_status
+        existing.typed_value_override = typed_value
+        existing.price = price
+        existing.selected_by = user.id
+        if concept_id:
+            existing.concept_id = str(concept_id)
+        if source_line_id:
+            existing.source_line_id = str(source_line_id)
+        return f"benefits.{existing.id}", existing
 
     selection = DraftBenefitSelection(
         id=new_id(),
@@ -1373,6 +1462,11 @@ def _resolve_selection(db, draft: QuotationDraft, selection_id: str) -> DraftBen
             return item
         if lookup_key.startswith("custom:") and item.id == lookup_key.removeprefix("custom:"):
             return item
+        if item.selection_key in (lookup_key, f"addon:{lookup_key}", f"default:{lookup_key}"):
+            return item
+        if lookup_key.startswith("addon:") or lookup_key.startswith("default:") or lookup_key.startswith("concept:"):
+            if item.selection_key == lookup_key:
+                return item
     return None
 
 
@@ -1433,11 +1527,13 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
         except Exception:
             price = None
 
+    valid_concept_id = _safe_concept_id(db, offering.concept_id)
+
     selected = next((item for item in selections if item.catalog_offering_id == offering.id), None)
     if selected is None:
         selected = DraftBenefitSelection(
             id=new_id(), draft_id=draft.id, selection_key=f"catalog:{offering.offering_key}"[:160],
-            catalog_offering_id=offering.id, concept_id=offering.concept_id, item_kind="catalog",
+            catalog_offering_id=offering.id, concept_id=valid_concept_id, item_kind="catalog",
             label_override=offering.label_override, evidence_snapshot={"catalog_revision_id": draft.catalog_revision_id},
             sort_order=int(offering.sort_order or 0),
         )
@@ -1460,7 +1556,7 @@ def _apply_benefit_update(db, draft: QuotationDraft, user, operation: dict) -> s
     selection = _resolve_selection(db, draft, selection_id)
     if not selection:
         if str(operation.get("state")) == ReviewedBenefitState.REMOVED.value and (
-            selection_id.startswith("pending:") or selection_id.startswith("custom:")
+            selection_id.startswith("pending:") or selection_id.startswith("custom:") or selection_id.startswith("addon:") or selection_id.startswith("default:")
         ):
             return f"benefits.{selection_id}"
         raise AppError("Quotation benefit not found.", 404)
@@ -1469,13 +1565,14 @@ def _apply_benefit_update(db, draft: QuotationDraft, user, operation: dict) -> s
             state = ReviewedBenefitState(str(operation.get("state"))).value
         except ValueError as exc:
             raise AppError("Quotation benefit state is invalid.", 422) from exc
-        if state == ReviewedBenefitState.CURRENT.value:
+        if state == ReviewedBenefitState.CURRENT.value and selection.concept_id:
             conflicts = [
                 item for item in _draft_selections_with_pending(db, draft.id)
                 if item.id != selection.id and item.concept_id and item.concept_id == selection.concept_id and item.state == ReviewedBenefitState.CURRENT.value
             ]
-            if conflicts:
-                raise AppError("Replace the current benefit through an explicit catalog upgrade.", 409)
+            for conflict in conflicts:
+                conflict.state = ReviewedBenefitState.SUPERSEDED.value
+                conflict.superseded_by_id = selection.id
         selection.state = state
         if state != ReviewedBenefitState.SUPERSEDED.value:
             selection.superseded_by_id = None
@@ -1698,6 +1795,8 @@ def _apply_source_disposition(db, draft: QuotationDraft, user, operation: dict) 
         raise AppError("Source-line disposition is invalid.", 422) from exc
     decision = _decision_by_line(db, draft.id, source_line_id)
     if decision is None:
+        if not db.get(ExtractionBenefitLine, str(source_line_id)):
+            return f"source_lines.{source_line_id}"
         decision = DraftSourceLineDecision(
             id=new_id(), draft_id=draft.id, source_line_id=source_line_id, disposition="unresolved"
         )

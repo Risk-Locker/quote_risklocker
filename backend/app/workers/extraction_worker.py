@@ -51,9 +51,7 @@ class JobProcessingError(RuntimeError):
         return self.safe_message
 
 
-def load_extraction_context(db) -> dict:
-    """Load immutable request inputs once before spawning the extractor."""
-
+def _query_extraction_context(db) -> dict:
     aliases = {
         item.field_name: list(item.aliases or [])
         for item in db.scalars(select(FieldAlias).where(FieldAlias.status == AccountStatus.ACTIVE.value)).all()
@@ -109,6 +107,12 @@ def load_extraction_context(db) -> dict:
         "db_companies": companies,
         "db_benefit_concepts": benefit_concepts,
     }
+
+
+def load_extraction_context(db) -> dict:
+    """Load immutable request inputs once before spawning the extractor with in-memory caching."""
+    from app.core.cache import get_or_set
+    return get_or_set("extraction_context", lambda: _query_extraction_context(db), ttl_seconds=120.0)
 
 
 def _company_resolution(fields: dict, companies: list[dict]) -> dict:

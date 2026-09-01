@@ -229,7 +229,7 @@ def _agency_bilingual_config() -> dict:
     ]
 
     config.update({
-        "version": 7, "template_name": name, "v7_master_key": key, "is_default": False, "locked": True,
+        "version": 7, "template_name": name, "v7_master_key": key, "is_default": True, "locked": True,
         "page_profile": {
             "profile_key": "a4", "name": "A4",
             "width": 794, "height": height, "unit": "px", "safe_margins": {"top": 24, "right": 24, "bottom": 24, "left": 24},
@@ -242,9 +242,9 @@ def _agency_bilingual_config() -> dict:
 
 def master_template_specs() -> list[dict]:
     return [
-        {"key": "standard_a4", "name": "Standard A4", "is_default": True, "config": _master_config("standard_a4", "Standard A4", height=1123, dense=False, extended=False, is_default=True)},
+        {"key": "standard_a4", "name": "Standard A4", "is_default": False, "config": _master_config("standard_a4", "Standard A4", height=1123, dense=False, extended=False, is_default=False)},
         {"key": "dense_a4", "name": "Dense A4", "is_default": False, "config": _master_config("dense_a4", "Dense A4", height=1123, dense=True, extended=False, is_default=False)},
-        {"key": "agency_bilingual", "name": "Bilingual Agency Motor", "is_default": False, "config": _agency_bilingual_config()},
+        {"key": "agency_bilingual", "name": "Bilingual Agency Motor", "is_default": True, "config": _agency_bilingual_config()},
         {"key": "extended_portrait", "name": "Extended Portrait", "is_default": False, "config": _master_config("extended_portrait", "Extended Portrait", height=1480, dense=False, extended=True, is_default=False)},
     ]
 

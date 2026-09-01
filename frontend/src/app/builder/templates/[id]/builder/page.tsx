@@ -25,6 +25,7 @@ import {
   MagnifyingGlass,
   Plus,
   Square,
+  Star,
   TextIndent,
   TextOutdent,
   TextT,
@@ -1251,6 +1252,24 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
             disabled={!future.length || readOnly}
           >
             Redo
+          </Button>
+          <Button
+            variant={(template as any)?.is_default || (template?.fixed_fields as any)?.is_default ? "secondary" : "ghost"}
+            size="sm"
+            icon={<Star weight={(template as any)?.is_default || (template?.fixed_fields as any)?.is_default ? "fill" : "regular"} size={16} className={(template as any)?.is_default || (template?.fixed_fields as any)?.is_default ? "text-amber-500" : ""} />}
+            onClick={async () => {
+              try {
+                await api(`/admin/templates/${id}/make-master`, { method: "POST", body: "{}" });
+                toast(`"${template?.name}" is now the default template for quotations.`, "success");
+                await load();
+              } catch (e) {
+                setError(e instanceof Error ? e.message : "Failed to set default template.");
+              }
+            }}
+            disabled={(template as any)?.is_default || (template?.fixed_fields as any)?.is_default}
+            title={(template as any)?.is_default || (template?.fixed_fields as any)?.is_default ? "Currently default template" : "Set as default template"}
+          >
+            {(template as any)?.is_default || (template?.fixed_fields as any)?.is_default ? "Default" : "Set Default"}
           </Button>
           {template?.locked ? (
             <Button

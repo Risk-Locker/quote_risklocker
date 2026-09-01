@@ -253,6 +253,18 @@ export default function BuilderTemplatesPage() {
     }
   }
 
+  async function handleMakeDefault(template: TemplateRecord) {
+    if (template.is_default) return;
+    setError("");
+    try {
+      await api(`/admin/templates/${template.id}/make-master`, { method: "POST", body: "{}" });
+      toast(`"${template.name}" is now the default template for quotations.`, "success");
+      await load();
+    } catch (reason) {
+      setError(apiErrorMessage(reason));
+    }
+  }
+
   async function handleRenameSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!pendingRename || !renameValue.trim()) return;
@@ -863,7 +875,11 @@ export default function BuilderTemplatesPage() {
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
                               <h2 className="m-0 truncate text-[17px] font-bold text-[var(--rl-text-strong)]">{template.name}</h2>
-                              {template.is_default ? <Star aria-label="Default template" size={15} weight="fill" className="shrink-0 text-[var(--rl-red)]" /> : null}
+                              {template.is_default ? (
+                                <span className="inline-flex items-center gap-1 rounded bg-amber-50 border border-amber-300 px-1.5 py-0.5 text-[10px] font-bold text-amber-900 uppercase">
+                                  <Star size={11} weight="fill" className="text-amber-500" /> Default
+                                </span>
+                              ) : null}
                             </div>
                             <p className="mt-1 text-[12px] text-[var(--rl-text-muted)]">{page.name} · {Math.round(page.width)} × {Math.round(page.height)} {page.unit}</p>
                           </div>
@@ -872,6 +888,16 @@ export default function BuilderTemplatesPage() {
                         <div className="flex items-center justify-between gap-3 border-t border-[var(--rl-border)] pt-3">
                           <p className="m-0 text-[11px] text-[var(--rl-text-muted)]">{published ? `Published revision ${published.revision_number}` : `Working revision ${template.revision}`}</p>
                           <div className="flex flex-wrap gap-1 items-center">
+                            <Button
+                              variant={template.is_default ? "secondary" : "ghost"}
+                              size="sm"
+                              icon={<Star size={14} weight={template.is_default ? "fill" : "regular"} className={template.is_default ? "text-amber-500" : ""} />}
+                              onClick={() => handleMakeDefault(template)}
+                              disabled={template.is_default}
+                              title={template.is_default ? "Currently default template" : "Set as default quotation template"}
+                            >
+                              {template.is_default ? "Default" : "Set Default"}
+                            </Button>
                             <Button variant="ghost" size="sm" icon={<Eye size={14} />} onClick={() => setPreview(template)}>Preview</Button>
                             <Button variant="secondary" size="sm" icon={<PencilSimple size={14} />} onClick={() => { setPendingRename(template); setRenameValue(template.name); }}>Rename</Button>
                             <Button variant="secondary" size="sm" icon={<CopySimple size={14} />} onClick={() => cloneTemplate(template)}>Clone</Button>

@@ -524,7 +524,7 @@ export function SessionWorkspaceProvider({ sessionId, children }: { sessionId: s
 
   const save = useCallback(() => {
     const previous = saveQueueRef.current;
-    const queued = (previous ? previous.catch(() => serverSnapshotRef.current as WorkspaceSnapshot).then(runSave) : runSave());
+    const queued = (previous ? previous.catch(() => serverSnapshotRef.current as WorkspaceSnapshot).then(() => runSave()) : runSave());
     saveQueueRef.current = queued;
     return queued.finally(() => {
       if (saveQueueRef.current === queued) saveQueueRef.current = null;

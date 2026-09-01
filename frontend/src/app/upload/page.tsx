@@ -10,6 +10,7 @@ import { Card } from "@/components/ui/card";
 import { GuidedTour } from "@/components/guided-tour";
 import { GeminiQuotaInfoButton } from "@/components/gemini-quota-meter";
 import { api } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/errors";
 
 type UploadLimits = {
   max_source_pdf_bytes: number;
@@ -188,7 +189,7 @@ export default function UploadPage() {
       await waitForJob(result);
     } catch (err) {
       if (!cancelRequested.current) {
-        setError(err instanceof Error ? err.message : "Upload failed.");
+        setError(apiErrorMessage(err));
       }
     } finally {
       if (mounted.current) setLoading(false);
