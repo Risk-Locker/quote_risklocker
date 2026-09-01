@@ -203,28 +203,39 @@ def cancel_job(db, job: Job) -> None:
     # Clean up orphan preparing session/draft if cancelled before completion
     if job.session_id and hasattr(db, "get"):
         from app.models.tables import Batch, QuotationDraft, Session, UploadedFile
-        session = db.get(Session, job.session_id)
+        session_id_to_clean = job.session_id
+        # Detach FKs first so cascading foreign keys do not delete this Job record
+        job.session_id = None
+        job.uploaded_file_id = None
+        if hasattr(db, "flush"):
+            db.flush()
+
+        session = db.get(Session, session_id_to_clean)
         if session:
             draft_id = session.draft_id
             uploaded_id = session.uploaded_file_id
             db.delete(session)
-            db.flush()
+            if hasattr(db, "flush"):
+                db.flush()
             if draft_id:
                 draft = db.get(QuotationDraft, draft_id)
                 if draft and draft.revision == 1:
                     db.delete(draft)
-                    db.flush()
+                    if hasattr(db, "flush"):
+                        db.flush()
             if uploaded_id:
                 uf = db.get(UploadedFile, uploaded_id)
                 if uf:
                     batch_id = uf.batch_id
                     db.delete(uf)
-                    db.flush()
+                    if hasattr(db, "flush"):
+                        db.flush()
                     if batch_id:
                         batch = db.get(Batch, batch_id)
                         if batch and not getattr(batch, "files", []):
                             db.delete(batch)
-                            db.flush()
+                            if hasattr(db, "flush"):
+                                db.flush()
     db.commit()
 
 
@@ -241,13 +252,14 @@ def serialize_job(job: Job) -> dict:
         "max_attempts": job.max_attempts,
         "progress": job.progress,
         "phase": job.phase,
-        "phase_started_at": job.phase_started_at.isoformat() if job.phase_started_at else None,
+        "phase_started_at": job.phase_started_at.isoformat() if getattr(job, "phase_started_at", None) else None,
         "phase_timestamps": job.phase_timestamps or {},
-        "heartbeat_at": job.heartbeat_at.isoformat() if job.heartbeat_at else None,
+        "heartbeat_at": job.heartbeat_at.isoformat() if getattr(job, "heartbeat_at", None) else None,
         "elapsed_seconds": _elapsed_seconds(job, now),
         "result": job.result or {},
         "error": job.safe_error or None,
-        "created_at": job.created_at.isoformat(),
-        "updated_at": job.updated_at.isoformat(),
-        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        "created_at": job.created_at.isoformat() if getattr(job, "created_at", None) else None,
+        "updated_at": job.updated_at.isoformat() if getattr(job, "updated_at", None) else None,
+        "cancelled_at": job.cancelled_at.isoformat() if getattr(job, "cancelled_at", None) else None,
+        "completed_at": job.completed_at.isoformat() if getattr(job, "completed_at", None) else None,
     }

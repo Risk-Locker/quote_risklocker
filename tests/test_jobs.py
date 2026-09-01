@@ -215,3 +215,58 @@ def test_terminal_or_foreign_leased_jobs_reject_state_changes():
         cancel_job(FakeDb(), make_job(state="completed"))
     with pytest.raises(AppError, match="lease"):
         complete_job(FakeDb(), make_job(state="processing", lease_owner="worker-a"), "worker-b", {})
+
+
+def test_cancel_job_detaches_session_and_remains_serializable():
+    from types import SimpleNamespace
+
+    mock_session = SimpleNamespace(id="session-1", draft_id="draft-1", uploaded_file_id="file-1")
+    mock_draft = SimpleNamespace(id="draft-1", revision=1)
+    mock_file = SimpleNamespace(id="file-1", batch_id="batch-1")
+    mock_batch = SimpleNamespace(id="batch-1", files=[])
+
+    deleted_items = []
+
+    class MockDb:
+        def __init__(self):
+            self.commits = 0
+            self.flushes = 0
+
+        def get(self, model, ident):
+            name = getattr(model, "__name__", str(model))
+            if "Session" in name and ident == "session-1":
+                return mock_session
+            if "QuotationDraft" in name and ident == "draft-1":
+                return mock_draft
+            if "UploadedFile" in name and ident == "file-1":
+                return mock_file
+            if "Batch" in name and ident == "batch-1":
+                return mock_batch
+            return None
+
+        def delete(self, obj):
+            deleted_items.append(obj)
+
+        def flush(self):
+            self.flushes += 1
+
+        def commit(self):
+            self.commits += 1
+
+    job = make_job(session_id="session-1", uploaded_file_id="file-1")
+    db = MockDb()
+
+    cancel_job(db, job)
+
+    assert job.state == "cancelled"
+    assert job.session_id is None
+    assert job.uploaded_file_id is None
+    assert mock_session in deleted_items
+    assert mock_draft in deleted_items
+    assert mock_file in deleted_items
+    assert mock_batch in deleted_items
+
+    serialized = serialize_job(job)
+    assert serialized["state"] == "cancelled"
+    assert serialized["cancelled_at"] is not None
+

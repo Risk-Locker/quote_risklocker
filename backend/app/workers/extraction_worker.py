@@ -163,10 +163,20 @@ def process_extraction_job(
     _ephemeral_path: Path | None = None
     if uploaded.storage_provider == "local_ephemeral":
         resolved_file = resolve_qc_path(uploaded.storage_path)
-        if not resolved_file.exists():
-            raise JobProcessingError("source_missing", "The ephemeral uploaded document is no longer available.")
         _ephemeral_path = resolved_file
-        source_bytes = _ephemeral_path.read_bytes()
+        source_bytes = None
+        import time
+        for _ in range(15):
+            try:
+                source_bytes = _ephemeral_path.read_bytes()
+                break
+            except (PermissionError, FileNotFoundError, OSError):
+                time.sleep(0.5)
+                
+        if source_bytes is None:
+            import os
+            logger.error("EPHEMERAL MISSING. storage_path=%r, resolved_file=%r, cwd=%r", uploaded.storage_path, str(resolved_file), os.getcwd())
+            raise JobProcessingError("source_missing", "The ephemeral uploaded document is no longer available.")
     else:
         source_bytes = (storage or SupabaseStorage(settings)).download_bytes(uploaded.storage_path)
 
