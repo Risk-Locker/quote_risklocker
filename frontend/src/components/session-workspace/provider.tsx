@@ -36,15 +36,48 @@ function _recalcAdjustedTotal(snapshot: WorkspaceSnapshot, nextExtras: Workspace
     const ccVal = typeof ccRaw === "object" && ccRaw !== null ? (ccRaw as Record<string, unknown>).value : ccRaw;
     const parsedCC = ccVal ? parseInt(String(ccVal).replace(/[^0-9]/g, ""), 10) : 0;
     if (parsedCC > 0) {
-      if (parsedCC <= 1000) rt = 20;
-      else if (parsedCC <= 1200) rt = 55;
-      else if (parsedCC <= 1400) rt = 70;
-      else if (parsedCC <= 1600) rt = 90;
-      else if (parsedCC <= 1800) rt = 200 + (parsedCC - 1600) * 0.40;
-      else if (parsedCC <= 2000) rt = 280 + (parsedCC - 1800) * 0.50;
-      else if (parsedCC <= 2500) rt = 380 + (parsedCC - 2000) * 1.00;
-      else if (parsedCC <= 3000) rt = 880 + (parsedCC - 2500) * 2.50;
-      else rt = 2130 + (parsedCC - 3000) * 4.50;
+      const carRaw = snapshot.fields?.car_model || snapshot.fields?.vehicle_model;
+      const carVal = typeof carRaw === "object" && carRaw !== null ? (carRaw as any).value : carRaw;
+      const carModel = String(carVal ?? "").toUpperCase();
+
+      const custRaw = snapshot.fields?.customer_name || snapshot.fields?.insured_name;
+      const custVal = typeof custRaw === "object" && custRaw !== null ? (custRaw as any).value : custRaw;
+      const custName = String(custVal ?? "").toUpperCase();
+
+      const isCompany = /(SDN\s*BHD|BHD|ENTERPRISE|TRADING|LTD|LLC|PLT|COMPANY|ENT\.)/i.test(custName);
+      const isNonSaloon = /(RANGER|HILUX|TRITON|D-MAX|NAVARA|BT-50|COLORADO|CR-V|HR-V|BR-V|X70|X50|X90|ARUZ|FORTUNER|CX-3|CX-5|CX-8|CX-9|SPORTAGE|TUCSON|SANTA FE|HARRIER|CROSS|RUSH|PAJERO|OUTLANDER|MU-X|EVEREST|TIGUAN|MACAN|CAYENNE|DEFENDER|DISCOVERY|EVOQUE|GLC|GLE|X1|X3|X4|X5|X6|XC40|XC60|XC90|ALZA|INNOVA|EXORA|VELLFIRE|ALPHARD|SERENA|ESTIMA|AVANZA|VELOZ|HIACE|URVAN|VAN|LORRY|TRUCK)/i.test(carModel);
+
+      if (isNonSaloon) {
+        if (parsedCC <= 1000) rt = 20;
+        else if (parsedCC <= 1200) rt = 85;
+        else if (parsedCC <= 1400) rt = 100;
+        else if (parsedCC <= 1600) rt = 120;
+        else if (parsedCC <= 1800) rt = 300 + (parsedCC - 1600) * 0.30;
+        else if (parsedCC <= 2000) rt = 360 + (parsedCC - 1800) * 0.40;
+        else if (parsedCC <= 2500) rt = 440 + (parsedCC - 2000) * 0.80;
+        else if (parsedCC <= 3000) rt = 840 + (parsedCC - 2500) * 1.60;
+        else rt = 1640 + (parsedCC - 3000) * 1.60;
+      } else if (isCompany) {
+        if (parsedCC <= 1000) rt = 20;
+        else if (parsedCC <= 1200) rt = 110;
+        else if (parsedCC <= 1400) rt = 140;
+        else if (parsedCC <= 1600) rt = 180;
+        else if (parsedCC <= 1800) rt = 400 + (parsedCC - 1600) * 0.80;
+        else if (parsedCC <= 2000) rt = 560 + (parsedCC - 1800) * 1.00;
+        else if (parsedCC <= 2500) rt = 760 + (parsedCC - 2000) * 3.00;
+        else if (parsedCC <= 3000) rt = 2260 + (parsedCC - 2500) * 7.50;
+        else rt = 6010 + (parsedCC - 3000) * 13.50;
+      } else {
+        if (parsedCC <= 1000) rt = 20;
+        else if (parsedCC <= 1200) rt = 55;
+        else if (parsedCC <= 1400) rt = 70;
+        else if (parsedCC <= 1600) rt = 90;
+        else if (parsedCC <= 1800) rt = 200 + (parsedCC - 1600) * 0.40;
+        else if (parsedCC <= 2000) rt = 280 + (parsedCC - 1800) * 0.50;
+        else if (parsedCC <= 2500) rt = 380 + (parsedCC - 2000) * 1.00;
+        else if (parsedCC <= 3000) rt = 880 + (parsedCC - 2500) * 2.50;
+        else rt = 2130 + (parsedCC - 3000) * 4.50;
+      }
     }
   }
 

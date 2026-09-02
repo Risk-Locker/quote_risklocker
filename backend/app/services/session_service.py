@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from sqlalchemy import func, or_, select, String
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, defer
 
 from app.core.errors import AppError
 from app.models.tables import Session as SessionModel, UploadedFile, QuotationDraft
@@ -47,7 +47,13 @@ def list_sessions(db: Session, user_id: str, search: str | None = None, limit: i
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
     rows = list(
         db.scalars(
-            base.order_by(SessionModel.created_at.desc()).limit(limit).offset(offset)
+            base.options(
+                joinedload(SessionModel.uploaded_file),
+                joinedload(SessionModel.draft).defer(QuotationDraft.scalar_decisions)
+            )
+            .order_by(SessionModel.created_at.desc())
+            .limit(limit)
+            .offset(offset)
         ).all()
     )
     return rows, total

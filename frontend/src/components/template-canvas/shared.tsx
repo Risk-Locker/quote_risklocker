@@ -301,6 +301,10 @@ export function CanvasElementView({
     available_addons: any[];
     groups?: Array<{ plan_id: string; plan_key: string; plan_label: string; cards: any[] }>;
     extras?: Array<{ label: string; price?: { amount?: number | string; currency?: string } }>;
+    displayPreferences?: {
+      defaults: { custom: boolean; coverage: boolean; price: boolean };
+      addons: { custom: boolean; coverage: boolean; price: boolean };
+    };
   };
   conceptAssets?: Record<string, string>;
 }) {
@@ -476,7 +480,7 @@ export function CanvasElementView({
                 ? benefitData.available_addons || []
                 : isExtras
                   ? currentCards.filter((b: any) => b.price || b.badge || b.cost_status === "paid")
-                  : currentCards)
+                  : currentCards.filter((b: any) => !b.price && !b.badge && b.cost_status !== "paid"))
             : [];
           const groups = !isAddons && benefitData?.groups?.length ? benefitData.groups : [];
           const groupById = new Map(groups.map((g) => [String(g.plan_id), g]));
@@ -658,30 +662,50 @@ export function CanvasElementView({
                             )}
                           </div>
                           <div className="flex flex-col min-w-0 flex-1 overflow-hidden justify-start">
-                            {val && !element.hideCoverage && (
-                              <span
-                                className="font-bold leading-tight text-[var(--rl-red)] truncate"
-                                style={{ fontSize: density.value }}
-                              >
-                                {val}
-                              </span>
-                            )}
-                            {desc && (
-                              <span
-                                className="leading-snug text-[var(--rl-text-muted)]"
-                                style={{ fontSize: density.desc }}
-                              >
-                                {desc}
-                              </span>
-                            )}
-                            {costBadge && !element.hideCost && (
-                              <span
-                                className={`mt-0.5 inline-block self-start font-semibold whitespace-nowrap text-slate-900 leading-tight`}
-                                style={{ fontSize: density.desc }}
-                              >
-                                {costBadge}
-                              </span>
-                            )}
+                            {(() => {
+                              const sectionPrefs = isAddonCard ? benefitData?.displayPreferences?.addons : benefitData?.displayPreferences?.defaults;
+                              let computedHideCoverage = element.hideCoverage || false;
+                              let computedHideCost = element.hideCost || false;
+                              
+                              if (sectionPrefs) {
+                                if (sectionPrefs.custom) {
+                                  computedHideCoverage = !!b?.typed_value_override?.hideCoverage || !!b?.typed_value?.hideCoverage;
+                                  computedHideCost = !!b?.typed_value_override?.hideCost || !!b?.typed_value?.hideCost;
+                                } else {
+                                  computedHideCoverage = !sectionPrefs.coverage;
+                                  computedHideCost = !sectionPrefs.price;
+                                }
+                              }
+
+                              return (
+                                <>
+                                  {val && !computedHideCoverage && (
+                                    <span
+                                      className="font-bold leading-tight text-[var(--rl-red)] truncate"
+                                      style={{ fontSize: density.value }}
+                                    >
+                                      {val}
+                                    </span>
+                                  )}
+                                  {desc && (
+                                    <span
+                                      className="leading-snug text-[var(--rl-text-muted)]"
+                                      style={{ fontSize: density.desc }}
+                                    >
+                                      {desc}
+                                    </span>
+                                  )}
+                                  {costBadge && !computedHideCost && (
+                                    <span
+                                      className={`mt-0.5 inline-block self-start font-semibold whitespace-nowrap text-slate-900 leading-tight`}
+                                      style={{ fontSize: density.desc }}
+                                    >
+                                      {costBadge}
+                                    </span>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </div>
                         </div>
                       </div>
@@ -689,7 +713,7 @@ export function CanvasElementView({
                   );
                 })
               ) : (
-                /* PURE 3-COLUMN MASONRY SYSTEM (Default) */
+                /* EQUAL-HEIGHT GRID SYSTEM */
                 (() => {
                   const numCols = element.columns ?? 3;
                   const isDark = element.benefitPreset === "dark-signature";
@@ -697,23 +721,15 @@ export function CanvasElementView({
                   const isElevated = element.benefitPreset === "elevated-3d" || element.cardStyle === "soft";
                   const isGridTile = element.benefitPreset === "grid-tile" || element.cardStyle === "outlined";
 
-                  const cols: Array<Array<{ b: any; idx: number }>> = Array.from({ length: numCols }, () => []);
-                  orderedItems.forEach((b: any, idx: number) => {
-                    cols[idx % numCols].push({ b, idx });
-                  });
-
                   return (
                     <div
-                      className="flex flex-row w-full items-start"
-                      style={{ gap: density.gap }}
+                      className="grid w-full items-stretch"
+                      style={{ 
+                        gridTemplateColumns: `repeat(${numCols}, minmax(0, 1fr))`,
+                        gap: density.gap 
+                      }}
                     >
-                      {cols.map((colItems, colIdx) => (
-                        <div
-                          key={`masonry-col-${colIdx}`}
-                          className="flex-1 flex flex-col min-w-0"
-                          style={{ gap: density.gap }}
-                        >
-                          {colItems.map(({ b, idx }) => {
+                      {orderedItems.map((b: any, idx: number) => {
                             const label = b ? b.label : `Benefit ${idx + 1}`;
                             let val = b?.value && !["", "Included standard cover", "Included", "FOC", "As quoted"].includes(b.value) ? b.value : "";
                             if (val) {
@@ -756,6 +772,7 @@ export function CanvasElementView({
                             }
                             const extractCost = (item: any): number | null => {
                               if (!item) return null;
+                              if (item.typed_value?.hide_price) return null;
                               const p = item.price ?? item.optional_price;
                               if (p !== null && p !== undefined) {
                                 if (typeof p === "object") {
@@ -780,9 +797,13 @@ export function CanvasElementView({
                             const costNum = extractCost(b) ?? (extraMatch ? extractCost(extraMatch) : null);
                             const costBadge = costNum !== null
                               ? `Cost : MYR ${costNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                              : (isAddonCard && !b?.is_pure_default ? "Cost : As quoted" : null);
+                              : (isAddonCard && !b?.is_pure_default && !b?.typed_value?.hide_price ? "Cost : As quoted" : null);
 
-                            const rawLimit = b?.detected_limit || b?.coverage_limit;
+                            let rawLimit = b?.detected_limit || b?.coverage_limit;
+                            if (b?.typed_value?.hide_limit) {
+                              rawLimit = null;
+                              val = "";
+                            }
                             if (rawLimit && typeof rawLimit === "string" && rawLimit.trim()) {
                               val = rawLimit.trim().startsWith("RM") ? rawLimit.trim() : `RM ${rawLimit.trim()}`;
                             } else if (costNum !== null && val) {
@@ -792,83 +813,101 @@ export function CanvasElementView({
                               }
                             }
 
-                            return (
-                              <article
-                                key={`benefit-card-${idx}`}
-                                className={`w-full rounded-[6px] overflow-hidden transition-all ${
-                                  b?.is_detected && element.gridKind === "available_addons"
-                                    ? "border-2 border-amber-400 bg-amber-50/40 shadow-xs ring-1 ring-amber-300/50"
-                                    : isDark
-                                      ? "border border-slate-700 bg-slate-900 shadow-xs"
-                                      : isMinimal
-                                        ? "border border-slate-200/90 bg-white/90 shadow-none hover:border-slate-300"
-                                        : isElevated
-                                          ? "border border-slate-200/90 bg-white shadow-sm hover:shadow"
-                                          : isGridTile
-                                            ? "border border-slate-300 bg-[#f8fafc] shadow-none"
-                                            : "border border-[var(--rl-border)] bg-white shadow-xs"
-                                }`}
-                                style={{ padding: isMinimal ? "3px 5px" : density.padding }}
+                        return (
+                          <article
+                            key={`benefit-card-${idx}`}
+                            className={`w-full h-full flex flex-col rounded-[6px] overflow-hidden transition-all ${
+                              b?.is_detected && element.gridKind === "available_addons"
+                                ? "border-2 border-amber-400 bg-amber-50/40 shadow-xs ring-1 ring-amber-300/50"
+                                : isDark
+                                  ? "border border-slate-700 bg-slate-900 shadow-xs"
+                                  : isMinimal
+                                    ? "border border-neutral-400 bg-white/90 shadow-none hover:border-neutral-500"
+                                    : isElevated
+                                      ? "border border-neutral-400 bg-white shadow-sm hover:shadow"
+                                      : isGridTile
+                                        ? "border border-neutral-400 bg-white shadow-none"
+                                        : "border border-neutral-400 bg-white shadow-xs"
+                            }`}
+                            style={{ padding: isMinimal ? "3px 5px" : density.padding }}
+                          >
+                            <div
+                              className={`font-bold leading-tight truncate ${isDark ? "text-white" : "text-[var(--rl-text-strong)]"}`}
+                              style={{ fontSize: isMinimal ? density.label - 0.5 : density.label, marginBottom: isMinimal ? 1 : 3 }}
+                            >
+                              {label}
+                            </div>
+                            <div className={`flex items-start ${isMinimal ? "gap-1" : "gap-1.5"}`}>
+                              <div
+                                className={`shrink-0 overflow-hidden ${isGridTile ? "rounded-full" : "rounded"}`}
+                                style={{ width: isMinimal ? density.icon - 2 : density.icon, height: isMinimal ? density.icon - 2 : density.icon }}
                               >
-                                <div
-                                  className={`font-bold leading-tight truncate ${isDark ? "text-white" : "text-[var(--rl-text-strong)]"}`}
-                                  style={{ fontSize: isMinimal ? density.label - 0.5 : density.label, marginBottom: isMinimal ? 1 : 3 }}
-                                >
-                                  {label}
-                                </div>
-                                <div className={`flex items-start ${isMinimal ? "gap-1" : "gap-1.5"}`}>
-                                  <div
-                                    className={`shrink-0 overflow-hidden ${isGridTile ? "rounded-full" : "rounded"}`}
-                                    style={{ width: isMinimal ? density.icon - 2 : density.icon, height: isMinimal ? density.icon - 2 : density.icon }}
+                                {assetUrl ? (
+                                  <img
+                                    src={fileUrl(assetUrl)}
+                                    alt={label}
+                                    className="h-full w-full object-contain"
+                                    onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
+                                  />
+                                ) : (
+                                  <span
+                                    className="grid h-full w-full place-items-center rounded bg-[var(--rl-red-light)] font-black text-[var(--rl-red)]"
+                                    style={{ fontSize: density.desc }}
                                   >
-                                    {assetUrl ? (
-                                      <img
-                                        src={fileUrl(assetUrl)}
-                                        alt={label}
-                                        className="h-full w-full object-contain"
-                                        onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
-                                      />
-                                    ) : (
-                                      <span
-                                        className="grid h-full w-full place-items-center rounded bg-[var(--rl-red-light)] font-black text-[var(--rl-red)]"
-                                        style={{ fontSize: density.desc }}
-                                      >
-                                        {label ? label.slice(0, 2).toUpperCase() : `B${idx + 1}`}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="flex flex-col min-w-0 flex-1 justify-start">
-                                    {val && !element.hideCoverage && (
-                                      <span
-                                        className={`font-bold leading-tight truncate ${isDark ? "text-amber-400" : "text-[var(--rl-red)]"}`}
-                                        style={{ fontSize: density.value }}
-                                      >
-                                        {val}
-                                      </span>
-                                    )}
-                                    {!isMinimal && desc && (
-                                      <span
-                                        className={`leading-snug ${isDark ? "text-slate-400" : "text-[var(--rl-text-muted)]"}`}
-                                        style={{ fontSize: density.desc }}
-                                      >
-                                        {desc}
-                                      </span>
-                                    )}
-                                    {costBadge && !element.hideCost && (
-                                      <span
-                                        className={`mt-0.5 inline-block font-semibold whitespace-nowrap leading-tight ${isDark ? "text-amber-300" : "text-slate-900"}`}
-                                        style={{ fontSize: density.desc }}
-                                      >
-                                        {costBadge}
-                                      </span>
-                                    )}
+                                    {label?.[0] || "?"}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex flex-col min-w-0 flex-1 justify-start">
+                                    {(() => {
+                                      const sectionPrefs = isAddonCard ? benefitData?.displayPreferences?.addons : benefitData?.displayPreferences?.defaults;
+                                      let computedHideCoverage = element.hideCoverage || false;
+                                      let computedHideCost = element.hideCost || false;
+                                      
+                                      if (sectionPrefs) {
+                                        if (sectionPrefs.custom) {
+                                          computedHideCoverage = !!b?.typed_value_override?.hideCoverage || !!b?.typed_value?.hideCoverage;
+                                          computedHideCost = !!b?.typed_value_override?.hideCost || !!b?.typed_value?.hideCost;
+                                        } else {
+                                          computedHideCoverage = !sectionPrefs.coverage;
+                                          computedHideCost = !sectionPrefs.price;
+                                        }
+                                      }
+
+                                      return (
+                                        <>
+                                          {val && !computedHideCoverage && (
+                                            <span
+                                              className={`font-bold leading-tight truncate ${isDark ? "text-amber-400" : "text-[var(--rl-red)]"}`}
+                                              style={{ fontSize: density.value }}
+                                            >
+                                              {val}
+                                            </span>
+                                          )}
+                                          {!isMinimal && desc && (
+                                            <span
+                                              className={`leading-snug ${isDark ? "text-slate-400" : "text-[var(--rl-text-muted)]"}`}
+                                              style={{ fontSize: density.desc }}
+                                            >
+                                              {desc}
+                                            </span>
+                                          )}
+                                          {costBadge && !computedHideCost && (
+                                            <span
+                                              className={`mt-0.5 inline-block font-semibold whitespace-nowrap leading-tight ${isDark ? "text-amber-300" : "text-slate-900"}`}
+                                              style={{ fontSize: density.desc }}
+                                            >
+                                              {costBadge}
+                                            </span>
+                                          )}
+                                        </>
+                                      );
+                                    })()}
                                   </div>
                                 </div>
                               </article>
                             );
                           })}
-                        </div>
-                      ))}
                     </div>
                   );
                 })()
@@ -915,15 +954,43 @@ export function CanvasElementView({
             const ccStr = variableValues?.engine_cc || "";
             const parsedCC = ccStr ? parseInt(String(ccStr).replace(/[^0-9]/g, ""), 10) : 0;
             if (parsedCC > 0) {
-              if (parsedCC <= 1000) roadtax = "20.00";
-              else if (parsedCC <= 1200) roadtax = "55.00";
-              else if (parsedCC <= 1400) roadtax = "70.00";
-              else if (parsedCC <= 1600) roadtax = "90.00";
-              else if (parsedCC <= 1800) roadtax = (200 + (parsedCC - 1600) * 0.40).toFixed(2);
-              else if (parsedCC <= 2000) roadtax = (280 + (parsedCC - 1800) * 0.50).toFixed(2);
-              else if (parsedCC <= 2500) roadtax = (380 + (parsedCC - 2000) * 1.00).toFixed(2);
-              else if (parsedCC <= 3000) roadtax = (880 + (parsedCC - 2500) * 2.50).toFixed(2);
-              else roadtax = (2130 + (parsedCC - 3000) * 4.50).toFixed(2);
+              const carModel = String(variableValues?.car_model || variableValues?.vehicle_model || "").toUpperCase();
+              const custName = String(variableValues?.customer_name || variableValues?.insured_name || "").toUpperCase();
+              
+              const isCompany = /(SDN\s*BHD|BHD|ENTERPRISE|TRADING|LTD|LLC|PLT|COMPANY|ENT\.)/i.test(custName);
+              const isNonSaloon = /(RANGER|HILUX|TRITON|D-MAX|NAVARA|BT-50|COLORADO|CR-V|HR-V|BR-V|X70|X50|X90|ARUZ|FORTUNER|CX-3|CX-5|CX-8|CX-9|SPORTAGE|TUCSON|SANTA FE|HARRIER|CROSS|RUSH|PAJERO|OUTLANDER|MU-X|EVEREST|TIGUAN|MACAN|CAYENNE|DEFENDER|DISCOVERY|EVOQUE|GLC|GLE|X1|X3|X4|X5|X6|XC40|XC60|XC90|ALZA|INNOVA|EXORA|VELLFIRE|ALPHARD|SERENA|ESTIMA|AVANZA|VELOZ|HIACE|URVAN|VAN|LORRY|TRUCK)/i.test(carModel);
+
+              if (isNonSaloon) {
+                if (parsedCC <= 1000) roadtax = "20.00";
+                else if (parsedCC <= 1200) roadtax = "85.00";
+                else if (parsedCC <= 1400) roadtax = "100.00";
+                else if (parsedCC <= 1600) roadtax = "120.00";
+                else if (parsedCC <= 1800) roadtax = (300 + (parsedCC - 1600) * 0.30).toFixed(2);
+                else if (parsedCC <= 2000) roadtax = (360 + (parsedCC - 1800) * 0.40).toFixed(2);
+                else if (parsedCC <= 2500) roadtax = (440 + (parsedCC - 2000) * 0.80).toFixed(2);
+                else if (parsedCC <= 3000) roadtax = (840 + (parsedCC - 2500) * 1.60).toFixed(2);
+                else roadtax = (1640 + (parsedCC - 3000) * 1.60).toFixed(2);
+              } else if (isCompany) {
+                if (parsedCC <= 1000) roadtax = "20.00";
+                else if (parsedCC <= 1200) roadtax = "110.00";
+                else if (parsedCC <= 1400) roadtax = "140.00";
+                else if (parsedCC <= 1600) roadtax = "180.00";
+                else if (parsedCC <= 1800) roadtax = (400 + (parsedCC - 1600) * 0.80).toFixed(2);
+                else if (parsedCC <= 2000) roadtax = (560 + (parsedCC - 1800) * 1.00).toFixed(2);
+                else if (parsedCC <= 2500) roadtax = (760 + (parsedCC - 2000) * 3.00).toFixed(2);
+                else if (parsedCC <= 3000) roadtax = (2260 + (parsedCC - 2500) * 7.50).toFixed(2);
+                else roadtax = (6010 + (parsedCC - 3000) * 13.50).toFixed(2);
+              } else {
+                if (parsedCC <= 1000) roadtax = "20.00";
+                else if (parsedCC <= 1200) roadtax = "55.00";
+                else if (parsedCC <= 1400) roadtax = "70.00";
+                else if (parsedCC <= 1600) roadtax = "90.00";
+                else if (parsedCC <= 1800) roadtax = (200 + (parsedCC - 1600) * 0.40).toFixed(2);
+                else if (parsedCC <= 2000) roadtax = (280 + (parsedCC - 1800) * 0.50).toFixed(2);
+                else if (parsedCC <= 2500) roadtax = (380 + (parsedCC - 2000) * 1.00).toFixed(2);
+                else if (parsedCC <= 3000) roadtax = (880 + (parsedCC - 2500) * 2.50).toFixed(2);
+                else roadtax = (2130 + (parsedCC - 3000) * 4.50).toFixed(2);
+              }
             }
           }
           const runner = variableValues?.service_fee || "";

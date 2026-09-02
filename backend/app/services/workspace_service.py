@@ -10,6 +10,7 @@ from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy import func, select, delete
+from sqlalchemy.orm import load_only
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.errors import AppError
@@ -1163,7 +1164,7 @@ def _reset_draft_benefits_for_catalog(db, draft: QuotationDraft) -> None:
     if hasattr(db, "flush"):
         db.flush()
 
-    rec = db.scalar(select(ExtractionRecord).where(ExtractionRecord.uploaded_file_id == draft.uploaded_file_id))
+    rec = db.scalar(select(ExtractionRecord).options(load_only(ExtractionRecord.id)).where(ExtractionRecord.uploaded_file_id == draft.uploaded_file_id))
     if rec:
         lines = list(db.scalars(select(ExtractionBenefitLine).where(ExtractionBenefitLine.extraction_record_id == rec.id)).all())
         for line in lines:

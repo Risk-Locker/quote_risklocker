@@ -74,6 +74,8 @@ class BenefitValue(BaseModel):
     enum_key: str | None = Field(default=None, max_length=120)
     plan_key: str | None = Field(default=None, max_length=120)
     display_text: str | None = Field(default=None, max_length=500)
+    hideCoverage: bool | None = False
+    hideCost: bool | None = False
 
     @model_validator(mode="before")
     @classmethod

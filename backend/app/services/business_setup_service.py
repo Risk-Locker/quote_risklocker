@@ -604,7 +604,7 @@ def _normalize_description_variants(values) -> list[dict]:
     return output
 
 
-def serialize_concept(db, item: BenefitConcept) -> dict:
+def serialize_concept(db, item: BenefitConcept, preloaded_assets: dict | None = None) -> dict:
     value_schema = item.value_schema or {}
     category = value_schema.get("category") or ("default" if item.sort_order <= 11 else "addon")
     variants = value_schema.get("variants") or []
@@ -625,7 +625,7 @@ def serialize_concept(db, item: BenefitConcept) -> dict:
         "value_pattern_dataset": item.value_pattern_dataset,
         "description_variants": item.description_variants,
         "sort_order": item.sort_order,
-        "default_asset": _asset_summary(db.get(BusinessAsset, item.default_asset_id)) if item.default_asset_id else None,
+        "default_asset": _asset_summary(preloaded_assets.get(item.default_asset_id) if preloaded_assets is not None else db.get(BusinessAsset, item.default_asset_id)) if item.default_asset_id else None,
         "revision": item.revision,
         "status": item.status,
     }
@@ -642,7 +642,13 @@ def list_benefit_concepts(db, user, *, search: str, page: int, page_size: int) -
         count_query = count_query.where(predicate)
     total = int(db.scalar(count_query) or 0)
     rows = db.scalars(query.order_by(BenefitConcept.sort_order.asc(), BenefitConcept.label.asc()).limit(page_size).offset((page - 1) * page_size)).all()
-    return {"items": [serialize_concept(db, row) for row in rows], "total": total, "page": page, "page_size": page_size}
+    asset_ids = {row.default_asset_id for row in rows if row.default_asset_id}
+    preloaded_assets = {}
+    if asset_ids:
+        assets = db.scalars(select(BusinessAsset).where(BusinessAsset.id.in_(asset_ids))).all()
+        preloaded_assets = {a.id: a for a in assets}
+
+    return {"items": [serialize_concept(db, row, preloaded_assets=preloaded_assets) for row in rows], "total": total, "page": page, "page_size": page_size}
 
 
 def save_benefit_concept(db, user, payload: dict) -> dict:

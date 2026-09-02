@@ -73,12 +73,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'"
-        )
+        if response.headers.get("content-type") != "application/pdf":
+            response.headers["X-Frame-Options"] = "SAMEORIGIN"
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'"
+            )
         if self.production:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response

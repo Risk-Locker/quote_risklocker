@@ -29,6 +29,7 @@ import {
   TreeStructure,
   X,
 } from "@phosphor-icons/react";
+import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
 import { AppShell } from "@/components/app-shell";
 import { BuilderNav } from "@/components/builder-nav";
 import { Badge } from "@/components/ui/badge";
@@ -245,6 +246,18 @@ function BenefitsPageContent() {
   const [aiDiffResult, setAiDiffResult] = useState<any>(null);
   const [aiDiffLoading, setAiDiffLoading] = useState(false);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
+
+  // ── 0. Queue for sequential API calls ──────────────────────────────────
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
+  const enqueueTask = useCallback((task: () => Promise<void>) => {
+    queueRef.current = queueRef.current.then(async () => {
+      try {
+        await task();
+      } catch (err) {
+        console.error("Queue task failed:", err);
+      }
+    });
+  }, []);
 
   // ── 1. Callbacks ───────────────────────────────────────────────────────
   const loadMatrix = useCallback(async (companyId: string) => {
@@ -635,7 +648,8 @@ ${aiMarkdownTable}`;
 
   // ── 1-Click Fast Toggle Sticker Handler (Optimistic UI, Zero Reload) ───
   async function toggleConceptFast(concept: Concept, targetRole: "included" | "addon_option") {
-    if (!selectedCatalog || !catalogWorkspace) return;
+
+    enqueueTask(async () => {    if (!selectedCatalog || !catalogWorkspace) return;
     const existing = activeConceptIdSet.get(concept.id);
     const target = offeringTarget();
     const targetPkgId = target.applies_to_id;
@@ -737,11 +751,14 @@ ${aiMarkdownTable}`;
         setSaving(false);
       }
     }
+
+    });
   }
 
   // ── Plan Variant Switcher (Optimistic UI, Zero Reload) ─────────────────
   async function updatePlanVariantInline(offering: Offering, variant: string) {
-    if (!selectedCatalog || !catalogWorkspace) return;
+
+    enqueueTask(async () => {    if (!selectedCatalog || !catalogWorkspace) return;
     setSaving(true);
     setError("");
     const concept = concepts.find((c) => c.id === offering.concept_id);
@@ -778,11 +795,14 @@ ${aiMarkdownTable}`;
     } finally {
       setSaving(false);
     }
+
+    });
   }
 
   // ── Inline Display Value Editor (Optimistic UI, Zero Reload) ──────────
   async function updateOfferingValueInline(offering: Offering, newValue: string) {
-    if (!selectedCatalog || !catalogWorkspace) return;
+
+    enqueueTask(async () => {    if (!selectedCatalog || !catalogWorkspace) return;
     setSaving(true);
     setError("");
     const prevOfferings = catalogWorkspace.offerings;
@@ -819,11 +839,14 @@ ${aiMarkdownTable}`;
     } finally {
       setSaving(false);
     }
+
+    });
   }
 
   // ── Inline Price / Cost Editor (Optimistic UI, Zero Reload) ───────────
   async function updateOfferingPriceInline(offering: Offering, newPriceStr: string) {
-    if (!selectedCatalog || !catalogWorkspace) return;
+
+    enqueueTask(async () => {    if (!selectedCatalog || !catalogWorkspace) return;
     setSaving(true);
     setError("");
     const prevOfferings = catalogWorkspace.offerings;
@@ -862,6 +885,8 @@ ${aiMarkdownTable}`;
     } finally {
       setSaving(false);
     }
+
+    });
   }
 
   async function resetToDefaultOfferings() {
@@ -1967,157 +1992,11 @@ ${aiMarkdownTable}`;
             </div>
 
             {/* ── Real Interactive Template Slot Preview (When Toggled) ─── */}
-            {showLiveTemplate && (
-              <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--rl-border)] pb-3">
-                  <div>
-                    <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">
-                      Quotation Template Slot Preview
-                    </h3>
-                    <p className="text-xs text-[var(--rl-text-muted)]">
-                      Live preview into template canvas: <span className="font-semibold text-[var(--rl-text-strong)]">{activeTemplate?.name || "Copy of Standard A4 _ testing purpose"}</span>
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {templates.length > 0 && (
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-semibold text-[var(--rl-text-muted)]">Template:</span>
-                        <select
-                          value={selectedTemplateId}
-                          onChange={(e) => setSelectedTemplateId(e.target.value)}
-                          className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-2.5 py-1 text-xs font-medium text-[var(--rl-text-strong)] shadow-sm focus:outline-none focus:ring-1 focus:ring-[var(--rl-black)]"
-                        >
-                          {templates.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                    <Button variant="secondary" size="sm" onClick={() => setShowLiveTemplate(false)}>
-                      Close Preview
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-                  {/* Left (4 cols): Template Slots Summary */}
-                  <div className="lg:col-span-4 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-4 space-y-4">
-                    <div>
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
-                        Template Slots Summary
-                      </h4>
-                      <p className="mt-0.5 text-[11px] text-[var(--rl-text-muted)]">
-                        Real-time binding to quotation schedule slots.
-                      </p>
-                    </div>
-
-                    <div className="text-xs space-y-2 border-t border-[var(--rl-border)] pt-3">
-                      <div>
-                        <span className="font-semibold text-[var(--rl-text-strong)]">Detected Insurer: </span>
-                        <span>{selectedCompany?.name}</span>
-                      </div>
-                      <div>
-                        <span className="font-semibold text-[var(--rl-text-strong)]">Product / Plan: </span>
-                        <span>{isPackaged && activePackage ? activePackage.name : selectedCatalog.name}</span>
-                      </div>
-                      <div>
-                        <span className="font-semibold text-[var(--rl-text-strong)]">Vehicle: </span>
-                        <span>{selectedVehicle?.name || "Car"} ({selectedSegment?.name || "Private"})</span>
-                      </div>
-                    </div>
-
-                    <div className="border-t border-[var(--rl-border)] pt-3">
-                      <span className="text-xs font-bold text-[var(--rl-text-strong)]">
-                        Your Benefits Slot ({defaultOfferings.length} items)
-                      </span>
-                      <div className="mt-2 max-h-48 overflow-y-auto space-y-1 pr-1 text-[11px]">
-                        {defaultOfferings.length === 0 ? (
-                          <span className="text-[var(--rl-text-muted)] italic">No default benefits selected.</span>
-                        ) : (
-                          defaultOfferings.map((o) => (
-                            <div key={o.id} className="flex justify-between rounded bg-[var(--rl-surface)] p-1.5 border border-[var(--rl-border)]">
-                              <span className="font-medium text-[var(--rl-text-strong)] truncate">
-                                {o.label_override || o.concept?.label || o.offering_key}
-                              </span>
-                              <span className="text-[var(--rl-text-muted)] shrink-0 ml-2 font-semibold">
-                                {o.display_value || "Included"}
-                              </span>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="border-t border-[var(--rl-border)] pt-3">
-                      <span className="text-xs font-bold text-[var(--rl-text-strong)]">
-                        Available Add-ons Slot ({addonOfferings.length} items)
-                      </span>
-                      <div className="mt-2 max-h-48 overflow-y-auto space-y-1 pr-1 text-[11px]">
-                        {addonOfferings.length === 0 ? (
-                          <span className="text-[var(--rl-text-muted)] italic">No add-ons selected (all included).</span>
-                        ) : (
-                          addonOfferings.map((o) => (
-                            <div key={o.id} className="flex justify-between rounded bg-[var(--rl-surface)] p-1.5 border border-[var(--rl-border)]">
-                              <span className="font-medium text-[var(--rl-text-strong)] truncate">
-                                {o.label_override || o.concept?.label || o.offering_key}
-                              </span>
-                              <span className="text-[var(--rl-text-muted)] shrink-0 ml-2 font-semibold">
-                                {o.display_value || "Optional"}
-                              </span>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right (8 cols): Real Template Canvas Preview */}
-                  <div className="lg:col-span-8 grid place-items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[#ececee] p-6 shadow-inner min-h-[580px]">
-                    {previewTemplateElements.length === 0 ? (
-                      <div className="grid h-full min-h-[420px] w-full place-items-center text-center text-xs text-[var(--rl-text-muted)]">
-                        <div>
-                          <p className="font-semibold text-[var(--rl-text-strong)]">No template canvas elements</p>
-                          <p className="mt-1">This template has no renderable elements. Pick another template above.</p>
-                        </div>
-                      </div>
-                    ) : (
-                      <div
-                        className="relative w-full max-w-[620px] bg-white shadow-card rounded-[4px] overflow-hidden border border-neutral-300"
-                        style={{ aspectRatio: `${canvasW} / ${canvasH}` }}
-                      >
-                        <div
-                          className="absolute left-0 top-0"
-                          style={{
-                            width: canvasW,
-                            height: canvasH,
-                            transform: `scale(${Math.min(1, 620 / canvasW)})`,
-                            transformOrigin: "top left",
-                          }}
-                        >
-                          {previewTemplateElements.map((element) => (
-                            <CanvasElementView
-                              key={element.id}
-                              element={element}
-                              selected={false}
-                              readOnly={true}
-                              onPointerDown={() => { }}
-                              variableValues={{}}
-                              benefitData={previewBenefitData}
-                              conceptAssets={previewConceptAssets}
-                              assets={previewTemplateAssets}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ── Fast Bulk Clicker: Category 1 (Default Benefits) ──────── */}
+            
+            {showLiveTemplate ? (
+              <PanelGroup orientation="horizontal" className="min-h-[600px] h-[80vh] rounded-[var(--rl-radius)] border border-[var(--rl-border)] shadow-sm bg-[var(--rl-surface)] mb-6">
+                <Panel defaultSize={60} minSize={40} className="flex flex-col gap-6 p-5 overflow-y-auto">
+                  {/* ── Fast Bulk Clicker: Category 1 (Default Benefits) ──────── */}
             <div className="rl-tour-defaults rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm">
               <div className="mb-4 flex items-center justify-between border-b border-[var(--rl-border)] pb-3">
                 <div>
@@ -2341,6 +2220,315 @@ ${aiMarkdownTable}`;
                 })}
               </div>
             </div>
+                </Panel>
+                
+                <PanelResizeHandle className="w-1 bg-[var(--rl-border)] hover:bg-[var(--rl-text-muted)] transition-colors cursor-col-resize flex-shrink-0" />
+                
+                <Panel defaultSize={40} minSize={30} className="bg-[#ececee] shadow-inner relative flex flex-col">
+                  <div className="bg-[var(--rl-surface)] p-4 border-b border-[var(--rl-border)]">
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--rl-border)] pb-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">
+                      Quotation Template Slot Preview
+                    </h3>
+                    <p className="text-xs text-[var(--rl-text-muted)]">
+                      Live preview into template canvas: <span className="font-semibold text-[var(--rl-text-strong)]">{activeTemplate?.name || "Copy of Standard A4 _ testing purpose"}</span>
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {templates.length > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-semibold text-[var(--rl-text-muted)]">Template:</span>
+                        <select
+                          value={selectedTemplateId}
+                          onChange={(e) => setSelectedTemplateId(e.target.value)}
+                          className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-2.5 py-1 text-xs font-medium text-[var(--rl-text-strong)] shadow-sm focus:outline-none focus:ring-1 focus:ring-[var(--rl-black)]"
+                        >
+                          {templates.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    <Button variant="secondary" size="sm" onClick={() => setShowLiveTemplate(false)}>
+                      Close Preview
+                    </Button>
+                  </div>
+                </div>
+                  </div>
+                  <div className="flex-1 p-6 overflow-auto">
+                    <div className="flex-1 grid place-items-center overflow-y-auto w-full h-full min-h-0">
+                    {previewTemplateElements.length === 0 ? (
+                      <div className="grid h-full min-h-[420px] w-full place-items-center text-center text-xs text-[var(--rl-text-muted)]">
+                        <div>
+                          <p className="font-semibold text-[var(--rl-text-strong)]">No template canvas elements</p>
+                          <p className="mt-1">This template has no renderable elements. Pick another template above.</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        className="relative w-full max-w-[620px] bg-white shadow-card rounded-[4px] overflow-hidden border border-neutral-300"
+                        style={{ aspectRatio: `${canvasW} / ${canvasH}` }}
+                      >
+                        <div
+                          className="absolute left-0 top-0"
+                          style={{
+                            width: canvasW,
+                            height: canvasH,
+                            transform: `scale(${Math.min(1, 620 / canvasW)})`,
+                            transformOrigin: "top left",
+                          }}
+                        >
+                          {previewTemplateElements.map((element) => (
+                            <CanvasElementView
+                              key={element.id}
+                              element={element}
+                              selected={false}
+                              readOnly={true}
+                              onPointerDown={() => { }}
+                              variableValues={{}}
+                              benefitData={previewBenefitData}
+                              conceptAssets={previewConceptAssets}
+                              assets={previewTemplateAssets}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  </div>
+                </Panel>
+              </PanelGroup>
+            ) : (
+              <div className="space-y-6 mb-6">
+                {/* ── Fast Bulk Clicker: Category 1 (Default Benefits) ──────── */}
+            <div className="rl-tour-defaults rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm">
+              <div className="mb-4 flex items-center justify-between border-b border-[var(--rl-border)] pb-3">
+                <div>
+                  <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">
+                    Category 1: Default / Global Benefits (11 items)
+                  </h3>
+                  <p className="text-xs text-[var(--rl-text-muted)]">
+                    Click any tile to toggle on/off standard included policy coverages for {isPackaged && activePackage ? activePackage.name : "this configuration"}.
+                  </p>
+                </div>
+                <span className="text-xs font-bold text-[var(--rl-text-strong)]">
+                  {defaultOfferings.length} / 11 Active in this tier
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                {defaultConcepts.map((concept) => {
+                  const offering = activeConceptIdSet.get(concept.id);
+                  const isActive = Boolean(offering && effectiveRole(offering) === "included");
+
+                  return (
+                    <div
+                      key={concept.id}
+                      onClick={() => toggleConceptFast(concept, "included")}
+                      className={`group relative flex flex-col justify-between rounded-[var(--rl-radius-sm)] border p-3 cursor-pointer transition-all ${isActive
+                        ? "border-[var(--rl-black)] bg-[var(--rl-bg)] shadow-sm ring-1 ring-[var(--rl-black)]"
+                        : "border-[var(--rl-border)] bg-[var(--rl-surface)] opacity-70 hover:opacity-100 hover:border-[var(--rl-text-muted)]"
+                        }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div
+                            className={`grid h-7 w-7 shrink-0 place-items-center rounded-[4px] border ${isActive
+                              ? "bg-[var(--rl-black)] text-white border-[var(--rl-black)]"
+                              : "bg-[var(--rl-bg)] text-[var(--rl-text-muted)] border-[var(--rl-border)]"
+                              }`}
+                          >
+                            {concept.default_asset?.url ? (
+                              <img src={fileUrl(concept.default_asset.url)} alt={concept.label} className="h-4 w-4 object-contain" />
+                            ) : (
+                              <ShieldCheck size={16} />
+                            )}
+                          </div>
+                          <span className="font-semibold text-xs text-[var(--rl-text-strong)] truncate">
+                            {concept.label}
+                          </span>
+                        </div>
+
+                        <div
+                          className={`h-4 w-4 rounded-[4px] border grid place-items-center ${isActive
+                            ? "bg-[var(--rl-black)] border-[var(--rl-black)] text-white"
+                            : "border-[var(--rl-border)] bg-[var(--rl-surface)]"
+                            }`}
+                        >
+                          {isActive && <Check size={12} weight="bold" />}
+                        </div>
+                      </div>
+
+                      <div className="mt-2.5 flex items-center justify-between gap-1.5 text-[11px] pt-1.5 border-t border-[var(--rl-border)]/60">
+                        {isActive ? (
+                          <>
+                            <input
+                              type="text"
+                              defaultValue={offering?.display_value || "Included"}
+                              onClick={(e) => e.stopPropagation()}
+                              onBlur={(e) => {
+                                if (offering) updateOfferingValueInline(offering, e.target.value);
+                              }}
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] flex-1 min-w-0"
+                              placeholder="Included"
+                              title="Coverage value / limit"
+                            />
+                            <input
+                              type="text"
+                              defaultValue={offering?.optional_price?.value ? `RM ${Number(offering.optional_price.value).toFixed(2)}` : (offering?.optional_price?.amount ? `RM ${offering.optional_price.amount}` : "")}
+                              onClick={(e) => e.stopPropagation()}
+                              onBlur={(e) => {
+                                if (offering) updateOfferingPriceInline(offering, e.target.value);
+                              }}
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] w-16 text-right shrink-0"
+                              placeholder="RM 0"
+                              title="Cost / Price (empty if free)"
+                            />
+                          </>
+                        ) : (
+                          <span className="text-[11px] text-[var(--rl-text-muted)]">Click to add</span>
+                        )}
+                        <span className="text-[10px] font-semibold text-[var(--rl-text-muted)] shrink-0">Default</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ── Fast Bulk Clicker: Category 2 (Unique Add-ons) ─────────── */}
+            <div className="rl-tour-addons rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm">
+              <div className="mb-4 flex items-center justify-between border-b border-[var(--rl-border)] pb-3">
+                <div>
+                  <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">
+                    Category 2: Unique Add-ons & Multi-Plan Variations (23 items)
+                  </h3>
+                  <p className="text-xs text-[var(--rl-text-muted)]">
+                    Click any tile to toggle on/off optional endorsements and select plan variations (Plan A/B/C/D, etc.) in 1 click.
+                  </p>
+                </div>
+                <span className="text-xs font-bold text-[var(--rl-text-strong)]">
+                  {addonOfferings.length} / 23 Active in this tier
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                {addonConcepts.map((concept) => {
+                  const offering = activeConceptIdSet.get(concept.id);
+                  const isActive = Boolean(offering && effectiveRole(offering) === "addon_option");
+                  const hasVariants = Boolean(concept.variants && concept.variants.length > 0);
+
+                  return (
+                    <div
+                      key={concept.id}
+                      onClick={() => toggleConceptFast(concept, "addon_option")}
+                      className={`group relative flex flex-col justify-between rounded-[var(--rl-radius-sm)] border p-3 cursor-pointer transition-all ${isActive
+                        ? "border-[var(--rl-black)] bg-[var(--rl-bg)] shadow-sm ring-1 ring-[var(--rl-black)]"
+                        : "border-[var(--rl-border)] bg-[var(--rl-surface)] opacity-70 hover:opacity-100 hover:border-[var(--rl-text-muted)]"
+                        }`}
+                    >
+                      <div>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div
+                              className={`grid h-7 w-7 shrink-0 place-items-center rounded-[4px] border ${isActive
+                                ? "bg-[var(--rl-black)] text-white border-[var(--rl-black)]"
+                                : "bg-[var(--rl-bg)] text-[var(--rl-text-muted)] border-[var(--rl-border)]"
+                                }`}
+                            >
+                              {concept.default_asset?.url ? (
+                                <img src={fileUrl(concept.default_asset.url)} alt={concept.label} className="h-4 w-4 object-contain" />
+                              ) : (
+                                <Sparkle size={16} />
+                              )}
+                            </div>
+                            <span className="font-semibold text-xs text-[var(--rl-text-strong)] truncate">
+                              {concept.label}
+                            </span>
+                          </div>
+
+                          <div
+                            className={`h-4 w-4 rounded-[4px] border grid place-items-center ${isActive
+                              ? "bg-[var(--rl-black)] border-[var(--rl-black)] text-white"
+                              : "border-[var(--rl-border)] bg-[var(--rl-surface)]"
+                              }`}
+                          >
+                            {isActive && <Check size={12} weight="bold" />}
+                          </div>
+                        </div>
+
+                        {/* Plan Variations 1-Click Switcher */}
+                        {hasVariants && (
+                          <div
+                            className="mt-2 flex flex-wrap gap-1"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {concept.variants!.map((variant) => {
+                              const isVariantActive = offering?.label_override?.includes(variant);
+                              return (
+                                <button
+                                  key={variant}
+                                  onClick={() => {
+                                    if (offering) {
+                                      updatePlanVariantInline(offering, variant);
+                                    } else {
+                                      toggleConceptFast(concept, "addon_option");
+                                    }
+                                  }}
+                                  className={`rounded-[4px] px-1.5 py-0.5 text-[10px] font-semibold transition-all ${isVariantActive
+                                    ? "bg-[var(--rl-black)] text-white"
+                                    : "bg-[var(--rl-surface)] border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                                    }`}
+                                >
+                                  {variant}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mt-2.5 flex items-center justify-between gap-1.5 text-[11px] pt-1.5 border-t border-[var(--rl-border)]/60">
+                        {isActive ? (
+                          <>
+                            <input
+                              type="text"
+                              defaultValue={offering?.display_value || "Optional"}
+                              onClick={(e) => e.stopPropagation()}
+                              onBlur={(e) => {
+                                if (offering) updateOfferingValueInline(offering, e.target.value);
+                              }}
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] flex-1 min-w-0"
+                              placeholder="Optional"
+                              title="Coverage value / limit"
+                            />
+                            <input
+                              type="text"
+                              defaultValue={offering?.optional_price?.value ? `RM ${Number(offering.optional_price.value).toFixed(2)}` : (offering?.optional_price?.amount ? `RM ${offering.optional_price.amount}` : "")}
+                              onClick={(e) => e.stopPropagation()}
+                              onBlur={(e) => {
+                                if (offering) updateOfferingPriceInline(offering, e.target.value);
+                              }}
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] w-16 text-right shrink-0"
+                              placeholder="RM 0"
+                              title="Cost / Price (empty if free)"
+                            />
+                          </>
+                        ) : (
+                          <span className="text-[11px] text-[var(--rl-text-muted)]">Click to add</span>
+                        )}
+                        <span className="text-[10px] font-semibold text-[var(--rl-text-muted)] shrink-0">Add-on</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+              </div>
+            )}
 
             {/* ── Revisions & Bundles Overview ─────────────────────────── */}
             <div className="rl-tour-bundles rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5">

@@ -18,6 +18,7 @@ import {
   Copy,
   DownloadSimple,
   Eye,
+  EyeClosed,
   FilePdf,
   FloppyDisk,
   Lightning,
@@ -89,12 +90,12 @@ const BASELINE_COMPREHENSIVE_KEYS = [
   "legal-liability-to-passengers",
   "strike-riot-civil-commotion",
   "roadside-assistance",
-  "towing",
+  "special-perils",
   "repair-workmanship-warranty",
 ];
 
 const GLOBAL_BENEFIT_KEYS = new Set([
-  "towing",
+  "special-perils",
   "roadside-assistance",
   "repair-workmanship-warranty",
   "all-drivers",
@@ -294,6 +295,19 @@ function IncludedCard({
   const selectionId = selection && typeof selection === "object" && "id" in selection ? String(selection.id) : (card.selection_id || null);
   const pending = !selectionId || String(selectionId).startsWith("pending:");
 
+  const isLimitHidden = !!(selection as any)?.typed_value_override?.hide_limit || !!(card as any).typed_value?.hide_limit;
+
+  const toggleLimitVisibility = () => {
+    if (!selectionId) return;
+    const currentOverride = (selection as any)?.typed_value_override || {};
+    const newOverride = { ...currentOverride, hide_limit: !isLimitHidden };
+    onQueue(
+      { op: "benefit_update", selection_id: selectionId, typed_value_override: newOverride },
+      `benefits.${selectionId}.typed_value_override`,
+      { op: "benefit_update", selection_id: selectionId, typed_value_override: currentOverride }
+    );
+  };
+
   const handleMoveToAddon = () => {
     if (!window.confirm(`Are you sure you want to move "${card.label}" to add-ons?`)) return;
     if (selectionId) {
@@ -369,9 +383,19 @@ function IncludedCard({
           ) : null}
         </div>
         {card.value && !["", "Included standard cover", "Included", "FOC", "As quoted"].includes(card.value) && (
-          <p className="text-[11px] font-bold text-[var(--rl-red)] leading-tight truncate">
-            {card.value}
-          </p>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <p className={`text-[11px] font-bold leading-tight truncate transition-colors ${isLimitHidden ? "text-[var(--rl-text-muted)] line-through" : "text-[var(--rl-red)]"}`}>
+              {card.value}
+            </p>
+            <button
+              type="button"
+              onClick={toggleLimitVisibility}
+              className="text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] transition-colors p-0.5 rounded hover:bg-gray-100"
+              title={isLimitHidden ? "Show coverage limit in PDF" : "Hide coverage limit in PDF"}
+            >
+              {isLimitHidden ? <EyeClosed size={12} weight="bold" /> : <Eye size={12} weight="bold" />}
+            </button>
+          </div>
         )}
         {card.description && (
           <p className="text-[10px] text-[var(--rl-text-muted)] leading-snug line-clamp-2">
@@ -417,6 +441,20 @@ function AddonCard({
 }) {
   const selectionId = card.selection_id;
   const pending = !selectionId || String(selectionId).startsWith("pending:");
+
+  // For AddonCard, selection is not passed directly, but card.typed_value is.
+  const isPriceHidden = !!(card as any).typed_value?.hide_price;
+
+  const togglePriceVisibility = () => {
+    if (!selectionId) return;
+    const currentOverride = (card as any).typed_value || {};
+    const newOverride = { ...currentOverride, hide_price: !isPriceHidden };
+    onQueue(
+      { op: "benefit_update", selection_id: selectionId, typed_value_override: newOverride },
+      `benefits.${selectionId}.typed_value_override`,
+      { op: "benefit_update", selection_id: selectionId, typed_value_override: currentOverride }
+    );
+  };
 
   const currentPriceObj = card.price || card.optional_price;
   const currentAmount = currentPriceObj ? (typeof currentPriceObj === "object" ? (currentPriceObj.amount ?? (currentPriceObj as any).value) : currentPriceObj) : null;
@@ -570,15 +608,25 @@ function AddonCard({
               />
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={() => setIsEditingPrice(true)}
-              className="group/price flex items-center gap-1 rounded bg-red-50 hover:bg-red-100/80 px-1.5 py-0.5 text-[10px] font-bold text-[var(--rl-red)] transition-colors"
-              title="Click to edit price"
-            >
-              <span>{currentPriceNum !== null ? `RM ${currentPriceNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "Set price"}</span>
-              <PencilSimple size={10} className="text-[var(--rl-text-muted)] group-hover/price:text-[var(--rl-red)]" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setIsEditingPrice(true)}
+                className={`group/price flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold transition-colors ${isPriceHidden ? "bg-gray-100 text-gray-500 line-through" : "bg-red-50 hover:bg-red-100/80 text-[var(--rl-red)]"}`}
+                title="Click to edit price"
+              >
+                <span>{currentPriceNum !== null ? `RM ${currentPriceNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "Set price"}</span>
+                <PencilSimple size={10} className="text-[var(--rl-text-muted)] group-hover/price:text-[var(--rl-red)]" />
+              </button>
+              <button
+                type="button"
+                onClick={togglePriceVisibility}
+                className="text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] transition-colors p-0.5 rounded hover:bg-gray-100"
+                title={isPriceHidden ? "Show price in PDF" : "Hide price in PDF"}
+              >
+                {isPriceHidden ? <EyeClosed size={12} weight="bold" /> : <Eye size={12} weight="bold" />}
+              </button>
+            </div>
           )}
           {hasPriceDiff ? (
             <button
@@ -2212,7 +2260,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                 setFormValues((values) => ({ ...values, [field.name]: newVtype }));
                                 commitFieldDirectly(field.name, newVtype);
                                 const currentCCStr = formValues["engine_cc"] || (workspace.fields["engine_cc"] as WorkspaceField | undefined)?.value;
-                                const parsedCC = currentCCStr ? parseInt(currentCCStr.replace(/[^0-9]/g, ""), 10) : inferCCFromCarModel(formValues["car_model"] || (workspace.fields["car_model"] as WorkspaceField | undefined)?.value);
+                                const parsedCC = currentCCStr ? parseFloat(currentCCStr.replace(/[^0-9.]/g, "")) : inferCCFromCarModel(formValues["car_model"] || (workspace.fields["car_model"] as WorkspaceField | undefined)?.value);
                                 if (parsedCC && parsedCC > 0) {
                                   const isCompany = newVtype.toLowerCase().includes("company") || newVtype.toLowerCase().includes("corp");
                                   const baseType = newVtype.toLowerCase().includes("motor") ? "Motorcycle" : (newVtype.toLowerCase().includes("lorry") || newVtype.toLowerCase().includes("other")) ? "Lorry" : "Car";
@@ -2251,7 +2299,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                   commitField(field);
                                   if (field.name === "engine_cc" || field.name === "car_model") {
                                     const currentCCStr = formValues["engine_cc"] || (field.name === "car_model" ? inferCCFromCarModel(formValues["car_model"])?.toString() : null);
-                                    const parsedCC = currentCCStr ? parseInt(currentCCStr.replace(/[^0-9]/g, ""), 10) : null;
+                                    const parsedCC = currentCCStr ? parseFloat(currentCCStr.replace(/[^0-9.]/g, "")) : null;
                                     if (parsedCC && parsedCC > 0) {
                                       if (!formValues["engine_cc"]) {
                                         setFormValues((values) => ({ ...values, engine_cc: `${parsedCC} CC` }));
@@ -2405,7 +2453,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                     <div className="text-right">
                                       <span className="block text-[9px] uppercase font-bold text-[var(--rl-text-muted)]">Limit / Sum</span>
                                       <span className="text-xs font-semibold text-[var(--rl-text-strong)] font-mono">
-                                        {rawLimit.startsWith("RM") ? rawLimit : `RM ${rawLimit}`}
+                                        {rawLimit}
                                       </span>
                                     </div>
                                   );

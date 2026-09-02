@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.orm import defer
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.errors import AppError
@@ -296,16 +297,24 @@ def list_published_templates(db, user) -> list[dict]:
     _require_business_user(user)
     templates = {
         item.id: item
-        for item in _all_rows(db, OutputTemplateConfig)
+        for item in db.scalars(select(OutputTemplateConfig)).all()
         if not item.deleted_at and item.status == "active"
     }
     latest: dict[str, TemplateRevision] = {}
-    for revision in _all_rows(db, TemplateRevision):
-        if revision.state != "published" or revision.template_id not in templates:
+    
+    published_revisions = db.scalars(
+        select(TemplateRevision)
+        .where(TemplateRevision.state == "published")
+        .options(defer(TemplateRevision.config))
+    ).all()
+
+    for revision in published_revisions:
+        if revision.template_id not in templates:
             continue
         current = latest.get(revision.template_id)
         if current is None or revision.revision_number > current.revision_number:
             latest[revision.template_id] = revision
+
     result: list[dict] = []
     for template_id, revision in latest.items():
         profile = db.get(TemplatePageProfile, revision.page_profile_id)
@@ -412,10 +421,11 @@ def publish_template_revision(db, user, template_id: str, *, base_revision: int)
         config["canvas"]["height"] = float(str(profile.height))
         config = validate_template_config(config)
         config_hash = canonical_context_hash(config)
-        revisions = [
-            item for item in _all_rows(db, TemplateRevision)
-            if item.template_id == template.id
-        ]
+        revisions = list(db.scalars(
+            select(TemplateRevision)
+            .where(TemplateRevision.template_id == template.id)
+            .options(defer(TemplateRevision.config))
+        ).all())
         matching = [item for item in revisions if item.state == "published" and item.config_hash == config_hash]
         if matching:
             return max(matching, key=lambda item: item.revision_number)
