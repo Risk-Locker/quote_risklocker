@@ -2086,6 +2086,16 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                         <Input value={selected.emptyMessage || ""} disabled={readOnly || Boolean(selected.locked)} onChange={(event) => updateElement(selected.id, { emptyMessage: event.target.value })} />
                       </label>
                     ) : null}
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <label className="flex items-center justify-between text-xs font-bold uppercase tracking-wide cursor-pointer bg-gray-50 border border-gray-200 p-2 rounded hover:bg-gray-100 transition-colors">
+                        Hide Coverage
+                        <input type="checkbox" className="h-3 w-3 accent-[var(--rl-red)]" checked={!!selected.hideCoverage} disabled={readOnly || Boolean(selected.locked)} onChange={(e) => updateElement(selected.id, { hideCoverage: e.target.checked })} />
+                      </label>
+                      <label className="flex items-center justify-between text-xs font-bold uppercase tracking-wide cursor-pointer bg-gray-50 border border-gray-200 p-2 rounded hover:bg-gray-100 transition-colors">
+                        Hide Cost
+                        <input type="checkbox" className="h-3 w-3 accent-[var(--rl-red)]" checked={!!selected.hideCost} disabled={readOnly || Boolean(selected.locked)} onChange={(e) => updateElement(selected.id, { hideCost: e.target.checked })} />
+                      </label>
+                    </div>
                     <p className="text-[11px] leading-relaxed text-[var(--rl-text-muted)]">Scenario count is editor-only. It is never saved into the published template.</p>
                   </EditorShell>
                 ) : null}

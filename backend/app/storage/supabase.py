@@ -106,14 +106,15 @@ class SupabaseStorage:
     ASSET_MIME_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/webp", "image/svg+xml"]
 
     def _bucket_file_size_limit(self) -> int:
-        """Return the largest configured object limit, including v6 adapters."""
+        """Return the largest configured object limit, capped at Supabase's max 50MB."""
 
         legacy = int(getattr(self.settings, "max_upload_bytes", 0) or 0)
-        return max(
+        limit = max(
             int(getattr(self.settings, "max_source_pdf_bytes", legacy) or legacy),
             int(getattr(self.settings, "max_generated_pdf_bytes", legacy) or legacy),
             int(getattr(self.settings, "max_asset_bytes", legacy) or legacy),
         )
+        return min(limit, 52428800) if limit > 0 else 52428800
 
     def ensure_bucket(self) -> None:
         bucket_id = quote(self.bucket, safe="")

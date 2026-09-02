@@ -208,7 +208,7 @@ GEMINI_EXTRACTION_SCHEMA = {
         },
         "detected_benefits": {
             "type": "array",
-            "description": "List of all benefits, add-ons, extra covers, and riders explicitly present in this quotation (e.g. Windscreen Damage RM 4,000 cost RM 600, Legal Liability Of Passengers cost RM 7.50, Legal Liability To Passengers cost RM 41.85, All Drivers cost RM 20, 24-hr Towing, Special Perils, Key Replacement RM 1,000, etc.).",
+            "description": "List of all benefits, add-ons, extra covers, and riders explicitly present in this quotation (e.g. Windscreen Damage RM 4,000 cost RM 600, Legal Liability Of Passengers cost RM 7.50, Legal Liability To Passengers cost RM 41.85, All Drivers cost RM 20, 24-hr Towing, Special Perils, Key Replacement RM 1,000, etc.). CRITICAL: DO NOT extract generic policy terms, standard exclusions, legal definitions, or general conditions as benefits. ONLY extract specific coverages or riders explicitly listed in the quotation schedule or pricing summary.",
             "items": {
                 "type": "object",
                 "properties": {
@@ -370,6 +370,10 @@ Extract accurate, grounded JSON data matching the provided schema from the quota
    - In `detected_benefits`, read the extras table with extreme precision.
    - **Coverage Limit (`coverage_limit`)**: Sum covered or insured limit explicitly stated (e.g. `Windscreen (Sum Insured: RM 2,650) ... RM 397.50` -> `coverage_limit: "2,650"`, `premium_cost: "397.50"`; `Key Replacement (Coverage: RM 1,000) ... RM 45.00` -> `coverage_limit: "1,000"`, `premium_cost: "45.00"`).
    - **No Coverage Limit**: If the benefit is a legal liability endorsement or service rider without an explicit sum insured (e.g. `Legal Liability to Passengers ... RM 41.85`, `Legal Liability of Passengers ... RM 7.50`, `All Drivers ... RM 20.00`, `24-hr Towing`), `coverage_limit` MUST BE EMPTY `""` or null. NEVER put the premium cost or price into `coverage_limit`.
+11. **STRICT BENEFIT FILTERING**:
+   - NEVER extract generic policy definitions, standard terms and conditions, legal clauses, or claim procedures as benefits.
+   - ONLY extract concrete coverages, riders, or add-ons that are explicitly listed in the quotation's pricing schedule, benefits table, or endorsements summary.
+   - If a PDF contains 30 pages of generic policy wording, IGNORE the generic text completely.
 
 {grounding_context}
 Return strictly structured JSON adhering to the provided schema.
@@ -457,7 +461,7 @@ def extract_with_gemini_sync(
     failed_models: set[str] = set()
 
     # Timeout: ensure sufficient time for complete structured JSON extraction (typically 5-7s)
-    effective_timeout = max(float(timeout_seconds or 20.0), 15.0)
+    effective_timeout = max(timeout_seconds or 20.0, 15.0)
 
     api_key = pool.get_next_key()
     if not api_key:

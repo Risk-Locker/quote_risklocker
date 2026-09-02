@@ -79,6 +79,8 @@ export type CanvasElement = {
   benefitPreset?: string;
   emptyState?: "hide" | "message";
   emptyMessage?: string;
+  hideCoverage?: boolean;
+  hideCost?: boolean;
   prefix?: string;
   suffix?: string;
   rowHeight?: number;
@@ -618,7 +620,7 @@ export function CanvasElementView({
                     >
                       <div
                         className={`w-full h-full flex flex-col rounded-[6px] overflow-hidden ${
-                          b?.is_detected
+                          b?.is_detected && element.gridKind === "available_addons"
                             ? "border-2 border-amber-400 bg-amber-50/40 shadow-xs ring-1 ring-amber-300/50"
                             : element.cardStyle === "minimal"
                               ? "bg-transparent border border-transparent"
@@ -656,7 +658,7 @@ export function CanvasElementView({
                             )}
                           </div>
                           <div className="flex flex-col min-w-0 flex-1 overflow-hidden justify-start">
-                            {val && (
+                            {val && !element.hideCoverage && (
                               <span
                                 className="font-bold leading-tight text-[var(--rl-red)] truncate"
                                 style={{ fontSize: density.value }}
@@ -672,7 +674,7 @@ export function CanvasElementView({
                                 {desc}
                               </span>
                             )}
-                            {costBadge && (
+                            {costBadge && !element.hideCost && (
                               <span
                                 className={`mt-0.5 inline-block self-start font-semibold whitespace-nowrap text-slate-900 leading-tight`}
                                 style={{ fontSize: density.desc }}
@@ -792,9 +794,9 @@ export function CanvasElementView({
 
                             return (
                               <article
-                                key={`masonry-card-${idx}`}
+                                key={`benefit-card-${idx}`}
                                 className={`w-full rounded-[6px] overflow-hidden transition-all ${
-                                  b?.is_detected
+                                  b?.is_detected && element.gridKind === "available_addons"
                                     ? "border-2 border-amber-400 bg-amber-50/40 shadow-xs ring-1 ring-amber-300/50"
                                     : isDark
                                       ? "border border-slate-700 bg-slate-900 shadow-xs"
@@ -836,7 +838,7 @@ export function CanvasElementView({
                                     )}
                                   </div>
                                   <div className="flex flex-col min-w-0 flex-1 justify-start">
-                                    {val && (
+                                    {val && !element.hideCoverage && (
                                       <span
                                         className={`font-bold leading-tight truncate ${isDark ? "text-amber-400" : "text-[var(--rl-red)]"}`}
                                         style={{ fontSize: density.value }}
@@ -852,7 +854,7 @@ export function CanvasElementView({
                                         {desc}
                                       </span>
                                     )}
-                                    {costBadge && (
+                                    {costBadge && !element.hideCost && (
                                       <span
                                         className={`mt-0.5 inline-block font-semibold whitespace-nowrap leading-tight ${isDark ? "text-amber-300" : "text-slate-900"}`}
                                         style={{ fontSize: density.desc }}
@@ -943,8 +945,8 @@ export function CanvasElementView({
             total = variableValues?.total_premium_adjusted || variableValues?.total_amount || "";
           }
           const displayPremium = pNum > 0 ? (pNum + extrasTotal).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : premium;
+          rows.push({ kind: "divider_dark", label: "", value: "" });
           rows.push({ kind: "premium", label: labels.premium || "Coverage Premium / 保费", value: displayPremium ? `RM ${displayPremium}` : "" });
-          rows.push({ kind: "divider", label: "", value: "" });
           rows.push({ kind: "roadtax", label: labels.roadtax || "Roadtax", value: roadtax ? `RM ${roadtax}` : "" });
           rows.push({ kind: "runner", label: labels.runner || "Runner Fee", value: runner ? `RM ${runner}` : "" });
           rows.push({ kind: "total", label: (labels as any).total_premium || labels.total || "Total Payable / 应付总额", value: total ? `RM ${total}` : "" });
@@ -954,6 +956,9 @@ export function CanvasElementView({
               {rows.map((row, index) => {
                 if (row.kind === "divider") {
                   return <div key={`divider-${index}`} className="w-full my-0.5" style={{ height: 1, background: "#E2E8F0" }} />;
+                }
+                if (row.kind === "divider_dark") {
+                  return <div key={`divider-${index}`} className="w-full my-1" style={{ height: 1, background: "#111827" }} />;
                 }
                 const labelStyle =
                   row.kind === "total"
@@ -1123,7 +1128,7 @@ export function balanceBenefitGridElements(
   const cardGap = 5;
 
   const hasExplicitExtrasGrid = elements.some((e) => e.gridKind === "extras" || e.gridKind === "purchased_extras");
-  const hasExtrasSection = hasExplicitExtrasGrid && extrasCards.length > 0;
+  const hasExtrasSection = extrasCards.length > 0;
 
   if (hasExtrasSection) {
     const n1 = focCards.length;
@@ -1162,27 +1167,40 @@ export function balanceBenefitGridElements(
         e.h = h1;
         adjusted.push(e);
         // Insert Extras section
-        adjusted.push({
-          id: "extras_header_bg",
-          type: "rectangle",
-          x: 40,
-          y: yHExt,
-          w: 714,
-          h: hdrH,
-          z: 2,
-          style: { background: "#1E293B", borderWidth: 0, borderColor: "transparent", borderRadius: 4 },
-        });
-        adjusted.push({
-          id: "extras_header_txt",
-          type: "text",
-          text: "Purchased Extras & Add-ons / 特别附加项目",
-          x: 52,
-          y: yHExt + 5,
-          w: 690,
-          h: 16,
-          z: 5,
-          style: { fontSize: 10.5, fontWeight: "700", color: "#FFFFFF", textAlign: "left" },
-        });
+        if (hasExplicitExtrasGrid) {
+          adjusted.push({
+            id: "extras_header_bg",
+            type: "rectangle",
+            x: 40,
+            y: yHExt,
+            w: 714,
+            h: hdrH,
+            z: 2,
+            style: { background: "#1E293B", borderWidth: 0, borderColor: "transparent", borderRadius: 4 },
+          });
+          adjusted.push({
+            id: "extras_header_txt",
+            type: "text",
+            text: "Purchased Extras & Add-ons / 特别附加项目",
+            x: 52,
+            y: yHExt + 5,
+            w: 690,
+            h: 16,
+            z: 5,
+            style: { fontSize: 10.5, fontWeight: "700", color: "#FFFFFF", textAlign: "left" },
+          });
+        } else {
+          adjusted.push({
+            id: "extras_divider_line",
+            type: "line",
+            x: grid1.x || 40,
+            y: yHExt + (hdrH / 2),
+            w: grid1.w || 714,
+            h: 1,
+            z: 2,
+            style: { borderColor: "#CBD5E1", borderStyle: "dashed" },
+          });
+        }
         adjusted.push({
           id: "extras_grid",
           type: "benefit-grid",
@@ -1198,6 +1216,8 @@ export function balanceBenefitGridElements(
           cardStyle: grid1.cardStyle || "standard",
           textDensity: grid1.textDensity || "compact",
           emptyState: "hide",
+          hideCoverage: grid1.hideCoverage,
+          hideCost: grid1.hideCost,
         });
         continue;
       } else if (e.id === "addons_header_bg" && hdr2Bg) {

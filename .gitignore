@@ -2,6 +2,7 @@
 .env.*
 .env.production
 .env.bak
+.env.bak.bak
 !**/.env.example
 !**/.env.example.explanation
 /.pytest_cache/
@@ -31,3 +32,4 @@ venv
 Malaysia_Motor_Insurance_Quick_Benefits_Addons_2026.docx
 /fix/
 *.db
+mcp_config.json

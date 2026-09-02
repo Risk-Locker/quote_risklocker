@@ -75,7 +75,7 @@ const FORM_FIELDS: FormField[] = [
   { name: "valid_until", label: "Quotation validity", kind: "text" },
   { name: "excess_amount", label: "Excess amount", kind: "money" },
   { name: "ncd_percent", label: "NCD", kind: "percent" },
-  { name: "premium", label: "Insurance premium (no extras)", kind: "money" },
+  { name: "premium", label: "Insurance Premium After NCD, Excluding Add-Ons", kind: "money" },
   { name: "insurance_premium_total", label: "Insurance premium", kind: "total" },
   { name: "roadtax", label: "Road tax", kind: "money" },
   { name: "service_fee", label: "Runner fee", kind: "money" },
@@ -442,6 +442,9 @@ function AddonCard({
       onQueue({ op: "benefit_update", selection_id: selectionId, price: newPrice, cost_status: "paid" }, `benefits.${selectionId}.price`);
     } else if (card.offering_id) {
       onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid", price: newPrice }, `benefits.offer.${card.offering_id}`);
+    } else if (selectionId || card.concept_key) {
+      const targetId = selectionId || card.concept_key!;
+      onQueue({ op: "benefit_update", selection_id: targetId, price: newPrice, cost_status: "paid" }, `benefits.${targetId}.price`);
     }
   };
 
@@ -454,6 +457,9 @@ function AddonCard({
         onQueue({ op: "benefit_update", selection_id: selectionId, price: resetPrice, cost_status: "paid" }, `benefits.${selectionId}.price`);
       } else if (card.offering_id) {
         onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid", price: resetPrice }, `benefits.offer.${card.offering_id}`);
+      } else if (selectionId || card.concept_key) {
+        const targetId = selectionId || card.concept_key!;
+        onQueue({ op: "benefit_update", selection_id: targetId, price: resetPrice, cost_status: "paid" }, `benefits.${targetId}.price`);
       }
     }
   };
@@ -1721,10 +1727,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const addonCards = workspace.benefit_cards.available_addons;
 
   return (
-    <section className="grid gap-4 max-w-7xl mx-auto pb-12">
+    <>
       {/* Top Header Bar */}
-      <Card className="sticky top-[68px] z-20 p-4 border border-[var(--rl-border)] bg-[var(--rl-surface)]/95 backdrop-blur-md shadow-xs">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <header className="sticky top-[56px] z-20 w-full border-b border-[var(--rl-border)] bg-[var(--rl-surface)]/95 backdrop-blur-md shadow-xs">
+        <div className="mx-auto flex max-w-[1560px] flex-wrap items-center justify-between px-4 sm:px-5 min-h-[56px] py-2 gap-3">
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-bold text-[var(--rl-text-strong)]">Quotation Workspace</h1>
@@ -1815,7 +1821,8 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
             </Button>
           </div>
         </div>
-      </Card>
+      </header>
+      <section className="grid gap-4 max-w-7xl mx-auto pb-12 pt-6 px-4 xl:px-0">
 
       {actionError || mutation.saveError ? (
         <div role="alert" className="rounded-[var(--rl-radius-sm)] bg-[var(--rl-red-light)] p-3 text-sm font-semibold text-[var(--rl-red)]">
@@ -2511,6 +2518,19 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {!previewCollapsed ? (
                     <>
+                      <div className="flex items-center gap-1.5 bg-gray-100/90 rounded px-1.5 py-0.5 border border-gray-200 text-[10px]">
+                        <span className="font-bold text-[var(--rl-text-muted)] text-[9px] uppercase tracking-wider">Zoom</span>
+                        <input
+                          type="range"
+                          min="0.25"
+                          max="2"
+                          step="0.05"
+                          value={previewZoom}
+                          onChange={(e) => setPreviewZoom(parseFloat(e.target.value))}
+                          className="w-16 h-1 cursor-pointer"
+                          title="Zoom"
+                        />
+                      </div>
                       <div className="flex items-center gap-1 bg-gray-100/90 rounded px-1.5 py-0.5 border border-gray-200 text-[10px]">
                         <span className="font-bold text-[var(--rl-text-muted)]">Style:</span>
                         <select
@@ -3203,5 +3223,6 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         </div>
       )}
     </section>
+    </>
   );
 }
