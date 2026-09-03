@@ -53,3 +53,5 @@ Pending: User approval to execute the final plan.
 2026-09-03 · Antigravity · Cleared redundant str() call warnings in gemini_extractor.py:304,317,328; pyright 0 errors and 0 warnings across all files · Pending: none.
 2026-09-03 · Antigravity · Confirmed project context, active stack, and recent progress for the user · Reviewed docs/core/START-HERE.md, STATE.md, and PROJECT-CONTEXT.md · Pending: none.
 2026-09-03 · Antigravity · Drafted implementation plan for complex fixes (visibility toggles, revisions UI, vehicle deduplication, AI memory, sequential refs) and pushed back on deleting backend revisions to preserve immutability · Created implementation_plan.md · Pending: User review and approval.
+2026-09-03 · Antigravity · Committed and pushed v13 to origin/v13 and origin/main; published new branch v14 to origin/v14 and checked out · 548 pytest green, tsc green, build clean · Pending: none.
+
