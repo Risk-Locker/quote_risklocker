@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 
 from sqlalchemy import and_, delete, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from app.core.config import Settings
 from app.core.errors import AppError
@@ -291,7 +291,7 @@ def permanent_delete_session(db: Session, user, uploaded_file_id: str, storage) 
             storage.delete_pdf(uploaded.storage_path)
         except Exception as exc:
             logger.warning("Could not delete source PDF %s during trash clear: %s", uploaded.storage_path, exc)
-    for version in db.scalars(select(GeneratedPdfVersion).where(GeneratedPdfVersion.uploaded_file_id == uploaded.id)).all():
+    for version in db.scalars(select(GeneratedPdfVersion).where(GeneratedPdfVersion.uploaded_file_id == uploaded.id).options(defer(GeneratedPdfVersion.draft_snapshot), defer(GeneratedPdfVersion.template_snapshot), defer(GeneratedPdfVersion.render_context_snapshot))).all():
         if version.storage_path:
             try:
                 storage.delete_pdf(version.storage_path)

@@ -68,7 +68,22 @@ type AIContextData = {
   live_system_prompt: string;
 };
 
-type ActiveTab = "chat" | "summary" | "companies" | "concepts" | "prompt";
+type AIMemoryItem = {
+  id: string;
+  field_name: string;
+  original_value: string;
+  corrected_value: string;
+  insurance_company: string;
+  created_at: string | null;
+};
+
+type AIMemoryData = {
+  total_memories: number;
+  summary_by_field: Array<{ field: string; count: number }>;
+  items: AIMemoryItem[];
+};
+
+type ActiveTab = "chat" | "learned" | "summary" | "companies" | "concepts" | "prompt";
 
 type ChatMessage = {
   id: string;
@@ -97,6 +112,24 @@ export default function AIContextPage() {
   const [promptSaving, setPromptSaving] = useState(false);
   const [promptSaved, setPromptSaved] = useState(false);
   const [canEditPrompt, setCanEditPrompt] = useState(false);
+
+  // AI Learned Correction Memory State
+  const [memoryData, setMemoryData] = useState<AIMemoryData | null>(null);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [memorySearch, setMemorySearch] = useState("");
+  const [memoryFieldFilter, setMemoryFieldFilter] = useState("all");
+
+  const filteredMemories = (memoryData?.items || []).filter((item) => {
+    if (memoryFieldFilter !== "all" && item.field_name !== memoryFieldFilter) return false;
+    if (!memorySearch.trim()) return true;
+    const q = memorySearch.toLowerCase();
+    return (
+      item.field_name.toLowerCase().includes(q) ||
+      item.original_value.toLowerCase().includes(q) ||
+      item.corrected_value.toLowerCase().includes(q) ||
+      item.insurance_company.toLowerCase().includes(q)
+    );
+  });
 
   // Chatbot State
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -148,10 +181,23 @@ export default function AIContextPage() {
     }
   }
 
+  async function loadMemory() {
+    setMemoryLoading(true);
+    try {
+      const res = await api<AIMemoryData>("/settings/ai-memory");
+      setMemoryData(res);
+    } catch (err) {
+      console.error("Failed to load AI memory:", err);
+    } finally {
+      setMemoryLoading(false);
+    }
+  }
+
   useEffect(() => {
     loadData();
     loadPrompt();
     loadCapabilities();
+    loadMemory();
   }, []);
 
   async function handleSendMessage(queryText?: string) {
@@ -266,7 +312,15 @@ export default function AIContextPage() {
                 { target: ".rl-tour-tabs", title: "Navigation tabs", body: "Grounding Chatbot, Database Overview, Insurers & Packages, Benefit Concepts, and Live System Prompt." },
               ]}
             />
-            <Button variant="secondary" size="sm" onClick={loadData} className="gap-1.5">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                loadData();
+                loadMemory();
+              }}
+              className="gap-1.5"
+            >
               <ArrowsClockwise size={15} weight="bold" />
               Refresh Context
             </Button>
@@ -317,6 +371,18 @@ export default function AIContextPage() {
           >
             <ChatCircleDots size={16} weight="bold" />
             AI Grounding Assistant (Chatbot)
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("learned")}
+            className={`px-4 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+              tab === "learned"
+                ? "border-[var(--rl-black)] text-[var(--rl-text-strong)]"
+                : "border-transparent text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+            }`}
+          >
+            <Lightning size={16} weight="bold" />
+            Learned Memory & Rules ({memoryData?.total_memories || 0})
           </button>
           <button
             type="button"
@@ -487,6 +553,152 @@ export default function AIContextPage() {
                 </Button>
               </form>
             </Card>
+          </div>
+        )}
+
+        {/* Tab: Learned Memory & Rules */}
+        {tab === "learned" && (
+          <div className="grid gap-4">
+            {/* Metric Summary Cards */}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <Card className="p-4 border border-[var(--rl-border)] bg-white shadow-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[var(--rl-text-muted)] uppercase tracking-wider">
+                    Total Learned Corrections
+                  </span>
+                  <Lightning size={20} weight="fill" className="text-amber-500" />
+                </div>
+                <p className="mt-2 text-2xl font-bold text-[var(--rl-text-strong)] font-mono">
+                  {memoryData?.total_memories ?? 0}
+                </p>
+                <p className="mt-1 text-xs text-[var(--rl-text-muted)]">
+                  Persistent correction rules automatically guiding extraction.
+                </p>
+              </Card>
+
+              <Card className="p-4 border border-[var(--rl-border)] bg-white shadow-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[var(--rl-text-muted)] uppercase tracking-wider">
+                    Corrected Fields Count
+                  </span>
+                  <ShieldCheck size={20} className="text-emerald-600" />
+                </div>
+                <p className="mt-2 text-2xl font-bold text-[var(--rl-text-strong)] font-mono">
+                  {memoryData?.summary_by_field.length ?? 0}
+                </p>
+                <p className="mt-1 text-xs text-[var(--rl-text-muted)]">
+                  Distinct quotation fields refined by human review.
+                </p>
+              </Card>
+
+              <Card className="p-4 border border-[var(--rl-border)] bg-white shadow-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[var(--rl-text-muted)] uppercase tracking-wider">
+                    Top Corrected Field
+                  </span>
+                  <Sparkle size={20} weight="fill" className="text-indigo-600" />
+                </div>
+                <p className="mt-2 text-xl font-bold text-[var(--rl-text-strong)] truncate font-mono">
+                  {memoryData?.summary_by_field[0]?.field ? `${memoryData.summary_by_field[0].field} (${memoryData.summary_by_field[0].count}x)` : "None"}
+                </p>
+                <p className="mt-1 text-xs text-[var(--rl-text-muted)]">
+                  Highest frequency learned field pattern.
+                </p>
+              </Card>
+            </div>
+
+            {/* Controls Bar: Search & Filter */}
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-white p-3 shadow-xs">
+              <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+                <Input
+                  value={memorySearch}
+                  onChange={(e) => setMemorySearch(e.target.value)}
+                  placeholder="Search learned memories (field, value, insurer)..."
+                  className="text-xs max-w-md"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={memoryFieldFilter}
+                  onChange={(e) => setMemoryFieldFilter(e.target.value)}
+                  aria-label="Filter by field name"
+                  className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white px-2.5 py-1.5 text-xs text-[var(--rl-text-strong)] focus:outline-none focus:ring-1 focus:ring-[var(--rl-black)]"
+                >
+                  <option value="all">All Fields ({memoryData?.total_memories || 0})</option>
+                  {memoryData?.summary_by_field.map((sf) => (
+                    <option key={sf.field} value={sf.field}>
+                      {sf.field} ({sf.count})
+                    </option>
+                  ))}
+                </select>
+                <Button variant="secondary" size="sm" onClick={loadMemory} disabled={memoryLoading} className="text-xs gap-1">
+                  <ArrowsClockwise size={13} className={memoryLoading ? "animate-spin" : ""} />
+                  Refresh
+                </Button>
+              </div>
+            </div>
+
+            {/* Memory Table */}
+            <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-white overflow-hidden shadow-xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs min-w-[700px]">
+                  <thead className="bg-gray-50 border-b border-[var(--rl-border)] text-[var(--rl-text-muted)] uppercase text-[11px]">
+                    <tr>
+                      <th className="p-3">Field Name</th>
+                      <th className="p-3">Original Detected</th>
+                      <th className="p-3">Learned / Corrected</th>
+                      <th className="p-3">Insurer Scope</th>
+                      <th className="p-3">Date Learned</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--rl-border)]">
+                    {filteredMemories.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="p-6 text-center text-xs text-[var(--rl-text-muted)]">
+                          {memoryLoading ? "Loading learned AI memories..." : "No learned memories match your filter."}
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredMemories.map((item) => (
+                        <tr key={item.id} className="hover:bg-gray-50/50">
+                          <td className="p-3 font-semibold text-[var(--rl-text-strong)] font-mono">
+                            <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-800">
+                              {item.field_name}
+                            </span>
+                          </td>
+                          <td className="p-3 text-red-600 line-through truncate max-w-[180px]">
+                            {item.original_value}
+                          </td>
+                          <td className="p-3 font-bold text-emerald-700 truncate max-w-[200px]">
+                            <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-2 py-0.5 text-emerald-800 border border-emerald-200/60">
+                              <CheckCircle size={12} weight="bold" className="text-emerald-600" />
+                              {item.corrected_value}
+                            </span>
+                          </td>
+                          <td className="p-3 text-[var(--rl-text-muted)]">
+                            <span className="inline-flex items-center gap-1.5">
+                              <Buildings size={14} className="text-gray-400" />
+                              {item.insurance_company}
+                            </span>
+                          </td>
+                          <td className="p-3 text-[var(--rl-text-muted)] font-mono text-[11px]">
+                            {item.created_at
+                              ? new Date(item.created_at).toLocaleDateString("en-MY", {
+                                  year: "numeric",
+                                  month: "short",
+                                  day: "numeric",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })
+                              : "—"}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
 

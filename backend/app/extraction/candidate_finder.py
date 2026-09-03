@@ -30,6 +30,7 @@ DRAFT_FIELDS = [
     "cover_end_date",
     "cover_period",
     "coverage_type",
+    "valuation_type",
     "coverage_amount",
     "sum_insured",
     "market_value",
@@ -104,6 +105,7 @@ DEFAULT_ALIASES = {
     "service_fee": ["service fee", "runner fee", "runner charge", "upah runner"],
     "ncd_percent": ["ncd", "ncb", "no claim discount", "no claim bonus", "dtt", "diskaun tanpa tuntutan"],
     "windscreen": ["windscreen", "cermin hadapan"],
+    "valuation_type": ["valuation type", "valuation basis", "basis of sum insured", "type of sum insured", "basis of valuation", "agreed value", "market value"],
     }
 
 DEFAULT_VEHICLE_BRANDS = ("PROTON", "PERODUA", "HONDA", "TOYOTA", "NISSAN", "BMW", "MERCEDES", "MERCEDES-BENZ", "MAZDA", "MITSUBISHI", "KIA", "HYUNDAI")
@@ -812,5 +814,19 @@ def find_candidates(
 
     for match in re.finditer(r"(?i)\bNCD\b[^\d]{0,15}(?P<ncd>\d{1,2}(?:\.\d+)?)\s*%?", text):
         _add(results, "ncd_percent", match.group("ncd"), "label_percent", 0.78, text, match.start(), match.end(), page_text)
+
+    # Valuation type detection (Agreed Value vs Market Value)
+    if re.search(r"(?i)\bagreed\s*value\s*[:=\-]?\s*(?:no|tidak|false|0)\b", text):
+        _add_static(results, "valuation_type", "Market Value", "pattern_agreed_value_no", 0.98, text, text, page_text)
+    elif re.search(r"(?i)\bmarket\s*value\s*[:=\-]?\s*(?:no|tidak|false|0)\b", text):
+        _add_static(results, "valuation_type", "Agreed Value", "pattern_market_value_no", 0.98, text, text, page_text)
+    elif re.search(r"(?i)\bagreed\s*value\s*[:=\-]?\s*(?:yes|ya|true|1|\bx\b|\[x\])", text):
+        _add_static(results, "valuation_type", "Agreed Value", "pattern_agreed_value_yes", 0.96, text, text, page_text)
+    elif re.search(r"(?i)\bmarket\s*value\s*[:=\-]?\s*(?:yes|ya|true|1|\bx\b|\[x\])", text):
+        _add_static(results, "valuation_type", "Market Value", "pattern_market_value_yes", 0.96, text, text, page_text)
+    elif re.search(r"(?i)\b(?:sum\s*insured|coverage)\s*\(\s*agreed\s*value\s*\)", text) or re.search(r"(?i)\bagreed\s*value\s*(?:basis|scheme)", text):
+        _add_static(results, "valuation_type", "Agreed Value", "pattern_agreed_value_phrase", 0.92, text, text, page_text)
+    elif re.search(r"(?i)\b(?:sum\s*insured|coverage)\s*\(\s*market\s*value\s*\)", text) or re.search(r"(?i)\bmarket\s*value\s*(?:basis|scheme)", text):
+        _add_static(results, "valuation_type", "Market Value", "pattern_market_value_phrase", 0.92, text, text, page_text)
 
     return dict(results)

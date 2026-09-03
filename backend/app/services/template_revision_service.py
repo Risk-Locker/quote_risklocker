@@ -297,7 +297,7 @@ def list_published_templates(db, user) -> list[dict]:
     _require_business_user(user)
     templates = {
         item.id: item
-        for item in db.scalars(select(OutputTemplateConfig)).all()
+        for item in db.scalars(select(OutputTemplateConfig).options(defer(OutputTemplateConfig.fixed_fields))).all()
         if not item.deleted_at and item.status == "active"
     }
     latest: dict[str, TemplateRevision] = {}
@@ -309,7 +309,7 @@ def list_published_templates(db, user) -> list[dict]:
     ).all()
 
     for revision in published_revisions:
-        if revision.template_id not in templates:
+        if revision.state != "published" or revision.template_id not in templates:
             continue
         current = latest.get(revision.template_id)
         if current is None or revision.revision_number > current.revision_number:

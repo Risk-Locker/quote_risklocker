@@ -71,6 +71,8 @@ def upsert_from_draft(
             val = _field(draft_fields, field_name)
             if val is not None:
                 setattr(existing, field_name, val)
+        if not getattr(existing, "total_premium", None):
+            existing.total_premium = _field(draft_fields, "total_amount")
         existing.raw_values = draft_fields
         existing.generated_at = datetime.now(timezone.utc)
         existing.updated_at = datetime.now(timezone.utc)
@@ -89,6 +91,8 @@ def upsert_from_draft(
         val = _field(draft_fields, field_name)
         if val is not None:
             setattr(record, field_name, val)
+    if not getattr(record, "total_premium", None):
+        record.total_premium = _field(draft_fields, "total_amount")
     db.add(record)
     db.commit()
     db.refresh(record)

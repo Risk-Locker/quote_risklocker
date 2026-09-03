@@ -157,7 +157,9 @@ export default function UploadPage() {
         return;
       }
       if (response.job.state === "failed" || response.job.state === "cancelled") {
-        throw new Error(response.job.error?.message || "The quotation could not be prepared. Try again.");
+        const stepName = PIPELINE_STEPS.find((s) => s.key === response.job.phase)?.label;
+        const prefix = stepName ? `Failed at [${stepName}]: ` : "";
+        throw new Error(prefix + (response.job.error?.message || "The quotation could not be prepared. Try again."));
       }
       if (response.job.state === "processing" && response.job.heartbeat_at) {
         const heartbeatAge = Date.now() - new Date(response.job.heartbeat_at).getTime();

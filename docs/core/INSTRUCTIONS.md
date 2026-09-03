@@ -20,5 +20,6 @@ How the owner talks, how to interpret him, and how every interaction must run. T
    - Only then execute.
 3. **Issue reports** ("this flow has issues") — never jump to fixes. Understand what he said, investigate systematically (see the `systematic-debugging` skill), use your own reasoning first, then external sources if needed, then present findings and execute.
 4. **Big changes** follow the same pipeline: understand -> analyze -> research -> plan -> record plan in `docs/MEMORY.md` -> get approval -> execute -> log the outcome.
-5. **Never claim success without the verification chain** in AGENTS.md (pytest, tsc, build, code-map check).
+5. **Never claim success without the verification chain** in AGENTS.md (pytest, tsc, build, zero IDE/lint problems on touched files, code-map check).
 6. **Update this file** whenever the owner expresses a new interaction preference — that is part of the logbook duty, not an optional chore.
+7. **Check code problems/diagnostics after each change.** Always inspect and resolve IDE diagnostic problems, type errors (Pyright/TypeScript), and linter warnings on touched files immediately after making changes.

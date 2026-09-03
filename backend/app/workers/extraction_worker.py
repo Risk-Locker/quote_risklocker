@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from app.core.workspace import QC_TEMP_ROOT, REPOSITORY_ROOT, qc_temp_directory, resolve_qc_path
 from app.extraction.company_resolution import build_companies_payload, resolve_company
+from app.extraction.db_lookups import get_db_packs, get_correction_memory
 from app.extraction.sandbox import extract_with_limits
 from app.models.enums import AccountStatus, RecordStatus
 from app.models.tables import (
@@ -106,6 +107,8 @@ def _query_extraction_context(db) -> dict:
         "db_models": list(dict.fromkeys(models)),
         "db_companies": companies,
         "db_benefit_concepts": benefit_concepts,
+        "db_packs": get_db_packs(db),
+        "db_corrections": get_correction_memory(db, None),
     }
 
 
@@ -163,6 +166,7 @@ def process_extraction_job(
         raise JobProcessingError("draft_changed", "This quotation changed before extraction completed. Start a fresh upload.")
 
     heartbeat_job(db, job, worker_id=worker_id, progress=5, phase="validating_source", lease_seconds=300)
+    logger.info("Job %s: validating source document (file=%s, name=%s)", job.id, uploaded.id, uploaded.original_filename)
     # Track the local ephemeral path for post-extraction Supabase promotion.
     _ephemeral_path: Path | None = None
     if uploaded.storage_provider == "local_ephemeral":
@@ -208,12 +212,15 @@ def process_extraction_job(
     if maximum and len(source_bytes) > maximum:
         raise JobProcessingError("source_limit_exceeded", "The uploaded document exceeds the configured source limit.")
 
+    logger.info("Job %s: source document ready (%d bytes)", job.id, len(source_bytes))
+
     if job.cancelled_at is not None or job.state == "cancelled":
         logger.info("Job %s was cancelled before extraction started; aborting.", job.id)
         return
 
     context = context_loader(db)
     heartbeat_job(db, job, worker_id=worker_id, progress=15, phase="extracting", lease_seconds=300)
+    logger.info("Job %s: executing extraction pipeline (enhanced_reading=%s)", job.id, bool((job.payload or {}).get("enhanced_reading")))
     with qc_temp_directory("extract-") as directory:
         source_path = (directory / "source.pdf").resolve()
         source_path.write_bytes(source_bytes)
@@ -234,6 +241,7 @@ def process_extraction_job(
     draft_data = result.get("draft") or {}
     values = _record_values(full)
     heartbeat_job(db, job, worker_id=worker_id, progress=85, phase="saving_review", lease_seconds=300)
+    logger.info("Job %s: extraction completed (%d fields), saving review records", job.id, len(draft_data.get("fields") or {}))
     if not values["company_resolution"]:
         values["company_resolution"] = _company_resolution(draft_data.get("fields") or {}, context.get("db_companies") or [])
 
@@ -333,6 +341,8 @@ def process_extraction_job(
         {"session_id": session.id, "draft_id": draft.id},
     )
 
+    logger.info("Job %s: review saved and job marked complete (session=%s, draft=%s)", job.id, session.id, draft.id)
+
     # Deferred Supabase promotion: runs AFTER the job is marked complete so the
     # user sees results immediately. Uses a fresh httpx.Client (not the shared
     # singleton) to avoid thread-safety issues from asyncio.to_thread context.
@@ -371,6 +381,14 @@ def run_one_job(
     job = claim_next_job(db, worker_id=worker_id, lease_seconds=300)
     if job is None:
         return None
+    logger.info(
+        "Worker [%s] claimed job %s (type=%s, attempt=%s/%s)",
+        worker_id,
+        job.id,
+        job.job_type,
+        job.attempt,
+        job.max_attempts,
+    )
     try:
         if job.job_type == "extract_pdf":
             process_extraction_job(db, settings, job, worker_id=worker_id, storage=storage)
@@ -378,14 +396,29 @@ def run_one_job(
             process_render_job(db, settings, job, worker_id=worker_id, storage=storage)
         else:
             raise JobProcessingError("unsupported_job", "This background task is not supported.")
+        logger.info("Job %s (%s) finished successfully", job.id, job.job_type)
     except JobProcessingError as exc:
+        logger.error(
+            "Job %s (%s) failed with JobProcessingError: [%s] %s",
+            job.id,
+            job.job_type,
+            exc.code,
+            exc.safe_message,
+        )
         db.rollback()
         fail_job(db, job, worker_id=worker_id, code=exc.code, message=exc.safe_message)
     except RenderJobProcessingError as exc:
+        logger.error(
+            "Job %s (%s) failed with RenderJobProcessingError: [%s] %s",
+            job.id,
+            job.job_type,
+            exc.code,
+            exc.safe_message,
+        )
         db.rollback()
         fail_job(db, job, worker_id=worker_id, code=exc.code, message=exc.safe_message)
     except Exception:
-        logger.exception("Background job failed", extra={"job_id": job.id, "job_type": job.job_type})
+        logger.exception("Job %s (%s) failed with unhandled exception", job.id, job.job_type)
         db.rollback()
         fail_job(
             db,

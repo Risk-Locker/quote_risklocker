@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.errors import AppError
@@ -80,7 +80,7 @@ def make_template_master(db: Session, user, template_id: str) -> OutputTemplateC
     template = db.get(OutputTemplateConfig, template_id)
     if not template or template.deleted_at:
         raise AppError("Template not found.", 404)
-    for other in db.scalars(select(OutputTemplateConfig).where(OutputTemplateConfig.deleted_at.is_(None))).all():
+    for other in db.scalars(select(OutputTemplateConfig).where(OutputTemplateConfig.deleted_at.is_(None)).options(defer(OutputTemplateConfig.fixed_fields))).all():
         if other.id == template_id:
             continue
         config = normalize_template_config(other.fixed_fields, other.name)
@@ -142,7 +142,7 @@ def delete_template_group(db: Session, user, group_id: str) -> None:
     group = db.get(TemplateGroup, group_id)
     if not group:
         raise AppError("Group not found.", 404)
-    for template in db.scalars(select(OutputTemplateConfig).where(OutputTemplateConfig.group_id == group_id)).all():
+    for template in db.scalars(select(OutputTemplateConfig).where(OutputTemplateConfig.group_id == group_id).options(defer(OutputTemplateConfig.fixed_fields))).all():
         template.group_id = None
     db.delete(group)
     db.commit()
@@ -203,6 +203,7 @@ def serialize_template(template: OutputTemplateConfig, db: Session | None = None
             db.scalars(
                 select(TemplateRevision)
                 .where(TemplateRevision.template_id == template.id)
+                .options(defer(TemplateRevision.config))
                 .order_by(TemplateRevision.revision_number.desc())
             ).all()
         )

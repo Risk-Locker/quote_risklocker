@@ -29,7 +29,7 @@ const nav: Array<{ href: Route; label: string; icon: typeof Upload }> = [
   { href: "/sessions", label: "Sessions", icon: SquaresFour },
   { href: "/builder/templates", label: "Builder", icon: Wrench },
   { href: "/extraction/company-detection" as Route, label: "Extraction & Aliases", icon: FunnelSimple },
-  { href: "/ai-context" as Route, label: "AI Grounding", icon: Brain },
+  { href: "/ai-context" as Route, label: "AI & Memory", icon: Brain },
   { href: "/settings/system-checks", label: "Settings", icon: Gear },
   { href: "/client-records", label: "Records", icon: Users },
   { href: "/inbox", label: "Inbox", icon: Bell },

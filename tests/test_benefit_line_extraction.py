@@ -210,3 +210,69 @@ def test_typed_values_and_description_shaping_across_types():
     # 4. Per day income
     assert by_concept["hospital-income"]["extracted_value"] == {"type": "per_day", "value": "100.00", "currency": "MYR", "unit": "day"}
     assert by_concept["hospital-income"]["candidate_mappings"][0]["shaped_description"] == "up to RM100/day"
+
+
+def test_table_stitching_and_section_stop_rejects_accounting_noise():
+    text = """ADDITIONAL COVERS
+:
+BREAKAGE OF GLASS IN
+W/SCREEN   4,000.00
+:
+RM 600.00
+PASSENGER LIABILITY COVER   :
+RM 71.85
+ALL DRIVERS  
+:
+RM 0.00
+TOTAL
+:
+RM 671.85
+TAKAFUL CONTRIBUTION
+:
+BASIC CONTRIBUTION
+:
+RM 4,294.71
+- NCD (55.00 %)
+:
+RM 2,362.09
++ ADDITIONAL COVERAGE
+:
+RM 671.85
+GROSS CONTRIBUTION
+:
+RM 2,604.47
+TOTAL CONTRIBUTION
+:
+RM 2,822.85
+QUOTATION TYPE: STANDARD
+Acceptance of any referred case is subject to the approval of Motor Underwriter.
+AGENT CODE : GCA03986 - ALM CONSULTANCY
+"""
+    lines = extract_benefit_lines([{"page": 1, "text": text}], concepts=CONCEPTS)
+    assert len(lines) == 3
+
+    # 1. Breakage of glass
+    assert "breakage of glass in windscreen" in lines[0]["normalized_label"]
+    assert lines[0]["coverage_limit"] == "4000.00"
+    assert lines[0]["premium_cost"] == "600.00"
+
+    # 2. Passenger liability cover
+    assert lines[1]["normalized_label"] == "passenger liability cover"
+    assert lines[1]["premium_cost"] == "71.85"
+
+    # 3. All drivers
+    assert lines[2]["normalized_label"] == "all drivers"
+    assert lines[2]["premium_cost"] == "0.00"
+
+
+def test_pure_amounts_and_negative_selection_rejected():
+    text = """SELECTED BENEFITS
+RM 600.00
+4,294.71
+AGREED VALUE : NO
+TAKAFUL SCHEME : MOTOR TAKAFUL
+TOTAL PAYABLE : RM 2,822.85
+"""
+    lines = extract_benefit_lines([{"page": 1, "text": text}], concepts=CONCEPTS)
+    assert len(lines) == 0
+

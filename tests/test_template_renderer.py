@@ -262,3 +262,24 @@ def test_dynamic_benefit_grid_renders_purchased_extra_with_label_and_badge():
     assert "Legal Liability to Passengers" in html
     assert "Cost : MYR 67.80" in html
     assert "border:1.5px solid #F59E0B" in html
+
+
+def test_valuation_type_renders_in_agency_bilingual_template():
+    from app.services.master_template_service import _agency_bilingual_config
+
+    fields = {
+        "customer_name": {"value": "John Doe"},
+        "cover_period": {"value": "01/01/2026 - 31/12/2026"},
+        "valuation_type": {"value": "Agreed Value"},
+        "coverage_amount": {"value": "75,000.00"},
+        "car_model": {"value": "Honda Civic"},
+        "ncd_percent": {"value": "55"},
+        "total_amount": {"value": "1,500.00"},
+    }
+    config = _agency_bilingual_config()
+    html = render_quotation_html(fields, template_name="Bilingual Agency Motor", template_config=config, render_context={"current_benefits": [], "available_addons": []})
+    assert "Valuation Type / 估价方式" in html
+    assert "Agreed Value" in html
+    assert "Vehicle Sum Insured / 车辆保额" in html
+    assert "RM 75,000.00" in html
+

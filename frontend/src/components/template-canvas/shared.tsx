@@ -135,6 +135,7 @@ export const VARIABLE_FALLBACK_MAP: Record<string, string[]> = {
   coverage_premium: ["premium", "basic_premium_vehicle", "basic_premium"],
   coverage_amount: ["sum_insured", "market_value", "agreed_value"],
   sum_insured: ["coverage_amount", "market_value", "agreed_value"],
+  valuation_type: ["valuation_basis", "sum_insured_type", "basis_of_sum_insured"],
   roadtax: ["road_tax_amount", "road_tax"],
   road_tax_amount: ["roadtax", "road_tax"],
   service_fee: ["runner_fee", "runner"],

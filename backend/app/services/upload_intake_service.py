@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import socket
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -188,7 +189,11 @@ async def create_queued_upload(
             job_type="extract_pdf",
             idempotency_key=key,
             state="queued",
-            payload={"enhanced_reading": enhanced_reading},
+            payload={
+                "enhanced_reading": enhanced_reading,
+                "node_host": socket.gethostname(),
+                "storage_provider": storage_provider,
+            },
             result={},
             safe_error={},
             progress=0,

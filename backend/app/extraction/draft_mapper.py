@@ -126,8 +126,85 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
                     fields[alias]["warnings"] = []
                     fields[alias]["message"] = ""
 
+    # Ensure excess_amount defaults to 0.00 if missing or empty
+    if "excess_amount" not in fields or not str(fields.get("excess_amount", {}).get("value") or "").strip():
+        fields["excess_amount"] = {
+            "value": "0.00",
+            "status": "ready",
+            "warnings": [],
+            "message": "",
+        }
+
+    # Ensure valid_until falls back to cover_start_date or start_dmy if missing or empty
+    if "valid_until" not in fields or not str(fields.get("valid_until", {}).get("value") or "").strip():
+        fallback_validity = start_dmy or start_raw or ""
+        if fallback_validity:
+            fields["valid_until"] = {
+                "value": str(fallback_validity),
+                "status": "ready",
+                "warnings": [],
+                "message": "",
+            }
+            if "quotation_validity" in fields:
+                fields["quotation_validity"]["value"] = str(fallback_validity)
+                fields["quotation_validity"]["status"] = "ready"
+
+    # Determine Valuation Type / Basis: "Agreed Value" or "Market Value"
+    raw_val_type = str(fields.get("valuation_type", {}).get("value") or "").strip().lower()
+
+    all_text_snippets: list[str] = []
+    for cand_list in (candidates or {}).values():
+        for c in cand_list:
+            if getattr(c, "evidence", None):
+                all_text_snippets.append(c.evidence.lower())
+            if getattr(c, "value", None):
+                all_text_snippets.append(c.value.lower())
+    if benefit_lines:
+        for bl in benefit_lines:
+            if isinstance(bl, dict):
+                all_text_snippets.append(str(bl.get("line_text") or bl.get("label") or "").lower())
+
+    joined_evidence = " ".join(all_text_snippets)
+
+    # Negative qualifiers take strict precedence:
+    # "agreed value : no / tidak / false" means Market Value!
+    has_agreed_no = bool(re.search(r"(?i)\bagreed\s*value\s*[:=\-]?\s*(?:no|tidak|false|0)\b", joined_evidence))
+    has_market_no = bool(re.search(r"(?i)\bmarket\s*value\s*[:=\-]?\s*(?:no|tidak|false|0)\b", joined_evidence))
+    has_agreed_yes = bool(re.search(r"(?i)\bagreed\s*value\s*[:=\-]?\s*(?:yes|ya|true|1|\bx\b|\[x\])", joined_evidence))
+    has_market_yes = bool(re.search(r"(?i)\bmarket\s*value\s*[:=\-]?\s*(?:yes|ya|true|1|\bx\b|\[x\])", joined_evidence))
+
+    is_agreed = False
+    is_market = False
+
+    if has_agreed_no:
+        is_agreed = False
+        is_market = True
+    elif has_market_no:
+        is_agreed = True
+        is_market = False
+    elif has_agreed_yes:
+        is_agreed = True
+    elif has_market_yes:
+        is_market = True
+    elif "agreed" in raw_val_type and not has_agreed_no:
+        is_agreed = True
+    elif "market" in raw_val_type and not has_market_no:
+        is_market = True
+    elif ("endorsement 89" in joined_evidence or "nilai yang dipersetujui" in joined_evidence or "agreed value" in joined_evidence) and not has_agreed_no:
+        is_agreed = True
+    elif "market value" in joined_evidence or "nilai pasaran" in joined_evidence:
+        is_market = True
+
+    final_val_type = "Agreed Value" if is_agreed else "Market Value"
+    if "valuation_type" not in fields:
+        fields["valuation_type"] = {"value": final_val_type, "status": "ready", "warnings": [], "message": ""}
+    else:
+        fields["valuation_type"]["value"] = final_val_type
+        fields["valuation_type"]["status"] = "ready"
+        fields["valuation_type"]["warnings"] = []
+        fields["valuation_type"]["message"] = ""
+
     # Infer vehicle CC and vehicle type
-    import re
     from app.services.vehicle_catalog_service import infer_vehicle_cc_and_type
     from app.services.road_tax_service import calculate_road_tax
 
@@ -212,6 +289,8 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
         extras_cost = Decimal("0")
         if benefit_lines:
             for b in benefit_lines:
+                if not isinstance(b, dict):
+                    continue
                 cost_str = b.get("premium_cost") or ""
                 if cost_str:
                     clean = re.sub(r"[^\d.]", "", str(cost_str))

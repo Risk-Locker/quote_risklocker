@@ -71,17 +71,17 @@ def collect_database_surfaces(db) -> list[dict[str, Any]]:
     def add(entity: str, row_id: object, payload: object) -> None:
         surfaces.append({"entity": entity, "id": str(row_id), "payload": payload})
 
-    for row in db.scalars(select(OutputTemplateConfig)).all():
+    for row in db.scalars(select(OutputTemplateConfig).limit(50)).all():
         add("output_template_config", row.id, row.fixed_fields)
-    for row in db.scalars(select(TemplateRevision)).all():
+    for row in db.scalars(select(TemplateRevision).order_by(TemplateRevision.revision_number.desc()).limit(50)).all():
         add("template_revision", row.id, row.config)
-    for row in db.scalars(select(QuotationDraft)).all():
+    for row in db.scalars(select(QuotationDraft).limit(50)).all():
         add("quotation_draft", row.id, row.layout_override)
-    for row in db.scalars(select(GeneratedPdfVersion)).all():
+    for row in db.scalars(select(GeneratedPdfVersion).limit(50)).all():
         add("generated_pdf_version", row.id, [row.draft_snapshot, row.template_snapshot, row.render_context_snapshot])
-    for row in db.scalars(select(RenderSnapshot)).all():
+    for row in db.scalars(select(RenderSnapshot).limit(50)).all():
         add("render_snapshot", row.id, [row.context, row.asset_hashes])
-    for row in db.scalars(select(OurSpecialVariant)).all():
+    for row in db.scalars(select(OurSpecialVariant).limit(50)).all():
         add("our_special_variant", row.id, row.icon_asset_id)
     for row in db.scalars(select(AppSetting)).all():
         add("app_setting", row.key, row.value)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from sqlalchemy import select
+from sqlalchemy.orm import defer
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.tables import OutputTemplateConfig, TemplateRevision, new_id
@@ -154,39 +155,43 @@ def _agency_bilingual_config() -> dict:
         _variable("val_customer", "customer_name", 216, 164, 266, 14, 5, size=9.5, weight="700", color=DARK),
 
         # Row 2: Coverage Type
-        _text("lbl_cov_type", "Coverage Type / 保单种类", 52, 179, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
-        _variable("val_cov_type", "coverage_type", 216, 179, 266, 14, 5, size=9.5, weight="700", color=DARK),
+        _text("lbl_cov_type", "Coverage Type / 保单种类", 52, 178, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
+        _variable("val_cov_type", "coverage_type", 216, 178, 266, 14, 5, size=9.5, weight="700", color=DARK),
 
         # Row 3: Car Model
-        _text("lbl_car_model", "Car Model / 车型", 52, 194, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
-        _variable("val_car_model", "car_model", 216, 194, 266, 14, 5, size=9.5, weight="700", color=DARK),
+        _text("lbl_car_model", "Car Model / 车型", 52, 192, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
+        _variable("val_car_model", "car_model", 216, 192, 266, 14, 5, size=9.5, weight="700", color=DARK),
 
         # Row 4: Vehicle CC
-        _text("lbl_engine_cc", "Vehicle CC / 引擎容量", 52, 209, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
-        _variable("val_engine_cc", "engine_cc", 216, 209, 266, 14, 5, size=9.5, weight="700", color=DARK, suffix=" cc"),
+        _text("lbl_engine_cc", "Vehicle CC / 引擎容量", 52, 206, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
+        _variable("val_engine_cc", "engine_cc", 216, 206, 266, 14, 5, size=9.5, weight="700", color=DARK, suffix=" cc"),
 
         # Row 5: NCD
-        _text("lbl_ncd", "NCD", 52, 224, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
-        _variable("val_ncd", "ncd_percent", 216, 224, 266, 14, 5, size=9.5, weight="700", color=DARK, suffix="%"),
+        _text("lbl_ncd", "NCD", 52, 220, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
+        _variable("val_ncd", "ncd_percent", 216, 220, 266, 14, 5, size=9.5, weight="700", color=DARK, suffix="%"),
 
         # Row 6: Coverage Period
-        _text("lbl_period", "Cover of Period / 保单期限", 52, 239, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
-        _variable("val_period", "cover_period", 216, 239, 266, 14, 5, size=9.5, weight="700", color=DARK),
+        _text("lbl_period", "Cover of Period / 保单期限", 52, 234, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
+        _variable("val_period", "cover_period", 216, 234, 266, 14, 5, size=9.5, weight="700", color=DARK),
 
-        # Row 7: Coverage / Sum Insured
-        _text("lbl_sum_insured", "Vehicle Sum Insured / 车辆保额", 52, 254, 160, 14, 5, size=8.5, weight="600", color=LABEL_COLOR),
-        _variable("val_sum_insured", "coverage_amount", 216, 254, 266, 14, 5, size=9.5, weight="700", color=DARK, prefix="RM "),
+        # Row 7: Valuation Type
+        _text("lbl_valuation_type", "Valuation Type / 估价方式", 52, 248, 160, 14, 5, size=8.5, weight="600", color=LABEL_COLOR),
+        _variable("val_valuation_type", "valuation_type", 216, 248, 266, 14, 5, size=9.5, weight="700", color=DARK),
+
+        # Row 8: Coverage / Sum Insured
+        _text("lbl_sum_insured", "Vehicle Sum Insured / 车辆保额", 52, 262, 160, 14, 5, size=8.5, weight="600", color=LABEL_COLOR),
+        _variable("val_sum_insured", "coverage_amount", 216, 262, 266, 14, 5, size=9.5, weight="700", color=DARK, prefix="RM "),
 
         # Dynamic Premium Block (Extras, Insurance Premium, Roadtax, Runner Fee, Total Premium)
         {
             "id": "premium_info_block",
             "type": "premium-info-block",
             "x": 52,
-            "y": 270,
+            "y": 276,
             "w": 430,
-            "h": 132,
+            "h": 126,
             "z": 5,
-            "rowHeight": 14.5,
+            "rowHeight": 14,
             "labels": {
                 "premium": "Insurance Premium / 保费",
                 "roadtax": "Roadtax / 路税",
@@ -251,8 +256,8 @@ def master_template_specs() -> list[dict]:
 
 def ensure_master_templates(db, user, *, apply: bool = False) -> dict:
     """Create and publish missing canonical masters without overwriting a published revision."""
-    templates = list(db.scalars(select(OutputTemplateConfig).where(OutputTemplateConfig.deleted_at.is_(None))).all())
-    revisions = list(db.scalars(select(TemplateRevision)).all())
+    templates = list(db.scalars(select(OutputTemplateConfig).where(OutputTemplateConfig.deleted_at.is_(None)).options(defer(OutputTemplateConfig.fixed_fields))).all())
+    revisions = list(db.scalars(select(TemplateRevision).options(defer(TemplateRevision.config))).all())
     report = {"created": [], "published": [], "retained": [], "default_cleared": [], "apply": apply}
     by_key = {str((item.fixed_fields or {}).get("v7_master_key") or ""): item for item in templates}
     for spec in master_template_specs():

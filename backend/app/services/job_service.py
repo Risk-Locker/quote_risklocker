@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, or_, select
@@ -9,6 +10,7 @@ from sqlalchemy import and_, or_, select
 from app.core.errors import AppError
 from app.models.tables import Job
 
+logger = logging.getLogger(__name__)
 
 TERMINAL_STATES = frozenset({"completed", "failed", "cancelled"})
 
@@ -39,17 +41,27 @@ def _elapsed_seconds(job: Job, now: datetime) -> float:
     return max(0.0, round((finished - started).total_seconds(), 3))
 
 
-def claim_query(now: datetime):
+def claim_query(now: datetime, worker_host: str | None = None):
+    clauses = [
+        Job.attempt < Job.max_attempts,
+        Job.cancelled_at.is_(None),
+        or_(
+            and_(Job.state == "queued", Job.available_at <= now),
+            and_(Job.state == "processing", Job.lease_expires_at.is_not(None), Job.lease_expires_at <= now),
+        ),
+    ]
+    if worker_host is not None:
+        clauses.append(
+            or_(
+                Job.payload["storage_provider"].as_string() != "local_ephemeral",
+                Job.payload["node_host"].as_string() == worker_host,
+                Job.payload["node_host"].is_(None),
+                Job.payload["storage_provider"].is_(None),
+            )
+        )
     return (
         select(Job)
-        .where(
-            Job.attempt < Job.max_attempts,
-            Job.cancelled_at.is_(None),
-            or_(
-                and_(Job.state == "queued", Job.available_at <= now),
-                and_(Job.state == "processing", Job.lease_expires_at.is_not(None), Job.lease_expires_at <= now),
-            ),
-        )
+        .where(*clauses)
         .order_by(Job.priority.asc(), Job.available_at.asc(), Job.created_at.asc())
         .limit(1)
         .with_for_update(skip_locked=True)
@@ -102,13 +114,21 @@ def enqueue_job(
     return job, True
 
 
-def claim_next_job(db, *, worker_id: str, lease_seconds: int = 180) -> Job | None:
+def claim_next_job(db, *, worker_id: str, lease_seconds: int = 180, worker_host: str | None = None) -> Job | None:
     if lease_seconds < 30 or lease_seconds > 3_600:
         raise AppError("Job lease duration is invalid.", 500)
     now = _utcnow()
-    job = db.scalar(claim_query(now))
+    import socket
+    host = worker_host or socket.gethostname()
+    job = db.scalar(claim_query(now, worker_host=host))
     if job is None:
         return None
+    # Defensive host check for local ephemeral files
+    if job.payload and isinstance(job.payload, dict):
+        if job.payload.get("storage_provider") == "local_ephemeral":
+            target_host = job.payload.get("node_host")
+            if target_host and target_host != host:
+                return None
     job.state = "processing"
     job.attempt += 1
     job.lease_owner = worker_id
@@ -173,10 +193,26 @@ def fail_job(db, job: Job, *, worker_id: str, code: str, message: str) -> None:
         job.state = "queued"
         _transition_phase(job, "retry_wait", now)
         job.available_at = now + timedelta(seconds=min(300, 15 * (2 ** max(0, job.attempt - 1))))
+        logger.warning(
+            "Job %s attempt %d/%d failed (retry scheduled at %s): [%s] %s",
+            job.id,
+            job.attempt,
+            job.max_attempts,
+            job.available_at.isoformat(),
+            code,
+            message,
+        )
     else:
         job.state = "failed"
         _transition_phase(job, "failed", now)
         job.completed_at = now
+        logger.error(
+            "Job %s failed permanently after %d attempts: [%s] %s",
+            job.id,
+            job.max_attempts,
+            code,
+            message,
+        )
     db.commit()
 
 

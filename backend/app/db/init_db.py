@@ -39,6 +39,7 @@ DEFAULT_FIELD_ALIASES = {
     "car_model": ["model", "vehicle model"],
     "vehicle_year": ["year", "manufacture year", "mfg year"],
     "engine_cc": ["engine cc", "capacity", "cubic capacity", "engine capacity", "cc"],
+    "valuation_type": ["valuation type", "valuation basis", "basis of sum insured", "type of sum insured", "agreed value", "market value"],
     "coverage_amount": ["sum insured", "coverage amount", "insured value", "market value", "agreed value"],
     "premium": ["premium", "gross premium", "premium payable", "basic premium"],
     "total_amount": ["total payable", "total amount", "amount payable", "gross amount"],

@@ -241,6 +241,8 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
   const insuranceCompany = values.insurance_company || workspace.pinned_names?.company_name || "Motor Insurance";
   const coverageType = values.coverage_type || "Comprehensive Private";
   const coverPeriod = values.cover_period || "Standard Annual";
+  const valuationType = values.valuation_type || "Market Value";
+  const sumInsured = formatMoney(values.coverage_amount || values.sum_insured || "0.00");
   const premium = formatMoney(values.premium || "0.00");
   const roadtax = formatMoney(values.roadtax || "0.00");
   const runnerFee = formatMoney(values.service_fee || values.runner_fee || "20.00");
@@ -388,6 +390,14 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
               <div className="flex justify-between py-1 border-b border-gray-100">
                 <span className="text-[var(--rl-text-muted)] font-medium">Period of Cover:</span>
                 <span className="font-semibold text-[var(--rl-text-strong)] font-mono">{coverPeriod}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-gray-100">
+                <span className="text-[var(--rl-text-muted)] font-medium">Valuation Type:</span>
+                <span className="font-semibold text-[var(--rl-text-strong)]">{valuationType}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-gray-100">
+                <span className="text-[var(--rl-text-muted)] font-medium">Vehicle Sum Insured:</span>
+                <span className="font-semibold text-[var(--rl-text-strong)] font-mono">{sumInsured}</span>
               </div>
             </div>
 

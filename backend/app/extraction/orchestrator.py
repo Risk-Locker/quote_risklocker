@@ -26,6 +26,9 @@ class ExtractionOrchestrator:
         db_companies: list[dict] | None = None,
         db_benefit_concepts: list[dict] | None = None,
         prompt_override: str | None = None,
+        db_packs: list[dict] | None = None,
+        db_corrections: list[dict] | None = None,
+        **kwargs,
     ) -> dict:
         native = extract_native(file_path)
         ocr_text = ""
@@ -69,6 +72,8 @@ class ExtractionOrchestrator:
                     db_companies=db_companies,
                     db_benefit_concepts=db_benefit_concepts,
                     db_aliases=db_aliases,
+                    db_packs=db_packs,
+                    correction_memory=db_corrections,
                     prompt_override=prompt_override,
                 )
             else:
@@ -109,10 +114,25 @@ class ExtractionOrchestrator:
                 # Map Gemini detected benefits
                 gemini_benefits = gemini_res.get("detected_benefits") or []
                 for b_item in gemini_benefits:
-                    b_label = str(b_item.get("label") or "").strip()
-                    b_val = str(b_item.get("value") or "").strip()
-                    b_key = str(b_item.get("concept_key") or "").strip()
-                    b_raw = str(b_item.get("raw_text") or f"{b_label}: {b_val}").strip()
+                    if isinstance(b_item, dict):
+                        b_label = str(b_item.get("label") or "").strip()
+                        b_val = str(b_item.get("value") or "").strip()
+                        b_key = str(b_item.get("concept_key") or "").strip()
+                        cov_limit = str(b_item.get("coverage_limit") or "").strip()
+                        cost = str(b_item.get("premium_cost") or "").strip()
+                        is_optional = bool(b_item.get("is_optional_cover", False))
+                        b_raw = str(b_item.get("raw_text") or f"{b_label}: {b_val}").strip()
+                    elif isinstance(b_item, str):
+                        b_label = b_item.strip()
+                        b_val = ""
+                        b_key = ""
+                        cov_limit = ""
+                        cost = ""
+                        is_optional = False
+                        b_raw = b_label
+                    else:
+                        continue
+
                     if b_label:
                         # Find matching concept robustly across id/concept_id, key/concept_key, name/label
                         matched_concept = None
@@ -132,9 +152,6 @@ class ExtractionOrchestrator:
 
                         concept_id = (matched_concept.get("concept_id") or matched_concept.get("id")) if matched_concept else None
                         c_key = (matched_concept.get("concept_key") or matched_concept.get("key")) if matched_concept else (b_key or b_norm)
-                        cov_limit = str(b_item.get("coverage_limit") or "").strip()
-                        cost = str(b_item.get("premium_cost") or "").strip()
-                        is_optional = bool(b_item.get("is_optional_cover", False))
 
                         clean_cov = re.sub(r"[^0-9.]", "", cov_limit)
                         clean_cost = re.sub(r"[^0-9.]", "", cost)

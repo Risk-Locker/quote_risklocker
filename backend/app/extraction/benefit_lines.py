@@ -45,6 +45,23 @@ STOP_HEADINGS = (
     "total payable",
     "contact us",
     "declaration",
+    "takaful contribution",
+    "contribution",
+    "basic contribution",
+    "gross contribution",
+    "total contribution",
+    "premium calculation",
+    "calculation of premium",
+    "calculation of contribution",
+    "premium details",
+    "breakdown of premium",
+    "payment details",
+    "schedule of payment",
+    "payment method",
+    "agent code",
+    "quotation type",
+    "important notice",
+    "acceptance of any referred case",
 )
 NON_BENEFIT_PREFIXES = (
     "total optional cover",
@@ -82,18 +99,47 @@ NON_BENEFIT_PREFIXES = (
     "private car protector quotation",
     "private car comprehensive quotation",
     "private car quotation",
+    "basic contribution",
+    "gross contribution",
+    "total contribution",
+    "takaful contribution",
+    "additional coverage",
+    "+ additional",
+    "- ncd",
+    "+ service tax",
+    "+ stamp duty",
+    "quotation type",
+    "agent code",
+    "acceptance of any",
+    "total",
+    "total payable",
+    "basic premium",
+    "takaful scheme",
+    "insurance scheme",
+    "scheme",
+    "agreed value",
+    "market value",
 )
 NARRATIVE_PREFIXES = ("example:", "example ", "note:", "important:", "disclaimer :", "disclaimer:")
 MONEY_RE = re.compile(r"(?:RM\s*)?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?", re.IGNORECASE)
+PURE_AMOUNT_RE = re.compile(r"^[:\-•*+~]?\s*(?:RM|MYR)?\s*[\d,]+(?:\.\d{1,2})?\s*%?\s*$", re.IGNORECASE)
 
 
 def _normalized(value: str) -> str:
     value = re.sub(r"^(?:☑|☒|✓|✔|☐|□|\[[xX ]\]|[•\-\*\+])\s*", "", value)
     value = re.sub(r"\s+", " ", value).strip(" :-;.").lower()
+    # Normalize common abbreviations
+    value = re.sub(r"\bw/screen\b|\bwscreen\b", "windscreen", value, flags=re.IGNORECASE)
+    value = re.sub(r"\blltp\b", "legal liability to passengers", value, flags=re.IGNORECASE)
+    value = re.sub(r"\bllop\b", "legal liability of passengers", value, flags=re.IGNORECASE)
+    value = re.sub(r"\blltr\b", "legal liability to pillion", value, flags=re.IGNORECASE)
     # Strip trailing numbers/parameters ONLY if preceded by currency/keywords OR followed by units
     value = re.sub(r"\s+(?:(?:rm|myr|premium|limit|sum\s+insured)\s*[\d,.]+|[\d,.]+\s*(?:km|kilometres?|days?|times?|years?|months?)).*$", "", value, flags=re.IGNORECASE)
     # Strip any trailing parens with money like (RM 2,650.00)
     value = re.sub(r"\s*\(\s*(?:rm|myr)?\s*[\d,.]+\s*\)\s*$", "", value, flags=re.IGNORECASE)
+    # Strip trailing colon or standalone number at the end
+    value = re.sub(r"\s*[:\-]\s*(?:rm|myr)?\s*[\d,.]+\s*$", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s+[\d,]+(?:\.\d{1,2})?\s*$", "", value)
     return value.strip(" :-;.")[:500]
 
 
@@ -159,13 +205,20 @@ def _typed_value(raw: str, normalized: str) -> dict | None:
             "semantic_role": "insured_limit",
             "premium": {"amount": cost_val, "currency": "MYR"},
         }
+
     premium_match = re.search(r"premium\s*RM?\s*(\d[\d,]*(?:\.\d+)?)", raw, re.IGNORECASE)
     first = amounts[0]
     amount = _money(f"{first.group(1)}.{first.group(2) or '00'}")
-    role = "insured_limit" if any(token in normalized for token in ("windscreen", "cover", "allowance", "benefit", "peril", "flood", "theft", "loss", "key", "seat", "passenger", "driver")) else "amount"
-    value: dict = {"type": "money", "value": amount, "currency": "MYR", "semantic_role": role}
+    is_table_cost = bool(re.search(r"[:\-]\s*(?:RM|MYR)?\s*[\d,]+", raw, re.IGNORECASE))
+    is_liability_driver = any(token in normalized for token in ("passenger", "driver", "all drivers", "lltp", "llop", "pillion"))
+
     if premium_match:
-        value["premium"] = {"amount": _money(premium_match.group(1)), "currency": "MYR"}
+        value = {"type": "money", "value": "0.00", "currency": "MYR", "semantic_role": "amount", "premium": {"amount": _money(premium_match.group(1)), "currency": "MYR"}}
+    elif is_table_cost or (is_liability_driver and not any(token in normalized for token in ("windscreen", "peril", "flood", "theft", "loss", "key", "seat", "cart"))):
+        value = {"type": "money", "value": "0.00", "currency": "MYR", "semantic_role": "amount", "premium": {"amount": amount, "currency": "MYR"}}
+    else:
+        role = "insured_limit" if any(token in normalized for token in ("windscreen", "cover", "allowance", "benefit", "peril", "flood", "theft", "loss", "key", "seat")) else "amount"
+        value = {"type": "money", "value": amount, "currency": "MYR", "semantic_role": role}
     return value
 
 
@@ -178,33 +231,33 @@ def _shape_description(concept: dict, typed_val: dict | None) -> str:
     v_type = typed_val.get("type")
     if v_type == "distance":
         disp = "Unlimited" if typed_val.get("unlimited") else f"{typed_val.get('value')} km"
-    elif v_type == "money":
-        disp = _format_display_money(str(typed_val.get("value") or "0"))
     elif v_type == "duration":
         disp = f"{typed_val.get('value')} {typed_val.get('unit')}"
     elif v_type == "per_day":
         disp = f"{_format_display_money(str(typed_val.get('value') or '0'))}/day"
+    elif v_type == "money":
+        disp = _format_display_money(typed_val.get("value") or "0")
     else:
         disp = str(typed_val.get("value") or "")
 
-    # Check description_variants for matching template
+    # 1. Search variants for template
     variants = concept.get("description_variants") or []
-    matching_template = None
-    for v in variants:
-        if isinstance(v, dict) and v.get("value_type") == v_type and v.get("template"):
-            matching_template = v.get("template")
-            break
+    for var in variants:
+        tmpl = var.get("template")
+        if tmpl and "{value}" in tmpl:
+            return tmpl.replace("{value}", disp)
 
-    if not matching_template and concept.get("description"):
-        desc = str(concept["description"])
-        if "{value}" in desc:
-            matching_template = desc
-        elif desc.lower().startswith("up to"):
-            matching_template = "up to {value}"
-
-    if matching_template:
-        return matching_template.replace("{value}", disp)
-    return f"up to {disp}" if not disp.lower().startswith("up to") else disp
+    # 2. Heuristic fallback based on value type
+    desc = str(concept.get("description") or "")
+    if v_type == "distance":
+        return f"up to {disp}"
+    if v_type == "duration":
+        return f"up to {disp}"
+    if v_type == "per_day":
+        return f"up to {disp}"
+    if v_type == "money":
+        return f"up to {disp}"
+    return desc
 
 
 def _candidate_mappings(
@@ -297,7 +350,9 @@ def _candidate_mappings(
 
 
 def _heading_scope(line: str) -> tuple[str, str] | None:
-    normalized = re.sub(r"\s+", " ", line).strip(" :").lower()
+    normalized = re.sub(r"\s+", " ", line).strip(" :-;.").lower()
+    if re.match(r"^total(?:\s*[:\-].*|\s+payable.*|\s+contribution.*|\s+premium.*|\s+amount.*)?$", normalized):
+        return "outside", "unknown"
     if normalized in SELECTED_HEADINGS:
         return "quotation_selected", "selected"
     if normalized in AVAILABLE_HEADINGS:
@@ -312,14 +367,55 @@ def _heading_scope(line: str) -> tuple[str, str] | None:
 
 
 def _looks_like_benefit(raw: str, concepts: list[dict], in_section: bool) -> bool:
+    if PURE_AMOUNT_RE.match(raw.strip()):
+        return False
     normalized = _normalized(raw)
     if not normalized or normalized.startswith(NON_BENEFIT_PREFIXES):
+        return False
+    if PURE_AMOUNT_RE.match(normalized):
         return False
     if any(candidate for candidate in _candidate_mappings(normalized, concepts)):
         return True
     if raw.startswith((*CHECKED_PREFIXES, *UNCHECKED_PREFIXES)):
         return True
-    return in_section and len(normalized) >= 4 and not normalized.startswith(NARRATIVE_PREFIXES)
+    if in_section and len(normalized) >= 4 and not normalized.startswith(NARRATIVE_PREFIXES):
+        if any(normalized.startswith(nbp) for nbp in NON_BENEFIT_PREFIXES):
+            return False
+        return True
+    return False
+
+
+def _stitch_lines(raw_lines: list[str]) -> list[str]:
+    stitched: list[str] = []
+    for line in raw_lines:
+        s = re.sub(r"\s+", " ", line).strip()
+        if not s or s in {"•", "*", "·"}:
+            continue
+        if s in {":", "-", "+"}:
+            if stitched:
+                stitched[-1] += " " + s
+            continue
+
+        is_amount = bool(re.match(r"^(?:[:\-]\s*)?(?:RM|MYR)?\s*[\d,]+(?:\.\d{1,2})?(?:\s*%)?$", s, re.IGNORECASE))
+        is_continuation = False
+        if stitched:
+            prev = stitched[-1].strip()
+            prev_lower = prev.lower()
+            prev_has_amount = bool(re.search(r"(?:RM|MYR)\s*[\d,]+(?:\.\d{2})?", prev, re.IGNORECASE))
+            if is_amount:
+                if not prev_has_amount and not _heading_scope(prev):
+                    is_continuation = True
+            elif s.startswith(":"):
+                is_continuation = True
+            elif prev_lower.endswith((" in", " of", " for", " with", " and", " or", ":")):
+                if not _heading_scope(prev):
+                    is_continuation = True
+
+        if is_continuation and stitched:
+            stitched[-1] += " " + s
+        else:
+            stitched.append(s)
+    return stitched
 
 
 def extract_benefit_lines(
@@ -340,10 +436,8 @@ def extract_benefit_lines(
     ordinal = 0
     for page in sorted(page_text, key=lambda item: int(item.get("page", 0))):
         page_number = int(page.get("page") or 1)
-        for raw_line in str(page.get("text") or "").splitlines():
-            raw = re.sub(r"\s+", " ", raw_line).strip()
-            if not raw or raw in {"•", "-", "*", "+", "·"}:
-                continue
+        stitched_lines = _stitch_lines(str(page.get("text") or "").splitlines())
+        for raw in stitched_lines:
             heading = _heading_scope(raw)
             if heading:
                 scope, section_state = heading

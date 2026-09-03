@@ -170,3 +170,147 @@ def test_adjusted_total_text_reactive_and_no_double_count():
     extras_with_addon = extras + [{"price": {"amount": 50.0}}]
     assert adjusted_total_text(fields, extras_with_addon) == "2,972.85"
 
+
+def test_extract_with_limits_accepts_db_packs_and_corrections_without_typeerror(tmp_path):
+    from app.extraction.sandbox import extract_with_limits
+
+    doc: Any = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "TEST QUOTATION FOR CUSTOMER")
+    pdf_path = tmp_path / "test_quote.pdf"
+    doc.save(str(pdf_path))
+    doc.close()
+
+    context = {
+        "db_aliases": {},
+        "db_brands": ["HONDA"],
+        "db_models": ["CIVIC"],
+        "db_companies": [],
+        "db_benefit_concepts": [],
+        "db_packs": [{"id": "pack-1", "name": "Basic"}],
+        "db_corrections": [{"id": "corr-1"}],
+        "extra_unknown_kwarg": "safe",
+    }
+    result = extract_with_limits(
+        pdf_path,
+        enhanced_reading=False,
+        source_filename="test_quote.pdf",
+        **context,
+    )
+    assert isinstance(result, dict)
+    assert "draft" in result
+
+
+def test_valuation_type_detection_and_no_conflict():
+    from app.extraction.candidate_finder import find_candidates
+    from app.extraction.draft_mapper import build_draft
+
+    # 1. QBE explicit Agreed Value = Yes
+    qbe_agreed_text = (
+        "QBE INSURANCE (MALAYSIA) BERHAD\n"
+        "Vehicle Sum Insured: RM 68,000.00\n"
+        "Agreed Value = Yes\n"
+        "Market Value = No\n"
+        "Gross Premium: RM 1,800.00\n"
+    )
+    candidates1 = find_candidates(qbe_agreed_text, [])
+    draft1, _, _ = build_draft(candidates1)
+    assert draft1["valuation_type"]["value"] == "Agreed Value"
+    assert draft1["coverage_amount"]["value"] == "68000.00"
+
+    # 2. QBE explicit Market Value = Yes
+    qbe_market_text = (
+        "QBE INSURANCE (MALAYSIA) BERHAD\n"
+        "Vehicle Sum Insured: RM 45,000.00\n"
+        "Agreed Value = No\n"
+        "Market Value = Yes\n"
+        "Gross Premium: RM 1,200.00\n"
+    )
+    candidates2 = find_candidates(qbe_market_text, [])
+    draft2, _, _ = build_draft(candidates2)
+    assert draft2["valuation_type"]["value"] == "Market Value"
+    assert draft2["coverage_amount"]["value"] == "45000.00"
+
+    # 3. Addon/endorsement with Agreed Value
+    addon_text = (
+        "ALLIANZ GENERAL INSURANCE\n"
+        "Sum Insured: RM 80,000.00\n"
+        "Premium: RM 2,000.00\n"
+    )
+    candidates3 = find_candidates(addon_text, [])
+    draft3, _, _ = build_draft(candidates3, benefit_lines=[{"line_text": "Endorsement 89 - Agreed Value", "label": "Agreed Value Cover"}])
+    assert draft3["valuation_type"]["value"] == "Agreed Value"
+    assert draft3["coverage_amount"]["value"] == "80000.00"
+
+    # 4. Standard default when neither is explicitly agreed
+    default_text = (
+        "ETIQA GENERAL TAKAFUL\n"
+        "Sum Insured: RM 50,000.00\n"
+        "Premium: RM 1,100.00\n"
+    )
+    candidates4 = find_candidates(default_text, [])
+    draft4, _, _ = build_draft(candidates4)
+    assert draft4["valuation_type"]["value"] == "Market Value"
+    assert draft4["coverage_amount"]["value"] == "50000.00"
+
+
+def test_valuation_negative_qualifier_excess_default_and_validity_fallback():
+    from app.extraction.candidate_finder import find_candidates
+    from app.extraction.draft_mapper import build_draft
+
+    # STMB quotation format with AGREED VALUE : NO and PERIOD OF TAKAFUL
+    stmb_text = (
+        "TAKAFUL SCHEME : MOTOR TAKAFUL\n"
+        "PARTICIPANT : LIM CHEE KEONG\n"
+        "PERIOD OF TAKAFUL : 09/07/2025 TO 08/07/2026\n"
+        "REGIST. NO : JJC9250\n"
+        "SUM COVERED (RM) : 10,000.00\n"
+        "NCD : 38.33 %\n"
+        "AGREED VALUE : NO\n"
+        "TOTAL CONTRIBUTION : RM 671.10\n"
+    )
+    candidates = find_candidates(stmb_text, [])
+    draft, _, _ = build_draft(candidates)
+    assert draft["valuation_type"]["value"] == "Market Value"
+    assert draft["excess_amount"]["value"] == "0.00"
+    assert draft["valid_until"]["value"] == "09-07-2025"
+
+
+def test_rag_system_prompt_string_tiers_and_benefits_defensive():
+    from app.extraction.gemini_extractor import build_rag_system_prompt
+
+    # db_packs with string plans as returned by get_db_packs
+    db_packs = [
+        {"name": "Auto360", "plans": ["Basic", "Comprehensive", "Premier"]},
+        {"name": "Standard Pack", "tiers": ["Silver", "Gold"]},
+        "Standalone String Package",
+    ]
+    db_companies = [
+        {"name": "AmAssurance", "aliases": ["AmGeneral", "Kurnia"]},
+        "Etiqa General Insurance",
+    ]
+    db_benefit_concepts = [
+        {"concept_key": "windscreen", "label": "Windscreen Damage"},
+        "Towing Service",
+    ]
+    correction_memory = [
+        {"field": "vehicle_year", "original_value": "2026", "corrected_value": "2024", "frequency": 3},
+        "invalid_non_dict_entry",
+    ]
+
+    prompt = build_rag_system_prompt(
+        db_companies=db_companies,
+        db_benefit_concepts=db_benefit_concepts,
+        db_aliases={},
+        db_packs=db_packs,
+        correction_memory=correction_memory,
+    )
+
+    assert "Auto360 (plans: Basic, Comprehensive, Premier)" in prompt
+    assert "Standard Pack (plans: Silver, Gold)" in prompt
+    assert "Windscreen Damage" in prompt
+    assert "AmAssurance" in prompt
+    assert "Field 'vehicle_year'" in prompt
+
+
+

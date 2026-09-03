@@ -47,6 +47,7 @@ const labels: Record<string, string> = {
   engine_no: "Engine/Motor No",
   chassis_no: "Chassis No",
   cover_period: "Cover Period",
+  valuation_type: "Valuation Type",
   coverage_type: "Coverage Type",
   coverage_amount: "Coverage Amount",
   market_value: "Market Value",
@@ -74,7 +75,7 @@ const fallbackGroups: ReviewGroup[] = [
   {
     id: "quotation_values",
     title: "Quotation Values",
-    fields: ["coverage_type", "cover_period", "car_model", "ncd_percent", "coverage_amount", "premium", "roadtax", "service_fee", "total_amount"]
+    fields: ["coverage_type", "cover_period", "valuation_type", "car_model", "ncd_percent", "coverage_amount", "premium", "roadtax", "service_fee", "total_amount"]
   },
   {
     id: "source_details",

@@ -604,6 +604,7 @@ def session_extract_gemini(
     from app.extraction.gemini_extractor import extract_with_gemini_sync, get_key_pool
     from app.services.catalog_review_service import initialize_catalog_review
     from app.models.tables import AppSetting, InsuranceCompany, BenefitConcept
+    from app.extraction.db_lookups import get_db_packs, get_correction_memory
 
     session = get_session(db, session_id)
     if not session or not can_view_owner_record(db, user, session.owner_id):
@@ -657,6 +658,8 @@ def session_extract_gemini(
         source_filename=uploaded.original_filename if uploaded else None,
         db_companies=db_companies,
         db_benefit_concepts=db_benefit_concepts,
+        db_packs=get_db_packs(db),
+        correction_memory=get_correction_memory(db, None),
         prompt_override=prompt_override,
     )
     if not gemini_res:
@@ -678,6 +681,8 @@ def session_extract_gemini(
     gemini_benefits = gemini_res.get("detected_benefits") or []
     extras_cost = Decimal("0")
     for b_item in gemini_benefits:
+        if not isinstance(b_item, dict):
+            continue
         cost = str(b_item.get("premium_cost") or "").strip()
         if cost:
             clean = re.sub(r"[^\d.]", "", cost)
@@ -769,9 +774,24 @@ def session_extract_gemini(
 
         gemini_benefits = gemini_res.get("detected_benefits") or []
         for b_item in gemini_benefits:
-            b_label = str(b_item.get("label") or "").strip()
-            b_val = str(b_item.get("value") or "").strip()
-            b_key = str(b_item.get("concept_key") or "").strip()
+            if isinstance(b_item, dict):
+                b_label = str(b_item.get("label") or "").strip()
+                b_val = str(b_item.get("value") or "").strip()
+                b_key = str(b_item.get("concept_key") or "").strip()
+                cov_limit = str(b_item.get("coverage_limit") or "").strip()
+                cost = str(b_item.get("premium_cost") or "").strip()
+                is_optional = bool(b_item.get("is_optional_cover", False))
+                b_raw = str(b_item.get("raw_text") or f"{b_label}: {b_val}").strip()
+            elif isinstance(b_item, str):
+                b_label = b_item.strip()
+                b_val = ""
+                b_key = ""
+                cov_limit = ""
+                cost = ""
+                is_optional = False
+                b_raw = b_label
+            else:
+                continue
             b_norm = b_label.lower().replace(" ", "-").replace("_", "-")
             matched_concept = None
             for c in (db_benefit_concepts or []):
@@ -789,9 +809,6 @@ def session_extract_gemini(
 
             concept_id = (matched_concept.get("concept_id") or matched_concept.get("id")) if matched_concept else None
             c_key = (matched_concept.get("concept_key") or matched_concept.get("key")) if matched_concept else (b_key or b_norm)
-            cov_limit = str(b_item.get("coverage_limit") or "").strip()
-            cost = str(b_item.get("premium_cost") or "").strip()
-            is_optional = bool(b_item.get("is_optional_cover", False))
             limit_val = cov_limit or (b_val if b_val.lower() not in {"included", "standard", "yes", "true"} else "")
             typed_val = None
             if limit_val:
@@ -2467,6 +2484,49 @@ def settings_ai_grounding_chat(
     from app.services.grounding_assistant import answer_grounding_query
     return answer_grounding_query(db, query=payload.query, session_id=payload.session_id)
 
+
+@router.get("/settings/ai-memory")
+def settings_ai_memory_get(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Return all AI correction memory items learned from user reviews."""
+    from app.models.tables import CorrectionMemory, InsuranceCompany
+    from sqlalchemy import func, desc
+
+    memories = (
+        db.query(CorrectionMemory, InsuranceCompany.name.label("company_name"))
+        .outerjoin(InsuranceCompany, CorrectionMemory.insurance_company_id == InsuranceCompany.id)
+        .order_by(desc(CorrectionMemory.created_at))
+        .limit(300)
+        .all()
+    )
+
+    items = []
+    for m, cname in memories:
+        items.append({
+            "id": str(m.id),
+            "field_name": m.field_name,
+            "original_value": m.original_value or "—",
+            "corrected_value": m.corrected_value or "—",
+            "insurance_company": cname or "Global / All Insurers",
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        })
+
+    field_counts = (
+        db.query(CorrectionMemory.field_name, func.count(CorrectionMemory.id))
+        .group_by(CorrectionMemory.field_name)
+        .order_by(desc(func.count(CorrectionMemory.id)))
+        .all()
+    )
+    summary_by_field = [{"field": row[0], "count": row[1]} for row in field_counts]
+    total_count = db.query(func.count(CorrectionMemory.id)).scalar() or 0
+
+    return {
+        "total_memories": total_count,
+        "summary_by_field": summary_by_field,
+        "items": items,
+    }
 
 
 @router.get("/settings/ai-prompt")

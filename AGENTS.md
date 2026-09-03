@@ -35,6 +35,7 @@ This file plus the whole `docs/` folder is a portable agent brain. Copy `AGENTS.
 
 - When code is deleted or commented out, mark it inline: `// RL-DISABLED <feature> — disabled <date>; restore when <condition>` so future agents know why and when to bring it back.
 - Match existing code style. No gratuitous comments; no refactors bundled into unrelated work.
+- Inspect and resolve all IDE problems, typechecker diagnostics (e.g. Pyright/TypeScript), and lint issues on any modified or newly created files after every change.
 - Commit only when the user explicitly asks. Documentation updates never depend on committing.
 
 ## 6. Interaction Rules
@@ -50,7 +51,7 @@ This file plus the whole `docs/` folder is a portable agent brain. Copy `AGENTS.
 
 ## 8. Verification
 
-- Never declare done without: backend `python -m pytest -q` (green), frontend `npx tsc --noEmit` and `npm run build` (green), `python commands/verify-brain.py` (green), and `python commands/update-code-map.py --check` when structure changed.
+- Never declare done without: backend `python -m pytest -q` (green), frontend `npx tsc --noEmit` and `npm run build` (green), zero IDE/lint diagnostics on changed files, `python commands/verify-brain.py` (green), and `python commands/update-code-map.py --check` when structure changed.
 - E2E/QA scripts live in `/.qc-tmp/` (see `docs/architecture/OPERATIONS.md` for the runbook).
 
 ## 9. Project-Specific (adapt when copying to another project)

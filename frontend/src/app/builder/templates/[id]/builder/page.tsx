@@ -70,7 +70,7 @@ type DragState = {
 
 const assetSlots = ["risklocker_logo", "insurer_logo", "bank_logo", "all_driver_icon", "background"];
 const variableTypes = ["text", "money", "number", "date", "percent", "image", "boolean", "choice", "benefit_card"];
-const sourceFields = ["customer_name", "vehicle_no", "insurance_company", "coverage_type", "cover_period", "car_model", "ncd_percent", "coverage_amount", "premium", "roadtax", "service_fee", "total_amount", "valid_until"];
+const sourceFields = ["customer_name", "vehicle_no", "insurance_company", "coverage_type", "cover_period", "valuation_type", "car_model", "ncd_percent", "coverage_amount", "premium", "roadtax", "service_fee", "total_amount", "valid_until"];
 
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)); }
 function templateFingerprint(value: TemplateRecord) { return JSON.stringify({ name: value.name, fixed_fields: value.fixed_fields }); }

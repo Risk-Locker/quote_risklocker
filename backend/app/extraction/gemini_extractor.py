@@ -7,7 +7,7 @@ import json
 import logging
 import re
 import threading
-from typing import Any
+from typing import Any, Sequence
 
 import httpx
 
@@ -150,6 +150,10 @@ GEMINI_EXTRACTION_SCHEMA = {
             "type": "string",
             "description": "Vehicle Sum Insured / Agreed Value / Market Value of the CAR itself (e.g. '53,000.00', '71,000.00'). Look for 'Sum Insured', 'Jumlah Diinsuranskan'. DO NOT extract the premium/price of an extra coverage option as the sum insured. A car sum insured is almost never a small number like 400 or 1000. It is usually tens of thousands (e.g. 10000+).",
         },
+        "valuation_type": {
+            "type": "string",
+            "description": "Valuation basis for vehicle sum insured: either 'Agreed Value' or 'Market Value'. Check if the quotation specifies 'Agreed Value', 'Agreed Value = Yes', 'Agreed Value Basis', 'Market Value = Yes', 'Market Value Basis', or if an Agreed Value endorsement/addon was selected. Output exactly 'Agreed Value' or 'Market Value'.",
+        },
         "cover_start_date": {
             "type": "string",
             "description": "Coverage period start date in DD/MM/YYYY or DD-MM-YYYY format.",
@@ -283,41 +287,66 @@ GEMINI_EXTRACTION_SCHEMA = {
 
 
 def build_rag_system_prompt(
-    db_companies: list[dict] | None = None,
-    db_benefit_concepts: list[dict] | None = None,
-    db_aliases: dict | None = None,
-    db_packs: list[dict] | None = None,
+    db_companies: Sequence[dict[str, Any] | str] | None = None,
+    db_benefit_concepts: Sequence[dict[str, Any] | str] | None = None,
+    db_aliases: dict[str, Any] | None = None,
+    db_packs: Sequence[dict[str, Any] | str] | None = None,
+    correction_memory: Sequence[dict[str, Any] | str] | None = None,
     prompt_override: str | None = None,
 ) -> str:
     """Construct dynamic grounding prompt with database-seeded business catalog context."""
-    company_hints: list[str] = []
-    for c in (db_companies or []):
-        name = c.get("name", "")
-        if not name:
-            continue
-        aliases = [a for a in (c.get("aliases") or []) if a and a != name]
-        if aliases:
-            company_hints.append(f"{name} (aliases: {', '.join(aliases)})")
+    companies_list = []
+    for comp in (db_companies or []):
+        if isinstance(comp, dict):
+            name = comp.get("name") or ""
+            aliases = [a for a in comp.get("aliases", []) if a]
         else:
-            company_hints.append(name)
-    companies_str = "; ".join(company_hints) if company_hints else "All active Malaysian motor insurers (e.g. AmAssurance, Etiqa, QBE, Takaful Malaysia, Berjaya Sompo, Lonpac, Tune Protect)"
+            name = comp
+            aliases = []
+        if name:
+            companies_list.append(f"{name}" + (f" (aliases: {', '.join(aliases[:4])})" if aliases else ""))
+    companies_str = ", ".join(companies_list) if companies_list else "All standard Malaysian insurers"
 
     concepts_list = []
     for bc in (db_benefit_concepts or []):
-        k = bc.get("concept_key") or bc.get("key") or ""
-        lbl = bc.get("label") or bc.get("name") or ""
+        if isinstance(bc, dict):
+            k = bc.get("concept_key") or bc.get("key") or ""
+            lbl = bc.get("label") or bc.get("name") or ""
+        else:
+            k = ""
+            lbl = bc
         if k or lbl:
             concepts_list.append(f"- {lbl} (concept_key: '{k}')" if k and lbl else f"- {lbl or k}")
     concepts_str = "\n".join(concepts_list) if concepts_list else "- Standard Malaysian Motor Benefit Library"
 
     packs_list = []
     for pk in (db_packs or []):
-        pn = pk.get("name") or ""
-        tiers = pk.get("tiers") or pk.get("plans") or []
+        if isinstance(pk, dict):
+            pn = pk.get("name") or ""
+            tiers = pk.get("tiers") or pk.get("plans") or []
+        else:
+            pn = pk
+            tiers = []
         if pn:
-            tier_names = ", ".join(str(t.get("name") or "") for t in tiers if str(t.get("name") or ""))
+            tier_names = ", ".join(
+                str(t.get("name") if isinstance(t, dict) else t).strip()
+                for t in tiers
+                if str(t.get("name") if isinstance(t, dict) else t).strip()
+            )
             packs_list.append(f"- {pn}" + (f" (plans: {tier_names})" if tier_names else ""))
     packs_str = "\n".join(packs_list) if packs_list else ""
+
+    corrections_list = []
+    for corr in (correction_memory or []):
+        if not isinstance(corr, dict):
+            continue
+        field = corr.get("field") or ""
+        old = corr.get("original_value") or ""
+        new = corr.get("corrected_value") or ""
+        freq = corr.get("frequency") or 2
+        if field and new:
+            corrections_list.append(f"- Field '{field}': Previously extracted as '{old}', corrected to '{new}' ({freq} times). Please apply this correction automatically if you encounter the same pattern.")
+    corrections_str = "\n".join(corrections_list) if corrections_list else "- No corrections found for this context."
 
     grounding_context = f"""
 ### LIVE DATABASE GROUNDING CONTEXT (always authoritative):
@@ -374,6 +403,8 @@ Extract accurate, grounded JSON data matching the provided schema from the quota
    - NEVER extract generic policy definitions, standard terms and conditions, legal clauses, or claim procedures as benefits.
    - ONLY extract concrete coverages, riders, or add-ons that are explicitly listed in the quotation's pricing schedule, benefits table, or endorsements summary.
    - If a PDF contains 30 pages of generic policy wording, IGNORE the generic text completely.
+12. **LEARNING FROM PREVIOUS HUMAN CORRECTIONS**:
+{corrections_str}
 
 {grounding_context}
 Return strictly structured JSON adhering to the provided schema.
@@ -385,10 +416,11 @@ def extract_with_gemini_sync(
     *,
     document_text: str | None = None,
     source_filename: str | None = None,
-    db_companies: list[dict] | None = None,
-    db_benefit_concepts: list[dict] | None = None,
-    db_aliases: dict | None = None,
-    db_packs: list[dict] | None = None,
+    db_companies: Sequence[dict[str, Any] | str] | None = None,
+    db_benefit_concepts: Sequence[dict[str, Any] | str] | None = None,
+    db_aliases: dict[str, Any] | None = None,
+    db_packs: Sequence[dict[str, Any] | str] | None = None,
+    correction_memory: Sequence[dict[str, Any] | str] | None = None,
     prompt_override: str | None = None,
     timeout_seconds: float = 15.0,
 ) -> dict[str, Any] | None:
@@ -401,7 +433,7 @@ def extract_with_gemini_sync(
 
     settings = get_settings()
     configured_model = settings.gemini_model or "gemini-3.1-flash-lite-preview"
-    system_prompt = build_rag_system_prompt(db_companies, db_benefit_concepts, db_aliases, db_packs, prompt_override)
+    system_prompt = build_rag_system_prompt(db_companies, db_benefit_concepts, db_aliases, db_packs, correction_memory, prompt_override)
 
     fn_prefix = f"Original Upload Filename: {source_filename}\n\n" if source_filename else ""
     parts: list[dict[str, Any]] = []

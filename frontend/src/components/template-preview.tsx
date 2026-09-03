@@ -13,6 +13,7 @@ type TemplateConfig = {
 const demoValues: Record<string, string> = {
   coverage_type: "Comprehensive",
   cover_period: "09/07/2026 - 08/07/2027",
+  valuation_type: "Market Value",
   car_model: "PROTON WAJA ENHANCED",
   ncd_percent: "45.00%",
   coverage_amount: "RM 10,000.00",
@@ -30,6 +31,7 @@ export function TemplatePreview({ template, packageName }: { template: TemplateC
   const summaryFields = config.summary_fields || [
     { field: "coverage_type", label: "Coverage Type" },
     { field: "cover_period", label: "Cover of Period" },
+    { field: "valuation_type", label: "Valuation Type 估价方式" },
     { field: "car_model", label: "Car Model 车款" },
     { field: "ncd_percent", label: "NCD" },
     { field: "coverage_amount", label: "Coverage 保额" },

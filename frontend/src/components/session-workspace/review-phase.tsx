@@ -58,7 +58,7 @@ import type { BenefitCardSummary, WorkspaceField } from "@/components/session-wo
 import { api, fileUrl } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 
-type FieldKind = "text" | "date" | "percent" | "money" | "total" | "vehicle_type";
+type FieldKind = "text" | "date" | "percent" | "money" | "total" | "vehicle_type" | "valuation_type";
 
 type FormField = { name: string; label: string; kind: FieldKind };
 
@@ -73,6 +73,7 @@ const FORM_FIELDS: FormField[] = [
   { name: "insurance_company", label: "Insurance name", kind: "text" },
   { name: "coverage_type", label: "Coverage type", kind: "text" },
   { name: "cover_period", label: "Cover period", kind: "text" },
+  { name: "valuation_type", label: "Valuation Type", kind: "valuation_type" },
   { name: "valid_until", label: "Quotation validity", kind: "text" },
   { name: "excess_amount", label: "Excess amount", kind: "money" },
   { name: "ncd_percent", label: "NCD", kind: "percent" },
@@ -722,6 +723,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
   const [copyingPng, setCopyingPng] = useState(false);
   const [copiedPng, setCopiedPng] = useState(false);
+  const [copiedInfo, setCopiedInfo] = useState(false);
   const [downloadingPng, setDownloadingPng] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [viewLoading, setViewLoading] = useState(false);
@@ -907,6 +909,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                  (workspace.fields["agreed_value"] as WorkspaceField | undefined)?.value;
       }
       values[field.name] = displayValue(field.kind, stored ?? null);
+    }
+
+    if (!values.excess_amount || values.excess_amount.trim() === "" || values.excess_amount === "—") {
+      values.excess_amount = "0.00";
     }
 
     // Auto-compute road tax if missing or 0
@@ -1688,6 +1694,65 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     }
   }
 
+  const handleCopyExtractedInfo = useCallback(() => {
+    const lines: string[] = [];
+
+    // 1. Core Policy & Vehicle Fields
+    for (const field of FORM_FIELDS) {
+      const val = field.kind === "total"
+        ? (previewFields[field.name] || formValues[field.name] || "")
+        : (formValues[field.name] ?? "");
+      lines.push(`${field.label}: ${val || "—"}`);
+    }
+
+    // 2. Custom Fields (if any)
+    const customEntries = Object.entries(workspace?.fields || {}).filter(
+      ([k]) => !FORM_FIELDS.some((f) => f.name === k) && !k.startsWith("_")
+    );
+    if (customEntries.length > 0) {
+      lines.push("");
+      lines.push("--- Custom Fields ---");
+      for (const [k, v] of customEntries) {
+        const valStr = typeof v === "object" && v !== null && "value" in v ? String((v as any).value || "") : String(v || "");
+        lines.push(`${k}: ${valStr || "—"}`);
+      }
+    }
+
+    // 3. Extra Benefits Detected
+    const extras = workspace?.extracted_benefits_section?.extras || [];
+    if (extras.length > 0) {
+      lines.push("");
+      lines.push("--- Extra Benefits Detected ---");
+      for (const extra of extras) {
+        const parts: string[] = [extra.label];
+        if (extra.coverage_limit) parts.push(`Limit: RM ${extra.coverage_limit}`);
+        if (extra.cost) parts.push(`Cost: RM ${extra.cost}`);
+        else parts.push("Cost: Included");
+        if (extra.is_applied) parts.push("(Included in Grid)");
+        lines.push(`- ${parts.join(" | ")}`);
+      }
+    }
+
+    const textToCopy = lines.join("\n");
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(textToCopy).then(() => {
+        setCopiedInfo(true);
+        setToastMessage("All extracted information copied to clipboard!");
+        setTimeout(() => setCopiedInfo(false), 2000);
+      }).catch(() => {
+        const textarea = document.createElement("textarea");
+        textarea.value = textToCopy;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+        setCopiedInfo(true);
+        setToastMessage("All extracted information copied to clipboard!");
+        setTimeout(() => setCopiedInfo(false), 2000);
+      });
+    }
+  }, [formValues, previewFields, workspace]);
+
   async function handleDownloadPdf() {
     if (!workspace) return;
     setPdfLoading(true);
@@ -1893,7 +1958,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       {/* 3-Column Resizable Workspace with Draggable Flexbox Sliders */}
       <div
         ref={containerRef}
-        className="flex flex-col lg:flex-row items-stretch min-h-[580px] w-full gap-0 select-none relative"
+        className={`flex flex-col lg:flex-row items-stretch min-h-[580px] w-full gap-0 relative ${isDragging ? "select-none" : ""}`}
       >
         {/* Column 1 (Optional): Source Quotation PDF */}
         {pdfOpen ? (
@@ -2002,7 +2067,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
             </div>
 
             {/* Row 1: Master Template Selection */}
-            <Card className="rl-tour-template grid gap-3 p-4 border border-[var(--rl-border)] bg-white shadow-xs">
+            <Card className="rl-tour-template grid gap-3 p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-sm font-bold text-[var(--rl-text-strong)]">Master template</h2>
@@ -2193,7 +2258,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
             </Card>
 
             {/* Row 2: Extracted Policy & Vehicle Values */}
-            <Card className="rl-tour-fields grid gap-3 p-4 border border-[var(--rl-border)] bg-white shadow-xs">
+            <Card className="rl-tour-fields grid gap-3 p-4">
               <div className="flex flex-wrap items-center justify-between border-b border-[var(--rl-border)] pb-2 gap-2">
                 <div>
                   <div className="flex items-center gap-2">
@@ -2203,6 +2268,16 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                   <p className="text-xs text-[var(--rl-text-muted)]">Verified quotation details formatted for the master template.</p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={handleCopyExtractedInfo}
+                    className="h-7 text-xs font-semibold gap-1.5"
+                    title="Copy all extracted policy, vehicle, and extra benefit information to clipboard"
+                  >
+                    {copiedInfo ? <Check size={13} weight="bold" className="text-emerald-600" /> : <Copy size={13} weight="bold" />}
+                    <span>{copiedInfo ? "Copied Info!" : "Copy Info"}</span>
+                  </Button>
                   <Button
                     size="sm"
                     variant="secondary"
@@ -2281,6 +2356,19 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                               <option value="Lorry">Lorry / Commercial</option>
                               <option value="Others">Others</option>
                             </Select>
+                          ) : field.kind === "valuation_type" ? (
+                            <Select
+                              value={formValues[field.name] || "Market Value"}
+                              onChange={(event) => {
+                                const val = event.target.value;
+                                setFormValues((values) => ({ ...values, [field.name]: val }));
+                                commitFieldDirectly(field.name, val);
+                              }}
+                              className="text-xs font-medium"
+                            >
+                              <option value="Agreed Value">Agreed Value (Nilai Dipersetujui)</option>
+                              <option value="Market Value">Market Value (Nilai Pasaran)</option>
+                            </Select>
                           ) : (
                             <span className="relative">
                               {field.kind === "money" || field.kind === "total" ? (
@@ -2336,7 +2424,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
             </Card>
 
             {/* Card 3: Extracted Benefits, Extras & Packages */}
-            <Card className="grid gap-3.5 p-4 border border-[var(--rl-border)] shadow-sm bg-white rounded-xl">
+            <Card className="grid gap-3.5 p-4">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--rl-border)] pb-3">
                 <div className="flex items-center gap-2">
                   <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-100">
@@ -2548,7 +2636,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         >
           <section aria-label="Live preview and benefits manager" className="grid grid-cols-1 gap-4 content-start">
             {/* Row 1: Real-time Live Preview Canvas */}
-            <Card className="rl-tour-preview grid gap-2.5 p-3.5 border border-[var(--rl-border)] bg-white shadow-xs overflow-hidden">
+            <Card className="rl-tour-preview grid gap-2.5 p-3.5 overflow-hidden">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <h2 className="text-sm font-bold text-[var(--rl-text-strong)]">Live Quotation Preview</h2>

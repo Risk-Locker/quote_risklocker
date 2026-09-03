@@ -552,6 +552,13 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
         if not cov_limit and isinstance(line.evidence, dict):
             cov_limit = line.evidence.get("coverage_limit") or line.evidence.get("limit")
 
+        ev_text = (line.evidence.get("text") or "") if isinstance(line.evidence, dict) else (str(line.evidence) if line.evidence else "")
+        raw_text_check = f"{line.raw_label or ''} {ev_text}".lower()
+        if re.search(r"[:=\-]?\s*(?:no|tidak|false|bukan)\b", raw_text_check):
+            if decision.disposition == "unresolved":
+                decision.disposition = "omitted"
+            continue
+
         if not target_concept_id:
             line_norm = _norm(line.raw_label or line.normalized_label)
             if "windscreen" in line_norm or "wndscrn" in line_norm:
@@ -560,7 +567,9 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                 target_concept_id = concepts_by_key.get("legal-liability-of-passengers").id if "legal-liability-of-passengers" in concepts_by_key else (concepts_by_key.get("legal-liability-to-passengers").id if "legal-liability-to-passengers" in concepts_by_key else None)
             if not target_concept_id:
                 for norm_k, c_obj in concepts_by_norm.items():
-                    if norm_k in line_norm or line_norm in norm_k:
+                    if len(line_norm) >= 6 and (norm_k in line_norm or re.search(r"\b" + re.escape(line_norm) + r"\b", norm_k)):
+                        if line_norm in {"total", "cover", "plan", "contribution", "premium", "driver", "vehicle", "basic", "gross"}:
+                            continue
                         target_concept_id = c_obj.id
                         break
 
@@ -571,7 +580,8 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
 
         extracted = line.extracted_value if isinstance(line.extracted_value, dict) else None
         if extracted is None:
-            ev_str = str(cov_limit or (line.evidence or {}).get("value") or (line.evidence or {}).get("coverage_limit") or "")
+            ev_dict = line.evidence if isinstance(line.evidence, dict) else {}
+            ev_str = str(cov_limit or ev_dict.get("value") or ev_dict.get("coverage_limit") or (line.evidence if isinstance(line.evidence, str) else "") or "")
             if ev_str and ev_str.lower() not in {"included", "standard", "yes", "true", "selected"}:
                 clean_limit = ev_str.upper().replace("RM", "").replace(",", "").strip()
                 is_pure_money = bool(re.match(r"^\s*(?:RM\s*)?[\d]+(?:,\d{3})*(?:\.\d{1,2})?\s*$", ev_str, re.IGNORECASE))

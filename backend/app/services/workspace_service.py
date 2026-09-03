@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy import func, select, delete
-from sqlalchemy.orm import load_only
+from sqlalchemy.orm import defer, load_only
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.errors import AppError
@@ -604,12 +604,24 @@ def _workspace_extracted_benefits_section(
     total_opt_cover = str((draft.fields or {}).get("optional_cover_amount", {}).get("value") or "")
 
     for idx, line in enumerate(raw_lines):
+        if not isinstance(line, dict):
+            continue
         label = line.get("raw_label") or line.get("raw_text") or ""
         if not label:
             continue
         norm_label = re.sub(r"\s+", " ", label).strip()
         if norm_label.lower() in seen_labels:
             continue
+        # Reject pure amounts, totals, accounting calculation rows, or negative flags
+        if re.match(r"^[:\-•*+~]?\s*(?:RM|MYR)?\s*[\d,]+(?:\.\d{1,2})?\s*%?\s*$", norm_label, re.IGNORECASE):
+            continue
+        if re.match(r"^(?:total|basic contribution|gross contribution|total contribution|takaful contribution|\+ additional|\- ncd|\+ service tax|\+ stamp duty|quotation type|agent code|takaful scheme|insurance scheme|agreed value|market value|acceptance of any|this quotation|endorsement attaching|cbc regulation)\b", norm_label, re.IGNORECASE):
+            continue
+        if re.search(r"[:=\-]?\s*(?:no|tidak|false)\b", norm_label, re.IGNORECASE):
+            continue
+        if line.get("line_kind") == "narrative":
+            continue
+
         seen_labels.add(norm_label.lower())
 
         raw_cov_limit = line.get("coverage_limit")
@@ -654,9 +666,8 @@ def _workspace_extracted_benefits_section(
         if concept_id and str(concept_id) in selection_concepts:
             is_applied = True
             selection_id = selection_concepts[str(concept_id)].id
-            
-        # Also auto-apply if there's a defined cost (e.g. LLTP was purchased)
-        if bool(cost):
+        elif concept_id and bool(cost):
+            # Known benefit concept with purchased extra cost
             is_applied = True
 
         is_optional = bool(line.get("is_optional_cover")) or line.get("section") == "Optional Covers" or bool(cost)
@@ -1084,6 +1095,13 @@ def _normalize_edited_value(field_name: str, raw) -> str | None:
         if not text or text.count(".") > 1:
             raise AppError("Enter NCD as a percentage number, for example 25.", 422)
         return text
+    if field_name == "valuation_type":
+        s = str(raw).strip()
+        if "agreed" in s.lower() or "dipersetujui" in s.lower():
+            return "Agreed Value"
+        if "market" in s.lower() or "pasaran" in s.lower():
+            return "Market Value"
+        return s or "Market Value"
     return str(raw)
 
 
@@ -1340,7 +1358,7 @@ def _safe_concept_id(db, concept_id: str | None) -> str | None:
             return None
     except Exception:
         pass
-    return str(concept_id)
+    return concept_id
 
 
 def _safe_source_line_id(db, source_line_id: str | None) -> str | None:
@@ -1354,7 +1372,7 @@ def _safe_source_line_id(db, source_line_id: str | None) -> str | None:
             return None
     except Exception:
         pass
-    return str(source_line_id)
+    return source_line_id
 
 
 def _safe_package_plan_id(db, plan_id: str | None) -> str | None:
@@ -1368,7 +1386,7 @@ def _safe_package_plan_id(db, plan_id: str | None) -> str | None:
             return None
     except Exception:
         pass
-    return str(plan_id)
+    return plan_id
 
 
 def _apply_custom_benefit(db, draft: QuotationDraft, user, operation: dict) -> tuple[str, DraftBenefitSelection]:
@@ -1413,17 +1431,17 @@ def _apply_custom_benefit(db, draft: QuotationDraft, user, operation: dict) -> t
         existing.price = price
         existing.selected_by = user.id
         if concept_id:
-            existing.concept_id = str(concept_id)
+            existing.concept_id = concept_id
         if source_line_id:
-            existing.source_line_id = str(source_line_id)
+            existing.source_line_id = source_line_id
         return f"benefits.{existing.id}", existing
 
     selection = DraftBenefitSelection(
         id=new_id(),
         draft_id=draft.id,
         selection_key=key,
-        source_line_id=str(source_line_id) if source_line_id else None,
-        concept_id=str(concept_id) if concept_id else None,
+        source_line_id=source_line_id if source_line_id else None,
+        concept_id=concept_id if concept_id else None,
         item_kind="custom",
         state=state,
         cost_status=cost_status,
@@ -1796,7 +1814,7 @@ def _apply_source_disposition(db, draft: QuotationDraft, user, operation: dict) 
         raise AppError("Source-line disposition is invalid.", 422) from exc
     decision = _decision_by_line(db, draft.id, source_line_id)
     if decision is None:
-        if not db.get(ExtractionBenefitLine, str(source_line_id)):
+        if not db.get(ExtractionBenefitLine, source_line_id):
             return f"source_lines.{source_line_id}"
         decision = DraftSourceLineDecision(
             id=new_id(), draft_id=draft.id, source_line_id=source_line_id, disposition="unresolved"
