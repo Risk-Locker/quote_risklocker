@@ -133,7 +133,7 @@ async def create_queued_upload(
             try:
                 # If it's not already in the trash, soft-delete it first
                 if not duplicate.deleted_at:
-                    move_to_trash(db, user, duplicate.id, settings)
+                    move_to_trash(db, settings, user, duplicate.id)
                 
                 # Now hard-delete it permanently
                 if storage:
