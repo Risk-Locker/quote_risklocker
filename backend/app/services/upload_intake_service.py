@@ -25,6 +25,7 @@ from app.models.tables import (
     QuotationDraft,
     Session as QuotationSession,
     UploadedFile,
+    User,
     new_id,
 )
 from app.services.document_security import quarantined_pdf
@@ -113,6 +114,32 @@ async def create_queued_upload(
         )
     except ValueError as exc:
         raise AppError(str(exc)) from exc
+
+    # -- Deduplication --
+    # Find and permanently delete any existing uploads with the exact same filename for this user.
+    from app.services.review_service import move_to_trash
+    from app.services.trash_service import permanent_delete_session
+
+    user = db.get(User, owner_id)
+    if user:
+        duplicates = db.scalars(
+            select(UploadedFile).where(
+                UploadedFile.owner_id == owner_id,
+                UploadedFile.original_filename == filename
+            )
+        ).all()
+        
+        for duplicate in duplicates:
+            try:
+                # If it's not already in the trash, soft-delete it first
+                if not duplicate.deleted_at:
+                    move_to_trash(db, user, duplicate.id, settings)
+                
+                # Now hard-delete it permanently
+                if storage:
+                    permanent_delete_session(db, user, duplicate.id, storage)
+            except Exception as exc:
+                logger.warning("Failed to deduplicate older file %s: %s", duplicate.id, exc)
 
     # NOTE: Always save to local ephemeral first so the 202 response returns
     # immediately (<500ms). The background extraction worker uploads to Supabase
