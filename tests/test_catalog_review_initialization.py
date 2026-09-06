@@ -300,3 +300,27 @@ def test_multi_catalog_coverage_dimension_resolution():
     assert res["catalog_revision_id"] == rev_tpft.id
     assert draft_tpft.catalog_revision_id == rev_tpft.id
 
+
+def test_detected_package_tier_seeds_corresponding_package_benefits():
+    product = InsuranceProduct(id="prod-am", company_id="comp-am", name="Private Car Comprehensive", status="active")
+    catalog = BenefitCatalog(id="cat-am", company_id="comp-am", product_id=product.id, name="Private Car Comprehensive", status="published")
+    revision = BenefitCatalogRevision(id="rev-am", catalog_id=catalog.id, revision_number=1, state="published", content_hash="5" * 64)
+    lite = BenefitPackage(id="pkg-lite", catalog_revision_id=revision.id, package_key="lite", name="auto365 Comprehensive Lite", package_kind="comprehensive", sort_order=1, status="active")
+    premier = BenefitPackage(id="pkg-prem", catalog_revision_id=revision.id, package_key="premier", name="auto365 Comprehensive Premier", package_kind="comprehensive", sort_order=3, status="active")
+    lite_towing = CatalogOffering(id="off-lite-tow", catalog_revision_id=revision.id, offering_key="lite-tow", concept_id="c-tow", offering_kind="base", role="included", applies_to_type="package", applies_to_id=lite.id, status="active")
+    premier_towing = CatalogOffering(id="off-prem-tow", catalog_revision_id=revision.id, offering_key="prem-tow", concept_id="c-tow", offering_kind="base", role="included", applies_to_type="package", applies_to_id=premier.id, status="active")
+
+    draft = QuotationDraft(
+        id="draft-prem", uploaded_file_id="f-prem", owner_id="u-1", company_id="comp-am",
+        fields={"tier_name": {"value": "auto365 Comprehensive Premier"}}, scalar_decisions={}, warnings=[],
+    )
+    db = FakeDb([product, catalog, revision, lite, premier, lite_towing, premier_towing])
+
+    res = initialize_catalog_review(db, draft)
+    assert res["catalog_revision_id"] == revision.id
+    assert draft.package_id == premier.id
+    selections = [item for item in db.added if isinstance(item, DraftBenefitSelection)]
+    assert len(selections) == 1
+    assert selections[0].catalog_offering_id == premier_towing.id
+
+

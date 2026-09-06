@@ -12,6 +12,7 @@ import {
   FilePlus,
   ImageSquare,
   Info,
+  Lock,
   MagnifyingGlass,
   PaintBrush,
   PencilSimple,
@@ -880,6 +881,11 @@ export default function BuilderTemplatesPage() {
                                   <Star size={11} weight="fill" className="text-amber-500" /> Default
                                 </span>
                               ) : null}
+                              {template.locked ? (
+                                <span className="inline-flex items-center gap-1 rounded bg-slate-50 border border-slate-300 px-1.5 py-0.5 text-[10px] font-bold text-slate-700 uppercase">
+                                  <Lock size={11} weight="bold" /> Locked Master
+                                </span>
+                              ) : null}
                             </div>
                             <p className="mt-1 text-[12px] text-[var(--rl-text-muted)]">{page.name} · {Math.round(page.width)} × {Math.round(page.height)} {page.unit}</p>
                           </div>
@@ -900,7 +906,11 @@ export default function BuilderTemplatesPage() {
                             </Button>
                             <Button variant="ghost" size="sm" icon={<Eye size={14} />} onClick={() => setPreview(template)}>Preview</Button>
                             <Button variant="secondary" size="sm" icon={<PencilSimple size={14} />} onClick={() => { setPendingRename(template); setRenameValue(template.name); }}>Rename</Button>
-                            <Button variant="secondary" size="sm" icon={<CopySimple size={14} />} onClick={() => cloneTemplate(template)}>Clone</Button>
+                            {template.locked ? (
+                              <Button size="sm" icon={<CopySimple size={14} />} onClick={() => cloneTemplate(template)}>Clone to Edit</Button>
+                            ) : (
+                              <Button variant="secondary" size="sm" icon={<CopySimple size={14} />} onClick={() => cloneTemplate(template)}>Clone</Button>
+                            )}
                             {!template.locked && template.status !== "retired" ? <Link href={`/builder/templates/${template.id}/builder`}><Button size="sm" icon={<PencilSimple size={14} />}>Open</Button></Link> : null}
                             {!template.locked && template.status !== "retired" ? <Button variant="ghost" size="sm" aria-label={`Delete ${template.name}`} icon={<Trash size={14} />} className="text-[var(--rl-red)]" onClick={() => setPendingDelete(template)}><span className="sr-only">Delete</span></Button> : null}
                           </div>
@@ -1271,39 +1281,7 @@ export default function BuilderTemplatesPage() {
                     </div>
                   </div>
 
-                  {/* 5-Attribute Feature Visibility Toggles */}
-                  <div className="pt-2 border-t border-[var(--rl-border)] space-y-1.5">
-                    <label className="block text-xs font-semibold text-[var(--rl-text-strong)]">5-Attribute Visibility</label>
-                    <div className="grid grid-cols-3 gap-1.5 text-xs">
-                      <button
-                        type="button"
-                        onClick={() => setCustomStyle({ ...customStyle, showCoverage: !customStyle.showCoverage })}
-                        className={`rounded border py-1.5 text-center font-medium transition-all ${
-                          customStyle.showCoverage ? "bg-red-50 border-red-300 text-red-700 font-bold" : "bg-[var(--rl-bg)] border-[var(--rl-border)] text-neutral-500"
-                        }`}
-                      >
-                        Coverage: {customStyle.showCoverage ? "ON" : "OFF"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setCustomStyle({ ...customStyle, showDescription: !customStyle.showDescription })}
-                        className={`rounded border py-1.5 text-center font-medium transition-all ${
-                          customStyle.showDescription ? "bg-blue-50 border-blue-300 text-blue-700 font-bold" : "bg-[var(--rl-bg)] border-[var(--rl-border)] text-neutral-500"
-                        }`}
-                      >
-                        Desc: {customStyle.showDescription ? "ON" : "OFF"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setCustomStyle({ ...customStyle, showCost: !customStyle.showCost })}
-                        className={`rounded border py-1.5 text-center font-medium transition-all ${
-                          customStyle.showCost ? "bg-emerald-50 border-emerald-300 text-emerald-700 font-bold" : "bg-[var(--rl-bg)] border-[var(--rl-border)] text-neutral-500"
-                        }`}
-                      >
-                        Cost: {customStyle.showCost ? "ON" : "OFF"}
-                      </button>
-                    </div>
-                  </div>
+
 
                   <div>
                     <label className="block text-xs font-semibold text-[var(--rl-text-strong)]">Cost / Tag Badge Style</label>

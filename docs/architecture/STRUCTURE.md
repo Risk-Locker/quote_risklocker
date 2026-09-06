@@ -57,6 +57,14 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Review Workspace: Interactive Benefit Template Switcher in `frontend/src/components/session-workspace/review-phase.tsx` (sidebar + canvas toolbar) with live preview updates.
 - Rendering: Double RM fix in `shared.tsx:765`, dynamic row height allocation (~66px standard, 40px minimal) and dynamic footer shifting (`footer_shift`) in `shared.tsx` and `template_renderer.py`. PDF generator applies preset in `generation_service.py:_template_config`.
 
+## System-Generated Quotation Reference (v14) Additions
+
+- Migration `migrations/039_quotation_sequences.sql`: `quotation_sequences` table (`year INT PRIMARY KEY, current_val BIGINT`) and backfill for all existing sessions (`RL260000001`+).
+- Migration `migrations/038_quotation_display_and_sequence.sql`: `display_options` JSONB and `display_overrides` columns.
+- Service: `backend/app/services/quotation_reference_service.py` provides atomic year-partitioned reference generation (`RL{YY}{SEQ:07d}`) using dynamic real-time `Asia/Kuala_Lumpur` business clock.
+- Extraction Shield: Prohibited quotation reference extraction from insurer documents in `gemini_extractor.py`, `candidate_finder.py`, and `draft_mapper.py`; preserved internal sequence in `extraction_worker.py` and `workspace_service.py`.
+- Tests: `tests/test_quotation_reference_service.py`.
+
 ## Benefit Configuration Matrix
 
 - `docs/domain/benefits/BENEFITS-CONFIGURATION.md` — canonical per-insurer benefits/add-on matrix: global benefit library (51 concepts), dimensions, and every company × coverage type × vehicle category row including add-on system (`single` vs `package`), package tiers, and seed status (seeded / draft / pending). Registered in `docs/core/START-HERE.md`.

@@ -126,8 +126,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-[var(--rl-bg)]">
       {/* Header */}
-      <header className="sticky top-0 z-30 border-b border-[var(--rl-border)] bg-[var(--rl-surface)]/95 backdrop-blur-md">
-        <div className="mx-auto flex max-w-[1560px] items-center justify-between px-4 sm:px-5 h-[56px]">
+      <header className="sticky top-0 z-40 w-full border-b border-[var(--rl-border)] bg-[var(--rl-surface)]/95 backdrop-blur-sm">
+        <div className="mx-auto flex w-full items-center justify-between px-4 sm:px-5 h-[56px]">
           <div className="flex items-center gap-3">
             {/* Mobile menu hamburger button */}
             <button
@@ -250,7 +250,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Main Grid Container */}
       <div
-        className={`mx-auto grid max-w-[1560px] gap-4 sm:gap-6 px-3 sm:px-5 py-4 sm:py-6 transition-[grid-template-columns] duration-200 ${
+        className={`mx-auto grid w-full gap-4 sm:gap-6 px-3 sm:px-5 py-4 sm:py-6 transition-[grid-template-columns] duration-200 ${
           isCollapsed
             ? "grid-cols-1 md:grid-cols-[64px_minmax(0,1fr)]"
             : "grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)]"

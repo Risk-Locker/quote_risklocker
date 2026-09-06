@@ -28,6 +28,7 @@ type GlobalBenefit = {
   match_dataset: string[];
   sort_order: number;
   default_asset: Asset | null;
+  display_overrides?: Record<string, boolean>;
   revision: number;
   status: string;
 };
@@ -73,6 +74,7 @@ export default function GlobalBenefitsPage() {
   const [formDescription, setFormDescription] = useState("");
   const [formAssetId, setFormAssetId] = useState("");
   const [formMatch, setFormMatch] = useState<string[]>([]);
+  const [formDisplayOverrides, setFormDisplayOverrides] = useState<Record<string, boolean>>({});
   const [formSort, setFormSort] = useState(0);
   const [formActive, setFormActive] = useState(true);
 
@@ -185,6 +187,7 @@ export default function GlobalBenefitsPage() {
     setFormDescription(item.description || "");
     setFormAssetId(item.default_asset?.id || "");
     setFormMatch([...item.match_dataset]);
+    setFormDisplayOverrides(item.display_overrides || {});
     setFormSort(item.sort_order || 0);
     setFormActive(item.status === "active");
   }
@@ -200,6 +203,7 @@ export default function GlobalBenefitsPage() {
     setFormDescription("");
     setFormAssetId("");
     setFormMatch([]);
+    setFormDisplayOverrides({});
     setFormSort(benefits.length + 1);
     setFormActive(true);
   }
@@ -213,6 +217,10 @@ export default function GlobalBenefitsPage() {
 
   function removeVariant(index: number) {
     setFormVariants(formVariants.filter((_, i) => i !== index));
+  }
+
+  function toggleFormDisplayOverride(key: string) {
+    setFormDisplayOverrides((prev) => ({ ...prev, [key]: !(prev[key] !== false) }));
   }
 
   async function saveBenefit() {
@@ -239,6 +247,7 @@ export default function GlobalBenefitsPage() {
         required_variables: [],
         match_dataset: formMatch,
         demo_value: null,
+        display_overrides: formDisplayOverrides,
         sort_order: Math.max(0, Number(formSort) || 0),
         status: formActive ? "active" : "inactive",
       };
@@ -560,6 +569,74 @@ export default function GlobalBenefitsPage() {
                         className="text-xs"
                       />
                     </div>
+                  </div>
+
+                  {/* Template Display Defaults (Overrides) */}
+                  <div className="grid gap-3 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex flex-col">
+                        <span className="text-xs font-bold text-[var(--rl-text-strong)]">Hard Display Override</span>
+                        <span className="text-[11px] font-normal text-[var(--rl-text-muted)]">Force visibility regardless of draft settings</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => toggleFormDisplayOverride("enabled")}
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded transition-all ${
+                          formDisplayOverrides.enabled ? "bg-emerald-100 text-emerald-800" : "bg-[var(--rl-border)] text-[var(--rl-text-muted)]"
+                        }`}
+                      >
+                        {formDisplayOverrides.enabled ? "ENABLED" : "DISABLED"}
+                      </button>
+                    </div>
+                    {formDisplayOverrides.enabled && (
+                      <div className="grid grid-cols-5 gap-2 text-xs pt-2 border-t border-[var(--rl-border)] mt-1">
+                        <button
+                          type="button"
+                          onClick={() => toggleFormDisplayOverride("showCoverage")}
+                          className={`rounded border py-2 text-center font-bold transition-all ${
+                            formDisplayOverrides.showCoverage !== false ? "bg-red-50 border-red-300 text-red-700" : "bg-[var(--rl-bg)] border-[var(--rl-border)] text-[var(--rl-text-muted)]"
+                          }`}
+                        >
+                          Coverage: {formDisplayOverrides.showCoverage !== false ? "ON" : "OFF"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleFormDisplayOverride("showDescription")}
+                          className={`rounded border py-2 text-center font-bold transition-all ${
+                            formDisplayOverrides.showDescription !== false ? "bg-blue-50 border-blue-300 text-blue-700" : "bg-[var(--rl-bg)] border-[var(--rl-border)] text-[var(--rl-text-muted)]"
+                          }`}
+                        >
+                          Desc: {formDisplayOverrides.showDescription !== false ? "ON" : "OFF"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleFormDisplayOverride("showCost")}
+                          className={`rounded border py-2 text-center font-bold transition-all ${
+                            formDisplayOverrides.showCost !== false ? "bg-emerald-50 border-emerald-300 text-emerald-700" : "bg-[var(--rl-bg)] border-[var(--rl-border)] text-[var(--rl-text-muted)]"
+                          }`}
+                        >
+                          Cost: {formDisplayOverrides.showCost !== false ? "ON" : "OFF"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleFormDisplayOverride("showAsset")}
+                          className={`rounded border py-2 text-center font-bold transition-all ${
+                            formDisplayOverrides.showAsset !== false ? "bg-purple-50 border-purple-300 text-purple-700" : "bg-[var(--rl-bg)] border-[var(--rl-border)] text-[var(--rl-text-muted)]"
+                          }`}
+                        >
+                          Icon: {formDisplayOverrides.showAsset !== false ? "ON" : "OFF"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleFormDisplayOverride("showGroup")}
+                          className={`rounded border py-2 text-center font-bold transition-all ${
+                            formDisplayOverrides.showGroup !== false ? "bg-amber-50 border-amber-300 text-amber-700" : "bg-[var(--rl-bg)] border-[var(--rl-border)] text-[var(--rl-text-muted)]"
+                          }`}
+                        >
+                          Group: {formDisplayOverrides.showGroup !== false ? "ON" : "OFF"}
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {/* System Classification & Controls */}

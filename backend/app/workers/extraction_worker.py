@@ -265,6 +265,15 @@ def process_extraction_job(
             fields["service_fee"] = {"value": f"{float((fee_setting.value or {}).get('amount', 0)):.2f}", "status": "ready", "message": ""}
         except (TypeError, ValueError):
             pass
+
+    # Strictly preserve internal system quotation reference (never overwrite from PDF)
+    existing_qref = (draft.fields or {}).get("quotation_reference") or session.quotation_ref
+    qref_val = existing_qref.get("value") if isinstance(existing_qref, dict) else existing_qref
+    if not qref_val or not str(qref_val).startswith("RL"):
+        from app.services.quotation_reference_service import generate_quotation_reference
+        qref_val = session.quotation_ref if session.quotation_ref and str(session.quotation_ref).startswith("RL") else generate_quotation_reference(db)
+        session.quotation_ref = qref_val
+    fields["quotation_reference"] = {"value": qref_val, "status": "ready", "message": ""}
     draft.fields = fields
     draft.warnings = draft_data.get("warnings") or []
     draft.status = draft_data.get("status") or RecordStatus.CHECK_NEEDED.value

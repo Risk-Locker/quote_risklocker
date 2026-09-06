@@ -53,6 +53,8 @@ _UNIQUE_RE = re.compile(r"unique constraint [\"']?([a-z0-9_]+)[\"']?", re.IGNORE
 
 
 def _integrity_message(exc: IntegrityError) -> tuple[str, int]:
+    import sys
+    print(f"INTEGRITY ERROR: {exc.orig!r}", file=sys.stderr)
     orig_text = str(getattr(exc, "orig", exc) or "").lower()
     if "foreign key" in orig_text or "violates foreign key" in orig_text:
         return "This record references a value that does not exist.", status.HTTP_422_UNPROCESSABLE_ENTITY

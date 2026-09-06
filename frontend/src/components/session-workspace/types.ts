@@ -98,6 +98,8 @@ export type WorkspaceSnapshot = {
   }>;
   pinned: Record<string, string | null>;
   pinned_names: { company_name: string | null; product_name: string | null; tier_name: string | null; package_name?: string | null };
+  quotation_ref?: string | null;
+  display_options?: Record<string, boolean> | null;
   hierarchy?: {
     company_name?: string | null;
     product_name?: string | null;

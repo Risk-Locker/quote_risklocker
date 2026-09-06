@@ -55,6 +55,7 @@ def generate_pdf(db: Session, settings: Settings, user, draft: QuotationDraft, a
         template_config=template_config,
         insurer_name=(draft.fields.get("insurance_company") or {}).get("value"),
         db=db,
+        render_context={"display_options": draft.display_options or {}},
     )
     next_number = (db.scalar(select(func.max(GeneratedPdfVersion.version_number)).where(GeneratedPdfVersion.draft_id == draft.id)) or 0) + 1
     filename = _version_filename(draft.uploaded_file.original_filename, next_number)

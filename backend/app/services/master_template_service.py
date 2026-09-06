@@ -22,8 +22,8 @@ def _text(node_id: str, text: str, x: float, y: float, w: float, h: float, z: in
     return {"id": node_id, "type": "text", "text": text, "x": x, "y": y, "w": w, "h": h, "z": z, "style": {"fontSize": size, "fontWeight": weight, "color": color, "textAlign": align}}
 
 
-def _variable(node_id: str, variable_id: str, x: float, y: float, w: float, h: float, z: int, *, size: int | float = 14, weight: str = "700", color: str = INK, align: str = "left", prefix: str = "", suffix: str = "") -> dict:
-    return {"id": node_id, "type": "variable", "variableId": variable_id, "prefix": prefix, "suffix": suffix, "x": x, "y": y, "w": w, "h": h, "z": z, "style": {"fontSize": size, "fontWeight": weight, "color": color, "textAlign": align}}
+def _variable(node_id: str, variable_id: str, x: float, y: float, w: float, h: float, z: int, *, size: int | float = 14, weight: str = "700", color: str = INK, align: str = "left", prefix: str = "", suffix: str = "", transform: str = "none") -> dict:
+    return {"id": node_id, "type": "variable", "variableId": variable_id, "prefix": prefix, "suffix": suffix, "x": x, "y": y, "w": w, "h": h, "z": z, "style": {"fontSize": size, "fontWeight": weight, "color": color, "textAlign": align, "textTransform": transform}}
 
 
 def _image(node_id: str, slot: str, x: float, y: float, w: float, h: float, z: int) -> dict:
@@ -134,7 +134,7 @@ def _agency_bilingual_config() -> dict:
 
         # 2. Header: Logos, Insurer Name, Quotation Ref, Vehicle No, and Top Divider
         _image("risklocker_logo", "risklocker_logo", 40, 32, 150, 42, 5),
-        _variable("header_insurer_name", "insurance_company", 210, 36, 230, 34, 5, size=16, weight="800", color=DARK, align="left"),
+        _variable("header_insurer_name", "insurance_company", 210, 36, 230, 34, 5, size=16, weight="800", color=DARK, align="left", transform="uppercase"),
         _text("ref_label", "Quotation Ref: ", 460, 36, 150, 16, 5, size=10.5, weight="500", color=MUTED_COLOR, align="right"),
         _variable("ref_val", "quotation_reference", 614, 36, 140, 16, 5, size=10.5, weight="700", color=MUTED_COLOR, align="left"),
         _text("vehicle_no_label", "Vehicle No: ", 460, 56, 150, 16, 5, size=10.5, weight="500", color=MUTED_COLOR, align="right"),
@@ -204,11 +204,10 @@ def _agency_bilingual_config() -> dict:
         # 5. Right Column: Payment Method & Excess / All Driver Card (x=508, w=246, y=134, h=272)
         _rectangle("pay_card_bg", 508, 134, 246, 272, 2, background="#FFFFFF", border=BORDER_COLOR, radius=6),
         _text("pay_title", "Payment Method", 522, 144, 218, 15, 5, size=10, weight="700", color=LABEL_COLOR),
-        _text("pay_bank_logo", "Hong Leong", 522, 161, 218, 18, 5, size=12.5, weight="800", color=DARK),
-        _text("pay_details_lbl", "Bank details", 522, 181, 218, 13, 5, size=8.5, weight="600", color=MUTED_COLOR),
-        _text("pay_acc_no", "12303105859", 522, 195, 218, 15, 5, size=11, weight="700", color=DARK),
-        _text("pay_holder", "RiskLocker Sdn. Bhd.", 522, 211, 218, 13, 5, size=9, weight="600", color=LABEL_COLOR),
-        _text("pay_bank_sub", "Hong Leong Bank", 522, 225, 218, 13, 5, size=9, weight="500", color=MUTED_COLOR),
+        _image("bank_logo", "bank_logo", 522, 163, 100, 24, 5),
+        _text("pay_details_lbl", "Bank details", 522, 193, 218, 13, 5, size=8.5, weight="600", color=MUTED_COLOR),
+        _text("pay_acc_no", "12300318500", 522, 207, 218, 15, 5, size=11, weight="700", color=DARK),
+        _text("pay_holder", "RiskLocker Sdn. Bhd.", 522, 223, 218, 13, 5, size=9, weight="600", color=LABEL_COLOR),
 
         # All Driver & Excess Box inside right card
         _rectangle("all_driver_bg", 518, 242, 226, 156, 3, background=BG_LIGHT, border=BORDER_COLOR, radius=4),
@@ -235,6 +234,10 @@ def _agency_bilingual_config() -> dict:
 
     config.update({
         "version": 7, "template_name": name, "v7_master_key": key, "is_default": True, "locked": True,
+        "assets": {
+            "risklocker_logo": "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f",
+            "bank_logo": "2168eaee-3e56-4903-8c4f-841f01ff2407"
+        },
         "page_profile": {
             "profile_key": "a4", "name": "A4",
             "width": 794, "height": height, "unit": "px", "safe_margins": {"top": 24, "right": 24, "bottom": 24, "left": 24},

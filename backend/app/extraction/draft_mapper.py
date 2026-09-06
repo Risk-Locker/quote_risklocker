@@ -209,6 +209,14 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
     from app.services.road_tax_service import calculate_road_tax
 
     car_model_val = fields.get("car_model", {}).get("value")
+    if car_model_val:
+        parts = re.split(r'[\s\-]+', str(car_model_val).strip())
+        deduped = []
+        for p in parts:
+            if p and (not deduped or deduped[-1].upper() != p.upper()):
+                deduped.append(p)
+        car_model_val = " ".join(deduped)
+        fields["car_model"]["value"] = car_model_val
     inferred_cc, inferred_type = infer_vehicle_cc_and_type(car_model_val)
     if "vehicle_type" in fields:
         if not fields["vehicle_type"].get("value"):
@@ -284,6 +292,15 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
         gp_val = fields.get("gross_premium", {}).get("value")
         st_val = fields.get("service_tax", {}).get("value")
         bp_val = fields.get("basic_premium_vehicle", {}).get("value") or fields.get("basic_premium", {}).get("value")
+
+        # Sanity check: if optional_cover_amount is identical to basic_premium, it's a layout hallucination
+        opt_val = fields.get("optional_cover_amount", {}).get("value")
+        if opt_val and bp_val:
+            opt_clean = re.sub(r"[^\d.]", "", str(opt_val))
+            bp_clean = re.sub(r"[^\d.]", "", str(bp_val))
+            if opt_clean and opt_clean == bp_clean:
+                fields["optional_cover_amount"]["value"] = ""
+                opt_val = ""
 
         # Sum detected optional cover / extra costs
         extras_cost = Decimal("0")

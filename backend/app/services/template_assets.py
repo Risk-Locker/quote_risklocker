@@ -200,13 +200,18 @@ def asset_data_uri(db: Session | None, asset_id: str | None) -> str:
 def find_asset_by_hint(db: Session | None, hints: list[str]) -> str:
     assets = list_template_assets(db)
     lowered = [(asset["id"], asset["filename"].lower(), asset["label"].lower()) for asset in assets]
+    
+    if db is not None:
+        business_assets = db.scalars(select(BusinessAsset).where(BusinessAsset.status.in_(["active", "unassigned"]))).all()
+        for b in business_assets:
+            lowered.append((b.id, (b.filename or "").lower(), (b.label or "").lower()))
+            
     for hint in hints:
         token = hint.lower()
         for asset_id, filename, label in lowered:
             if token in filename or token in label:
                 return asset_id
     return ""
-
 
 def _extension_for_mime(mime: str) -> str:
     if mime == "image/svg+xml":

@@ -398,6 +398,23 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
     updateElement(elementId, { style: patch });
   }
 
+  function updateDisplayOption(category: "default" | "addon", key: string, val: boolean) {
+    commit((current) => {
+      const prevDisplay = (current as any).display_options || {};
+      const catOpts = { ...(prevDisplay[category] || {}), [key]: val };
+      (current as any).display_options = { ...prevDisplay, [category]: catOpts };
+      return current;
+    });
+  }
+
+  function updateDisplayOptionRoot(key: string, val: boolean) {
+    commit((current) => {
+      const prevDisplay = (current as any).display_options || {};
+      (current as any).display_options = { ...prevDisplay, [key]: val };
+      return current;
+    });
+  }
+
   function addElement(type: string, patch: Partial<CanvasElement> = {}) {
     const element: CanvasElement = {
       id: makeId(type),
@@ -2087,6 +2104,13 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                       </label>
                     ) : null}
 
+                    <BenefitDisplayControlPanel
+                      displayOptions={(config as any)?.display_options || {}}
+                      readOnly={readOnly}
+                      onToggleRoot={updateDisplayOptionRoot}
+                      onToggleCategory={updateDisplayOption}
+                    />
+
                     <p className="text-[11px] leading-relaxed text-[var(--rl-text-muted)]">Scenario count is editor-only. It is never saved into the published template.</p>
                   </EditorShell>
                 ) : null}
@@ -2224,7 +2248,19 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                   <Button variant="danger" size="sm" icon={<Trash weight="bold" size={14} />} disabled={readOnly} onClick={deleteSelection}>Delete</Button>
                 </div>
               </div>
-            ) : <p className="mt-3 text-sm text-[var(--rl-text-muted)]">Select an element on the canvas.</p>}
+            ) : (
+              <div className="mt-3 space-y-4">
+                <div className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3 text-xs text-[var(--rl-text-muted)]">
+                  Click any element on the canvas to inspect and edit its properties, or configure the template&apos;s global benefit display settings below.
+                </div>
+                <BenefitDisplayControlPanel
+                  displayOptions={(config as any)?.display_options || {}}
+                  readOnly={readOnly}
+                  onToggleRoot={updateDisplayOptionRoot}
+                  onToggleCategory={updateDisplayOption}
+                />
+              </div>
+            )}
               </div>
           </aside>
         ) : <div />}
@@ -2511,6 +2547,144 @@ function CardEditor({ cardId, card, assets, readOnly, onChange }: { cardId: stri
         <option value="">Auto icon asset</option>
         {assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.label}</option>)}
       </Select>
+    </div>
+  );
+}
+
+function BenefitDisplayControlPanel({
+  displayOptions,
+  readOnly,
+  onToggleRoot,
+  onToggleCategory,
+}: {
+  displayOptions: any;
+  readOnly: boolean;
+  onToggleRoot: (key: string, val: boolean) => void;
+  onToggleCategory: (category: "default" | "addon", key: string, val: boolean) => void;
+}) {
+  const isEnabled = displayOptions?.enabled !== false;
+  const defOpts = displayOptions?.default || {};
+  const addOpts = displayOptions?.addon || {};
+
+  const fields = [
+    { key: "showAsset", label: "Logo" },
+    { key: "showGroup", label: "Title" },
+    { key: "showCoverage", label: "Coverage" },
+    { key: "showDescription", label: "Desc" },
+    { key: "showCost", label: "Cost" },
+  ];
+
+  return (
+    <div className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3 space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <span className="block text-xs font-bold text-[var(--rl-text-strong)]">
+            Benefit Display Control Panel
+          </span>
+          <span className="block text-[10.5px] text-[var(--rl-text-muted)]">
+            Master card attribute visibility for this template
+          </span>
+        </div>
+        <button
+          type="button"
+          disabled={readOnly}
+          onClick={() => onToggleRoot("enabled", !isEnabled)}
+          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--rl-red)] focus:ring-offset-1 disabled:opacity-50 ${
+            isEnabled ? "bg-[var(--rl-red)]" : "bg-gray-300"
+          }`}
+          title={isEnabled ? "Disable display control (show everything)" : "Enable display control"}
+        >
+          <span className="sr-only">Toggle Global Display Settings</span>
+          <span
+            aria-hidden="true"
+            className={`pointer-events-none absolute left-0 inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+              isEnabled ? "translate-x-4" : "translate-x-0.5"
+            }`}
+          />
+        </button>
+      </div>
+
+      <div className="rounded-[4px] border border-blue-100 bg-blue-50/70 p-2 text-[10px] text-blue-900 leading-snug">
+        <span className="font-bold">Fixed Override Rule:</span> Benefits with explicit <em>Hard Display Overrides</em> in Global Benefits (e.g. <strong>Windscreen</strong>) lock their visibility and will ignore these toggles.
+      </div>
+
+      {isEnabled ? (
+        <div className="space-y-2.5 pt-1">
+          {/* Default / Included Benefits */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10.5px] font-bold text-[var(--rl-text-strong)]">
+                Default Benefits (Included):
+              </span>
+              <span className="text-[9.5px] text-[var(--rl-text-muted)]">
+                Standard baseline
+              </span>
+            </div>
+            <div className="grid grid-cols-5 gap-1 text-[10px]">
+              {fields.map(({ key, label }) => {
+                const isOn = defOpts[key] !== false;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    disabled={readOnly}
+                    onClick={() => onToggleCategory("default", key, !isOn)}
+                    className={`rounded py-1 text-center font-bold transition-all disabled:opacity-50 ${
+                      isOn
+                        ? "bg-[var(--rl-black)] text-white shadow-xs ring-1 ring-[var(--rl-black)]"
+                        : "bg-white text-[var(--rl-text-muted)] border border-[var(--rl-border)] hover:bg-gray-50"
+                    }`}
+                  >
+                    <div>{label}</div>
+                    <div className={`text-[8.5px] font-normal mt-0.5 ${isOn ? "text-emerald-300" : "text-gray-400"}`}>
+                      {isOn ? "SHOW" : "HIDE"}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Add-on Benefits */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10.5px] font-bold text-[var(--rl-text-strong)]">
+                Add-on Benefits (Optional / Paid):
+              </span>
+              <span className="text-[9.5px] text-[var(--rl-text-muted)]">
+                Riders & extras
+              </span>
+            </div>
+            <div className="grid grid-cols-5 gap-1 text-[10px]">
+              {fields.map(({ key, label }) => {
+                const isOn = addOpts[key] !== false;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    disabled={readOnly}
+                    onClick={() => onToggleCategory("addon", key, !isOn)}
+                    className={`rounded py-1 text-center font-bold transition-all disabled:opacity-50 ${
+                      isOn
+                        ? "bg-[var(--rl-black)] text-white shadow-xs ring-1 ring-[var(--rl-black)]"
+                        : "bg-white text-[var(--rl-text-muted)] border border-[var(--rl-border)] hover:bg-gray-50"
+                    }`}
+                  >
+                    <div>{label}</div>
+                    <div className={`text-[8.5px] font-normal mt-0.5 ${isOn ? "text-emerald-300" : "text-gray-400"}`}>
+                      {isOn ? "SHOW" : "HIDE"}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <p className="text-[10px] text-[var(--rl-text-muted)] italic">
+          Full display active. All card attributes render by default.
+        </p>
+      )}
     </div>
   );
 }

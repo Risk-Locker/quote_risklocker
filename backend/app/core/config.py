@@ -217,8 +217,8 @@ def _storage_settings() -> tuple[str, str, str, str]:
     if driver != "supabase":
         raise RuntimeError("STORAGE_DRIVER must be 'supabase'. Persistent local PDF storage is not supported.")
     url = _required("SUPABASE_URL").rstrip("/")
-    if not url.lower().startswith("https://"):
-        raise RuntimeError("SUPABASE_URL must be an HTTPS Supabase project URL.")
+    if not url.lower().startswith("https://") and not url.lower().startswith("http://"):
+        raise RuntimeError("SUPABASE_URL must be an HTTP or HTTPS Supabase project URL.")
     service_key = _required("SUPABASE_SERVICE_ROLE_KEY")
     bucket = os.getenv("SUPABASE_STORAGE_BUCKET", "risklocker-pdfs").strip()
     if not bucket or any(ch not in "abcdefghijklmnopqrstuvwxyz0123456789-_" for ch in bucket.lower()):

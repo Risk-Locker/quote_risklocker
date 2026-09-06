@@ -98,6 +98,9 @@ class TrashDeleteForeverRequest(BaseModel):
     entity_type: str = Field(min_length=1)
     entity_id: str = Field(min_length=1)
 
+class BulkDeleteRequest(BaseModel):
+    item_ids: list[str]
+
 
 # --- Client Records ---
 

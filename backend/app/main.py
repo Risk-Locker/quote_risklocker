@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sys
@@ -19,10 +20,7 @@ from app.core.config import get_settings
 from app.core.errors import register_error_handlers
 from app.core.http_security import RequestSecurityMiddleware, SecurityHeadersMiddleware
 from app.core.rate_limit import RateLimitMiddleware
-from app.db.init_db import seed_defaults  # RL-DISABLED startup seeding — disabled 2026-08-13; invoke explicitly from CLI only.
 from app.db.session import SessionLocal, verify_database_connection, verify_schema_version
-from app.models.tables import Base  # RL-DISABLED runtime schema creation — disabled 2026-08-13; migrations own schema changes.
-from app.services.storage_retention import purge_expired_pdfs  # RL-DISABLED automatic expiry — disabled 2026-08-13; PDFs are manually retained.
 from app.storage.supabase import SupabaseStorage, close_shared_storage_client
 
 
@@ -127,8 +125,6 @@ def create_app() -> FastAPI:
     app.add_middleware(SecurityHeadersMiddleware, production=production)
     register_error_handlers(app)
     app.include_router(router, prefix="/api")
-    if not production:
-        app.include_router(router)
 
     return app
 

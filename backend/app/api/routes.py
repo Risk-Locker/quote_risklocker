@@ -57,6 +57,7 @@ from app.api.schemas import (
     TemplateSelectionImpactRequest,
     TemplateUpdateRequest,
     TrashDeleteForeverRequest,
+    BulkDeleteRequest,
     UserCreateRequest,
     UserPasswordChangeRequest,
     UserUpdateRequest,
@@ -289,7 +290,20 @@ def _pdf_response(data: bytes, filename: str, range_header: str | None, download
 
 @router.get("/health")
 def health(settings: Settings = Depends(settings_dep)) -> dict:
-    return {"status": "Ready", "app": settings.app_name}
+    db_host = "Unknown"
+    if settings.database_url:
+        parts = settings.database_url.split('@') if isinstance(settings.database_url, str) else str(settings.database_url).split('@')
+        if len(parts) > 1:
+            db_host = parts[-1].split('/')[0]
+            
+    return {
+        "status": "Ready", 
+        "app": settings.app_name,
+        "env": settings.app_env,
+        "supabase_url": settings.supabase_url,
+        "database_host": db_host,
+        "storage_bucket": settings.supabase_storage_bucket
+    }
 
 
 @router.get("/health/ready")
@@ -528,6 +542,17 @@ def generate_selected(payload: GenerateSelectedRequest, db: Session = Depends(ge
 def sessions_list(search: str | None = None, limit: int = 25, offset: int = 0, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     sessions, total = list_sessions(db, user.id, search=search, limit=min(max(limit, 1), 100), offset=max(offset, 0))
     return {"sessions": [serialize_session(s) for s in sessions], "total": total}
+
+
+@router.post("/sessions/bulk-delete")
+def sessions_bulk_delete(payload: BulkDeleteRequest, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
+    from app.services.trash_service import permanent_delete_session
+    for sid in payload.item_ids:
+        try:
+            permanent_delete_session(db, user, sid, SupabaseStorage(settings))
+        except Exception:
+            pass # Skip if not found or already deleted
+    return {"deleted": True}
 
 
 @router.get("/sessions/{session_id}")
@@ -809,9 +834,9 @@ def session_extract_gemini(
 
             concept_id = (matched_concept.get("concept_id") or matched_concept.get("id")) if matched_concept else None
             c_key = (matched_concept.get("concept_key") or matched_concept.get("key")) if matched_concept else (b_key or b_norm)
-            limit_val = cov_limit or (b_val if b_val.lower() not in {"included", "standard", "yes", "true"} else "")
+            limit_val = cov_limit or (b_val if b_val.lower() not in {"included", "standard", "yes", "true", "optional"} else "")
             typed_val = None
-            if limit_val:
+            if limit_val and (re.search(r"\d", limit_val) or re.search(r"\bunlimited\b", limit_val, re.I)):
                 clean_limit = limit_val.upper().replace("RM", "").replace(",", "").strip()
                 is_pure_money = bool(re.match(r"^\s*(?:RM\s*)?[\d]+(?:,\d{3})*(?:\.\d{1,2})?\s*$", limit_val, re.IGNORECASE))
                 if is_pure_money:
@@ -827,22 +852,6 @@ def session_extract_gemini(
                         "value": limit_val,
                         "display_text": limit_val,
                     }
-            elif cost:
-                clean_cost = cost.upper().replace("RM", "").replace(",", "").strip()
-                is_pure_money = bool(re.match(r"^\s*(?:RM\s*)?[\d]+(?:,\d{3})*(?:\.\d{1,2})?\s*$", cost, re.IGNORECASE))
-                if is_pure_money:
-                    typed_val = {
-                        "type": "money",
-                        "value": clean_cost,
-                        "currency": "MYR",
-                        "display_text": f"RM {clean_cost}",
-                    }
-                else:
-                    typed_val = {
-                        "type": "text",
-                        "value": cost,
-                        "display_text": cost,
-                    }
 
             line = ExtractionBenefitLine(
                 id=new_id(),
@@ -855,7 +864,7 @@ def session_extract_gemini(
                 source_scope="selected",
                 line_kind="benefit_candidate",
                 inclusion_state="selected",
-                evidence={"value": b_val, "coverage_limit": cov_limit, "premium_cost": cost},
+                evidence={"value": b_val, "coverage_limit": cov_limit if (re.search(r"\d", cov_limit) or re.search(r"\bunlimited\b", cov_limit, re.I)) else "", "premium_cost": cost},
                 candidate_mappings=[{
                     "concept_id": concept_id,
                     "concept_key": c_key,
@@ -864,8 +873,8 @@ def session_extract_gemini(
                     "score": 100,
                     "match_type": "gemini_multimodal",
                     "evidence": b_val,
-                    "shaped_description": f"{b_label} ({b_val})" if b_val and b_val.lower() != "included" else b_label,
-                    "coverage_limit": cov_limit or b_val,
+                    "shaped_description": f"{b_label} ({limit_val})" if limit_val and (re.search(r"\d", limit_val) or re.search(r"\bunlimited\b", limit_val, re.I)) else b_label,
+                    "coverage_limit": limit_val if (re.search(r"\d", limit_val) or re.search(r"\bunlimited\b", limit_val, re.I)) else None,
                     "premium_cost": cost,
                     "is_detected": True,
                 }] if concept_id or c_key else [],
@@ -1177,6 +1186,18 @@ def trash_delete_forever(payload: TrashDeleteForeverRequest, db: Session = Depen
     if not handler:
         raise AppError("Unknown trash item type.", 400)
     handler()
+    return {"deleted": True}
+
+
+@router.post("/trash/bulk-delete-forever")
+def trash_bulk_delete_forever(payload: BulkDeleteRequest, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
+    from app.services import trash_service
+    # Trash records are listed in trash UI as trash.id
+    for tid in payload.item_ids:
+        try:
+            trash_service.permanent_delete_trash_record(db, user, tid, SupabaseStorage(settings))
+        except Exception:
+            pass
     return {"deleted": True}
 
 
@@ -2298,6 +2319,9 @@ def road_tax_rule_delete(rule_id: str, db: Session = Depends(get_db), user: User
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
     delete_road_tax_rule(db, rule_id)
     return {"deleted": True}
+
+
+
 
 
 @router.get("/admin/road-tax-rules/export")

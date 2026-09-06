@@ -159,6 +159,7 @@ def process_render_job(
             "groups": context.get("groups") or [],
             "extras": context.get("extras") or [],
             "total_premium_adjusted": (context.get("fields") or {}).get("total_premium_adjusted", {}).get("value") or context.get("total_premium_adjusted"),
+            "display_options": context.get("display_options") or {},
         },
         resolved_assets=resolved_assets,
     )

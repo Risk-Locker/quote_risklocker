@@ -91,13 +91,13 @@ export default function SessionsPage() {
   }
 
   async function removeSelected() {
-    const ids = sessions.filter((s) => selected.has(s.id)).map((s) => s.uploaded_file_id);
+    const ids = sessions.filter((s) => selected.has(s.id)).map((s) => s.id);
     if (!ids.length) return;
     setDeleting("bulk");
     setError("");
     try {
-      await api("/records/bulk-delete", { method: "POST", body: JSON.stringify({ uploaded_file_ids: ids }) });
-      toast(`${ids.length} session${ids.length > 1 ? "s" : ""} moved to Trash.`, "success");
+      await api("/sessions/bulk-delete", { method: "POST", body: JSON.stringify({ item_ids: ids }) });
+      toast(`${ids.length} session${ids.length > 1 ? "s" : ""} deleted forever.`, "success");
       setSelected(new Set());
       setPendingBulkDelete(false);
       await load(true);

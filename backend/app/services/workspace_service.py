@@ -276,7 +276,7 @@ def _catalog_overview(db, draft: QuotationDraft) -> dict:
     return overview
 
 
-def _field_summary(draft: QuotationDraft) -> dict[str, dict]:
+def _field_summary(draft: QuotationDraft, session_ref: str | None = None) -> dict[str, dict]:
     output: dict[str, dict] = {}
     for name, value in (draft.fields or {}).items():
         field = value if isinstance(value, dict) else {"value": value}
@@ -285,6 +285,14 @@ def _field_summary(draft: QuotationDraft) -> dict[str, dict]:
             "status": field.get("status", "check_needed"),
             "message": field.get("message", ""),
             "decision": (draft.scalar_decisions or {}).get(name),
+        }
+    current_qref = output.get("quotation_reference", {}).get("value")
+    if (not current_qref or not str(current_qref).startswith("RL")) and session_ref and session_ref.startswith("RL"):
+        output["quotation_reference"] = {
+            "value": session_ref,
+            "status": "ready",
+            "message": "",
+            "decision": None,
         }
     return output
 
@@ -388,8 +396,10 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
     eval_context = extract_evaluation_context(draft.fields or {}, extras_section.get("extras", []))
     
     # Try to determine insurer_key and product_type
-    insurer_key = str(getattr(draft.company, "company_key", "") or "etiqa") if hasattr(draft, "company") and draft.company else "etiqa"
-    product_type = str(getattr(draft.product, "name", "private_car") or "private_car") if hasattr(draft, "product") and draft.product else "private_car"
+    draft_company = getattr(draft, "company", None)
+    draft_product = getattr(draft, "product", None)
+    insurer_key = str(getattr(draft_company, "company_key", "") or "etiqa") if draft_company else "etiqa"
+    product_type = str(getattr(draft_product, "name", "private_car") or "private_car") if draft_product else "private_car"
     
     insurer_catalog = get_catalog_for_product(insurer_key, product_type)
 
@@ -503,7 +513,9 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
         "uploaded_file_id": draft.uploaded_file_id,
         "revision": draft.revision,
         "status": draft.status,
-        "fields": _field_summary(draft),
+        "display_options": draft.display_options or {},
+        "quotation_ref": session.quotation_ref,
+        "fields": _field_summary(draft, session.quotation_ref),
         "benefits": [_selection_summary(item) for item in sorted(selections, key=lambda item: (item.sort_order, item.selection_key))],
         "benefit_cards": benefit_cards,
         "extras": extras,
@@ -1334,14 +1346,13 @@ def _apply_reset_benefits(db, draft: QuotationDraft, user, operation: dict) -> s
     for d in _rows_for_draft(db, DraftSourceLineDecision, draft.id):
         db.delete(d)
 
-    if draft.catalog_revision_id:
-        revision = db.get(BenefitCatalogRevision, draft.catalog_revision_id)
-        if revision:
-            seed_base_benefits(db, draft, revision)
-        else:
-            initialize_catalog_review(db, draft)
-    else:
-        initialize_catalog_review(db, draft)
+    revision = pin_catalog_context(db, draft)
+    if revision:
+        seed_base_benefits(db, draft, revision)
+    elif draft.catalog_revision_id:
+        rev = db.get(BenefitCatalogRevision, draft.catalog_revision_id)
+        if rev:
+            seed_base_benefits(db, draft, rev)
 
     auto_apply_extracted_benefits(db, draft)
     return "benefits"
@@ -1909,6 +1920,11 @@ def apply_workspace_patch(
             elif operation_name == "create_custom_benefit":
                 path, _selection = _apply_custom_benefit(db, draft, user, operation)
                 changed_paths.append(path)
+            elif operation_name == "update_display_options":
+                options = operation.get("options")
+                if isinstance(options, dict):
+                    draft.display_options = {**(draft.display_options or {}), **options}
+                    changed_paths.append("display_options")
             elif operation_name == "source_disposition":
                 changed_paths.append(_apply_source_disposition(db, draft, user, operation))
             elif operation_name == "select_catalog_offering":
@@ -1973,11 +1989,13 @@ def apply_workspace_patch(
     except AppError:
         db.rollback()
         raise
+    session = db.scalar(select(Session).where(Session.draft_id == draft.id))
+    session_ref = session.quotation_ref if session else None
     return {
         "draft_id": draft.id,
         "revision": draft.revision,
         "status": draft.status,
-        "fields": _field_summary(draft),
+        "fields": _field_summary(draft, session_ref),
         "changed_paths": changed_paths,
         "generation_blockers": blockers,
     }

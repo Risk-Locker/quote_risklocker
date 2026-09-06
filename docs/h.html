@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RiskLocker Architecture Flow</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f8f9fa;
+            margin: 0;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            max-width: 1200px;
+            width: 100%;
+            overflow-x: auto;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>RiskLocker System Flow Diagram</h1>
+        <div class="mermaid">
+            graph TD
+                %% User Action
+                User([User]) -->|Uploads PDF| NextJS[Next.js Frontend]
+                NextJS -->|POST /api/extraction| FastAPI[FastAPI Backend]
+
+                %% Backend Processing
+                subgraph Backend [FastAPI Backend]
+                    Auth[Security & Auth Middleware]
+                    RateLimit[Rate Limit Middleware]
+                    Orchestrator[Extraction Orchestrator]
+                    Validator[Math & Schema Validator]
+                end
+
+                FastAPI --> Auth
+                Auth --> RateLimit
+                RateLimit --> Orchestrator
+
+                %% RAG Learning Loop
+                subgraph Database [PostgreSQL Database]
+                    QuotationDraft[(QuotationDraft)]
+                    ClientRecord[(ClientRecord)]
+                    CorrectionMemory[(CorrectionMemory)]
+                    BenefitAlias[(BenefitAlias)]
+                end
+
+                CorrectionMemory -.->|Injects past corrections| Orchestrator
+                BenefitAlias -.->|Injects alias mappings| Orchestrator
+
+                %% AI Extraction
+                subgraph AI [Google Gemini API]
+                    Gemini[Gemini 1.5 Flash]
+                end
+
+                Orchestrator -->|Sends PDF bytes & strict JSON Schema| Gemini
+                Gemini -->|Returns structured JSON| Validator
+
+                %% Validation & Storage
+                Validator -->|Saves parsed data| QuotationDraft
+                Validator -->|Routes IC/BRN| ClientRecord
+
+                %% Output
+                QuotationDraft --> OutputGen[Playwright / Template Generator]
+                OutputGen -->|Generates Output PDF| Storage[(Supabase Storage Bucket)]
+                OutputGen -->|Returns preview| NextJS
+        </div>
+    </div>
+
+    <script>
+        mermaid.initialize({ startOnLoad: true, theme: 'default' });
+    </script>
+</body>
+</html>

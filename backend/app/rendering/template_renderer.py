@@ -259,12 +259,41 @@ def _dynamic_benefit_grid(
         cards = list(render_context.get("current_benefits") or [])
     groups = list(render_context.get("groups") or []) if kind in {"current_benefits", "extras", "purchased_extras"} else []
     group_by_id = {str(item.get("plan_id")): item for item in groups if item.get("plan_id")}
+    disp_opts = (
+        render_context.get("display_options")
+        or (render_context.get("draft") or {}).get("display_options")
+        or (render_context.get("template_config") or {}).get("display_options")
+        or {}
+    )
+    visible_cards = []
+    for card in cards:
+        disp_ovr = card.get("display_overrides") or {}
+        def get_vis(key, default_val=True):
+            if disp_ovr.get("enabled") and key in disp_ovr:
+                return disp_ovr[key]
+            if disp_opts.get("enabled") is not False:
+                cat = "addon" if card.get("is_addon") else "default"
+                cat_opts = disp_opts.get(cat) or {}
+                if key in cat_opts:
+                    return cat_opts[key]
+                if key in disp_opts:
+                    return disp_opts[key]
+            return default_val
+        if not get_vis("isVisible", True):
+            continue
+        card["_showCoverage"] = get_vis("showCoverage", True)
+        card["_showDescription"] = get_vis("showDescription", True)
+        card["_showCost"] = get_vis("showCost", True)
+        card["_showAsset"] = get_vis("showAsset", True)
+        card["_showGroup"] = get_vis("showGroup", True)
+        visible_cards.append(card)
+    cards = visible_cards
     ordered = cards
     if groups:
-        free = [card for card in cards if not str(card.get("group_id") or "")]
+        free = [card for card in cards if not str(card.get("group_id") or "") or not card.get("_showGroup", True)]
         members: dict[str, list[dict]] = {}
         for card in cards:
-            group_id = str(card.get("group_id") or "")
+            group_id = str(card.get("group_id") or "") if card.get("_showGroup", True) else ""
             if group_id and group_id in group_by_id:
                 members.setdefault(group_id, []).append(card)
         ordered = free + [card for group in groups for card in members.get(str(group.get("plan_id")), [])]
@@ -341,11 +370,13 @@ def _dynamic_benefit_grid(
         desc_fs = density["desc"]
         title_color = "#FFFFFF" if is_dark else "#0F172A"
         desc_color = "#94A3B8" if is_dark else "#64748B"
-        val_color = "#F59E0B" if is_dark else "#DC2626"
+        val_color = "#F8FAFC" if is_dark else "#0F172A"
 
         # --- Image cell (bottom-left) ---
         icon_radius = "999px" if is_grid_tile else "4px"
-        if asset_uri_c:
+        if not card.get("_showAsset", True):
+            image_html = ""
+        elif asset_uri_c:
             image_html = (
                 f'<img alt="" src="{escape(asset_uri_c)}" '
                 f'style="width:{icon_sz}px;height:{icon_sz}px;object-fit:contain;display:block;flex-shrink:0;border-radius:{icon_radius}" />'
@@ -360,8 +391,8 @@ def _dynamic_benefit_grid(
 
         # --- Coverage value row ---
         cov_limit = card.get("detected_limit") or card.get("coverage_limit")
-        if cov_limit:
-            value_str = str(cov_limit) if str(cov_limit).startswith("RM") else f"RM {cov_limit}"
+        if cov_limit and (re.search(r"\d", str(cov_limit)) or str(cov_limit).strip().lower() == "unlimited"):
+            value_str = str(cov_limit) if str(cov_limit).startswith("RM") or not any(c.isdigit() for c in str(cov_limit)) else f"RM {cov_limit}"
         elif value_str and (card.get("price") or card.get("optional_price")):
             try:
                 v_num = float(re.sub(r"[^0-9.]", "", value_str))
@@ -373,7 +404,13 @@ def _dynamic_benefit_grid(
             except Exception:
                 pass
 
-        show_value = bool(value_str and value_str not in {"Included standard cover", "Included", "FOC", "As quoted"})
+        # Strict validation: value_str must have digits or be 'unlimited'
+        is_valid_cov = bool(value_str and (re.search(r"\d", value_str) or value_str.strip().lower() == "unlimited"))
+        if is_valid_cov and value_str.lower() in {"included standard cover", "included", "foc", "as quoted", "selected", "optional"}:
+            is_valid_cov = False
+            value_str = ""
+
+        show_value = is_valid_cov and card.get("_showCoverage", True)
         coverage_html = (
             f'<span style="display:block;font-size:{val_fs}px;font-weight:700;line-height:1.15;'
             f'color:{val_color};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{value_str}</span>'
@@ -385,14 +422,14 @@ def _dynamic_benefit_grid(
             f'<span style="display:block;font-size:{desc_fs}px;line-height:1.2;color:{desc_color};'
             f'overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">'
             f'{desc_str}</span>'
-            if (desc_str and not is_minimal) else ""
+            if (desc_str and not is_minimal and card.get("_showDescription", True)) else ""
         )
 
         # --- Cost / price badge ---
         price_badge = ""
         price = card.get("price") or card.get("optional_price")
         is_addon_card = card.get("is_addon") or kind == "available_addons" or is_purchased_extra or bool(card.get("price"))
-        if is_addon_card and not card.get("is_pure_default"):
+        if is_addon_card and not card.get("is_pure_default") and card.get("_showCost", True):
             p_val = None
             if price:
                 p_val = (price.get("amount") if price.get("amount") is not None else price.get("value")) if isinstance(price, dict) else price
@@ -407,24 +444,29 @@ def _dynamic_benefit_grid(
                     clean_pval = str(p_val).replace("RM ", "").replace("RM", "")
                     p_str = f"Cost : MYR {clean_pval}"
                 price_badge = (
-                    f'<span style="display:block;margin-top:1px;font-size:{desc_fs}px;font-weight:600;'
-                    f'color:{"#FBBF24" if is_dark else "#0F172A"};line-height:1.15;white-space:nowrap">{p_str}</span>'
+                    f'<span style="display:block;margin-top:1px;font-size:{desc_fs}px;font-weight:700;'
+                    f'color:{"#EF4444" if is_dark else "#DC2626"};line-height:1.15;white-space:nowrap">{p_str}</span>'
                 )
             elif kind == "available_addons":
                 price_badge = (
-                    f'<span style="display:block;margin-top:1px;font-size:{desc_fs}px;font-weight:600;'
-                    f'color:{"#FBBF24" if is_dark else "#0F172A"};line-height:1.15;white-space:nowrap">Cost : As quoted</span>'
+                    f'<span style="display:block;margin-top:1px;font-size:{desc_fs}px;font-weight:700;'
+                    f'color:{"#EF4444" if is_dark else "#DC2626"};line-height:1.15;white-space:nowrap">Cost : As quoted</span>'
                 )
 
         # Title font: shrink for long labels
         title_fs = lbl_fs - 1.0 if len(label_str) > 30 else (lbl_fs - 0.5 if len(label_str) > 18 else float(lbl_fs))
         title_margin = 1 if is_minimal else 3
 
-        inner_html = (
-            # Title row (full width)
+        title_html = (
             f'<div style="display:block;font-size:{title_fs}px;font-weight:700;line-height:1.15;'
             f'color:{title_color};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
             f'margin-bottom:{title_margin}px">{label_str}</div>'
+            if card.get("_showGroup", True) else ""
+        )
+
+        inner_html = (
+            # Title row (full width)
+            f'{title_html}'
             # Bottom row: image left, detail right
             f'<div style="display:flex;gap:5px;align-items:flex-start">'
             f'{image_html}'

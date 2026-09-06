@@ -324,6 +324,11 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
         if item.catalog_id == target_catalog.id and item.state == "published"
     ]
     if not revisions:
+        revisions = [
+            item for item in _rows(db, BenefitCatalogRevision)
+            if item.catalog_id == target_catalog.id and item.state == "draft"
+        ]
+    if not revisions:
         draft.catalog_revision_id = None
         return None
 
@@ -343,8 +348,9 @@ def seed_base_benefits(db, draft: QuotationDraft, revision: BenefitCatalogRevisi
 
     # Find primary package for this draft:
     # 1. draft.package_id if set and valid in revision
-    # 2. catalog.package_id if set and valid in revision
-    # 3. Lowest-sort active comprehensive package in revision
+    # 2. Check if extracted tier/plan fields explicitly detect a specific package
+    # 3. catalog.package_id if set and valid in revision
+    # 4. Lowest-sort active comprehensive package in revision
     catalogs = [item for item in _rows(db, BenefitCatalog) if item.id == revision.catalog_id]
     catalog_pkg_id = catalogs[0].package_id if catalogs else None
 
@@ -359,10 +365,30 @@ def seed_base_benefits(db, draft: QuotationDraft, revision: BenefitCatalogRevisi
         valid_ids = {item.id for item in revision_packages}
         if getattr(draft, "package_id", None) and draft.package_id in valid_ids:
             primary_pkg_id = draft.package_id
-        elif catalog_pkg_id and catalog_pkg_id in valid_ids:
-            primary_pkg_id = catalog_pkg_id
         else:
-            primary_pkg_id = min(revision_packages, key=lambda item: (item.sort_order if item.sort_order is not None else 0, item.name)).id
+            detected_tier_text = ""
+            for k in ("product_tier", "tier_name", "plan_name", "detected_package_name"):
+                val = _field_value(draft.fields or {}, k)
+                if val:
+                    detected_tier_text += f" {val}"
+            if detected_tier_text:
+                norm_tier = _norm(detected_tier_text)
+                matched_pkg = next(
+                    (
+                        p for p in revision_packages
+                        if (_norm(p.name) in norm_tier or norm_tier in _norm(p.name))
+                        or (p.package_key and (_norm(p.package_key) in norm_tier or norm_tier in _norm(p.package_key)))
+                    ),
+                    None,
+                )
+                if matched_pkg:
+                    primary_pkg_id = matched_pkg.id
+
+            if not primary_pkg_id:
+                if catalog_pkg_id and catalog_pkg_id in valid_ids:
+                    primary_pkg_id = catalog_pkg_id
+                else:
+                    primary_pkg_id = min(revision_packages, key=lambda item: (item.sort_order if item.sort_order is not None else 0, item.name)).id
 
         if not getattr(draft, "package_id", None):
             draft.package_id = primary_pkg_id
@@ -528,8 +554,10 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     target_concept_id = concepts_by_key[c_k].id
             if mapping.get("premium_cost"):
                 premium_cost = mapping.get("premium_cost")
-            if mapping.get("coverage_limit") or mapping.get("evidence"):
-                cov_limit = mapping.get("coverage_limit") or mapping.get("evidence")
+            if mapping.get("coverage_limit"):
+                raw_cl = str(mapping.get("coverage_limit")).strip()
+                if any(c.isdigit() for c in raw_cl) or raw_cl.lower() == "unlimited":
+                    cov_limit = raw_cl
 
         if all_concepts and target_concept_id and str(target_concept_id) not in all_concepts:
             target_concept_id = None
@@ -551,6 +579,12 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
             cov_limit = cov_limit or line.extracted_value.get("coverage_limit")
         if not cov_limit and isinstance(line.evidence, dict):
             cov_limit = line.evidence.get("coverage_limit") or line.evidence.get("limit")
+
+        # Sanitize cov_limit: must have digits or be unlimited
+        if cov_limit:
+            cl_str = str(cov_limit).strip()
+            if not any(c.isdigit() for c in cl_str) and cl_str.lower() != "unlimited":
+                cov_limit = None
 
         ev_text = (line.evidence.get("text") or "") if isinstance(line.evidence, dict) else (str(line.evidence) if line.evidence else "")
         raw_text_check = f"{line.raw_label or ''} {ev_text}".lower()
@@ -581,11 +615,12 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
         extracted = line.extracted_value if isinstance(line.extracted_value, dict) else None
         if extracted is None:
             ev_dict = line.evidence if isinstance(line.evidence, dict) else {}
-            ev_str = str(cov_limit or ev_dict.get("value") or ev_dict.get("coverage_limit") or (line.evidence if isinstance(line.evidence, str) else "") or "")
-            if ev_str and ev_str.lower() not in {"included", "standard", "yes", "true", "selected"}:
-                clean_limit = ev_str.upper().replace("RM", "").replace(",", "").strip()
+            ev_str = str(cov_limit or ev_dict.get("coverage_limit") or ev_dict.get("limit") or "")
+            if ev_str and ev_str.lower() not in {"included", "standard", "yes", "true", "selected", "optional"}:
+                has_digits = bool(re.search(r"\d", ev_str))
                 is_pure_money = bool(re.match(r"^\s*(?:RM\s*)?[\d]+(?:,\d{3})*(?:\.\d{1,2})?\s*$", ev_str, re.IGNORECASE))
                 if is_pure_money:
+                    clean_limit = ev_str.upper().replace("RM", "").replace(",", "").strip()
                     extracted = {
                         "type": "money",
                         "value": clean_limit,
@@ -593,11 +628,11 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                         "semantic_role": "limit",
                         "display_text": f"RM {clean_limit}",
                     }
-                else:
+                elif has_digits or ev_str.strip().lower() == "unlimited":
                     extracted = {
-                        "type": "text",
-                        "value": ev_str,
-                        "display_text": ev_str,
+                        "type": "custom",
+                        "value": ev_str.strip(),
+                        "display_text": ev_str.strip(),
                     }
             elif premium_cost:
                 clean_p = str(premium_cost).upper().replace("RM", "").replace(",", "").strip()

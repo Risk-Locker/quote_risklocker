@@ -876,6 +876,16 @@ def update_catalog_context(db, user, catalog_id: str, payload: dict) -> dict:
 
 
 def _offering(item: CatalogOffering) -> dict:
+    disp_val = item.display_value
+    if disp_val:
+        d_str = str(disp_val).strip()
+        has_digits = any(c.isdigit() for c in d_str)
+        is_unlimited = d_str.lower() == "unlimited"
+        if not has_digits and not is_unlimited:
+            disp_val = None
+        elif d_str.lower() in {"included", "optional", "foc", "as quoted", "selected", "standard"}:
+            disp_val = None
+
     return {
         "id": item.id,
         "catalog_revision_id": item.catalog_revision_id,
@@ -887,7 +897,7 @@ def _offering(item: CatalogOffering) -> dict:
         "role": item.role,
         "label_override": item.label_override,
         "typed_value": item.typed_value,
-        "display_value": item.display_value,
+        "display_value": disp_val,
         "optional_price": item.optional_price,
         "source_document_id": item.source_document_id,
         "source_citation": item.source_citation,
@@ -989,30 +999,51 @@ def _validate_assignment_context(db, catalog: BenefitCatalog, revision: BenefitC
     applies_type = payload.get("applies_to_type")
     applies_id = payload.get("applies_to_id")
     role = payload.get("role")
+
+    # If updating an existing offering and applies_to_type was not specified in the payload, preserve it
+    if applies_type is None and payload.get("id"):
+        existing_off = db.get(CatalogOffering, payload["id"])
+        if existing_off is not None:
+            applies_type = existing_off.applies_to_type
+            applies_id = existing_off.applies_to_id
+
+    rev_packages = list(db.scalars(select(BenefitPackage).where(BenefitPackage.catalog_revision_id == revision.id)).all())
+    is_catalog_packaged = bool(catalog.package_id) or bool(rev_packages)
+
     if applies_type is None and not legacy:
-        applies_type = "package" if catalog.package_id else "product"
-        applies_id = catalog.package_id if catalog.package_id else None
+        applies_type = "package" if is_catalog_packaged else "product"
+        applies_id = (catalog.package_id or (rev_packages[0].id if rev_packages else None)) if is_catalog_packaged else catalog.product_id
     if applies_type is not None and applies_type not in {"product", "package", "bundle"}:
         raise AppError("Assignment target type must be product, package, or bundle.", 422)
     if role is not None and role not in {"included", "addon_option", "bundle_component"}:
         raise AppError("Assignment role is invalid.", 422)
     if applies_type is not None:
         if applies_type == "package":
-            if catalog.package_id is None:
+            if not rev_packages and catalog.package_id is None:
                 raise AppError("This catalog has no package; assignments must be product-level.", 422)
             if applies_id is None:
-                applies_id = catalog.package_id
+                applies_id = catalog.package_id or (rev_packages[0].id if rev_packages else None)
             else:
                 package = db.get(BenefitPackage, applies_id)
-                if package is None or package.catalog_revision_id != revision.id or package.package_kind != "comprehensive":
+                if package and package.catalog_revision_id != revision.id:
+                    matched_pkg = db.scalar(
+                        select(BenefitPackage).where(
+                            BenefitPackage.catalog_revision_id == revision.id,
+                            (BenefitPackage.package_key == package.package_key) | (BenefitPackage.name == package.name),
+                        )
+                    )
+                    if matched_pkg:
+                        package = matched_pkg
+                        applies_id = matched_pkg.id
+                if package is None or package.catalog_revision_id != revision.id or package.package_kind not in {"comprehensive", "tpft", "tpo"}:
                     raise AppError("Choose a comprehensive package from this catalog's draft revision.", 422)
         elif applies_type == "bundle":
-            if catalog.package_id is None:
+            if catalog.package_id is None and not rev_packages:
                 raise AppError("Add-on bundles require a packaged catalog.", 422)
             bundle = db.get(BenefitPackage, applies_id) if applies_id else None
             if bundle is None or bundle.catalog_revision_id != revision.id or bundle.package_kind != "addon_bundle":
                 raise AppError("Choose an add-on bundle from this catalog's draft revision.", 422)
-        elif applies_type == "product" and catalog.package_id is not None:
+        elif applies_type == "product" and is_catalog_packaged:
             raise AppError("This catalog is packaged; assign benefits to the package instead.", 422)
     optional_price = payload.get("optional_price")
     if optional_price is not None:
@@ -1097,6 +1128,8 @@ def save_catalog_offering(db, user, catalog_id: str, payload: dict) -> dict:
                 ))
             if catalog.package_id and catalog.package_id in package_map:
                 catalog.package_id = package_map[catalog.package_id]
+            if payload.get("applies_to_id") and payload["applies_to_id"] in package_map:
+                payload["applies_to_id"] = package_map[payload["applies_to_id"]]
             catalog.revision += 1
             catalog.status = "draft"
             db.flush()
@@ -1123,12 +1156,12 @@ def save_catalog_offering(db, user, catalog_id: str, payload: dict) -> dict:
     if payload.get("id"):
         offering = db.get(CatalogOffering, payload["id"])
         if offering is None or offering.catalog_revision_id != revision.id:
-            # If from previous revision, find matching concept in draft revision
-            if payload.get("concept_id"):
+            # If from previous revision, find matching offering in draft revision by unique offering_key
+            if payload.get("offering_key"):
                 offering = db.scalar(
                     select(CatalogOffering).where(
                         CatalogOffering.catalog_revision_id == revision.id,
-                        CatalogOffering.concept_id == payload["concept_id"],
+                        CatalogOffering.offering_key == payload["offering_key"],
                     )
                 )
     if offering is None:
@@ -1146,7 +1179,14 @@ def save_catalog_offering(db, user, catalog_id: str, payload: dict) -> dict:
         "source_citation", "source_aliases", "presentation_facet_ids", "sort_order", "status",
     ):
         if key in payload:
-            setattr(offering, key, payload[key])
+            val = payload[key]
+            if key == "display_value" and val:
+                v_str = str(val).strip()
+                if not any(c.isdigit() for c in v_str) and v_str.lower() != "unlimited":
+                    val = None
+                elif v_str.lower() in {"included", "optional", "foc", "as quoted", "selected", "standard"}:
+                    val = None
+            setattr(offering, key, val)
     db.flush()
     revision.content_hash = canonical_context_hash(_revision_content_payload(db, revision))
     revision.source_document_ids = sorted({row.source_document_id for row in db.scalars(
@@ -1232,12 +1272,28 @@ def remove_catalog_offering(db, user, catalog_id: str, offering_id: str, *, base
             db.commit()
             return
     offering = db.get(CatalogOffering, offering_id)
+    target_offering = None
     if offering is not None:
-        db.delete(offering)
+        if offering.catalog_revision_id == revision.id:
+            target_offering = offering
+        else:
+            target_offering = db.scalar(
+                select(CatalogOffering).where(
+                    CatalogOffering.catalog_revision_id == revision.id,
+                    (CatalogOffering.offering_key == offering.offering_key)
+                    | (
+                        (CatalogOffering.concept_id == offering.concept_id)
+                        & (CatalogOffering.role == offering.role)
+                    ),
+                )
+            )
+    if target_offering is not None:
+        deleted_id = target_offering.id
+        db.delete(target_offering)
         db.flush()
         revision.content_hash = canonical_context_hash(_revision_content_payload(db, revision))
         catalog.revision += 1
-        _audit(db, user, "business.catalog_offering.delete", "catalog_offering", offering_id, {"catalog_id": catalog.id, "new_revision": catalog.revision})
+        _audit(db, user, "business.catalog_offering.delete", "catalog_offering", deleted_id, {"catalog_id": catalog.id, "new_revision": catalog.revision})
         db.commit()
 
 

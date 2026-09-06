@@ -38,6 +38,7 @@ import { Card } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tooltip } from "@/components/ui/tooltip";
+import { Select } from "@/components/ui/select";
 import { PageLoading } from "@/components/ui/page-loading";
 import { CanvasElementView, type CanvasElement } from "@/components/template-canvas/shared";
 import { GuidedTour, type TourStep } from "@/components/guided-tour";
@@ -212,14 +213,56 @@ function BenefitsPageContent() {
   const [selectedProductId, setSelectedProductId] = useState(params.get("product") || "");
   const [selectedCatalogId, setSelectedCatalogId] = useState(params.get("catalog") || "");
   const [selectedPackageId, setSelectedPackageId] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"structure" | "bundles" | "revisions">("structure");
+  const [selectedPackageKey, setSelectedPackageKey] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<"structure" | "bundles">("structure");
   const [showLiveTemplate, setShowLiveTemplate] = useState(true);
   const [loading, setLoading] = useState(true);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [dialog, setDialog] = useState<"config" | "bundle" | "clone" | null>(null);
+  const [builderCoverageFilter, setBuilderCoverageFilter] = useState<"comprehensive" | "tpft" | "tpo">("comprehensive");
+
   const mountedRef = useRef(true);
+  const leftScrollRef = useRef<HTMLDivElement | null>(null);
+  const rightScrollRef = useRef<HTMLDivElement | null>(null);
+  const isSyncingScrollRef = useRef<boolean>(false);
+
+  const handleLeftScroll = useCallback(() => {
+    if (isSyncingScrollRef.current) return;
+    const left = leftScrollRef.current;
+    const right = rightScrollRef.current;
+    if (!left || !right) return;
+
+    const maxLeft = left.scrollHeight - left.clientHeight;
+    const maxRight = right.scrollHeight - right.clientHeight;
+    if (maxLeft <= 0 || maxRight <= 0) return;
+
+    isSyncingScrollRef.current = true;
+    const ratio = left.scrollTop / maxLeft;
+    right.scrollTop = ratio * maxRight;
+    requestAnimationFrame(() => {
+      isSyncingScrollRef.current = false;
+    });
+  }, []);
+
+  const handleRightScroll = useCallback(() => {
+    if (isSyncingScrollRef.current) return;
+    const left = leftScrollRef.current;
+    const right = rightScrollRef.current;
+    if (!left || !right) return;
+
+    const maxLeft = left.scrollHeight - left.clientHeight;
+    const maxRight = right.scrollHeight - right.clientHeight;
+    if (maxLeft <= 0 || maxRight <= 0) return;
+
+    isSyncingScrollRef.current = true;
+    const ratio = right.scrollTop / maxRight;
+    left.scrollTop = ratio * maxLeft;
+    requestAnimationFrame(() => {
+      isSyncingScrollRef.current = false;
+    });
+  }, []);
 
   // Form states
   const [formName, setFormName] = useState("");
@@ -480,7 +523,9 @@ ${aiMarkdownTable}`;
 
   const productConfigs = useMemo(() => {
     const items = (companyWorkspace?.catalogs || []).filter(
-      (item) => !item.tier_id && (!selectedProductId || !item.product_id || item.product_id === selectedProductId)
+      (item) => !item.tier_id && 
+      (!selectedProductId || !item.product_id || item.product_id === selectedProductId) &&
+      (!item.package || item.package.package_kind === builderCoverageFilter)
     );
     return items.sort((a, b) => {
       const aOrder = a.package?.sort_order ?? 0;
@@ -495,19 +540,42 @@ ${aiMarkdownTable}`;
 
   const comprehensivePackages = useMemo(() => {
     return (catalogWorkspace?.packages || [])
-      .filter((p) => p && p.package_kind === "comprehensive" && p.status === "active")
+      .filter((p) => {
+        if (!p || p.status !== "active") return false;
+        if (matrixFilterCoverage === "All") return true;
+        if (matrixFilterCoverage === "Comprehensive") return p.package_kind === "comprehensive";
+        if (matrixFilterCoverage === "Third Party, Fire & Theft") return p.package_kind === "tpft";
+        if (matrixFilterCoverage === "Third Party") return p.package_kind === "tpo";
+        return true;
+      })
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-  }, [catalogWorkspace]);
+  }, [catalogWorkspace, matrixFilterCoverage]);
 
   const isPackaged = comprehensivePackages.length > 0;
 
   const activePackage = useMemo(() => {
     if (!isPackaged) return null;
-    const found = comprehensivePackages.find((p) => p.id === selectedPackageId);
+    const found = comprehensivePackages.find(
+      (p) =>
+        (selectedPackageId && p.id === selectedPackageId) ||
+        (selectedPackageKey && (p.package_key === selectedPackageKey || p.name === selectedPackageKey))
+    );
     if (found) return found;
     const byCatalog = comprehensivePackages.find((p) => p.id === selectedCatalog?.package_id);
     return byCatalog || comprehensivePackages[0] || null;
-  }, [comprehensivePackages, isPackaged, selectedPackageId, selectedCatalog?.package_id]);
+  }, [comprehensivePackages, isPackaged, selectedPackageId, selectedPackageKey, selectedCatalog?.package_id]);
+
+  useEffect(() => {
+    if (activePackage) {
+      if (activePackage.id !== selectedPackageId) {
+        setSelectedPackageId(activePackage.id);
+      }
+      const key = activePackage.package_key || activePackage.name;
+      if (key && key !== selectedPackageKey) {
+        setSelectedPackageKey(key);
+      }
+    }
+  }, [activePackage, selectedPackageId, selectedPackageKey]);
 
   const allOfferings = useMemo(() => catalogWorkspace?.offerings || [], [catalogWorkspace]);
 
@@ -519,7 +587,7 @@ ${aiMarkdownTable}`;
       if (isPackaged && targetPkgId) {
         return item.applies_to_id === targetPkgId;
       }
-      return !item.applies_to_id;
+      return !item.applies_to_id || item.applies_to_id === selectedCatalog.product_id || item.applies_to_type === "product";
     });
   }, [allOfferings, selectedCatalog, isPackaged, activePackage]);
 
@@ -556,25 +624,51 @@ ${aiMarkdownTable}`;
   const selectedVehicle = useMemo(() => vehicles.find((item) => item.id === selectedVehicleId) || null, [vehicles, selectedVehicleId]);
   const activeTemplate = useMemo(() => templates.find((t) => t.id === selectedTemplateId) || templates[0] || null, [templates, selectedTemplateId]);
 
+  const previewVariableValues = useMemo(() => ({
+    insurance_company: selectedCompany?.name || "Insurance Company",
+    insurer_name: selectedCompany?.name || "Insurance Company",
+    insurer: selectedCompany?.name || "Insurer",
+    product_name: isPackaged && activePackage ? activePackage.name : (selectedProduct?.name || "Private Car Comprehensive"),
+    vehicle_model: selectedVehicle?.name ? `${selectedVehicle.name} (${selectedSegment?.name || "Private"})` : "Perodua Myvi 1.5 AV (Auto)",
+    vehicle_registration: "VAB 1234",
+    quotation_reference: "RL-202609-00101",
+    issue_date: new Date().toLocaleDateString("en-GB"),
+    insured_name: "Ahmad Bin Abdullah",
+    id_number: "900101-14-1234",
+    postcode: "50480",
+    coverage_type: "Comprehensive",
+    sum_insured: "RM 55,000.00",
+    total_premium: "RM 1,450.00",
+  }), [selectedCompany, selectedProduct, selectedVehicle, selectedSegment, isPackaged, activePackage]);
+
   // Real template preview data (mirrors the sessions workspace benefit cards)
   const previewBenefitData = useMemo(
     () => ({
       current_benefits: defaultOfferings.map((o) => ({
         label: o.label_override || o.concept?.label || o.offering_key,
         value: o.display_value || "Included",
+        description: (o.concept as any)?.description || "",
         asset_id: o.concept?.default_asset?.id || null,
         concept_key: o.concept?.concept_key || "",
         is_detected: false,
+        price: o.optional_price,
+        optional_price: o.optional_price,
+        display_overrides: (o as any).display_overrides || {},
       })),
       available_addons: addonOfferings.map((o) => ({
         label: o.label_override || o.concept?.label || o.offering_key,
         value: o.display_value || "Optional",
+        description: (o.concept as any)?.description || "",
         asset_id: o.concept?.default_asset?.id || null,
         concept_key: o.concept?.concept_key || "",
         is_detected: false,
+        price: o.optional_price,
+        optional_price: o.optional_price,
+        display_overrides: (o as any).display_overrides || {},
       })),
+      displayOptions: (activeTemplate as any)?.config?.display_options || (activeTemplate?.fixed_fields as any)?.display_options || {},
     }),
-    [defaultOfferings, addonOfferings]
+    [defaultOfferings, addonOfferings, activeTemplate]
   );
 
   const previewConceptAssets = useMemo(() => {
@@ -643,7 +737,7 @@ ${aiMarkdownTable}`;
   function offeringTarget(): { applies_to_type: string | null; applies_to_id: string | null } {
     return isPackaged && activePackage
       ? { applies_to_type: "package", applies_to_id: activePackage.id }
-      : { applies_to_type: null, applies_to_id: null };
+      : { applies_to_type: selectedCatalog?.product_id ? "product" : null, applies_to_id: selectedCatalog?.product_id || null };
   }
 
   // ── 1-Click Fast Toggle Sticker Handler (Optimistic UI, Zero Reload) ───
@@ -683,7 +777,6 @@ ${aiMarkdownTable}`;
     } else {
       // 2. Optimistic Add (0ms delay)
       const tempId = `temp-${Date.now()}`;
-      const defaultVal = targetRole === "included" ? "Included" : "Optional";
       const variantStr = concept.variants && concept.variants.length > 0 ? concept.variants[0] : "";
       const labelOverride = variantStr ? `${concept.label} (${variantStr})` : null;
 
@@ -697,7 +790,7 @@ ${aiMarkdownTable}`;
         applies_to_id: targetPkgId,
         role: targetRole,
         label_override: labelOverride,
-        display_value: defaultVal,
+        display_value: null,
         sort_order: currentPackageOfferings.length + 1,
         status: "active",
         source_aliases: [],
@@ -724,8 +817,7 @@ ${aiMarkdownTable}`;
         applies_to_id: targetPkgId,
         role: targetRole,
         label_override: labelOverride,
-        typed_value: { type: "custom", display_text: defaultVal },
-        display_value: defaultVal,
+        display_value: null,
         sort_order: currentPackageOfferings.length + 1,
         status: "active",
       };
@@ -780,6 +872,8 @@ ${aiMarkdownTable}`;
         offering_key: offering.offering_key,
         offering_kind: offering.offering_kind,
         concept_id: offering.concept_id,
+        applies_to_type: offering.applies_to_type,
+        applies_to_id: offering.applies_to_id,
         role: offering.role,
         base_revision: selectedCatalog.revision,
         label_override: label,
@@ -799,6 +893,16 @@ ${aiMarkdownTable}`;
     });
   }
 
+  const cleanCoverageValue = (val?: string | null) => {
+    if (!val) return "";
+    const s = String(val).trim();
+    if (/\d/.test(s) || /^unlimited$/i.test(s)) {
+      if (/^(?:included|optional|foc|as quoted|selected|standard)$/i.test(s)) return "";
+      return s;
+    }
+    return "";
+  };
+
   // ── Inline Display Value Editor (Optimistic UI, Zero Reload) ──────────
   async function updateOfferingValueInline(offering: Offering, newValue: string) {
 
@@ -807,13 +911,15 @@ ${aiMarkdownTable}`;
     setError("");
     const prevOfferings = catalogWorkspace.offerings;
     const trimmed = newValue.trim();
+    const isValid = Boolean(trimmed && (/\d/.test(trimmed) || /^unlimited$/i.test(trimmed)) && !/^(?:included|optional|foc|as quoted|selected|standard)$/i.test(trimmed));
+    const cleanVal = isValid ? trimmed : null;
 
     // Optimistic value update
     setCatalogWorkspace((prev) => {
       if (!prev) return prev;
       return {
         ...prev,
-        offerings: prev.offerings.map((o) => (o.id === offering.id ? { ...o, display_value: trimmed || null } : o)),
+        offerings: prev.offerings.map((o) => (o.id === offering.id ? { ...o, display_value: cleanVal } : o)),
       };
     });
 
@@ -823,10 +929,12 @@ ${aiMarkdownTable}`;
         offering_key: offering.offering_key,
         offering_kind: offering.offering_kind,
         concept_id: offering.concept_id,
+        applies_to_type: offering.applies_to_type,
+        applies_to_id: offering.applies_to_id,
         role: offering.role,
         base_revision: selectedCatalog.revision,
-        display_value: trimmed || null,
-        typed_value: trimmed ? { type: "custom", display_text: trimmed } : null,
+        display_value: cleanVal,
+        typed_value: cleanVal ? { type: "custom", display_text: cleanVal } : null,
       };
       await api(`/business/catalogs/${selectedCatalog.id}/offerings`, {
         method: "POST",
@@ -868,6 +976,8 @@ ${aiMarkdownTable}`;
         offering_key: offering.offering_key,
         offering_kind: offering.offering_kind,
         concept_id: offering.concept_id,
+        applies_to_type: offering.applies_to_type,
+        applies_to_id: offering.applies_to_id,
         role: offering.role,
         base_revision: selectedCatalog.revision,
         display_value: offering.display_value || undefined,
@@ -918,7 +1028,16 @@ ${aiMarkdownTable}`;
       if (formAsPackage && formPackageName.trim()) {
         await api(`/business/catalogs/${configId}/packages`, {
           method: "POST",
-          body: JSON.stringify({ base_revision: 1, name: formPackageName.trim(), package_key: formPackageKey.trim() || undefined, package_kind: "comprehensive" }),
+          body: JSON.stringify({
+            base_revision: 1,
+            name: formPackageName.trim(),
+            package_key: formPackageKey.trim() || undefined,
+            ...(builderCoverageFilter === "tpft"
+              ? { package_kind: "tpft" }
+              : builderCoverageFilter === "tpo"
+              ? { package_kind: "tpo" }
+              : { package_kind: "comprehensive" }),
+          }),
         });
       }
       setDialog(null);
@@ -1382,15 +1501,15 @@ ${aiMarkdownTable}`;
               steps={BENEFITS_TOUR_STEPS}
             />
             {selectedCatalog && (
-              selectedCatalog.revisions?.[0]?.state === "published" ? (
+              (catalogWorkspace?.active_revision?.state === "published" && selectedCatalog.status === "published") ? (
                 <Button variant="secondary" size="sm" onClick={openNewDraft} disabled={saving} className="gap-1.5">
                   <PencilSimple size={14} weight="bold" />
                   New draft
                 </Button>
               ) : (
-                <Button size="sm" onClick={publishConfig} disabled={saving} className="gap-1.5">
+                <Button size="sm" onClick={publishConfig} disabled={saving} className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold">
                   <CheckCircle size={14} weight="bold" />
-                  Publish
+                  Publish Changes
                 </Button>
               )
             )}
@@ -1515,11 +1634,28 @@ ${aiMarkdownTable}`;
               <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
                 4. Coverage:
               </span>
-              <div className="flex items-center gap-1.5">
-                <span className="rounded-[var(--rl-radius-sm)] bg-[var(--rl-surface)] border border-[var(--rl-border)] px-2.5 py-1 text-xs font-semibold text-[var(--rl-text-strong)]">
-                  Comprehensive
-                </span>
-                <span className="text-[11px] text-[var(--rl-text-muted)]">(Third Party available)</span>
+              <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
+                {[
+                  { id: "comprehensive", label: "Comprehensive", hint: "(Third Party available)" },
+                  { id: "tpft", label: "Third Party, Fire & Theft", hint: "" },
+                  { id: "tpo", label: "Third Party", hint: "" }
+                ].map((cov) => {
+                  const active = builderCoverageFilter === cov.id;
+                  return (
+                    <button
+                      key={cov.id}
+                      onClick={() => setBuilderCoverageFilter(cov.id as any)}
+                      className={`flex items-center gap-1.5 rounded-[var(--rl-radius-sm)] px-2.5 py-1 transition-all ${
+                        active
+                          ? "bg-[var(--rl-surface)] border border-[var(--rl-border)] text-[var(--rl-text-strong)] shadow-sm"
+                          : "border border-transparent text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                      }`}
+                    >
+                      <span>{cov.label}</span>
+                      {cov.hint && <span className="text-[11px] font-normal text-[var(--rl-text-muted)]">{cov.hint}</span>}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -1875,7 +2011,10 @@ ${aiMarkdownTable}`;
                     return (
                       <button
                         key={pkg.id}
-                        onClick={() => setSelectedPackageId(pkg.id)}
+                        onClick={() => {
+                          setSelectedPackageId(pkg.id);
+                          setSelectedPackageKey(pkg.package_key || pkg.name);
+                        }}
                         className={`flex flex-col justify-between rounded-[var(--rl-radius-sm)] border p-3.5 text-left transition-all ${isCurrent
                           ? "border-[var(--rl-black)] bg-[var(--rl-bg)] shadow-md ring-2 ring-[var(--rl-black)]"
                           : "border-[var(--rl-border)] bg-[var(--rl-surface)] opacity-80 hover:opacity-100 hover:border-[var(--rl-text-muted)]"
@@ -1995,8 +2134,9 @@ ${aiMarkdownTable}`;
             
             {showLiveTemplate ? (
               <PanelGroup orientation="horizontal" className="min-h-[600px] h-[80vh] rounded-[var(--rl-radius)] border border-[var(--rl-border)] shadow-sm bg-[var(--rl-surface)] mb-6">
-                <Panel defaultSize={60} minSize={40} className="flex flex-col gap-6 p-5 overflow-y-auto">
-                  {/* ── Fast Bulk Clicker: Category 1 (Default Benefits) ──────── */}
+                <Panel defaultSize={60} minSize={40} className="flex flex-col overflow-hidden">
+                  <div ref={leftScrollRef} onScroll={handleLeftScroll} className="flex-1 flex flex-col gap-6 p-5 overflow-y-auto">
+                    {/* ── Fast Bulk Clicker: Category 1 (Default Benefits) ──────── */}
             <div className="rl-tour-defaults rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm">
               <div className="mb-4 flex items-center justify-between border-b border-[var(--rl-border)] pb-3">
                 <div>
@@ -2060,13 +2200,13 @@ ${aiMarkdownTable}`;
                           <>
                             <input
                               type="text"
-                              defaultValue={offering?.display_value || "Included"}
+                              defaultValue={cleanCoverageValue(offering?.display_value)}
                               onClick={(e) => e.stopPropagation()}
                               onBlur={(e) => {
                                 if (offering) updateOfferingValueInline(offering, e.target.value);
                               }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] flex-1 min-w-0"
-                              placeholder="Included"
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-text-strong)] flex-1 min-w-0"
+                              placeholder="RM 0.00 (empty if none)"
                               title="Coverage value / limit"
                             />
                             <input
@@ -2076,7 +2216,7 @@ ${aiMarkdownTable}`;
                               onBlur={(e) => {
                                 if (offering) updateOfferingPriceInline(offering, e.target.value);
                               }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] w-16 text-right shrink-0"
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-red)] w-16 text-right shrink-0"
                               placeholder="RM 0"
                               title="Cost / Price (empty if free)"
                             />
@@ -2189,13 +2329,13 @@ ${aiMarkdownTable}`;
                           <>
                             <input
                               type="text"
-                              defaultValue={offering?.display_value || "Optional"}
+                              defaultValue={cleanCoverageValue(offering?.display_value)}
                               onClick={(e) => e.stopPropagation()}
                               onBlur={(e) => {
                                 if (offering) updateOfferingValueInline(offering, e.target.value);
                               }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] flex-1 min-w-0"
-                              placeholder="Optional"
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-text-strong)] flex-1 min-w-0"
+                              placeholder="RM 0.00 (empty if none)"
                               title="Coverage value / limit"
                             />
                             <input
@@ -2205,7 +2345,7 @@ ${aiMarkdownTable}`;
                               onBlur={(e) => {
                                 if (offering) updateOfferingPriceInline(offering, e.target.value);
                               }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] w-16 text-right shrink-0"
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-red)] w-16 text-right shrink-0"
                               placeholder="RM 0"
                               title="Cost / Price (empty if free)"
                             />
@@ -2220,12 +2360,13 @@ ${aiMarkdownTable}`;
                 })}
               </div>
             </div>
+                  </div>
                 </Panel>
                 
                 <PanelResizeHandle className="w-1 bg-[var(--rl-border)] hover:bg-[var(--rl-text-muted)] transition-colors cursor-col-resize flex-shrink-0" />
                 
-                <Panel defaultSize={40} minSize={30} className="bg-[#ececee] shadow-inner relative flex flex-col">
-                  <div className="bg-[var(--rl-surface)] p-4 border-b border-[var(--rl-border)]">
+                <Panel defaultSize={40} minSize={30} className="bg-[#f5f5f7] border-l border-[var(--rl-border)] shadow-inner relative flex flex-col overflow-hidden">
+                  <div className="bg-[var(--rl-surface)] p-4 border-b border-[var(--rl-border)] shrink-0">
                     <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--rl-border)] pb-3">
                   <div>
                     <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">
@@ -2258,8 +2399,8 @@ ${aiMarkdownTable}`;
                   </div>
                 </div>
                   </div>
-                  <div className="flex-1 p-6 overflow-auto">
-                    <div className="flex-1 grid place-items-center overflow-y-auto w-full h-full min-h-0">
+                  <div ref={rightScrollRef} onScroll={handleRightScroll} className="flex-1 p-6 overflow-y-auto overflow-x-hidden">
+                    <div className="flex flex-col items-center justify-start w-full min-h-full py-2">
                     {previewTemplateElements.length === 0 ? (
                       <div className="grid h-full min-h-[420px] w-full place-items-center text-center text-xs text-[var(--rl-text-muted)]">
                         <div>
@@ -2269,7 +2410,7 @@ ${aiMarkdownTable}`;
                       </div>
                     ) : (
                       <div
-                        className="relative w-full max-w-[620px] bg-white shadow-card rounded-[4px] overflow-hidden border border-neutral-300"
+                        className="relative w-full max-w-[620px] bg-white shadow-card rounded-[4px] overflow-hidden border border-neutral-300 outline outline-1 outline-transparent hover:outline-[var(--rl-border)] transition-all duration-200"
                         style={{ aspectRatio: `${canvasW} / ${canvasH}` }}
                       >
                         <div
@@ -2288,7 +2429,8 @@ ${aiMarkdownTable}`;
                               selected={false}
                               readOnly={true}
                               onPointerDown={() => { }}
-                              variableValues={{}}
+                              config={activeTemplate?.fixed_fields || (activeTemplate as any)?.config}
+                              variableValues={previewVariableValues}
                               benefitData={previewBenefitData}
                               conceptAssets={previewConceptAssets}
                               assets={previewTemplateAssets}
@@ -2367,13 +2509,13 @@ ${aiMarkdownTable}`;
                           <>
                             <input
                               type="text"
-                              defaultValue={offering?.display_value || "Included"}
+                              defaultValue={cleanCoverageValue(offering?.display_value)}
                               onClick={(e) => e.stopPropagation()}
                               onBlur={(e) => {
                                 if (offering) updateOfferingValueInline(offering, e.target.value);
                               }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] flex-1 min-w-0"
-                              placeholder="Included"
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-text-strong)] flex-1 min-w-0"
+                              placeholder="RM 0.00 (empty if none)"
                               title="Coverage value / limit"
                             />
                             <input
@@ -2383,7 +2525,7 @@ ${aiMarkdownTable}`;
                               onBlur={(e) => {
                                 if (offering) updateOfferingPriceInline(offering, e.target.value);
                               }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] w-16 text-right shrink-0"
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-red)] w-16 text-right shrink-0"
                               placeholder="RM 0"
                               title="Cost / Price (empty if free)"
                             />
@@ -2496,13 +2638,13 @@ ${aiMarkdownTable}`;
                           <>
                             <input
                               type="text"
-                              defaultValue={offering?.display_value || "Optional"}
+                              defaultValue={cleanCoverageValue(offering?.display_value)}
                               onClick={(e) => e.stopPropagation()}
                               onBlur={(e) => {
                                 if (offering) updateOfferingValueInline(offering, e.target.value);
                               }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] flex-1 min-w-0"
-                              placeholder="Optional"
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-text-strong)] flex-1 min-w-0"
+                              placeholder="RM 0.00 (empty if none)"
                               title="Coverage value / limit"
                             />
                             <input
@@ -2512,7 +2654,7 @@ ${aiMarkdownTable}`;
                               onBlur={(e) => {
                                 if (offering) updateOfferingPriceInline(offering, e.target.value);
                               }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--rl-text-strong)] w-16 text-right shrink-0"
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-red)] w-16 text-right shrink-0"
                               placeholder="RM 0"
                               title="Cost / Price (empty if free)"
                             />
@@ -2550,15 +2692,6 @@ ${aiMarkdownTable}`;
                     }`}
                 >
                   Bundles ({bundles.length})
-                </button>
-                <button
-                  onClick={() => setActiveTab("revisions")}
-                  className={`font-semibold transition-colors ${activeTab === "revisions"
-                    ? "text-[var(--rl-text-strong)] border-b-2 border-[var(--rl-black)] pb-1"
-                    : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                    }`}
-                >
-                  Revisions ({selectedCatalog.revisions?.length || 1})
                 </button>
               </div>
 
@@ -2775,22 +2908,6 @@ ${aiMarkdownTable}`;
                 </div>
               )}
 
-              {activeTab === "revisions" && (
-                <div className="mt-4 space-y-2 text-xs">
-                  {(selectedCatalog.revisions || []).map((rev) => (
-                    <div key={rev.id} className="flex items-center justify-between rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] p-3">
-                      <div>
-                        <span className="font-semibold text-[var(--rl-text-strong)]">Revision #{rev.revision_number}</span>
-                        <span className="ml-2 text-[var(--rl-text-muted)]">{rev.content_hash.slice(0, 12)}...</span>
-                      </div>
-                      <span className="rounded-[4px] bg-[var(--rl-bg)] border border-[var(--rl-border)] px-2 py-0.5 text-[10px] uppercase font-bold text-[var(--rl-text-muted)]">
-                        {rev.state}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
               {activeTab === "structure" && (
                 <div className="mt-3 text-xs text-[var(--rl-text-muted)]">
                   All 34 canonical benefit concepts (11 Default Benefits and 23 Add-ons) are populated from the active database catalog.
@@ -2830,15 +2947,18 @@ ${aiMarkdownTable}`;
                 </label>
               </div>
               {formAsPackage && (
-                <div>
-                  <label className="block font-semibold text-[var(--rl-text-strong)]">Package Name</label>
-                  <Input
-                    value={formPackageName}
-                    onChange={(e) => setFormPackageName(e.target.value)}
-                    placeholder="e.g. auto365 Comprehensive Lite"
-                    className="mt-1 w-full"
-                  />
-                </div>
+                <>
+
+                  <div>
+                    <label className="block font-semibold text-[var(--rl-text-strong)]">Package Name</label>
+                    <Input
+                      value={formPackageName}
+                      onChange={(e) => setFormPackageName(e.target.value)}
+                      placeholder="e.g. auto365 Comprehensive Lite"
+                      className="mt-1 w-full"
+                    />
+                  </div>
+                </>
               )}
               <div className="flex justify-end gap-2 pt-2">
                 <Button variant="secondary" size="sm" onClick={() => setDialog(null)}>

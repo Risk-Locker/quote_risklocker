@@ -383,19 +383,12 @@ function IncludedCard({
             <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-800 ring-1 ring-amber-400/50 shrink-0">★ Detected</span>
           ) : null}
         </div>
-        {card.value && !["", "Included standard cover", "Included", "FOC", "As quoted"].includes(card.value) && (
+        {card.value && !["", "Included standard cover", "Included", "FOC", "As quoted", "Optional"].includes(card.value) && (/\d/.test(card.value) || /unlimited/i.test(card.value)) && (
           <div className="flex items-center gap-1.5 mt-0.5">
-            <p className={`text-[11px] font-bold leading-tight truncate transition-colors ${isLimitHidden ? "text-[var(--rl-text-muted)] line-through" : "text-[var(--rl-red)]"}`}>
+            <p className={`text-[11px] font-bold leading-tight truncate transition-colors ${isLimitHidden ? "text-[var(--rl-text-muted)] line-through" : "text-[var(--rl-text-strong)]"}`}>
               {card.value}
             </p>
-            <button
-              type="button"
-              onClick={toggleLimitVisibility}
-              className="text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] transition-colors p-0.5 rounded hover:bg-gray-100"
-              title={isLimitHidden ? "Show coverage limit in PDF" : "Hide coverage limit in PDF"}
-            >
-              {isLimitHidden ? <EyeClosed size={12} weight="bold" /> : <Eye size={12} weight="bold" />}
-            </button>
+
           </div>
         )}
         {card.description && (
@@ -579,8 +572,8 @@ function AddonCard({
             <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-800 ring-1 ring-amber-400/50 shrink-0">★ Detected</span>
           ) : null}
         </div>
-        {card.value && !["", "Optional payable add-on", "Included", "FOC", "As quoted"].includes(card.value) && (
-          <p className="text-[11px] font-bold text-[var(--rl-red)] leading-tight truncate">
+        {card.value && !["", "Optional payable add-on", "Included", "FOC", "As quoted", "Optional"].includes(card.value) && (/\d/.test(card.value) || /unlimited/i.test(card.value)) && (
+          <p className="text-[11px] font-bold text-[var(--rl-text-strong)] leading-tight truncate">
             {card.value}
           </p>
         )}
@@ -618,14 +611,6 @@ function AddonCard({
               >
                 <span>{currentPriceNum !== null ? `RM ${currentPriceNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "Set price"}</span>
                 <PencilSimple size={10} className="text-[var(--rl-text-muted)] group-hover/price:text-[var(--rl-red)]" />
-              </button>
-              <button
-                type="button"
-                onClick={togglePriceVisibility}
-                className="text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] transition-colors p-0.5 rounded hover:bg-gray-100"
-                title={isPriceHidden ? "Show price in PDF" : "Hide price in PDF"}
-              >
-                {isPriceHidden ? <EyeClosed size={12} weight="bold" /> : <Eye size={12} weight="bold" />}
               </button>
             </div>
           )}
@@ -768,12 +753,39 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
   // Pure Flexbox Drag-to-Resize State
   const containerRef = useRef<HTMLDivElement>(null);
-  const [isDragging, setIsDragging] = useState<"pdf" | "main" | null>(null);
-  const [colSizes, setColSizes] = useState({ pdf: 25, middle: 35, right: 40 });
-  const [split2Col, setSplit2Col] = useState(45);
+  const [isDragging, setIsDragging] = useState<"pdf" | "main" | "pdf-preview" | null>(null);
+  const [colSizes, setColSizes] = useState({ pdf: 28, middle: 36, right: 36 });
+  const [splitPdfPreview, setSplitPdfPreview] = useState(50); // when form is collapsed: PDF vs Preview %
+  const [splitPdfForm, setSplitPdfForm] = useState(40); // when preview is collapsed: PDF vs Form %
+  const [split2Col, setSplit2Col] = useState(45); // when PDF is closed: Form vs Preview %
   const [formCollapsed, setFormCollapsed] = useState(false);
   const [previewColCollapsed, setPreviewColCollapsed] = useState(false);
   const [isDesktop, setIsDesktop] = useState(true);
+
+  // Dynamic responsive panel widths across all 7 combination states
+  const pdfWidth = useMemo(() => {
+    if (!pdfOpen) return "0%";
+    if (formCollapsed && previewColCollapsed) return "100%";
+    if (formCollapsed) return `${splitPdfPreview}%`;
+    if (previewColCollapsed) return `${splitPdfForm}%`;
+    return `${colSizes.pdf}%`;
+  }, [pdfOpen, formCollapsed, previewColCollapsed, splitPdfPreview, splitPdfForm, colSizes.pdf]);
+
+  const formWidth = useMemo(() => {
+    if (formCollapsed) return "0%";
+    if (!pdfOpen && previewColCollapsed) return "100%";
+    if (!pdfOpen) return `${split2Col}%`;
+    if (previewColCollapsed) return `${100 - splitPdfForm}%`;
+    return `${colSizes.middle}%`;
+  }, [formCollapsed, pdfOpen, previewColCollapsed, split2Col, splitPdfForm, colSizes.middle]);
+
+  const previewWidth = useMemo(() => {
+    if (previewColCollapsed) return "0%";
+    if (!pdfOpen && formCollapsed) return "100%";
+    if (!pdfOpen) return `${100 - split2Col}%`;
+    if (formCollapsed) return `${100 - splitPdfPreview}%`;
+    return `${colSizes.right}%`;
+  }, [previewColCollapsed, pdfOpen, formCollapsed, split2Col, splitPdfPreview, colSizes.right]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -784,7 +796,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  const handlePointerDown = useCallback((which: "pdf" | "main") => (e: React.PointerEvent) => {
+  const handlePointerDown = useCallback((which: "pdf" | "main" | "pdf-preview") => (e: React.PointerEvent) => {
     e.preventDefault();
     setIsDragging(which);
   }, []);
@@ -801,7 +813,15 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       const offsetX = e.clientX - rect.left;
       const percent = Math.max(10, Math.min(90, (offsetX / totalWidth) * 100));
 
-      if (pdfOpen) {
+      // Case 1: PDF + Preview open (Middle Form collapsed)
+      if (isDragging === "pdf-preview") {
+        const newPdf = Math.max(20, Math.min(80, percent));
+        setSplitPdfPreview(newPdf);
+        return;
+      }
+
+      // Case 2: All 3 panels open
+      if (pdfOpen && !formCollapsed && !previewColCollapsed) {
         if (isDragging === "pdf") {
           const newPdf = Math.max(15, Math.min(45, percent));
           setColSizes((prev) => {
@@ -821,9 +841,25 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
             return { ...prev, middle: newMiddle, right: newRight };
           });
         }
-      } else {
-        const newLeft = Math.max(20, Math.min(80, percent));
-        setSplit2Col(newLeft);
+        return;
+      }
+
+      // Case 3: PDF closed, Form + Preview open
+      if (!pdfOpen && !formCollapsed && !previewColCollapsed) {
+        if (isDragging === "main") {
+          const newForm = Math.max(20, Math.min(80, percent));
+          setSplit2Col(newForm);
+        }
+        return;
+      }
+
+      // Case 4: Preview collapsed, PDF + Form open
+      if (pdfOpen && !formCollapsed && previewColCollapsed) {
+        if (isDragging === "pdf") {
+          const newPdf = Math.max(20, Math.min(80, percent));
+          setSplitPdfForm(newPdf);
+        }
+        return;
       }
     };
 
@@ -842,7 +878,8 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     };
-  }, [isDragging, pdfOpen]);
+  }, [isDragging, pdfOpen, formCollapsed, previewColCollapsed]);
+
 
   const [customLabel, setCustomLabel] = useState("");
   const [customValue, setCustomValue] = useState("");
@@ -858,6 +895,25 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [previewTemplate, setPreviewTemplate] = useState<TemplatePayload | null>(null);
   const [previewZoom, setPreviewZoom] = useState(0.48);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const previewScrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Active native wheel listener for Ctrl / Cmd + Mouse Wheel canvas zooming (bypasses passive listener limitation)
+  useEffect(() => {
+    const handleWheel = (e: WheelEvent) => {
+      if (!previewScrollRef.current || !previewScrollRef.current.contains(e.target as Node)) return;
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const step = 0.08;
+        const delta = e.deltaY < 0 ? step : -step;
+        setPreviewZoom((z) => Math.min(2.5, Math.max(0.25, Number((z + delta).toFixed(2)))));
+      }
+    };
+
+    window.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      window.removeEventListener("wheel", handleWheel);
+    };
+  }, []);
 
   const [selectedBenefitPreset, setSelectedBenefitPreset] = useState<string>(() => {
     try {
@@ -877,6 +933,13 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     decideField("benefit_preset", "edit", presetId);
   }, [decideField]);
 
+  const displayOptions = useMemo(() => {
+    if (workspace?.display_options && Object.keys(workspace.display_options).length > 0) {
+      return workspace.display_options;
+    }
+    return (previewTemplate?.config as any)?.display_options || {};
+  }, [workspace?.display_options, previewTemplate?.config]);
+
   const balancedElements = useMemo(() => {
     if (!previewTemplate?.config?.canvas) return [];
     const rawElements = (previewTemplate.config.canvas.elements || []).map((el: any) => {
@@ -888,8 +951,9 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     return balanceBenefitGridElements(rawElements, {
       ...workspace?.benefit_cards,
       extras: workspace?.extras,
+      displayOptions,
     } as any);
-  }, [previewTemplate, workspace?.benefit_cards, workspace?.extras, selectedBenefitPreset]);
+  }, [previewTemplate, workspace?.benefit_cards, workspace?.extras, selectedBenefitPreset, displayOptions]);
 
   const canvasH = useMemo(() => {
     const baseHeight = previewTemplate?.config?.canvas?.height || 1123;
@@ -907,6 +971,12 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         stored = (workspace.fields["coverage_amount"] as WorkspaceField | undefined)?.value ||
                  (workspace.fields["market_value"] as WorkspaceField | undefined)?.value ||
                  (workspace.fields["agreed_value"] as WorkspaceField | undefined)?.value;
+      }
+      if (field.name === "quotation_reference") {
+        const qrefCandidate = stored || workspace.quotation_ref;
+        if (qrefCandidate && (!stored || !String(stored).startsWith("RL"))) {
+          stored = workspace.quotation_ref || stored;
+        }
       }
       values[field.name] = displayValue(field.kind, stored ?? null);
     }
@@ -1259,10 +1329,11 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     // Insurer name aliases
     const effectiveCompany = formValues["insurance_company"] || fields["insurance_company"] || companyName || workspace?.pinned_names?.company_name || "";
     if (effectiveCompany) {
-      fields["insurance_company"] = effectiveCompany;
-      fields["insurance_name"] = effectiveCompany;
-      fields["company_name"] = effectiveCompany;
-      fields["insurer_name"] = effectiveCompany;
+      const upperCompany = effectiveCompany.toUpperCase();
+      fields["insurance_company"] = upperCompany;
+      fields["insurance_name"] = upperCompany;
+      fields["company_name"] = upperCompany;
+      fields["insurer_name"] = upperCompany;
     }
 
     // Sum insured / coverage amount
@@ -1357,9 +1428,14 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
   function commitField(field: FormField) {
     const current = formValues[field.name];
-    if (current === undefined || current.trim() === "") return;
+    if (current === undefined) return;
     if (field.kind === "total") return;
-    decideField(field.name, "edit", current);
+    
+    if (current.trim() === "") {
+      decideField(field.name, "clear", "");
+    } else {
+      decideField(field.name, "edit", current);
+    }
 
     if (field.name === "sum_insured") {
       decideField("coverage_amount", "edit", current);
@@ -1377,7 +1453,15 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   }
 
   function commitFieldDirectly(name: string, value: string) {
-    if (value === undefined || value.trim() === "") return;
+    if (value === undefined) return;
+    if (value.trim() === "") {
+      decideField(name, "clear", "");
+      if (name === "sum_insured") {
+        decideField("coverage_amount", "clear", "");
+        decideField("market_value", "clear", "");
+      }
+      return;
+    }
     decideField(name, "edit", value);
     if (name === "sum_insured") {
       decideField("coverage_amount", "edit", value);
@@ -1632,7 +1716,16 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     document.body.removeChild(link);
   }
 
+  async function flushActiveInput() {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+      // Give React a tiny tick to process the onBlur before continuing
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  }
+
   async function handleCopyPng() {
+    await flushActiveInput();
     if (mutation.dirty) {
       try {
         await save();
@@ -1669,6 +1762,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   }
 
   async function handleDownloadPng() {
+    await flushActiveInput();
     if (mutation.dirty) {
       try {
         await save();
@@ -1754,6 +1848,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   }, [formValues, previewFields, workspace]);
 
   async function handleDownloadPdf() {
+    await flushActiveInput();
     if (!workspace) return;
     setPdfLoading(true);
     setActionError(null);
@@ -1843,7 +1938,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     <>
       {/* Top Header Bar */}
       <header className="sticky top-[56px] z-20 w-full border-b border-[var(--rl-border)] bg-[var(--rl-surface)]/95 backdrop-blur-md shadow-xs">
-        <div className="mx-auto flex max-w-[1560px] flex-wrap items-center justify-between px-4 sm:px-5 min-h-[56px] py-2 gap-3">
+        <div className="mx-auto flex w-full max-w-[1800px] flex-wrap items-center justify-between px-4 sm:px-6 min-h-[56px] py-2 gap-3">
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-bold text-[var(--rl-text-strong)]">Quotation Workspace</h1>
@@ -1869,24 +1964,51 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                 { target: ".rl-tour-preview", title: "Live preview", body: "Real-time preview of the quotation on the pinned template. Export as PNG or generate the official PDF from here." },
               ]}
             />
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={pdfOpen ? <CaretLeft weight="bold" /> : <FilePdf weight="bold" />}
-              onClick={() => setPdfOpen((v) => !v)}
-            >
-              {pdfOpen ? "Hide PDF" : "Show source PDF"}
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              className="hidden lg:inline-flex"
-              icon={formCollapsed ? <CaretRight weight="bold" /> : <CaretLeft weight="bold" />}
-              onClick={() => setFormCollapsed((v) => !v)}
-              title={formCollapsed ? "Expand form and extracted values panel" : "Collapse form panel smoothly to the left"}
-            >
-              {formCollapsed ? "Show Form Panel" : "Hide Form Panel"}
-            </Button>
+
+            {/* Unified 3-Panel Layout Switcher */}
+            <div className="flex items-center gap-0.5 rounded-lg border border-[var(--rl-border)] bg-gray-100/90 p-0.5 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setPdfOpen((v) => !v)}
+                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-all cursor-pointer ${
+                  pdfOpen
+                    ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
+                    : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] hover:bg-white/50"
+                }`}
+                title={pdfOpen ? "Hide PDF" : "Show source PDF"}
+                aria-label={pdfOpen ? "Hide PDF" : "Show source PDF"}
+              >
+                <FilePdf size={14} weight={pdfOpen ? "fill" : "bold"} className={pdfOpen ? "text-[var(--rl-red)]" : ""} />
+                <span>PDF</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormCollapsed((v) => !v)}
+                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-all cursor-pointer ${
+                  !formCollapsed
+                    ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
+                    : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] hover:bg-white/50"
+                }`}
+                title={!formCollapsed ? "Hide Form & Extracted Values panel" : "Show Form & Extracted Values panel"}
+              >
+                <PencilSimple size={14} weight={!formCollapsed ? "fill" : "bold"} className={!formCollapsed ? "text-blue-600" : ""} />
+                <span>Form</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewColCollapsed((v) => !v)}
+                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-all cursor-pointer ${
+                  !previewColCollapsed
+                    ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
+                    : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] hover:bg-white/50"
+                }`}
+                title={!previewColCollapsed ? "Hide Live Preview & Benefits panel" : "Show Live Preview & Benefits panel"}
+              >
+                <Eye size={14} weight={!previewColCollapsed ? "fill" : "bold"} className={!previewColCollapsed ? "text-emerald-600" : ""} />
+                <span>Preview</span>
+              </button>
+            </div>
+
             <Button
               variant={mutation.dirty ? "primary" : "secondary"}
               loading={mutation.saving}
@@ -1895,6 +2017,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
             >
               {mutation.dirty ? "Save Changes" : "Saved"}
             </Button>
+
 
             {/* PNG Actions Button (Copy as PNG | Download PNG) */}
             {/* Unified Action 1: Copy as PNG */}
@@ -1935,7 +2058,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
           </div>
         </div>
       </header>
-      <section className="grid gap-4 max-w-7xl mx-auto pb-12 pt-6 px-4 xl:px-0">
+      <section className="grid gap-4 w-full max-w-[1800px] mx-auto pb-12 pt-6 px-4 sm:px-6">
 
       {actionError || mutation.saveError ? (
         <div role="alert" className="rounded-[var(--rl-radius-sm)] bg-[var(--rl-red-light)] p-3 text-sm font-semibold text-[var(--rl-red)]">
@@ -1964,27 +2087,37 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         {pdfOpen ? (
           <>
             <div
-              style={{ width: isDesktop ? `${colSizes.pdf}%` : "100%" }}
+              style={{ width: isDesktop ? pdfWidth : "100%" }}
               className="w-full lg:w-auto min-w-0 flex-shrink-0 relative overflow-hidden pr-0 lg:pr-1"
             >
               <div className="relative min-w-0 h-full">
                 <Card className="sticky top-[140px] h-[calc(100vh-180px)] p-2">
                   <div className="flex items-center justify-between px-1 pb-1.5 border-b border-[var(--rl-border)] mb-1">
                     <span className="text-xs font-bold text-[var(--rl-text-strong)]">Source Quotation PDF</span>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      className="h-6 px-2 text-[11px] gap-1"
-                      onClick={() => {
-                        const srcUrl = fileUrl(`/uploaded-files/${workspace.uploaded_file_id}/content`);
-                        window.open(srcUrl, "_blank");
-                        triggerDownload(srcUrl, `source_quotation_${formValues.vehicle_no || id}.pdf`);
-                      }}
-                      title="Open source PDF in new tab and download"
-                    >
-                      <DownloadSimple size={12} weight="bold" />
-                      Download Source PDF
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="h-6 px-2 text-[11px] gap-1"
+                        onClick={() => {
+                          const srcUrl = fileUrl(`/uploaded-files/${workspace.uploaded_file_id}/content`);
+                          window.open(srcUrl, "_blank");
+                          triggerDownload(srcUrl, `source_quotation_${formValues.vehicle_no || id}.pdf`);
+                        }}
+                        title="Open source PDF in new tab and download"
+                      >
+                        <DownloadSimple size={12} weight="bold" />
+                        Download Source PDF
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={() => setPdfOpen(false)}
+                        className="hidden lg:flex items-center justify-center p-1 text-[11px] font-semibold text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded border border-transparent hover:border-gray-200 transition-all cursor-pointer ml-0.5"
+                        title="Close PDF Panel"
+                      >
+                        <X size={14} weight="bold" />
+                      </button>
+                    </div>
                   </div>
                   <iframe
                     title="Source quotation PDF"
@@ -1995,29 +2128,44 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
               </div>
             </div>
             {/* Draggable Slider 1 (between PDF and Form) */}
-            <div
-              onPointerDown={handlePointerDown("pdf")}
-              role="separator"
-              aria-orientation="vertical"
-              className="group w-3.5 -mx-1 flex items-center justify-center cursor-col-resize self-stretch z-10 shrink-0 hidden lg:flex"
-            >
-              <div className={`w-1 h-full rounded-full transition-colors ${isDragging === "pdf" ? "bg-[var(--rl-red)]" : "bg-[var(--rl-border)] group-hover:bg-[var(--rl-red)]"}`} />
-            </div>
+            {pdfOpen && !formCollapsed ? (
+              <div
+                onPointerDown={handlePointerDown("pdf")}
+                role="separator"
+                aria-orientation="vertical"
+                className="group w-3.5 -mx-1 flex items-center justify-center cursor-col-resize self-stretch z-10 shrink-0 hidden lg:flex"
+                title="Drag to resize PDF and Form panels"
+              >
+                <div className={`w-1 h-full rounded-full transition-colors ${isDragging === "pdf" ? "bg-[var(--rl-red)]" : "bg-[var(--rl-border)] group-hover:bg-[var(--rl-red)]"}`} />
+              </div>
+            ) : null}
+
+            {/* Draggable Slider between PDF and Preview when Form is collapsed */}
+            {pdfOpen && formCollapsed && !previewColCollapsed ? (
+              <div
+                onPointerDown={handlePointerDown("pdf-preview")}
+                role="separator"
+                aria-orientation="vertical"
+                className="group w-3.5 -mx-1 flex items-center justify-center cursor-col-resize self-stretch z-10 shrink-0 hidden lg:flex"
+                title="Drag to resize PDF and Live Preview panels"
+              >
+                <div className={`w-1 h-full rounded-full transition-colors ${isDragging === "pdf-preview" ? "bg-[var(--rl-red)]" : "bg-[var(--rl-border)] group-hover:bg-[var(--rl-red)]"}`} />
+              </div>
+            ) : null}
           </>
         ) : null}
 
         {/* Column 2: Master Template + Extracted Values */}
         <div
           style={{
-            width: isDesktop
-              ? (formCollapsed ? "0%" : previewColCollapsed ? (pdfOpen ? `${100 - colSizes.pdf}%` : "100%") : (pdfOpen ? `${colSizes.middle}%` : `${split2Col}%`))
-              : "100%",
+            width: isDesktop ? formWidth : "100%",
             opacity: isDesktop && formCollapsed ? 0 : 1,
             pointerEvents: isDesktop && formCollapsed ? "none" : "auto",
             transition: isDragging ? "none" : "width 400ms cubic-bezier(0.4, 0, 0.2, 1), opacity 300ms ease-in-out, padding 400ms ease-in-out",
           }}
           className={`w-full lg:w-auto min-w-0 flex-shrink-0 ${formCollapsed ? "overflow-hidden px-0" : "px-0 lg:px-2"}`}
         >
+
           <section aria-label="Template configuration and extracted values" className="grid grid-cols-1 gap-4 content-start">
             {/* Hierarchy & Quotation Context Overview Bar */}
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-2.5 text-xs shadow-xs">
@@ -2058,11 +2206,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
               <button
                 type="button"
                 onClick={() => setFormCollapsed(true)}
-                className="hidden lg:flex items-center gap-1 ml-auto px-2 py-1 text-[11px] font-semibold text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 rounded border border-neutral-200 transition-colors shadow-2xs cursor-pointer"
-                title="Collapse this section smoothly to expand live preview"
+                className="hidden lg:flex items-center justify-center p-1 ml-auto text-[11px] font-semibold text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded border border-transparent hover:border-gray-200 transition-all cursor-pointer"
+                title="Close Form Panel"
               >
-                <CaretLeft size={13} weight="bold" />
-                <span>Collapse Panel</span>
+                <X size={14} weight="bold" />
               </button>
             </div>
 
@@ -2253,6 +2400,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                       })}
                     </div>
                   </div>
+
                 </>
               )}
             </Card>
@@ -2554,12 +2702,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                       {String(extra.cost).startsWith("RM") ? String(extra.cost) : `RM ${extra.cost}`}
                                     </span>
                                   </div>
-                                ) : (
-                                  <div className="text-right">
-                                    <span className="block text-[9px] uppercase font-bold text-[var(--rl-text-muted)]">Cost</span>
-                                    <span className="text-[11px] font-medium text-gray-400">Included</span>
-                                  </div>
-                                )}
+                                ) : null}
 
                                 {!extra.is_applied && extra.concept_key ? (
                                   <Button
@@ -2597,19 +2740,6 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
           </section>
         </div>
 
-        {/* Collapsed Expand Handle for Column 2 */}
-        {formCollapsed && isDesktop ? (
-          <button
-            type="button"
-            onClick={() => setFormCollapsed(false)}
-            className="hidden lg:flex flex-col items-center justify-center gap-2 py-4 px-1.5 rounded-r-md bg-neutral-900 text-white hover:bg-neutral-800 hover:scale-105 active:scale-95 text-xs font-semibold shadow-md transition-all cursor-pointer h-fit sticky top-[140px] z-10 select-none border border-neutral-700 shrink-0 -ml-1 mr-2"
-            title="Expand Form & Extracted Values"
-          >
-            <CaretRight weight="bold" size={14} />
-            <span className="[writing-mode:vertical-lr] tracking-wide text-[11px] font-medium py-1">Show Form Panel</span>
-          </button>
-        ) : null}
-
         {/* Draggable Slider 2 (between Form and Live Preview) */}
         {!formCollapsed && !previewColCollapsed ? (
           <div
@@ -2617,6 +2747,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
             role="separator"
             aria-orientation="vertical"
             className="group w-3.5 -mx-1 flex items-center justify-center cursor-col-resize self-stretch z-10 shrink-0 hidden lg:flex"
+            title="Drag to resize Form and Live Preview panels"
           >
             <div className={`w-1 h-full rounded-full transition-colors ${isDragging === "main" ? "bg-[var(--rl-red)]" : "bg-[var(--rl-border)] group-hover:bg-[var(--rl-red)]"}`} />
           </div>
@@ -2625,15 +2756,14 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         {/* Column 3: Live Quotation Preview + Insurer Benefits */}
         <div
           style={{
-            width: isDesktop
-              ? (previewColCollapsed ? "0%" : formCollapsed ? (pdfOpen ? `${100 - colSizes.pdf}%` : "100%") : (pdfOpen ? `${colSizes.right}%` : `${100 - split2Col}%`))
-              : "100%",
+            width: isDesktop ? previewWidth : "100%",
             opacity: isDesktop && previewColCollapsed ? 0 : 1,
             pointerEvents: isDesktop && previewColCollapsed ? "none" : "auto",
             transition: isDragging ? "none" : "width 400ms cubic-bezier(0.4, 0, 0.2, 1), opacity 300ms ease-in-out, padding 400ms ease-in-out",
           }}
           className={`w-full lg:w-auto min-w-0 flex-1 ${previewColCollapsed ? "overflow-hidden px-0" : "pl-0 lg:pl-2"}`}
         >
+
           <section aria-label="Live preview and benefits manager" className="grid grid-cols-1 gap-4 content-start">
             {/* Row 1: Real-time Live Preview Canvas */}
             <Card className="rl-tour-preview grid gap-2.5 p-3.5 overflow-hidden">
@@ -2644,28 +2774,47 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                     Real-time
                   </span>
-                  <span
-                    className="hidden sm:inline-flex text-[10px] font-mono text-[var(--rl-text-muted)] bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200"
-                    title="Hold Ctrl and scroll mouse wheel inside canvas to zoom in/out"
+                  <button
+                    type="button"
+                    onClick={() => setPreviewZoom(0.48)}
+                    className="hidden sm:inline-flex items-center gap-1 text-[10px] font-mono text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] bg-gray-100 hover:bg-gray-200 px-1.5 py-0.5 rounded border border-gray-200 cursor-pointer transition-colors"
+                    title="Click to reset zoom (Default 48%). Or hold Ctrl and scroll mouse wheel inside canvas to zoom in/out"
                   >
-                    {Math.round(previewZoom * 100)}%
-                  </span>
+                    <span>{Math.round(previewZoom * 100)}%</span>
+                    <ArrowCounterClockwise size={10} className="text-gray-400" />
+                  </button>
                 </div>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {!previewCollapsed ? (
                     <>
-                      <div className="flex items-center gap-1.5 bg-gray-100/90 rounded px-1.5 py-0.5 border border-gray-200 text-[10px]">
+                      <div className="flex items-center gap-1 bg-gray-100/90 rounded px-1.5 py-0.5 border border-gray-200 text-[10px]">
                         <span className="font-bold text-[var(--rl-text-muted)] text-[9px] uppercase tracking-wider">Zoom</span>
+                        <button
+                          type="button"
+                          onClick={() => setPreviewZoom((z) => Math.max(0.25, Number((z - 0.1).toFixed(2))))}
+                          className="rounded p-0.5 text-[var(--rl-text-muted)] hover:bg-gray-200 hover:text-[var(--rl-text-strong)] transition-colors cursor-pointer"
+                          title="Zoom Out (or Ctrl + Wheel Down)"
+                        >
+                          <MagnifyingGlassMinus size={13} weight="bold" />
+                        </button>
                         <input
                           type="range"
                           min="0.25"
-                          max="2"
+                          max="2.5"
                           step="0.05"
                           value={previewZoom}
                           onChange={(e) => setPreviewZoom(parseFloat(e.target.value))}
-                          className="w-16 h-1 cursor-pointer"
-                          title="Zoom"
+                          className="w-16 h-1 cursor-pointer accent-[var(--rl-red)]"
+                          title="Zoom slider (25% - 250%)"
                         />
+                        <button
+                          type="button"
+                          onClick={() => setPreviewZoom((z) => Math.min(2.5, Number((z + 0.1).toFixed(2))))}
+                          className="rounded p-0.5 text-[var(--rl-text-muted)] hover:bg-gray-200 hover:text-[var(--rl-text-strong)] transition-colors cursor-pointer"
+                          title="Zoom In (or Ctrl + Wheel Up)"
+                        >
+                          <MagnifyingGlassPlus size={13} weight="bold" />
+                        </button>
                       </div>
                       <div className="flex items-center gap-1 bg-gray-100/90 rounded px-1.5 py-0.5 border border-gray-200 text-[10px]">
                         <span className="font-bold text-[var(--rl-text-muted)]">Style:</span>
@@ -2702,11 +2851,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                   <button
                     type="button"
                     onClick={() => setPreviewColCollapsed(true)}
-                    className="hidden lg:flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 rounded border border-neutral-200 transition-colors shadow-2xs cursor-pointer ml-1"
-                    title="Collapse this section smoothly to expand form section"
+                    className="hidden lg:flex items-center justify-center p-1 text-[11px] font-semibold text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded border border-transparent hover:border-gray-200 transition-all cursor-pointer ml-1"
+                    title="Close Preview Panel"
                   >
-                    <CaretRight size={13} weight="bold" />
-                    <span>Collapse Panel</span>
+                    <X size={14} weight="bold" />
                   </button>
                 </div>
               </div>
@@ -2718,55 +2866,51 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
               ) : (
                 /* Canvas Render Container */
                 <div
-                  onWheel={(e) => {
-                    if (e.ctrlKey || e.metaKey) {
-                      e.preventDefault();
-                      const delta = e.deltaY < 0 ? 0.05 : -0.05;
-                      setPreviewZoom((z) => Math.min(2.0, Math.max(0.25, Number((z + delta).toFixed(2)))));
-                    }
-                  }}
-                  className={`flex ${previewExpanded ? "h-[680px]" : "h-[400px]"} w-full items-start justify-center overflow-auto rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-gray-50/80 p-3 transition-all duration-200`}
+                  ref={previewScrollRef}
+                  className={`relative ${previewExpanded ? "h-[680px]" : "h-[450px]"} w-full overflow-auto rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-gray-50/80 p-4 transition-all duration-200`}
                 >
                   {previewLoading && !previewTemplate ? (
                     <div className="flex h-full items-center justify-center text-xs text-[var(--rl-text-muted)]">
                       Loading preview template...
                     </div>
                   ) : previewTemplate ? (
-                    <div
-                      style={{
-                        width: (previewTemplate.config.canvas?.width || 794) * previewZoom,
-                        height: canvasH * previewZoom,
-                        position: "relative",
-                        backgroundColor: "#ffffff",
-                        boxShadow: "0 4px 14px rgba(0,0,0,0.08)",
-                        borderRadius: "4px",
-                        overflow: "hidden",
-                        flexShrink: 0,
-                      }}
-                    >
+                    <div className="inline-block min-w-full text-center">
                       <div
-                        id="rl-live-canvas-inner"
+                        className="inline-block text-left shrink-0"
                         style={{
-                          width: previewTemplate.config.canvas?.width || 794,
-                          height: canvasH,
-                          transform: `scale(${previewZoom})`,
-                          transformOrigin: "top left",
+                          width: (previewTemplate.config.canvas?.width || 794) * previewZoom,
+                          height: canvasH * previewZoom,
                           position: "relative",
+                          backgroundColor: "#ffffff",
+                          boxShadow: "0 4px 14px rgba(0,0,0,0.08)",
+                          borderRadius: "4px",
+                          overflow: "hidden",
                         }}
                       >
-                        {balancedElements.map((element: CanvasElement) => (
-                          <CanvasElementView
-                            key={element.id}
-                            element={element}
-                            selected={false}
-                            readOnly={true}
-                            onPointerDown={() => { }}
-                            variableValues={previewFields}
-                            benefitData={{ ...workspace.benefit_cards, extras: workspace.extras }}
-                            conceptAssets={conceptAssets}
-                            assets={previewTemplateAssets}
-                          />
-                        ))}
+                        <div
+                          id="rl-live-canvas-inner"
+                          style={{
+                            width: previewTemplate.config.canvas?.width || 794,
+                            height: canvasH,
+                            transform: `scale(${previewZoom})`,
+                            transformOrigin: "top left",
+                            position: "relative",
+                          }}
+                        >
+                          {balancedElements.map((element: CanvasElement) => (
+                            <CanvasElementView
+                              key={element.id}
+                              element={element}
+                              selected={false}
+                              readOnly={true}
+                              onPointerDown={() => { }}
+                              variableValues={previewFields}
+                              benefitData={{ ...workspace.benefit_cards, extras: workspace.extras, displayOptions }}
+                              conceptAssets={conceptAssets}
+                              assets={previewTemplateAssets}
+                            />
+                          ))}
+                        </div>
                       </div>
                     </div>
                   ) : (
@@ -2776,6 +2920,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                   )}
                 </div>
               )}
+
             </Card>
 
             {/* Row 2: Interactive Benefits & Add-ons Manager with Tabs */}
@@ -2921,7 +3066,6 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                             <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800">
                               {currentCards.length} standard covers (constant)
                             </span>
-                            {/* RL-DISABLED add_to_defaults_button — disabled 2026-08-28; restore when defaults can receive additions */}
                           </div>
                         </div>
 
@@ -3218,19 +3362,20 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
           </section>
         </div>
 
-        {/* Collapsed Expand Handle for Column 3 */}
-        {previewColCollapsed && isDesktop ? (
-          <button
-            type="button"
-            onClick={() => setPreviewColCollapsed(false)}
-            className="hidden lg:flex flex-col items-center justify-center gap-2 py-4 px-1.5 rounded-l-md bg-neutral-900 text-white hover:bg-neutral-800 hover:scale-105 active:scale-95 text-xs font-semibold shadow-md transition-all cursor-pointer h-fit sticky top-[140px] z-10 select-none border border-neutral-700 shrink-0 -mr-1 ml-2"
-            title="Expand Preview & Benefits Panel"
-          >
-            <CaretLeft weight="bold" size={14} />
-            <span className="[writing-mode:vertical-lr] tracking-wide text-[11px] font-medium py-1">Show Preview Panel</span>
-          </button>
+        {/* Empty fallback if all 3 panels are collapsed */}
+        {!pdfOpen && formCollapsed && previewColCollapsed ? (
+          <div className="flex flex-col items-center justify-center w-full py-24 text-center text-sm text-[var(--rl-text-muted)] gap-3 bg-[var(--rl-surface)] rounded-[var(--rl-radius)] border border-[var(--rl-border)]">
+            <p className="font-semibold text-neutral-700">All workspace panels are currently hidden.</p>
+            <p className="text-xs text-neutral-500 max-w-sm">Use the layout switcher in the top header or click below to restore panels:</p>
+            <div className="flex items-center gap-2 mt-1">
+              <Button size="sm" variant="secondary" onClick={() => setPdfOpen(true)}>Open PDF</Button>
+              <Button size="sm" variant="secondary" onClick={() => setFormCollapsed(false)}>Open Form</Button>
+              <Button size="sm" variant="primary" onClick={() => setPreviewColCollapsed(false)}>Open Live Preview</Button>
+            </div>
+          </div>
         ) : null}
       </div>
+
 
       {/* Global Benefit Library Modal */}
       {showGlobalModal ? (

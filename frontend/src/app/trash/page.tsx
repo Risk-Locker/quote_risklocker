@@ -46,6 +46,8 @@ export default function TrashPage() {
   const [confirmEmpty, setConfirmEmpty] = useState(false);
   const [confirmForever, setConfirmForever] = useState<{ entityType: string; entityId: string; label: string } | null>(null);
   const [emptying, setEmptying] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deletingBulk, setDeletingBulk] = useState(false);
   const { toast } = useToast();
 
   async function load() {
@@ -108,6 +110,32 @@ export default function TrashPage() {
     }
   }
 
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function bulkDeleteForever() {
+    const ids = Array.from(selected);
+    if (!ids.length) return;
+    setDeletingBulk(true);
+    setError("");
+    try {
+      await api("/trash/bulk-delete-forever", { method: "POST", body: JSON.stringify({ item_ids: ids }) });
+      toast(`${ids.length} item${ids.length > 1 ? "s" : ""} permanently deleted.`, "success");
+      setSelected(new Set());
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete items.");
+    } finally {
+      setDeletingBulk(false);
+    }
+  }
+
   useEffect(() => {
     load().catch(() => setData(null));
   }, []);
@@ -136,7 +164,10 @@ export default function TrashPage() {
               <button
                 key={t.key}
                 type="button"
-                onClick={() => setTab(t.key)}
+                onClick={() => {
+                  setTab(t.key);
+                  setSelected(new Set());
+                }}
                 className={`rounded-[var(--rl-radius-sm)] px-3.5 py-2 text-[13px] font-semibold transition-colors
                   ${tab === t.key
                     ? "bg-[var(--rl-black)] text-white shadow-card"
@@ -147,14 +178,26 @@ export default function TrashPage() {
             ))}
           </div>
           {counts.sessions + counts.templates + counts.specials + counts.records + counts.assets > 0 ? (
-            <Button
-              variant="danger"
-              loading={emptying}
-              icon={<Trash size={16} weight="bold" />}
-              onClick={() => setConfirmEmpty(true)}
-            >
-              Empty trash
-            </Button>
+            <div className="flex items-center gap-2">
+              {selected.size > 0 && (
+                <Button
+                  variant="danger"
+                  loading={deletingBulk}
+                  icon={<Trash size={16} weight="bold" />}
+                  onClick={bulkDeleteForever}
+                >
+                  Delete {selected.size} selected
+                </Button>
+              )}
+              <Button
+                variant="danger"
+                loading={emptying}
+                icon={<Trash size={16} weight="bold" />}
+                onClick={() => setConfirmEmpty(true)}
+              >
+                Empty trash
+              </Button>
+            </div>
           ) : null}
         </div>
 
@@ -171,6 +214,18 @@ export default function TrashPage() {
             <table className="w-full min-w-[560px]">
               <thead>
                 <tr className="border-b border-[var(--rl-border)]">
+                  <th className="px-4 py-3 text-left text-[12px] font-semibold w-10">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all sessions"
+                      className="mt-1 h-4 w-4 accent-[var(--rl-red)]"
+                      checked={data?.sessions.length! > 0 && selected.size === data?.sessions.length}
+                      onChange={() => {
+                        if (selected.size === data?.sessions.length) setSelected(new Set());
+                        else setSelected(new Set(data?.sessions.map((s) => s.id)));
+                      }}
+                    />
+                  </th>
                   <th className="px-4 py-3 text-left text-[12px] font-semibold text-[var(--rl-text-muted)] uppercase tracking-wider">File</th>
                   <th className="px-4 py-3 text-left text-[12px] font-semibold text-[var(--rl-text-muted)] uppercase tracking-wider">Deleted</th>
                   <th className="px-4 py-3 text-left text-[12px] font-semibold text-[var(--rl-text-muted)] uppercase tracking-wider">Action</th>
@@ -178,9 +233,18 @@ export default function TrashPage() {
               </thead>
               <tbody>
                 {data?.sessions.length === 0 ? (
-                  <tr><td colSpan={3} className="px-4 py-10 text-center text-[14px] text-[var(--rl-text-muted)]">No sessions in trash.</td></tr>
+                  <tr><td colSpan={4} className="px-4 py-10 text-center text-[14px] text-[var(--rl-text-muted)]">No sessions in trash.</td></tr>
                 ) : data?.sessions.map((item) => (
                   <tr key={item.id} className="border-b border-[var(--rl-border)] last:border-0">
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${item.filename}`}
+                        className="mt-1 h-4 w-4 accent-[var(--rl-red)]"
+                        checked={selected.has(item.id)}
+                        onChange={() => toggleSelect(item.id)}
+                      />
+                    </td>
                     <td className="px-4 py-3 text-[14px] font-medium text-[var(--rl-text-strong)]">{item.filename}</td>
                     <td className="px-4 py-3 text-[14px] font-medium text-[var(--rl-text-strong)]">{item.deleted_at ? new Date(item.deleted_at).toLocaleString() : item.created_at ? new Date(item.created_at).toLocaleString() : "-"}</td>
                     <td className="px-4 py-3">

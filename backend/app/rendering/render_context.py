@@ -246,7 +246,7 @@ def format_benefit_value(raw_value: dict | None) -> str:
     if value.type == "region":
         return str(value.region)
     if value.type == "boolean":
-        return "Included" if value.value else "Not included"
+        return ""
     if value.type == "enum":
         return str(value.enum_key)
     if value.type == "package_plan":
@@ -336,10 +336,30 @@ def _card(
         else:
             card_val = str(typed_value or "")
 
+    # Strict check: card_val must contain digits or be 'unlimited'
+    if card_val:
+        has_digits = any(c.isdigit() for c in card_val)
+        is_unlimited = card_val.strip().lower() == "unlimited"
+        if not has_digits and not is_unlimited:
+            card_val = ""
+        elif card_val.strip().lower() in {"included standard cover", "included", "foc", "as quoted", "selected", "yes", "true", "standard", "optional"}:
+            card_val = ""
+
     # If card_val is empty, but evidence_snapshot has an extracted coverage limit (e.g. RM 4,000):
     ev_lim = (getattr(selection, "evidence_snapshot", None) or {}).get("coverage_limit")
-    if ev_lim and (not card_val or card_val in {"Included standard cover", "Included", "FOC", "As quoted"}):
-        card_val = str(ev_lim) if str(ev_lim).startswith("RM") else f"RM {ev_lim}"
+    if ev_lim and (not card_val or card_val.lower() in {"included standard cover", "included", "foc", "as quoted", "selected", "optional"}):
+        ev_str = str(ev_lim).strip()
+        if ev_str.lower() in {"included standard cover", "included", "foc", "as quoted", "selected", "yes", "true", "standard", "optional"}:
+            card_val = ""
+        else:
+            has_digits = any(c.isdigit() for c in ev_str)
+            is_unlimited = ev_str.lower() == "unlimited"
+            if has_digits and not ev_str.startswith("RM"):
+                card_val = f"RM {ev_str}"
+            elif has_digits or is_unlimited:
+                card_val = ev_str
+            else:
+                card_val = ""
 
     is_pure_default = catalog_def.get("category") == "default" and not is_detected and not is_purchased_extra if catalog_def else False
     is_addon = bool(
@@ -375,6 +395,7 @@ def _card(
         "is_pure_default": is_pure_default,
         "is_addon": is_addon,
         "group_id": getattr(selection, "package_plan_id", None),
+        "display_overrides": getattr(concept, "display_overrides", {}) or {},
     }
 
 

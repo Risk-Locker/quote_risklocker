@@ -23,6 +23,7 @@
 - Quotation and source benefit lines are suggestions until reviewed. Narrative, PDS, illustrative, not-included, and unmapped lines never become selected benefits automatically.
 - Staff-facing copy uses `Review / Edit`, `Please check this value.`, `Enhanced reading`, `PDF Expired`, and the statuses `Ready`, `Check Needed`, `Cannot Read`, and `Generated`.
 - Never show OCR, parser, regex, confidence, coordinates, storage keys, provider URLs, or technical stack traces to Staff.
+- Quotation reference numbers (`quotation_reference`) are NEVER extracted from insurer quotation PDFs or underwriter documents. Reference numbers are strictly internal system sequences formatted as `RL{YY}{SEQ:07d}` (e.g. `RL260000001`), partitioned and reset by real-time calendar year (`Asia/Kuala_Lumpur` business clock), and managed atomically via database sequence counters.
 
 ## Catalog Benefit Semantics
 

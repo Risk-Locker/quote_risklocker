@@ -371,6 +371,31 @@ def permanent_delete_template_asset(db: Session, user, asset_id: str) -> None:
     db.commit()
 
 
+def permanent_delete_trash_record(db: Session, user, trash_id: str, storage) -> None:
+    """Permanently delete a single item from the trash using its TrashRecord ID."""
+    trash_record = db.query(TrashRecord).filter(TrashRecord.id == trash_id).first()
+    if not trash_record:
+        raise AppError("Trash record not found.", 404)
+        
+    entity_type = trash_record.entity_type
+    entity_id = trash_record.entity_id
+    
+    if entity_type == "uploaded_file":
+        permanent_delete_session(db, user, entity_id, storage)
+    elif entity_type == "output_template_config":
+        permanent_delete_template(db, user, entity_id)
+    elif entity_type == "our_special":
+        permanent_delete_special(db, user, entity_id)
+    elif entity_type == "our_special_variant":
+        permanent_delete_special_variant(db, user, entity_id)
+    elif entity_type == "client_record":
+        permanent_delete_client_record(db, user, entity_id)
+    elif entity_type == "template_asset":
+        permanent_delete_template_asset(db, user, entity_id)
+    else:
+        raise AppError(f"Unknown trash entity type: {entity_type}", 400)
+
+
 def empty_all_trash(db: Session, user, storage) -> dict:
     """Permanently delete everything currently in the trash."""
     counts: dict[str, int] = {"sessions": 0, "templates": 0, "our_specials": 0, "our_special_variants": 0, "client_records": 0, "assets": 0}

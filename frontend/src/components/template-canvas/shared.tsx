@@ -306,6 +306,7 @@ export function CanvasElementView({
       defaults: { custom: boolean; coverage: boolean; price: boolean };
       addons: { custom: boolean; coverage: boolean; price: boolean };
     };
+    displayOptions?: any;
   };
   conceptAssets?: Record<string, string>;
 }) {
@@ -491,11 +492,39 @@ export function CanvasElementView({
               ...groups.flatMap((g) => items.filter((item) => String(item?.group_id || "") === String(g.plan_id))),
             ]
             : items).filter((b: any) => !b?.label || !/own damage|third\s?-?\s?party bodily|third\s?-?\s?party property/i.test(b.label));
-          const actualCount = benefitData ? orderedItems.length : scenarioCount;
+          const dispOpts = (benefitData?.displayOptions && Object.keys(benefitData.displayOptions).length > 0)
+            ? benefitData.displayOptions
+            : ((config as any)?.display_options || {});
+          const isGlobalEnabled = dispOpts?.enabled !== false;
+
+          const getVis = (item: any, isAddonCard: boolean, key: string, defaultVal = true) => {
+            const dispOvr = item?.display_overrides;
+            if (dispOvr?.enabled && key in dispOvr) {
+              return Boolean(dispOvr[key]);
+            }
+            if (isGlobalEnabled && dispOpts) {
+              const cat = isAddonCard ? "addon" : "default";
+              const catOpts = dispOpts[cat];
+              if (catOpts && key in catOpts) {
+                return Boolean(catOpts[key]);
+              }
+              if (key in dispOpts) {
+                return Boolean(dispOpts[key]);
+              }
+            }
+            return defaultVal;
+          };
+
+          const visibleItems = orderedItems.filter((item: any) => {
+            const isAddonCard = Boolean(isAddons || item?.is_addon || item?.price || (item?.cost_status === "paid") || item?.detected_cost);
+            return getVis(item, isAddonCard, "isVisible", true);
+          });
+
+          const actualCount = benefitData ? visibleItems.length : scenarioCount;
           const actualLayout = packFixedGrid(actualCount, element.w, element.h, element.packing);
           const groupRects = new Map<string, { x1: number; y1: number; x2: number; y2: number }>();
           actualLayout.cards.forEach((card, idx) => {
-            const item = orderedItems[idx];
+            const item = visibleItems[idx];
             const groupId = item?.group_id ? String(item.group_id) : "";
             if (!groupById.has(groupId)) return;
             const prev = groupRects.get(groupId);
@@ -539,9 +568,9 @@ export function CanvasElementView({
               ) : element.layoutMode === "normal" ? (
                 /* Legacy Fixed Grid fallback */
                 actualLayout.cards.map((card, idx) => {
-                  const b = orderedItems[idx];
+                  const b = visibleItems[idx];
                   const label = b ? b.label : `Benefit ${card.index + 1}`;
-                  let val = b?.value && !["", "Included standard cover", "Included", "FOC", "As quoted"].includes(b.value) ? b.value : "";
+                  let val = b?.value && !["", "Included standard cover", "Included", "FOC", "As quoted", "Optional"].includes(b.value) && (/\d/.test(b.value) || /unlimited/i.test(b.value)) ? b.value : "";
                   if (val) {
                     if (/towing|breakdown/i.test(label)) {
                       if (/unlimited/i.test(val)) val = "Unlimited";
@@ -571,6 +600,11 @@ export function CanvasElementView({
                       (assets.find((a) => a.id === b.asset_id)?.url || null)
                     : null;
                   const isAddonCard = Boolean(isAddons || b?.is_addon || b?.price || (b?.cost_status === "paid") || b?.detected_cost);
+                  const showAsset = getVis(b, isAddonCard, "showAsset", true);
+                  const showGroup = getVis(b, isAddonCard, "showGroup", true);
+                  const showCoverage = getVis(b, isAddonCard, "showCoverage", true);
+                  const showDescription = getVis(b, isAddonCard, "showDescription", true);
+                  const showCost = getVis(b, isAddonCard, "showCost", true);
                   let extraMatch = null;
                   if (benefitData?.extras) {
                     extraMatch = benefitData.extras.find((ex: any) =>
@@ -609,12 +643,18 @@ export function CanvasElementView({
 
                   const rawLimit = b?.detected_limit || b?.coverage_limit;
                   if (rawLimit && typeof rawLimit === "string" && rawLimit.trim()) {
-                    val = rawLimit.trim().startsWith("RM") ? rawLimit.trim() : `RM ${rawLimit.trim()}`;
+                    const s = rawLimit.trim();
+                    if (/\d/.test(s) || /unlimited/i.test(s)) {
+                      val = s.startsWith("RM") ? s : `RM ${s}`;
+                    }
                   } else if (costNum !== null && val) {
                     const valNum = parseFloat(String(val).replace(/[^0-9.]/g, ""));
                     if (Number.isFinite(valNum) && Math.abs(valNum - costNum) < 0.01) {
                       val = "";
                     }
+                  }
+                  if (val && !(/\d/.test(val) || /unlimited/i.test(val))) {
+                    val = "";
                   }
 
                   return (
@@ -635,46 +675,50 @@ export function CanvasElementView({
                         }`}
                         style={{ padding: density.padding }}
                       >
-                        <div
-                          className="font-bold leading-snug text-[var(--rl-text-strong)] shrink-0 truncate"
-                          style={{ fontSize: density.label, marginBottom: 3 }}
-                        >
-                          {label}
-                        </div>
-                        <div className="flex flex-1 min-h-0 gap-1.5 items-start overflow-hidden">
+                        {showGroup && (
                           <div
-                            className="shrink-0 overflow-hidden rounded"
-                            style={{ width: density.icon, height: density.icon }}
+                            className="font-bold leading-snug text-[var(--rl-text-strong)] shrink-0 truncate"
+                            style={{ fontSize: density.label, marginBottom: 3 }}
                           >
-                            {assetUrl ? (
-                              <img
-                                src={fileUrl(assetUrl)}
-                                alt={label}
-                                className="h-full w-full object-contain"
-                                onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
-                              />
-                            ) : (
-                              <span
-                                className="grid h-full w-full place-items-center rounded bg-[var(--rl-red-light)] font-black text-[var(--rl-red)]"
-                                style={{ fontSize: density.desc }}
-                              >
-                                {label ? label.slice(0, 2).toUpperCase() : `B${card.index + 1}`}
-                              </span>
-                            )}
+                            {label}
                           </div>
+                        )}
+                        <div className="flex flex-1 min-h-0 gap-1.5 items-start overflow-hidden">
+                          {showAsset && (
+                            <div
+                              className="shrink-0 overflow-hidden rounded"
+                              style={{ width: density.icon, height: density.icon }}
+                            >
+                              {assetUrl ? (
+                                <img
+                                  src={fileUrl(assetUrl)}
+                                  alt={label}
+                                  className="h-full w-full object-contain"
+                                  onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
+                                />
+                              ) : (
+                                <span
+                                  className="grid h-full w-full place-items-center rounded bg-[var(--rl-red-light)] font-black text-[var(--rl-red)]"
+                                  style={{ fontSize: density.desc }}
+                                >
+                                  {label ? label.slice(0, 2).toUpperCase() : `B${card.index + 1}`}
+                                </span>
+                              )}
+                            </div>
+                          )}
                           <div className="flex flex-col min-w-0 flex-1 overflow-hidden justify-start">
                             {(() => {
                               const sectionPrefs = isAddonCard ? benefitData?.displayPreferences?.addons : benefitData?.displayPreferences?.defaults;
-                              let computedHideCoverage = element.hideCoverage || false;
-                              let computedHideCost = element.hideCost || false;
+                              let computedHideCoverage = !showCoverage || element.hideCoverage || false;
+                              let computedHideCost = !showCost || element.hideCost || false;
                               
                               if (sectionPrefs) {
                                 if (sectionPrefs.custom) {
-                                  computedHideCoverage = !!b?.typed_value_override?.hideCoverage || !!b?.typed_value?.hideCoverage;
-                                  computedHideCost = !!b?.typed_value_override?.hideCost || !!b?.typed_value?.hideCost;
+                                  computedHideCoverage = computedHideCoverage || !!b?.typed_value_override?.hideCoverage || !!b?.typed_value?.hideCoverage;
+                                  computedHideCost = computedHideCost || !!b?.typed_value_override?.hideCost || !!b?.typed_value?.hideCost;
                                 } else {
-                                  computedHideCoverage = !sectionPrefs.coverage;
-                                  computedHideCost = !sectionPrefs.price;
+                                  computedHideCoverage = computedHideCoverage || !sectionPrefs.coverage;
+                                  computedHideCost = computedHideCost || !sectionPrefs.price;
                                 }
                               }
 
@@ -682,13 +726,13 @@ export function CanvasElementView({
                                 <>
                                   {val && !computedHideCoverage && (
                                     <span
-                                      className="font-bold leading-tight text-[var(--rl-red)] truncate"
+                                      className="font-bold leading-tight text-[var(--rl-text-strong)] truncate"
                                       style={{ fontSize: density.value }}
                                     >
                                       {val}
                                     </span>
                                   )}
-                                  {desc && (
+                                  {desc && showDescription && (
                                     <span
                                       className="leading-snug text-[var(--rl-text-muted)]"
                                       style={{ fontSize: density.desc }}
@@ -698,7 +742,7 @@ export function CanvasElementView({
                                   )}
                                   {costBadge && !computedHideCost && (
                                     <span
-                                      className={`mt-0.5 inline-block self-start font-semibold whitespace-nowrap text-slate-900 leading-tight`}
+                                      className={`mt-0.5 inline-block self-start font-bold whitespace-nowrap text-[var(--rl-red)] leading-tight`}
                                       style={{ fontSize: density.desc }}
                                     >
                                       {costBadge}
@@ -730,9 +774,9 @@ export function CanvasElementView({
                         gap: density.gap 
                       }}
                     >
-                      {orderedItems.map((b: any, idx: number) => {
+                      {visibleItems.map((b: any, idx: number) => {
                             const label = b ? b.label : `Benefit ${idx + 1}`;
-                            let val = b?.value && !["", "Included standard cover", "Included", "FOC", "As quoted"].includes(b.value) ? b.value : "";
+                            let val = b?.value && !["", "Included standard cover", "Included", "FOC", "As quoted", "Optional"].includes(b.value) && (/\d/.test(b.value) || /unlimited/i.test(b.value)) ? b.value : "";
                             if (val) {
                               if (/towing|breakdown/i.test(label)) {
                                 if (/unlimited/i.test(val)) val = "Unlimited";
@@ -763,6 +807,11 @@ export function CanvasElementView({
                                 (assets.find((a) => a.id === b.asset_id)?.url || null)
                               : null;
                             const isAddonCard = Boolean(isAddons || b?.is_addon || b?.price || (b?.cost_status === "paid") || b?.detected_cost);
+                            const showAsset = getVis(b, isAddonCard, "showAsset", true);
+                            const showGroup = getVis(b, isAddonCard, "showGroup", true);
+                            const showCoverage = getVis(b, isAddonCard, "showCoverage", true);
+                            const showDescription = getVis(b, isAddonCard, "showDescription", true);
+                            const showCost = getVis(b, isAddonCard, "showCost", true);
                             let extraMatch = null;
                             if (benefitData?.extras) {
                               extraMatch = benefitData.extras.find((ex: any) =>
@@ -806,12 +855,18 @@ export function CanvasElementView({
                               val = "";
                             }
                             if (rawLimit && typeof rawLimit === "string" && rawLimit.trim()) {
-                              val = rawLimit.trim().startsWith("RM") ? rawLimit.trim() : `RM ${rawLimit.trim()}`;
+                              const s = rawLimit.trim();
+                              if (/\d/.test(s) || /unlimited/i.test(s)) {
+                                val = s.startsWith("RM") ? s : `RM ${s}`;
+                              }
                             } else if (costNum !== null && val) {
                               const valNum = parseFloat(String(val).replace(/[^0-9.]/g, ""));
                               if (Number.isFinite(valNum) && Math.abs(valNum - costNum) < 0.01) {
                                 val = "";
                               }
+                            }
+                            if (val && !(/\d/.test(val) || /unlimited/i.test(val))) {
+                              val = "";
                             }
 
                         return (
@@ -832,46 +887,50 @@ export function CanvasElementView({
                             }`}
                             style={{ padding: isMinimal ? "3px 5px" : density.padding }}
                           >
-                            <div
-                              className={`font-bold leading-tight truncate ${isDark ? "text-white" : "text-[var(--rl-text-strong)]"}`}
-                              style={{ fontSize: isMinimal ? density.label - 0.5 : density.label, marginBottom: isMinimal ? 1 : 3 }}
-                            >
-                              {label}
-                            </div>
-                            <div className={`flex items-start ${isMinimal ? "gap-1" : "gap-1.5"}`}>
+                            {showGroup && (
                               <div
-                                className={`shrink-0 overflow-hidden ${isGridTile ? "rounded-full" : "rounded"}`}
-                                style={{ width: isMinimal ? density.icon - 2 : density.icon, height: isMinimal ? density.icon - 2 : density.icon }}
+                                className={`font-bold leading-tight truncate ${isDark ? "text-white" : "text-[var(--rl-text-strong)]"}`}
+                                style={{ fontSize: isMinimal ? density.label - 0.5 : density.label, marginBottom: isMinimal ? 1 : 3 }}
                               >
-                                {assetUrl ? (
-                                  <img
-                                    src={fileUrl(assetUrl)}
-                                    alt={label}
-                                    className="h-full w-full object-contain"
-                                    onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
-                                  />
-                                ) : (
-                                  <span
-                                    className="grid h-full w-full place-items-center rounded bg-[var(--rl-red-light)] font-black text-[var(--rl-red)]"
-                                    style={{ fontSize: density.desc }}
-                                  >
-                                    {label?.[0] || "?"}
-                                  </span>
-                                )}
+                                {label}
                               </div>
+                            )}
+                            <div className={`flex items-start ${isMinimal ? "gap-1" : "gap-1.5"}`}>
+                              {showAsset && (
+                                <div
+                                  className={`shrink-0 overflow-hidden ${isGridTile ? "rounded-full" : "rounded"}`}
+                                  style={{ width: isMinimal ? density.icon - 2 : density.icon, height: isMinimal ? density.icon - 2 : density.icon }}
+                                >
+                                  {assetUrl ? (
+                                    <img
+                                      src={fileUrl(assetUrl)}
+                                      alt={label}
+                                      className="h-full w-full object-contain"
+                                      onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
+                                    />
+                                  ) : (
+                                    <span
+                                      className="grid h-full w-full place-items-center rounded bg-[var(--rl-red-light)] font-black text-[var(--rl-red)]"
+                                      style={{ fontSize: density.desc }}
+                                    >
+                                      {label?.[0] || "?"}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                               <div className="flex flex-col min-w-0 flex-1 justify-start">
                                     {(() => {
                                       const sectionPrefs = isAddonCard ? benefitData?.displayPreferences?.addons : benefitData?.displayPreferences?.defaults;
-                                      let computedHideCoverage = element.hideCoverage || false;
-                                      let computedHideCost = element.hideCost || false;
+                                      let computedHideCoverage = !showCoverage || element.hideCoverage || false;
+                                      let computedHideCost = !showCost || element.hideCost || false;
                                       
                                       if (sectionPrefs) {
                                         if (sectionPrefs.custom) {
-                                          computedHideCoverage = !!b?.typed_value_override?.hideCoverage || !!b?.typed_value?.hideCoverage;
-                                          computedHideCost = !!b?.typed_value_override?.hideCost || !!b?.typed_value?.hideCost;
+                                          computedHideCoverage = computedHideCoverage || !!b?.typed_value_override?.hideCoverage || !!b?.typed_value?.hideCoverage;
+                                          computedHideCost = computedHideCost || !!b?.typed_value_override?.hideCost || !!b?.typed_value?.hideCost;
                                         } else {
-                                          computedHideCoverage = !sectionPrefs.coverage;
-                                          computedHideCost = !sectionPrefs.price;
+                                          computedHideCoverage = computedHideCoverage || !sectionPrefs.coverage;
+                                          computedHideCost = computedHideCost || !sectionPrefs.price;
                                         }
                                       }
 
@@ -879,13 +938,13 @@ export function CanvasElementView({
                                         <>
                                           {val && !computedHideCoverage && (
                                             <span
-                                              className={`font-bold leading-tight truncate ${isDark ? "text-amber-400" : "text-[var(--rl-red)]"}`}
+                                              className={`font-bold leading-tight truncate ${isDark ? "text-white" : "text-[var(--rl-text-strong)]"}`}
                                               style={{ fontSize: density.value }}
                                             >
                                               {val}
                                             </span>
                                           )}
-                                          {!isMinimal && desc && (
+                                          {!isMinimal && desc && showDescription && (
                                             <span
                                               className={`leading-snug ${isDark ? "text-slate-400" : "text-[var(--rl-text-muted)]"}`}
                                               style={{ fontSize: density.desc }}
@@ -895,7 +954,7 @@ export function CanvasElementView({
                                           )}
                                           {costBadge && !computedHideCost && (
                                             <span
-                                              className={`mt-0.5 inline-block font-semibold whitespace-nowrap leading-tight ${isDark ? "text-amber-300" : "text-slate-900"}`}
+                                              className={`mt-0.5 inline-block font-bold whitespace-nowrap leading-tight ${isDark ? "text-red-400" : "text-[var(--rl-red)]"}`}
                                               style={{ fontSize: density.desc }}
                                             >
                                               {costBadge}

@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from typing import Any, Callable, ContextManager
 
 from fastapi import UploadFile
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session as DbSession
 
 from app.core.config import Settings
@@ -29,6 +29,7 @@ from app.models.tables import (
 )
 from app.services.document_security import quarantined_pdf
 from app.services.file_validation import display_filename, validate_upload_bytes
+from app.services.quotation_reference_service import generate_quotation_reference
 from app.storage.supabase import SupabaseStorage
 
 
@@ -138,6 +139,8 @@ async def create_queued_upload(
             storage_etag = None
             storage_sha = hashlib.sha256(data).hexdigest()
 
+        q_ref = generate_quotation_reference(db, when=now)
+
         batch = Batch(
             id=batch_id,
             owner_id=owner_id,
@@ -170,7 +173,14 @@ async def create_queued_upload(
             uploaded_file_id=uploaded_file_id,
             owner_id=owner_id,
             status=RecordStatus.PREPARING.value,
-            fields={},
+            fields={
+                "quotation_reference": {
+                    "value": q_ref,
+                    "status": "ready",
+                    "warnings": [],
+                    "message": ""
+                }
+            },
             scalar_decisions={},
             warnings=[],
         )
@@ -179,6 +189,7 @@ async def create_queued_upload(
             owner_id=owner_id,
             uploaded_file_id=uploaded_file_id,
             draft_id=draft_id,
+            quotation_ref=q_ref,
             status=AccountStatus.ACTIVE.value,
         )
         job = Job(

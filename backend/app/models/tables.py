@@ -218,6 +218,7 @@ class Session(Base, TimestampMixin):
     insurance_type: Mapped[str] = mapped_column(String(100), nullable=False, default=InsuranceType.MOTOR.value)
     detected_company: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default=AccountStatus.ACTIVE.value)
+    quotation_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     owner: Mapped[User] = relationship()
     uploaded_file: Mapped[UploadedFile] = relationship()
@@ -407,6 +408,7 @@ class QuotationDraft(Base, TimestampMixin, SoftDeleteMixin):
     layout_override_base_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reviewed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    display_options: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
     uploaded_file: Mapped[UploadedFile] = relationship(back_populates="draft")
     versions: Mapped[list["GeneratedPdfVersion"]] = relationship(back_populates="draft")
@@ -629,6 +631,7 @@ class BenefitConcept(Base, TimestampMixin):
     match_dataset: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     value_pattern_dataset: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     description_variants: Mapped[list[dict]] = mapped_column(JSON, default=list, nullable=False)
+    display_overrides: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="active", index=True)

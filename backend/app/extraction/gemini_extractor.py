@@ -92,7 +92,19 @@ GEMINI_EXTRACTION_SCHEMA = {
     "properties": {
         "customer_name": {
             "type": "string",
-            "description": "Full name of the policyholder/insured customer (e.g. found under 'The Insured / Pihak Diinsuranskan', 'Insured Name', 'Participant'). NEVER extract the Agent's Name, Agency, or Broker (e.g. ignore 'Nama Ejen', 'No. Akaun', 'RISKLOCKER').",
+            "description": "Full name of the policyholder/insured customer or company (e.g. found under 'The Insured / Pihak Diinsuranskan', 'Insured Name', 'Participant'). NEVER extract the Agent's Name, Agency, or Broker.",
+        },
+        "client_type": {
+            "type": "string",
+            "description": "Strictly classify the customer as either 'Private' or 'Company'. Look at the customer name and IC/BRN structure.",
+        },
+        "ic_or_brn": {
+            "type": "string",
+            "description": "Extract the Customer IC No. (if Private) or Business Registration No. / ROC / ROB (if Company). Look for 'New IC No.', 'NRIC', 'Business Regist. No.', 'Company Registration'.",
+        },
+        "representative_name": {
+            "type": "string",
+            "description": "If the client is a Company, extract the name of the person handling or representing the policy if explicitly stated. Otherwise empty string.",
         },
         "insurance_company": {
             "type": "string",
@@ -105,10 +117,6 @@ GEMINI_EXTRACTION_SCHEMA = {
         "detected_package_name": {
             "type": "string",
             "description": "If this is a packaged insurer (like AmAssurance), specify the package/tier name found in the document (e.g. 'Lite', 'Plus', 'Standard', 'Premier', 'Comprehensive'). Otherwise empty string.",
-        },
-        "quotation_reference": {
-            "type": "string",
-            "description": "Quotation reference number or quote number from the underwriter (e.g. 'MPA-25-49-00274660', 'QB413363-8-001', 'FL22026M-00747807-002', 'QJV26040103JHR'). Look for 'Quotation Ref', 'Quotation No', 'Quote No', 'No. Sebutharga', 'Ref No'. This is NOT the vehicle registration plate number.",
         },
         "vehicle_no": {
             "type": "string",
@@ -164,7 +172,7 @@ GEMINI_EXTRACTION_SCHEMA = {
         },
         "ncd_percent": {
             "type": "string",
-            "description": "No Claim Discount percentage number without percent sign (e.g. '25.00' or '55'). Check 'NCD', 'NCB', 'No Claim Bonus', 'No Claim Discount', 'DTT'.",
+            "description": "No Claim Discount percentage number without percent sign (e.g. '25.00' or '55'). Check 'NCD', 'NCB', 'No Claim Bonus', 'No Claim Discount', 'DTT'. NEVER include the % symbol.",
         },
         "basic_premium": {
             "type": "string",
@@ -172,7 +180,7 @@ GEMINI_EXTRACTION_SCHEMA = {
         },
         "ncd_amount": {
             "type": "string",
-            "description": "No Claim Discount amount deducted in RM (e.g. '1,515.88' or '345.50'). Look for 'NCD', 'DTT', 'No Claim Discount'.",
+            "description": "No Claim Discount amount deducted in RM (e.g. '1,515.88' or '345.50'). Look for 'NCD', 'DTT', 'No Claim Discount'. NEVER include negative signs or minus symbols. E.g. if it says '- 1,515.88', extract '1515.88'.",
         },
         "gross_premium": {
             "type": "string",
@@ -201,10 +209,6 @@ GEMINI_EXTRACTION_SCHEMA = {
         "roadtax": {
             "type": "string",
             "description": "Road tax amount if specified.",
-        },
-        "service_fee": {
-            "type": "string",
-            "description": "Runner / service fee if specified.",
         },
         "valid_until": {
             "type": "string",
@@ -319,6 +323,12 @@ def build_rag_system_prompt(
             concepts_list.append(f"- {lbl} (concept_key: '{k}')" if k and lbl else f"- {lbl or k}")
     concepts_str = "\n".join(concepts_list) if concepts_list else "- Standard Malaysian Motor Benefit Library"
 
+    aliases_list = []
+    if db_aliases:
+        for alias, concept in db_aliases.items():
+            aliases_list.append(f"- Code/Alias '{alias}' MUST map to '{concept}'")
+    aliases_str = "\n".join(aliases_list) if aliases_list else "- No custom aliases."
+
     packs_list = []
     for pk in (db_packs or []):
         if isinstance(pk, dict):
@@ -345,7 +355,10 @@ def build_rag_system_prompt(
         new = corr.get("corrected_value") or ""
         freq = corr.get("frequency") or 2
         if field and new:
-            corrections_list.append(f"- Field '{field}': Previously extracted as '{old}', corrected to '{new}' ({freq} times). Please apply this correction automatically if you encounter the same pattern.")
+            if field == "benefit_label":
+                corrections_list.append(f"- Benefit Label Correction: You previously extracted the benefit label as '{old}', but the human corrected it to '{new}' ({freq} times). You MUST output '{new}' instead of '{old}' when detecting this benefit.")
+            else:
+                corrections_list.append(f"- Field '{field}': Previously extracted as '{old}', corrected to '{new}' ({freq} times). Please apply this correction automatically if you encounter the same pattern.")
     corrections_str = "\n".join(corrections_list) if corrections_list else "- No corrections found for this context."
 
     grounding_context = f"""
@@ -355,6 +368,8 @@ def build_rag_system_prompt(
 {concepts_str}
 - Known benefit packs and plan levels:
 {packs_str}
+- Endorsement Code Aliases (Mandatory Mappings):
+{aliases_str}
 """
 
     if prompt_override and prompt_override.strip():
@@ -402,9 +417,12 @@ Extract accurate, grounded JSON data matching the provided schema from the quota
 11. **STRICT BENEFIT FILTERING**:
    - NEVER extract generic policy definitions, standard terms and conditions, legal clauses, or claim procedures as benefits.
    - ONLY extract concrete coverages, riders, or add-ons that are explicitly listed in the quotation's pricing schedule, benefits table, or endorsements summary.
+   - NEVER extract the core coverage type or vehicle use class (e.g. 'Comprehensive', 'Third Party', 'Third Party Fire & Theft', 'TPFT', 'Private Car - Private Use', 'Motorcycle') as a benefit. These belong in the main vehicle/policy fields.
    - If a PDF contains 30 pages of generic policy wording, IGNORE the generic text completely.
 12. **LEARNING FROM PREVIOUS HUMAN CORRECTIONS**:
 {corrections_str}
+13. **QUOTATION REFERENCE**:
+   - DO NOT extract underwriter reference numbers, quote numbers, or ref numbers from the document. Quotation reference is strictly an internal Risklocker system sequence.
 
 {grounding_context}
 Return strictly structured JSON adhering to the provided schema.
@@ -439,25 +457,27 @@ def extract_with_gemini_sync(
     parts: list[dict[str, Any]] = []
 
     has_digital_text = bool(document_text and len(document_text.strip()) >= 50)
+    
+    # ALWAYS pass multimodal vision bytes if available to ensure spatial/horizontal alignment awareness.
+    if pdf_bytes and len(pdf_bytes) > 100:
+        b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+        parts.append(
+            {
+                "inline_data": {
+                    "mime_type": "application/pdf",
+                    "data": b64_pdf,
+                }
+            }
+        )
+
     if has_digital_text:
-        # High-speed text-first extraction: ~2.2s latency vs ~11s for base64 multi-MB PDF
+        # High-speed text-first extraction helps exact spelling
         parts.append(
             {
                 "text": f"{fn_prefix}Extract all insurance quotation values, vehicle details, coverage, and detected benefits from this document according to the JSON schema.\n\n--- DOCUMENT TEXT LAYER ---\n{document_text}\n--- END DOCUMENT TEXT LAYER ---"
             }
         )
     else:
-        # Fallback to multimodal inline PDF vision for scanned / raster-only PDFs
-        if pdf_bytes and len(pdf_bytes) > 100:
-            b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
-            parts.append(
-                {
-                    "inline_data": {
-                        "mime_type": "application/pdf",
-                        "data": b64_pdf,
-                    }
-                }
-            )
         parts.append(
             {
                 "text": f"{fn_prefix}Extract all insurance quotation values, vehicle details, coverage, and detected benefits from this scanned document according to the JSON schema."
