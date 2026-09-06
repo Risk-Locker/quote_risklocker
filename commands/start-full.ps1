@@ -19,7 +19,7 @@ foreach ($attempt in 1..30) {
     if (Test-Path $backendPortFile) {
         $backendPort = (Get-Content $backendPortFile -Raw).Trim()
         try {
-            $health = Invoke-RestMethod -Uri "http://127.0.0.1:$backendPort/health" -TimeoutSec 2
+            $health = Invoke-RestMethod -Uri "http://127.0.0.1:$backendPort/api/health" -TimeoutSec 2
             if ($health.status -eq "Ready" -and [string]$health.app -match "Risklocker") {
                 break
             }

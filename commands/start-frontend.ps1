@@ -49,7 +49,7 @@ function Test-BackendHealth {
     }
 
     try {
-        $response = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 2
+        $response = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/health" -TimeoutSec 2
         return ($response.status -eq "Ready" -and [string]$response.app -match "Risklocker")
     } catch {
         return $false
