@@ -304,11 +304,18 @@ def _dynamic_benefit_grid(
     for card in cards:
         disp_ovr = card.get("display_overrides") or {}
         def get_vis(key, default_val=True):
-            if disp_ovr.get("enabled") and key in disp_ovr:
-                return disp_ovr[key]
+            if disp_ovr:
+                if disp_ovr.get("enabled"):
+                    if key in disp_ovr:
+                        return bool(disp_ovr[key])
+                    # If hard display override is enabled on the concept, any visibility flag not explicitly false defaults to True
+                    if key in {"showGroup", "showAsset", "showTitle", "showCoverage", "showCost", "showDescription", "isVisible"}:
+                        return True
+                if disp_ovr.get(key) is False:
+                    return False
             sec_vis_map = element.get("sectionVisibility")
             if sec_vis_map and isinstance(sec_vis_map, dict):
-                is_extra = bool(card.get("is_extra") or (card.get("cost_status") == "paid" and kind == "current_benefits") or card.get("price"))
+                is_extra = bool(card.get("is_extra") or (card.get("cost_status") == "paid" and kind in {"current_benefits", "extras", "purchased_extras"}) or card.get("price"))
                 sec_key = "optionalAddons" if kind == "available_addons" else ("addedAddons" if is_extra else "default")
                 sec_vis = sec_vis_map.get(sec_key)
                 if sec_vis and isinstance(sec_vis, dict):
@@ -676,15 +683,39 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
                     formatted_price = format_money_amount(raw_price)
             else:
                 formatted_price = format_money_amount(raw_price)
-            cov_limit = str(extra.get("coverage_limit") or "")
+            show_cov = extra.get("show_coverage", True)
+            disp_ovr = extra.get("display_overrides") or {}
+            if disp_ovr.get("enabled") and disp_ovr.get("showCoverage") is False:
+                show_cov = False
+            elif disp_ovr.get("showCoverage") is False:
+                show_cov = False
+
+            is_plan = bool(re.search(r"\b(plan|tier|level|package|option)\s*\d+\b", str(extra.get("label") or "") + " " + str(extra.get("coverage_limit") or ""), re.I))
+            cov_limit = str(extra.get("coverage_limit") or "") if show_cov else ""
+            if cov_limit and is_plan:
+                clean_cov = re.sub(r"[()]", "", cov_limit).replace("RM", "").strip()
+                try:
+                    num_cov = float(clean_cov.replace(",", ""))
+                    if num_cov < 100:
+                        cov_limit = ""
+                except Exception:
+                    pass
             if cov_limit:
                 clean_cov = re.sub(r"[()]", "", cov_limit).replace("RM", "").strip()
                 try:
                     num_cov = float(clean_cov.replace(",", ""))
-                    cov_limit = f"(RM {int(num_cov):,})" if num_cov == int(num_cov) else f"(RM {num_cov:,.2f})"
+                    if num_cov >= 100 or "RM" in str(extra.get("coverage_limit") or ""):
+                        cov_limit = f"(RM {int(num_cov):,})" if num_cov == int(num_cov) else f"(RM {num_cov:,.2f})"
+                    else:
+                        cov_limit = ""
                 except Exception:
                     cov_limit = f"({cov_limit.strip()})" if not cov_limit.startswith("(") else cov_limit
-            rows.append(("extra", str(extra.get("label") or ""), cov_limit, formatted_price))
+            label = str(extra.get("label") or "")
+            if not show_cov:
+                label = re.sub(r"\s*\(RM\s*[\d,.]+\)", "", label, flags=re.I).strip()
+            else:
+                label = re.sub(r"(\bplan\s*\d+)\s*\(RM\s*[\d,.]+\)", r"\1", label, flags=re.I).strip()
+            rows.append(("extra", label, cov_limit, formatted_price))
     rows.append(("premium", str(labels.get("premium") or "Insurance Premium / 保费"), "", _format_value(_value(fields, "premium"), "RM ")))
     rows.append(("divider", "", "", ""))
     rt_display = _value(fields, "roadtax")
@@ -777,8 +808,8 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     y_bottom = float(grid2.get("y") or 796) + float(grid2.get("h") or 262)
 
     hdr_h = 26.0
-    gap = 10.0
-    pad = 4.0
+    gap = 8.0
+    pad = 3.0
 
     has_explicit_extras_grid = any(e.get("gridKind") in {"extras", "purchased_extras"} for e in elements)
     has_extras_section = len(extras_cards) > 0
@@ -786,9 +817,18 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     cols = max(1, int(grid1.get("columns") or 3)) if grid1 else 3
     is_minimal = bool(grid1 and (grid1.get("benefitPreset") == "compact-minimal" or grid1.get("cardStyle") == "minimal"))
     custom_icon_size = float(grid1.get("iconSize") or 0) if grid1 else 0.0
-    dynamic_icon_extra = max(0.0, custom_icon_size - 20.0) if custom_icon_size > 32.0 else 0.0
-    default_row_height = (40.0 if is_minimal else (72.0 if cols == 2 else 68.0)) + dynamic_icon_extra
-    addon_row_height = (40.0 if is_minimal else (88.0 if cols == 2 else 84.0)) + dynamic_icon_extra
+    default_row_height = (
+        38.0 if is_minimal else (
+            max(54.0, custom_icon_size + 10.0 if custom_icon_size > 0 else 54.0) if cols == 2
+            else max(50.0, custom_icon_size + 8.0 if custom_icon_size > 0 else 50.0)
+        )
+    )
+    addon_row_height = (
+        38.0 if is_minimal else (
+            max(60.0, custom_icon_size + 14.0 if custom_icon_size > 0 else 60.0) if cols == 2
+            else max(56.0, custom_icon_size + 12.0 if custom_icon_size > 0 else 56.0)
+        )
+    )
     card_gap = 5.0
 
     if has_extras_section:

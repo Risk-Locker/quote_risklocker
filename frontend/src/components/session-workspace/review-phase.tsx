@@ -2709,13 +2709,18 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                   )}
                                 </div>
                               </div>
-
                               <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-gray-100">
                                 {(() => {
+                                  const dispOvr = (extra as any)?.display_overrides;
+                                  const showCov = (extra as any)?.show_coverage !== false &&
+                                    !(dispOvr?.enabled && dispOvr?.showCoverage === false) &&
+                                    !(dispOvr?.showCoverage === false);
+                                  if (!showCov) return null;
                                   const rawLimit = extra.coverage_limit && typeof extra.coverage_limit === "string" && !extra.coverage_limit.includes("[object") ? extra.coverage_limit.trim() : "";
                                   const costNum = extra.cost ? parseFloat(String(extra.cost).replace(/[^0-9.]/g, "")) : null;
                                   const limitNum = rawLimit ? parseFloat(rawLimit.replace(/[^0-9.]/g, "")) : null;
-                                  const isGenuine = Boolean(rawLimit && limitNum !== null && limitNum > 0 && (costNum === null || Math.abs(limitNum - costNum) > 0.01));
+                                  const isPlan = Boolean(rawLimit && /\b(plan|tier|level|package|option)\s*\d+\b/i.test(String(extra.label || "") + " " + rawLimit));
+                                  const isGenuine = Boolean(rawLimit && limitNum !== null && limitNum > 0 && (costNum === null || Math.abs(limitNum - costNum) > 0.01) && !isPlan && (limitNum >= 100 || /RM/i.test(rawLimit)));
                                   if (!isGenuine) return null;
                                   return (
                                     <div className="text-right">

@@ -10,6 +10,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+import uuid
 
 from sqlalchemy import select, text
 from sqlalchemy.orm.attributes import flag_modified
@@ -195,7 +196,15 @@ def _catalog_rows(db, draft: QuotationDraft) -> tuple[list, list, list, list, li
         ).all()
     )
     offering_ids = {item.id for item in offerings}
-    concept_ids = {item.concept_id for item in offerings}
+    concept_ids = {item.concept_id for item in offerings if item.concept_id}
+    selections = list(
+        db.scalars(
+            select(DraftBenefitSelection).where(DraftBenefitSelection.draft_id == draft.id)
+        ).all()
+    )
+    for sel in selections:
+        if sel.concept_id:
+            concept_ids.add(sel.concept_id)
     concepts = (
         list(db.scalars(select(BenefitConcept).where(BenefitConcept.id.in_(concept_ids))).all())
         if concept_ids
@@ -272,6 +281,10 @@ def _snapshot_assets(db, config: dict, cards: dict, draft: QuotationDraft) -> tu
     embedded: dict[str, str] = {}
     hashes: dict[str, str] = {}
     for asset_id in sorted(_referenced_asset_ids(config, cards)):
+        try:
+            uuid.UUID(str(asset_id))
+        except (ValueError, TypeError):
+            continue
         business = db.get(BusinessAsset, asset_id)
         if business:
             derivative = (business.derivative_manifest or {}).get("pdf") or {}
@@ -365,7 +378,10 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
     max_element_y = max((float(e.get("y") or 0) + float(e.get("h") or 0) for e in balanced), default=0.0)
     base_height = float(config.get("page_profile", {}).get("height") or 1123.0)
     if max_element_y + 30.0 > base_height:
-        config["page_profile"]["height"] = float(int(max_element_y + 30.0))
+        new_h = float(int(max_element_y + 30.0))
+        config["page_profile"]["height"] = new_h
+        if "canvas" in config and isinstance(config["canvas"], dict):
+            config["canvas"]["height"] = new_h
 
     context = {
         "schema_version": 1,

@@ -283,3 +283,54 @@ def test_valuation_type_renders_in_agency_bilingual_template():
     assert "Vehicle Sum Insured / 车辆保额" in html
     assert "RM 75,000.00" in html
 
+
+def test_premium_info_block_omits_coverage_limit_when_show_coverage_is_false():
+    render_context = {
+        "extras": [
+            {
+                "selection_id": "s1",
+                "label": "Windscreen (RM 3,000)",
+                "coverage_limit": "(RM 3,000)",
+                "show_coverage": False,
+                "display_overrides": {"enabled": True, "showCoverage": False},
+                "price": {"amount": "400.00", "currency": "MYR"},
+            },
+        ],
+        "total_premium_adjusted": "1,000.00",
+    }
+    fields = {"premium": {"value": "600.00"}}
+    html = render_quotation_html(
+        fields,
+        template_config=_element(
+            {"id": "pib", "type": "premium-info-block", "x": 0, "y": 0, "w": 400, "h": 200, "z": 1}
+        ),
+        render_context=render_context,
+    )
+    assert "Windscreen" in html
+    assert "(RM 3,000)" not in html
+    assert "RM 400.00" in html
+
+
+def test_balance_benefit_grid_tight_row_height_for_44px_icons():
+    from app.rendering.template_renderer import _balance_benefit_grid_elements
+
+    elements = [
+        {"id": "specials_header_bg", "type": "rectangle", "y": 414, "h": 26},
+        {"id": "specials_header_txt", "type": "text", "y": 419, "h": 16},
+        {"id": "grid1", "type": "benefit-grid", "gridKind": "current_benefits", "y": 444, "columns": 3, "iconSize": 44},
+        {"id": "addons_header_bg", "type": "rectangle", "y": 700, "h": 26},
+        {"id": "addons_header_txt", "type": "text", "y": 705, "h": 16},
+        {"id": "grid2", "type": "benefit-grid", "gridKind": "available_addons", "y": 730, "columns": 3, "iconSize": 44},
+    ]
+    render_context = {
+        "current_benefits": [{"id": f"b{i}"} for i in range(9)] + [{"id": "ext1", "price": 100}],
+        "available_addons": [{"id": f"a{i}"} for i in range(6)],
+    }
+    balanced = _balance_benefit_grid_elements(elements, render_context)
+    by_id = {e["id"]: e for e in balanced}
+    assert by_id["grid1"]["h"] <= 175.0
+    assert by_id["extras_grid"]["h"] <= 65.0
+    grid2 = by_id["grid2"]
+    assert float(grid2["y"]) + float(grid2["h"]) < 1000.0
+
+

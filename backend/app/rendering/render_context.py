@@ -80,7 +80,9 @@ def _clean_extra_label(raw_label: str) -> str:
 
 def build_extras(selections: Iterable[Any], concepts: Iterable[Any], offerings: Iterable[Any] | None = None) -> list[dict]:
     """Staff-added priced extras shown above the coverage premium."""
-    concept_labels = {str(item.id): item.label for item in concepts}
+    concepts_list = list(concepts)
+    concepts_by_id = {str(item.id): item for item in concepts_list}
+    concept_labels = {str(item.id): item.label for item in concepts_list}
     offerings_by_id = {str(item.id): item for item in (offerings or [])}
     extras: list[dict] = []
     for sel in selections:
@@ -93,8 +95,19 @@ def build_extras(selections: Iterable[Any], concepts: Iterable[Any], offerings: 
             continue
         if not price:
             continue
+        concept = concepts_by_id.get(str(getattr(sel, "concept_id", None)))
+        disp_ovr = (getattr(concept, "display_overrides", {}) or {}) if concept else {}
+        show_cov = True
+        if disp_ovr.get("enabled") and disp_ovr.get("showCoverage") is False:
+            show_cov = False
+        elif disp_ovr.get("showCoverage") is False:
+            show_cov = False
+
         raw_label = str(getattr(sel, "label_override", None) or "").strip() or concept_labels.get(str(getattr(sel, "concept_id", None)), "Extra benefit")
         label = _clean_extra_label(raw_label)
+        label = re.sub(r"(\bplan\s*\d+)\s*\(RM\s*[\d,.]+\)", r"\1", label, flags=re.I).strip()
+        if not show_cov:
+            label = re.sub(r"\s*\(RM\s*[\d,.]+\)", "", label, flags=re.I).strip()
 
         price_num = None
         if isinstance(price, dict):
@@ -120,15 +133,16 @@ def build_extras(selections: Iterable[Any], concepts: Iterable[Any], offerings: 
                     limit_val = typed.get("value")
 
         limit_str = ""
-        if limit_val:
+        if limit_val and show_cov:
             s = str(limit_val).strip()
-            if not any(w in s.lower() for w in ("included", "foc", "n/a", "none", "standard", "covered")):
+            is_plan_name = bool(re.search(r"\b(plan|tier|level|package|option)\s*\d+\b", s, re.I))
+            if not is_plan_name and not any(w in s.lower() for w in ("included", "foc", "n/a", "none", "standard", "covered")):
                 clean_num_str = re.sub(r"[^0-9.]", "", s)
                 if clean_num_str:
                     try:
                         num = float(clean_num_str)
-                        # Only show coverage limit if it is positive and distinct from the add-on price
-                        if num > 0 and (price_num is None or abs(num - price_num) > 0.01):
+                        # Only show coverage limit if it is positive, >= 100 (or explicitly RM), and distinct from the add-on price
+                        if (num >= 100 or (s.upper().startswith("RM") and num > 0)) and (price_num is None or abs(num - price_num) > 0.01):
                             limit_formatted = f"RM {int(num):,}" if num == int(num) else f"RM {num:,.2f}"
                             limit_str = f"({limit_formatted})"
                     except Exception:
@@ -136,6 +150,10 @@ def build_extras(selections: Iterable[Any], concepts: Iterable[Any], offerings: 
 
         extras.append({
             "selection_id": sel.id,
+            "concept_id": getattr(sel, "concept_id", None),
+            "concept_key": getattr(concept, "concept_key", None),
+            "display_overrides": disp_ovr,
+            "show_coverage": show_cov,
             "label": label,
             "coverage_limit": limit_str,
             "price": price,

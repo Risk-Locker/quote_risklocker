@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowClockwise, ImageSquare, MagnifyingGlass, Plus, ShieldCheck, Tag, Trash, X } from "@phosphor-icons/react";
+import { ArrowClockwise, Check, CheckCircle, FloppyDisk, ImageSquare, MagnifyingGlass, Plus, ShieldCheck, Tag, Trash, X } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
 import { BuilderNav } from "@/components/builder-nav";
 import { GuidedTour } from "@/components/guided-tour";
@@ -62,6 +62,8 @@ export default function GlobalBenefitsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [justSaved, setJustSaved] = useState(false);
   const [isNew, setIsNew] = useState(false);
   const mountedRef = useRef(true);
 
@@ -179,6 +181,9 @@ export default function GlobalBenefitsPage() {
   function selectBenefit(item: GlobalBenefit) {
     setSelectedId(item.id);
     setIsNew(false);
+    setError("");
+    setSuccessMessage("");
+    setJustSaved(false);
     setFormLabel(item.label);
     setFormKey(item.concept_key);
     setFormCategory(item.category || (item.sort_order <= 11 ? "default" : "addon"));
@@ -195,6 +200,9 @@ export default function GlobalBenefitsPage() {
   function newBenefit() {
     setSelectedId("");
     setIsNew(true);
+    setError("");
+    setSuccessMessage("");
+    setJustSaved(false);
     setFormLabel("");
     setFormKey("");
     setFormCategory(categoryFilter === "addon" ? "addon" : "default");
@@ -220,8 +228,84 @@ export default function GlobalBenefitsPage() {
   }
 
   function toggleFormDisplayOverride(key: string) {
-    setFormDisplayOverrides((prev) => ({ ...prev, [key]: !(prev[key] !== false) }));
+    setFormDisplayOverrides((prev) => {
+      const next: Record<string, boolean> = { ...prev };
+      if (key === "enabled") {
+        const nextEnabled = !prev.enabled;
+        next.enabled = nextEnabled;
+        if (nextEnabled) {
+          next.showCoverage = prev.showCoverage !== false;
+          next.showDescription = prev.showDescription !== false;
+          next.showCost = prev.showCost !== false;
+          next.showAsset = prev.showAsset !== false;
+          next.showGroup = prev.showGroup !== false;
+        }
+        return next;
+      }
+      next[key] = !(prev[key] !== false);
+      return next;
+    });
   }
+
+  const isDirty = useMemo(() => {
+    if (isNew) {
+      return Boolean(
+        formLabel.trim() ||
+        formKey.trim() ||
+        formDescription.trim() ||
+        formAssetId ||
+        formVariants.length > 0 ||
+        formMatch.length > 0
+      );
+    }
+    if (!selected) return false;
+    const baseCategory = selected.category || (selected.sort_order <= 11 ? "default" : "addon");
+    if (formLabel.trim() !== (selected.label || "").trim()) return true;
+    if (formKey.trim() !== (selected.concept_key || "").trim()) return true;
+    if (formCategory !== baseCategory) return true;
+    if ((formDescription || "").trim() !== (selected.description || "").trim()) return true;
+    if ((formAssetId || "") !== (selected.default_asset?.id || "")) return true;
+    if (Number(formSort) !== Number(selected.sort_order || 0)) return true;
+    if (formActive !== (selected.status === "active")) return true;
+
+    // Compare variants
+    const origVariants = selected.variants || [];
+    if (formVariants.length !== origVariants.length) return true;
+    for (let i = 0; i < formVariants.length; i++) {
+      if (formVariants[i] !== origVariants[i]) return true;
+    }
+
+    // Compare match_dataset
+    const origMatch = selected.match_dataset || [];
+    if (formMatch.length !== origMatch.length) return true;
+    for (let i = 0; i < formMatch.length; i++) {
+      if (formMatch[i] !== origMatch[i]) return true;
+    }
+
+    // Compare display_overrides
+    const origOverrides = selected.display_overrides || {};
+    const curKeys = Object.keys(formDisplayOverrides);
+    const origKeys = Object.keys(origOverrides);
+    const allKeys = new Set([...curKeys, ...origKeys]);
+    for (const k of allKeys) {
+      if (Boolean(formDisplayOverrides[k]) !== Boolean(origOverrides[k])) return true;
+    }
+
+    return false;
+  }, [
+    isNew,
+    selected,
+    formLabel,
+    formKey,
+    formCategory,
+    formDescription,
+    formAssetId,
+    formSort,
+    formActive,
+    formVariants,
+    formMatch,
+    formDisplayOverrides,
+  ]);
 
   async function saveBenefit() {
     if (!formLabel.trim()) {
@@ -235,6 +319,7 @@ export default function GlobalBenefitsPage() {
     }
     setSaving(true);
     setError("");
+    setSuccessMessage("");
     try {
       const payload: Record<string, unknown> = {
         concept_key: key,
@@ -261,6 +346,14 @@ export default function GlobalBenefitsPage() {
       });
       await refresh(false);
       selectBenefit(saved.benefit_concept);
+      setJustSaved(true);
+      setSuccessMessage(`Benefit "${saved.benefit_concept.label}" successfully saved!`);
+      setTimeout(() => {
+        setJustSaved(false);
+      }, 3500);
+      setTimeout(() => {
+        setSuccessMessage("");
+      }, 5000);
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
@@ -461,6 +554,22 @@ export default function GlobalBenefitsPage() {
                       <span className="rounded-full bg-[var(--rl-bg)] border border-[var(--rl-border)] px-2.5 py-0.5 text-[10px] font-bold text-[var(--rl-text-strong)]">
                         {formCategory === "default" ? "Category 1: Default Benefit" : "Category 2: Unique Add-on"}
                       </span>
+                      {isDirty ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                          <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                          Unsaved Changes
+                        </span>
+                      ) : justSaved ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                          <Check size={10} weight="bold" className="text-emerald-600" />
+                          Saved
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-gray-50 border border-gray-200 px-2 py-0.5 text-[10px] font-medium text-gray-500">
+                          <Check size={10} weight="bold" className="text-gray-400" />
+                          All changes saved
+                        </span>
+                      )}
                     </div>
                     <p className="mt-0.5 text-xs text-[var(--rl-text-muted)]">Reusable global definition. Specific values/tariffs are configured per product package in the Builder.</p>
                   </div>
@@ -480,9 +589,51 @@ export default function GlobalBenefitsPage() {
                       </Button>
                     )}
                     <Button variant="secondary" size="sm" onClick={newBenefit} icon={<Plus size={14} />}>New</Button>
-                    <Button size="sm" loading={saving} onClick={saveBenefit}>Save Benefit</Button>
+                    <Button
+                      size="sm"
+                      loading={saving}
+                      disabled={!isDirty || saving}
+                      onClick={saveBenefit}
+                      icon={
+                        justSaved ? (
+                          <Check size={14} weight="bold" className="text-emerald-500" />
+                        ) : isDirty ? (
+                          <FloppyDisk size={14} weight="bold" />
+                        ) : (
+                          <Check size={14} weight="bold" className="text-gray-400" />
+                        )
+                      }
+                      className={
+                        isDirty
+                          ? "bg-[var(--rl-red)] text-white hover:bg-[var(--rl-red-hover)] border-[var(--rl-red)] shadow-xs transition-all"
+                          : "bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed opacity-60"
+                      }
+                      title={isDirty ? "Save changes to server" : "No unsaved changes"}
+                    >
+                      {justSaved ? "Saved!" : isDirty ? (isNew ? "Save Benefit" : "Save Changes") : "Saved"}
+                    </Button>
                   </div>
                 </div>
+
+                {successMessage ? (
+                  <div
+                    role="status"
+                    className="flex items-center justify-between gap-3 rounded-[var(--rl-radius-sm)] border-l-4 border-emerald-600 bg-emerald-50 px-4 py-3 text-[13px] font-semibold text-emerald-800 shadow-xs"
+                  >
+                    <div className="flex items-center gap-2">
+                      <CheckCircle size={18} weight="fill" className="text-emerald-600 shrink-0" />
+                      <span>{successMessage}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSuccessMessage("")}
+                      className="text-emerald-700 hover:text-emerald-900 transition-colors"
+                      aria-label="Dismiss alert"
+                    >
+                      <X size={14} weight="bold" />
+                    </button>
+                  </div>
+                ) : null}
 
                 <div className="grid gap-5">
                   {/* 3 Core Fields Card */}
@@ -651,6 +802,42 @@ export default function GlobalBenefitsPage() {
                       />
                     </div>
                   </div>
+
+                  {/* Sticky Save Action Bar when Dirty */}
+                  {isDirty ? (
+                    <div className="sticky bottom-4 z-30 mt-4 flex items-center justify-between gap-3 rounded-[var(--rl-radius-sm)] border border-amber-300 bg-amber-50/95 p-3.5 shadow-lg backdrop-blur-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                        <span className="text-xs font-semibold text-amber-900">
+                          You have unsaved changes to this benefit concept.
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => {
+                            if (isNew) {
+                              newBenefit();
+                            } else if (selected) {
+                              selectBenefit(selected);
+                            }
+                          }}
+                        >
+                          Discard
+                        </Button>
+                        <Button
+                          size="sm"
+                          loading={saving}
+                          onClick={saveBenefit}
+                          className="bg-[var(--rl-red)] text-white hover:bg-[var(--rl-red-hover)] border-[var(--rl-red)] font-bold shadow-xs"
+                          icon={<FloppyDisk size={14} weight="bold" />}
+                        >
+                          Save Changes
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             ) : (

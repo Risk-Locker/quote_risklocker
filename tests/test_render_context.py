@@ -200,3 +200,43 @@ def test_build_extras_formats_coverage_limit_as_parenthesized_rm_and_ignores_pri
     assert by_label["Windscreen"]["coverage_limit"] == "(RM 2,650)"
     assert by_label["Legal Liability to Passengers (LLTP)"]["coverage_limit"] == ""  # Price match suppressed
     assert by_label["Legal Liability of Passengers (LLOP)"]["coverage_limit"] == ""
+
+
+def test_build_extras_omits_coverage_when_display_overrides_show_coverage_is_false():
+    from app.rendering.render_context import build_extras
+
+    class FakeConcept:
+        def __init__(self, id, label, concept_key, display_overrides=None):
+            self.id = id
+            self.label = label
+            self.concept_key = concept_key
+            self.display_overrides = display_overrides or {}
+
+    class FakeSel:
+        def __init__(self, id, concept_id, label_override, price, coverage_limit=None):
+            self.id = id
+            self.state = "current"
+            self.concept_id = concept_id
+            self.label_override = label_override
+            self.price = price
+            self.coverage_limit = coverage_limit
+            self.cost_status = "paid"
+            self.catalog_offering_id = None
+            self.sort_order = 0
+
+    concepts = [
+        FakeConcept("c1", "Windscreen", "windscreen", {"enabled": True, "showCoverage": False}),
+        FakeConcept("c2", "Towing", "towing", {"showCoverage": True}),
+    ]
+    selections = [
+        FakeSel("s1", "c1", "Windscreen (RM 3,000)", {"amount": "400.00", "currency": "MYR"}, "3000"),
+        FakeSel("s2", "c2", "Towing", {"amount": "50.00", "currency": "MYR"}, "1000"),
+    ]
+    extras = build_extras(selections, concepts)
+    by_key = {e["concept_key"]: e for e in extras}
+    assert by_key["windscreen"]["coverage_limit"] == ""
+    assert by_key["windscreen"]["show_coverage"] is False
+    assert by_key["windscreen"]["label"] == "Windscreen"
+    assert by_key["towing"]["coverage_limit"] == "(RM 1,000)"
+    assert by_key["towing"]["show_coverage"] is True
+

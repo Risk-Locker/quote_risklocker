@@ -541,8 +541,18 @@ export function CanvasElementView({
 
           const getVis = (item: any, isAddonCard: boolean, key: string, defaultVal = true) => {
             const dispOvr = item?.display_overrides;
-            if (dispOvr?.enabled && key in dispOvr) {
-              return Boolean(dispOvr[key]);
+            if (dispOvr) {
+              if (dispOvr.enabled) {
+                if (key in dispOvr) {
+                  return Boolean(dispOvr[key]);
+                }
+                if (["showGroup", "showAsset", "showTitle", "showCoverage", "showCost", "showDescription", "isVisible"].includes(key)) {
+                  return true;
+                }
+              }
+              if (dispOvr[key] === false) {
+                return false;
+              }
             }
             if ((element as any).sectionVisibility) {
               const secKey = isAddons
@@ -1131,20 +1141,31 @@ export function CanvasElementView({
           if (extras.length > 0) {
             rows.push({ kind: "extras_header", label: labels.extras || "Extras / 附加项目", value: "" });
             extras.forEach((extra) => {
-              const rawLimit = (extra as any)?.coverage_limit || ((extra as any)?.typed_value_override?.value ? String((extra as any)?.typed_value_override?.value) : "");
+              const dispOvr = (extra as any)?.display_overrides;
+              const showCov = (extra as any)?.show_coverage !== false &&
+                !(dispOvr?.enabled && dispOvr?.showCoverage === false) &&
+                !(dispOvr?.showCoverage === false);
+              const rawLimit = showCov ? ((extra as any)?.coverage_limit || ((extra as any)?.typed_value_override?.value ? String((extra as any)?.typed_value_override?.value) : "")) : "";
               let limitLabel = "";
-              if (rawLimit) {
+              const isPlan = /\b(plan|tier|level|package|option)\s*\d+\b/i.test(String(extra?.label || "") + " " + String(rawLimit));
+              if (rawLimit && !isPlan) {
                 const clean = String(rawLimit).replace(/[()]/g, "").replace(/^RM\s*/i, "").trim();
                 const num = parseFloat(clean.replace(/,/g, ""));
-                if (Number.isFinite(num) && num > 0) {
+                if (Number.isFinite(num) && num >= 100) {
                   limitLabel = ` (RM ${num.toLocaleString("en-MY")})`;
-                } else if (clean && !/^(included|foc|none|n\/a)$/i.test(clean)) {
+                } else if (clean && !/^(included|foc|none|n\/a)$/i.test(clean) && /^RM\s*[\d,.]+/i.test(clean)) {
                   limitLabel = ` (${clean.startsWith("RM") ? clean : `RM ${clean}`})`;
                 }
               }
+              let extraLabel = String(extra?.label || "");
+              if (!showCov) {
+                extraLabel = extraLabel.replace(/\s*\(RM\s*[\d,.]+\)/gi, "").trim();
+              } else {
+                extraLabel = extraLabel.replace(/(\bplan\s*\d+)\s*\(RM\s*[\d,.]+\)/gi, "$1").trim();
+              }
               rows.push({
                 kind: "extra",
-                label: String(extra?.label || "") + limitLabel,
+                label: extraLabel + limitLabel,
                 value: fmtMoney(extra?.price),
               });
             });
@@ -1387,14 +1408,21 @@ export function balanceBenefitGridElements(
   const yTop = baseTop + extraShift;
 
   const hdrH = 26;
-  const gap = 6;
+  const gap = 8;
   const pad = 3;
   const cols = Number(grid1.columns || 3);
   const isMinimal = grid1.benefitPreset === "compact-minimal" || grid1.cardStyle === "minimal";
   const customIconSize = Number((grid1 as any).iconSize || 0);
-  const dynamicIconExtra = customIconSize > 32 ? Math.max(0, customIconSize - 20) : 0;
-  const defaultRowHeight = (isMinimal ? 40 : (cols === 2 ? 72 : 68)) + dynamicIconExtra;
-  const addonRowHeight = (isMinimal ? 40 : (cols === 2 ? 88 : 84)) + dynamicIconExtra;
+  const defaultRowHeight = isMinimal
+    ? 38
+    : cols === 2
+      ? Math.max(54, customIconSize > 0 ? customIconSize + 10 : 54)
+      : Math.max(50, customIconSize > 0 ? customIconSize + 8 : 50);
+  const addonRowHeight = isMinimal
+    ? 38
+    : cols === 2
+      ? Math.max(60, customIconSize > 0 ? customIconSize + 14 : 60)
+      : Math.max(56, customIconSize > 0 ? customIconSize + 12 : 56);
   const cardGap = 5;
 
   const hasExplicitExtrasGrid = elements.some((e) => e.gridKind === "extras" || e.gridKind === "purchased_extras");

@@ -632,6 +632,9 @@ def _workspace_extracted_benefits_section(
 
     raw_lines = extraction.benefit_lines if extraction and extraction.benefit_lines else []
     selection_concepts = {str(s.concept_id): s for s in selections if s.state == "current"}
+    all_concepts = list(db.scalars(select(BenefitConcept)).all())
+    concepts_by_id = {str(c.id): c for c in all_concepts}
+    concepts_by_key = {c.concept_key: c for c in all_concepts}
 
     extras_list = []
     seen_labels = set()
@@ -679,6 +682,7 @@ def _workspace_extracted_benefits_section(
             cov_limit = str(typed_val.get("value") or "")
 
         # Clean cost and limit to avoid showing false limit matching cost
+        is_plan = bool(re.search(r"\b(plan|tier|level|package|option)\s*\d+\b", label + " " + cov_limit, re.I))
         clean_lim_str = re.sub(r"[^0-9.]", "", cov_limit)
         clean_cost_str = re.sub(r"[^0-9.]", "", cost)
         if clean_lim_str and clean_cost_str:
@@ -687,6 +691,16 @@ def _workspace_extracted_benefits_section(
                 c_n = float(clean_cost_str)
                 if abs(l_n - c_n) <= 0.01 or l_n == 0:
                     cov_limit = ""
+                elif is_plan and l_n < 100:
+                    # Single-digit plan tier numbers (e.g. Plan 4) are not coverage sums insured
+                    cov_limit = ""
+            except Exception:
+                pass
+        elif is_plan and clean_lim_str:
+            try:
+                l_n = float(clean_lim_str)
+                if l_n < 100:
+                    cov_limit = ""
             except Exception:
                 pass
 
@@ -694,6 +708,21 @@ def _workspace_extracted_benefits_section(
         first_map = mappings[0] if mappings else {}
         concept_id = first_map.get("concept_id")
         concept_key = first_map.get("concept_key") or ""
+
+        concept = concepts_by_id.get(str(concept_id)) if concept_id else concepts_by_key.get(concept_key)
+        disp_ovr = (getattr(concept, "display_overrides", {}) or {}) if concept else {}
+        show_cov = True
+        if disp_ovr.get("enabled") and disp_ovr.get("showCoverage") is False:
+            show_cov = False
+        elif disp_ovr.get("showCoverage") is False:
+            show_cov = False
+
+        if not show_cov:
+            cov_limit = ""
+            label = re.sub(r"\s*\(RM\s*[\d,.]+\)", "", label, flags=re.I).strip()
+        else:
+            # Strip false (RM \d+) suffix if attached to a plan tier name (e.g. Plan 4 (RM 4))
+            label = re.sub(r"(\bplan\s*\d+)\s*\(RM\s*[\d,.]+\)", r"\1", label, flags=re.I).strip()
 
         is_applied = False
         selection_id = None
@@ -717,6 +746,8 @@ def _workspace_extracted_benefits_section(
             "concept_id": concept_id,
             "is_applied": is_applied,
             "selection_id": selection_id,
+            "display_overrides": disp_ovr,
+            "show_coverage": show_cov,
             "source": "gemini_vision" if "gemini" in str(line.get("line_id", "")) else "native_pdf",
         })
 
