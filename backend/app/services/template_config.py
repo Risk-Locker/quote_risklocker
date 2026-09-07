@@ -149,9 +149,11 @@ def default_canvas_elements() -> list[dict[str, Any]]:
         _element("quote_vehicle", "variable", 560, 51, 210, 25, variableId="vehicle_no", fontSize=17, fontWeight="800", textAlign="right", z=3),
         _element("top_rule", "line", 0, 114, CANVAS_WIDTH, 2, borderWidth=2, z=2),
         *rows,
-        _element("payment_box", "group", 532, 160, 224, 122, borderWidth=2, background="#ffffff", z=2),
-        _element("bank_logo", "image", 548, 178, 70, 60, assetSlot="bank_logo", z=3),
-        _element("payment_text", "text", 622, 166, 120, 104, text="Payment Method\nBank details\n12300318500\nRisklocker Sdn. Bhd.\nHong Leong Bank", fontSize=13, textAlign="right", z=3),
+        _element("payment_box", "group", 532, 160, 224, 134, borderWidth=2, background="#ffffff", z=2),
+        _element("bank_logo", "image", 548, 172, 70, 50, assetSlot="bank_logo", assetId="2168eaee-3e56-4903-8c4f-841f01ff2407", z=3),
+        _element("payment_text", "text", 622, 166, 120, 48, text="Payment Method\nBank details\n12300318500", fontSize=12, textAlign="right", z=3),
+        _element("pay_holder", "image", 622, 218, 120, 24, assetSlot="risklocker_logo", assetId="e9685e1f-ac95-410c-a2e9-eccb7ca35d5f", z=3),
+        _element("pay_bank_sub", "image", 622, 246, 120, 24, assetSlot="bank_logo", assetId="2168eaee-3e56-4903-8c4f-841f01ff2407", z=3),
         _element("driver_box", "group", 532, 306, 224, 48, borderWidth=2, background="#ffffff", z=2),
         _element("driver_icon", "image", 548, 314, 34, 34, assetSlot="all_driver_icon", z=3),
         _element("driver_text", "text", 610, 319, 120, 24, text="All Driver", fontSize=14, textAlign="center", z=3),
@@ -167,10 +169,10 @@ def default_canvas_elements() -> list[dict[str, Any]]:
 
 def _default_assets() -> dict[str, str]:
     return {
-        "risklocker_logo": find_asset_by_hint(None, ["risklocker logo"]),
-        "bank_logo": find_asset_by_hint(None, ["hongleong", "bank"]),
-        "all_driver_icon": find_asset_by_hint(None, ["all driver"]),
-        "background": find_asset_by_hint(None, ["template_bg"]),
+        "risklocker_logo": "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f",
+        "bank_logo": "2168eaee-3e56-4903-8c4f-841f01ff2407",
+        "all_driver_icon": "91116a7dc3540d62",
+        "background": "49e754a6faa949c2",
     }
 
 

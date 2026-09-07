@@ -1,4 +1,4 @@
-"""Dry-run or idempotently publish the three canonical v7 master templates."""
+"""Dry-run or idempotently publish the canonical Bilingual Agency Motor v7 master template."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from app.services.master_template_service import ensure_master_templates
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Publish Standard A4, Dense A4, and Extended Portrait v7 masters.")
+    parser = argparse.ArgumentParser(description="Publish Bilingual Agency Motor v7 master.")
     parser.add_argument("--apply", action="store_true", help="Create and publish missing masters. Default is dry-run.")
     parser.add_argument("--report-path", type=Path, default=Path(".qc-tmp/v7-master-template-report.json"))
     args = parser.parse_args()

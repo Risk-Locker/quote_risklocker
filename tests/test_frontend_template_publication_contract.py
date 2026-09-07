@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILDER = ROOT / "frontend/src/app/builder/templates/[id]/builder/page.tsx"
-TEMPLATE_LIST = ROOT / "frontend/src/app/builder/templates/page.tsx"
+TEMPLATE_LIST = ROOT / "frontend/src/app/builder/templates/quotation-templates/page.tsx"
 REVIEW = ROOT / "frontend/src/components/session-workspace/review-phase.tsx"
 PROVIDER = ROOT / "frontend/src/components/session-workspace/provider.tsx"
 CANVAS = ROOT / "frontend/src/components/template-canvas/shared.tsx"

@@ -55,6 +55,7 @@ External chat tools cannot be forced to follow repository instructions. Give the
 | `docs/architecture/STRUCTURE.md` | Curated repository guide & ownership map | File or directory additions / deletions occur |
 | `docs/architecture/TESTING.md` | Test strategy, test suites & CI/CD gates | Coverage expectations or test commands change |
 | `docs/architecture/REFERENCES.md` | Asset policy & runtime reference boundaries | Asset paths or storage rules change |
+| `docs/h.md` | Comprehensive system architecture & pipeline overview | High-level pipeline architecture changes |
 
 ### Tier 3: Domain & Business Specs (`docs/domain/`)
 | Document | Purpose | Update when |

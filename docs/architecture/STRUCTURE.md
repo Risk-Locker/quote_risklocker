@@ -53,7 +53,7 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 ## Benefit Presets (v10) Additions
 
 - Centralized Presets: `frontend/src/lib/benefit-presets.ts` (`SYSTEM_BENEFIT_PRESETS`, `getBenefitPreset`, `applyPresetToCanvasElement`). 6 presets: Masonry Flow, Compact Minimalist, Signature 2-Col, Elevated 3D, Grid Tile, Dark Luxury.
-- Template Builder: Preset selector in `frontend/src/app/builder/templates/[id]/builder/page.tsx` (`Dynamic benefit grid` inspector) and template applier in `frontend/src/app/builder/templates/page.tsx`.
+- Template Builder: Preset selector in `frontend/src/app/builder/templates/[id]/builder/page.tsx` (`Dynamic benefit grid` inspector), Quotation Templates manager at `frontend/src/app/builder/templates/quotation-templates/page.tsx`, and dedicated Benefit Templates designer at `frontend/src/app/builder/templates/benefit-templates/page.tsx` (with automatic sub-tab routing and redirects at `/builder/templates` and `/builder/templates/benefits`).
 - Review Workspace: Interactive Benefit Template Switcher in `frontend/src/components/session-workspace/review-phase.tsx` (sidebar + canvas toolbar) with live preview updates.
 - Rendering: Double RM fix in `shared.tsx:765`, dynamic row height allocation (~66px standard, 40px minimal) and dynamic footer shifting (`footer_shift`) in `shared.tsx` and `template_renderer.py`. PDF generator applies preset in `generation_service.py:_template_config`.
 

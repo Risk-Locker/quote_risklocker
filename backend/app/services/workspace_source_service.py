@@ -85,14 +85,53 @@ def get_workspace_template_config(db, user, session_id: str) -> dict:
         and draft.layout_override_template_revision_id == revision.id
         and draft.layout_override_base_hash == revision.config_hash
     )
-    config = draft.layout_override if exact_binding else revision.config
+    config = deepcopy(draft.layout_override if exact_binding else revision.config) or {}
+    if "assets" not in config or not isinstance(config["assets"], dict) or not config["assets"]:
+        config["assets"] = {
+            "risklocker_logo": "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f",
+            "bank_logo": "2168eaee-3e56-4903-8c4f-841f01ff2407",
+            "all_driver_icon": "91116a7dc3540d62",
+            "background": "49e754a6faa949c2",
+        }
+    else:
+        config["assets"].setdefault("risklocker_logo", "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f")
+        config["assets"].setdefault("bank_logo", "2168eaee-3e56-4903-8c4f-841f01ff2407")
+        config["assets"].setdefault("all_driver_icon", "91116a7dc3540d62")
+        config["assets"].setdefault("background", "49e754a6faa949c2")
+
+    canvas = config.get("canvas")
+    if isinstance(canvas, dict) and "elements" in canvas:
+        for el in canvas["elements"]:
+            slot = el.get("assetSlot")
+            eid = el.get("id")
+            if eid in {"pay_holder", "text_ltaa394"}:
+                el["type"] = "image"
+                el["assetSlot"] = "risklocker_logo"
+                el["assetId"] = "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f"
+                el["text"] = None
+            elif eid in {"pay_bank_sub", "text_ul2w5ka"}:
+                el["type"] = "image"
+                el["assetSlot"] = "bank_logo"
+                el["assetId"] = "2168eaee-3e56-4903-8c4f-841f01ff2407"
+                el["text"] = None
+            elif slot == "risklocker_logo" or eid == "risklocker_logo":
+                el["assetId"] = "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f"
+                el["assetSlot"] = "risklocker_logo"
+                el["type"] = "image"
+            elif slot == "bank_logo" or eid in {"bank_logo", "pay_bank_logo"}:
+                el["assetId"] = "2168eaee-3e56-4903-8c4f-841f01ff2407"
+                el["assetSlot"] = "bank_logo"
+                el["type"] = "image"
+                if el.get("text") is not None:
+                    el["text"] = None
+
     return {
         "template_id": revision.template_id,
         "template_revision_id": revision.id,
         "revision_number": revision.revision_number,
         "config_hash": revision.config_hash,
         "source": "session_override" if exact_binding else "template_revision",
-        "config": deepcopy(config),
+        "config": config,
         "binding": {
             "template_id": revision.template_id,
             "template_revision_id": revision.id,

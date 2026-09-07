@@ -722,6 +722,11 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
       selectOnly(element.id);
     }
     const members = mode === "move" ? moveSelectionIds() : new Set([element.id]);
+    if (mode === "move" && element.groupId) {
+      for (const el of elements) {
+        if (el.groupId === element.groupId && !el.locked) members.add(el.id);
+      }
+    }
     const memberStart = new Map<string, { x: number; y: number; w: number; h: number }>();
     for (const el of elements) {
       if (members.has(el.id)) memberStart.set(el.id, { x: el.x, y: el.y, w: el.w, h: el.h });
@@ -762,8 +767,8 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
     if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
 
     if (drag.mode === "move") {
-      let nx = Math.round(drag.start.x + dx);
-      let ny = Math.round(drag.start.y + dy);
+      let nx = Math.max(0, Math.min(canvasW - drag.start.w, Math.round(drag.start.x + dx)));
+      let ny = Math.max(0, Math.min(canvasH - drag.start.h, Math.round(drag.start.y + dy)));
       if (!event.altKey) {
         const { value: sx, guide: gx } = snapValue(nx, SNAP, []);
         const { value: sy, guide: gy } = snapValue(ny, SNAP, []);
@@ -971,7 +976,7 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
       setImportError("Missing or invalid \"canvas.elements\" array.");
       return false;
     }
-    const knownTypes = new Set(["text", "variable", "image", "line", "rectangle", "ellipse", "triangle", "diamond", "layer-group", "group", "shape", "benefit-grid", "benefit-section", "benefit-card", "special"]);
+    const knownTypes = new Set(["text", "variable", "image", "line", "rectangle", "ellipse", "triangle", "diamond", "layer-group", "group", "shape", "benefit-grid", "benefit-section", "benefit-card", "special", "premium-info-block"]);
     const num = (value: unknown, fallback: number) => (typeof value === "number" && Number.isFinite(value) ? value : fallback);
     const str = (value: unknown) => (typeof value === "string" ? value : undefined);
     const elements = (canvas.elements as unknown[]).map((entry, index) => {

@@ -267,6 +267,13 @@ export function computeGuides(
   return guidePositions;
 }
 
+export const SYSTEM_SLOT_DEFAULTS: Record<string, string> = {
+  risklocker_logo: "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f",
+  bank_logo: "2168eaee-3e56-4903-8c4f-841f01ff2407",
+  all_driver_icon: "91116a7dc3540d62",
+  background: "49e754a6faa949c2",
+};
+
 export function CanvasElementView({
   element,
   selected,
@@ -311,15 +318,48 @@ export function CanvasElementView({
   conceptAssets?: Record<string, string>;
 }) {
   if (element.type === "layer-group" || element.visible === false) return null;
-  const assetId = element.assetId || (element.assetSlot ? config?.assets?.[element.assetSlot] : "");
+  const eid = element.id || "";
+  const isImageOrLogo =
+    element.type === "image" ||
+    ["pay_holder", "text_ltaa394", "pay_bank_sub", "text_ul2w5ka", "pay_bank_logo", "bank_logo", "risklocker_logo"].includes(eid);
+
+  const slot =
+    element.assetSlot ||
+    (eid === "risklocker_logo" || eid === "pay_holder" || eid === "text_ltaa394"
+      ? "risklocker_logo"
+      : eid === "bank_logo" || eid === "pay_bank_logo" || eid === "pay_bank_sub" || eid === "text_ul2w5ka"
+        ? "bank_logo"
+        : eid === "driver_icon"
+          ? "all_driver_icon"
+          : "");
+
+  let assetId = element.assetId || (slot ? config?.assets?.[slot] : "");
+  if ((!assetId || assetId === "None") && slot && SYSTEM_SLOT_DEFAULTS[slot]) {
+    assetId = SYSTEM_SLOT_DEFAULTS[slot];
+  }
+  if (!assetId || assetId === "None") {
+    if (slot && SYSTEM_SLOT_DEFAULTS[slot]) {
+      assetId = SYSTEM_SLOT_DEFAULTS[slot];
+    } else if (SYSTEM_SLOT_DEFAULTS[eid]) {
+      assetId = SYSTEM_SLOT_DEFAULTS[eid];
+    } else if (eid === "pay_holder" || eid === "text_ltaa394") {
+      assetId = SYSTEM_SLOT_DEFAULTS["risklocker_logo"];
+    } else if (eid === "pay_bank_logo" || eid === "pay_bank_sub" || eid === "text_ul2w5ka") {
+      assetId = SYSTEM_SLOT_DEFAULTS["bank_logo"];
+    }
+  }
   const asset = assets.find((item) => item.id === assetId);
-  const resolvedUrl = asset?.url || (assetId ? (
+  let resolvedUrl = asset?.url || (assetId ? (
     typeof assetId === "string" && (assetId.startsWith("http://") || assetId.startsWith("https://") || assetId.startsWith("/") || assetId.startsWith("data:"))
       ? assetId
       : String(assetId).includes("-")
         ? `/business/assets/${assetId}/content?profile=ui`
         : `/template-assets/${assetId}`
   ) : "");
+  if (!resolvedUrl && slot && SYSTEM_SLOT_DEFAULTS[slot]) {
+    const fallbackId = SYSTEM_SLOT_DEFAULTS[slot];
+    resolvedUrl = `/business/assets/${fallbackId}/content?profile=ui`;
+  }
   const isSpecial = element.type === "special";
   const isLine = element.type === "line";
   const style = element.style || {};
@@ -410,27 +450,29 @@ export function CanvasElementView({
       tabIndex={readOnly ? undefined : 0}
       aria-label={readOnly ? undefined : element.name || `${element.type} layer`}
     >
-      {element.type === "image" ? (
+      {isImageOrLogo ? (
         resolvedUrl ? (
           <img className="h-full w-full object-contain" src={fileUrl(resolvedUrl)} alt="" />
-        ) : element.assetSlot ? (
+        ) : slot ? (
           <div className="flex h-full w-full items-center justify-center rounded border border-dashed border-gray-200 bg-gray-50/60 p-1 text-center font-bold text-gray-500 text-[10px]">
-            {element.assetSlot === "risklocker_logo" ? (
-              <span className="text-red-600 font-black tracking-tight text-[11px]">RISKLOCKER</span>
-            ) : element.assetSlot === "insurer_logo" ? (
+            {slot === "risklocker_logo" ? (
+              <img className="h-full w-full object-contain" src={fileUrl("/business/assets/e9685e1f-ac95-410c-a2e9-eccb7ca35d5f/content?profile=ui")} alt="Risklocker" />
+            ) : slot === "bank_logo" ? (
+              <img className="h-full w-full object-contain" src={fileUrl("/business/assets/2168eaee-3e56-4903-8c4f-841f01ff2407/content?profile=ui")} alt="Hong Leong Bank" />
+            ) : slot === "insurer_logo" ? (
               <span className="text-slate-800 font-bold text-[11px]">{variableValues?.insurance_company || variableValues?.insurance_name || "INSURER"}</span>
             ) : (
-              element.assetSlot
+              slot
             )}
           </div>
         ) : null
       ) : null}
-      {element.type === "text" && editingText && !readOnly ? (
+      {element.type === "text" && !isImageOrLogo && editingText && !readOnly ? (
         <EditableText
           initial={element.text || ""}
           onCommit={(text) => onTextCommit?.(text)}
         />
-      ) : element.type === "text" ? (
+      ) : element.type === "text" && !isImageOrLogo ? (
         (() => {
           let text = element.text || "";
           if (text.includes("{") && variableValues) {
@@ -501,6 +543,22 @@ export function CanvasElementView({
             const dispOvr = item?.display_overrides;
             if (dispOvr?.enabled && key in dispOvr) {
               return Boolean(dispOvr[key]);
+            }
+            if ((element as any).sectionVisibility) {
+              const secKey = isAddons
+                ? "optionalAddons"
+                : isAddonCard
+                  ? "addedAddons"
+                  : "default";
+              const secVis = (element as any).sectionVisibility[secKey];
+              if (secVis) {
+                if (key === "showGroup" && "showTitle" in secVis) return Boolean(secVis.showTitle);
+                if (key === "showAsset" && "showAsset" in secVis) return Boolean(secVis.showAsset);
+                if (key === "showCoverage" && "showCoverage" in secVis) return Boolean(secVis.showCoverage);
+                if (key === "showDescription" && "showDescription" in secVis) return Boolean(secVis.showDescription);
+                if (key === "showCost" && "showCost" in secVis) return Boolean(secVis.showCost);
+                if (key in secVis) return Boolean(secVis[key]);
+              }
             }
             if (isGlobalEnabled && dispOpts) {
               const cat = isAddonCard ? "addon" : "default";
@@ -657,6 +715,23 @@ export function CanvasElementView({
                     val = "";
                   }
 
+                  const isDark = element.benefitPreset === "dark-signature";
+                  const customIconSize = (element as any).iconSize ? Number((element as any).iconSize) : 0;
+                  const cardIconSize = customIconSize > 0 ? Math.min(60, Math.max(16, customIconSize)) : density.icon;
+                  const cardShape = (element as any).shape;
+                  const cardRadius = cardShape === "racetrack" ? "999px" : cardShape === "soft" ? "12px" : cardShape === "oval" ? "24px / 14px" : cardShape === "square" ? "0px" : "6px";
+                  const cardElevation = (element as any).elevation;
+                  const cardShadow = cardElevation === "shadow" ? "0 4px 12px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0,0,0,0.04)" : cardElevation === "lift" ? "0 8px 20px rgba(0, 0, 0, 0.12)" : undefined;
+                  const cardBg = (element as any).bgColor;
+                  const cardBorderColor = (element as any).borderColor;
+                  const cardBorderWidth = (element as any).borderWidth;
+                  const cardBorderStyle = (element as any).borderStyle;
+                  const cardImageFit = (element as any).imageFit || "contain";
+                  const cardIconPad = (element as any).iconPadShape;
+                  const iconPadRadius = cardIconPad === "circle" ? "999px" : cardIconPad === "box" ? "6px" : cardIconPad === "none" ? "0px" : "4px";
+
+                  const isAmberCard = isExtras || (b?.is_detected && element.gridKind === "available_addons");
+
                   return (
                     <article
                       key={card.index}
@@ -664,21 +739,33 @@ export function CanvasElementView({
                       style={{ left: card.x, top: card.y, width: card.width, height: card.height }}
                     >
                       <div
-                        className={`w-full h-full flex flex-col rounded-[6px] overflow-hidden ${
-                          b?.is_detected && element.gridKind === "available_addons"
-                            ? "border-2 border-amber-400 bg-amber-50/40 shadow-xs ring-1 ring-amber-300/50"
+                        className={`w-full h-full flex flex-col overflow-hidden ${
+                          isAmberCard
+                            ? "border-2 border-amber-400 bg-amber-50/30 shadow-xs ring-1 ring-amber-300/40"
                             : element.cardStyle === "minimal"
                               ? "bg-transparent border border-transparent"
                               : element.cardStyle === "soft"
                                 ? "bg-[#f3f0f0] border border-gray-200 shadow-xs"
                                 : "border border-[var(--rl-border)] bg-white shadow-xs"
                         }`}
-                        style={{ padding: density.padding }}
+                        style={{
+                          padding: density.padding,
+                          borderRadius: cardShape ? cardRadius : undefined,
+                          boxShadow: isAmberCard ? "0 1px 3px rgba(245, 158, 11, 0.15)" : (cardElevation ? cardShadow : undefined),
+                          backgroundColor: isAmberCard ? "#FFFDF7" : (cardBg || undefined),
+                          borderColor: isAmberCard ? "#F59E0B" : (cardBorderColor || undefined),
+                          borderWidth: isAmberCard ? "1.5px" : (cardBorderWidth !== undefined ? `${cardBorderWidth}px` : undefined),
+                          borderStyle: cardBorderStyle || undefined,
+                        }}
                       >
                         {showGroup && (
                           <div
                             className="font-bold leading-snug text-[var(--rl-text-strong)] shrink-0 truncate"
-                            style={{ fontSize: density.label, marginBottom: 3 }}
+                            style={{
+                              fontSize: (element as any).titleSize || density.label,
+                              marginBottom: 3,
+                              color: (element as any).textColor || undefined,
+                            }}
                           >
                             {label}
                           </div>
@@ -686,14 +773,19 @@ export function CanvasElementView({
                         <div className="flex flex-1 min-h-0 gap-1.5 items-start overflow-hidden">
                           {showAsset && (
                             <div
-                              className="shrink-0 overflow-hidden rounded"
-                              style={{ width: density.icon, height: density.icon }}
+                              className="shrink-0 overflow-hidden"
+                              style={{
+                                width: `${cardIconSize}px`,
+                                height: `${cardIconSize}px`,
+                                borderRadius: iconPadRadius,
+                              }}
                             >
                               {assetUrl ? (
                                 <img
                                   src={fileUrl(assetUrl)}
                                   alt={label}
-                                  className="h-full w-full object-contain"
+                                  className="h-full w-full"
+                                  style={{ objectFit: cardImageFit }}
                                   onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
                                 />
                               ) : (
@@ -741,12 +833,20 @@ export function CanvasElementView({
                                     </span>
                                   )}
                                   {costBadge && !computedHideCost && (
-                                    <span
-                                      className={`mt-0.5 inline-block self-start font-bold whitespace-nowrap text-[var(--rl-red)] leading-tight`}
-                                      style={{ fontSize: density.desc }}
-                                    >
-                                      {costBadge}
-                                    </span>
+                                    <div className="mt-1 flex items-center">
+                                      <span
+                                        className={`inline-block rounded px-1.5 py-0.5 font-bold whitespace-nowrap leading-tight border ${
+                                          isExtras
+                                            ? isDark ? "bg-amber-950/40 text-amber-300 border-amber-700/50" : "bg-amber-50 text-amber-800 border-amber-300/80"
+                                            : isDark
+                                              ? "bg-red-950/40 text-red-300 border-red-800/50"
+                                              : "bg-red-50 text-red-600 border-red-200"
+                                        }`}
+                                        style={{ fontSize: Math.max(8.5, density.desc) }}
+                                      >
+                                        {costBadge}
+                                      </span>
+                                    </div>
                                   )}
                                 </>
                               );
@@ -869,12 +969,28 @@ export function CanvasElementView({
                               val = "";
                             }
 
+                        const customIconSize = (element as any).iconSize ? Number((element as any).iconSize) : 0;
+                        const cardIconSize = customIconSize > 0 ? Math.min(60, Math.max(16, customIconSize)) : (isMinimal ? density.icon - 2 : density.icon);
+                        const cardShape = (element as any).shape;
+                        const cardRadius = cardShape === "racetrack" ? "999px" : cardShape === "soft" ? "12px" : cardShape === "oval" ? "24px / 14px" : cardShape === "square" ? "0px" : "6px";
+                        const cardElevation = (element as any).elevation;
+                        const cardShadow = cardElevation === "shadow" ? "0 4px 12px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0,0,0,0.04)" : cardElevation === "lift" ? "0 8px 20px rgba(0, 0, 0, 0.12)" : undefined;
+                        const cardBg = (element as any).bgColor;
+                        const cardBorderColor = (element as any).borderColor;
+                        const cardBorderWidth = (element as any).borderWidth;
+                        const cardBorderStyle = (element as any).borderStyle;
+                        const cardImageFit = (element as any).imageFit || "contain";
+                        const cardIconPad = (element as any).iconPadShape;
+                        const iconPadRadius = cardIconPad === "circle" ? "999px" : cardIconPad === "box" ? "6px" : cardIconPad === "none" ? "0px" : (isGridTile ? "999px" : "4px");
+
+                        const isAmberCard = isExtras || (b?.is_detected && element.gridKind === "available_addons");
+
                         return (
                           <article
                             key={`benefit-card-${idx}`}
-                            className={`w-full h-full flex flex-col rounded-[6px] overflow-hidden transition-all ${
-                              b?.is_detected && element.gridKind === "available_addons"
-                                ? "border-2 border-amber-400 bg-amber-50/40 shadow-xs ring-1 ring-amber-300/50"
+                            className={`w-full h-full flex flex-col overflow-hidden transition-all ${
+                              isAmberCard
+                                ? "border-2 border-amber-400 bg-amber-50/30 shadow-xs ring-1 ring-amber-300/40"
                                 : isDark
                                   ? "border border-slate-700 bg-slate-900 shadow-xs"
                                   : isMinimal
@@ -885,12 +1001,24 @@ export function CanvasElementView({
                                         ? "border border-neutral-400 bg-white shadow-none"
                                         : "border border-neutral-400 bg-white shadow-xs"
                             }`}
-                            style={{ padding: isMinimal ? "3px 5px" : density.padding }}
+                            style={{
+                              padding: isMinimal ? "3px 5px" : density.padding,
+                              borderRadius: cardShape ? cardRadius : "6px",
+                              boxShadow: isAmberCard ? "0 1px 3px rgba(245, 158, 11, 0.15)" : (cardElevation ? cardShadow : undefined),
+                              backgroundColor: isAmberCard ? "#FFFDF7" : (cardBg || undefined),
+                              borderColor: isAmberCard ? "#F59E0B" : (cardBorderColor || undefined),
+                              borderWidth: isAmberCard ? "1.5px" : (cardBorderWidth !== undefined ? `${cardBorderWidth}px` : undefined),
+                              borderStyle: cardBorderStyle || undefined,
+                            }}
                           >
                             {showGroup && (
                               <div
                                 className={`font-bold leading-tight truncate ${isDark ? "text-white" : "text-[var(--rl-text-strong)]"}`}
-                                style={{ fontSize: isMinimal ? density.label - 0.5 : density.label, marginBottom: isMinimal ? 1 : 3 }}
+                                style={{
+                                  fontSize: isMinimal ? density.label - 0.5 : ((element as any).titleSize || density.label),
+                                  marginBottom: isMinimal ? 1 : 3,
+                                  color: (element as any).textColor || undefined,
+                                }}
                               >
                                 {label}
                               </div>
@@ -898,14 +1026,19 @@ export function CanvasElementView({
                             <div className={`flex items-start ${isMinimal ? "gap-1" : "gap-1.5"}`}>
                               {showAsset && (
                                 <div
-                                  className={`shrink-0 overflow-hidden ${isGridTile ? "rounded-full" : "rounded"}`}
-                                  style={{ width: isMinimal ? density.icon - 2 : density.icon, height: isMinimal ? density.icon - 2 : density.icon }}
+                                  className="shrink-0 overflow-hidden"
+                                  style={{
+                                    width: `${cardIconSize}px`,
+                                    height: `${cardIconSize}px`,
+                                    borderRadius: iconPadRadius,
+                                  }}
                                 >
                                   {assetUrl ? (
                                     <img
                                       src={fileUrl(assetUrl)}
                                       alt={label}
-                                      className="h-full w-full object-contain"
+                                      className="h-full w-full"
+                                      style={{ objectFit: cardImageFit }}
                                       onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
                                     />
                                   ) : (
@@ -953,12 +1086,20 @@ export function CanvasElementView({
                                             </span>
                                           )}
                                           {costBadge && !computedHideCost && (
-                                            <span
-                                              className={`mt-0.5 inline-block font-bold whitespace-nowrap leading-tight ${isDark ? "text-red-400" : "text-[var(--rl-red)]"}`}
-                                              style={{ fontSize: density.desc }}
-                                            >
-                                              {costBadge}
-                                            </span>
+                                            <div className="mt-1 flex items-center">
+                                              <span
+                                                className={`inline-block rounded px-1.5 py-0.5 font-bold whitespace-nowrap leading-tight border ${
+                                                  isExtras
+                                                    ? isDark ? "bg-amber-950/40 text-amber-300 border-amber-700/50" : "bg-amber-50 text-amber-800 border-amber-300/80"
+                                                    : isDark
+                                                      ? "bg-red-950/40 text-red-300 border-red-800/50"
+                                                      : "bg-red-50 text-red-600 border-red-200"
+                                                }`}
+                                                style={{ fontSize: Math.max(8.5, density.desc) }}
+                                              >
+                                                {costBadge}
+                                              </span>
+                                            </div>
                                           )}
                                         </>
                                       );
@@ -1250,8 +1391,10 @@ export function balanceBenefitGridElements(
   const pad = 3;
   const cols = Number(grid1.columns || 3);
   const isMinimal = grid1.benefitPreset === "compact-minimal" || grid1.cardStyle === "minimal";
-  const defaultRowHeight = isMinimal ? 40 : (cols === 2 ? 72 : 68);
-  const addonRowHeight = isMinimal ? 40 : (cols === 2 ? 88 : 84);
+  const customIconSize = Number((grid1 as any).iconSize || 0);
+  const dynamicIconExtra = customIconSize > 32 ? Math.max(0, customIconSize - 20) : 0;
+  const defaultRowHeight = (isMinimal ? 40 : (cols === 2 ? 72 : 68)) + dynamicIconExtra;
+  const addonRowHeight = (isMinimal ? 40 : (cols === 2 ? 88 : 84)) + dynamicIconExtra;
   const cardGap = 5;
 
   const hasExplicitExtrasGrid = elements.some((e) => e.gridKind === "extras" || e.gridKind === "purchased_extras");
@@ -1262,8 +1405,9 @@ export function balanceBenefitGridElements(
     const nExt = extrasCards.length;
     const n2 = addonCards.length;
 
+    const extrasCols = nExt <= 2 ? Math.min(2, cols) : cols;
     const rows1 = n1 > 0 ? Math.ceil(n1 / cols) : 0;
-    const rowsExt = nExt > 0 ? Math.ceil(nExt / cols) : 0;
+    const rowsExt = nExt > 0 ? Math.ceil(nExt / extrasCols) : 0;
     const rows2 = n2 > 0 ? Math.ceil(n2 / cols) : 0;
 
     const h1 = rows1 > 0 ? rows1 * defaultRowHeight + Math.max(0, rows1 - 1) * cardGap : 40;
@@ -1294,57 +1438,39 @@ export function balanceBenefitGridElements(
         e.h = h1;
         adjusted.push(e);
         // Insert Extras section
-        if (hasExplicitExtrasGrid) {
-          adjusted.push({
-            id: "extras_header_bg",
-            type: "rectangle",
-            x: 40,
-            y: yHExt,
-            w: 714,
-            h: hdrH,
-            z: 2,
-            style: { background: "#1E293B", borderWidth: 0, borderColor: "transparent", borderRadius: 4 },
-          });
-          adjusted.push({
-            id: "extras_header_txt",
-            type: "text",
-            text: "Purchased Extras & Add-ons / 特别附加项目",
-            x: 52,
-            y: yHExt + 5,
-            w: 690,
-            h: 16,
-            z: 5,
-            style: { fontSize: 10.5, fontWeight: "700", color: "#FFFFFF", textAlign: "left" },
-          });
-        } else {
-          adjusted.push({
-            id: "extras_divider_line",
-            type: "line",
-            x: grid1.x || 40,
-            y: yHExt + (hdrH / 2),
-            w: grid1.w || 714,
-            h: 1,
-            z: 2,
-            style: { borderColor: "#CBD5E1", borderStyle: "dashed" },
-          });
-        }
         adjusted.push({
+          id: "extras_header_bg",
+          type: "rectangle",
+          x: grid1.x || 40,
+          y: yHExt,
+          w: grid1.w || 714,
+          h: hdrH,
+          z: 2,
+          style: { background: "#1E293B", borderWidth: 0, borderColor: "transparent", borderRadius: 4 },
+        });
+        adjusted.push({
+          id: "extras_header_txt",
+          type: "text",
+          text: "Purchased Extras & Add-ons / 已附加特别项目",
+          x: (grid1.x || 40) + 12,
+          y: yHExt + 5,
+          w: (grid1.w || 714) - 24,
+          h: 16,
+          z: 5,
+          style: { fontSize: 10.5, fontWeight: "700", color: "#FFFFFF", textAlign: "left" },
+        });
+        adjusted.push({
+          ...grid1,
           id: "extras_grid",
           type: "benefit-grid",
           gridKind: "extras",
-          x: 40,
+          x: grid1.x ?? 40,
           y: yGExt,
-          w: 714,
+          w: grid1.w ?? 714,
           h: hExt,
           z: 4,
-          benefitPreset: grid1.benefitPreset,
-          layoutMode: grid1.layoutMode,
-          columns: cols,
-          cardStyle: grid1.cardStyle || "standard",
-          textDensity: grid1.textDensity || "compact",
+          columns: extrasCols,
           emptyState: "hide",
-          hideCoverage: grid1.hideCoverage,
-          hideCost: grid1.hideCost,
         });
         continue;
       } else if (e.id === "addons_header_bg" && hdr2Bg) {

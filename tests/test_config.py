@@ -40,10 +40,10 @@ def test_supabase_storage_credentials_are_required(missing: str):
             get_settings()
 
 
-def test_supabase_url_requires_https():
-    env = {**VALID_ENV, "SUPABASE_URL": "http://project.supabase.co"}
+def test_supabase_url_requires_http_or_https():
+    env = {**VALID_ENV, "SUPABASE_URL": "ftp://project.supabase.co"}
     with patch.dict(os.environ, env, clear=True):
-        with pytest.raises(RuntimeError, match="must be an HTTPS"):
+        with pytest.raises(RuntimeError, match="must be an HTTP or HTTPS"):
             get_settings()
 
 

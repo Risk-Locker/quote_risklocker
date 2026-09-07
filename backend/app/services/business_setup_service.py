@@ -624,6 +624,7 @@ def serialize_concept(db, item: BenefitConcept, preloaded_assets: dict | None = 
         "match_dataset": item.match_dataset,
         "value_pattern_dataset": item.value_pattern_dataset,
         "description_variants": item.description_variants,
+        "display_overrides": item.display_overrides or {},
         "sort_order": item.sort_order,
         "default_asset": _asset_summary(preloaded_assets.get(item.default_asset_id) if preloaded_assets is not None else db.get(BusinessAsset, item.default_asset_id)) if item.default_asset_id else None,
         "revision": item.revision,
@@ -694,6 +695,7 @@ def save_benefit_concept(db, user, payload: dict) -> dict:
 
     concept.sort_order = max(0, int(payload.get("sort_order") or 0))
     concept.default_asset_id = asset_id
+    concept.display_overrides = payload.get("display_overrides") or {}
     concept.status = payload.get("status", "active")
     if payload.get("id"):
         concept.revision += 1

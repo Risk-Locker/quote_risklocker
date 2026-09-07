@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import mimetypes
+import json
 from copy import deepcopy
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -127,14 +128,37 @@ def _template_config(draft: QuotationDraft, revision: TemplateRevision, page: Te
         canvas.setdefault("height", page_h)
         canvas.setdefault("elements", [])
         preset_id = None
+        preset_config = None
         if draft.fields and isinstance(draft.fields, dict):
             raw_p = draft.fields.get("benefit_preset")
             preset_id = raw_p.get("value") if isinstance(raw_p, dict) else raw_p
-        if preset_id:
+            raw_cfg = draft.fields.get("benefit_preset_config")
+            cfg_val = raw_cfg.get("value") if isinstance(raw_cfg, dict) else raw_cfg
+            if cfg_val and isinstance(cfg_val, str):
+                try:
+                    preset_config = json.loads(cfg_val)
+                except Exception:
+                    preset_config = None
+            elif isinstance(cfg_val, dict):
+                preset_config = cfg_val
+
+        if preset_config or preset_id:
             for el in canvas.get("elements") or []:
                 if el.get("type") == "benefit-grid":
-                    el["benefitPreset"] = str(preset_id)
-                    if preset_id == "compact-minimal":
+                    if preset_id:
+                        el["benefitPreset"] = str(preset_id)
+                    if isinstance(preset_config, dict):
+                        for k in [
+                            "layoutMode", "columns", "cardStyle", "textDensity",
+                            "iconSize", "shape", "elevation", "borderWidth", "borderStyle",
+                            "imageFit", "iconPadShape", "titleSize", "titleWeight",
+                            "textWrap", "valueBadgeStyle", "bgColor", "borderColor",
+                            "textColor", "accentColor", "rowHeight", "uniformHeight",
+                            "sectionVisibility", "showDescription", "showCoverage", "showCost"
+                        ]:
+                            if k in preset_config:
+                                el[k] = preset_config[k]
+                    elif preset_id == "compact-minimal":
                         el["layoutMode"] = "masonry"
                         el["columns"] = 3
                         el["cardStyle"] = "minimal"
@@ -210,10 +234,20 @@ def _catalog_rows(db, draft: QuotationDraft) -> tuple[list, list, list, list, li
 
 
 def _referenced_asset_ids(config: dict, cards: dict) -> set[str]:
+    from app.rendering.template_renderer import SYSTEM_DEFAULT_SLOTS
+
     asset_ids = {str(item) for item in (config.get("assets") or {}).values() if item}
     for element in (config.get("canvas") or {}).get("elements") or []:
         if element.get("assetId"):
             asset_ids.add(str(element["assetId"]))
+        slot = element.get("assetSlot")
+        eid = element.get("id") or ""
+        if slot and slot in SYSTEM_DEFAULT_SLOTS:
+            asset_ids.add(SYSTEM_DEFAULT_SLOTS[slot])
+        elif eid in {"pay_holder", "text_ltaa394", "risklocker_logo"}:
+            asset_ids.add(SYSTEM_DEFAULT_SLOTS["risklocker_logo"])
+        elif eid in {"pay_bank_sub", "text_ul2w5ka", "bank_logo", "pay_bank_logo"}:
+            asset_ids.add(SYSTEM_DEFAULT_SLOTS["bank_logo"])
     for collection in cards.values():
         for card in collection:
             if card.get("asset_id"):
@@ -222,11 +256,17 @@ def _referenced_asset_ids(config: dict, cards: dict) -> set[str]:
 
 
 def _snapshot_assets(db, config: dict, cards: dict, draft: QuotationDraft) -> tuple[dict, dict, dict]:
+    from app.rendering.template_renderer import SYSTEM_DEFAULT_SLOTS
+
     config = deepcopy(config)
+    config.setdefault("assets", {})
+    for slot, default_id in SYSTEM_DEFAULT_SLOTS.items():
+        config["assets"].setdefault(slot, default_id)
+
     if draft.company_id:
         company = db.get(InsuranceCompany, draft.company_id)
         if company and company.logo_asset_id:
-            config.setdefault("assets", {})["insurer_logo"] = company.logo_asset_id
+            config["assets"]["insurer_logo"] = company.logo_asset_id
 
     manifest: dict[str, dict] = {}
     embedded: dict[str, str] = {}
@@ -253,14 +293,18 @@ def _snapshot_assets(db, config: dict, cards: dict, draft: QuotationDraft) -> tu
             hashes[asset_id] = legacy.storage_sha256
             continue
         try:
-            resolved = resolve_template_asset(None, asset_id)
+            resolved = resolve_template_asset(db, asset_id)
         except FileNotFoundError as exc:
             raise AppError("A template or benefit asset required for rendering is unavailable.", 409) from exc
-        if not isinstance(resolved, Path):
+        if isinstance(resolved, Path):
+            data = resolved.read_bytes()
+            content_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+        elif isinstance(resolved, (bytes, bytearray)):
+            data = resolved
+            content_type = "image/png"
+        else:
             raise AppError("A template asset could not be frozen for rendering.", 409)
-        data = resolved.read_bytes()
         content_hash = hashlib.sha256(data).hexdigest()
-        content_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
         embedded[asset_id] = f"data:{content_type};base64,{base64.b64encode(data).decode('ascii')}"
         hashes[asset_id] = content_hash
     return config, {"manifest": manifest, "embedded": embedded}, hashes
@@ -370,15 +414,10 @@ def request_version_generation(
     existing = _existing_request(db, user, draft, key, draft_revision)
     if existing:
         return existing
-    revision = db.get(TemplateRevision, draft.template_revision_id) if draft.template_revision_id else None
-    if not revision:
-        revision = db.scalars(
-            select(TemplateRevision)
-            .where(TemplateRevision.state.in_(["published", "compatibility"]))
-            .order_by(TemplateRevision.revision_number.desc())
-        ).first()
-        if revision:
-            draft.template_revision_id = revision.id
+    from app.services.workspace_service import _template_for_draft
+    revision = _template_for_draft(db, draft)
+    if revision and draft.template_revision_id != revision.id:
+        draft.template_revision_id = revision.id
     if not draft.catalog_revision_id:
         active_cat = db.scalars(
             select(BenefitCatalogRevision)
@@ -471,15 +510,10 @@ def request_preview_render(db, user, session_id: str, *, draft_revision: int) ->
         raise AppError("Quotation not found.", 404)
     if draft.revision != draft_revision:
         raise AppError("The quotation changed. Save the latest revision before previewing.", 409)
-    revision = db.get(TemplateRevision, draft.template_revision_id) if draft.template_revision_id else None
-    if not revision:
-        revision = db.scalars(
-            select(TemplateRevision)
-            .where(TemplateRevision.state.in_(["published", "compatibility"]))
-            .order_by(TemplateRevision.revision_number.desc())
-        ).first()
-        if revision:
-            draft.template_revision_id = revision.id
+    from app.services.workspace_service import _template_for_draft
+    revision = _template_for_draft(db, draft)
+    if revision and draft.template_revision_id != revision.id:
+        draft.template_revision_id = revision.id
     decisions = _for_draft(db, DraftSourceLineDecision, draft.id)
     selections = _for_draft(db, DraftBenefitSelection, draft.id)
     fatal_blockers = [

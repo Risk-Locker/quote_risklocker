@@ -1,3 +1,17 @@
+export type SectionComponentVisibility = {
+  showAsset: boolean;
+  showTitle: boolean;
+  showCoverage: boolean;
+  showDescription: boolean;
+  showCost: boolean;
+};
+
+export type BenefitSectionVisibility = {
+  default: SectionComponentVisibility;
+  addedAddons: SectionComponentVisibility;
+  optionalAddons: SectionComponentVisibility;
+};
+
 export type BenefitCardStyle = {
   id: string;
   name: string;
@@ -5,13 +19,14 @@ export type BenefitCardStyle = {
   description: string;
   is_default?: boolean;
   is_custom?: boolean;
+  is_system_modified?: boolean;
   shape: "rounded" | "racetrack" | "square" | "soft" | "oval";
   layout: "merged-2col" | "masonry" | "horizontal" | "tile" | "compact";
   borderWidth: number;
   borderStyle: "solid" | "dashed" | "none";
   elevation: "flat" | "shadow" | "lift";
   uniformHeight: number; // in px, e.g. 0 for auto, 38, 52, 60
-  iconSize: number; // in px
+  iconSize: number; // in px (28 - 60px)
   imageFit: "contain" | "cover" | "scale-down";
   iconPadShape: "box" | "circle" | "none" | "dark";
   titleSize: number;
@@ -30,7 +45,49 @@ export type BenefitCardStyle = {
   textDensity: "compact" | "normal" | "comfortable";
   cardStyle: "standard" | "outlined" | "soft" | "minimal";
   rowHeight: number;
+  sectionVisibility?: BenefitSectionVisibility;
 };
+
+export function normalizeSectionVisibility(
+  vis?: Partial<BenefitSectionVisibility>,
+  fallback?: Partial<BenefitCardStyle>
+): BenefitSectionVisibility {
+  const defDesc = fallback?.showDescription ?? true;
+  const defCov = fallback?.showCoverage ?? true;
+  const defCost = fallback?.showCost ?? true;
+
+  const defaultComp: SectionComponentVisibility = {
+    showAsset: true,
+    showTitle: true,
+    showCoverage: defCov,
+    showDescription: defDesc,
+    showCost: defCost,
+  };
+
+  return {
+    default: {
+      showAsset: vis?.default?.showAsset ?? defaultComp.showAsset,
+      showTitle: vis?.default?.showTitle ?? defaultComp.showTitle,
+      showCoverage: vis?.default?.showCoverage ?? defaultComp.showCoverage,
+      showDescription: vis?.default?.showDescription ?? defaultComp.showDescription,
+      showCost: vis?.default?.showCost ?? defaultComp.showCost,
+    },
+    addedAddons: {
+      showAsset: vis?.addedAddons?.showAsset ?? defaultComp.showAsset,
+      showTitle: vis?.addedAddons?.showTitle ?? defaultComp.showTitle,
+      showCoverage: vis?.addedAddons?.showCoverage ?? defaultComp.showCoverage,
+      showDescription: vis?.addedAddons?.showDescription ?? defaultComp.showDescription,
+      showCost: vis?.addedAddons?.showCost ?? defaultComp.showCost,
+    },
+    optionalAddons: {
+      showAsset: vis?.optionalAddons?.showAsset ?? defaultComp.showAsset,
+      showTitle: vis?.optionalAddons?.showTitle ?? defaultComp.showTitle,
+      showCoverage: vis?.optionalAddons?.showCoverage ?? defaultComp.showCoverage,
+      showDescription: vis?.optionalAddons?.showDescription ?? defaultComp.showDescription,
+      showCost: vis?.optionalAddons?.showCost ?? defaultComp.showCost,
+    },
+  };
+}
 
 export const SYSTEM_BENEFIT_PRESETS: BenefitCardStyle[] = [
   {
@@ -260,15 +317,105 @@ export const SYSTEM_BENEFIT_PRESETS: BenefitCardStyle[] = [
   },
 ];
 
-export function getBenefitPreset(presetId: string | null | undefined): BenefitCardStyle {
-  if (!presetId) return SYSTEM_BENEFIT_PRESETS[0];
-  const found = SYSTEM_BENEFIT_PRESETS.find((p) => p.id === presetId);
-  return found || SYSTEM_BENEFIT_PRESETS[0];
+export function getAllBenefitPresets(): BenefitCardStyle[] {
+  if (typeof window === "undefined") {
+    return SYSTEM_BENEFIT_PRESETS.map((p) => ({
+      ...p,
+      sectionVisibility: normalizeSectionVisibility(p.sectionVisibility, p),
+    }));
+  }
+  try {
+    const overridesRaw = localStorage.getItem("risklocker_benefit_preset_overrides");
+    const overrides: Record<string, Partial<BenefitCardStyle>> = overridesRaw ? JSON.parse(overridesRaw) : {};
+
+    const mergedSystem = SYSTEM_BENEFIT_PRESETS.map((sys) => {
+      if (overrides[sys.id]) {
+        const merged: BenefitCardStyle = {
+          ...sys,
+          ...overrides[sys.id],
+          is_system_modified: true,
+        };
+        return {
+          ...merged,
+          sectionVisibility: normalizeSectionVisibility(merged.sectionVisibility, merged),
+        };
+      }
+      return {
+        ...sys,
+        sectionVisibility: normalizeSectionVisibility(sys.sectionVisibility, sys),
+      };
+    });
+
+    const customRaw = localStorage.getItem("risklocker_benefit_card_presets");
+    const customList: BenefitCardStyle[] = customRaw ? JSON.parse(customRaw) : [];
+    const normalizedCustom = customList.map((c) => ({
+      ...c,
+      sectionVisibility: normalizeSectionVisibility(c.sectionVisibility, c),
+    }));
+
+    return [...mergedSystem, ...normalizedCustom];
+  } catch (e) {
+    console.warn("Failed to load benefit presets from localStorage:", e);
+    return SYSTEM_BENEFIT_PRESETS.map((p) => ({
+      ...p,
+      sectionVisibility: normalizeSectionVisibility(p.sectionVisibility, p),
+    }));
+  }
 }
 
-export function applyPresetToCanvasElement(elem: any, presetId: string): any {
+export function getBenefitPreset(presetId: string | null | undefined): BenefitCardStyle {
+  const all = getAllBenefitPresets();
+  if (!presetId) return all[0];
+  const found = all.find((p) => p.id === presetId);
+  return found || all[0];
+}
+
+export function savePresetOverride(presetId: string, updates: Partial<BenefitCardStyle>): void {
+  if (typeof window === "undefined") return;
+  const isSystem = SYSTEM_BENEFIT_PRESETS.some((p) => p.id === presetId);
+  if (isSystem) {
+    try {
+      const overridesRaw = localStorage.getItem("risklocker_benefit_preset_overrides");
+      const overrides: Record<string, Partial<BenefitCardStyle>> = overridesRaw ? JSON.parse(overridesRaw) : {};
+      overrides[presetId] = {
+        ...(overrides[presetId] || {}),
+        ...updates,
+      };
+      localStorage.setItem("risklocker_benefit_preset_overrides", JSON.stringify(overrides));
+    } catch (e) {
+      console.error("Failed to save system preset override:", e);
+    }
+  } else {
+    try {
+      const customRaw = localStorage.getItem("risklocker_benefit_card_presets");
+      const customList: BenefitCardStyle[] = customRaw ? JSON.parse(customRaw) : [];
+      const updated = customList.map((c) => (c.id === presetId ? { ...c, ...updates } : c));
+      localStorage.setItem("risklocker_benefit_card_presets", JSON.stringify(updated));
+    } catch (e) {
+      console.error("Failed to update custom preset:", e);
+    }
+  }
+}
+
+export function resetPresetToDefault(presetId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const overridesRaw = localStorage.getItem("risklocker_benefit_preset_overrides");
+    if (overridesRaw) {
+      const overrides: Record<string, Partial<BenefitCardStyle>> = JSON.parse(overridesRaw);
+      delete overrides[presetId];
+      localStorage.setItem("risklocker_benefit_preset_overrides", JSON.stringify(overrides));
+    }
+  } catch (e) {
+    console.error("Failed to reset preset:", e);
+  }
+}
+
+export function applyPresetToCanvasElement(elem: any, presetInput: string | BenefitCardStyle): any {
   if (elem.type !== "benefit-grid") return elem;
-  const preset = getBenefitPreset(presetId);
+  const preset = typeof presetInput === "string" ? getBenefitPreset(presetInput) : presetInput;
+  const secVis = normalizeSectionVisibility(preset.sectionVisibility, preset);
+
   return {
     ...elem,
     benefitPreset: preset.id,
@@ -276,6 +423,29 @@ export function applyPresetToCanvasElement(elem: any, presetId: string): any {
     columns: preset.columns,
     cardStyle: preset.cardStyle,
     textDensity: preset.textDensity,
+    // Visual styling properties:
+    shape: preset.shape,
+    borderWidth: preset.borderWidth,
+    borderStyle: preset.borderStyle,
+    elevation: preset.elevation,
+    uniformHeight: preset.uniformHeight,
+    iconSize: preset.iconSize,
+    imageFit: preset.imageFit,
+    iconPadShape: preset.iconPadShape,
+    titleSize: preset.titleSize,
+    titleWeight: preset.titleWeight,
+    textWrap: preset.textWrap,
+    valueBadgeStyle: preset.valueBadgeStyle,
+    bgColor: preset.bgColor,
+    borderColor: preset.borderColor,
+    textColor: preset.textColor,
+    accentColor: preset.accentColor,
+    rowHeight: preset.rowHeight,
+    // Section-component visibility:
+    sectionVisibility: secVis,
+    showDescription: preset.showDescription,
+    showCoverage: preset.showCoverage,
+    showCost: preset.showCost,
     packing: {
       ...(elem.packing || {}),
       strategy: preset.layoutMode === "masonry" ? "balanced" : (elem.packing?.strategy || "balanced"),

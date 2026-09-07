@@ -18,28 +18,43 @@ MUTED = "#66666B"
 BORDER = "#D9D9DE"
 
 
-def _text(node_id: str, text: str, x: float, y: float, w: float, h: float, z: int, *, size: int | float = 14, weight: str = "600", color: str = INK, align: str = "left") -> dict:
-    return {"id": node_id, "type": "text", "text": text, "x": x, "y": y, "w": w, "h": h, "z": z, "style": {"fontSize": size, "fontWeight": weight, "color": color, "textAlign": align}}
+def _text(node_id: str, text: str, x: float, y: float, w: float, h: float, z: int, *, size: int | float = 14, weight: str = "600", color: str = INK, align: str = "left", locked: bool = False, group_id: str | None = None) -> dict:
+    res = {"id": node_id, "type": "text", "text": text, "x": x, "y": y, "w": w, "h": h, "z": z, "style": {"fontSize": size, "fontWeight": weight, "color": color, "textAlign": align}}
+    if locked: res["locked"] = True
+    if group_id: res["groupId"] = group_id
+    return res
 
 
-def _variable(node_id: str, variable_id: str, x: float, y: float, w: float, h: float, z: int, *, size: int | float = 14, weight: str = "700", color: str = INK, align: str = "left", prefix: str = "", suffix: str = "", transform: str = "none") -> dict:
-    return {"id": node_id, "type": "variable", "variableId": variable_id, "prefix": prefix, "suffix": suffix, "x": x, "y": y, "w": w, "h": h, "z": z, "style": {"fontSize": size, "fontWeight": weight, "color": color, "textAlign": align, "textTransform": transform}}
+def _variable(node_id: str, variable_id: str, x: float, y: float, w: float, h: float, z: int, *, size: int | float = 14, weight: str = "700", color: str = INK, align: str = "left", prefix: str = "", suffix: str = "", transform: str = "none", locked: bool = False, group_id: str | None = None) -> dict:
+    res = {"id": node_id, "type": "variable", "variableId": variable_id, "prefix": prefix, "suffix": suffix, "x": x, "y": y, "w": w, "h": h, "z": z, "style": {"fontSize": size, "fontWeight": weight, "color": color, "textAlign": align, "textTransform": transform}}
+    if locked: res["locked"] = True
+    if group_id: res["groupId"] = group_id
+    return res
 
 
-def _image(node_id: str, slot: str, x: float, y: float, w: float, h: float, z: int) -> dict:
-    return {"id": node_id, "type": "image", "assetSlot": slot, "x": x, "y": y, "w": w, "h": h, "z": z, "style": {"borderWidth": 0}}
+def _image(node_id: str, slot: str, x: float, y: float, w: float, h: float, z: int, *, locked: bool = False, group_id: str | None = None) -> dict:
+    res = {"id": node_id, "type": "image", "assetSlot": slot, "x": x, "y": y, "w": w, "h": h, "z": z, "style": {"borderWidth": 0}}
+    if locked: res["locked"] = True
+    if group_id: res["groupId"] = group_id
+    return res
 
 
-def _rectangle(node_id: str, x: float, y: float, w: float, h: float, z: int, *, background: str = "#FFFFFF", border: str = BORDER, radius: int = 0) -> dict:
-    return {"id": node_id, "type": "rectangle", "x": x, "y": y, "w": w, "h": h, "z": z, "style": {"background": background, "borderWidth": 1 if border else 0, "borderColor": border or "transparent", "borderRadius": radius}}
+def _rectangle(node_id: str, x: float, y: float, w: float, h: float, z: int, *, background: str = "#FFFFFF", border: str = BORDER, radius: int = 0, locked: bool = False, group_id: str | None = None) -> dict:
+    res = {"id": node_id, "type": "rectangle", "x": x, "y": y, "w": w, "h": h, "z": z, "style": {"background": background, "borderWidth": 1 if border else 0, "borderColor": border or "transparent", "borderRadius": radius}}
+    if locked: res["locked"] = True
+    if group_id: res["groupId"] = group_id
+    return res
 
 
-def _line(node_id: str, x: float, y: float, w: float, z: int, *, color: str = RED, height: float = 2) -> dict:
-    return {"id": node_id, "type": "line", "x": x, "y": y, "w": w, "h": height, "z": z, "style": {"color": color, "borderWidth": height}}
+def _line(node_id: str, x: float, y: float, w: float, z: int, *, color: str = RED, height: float = 2, locked: bool = False, group_id: str | None = None) -> dict:
+    res = {"id": node_id, "type": "line", "x": x, "y": y, "w": w, "h": height, "z": z, "style": {"color": color, "borderWidth": height}}
+    if locked: res["locked"] = True
+    if group_id: res["groupId"] = group_id
+    return res
 
 
-def _grid(node_id: str, kind: str, x: float, y: float, w: float, h: float, z: int, *, dense: bool = False) -> dict:
-    return {
+def _grid(node_id: str, kind: str, x: float, y: float, w: float, h: float, z: int, *, dense: bool = False, locked: bool = False) -> dict:
+    res = {
         "id": node_id, "type": "benefit-grid", "gridKind": kind, "x": x, "y": y, "w": w, "h": h, "z": z,
         "layoutMode": "masonry", "columns": 3,
         "packing": {
@@ -49,6 +64,12 @@ def _grid(node_id: str, kind: str, x: float, y: float, w: float, h: float, z: in
         },
         "cardStyle": "outlined" if dense else "standard", "textDensity": "compact" if dense else "normal", "emptyState": "hide",
     }
+    if locked: res["locked"] = True
+    return res
+
+
+def _layer_group(node_id: str, name: str) -> dict:
+    return {"id": node_id, "type": "layer-group", "name": name, "locked": False}
 
 
 def _identity_header(*, compact: bool = False) -> list[dict]:
@@ -142,45 +163,45 @@ def _agency_bilingual_config() -> dict:
         _line("header_rule", 40, 82, 714, 2, color=BORDER_COLOR, height=1),
 
         # 3. Main Title
-        _text("title_motor", "Motor Insurance ", 40, 94, 200, 34, 5, size=24, weight="800", color=DARK),
-        _text("title_quotation", "Quotation", 236, 94, 160, 34, 5, size=24, weight="800", color=RED_COLOR),
+        _text("title_motor", "Motor Insurance ", 40, 94, 200, 34, 5, size=24, weight="800", color=DARK, locked=True),
+        _text("title_quotation", "Quotation", 236, 94, 160, 34, 5, size=24, weight="800", color=RED_COLOR, locked=True),
 
         # 4. Left Column: Coverage & Vehicle Information Card (x=40, w=454, y=134, h=272)
-        _rectangle("cov_header_bg", 40, 134, 454, 26, 2, background=NAVY, border="", radius=4),
-        _text("cov_header_txt", "Coverage & Vehicle Information / 车辆及保单资料", 52, 139, 430, 16, 5, size=10, weight="700", color="#FFFFFF"),
-        _rectangle("cov_table_bg", 40, 160, 454, 246, 2, background="#FFFFFF", border=BORDER_COLOR, radius=4),
+        _rectangle("cov_header_bg", 40, 134, 454, 26, 2, background=NAVY, border="", radius=4, locked=True),
+        _text("cov_header_txt", "Coverage & Vehicle Information / 车辆及保单资料", 52, 139, 430, 16, 5, size=10, weight="700", color="#FFFFFF", locked=True),
+        _rectangle("cov_table_bg", 40, 160, 454, 246, 2, background="#FFFFFF", border=BORDER_COLOR, radius=4, locked=True),
 
         # Row 1: Customer Name
-        _text("lbl_customer", "Customer / 客户姓名", 52, 164, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
-        _variable("val_customer", "customer_name", 216, 164, 266, 14, 5, size=9.5, weight="700", color=DARK),
+        _text("lbl_customer", "Customer / 客户姓名", 52, 164, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR, locked=True),
+        _variable("val_customer", "customer_name", 216, 164, 266, 14, 5, size=9.5, weight="700", color=DARK, locked=True),
 
         # Row 2: Coverage Type
-        _text("lbl_cov_type", "Coverage Type / 保单种类", 52, 178, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
-        _variable("val_cov_type", "coverage_type", 216, 178, 266, 14, 5, size=9.5, weight="700", color=DARK),
+        _text("lbl_cov_type", "Coverage Type / 保单种类", 52, 178, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR, locked=True),
+        _variable("val_cov_type", "coverage_type", 216, 178, 266, 14, 5, size=9.5, weight="700", color=DARK, locked=True),
 
         # Row 3: Car Model
-        _text("lbl_car_model", "Car Model / 车型", 52, 192, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
-        _variable("val_car_model", "car_model", 216, 192, 266, 14, 5, size=9.5, weight="700", color=DARK),
+        _text("lbl_car_model", "Car Model / 车型", 52, 192, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR, locked=True),
+        _variable("val_car_model", "car_model", 216, 192, 266, 14, 5, size=9.5, weight="700", color=DARK, locked=True),
 
         # Row 4: Vehicle CC
-        _text("lbl_engine_cc", "Vehicle CC / 引擎容量", 52, 206, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
-        _variable("val_engine_cc", "engine_cc", 216, 206, 266, 14, 5, size=9.5, weight="700", color=DARK, suffix=" cc"),
+        _text("lbl_engine_cc", "Vehicle CC / 引擎容量", 52, 206, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR, locked=True),
+        _variable("val_engine_cc", "engine_cc", 216, 206, 266, 14, 5, size=9.5, weight="700", color=DARK, suffix=" cc", locked=True),
 
         # Row 5: NCD
-        _text("lbl_ncd", "NCD", 52, 220, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
-        _variable("val_ncd", "ncd_percent", 216, 220, 266, 14, 5, size=9.5, weight="700", color=DARK, suffix="%"),
+        _text("lbl_ncd", "NCD", 52, 220, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR, locked=True),
+        _variable("val_ncd", "ncd_percent", 216, 220, 266, 14, 5, size=9.5, weight="700", color=DARK, suffix="%", locked=True),
 
         # Row 6: Coverage Period
-        _text("lbl_period", "Cover of Period / 保单期限", 52, 234, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR),
-        _variable("val_period", "cover_period", 216, 234, 266, 14, 5, size=9.5, weight="700", color=DARK),
+        _text("lbl_period", "Cover of Period / 保单期限", 52, 234, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR, locked=True),
+        _variable("val_period", "cover_period", 216, 234, 266, 14, 5, size=9.5, weight="700", color=DARK, locked=True),
 
         # Row 7: Valuation Type
-        _text("lbl_valuation_type", "Valuation Type / 估价方式", 52, 248, 160, 14, 5, size=8.5, weight="600", color=LABEL_COLOR),
-        _variable("val_valuation_type", "valuation_type", 216, 248, 266, 14, 5, size=9.5, weight="700", color=DARK),
+        _text("lbl_valuation_type", "Valuation Type / 估价方式", 52, 248, 160, 14, 5, size=8.5, weight="600", color=LABEL_COLOR, locked=True),
+        _variable("val_valuation_type", "valuation_type", 216, 248, 266, 14, 5, size=9.5, weight="700", color=DARK, locked=True),
 
         # Row 8: Coverage / Sum Insured
-        _text("lbl_sum_insured", "Vehicle Sum Insured / 车辆保额", 52, 262, 160, 14, 5, size=8.5, weight="600", color=LABEL_COLOR),
-        _variable("val_sum_insured", "coverage_amount", 216, 262, 266, 14, 5, size=9.5, weight="700", color=DARK, prefix="RM "),
+        _text("lbl_sum_insured", "Vehicle Sum Insured / 车辆保额", 52, 262, 160, 14, 5, size=8.5, weight="600", color=LABEL_COLOR, locked=True),
+        _variable("val_sum_insured", "coverage_amount", 216, 262, 266, 14, 5, size=9.5, weight="700", color=DARK, prefix="RM ", locked=True),
 
         # Dynamic Premium Block (Extras, Insurance Premium, Roadtax, Runner Fee, Total Premium)
         {
@@ -191,6 +212,7 @@ def _agency_bilingual_config() -> dict:
             "w": 430,
             "h": 126,
             "z": 5,
+            "locked": True,
             "rowHeight": 14,
             "labels": {
                 "premium": "Insurance Premium / 保费",
@@ -202,38 +224,41 @@ def _agency_bilingual_config() -> dict:
         },
 
         # 5. Right Column: Payment Method & Excess / All Driver Card (x=508, w=246, y=134, h=272)
-        _rectangle("pay_card_bg", 508, 134, 246, 272, 2, background="#FFFFFF", border=BORDER_COLOR, radius=6),
-        _text("pay_title", "Payment Method", 522, 144, 218, 15, 5, size=10, weight="700", color=LABEL_COLOR),
-        _image("bank_logo", "bank_logo", 522, 163, 100, 24, 5),
-        _text("pay_details_lbl", "Bank details", 522, 193, 218, 13, 5, size=8.5, weight="600", color=MUTED_COLOR),
-        _text("pay_acc_no", "12300318500", 522, 207, 218, 15, 5, size=11, weight="700", color=DARK),
-        _text("pay_holder", "RiskLocker Sdn. Bhd.", 522, 223, 218, 13, 5, size=9, weight="600", color=LABEL_COLOR),
+        _layer_group("grp_payment_card", "Payment Method Card"),
+        _layer_group("grp_excess_card", "Excess & All Driver Card"),
+
+        _rectangle("pay_card_bg", 508, 134, 246, 272, 2, background="#FFFFFF", border=BORDER_COLOR, radius=6, group_id="grp_payment_card"),
+        _text("pay_title", "Payment Method", 522, 144, 218, 15, 5, size=10, weight="700", color=LABEL_COLOR, group_id="grp_payment_card"),
+        _image("bank_logo", "bank_logo", 522, 163, 100, 24, 5, group_id="grp_payment_card"),
+        _text("pay_details_lbl", "Bank details", 522, 193, 218, 13, 5, size=8.5, weight="600", color=MUTED_COLOR, group_id="grp_payment_card"),
+        _text("pay_acc_no", "12300318500", 522, 207, 218, 15, 5, size=11, weight="700", color=DARK, group_id="grp_payment_card"),
+        _text("pay_holder", "RiskLocker Sdn. Bhd.", 522, 223, 218, 13, 5, size=9, weight="600", color=LABEL_COLOR, group_id="grp_payment_card"),
 
         # All Driver & Excess Box inside right card
-        _rectangle("all_driver_bg", 518, 242, 226, 156, 3, background=BG_LIGHT, border=BORDER_COLOR, radius=4),
-        _text("all_driver_title", "All Driver Included", 528, 249, 206, 15, 5, size=10, weight="700", color=DARK),
-        _text("all_driver_sub", "Authorised Drivers Covered", 528, 264, 206, 13, 5, size=8.5, weight="500", color=MUTED_COLOR),
-        _line("divider_driver_excess", 528, 280, 206, 4, color=BORDER_COLOR, height=1),
-        _text("excess_label", "Policy Excess / 自负额", 528, 286, 206, 14, 5, size=9, weight="600", color=LABEL_COLOR),
-        _variable("excess_val", "excess_amount", 528, 301, 206, 16, 5, size=11, weight="800", color=DARK, prefix="RM "),
-        _text("excess_note", "Compulsory Excess as per quotation", 528, 318, 206, 12, 5, size=7.5, weight="500", color=MUTED_COLOR),
+        _rectangle("all_driver_bg", 518, 242, 226, 156, 3, background=BG_LIGHT, border=BORDER_COLOR, radius=4, group_id="grp_excess_card"),
+        _text("all_driver_title", "All Driver Included", 528, 249, 206, 15, 5, size=10, weight="700", color=DARK, group_id="grp_excess_card"),
+        _text("all_driver_sub", "Authorised Drivers Covered", 528, 264, 206, 13, 5, size=8.5, weight="500", color=MUTED_COLOR, group_id="grp_excess_card"),
+        _line("divider_driver_excess", 528, 280, 206, 4, color=BORDER_COLOR, height=1, group_id="grp_excess_card"),
+        _text("excess_label", "Policy Excess / 自负额", 528, 286, 206, 14, 5, size=9, weight="600", color=LABEL_COLOR, group_id="grp_excess_card"),
+        _variable("excess_val", "excess_amount", 528, 301, 206, 16, 5, size=11, weight="800", color=DARK, prefix="RM ", group_id="grp_excess_card"),
+        _text("excess_note", "Compulsory Excess as per quotation", 528, 318, 206, 12, 5, size=7.5, weight="500", color=MUTED_COLOR, group_id="grp_excess_card"),
 
         # 6. Section 1: Our Specials / 特别优惠 (Included Benefits Grid)
-        _rectangle("specials_header_bg", 40, 414, 714, 26, 2, background=NAVY, border="", radius=4),
-        _text("specials_header_txt", "Our Specials / 特别优惠", 52, 419, 690, 16, 5, size=10.5, weight="700", color="#FFFFFF"),
-        _grid("current_benefits_grid", "current_benefits", 40, 444, 714, 314, 4, dense=True),
+        _rectangle("specials_header_bg", 40, 414, 714, 26, 2, background=NAVY, border="", radius=4, locked=True),
+        _text("specials_header_txt", "Our Specials / 特别优惠", 52, 419, 690, 16, 5, size=10.5, weight="700", color="#FFFFFF", locked=True),
+        _grid("current_benefits_grid", "current_benefits", 40, 444, 714, 314, 4, dense=True, locked=True),
 
         # 7. Section 2: You May Add On / 可添加项目 (Available Add-ons Grid)
-        _rectangle("addons_header_bg", 40, 766, 714, 26, 2, background=NAVY, border="", radius=4),
-        _text("addons_header_txt", "You May Add On (With Additional Charges) / 可添加项目 (额外收费)", 52, 771, 690, 16, 5, size=10.5, weight="700", color="#FFFFFF"),
-        _grid("available_addons_grid", "available_addons", 40, 796, 714, 262, 4, dense=True),
+        _rectangle("addons_header_bg", 40, 766, 714, 26, 2, background=NAVY, border="", radius=4, locked=True),
+        _text("addons_header_txt", "You May Add On (With Additional Charges) / 可添加项目 (额外收费)", 52, 771, 690, 16, 5, size=10.5, weight="700", color="#FFFFFF", locked=True),
+        _grid("available_addons_grid", "available_addons", 40, 796, 714, 262, 4, dense=True, locked=True),
 
         # 8. Footer
         _text("footer_terms", "*Terms & Conditions Apply | Quotation Validity: {valid_until}", 40, 1068, 714, 16, 5, size=8.5, weight="500", color=MUTED_COLOR),
     ]
 
     config.update({
-        "version": 7, "template_name": name, "v7_master_key": key, "is_default": True, "locked": True,
+        "version": 7, "template_name": name, "v7_master_key": key, "is_default": True, "locked": False,
         "assets": {
             "risklocker_logo": "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f",
             "bank_logo": "2168eaee-3e56-4903-8c4f-841f01ff2407"
@@ -249,11 +274,9 @@ def _agency_bilingual_config() -> dict:
 
 
 def master_template_specs() -> list[dict]:
+    # RL-DISABLED legacy templates (standard_a4, dense_a4, extended_portrait) — disabled 2026-09-07; restore when explicitly requested
     return [
-        {"key": "standard_a4", "name": "Standard A4", "is_default": False, "config": _master_config("standard_a4", "Standard A4", height=1123, dense=False, extended=False, is_default=False)},
-        {"key": "dense_a4", "name": "Dense A4", "is_default": False, "config": _master_config("dense_a4", "Dense A4", height=1123, dense=True, extended=False, is_default=False)},
         {"key": "agency_bilingual", "name": "Bilingual Agency Motor", "is_default": True, "config": _agency_bilingual_config()},
-        {"key": "extended_portrait", "name": "Extended Portrait", "is_default": False, "config": _master_config("extended_portrait", "Extended Portrait", height=1480, dense=False, extended=True, is_default=False)},
     ]
 
 
@@ -290,10 +313,10 @@ def ensure_master_templates(db, user, *, apply: bool = False) -> dict:
             publish_template_revision(db, user, current.id, base_revision=current.revision)
 
     if apply:
-        standard = by_key.get("standard_a4")
+        bilingual = by_key.get("agency_bilingual")
         for item in templates + list(by_key.values()):
             config = deepcopy(item.fixed_fields or {})
-            wanted = bool(standard and item.id == standard.id)
+            wanted = bool(bilingual and item.id == bilingual.id)
             if bool(config.get("is_default")) == wanted:
                 continue
             config["is_default"] = wanted

@@ -231,6 +231,7 @@ class BenefitConceptSaveRequest(StrictRequest):
     match_dataset: list[str] = Field(default_factory=list, max_length=500)
     value_pattern_dataset: list[str] = Field(default_factory=list, max_length=500)
     description_variants: list[dict] = Field(default_factory=list, max_length=2)
+    display_overrides: dict = Field(default_factory=dict)
     sort_order: int = Field(default=0, ge=0)
     default_asset_id: str | None = None
     status: str = "active"

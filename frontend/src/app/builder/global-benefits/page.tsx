@@ -405,7 +405,6 @@ export default function GlobalBenefitsPage() {
             <div className="max-h-[580px] overflow-y-auto p-2">
               {filtered.length ? filtered.map((item) => {
                 const active = item.id === selectedId;
-                const cat = item.category || (item.sort_order <= 11 ? "default" : "addon");
                 const hasVariants = (item.variants || []).length > 0;
 
                 return (
@@ -427,12 +426,7 @@ export default function GlobalBenefitsPage() {
                       )}
                     </span>
                     <div className="min-w-0">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="truncate text-xs font-bold text-[var(--rl-text-strong)]">{item.label}</span>
-                        <span className="shrink-0 rounded bg-[var(--rl-bg)] border border-[var(--rl-border)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
-                          {cat === "default" ? "Default" : "Addon"}
-                        </span>
-                      </div>
+                      <span className="block truncate text-xs font-bold text-[var(--rl-text-strong)]">{item.label}</span>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         <span className="truncate font-mono text-[10px] text-[var(--rl-text-muted)]">#{item.sort_order} · {item.concept_key}</span>
                         {hasVariants ? (

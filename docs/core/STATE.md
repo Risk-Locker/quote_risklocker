@@ -4,118 +4,33 @@ Current high-signal snapshot of active development. Rotate old entries to docs/h
 
 ## Active System State (Current Snapshot)
 - **Architecture**: Next.js 15.5 frontend (:3000) + FastAPI backend (:8100) + Supabase/PostgreSQL pooler + Private Storage.
-Done: Investigated run 33628313695 failure; identified 	est_template_publication.py failing because list_published_templates in 	emplate_revision_service.py:312 skipped checking 
-evision.state == 'published' in memory (relying only on SQL where clause which FakeDb does not evaluate in unit tests); added explicit 
-evision.state != 'published' check; verified 541/541 pytest tests passing and Next.js build clean.
-Pending: Commit and push fix to resolve GitHub Actions CI.
+- **Endpoints**: `/builder/templates/quotation-templates` (Quotation Templates) and `/builder/templates/benefit-templates` (Benefit Templates), with instant automatic redirects from `/builder/templates` and `/builder/templates/benefits`.
+- **Recent Migrations**: Asset derivative paths fixed in Postgres DB; sub-tab routing for template builders decoupled into distinct endpoints without number prefixes.
 
-### 2026-09-02 Ã‚Â· Antigravity Ã‚Â· UI Layout Fixes & Benefit Visibility Toggles
-Asked: Fix duplicated addons, equalize masonry grid heights, add per-benefit visibility toggles, and clarify revision system.
-Done: Filtered current_benefits in shared.tsx, migrated layout to equal-height CSS Grid, added Eye toggle buttons to IncludedCard and AddonCard in 
-eview-phase.tsx for real-time live preview updates.
-Pending: none.
-
-### 2026-09-02 Ã‚Â· Antigravity (Gemini 3.1 Pro) Ã‚Â· Egress Optimization & Workspace Fixes
-Asked: Fix 50MB egress and latency issue for templates API, fix road tax calculation bug, Extra Benefits RM prefix, and production PDF viewer iframe.
-Done: Optimized list_published_templates in 	emplate_revision_service.py to use SQL where and defer(config); replaced parseInt with parseFloat in 
-eview-phase.tsx, removed forced RM prefix for non-monetary limits, and bypassed CSP for application/pdf in http_security.py.
-Pending: none.
-
-### 2026-09-02 Â· Antigravity (Gemini 3.1 Pro) Â· Analysis of Implementation Plan
-Asked: Analyze the previous AI's implementation plan, check if issues are true, if fixes would break things, and find hidden issues.
-Done: Audited codebase against the claims. Validated that many schema "issues" (string money values, untyped JSON, ephemeral files) are actually intentional and required behavior. Confirmed critical RAG learning loop gap, code duplication, and discovered a new bug (db_packs is missing from extraction context). Wrote analysis report and concrete fix plan in "implementation_plan.md".
-Pending: User review of the plan and decision on Admin Approval for the AI learning loop.
-
-### 2026-09-02 · Antigravity (Gemini 3.1 Pro) · Analysis of Egress Issues & Final Plan
-Asked: Do a final analysis prioritizing DB egress and memory spikes (e.g. 700 revisions crash) and enforce a strict 200MB/day limit. Start plan with branch v13 creation.
-Done: Investigated template_revision_service and admin_service. Found exact cause of the egress spike: querying all TemplateRevisions without deferring the massive JSON config column. Updated the implementation_plan.md with 5 tasks, inserting a new Task 1 to fix all missing config defers. Ensured all new tasks (packs, corrections) use strict DB-level aggregations and limits to minimize payload size.
-Pending: User approval to execute the final egress-safe plan.
-
-### 2026-09-02 · Antigravity (Gemini 3.1 Pro) · System-Wide Egress Sweep
-Asked: Search for other discrepancies/issues in the system beyond just template revisions.
-Done: Swept the codebase for missing defers on heavy JSON columns (GeneratedPdfVersion, OutputTemplateConfig, QuotationDraft). Expanded the implementation plan to patch trash_service, legacy_asset_inventory, and workspace_service to prevent egress spikes across the entire backend.
-Pending: User approval to execute the final plan.
-
-2026-09-02 * Antigravity * User requested to finalize extraction logic and verify egress * Fixed missing defers across admin/template/trash services, added total_premium fallback, integrated db_packs and correction memory into Gemini extraction, skipped Task 4 to prevent bugs * Verified build successfully
-2026-09-03 · Antigravity · Audited project architecture and fixed upload failure; resolved distributed worker collision via node_host payload/claim filtering in job_service.py:42-133, fixed TypeError/NameError in sandbox.py:31-95 and orchestrator.py:18-75, added pipeline observability logs in extraction_worker.py:168-410, added step failure prefix in upload/page.tsx:160 · 542 pytest passing + Next.js build clean · Pending: none.
-2026-09-03 · Antigravity · Fixed Document.new_page typing diagnostic in test_extraction_regression.py:177 with Any annotation; encoded rule to inspect and resolve IDE problem diagnostics after every change into AGENTS.md:38,53 and INSTRUCTIONS.md:25 · All checks green · Pending: none.
-2026-09-03 · Antigravity · Fixed NameError 'defer' in workspace_service.py:13,131 by importing defer and removing bad defer on fixed_fields; smoke-tested build_workspace_snapshot on session d59d824a · 26 workspace tests passing · Pending: none.
-2026-09-03 · Antigravity · Cleared 8 redundant str() linter warnings in workspace_service.py:1343-1799 · All 24 workspace tests green · Pending: none.
-2026-09-03 · Antigravity · Implemented 'valuation_type' field across extraction, master template, and sessions UI; added QBE/addon detection in candidate_finder.py:33,818 and draft_mapper.py:130, inserted Row 7 in master_template_service.py:175, added dropdown in review-phase.tsx:75,2285 · 544 pytest passing + Next.js build clean · Pending: none.
-2026-09-03 · Antigravity · Fixed benefit extraction false positives and fragmentation; added table row stitching, section termination, and noise filtering in benefit_lines.py:42-425, catalog_review_service.py:552-570, workspace_service.py:610-660 · 546 pytest passing + Next.js build clean · Pending: none.
-2026-09-03 · Antigravity · Restored text copy/selection on review page by removing global select-none and restored Card design token styling on rl-tour-fields in review-phase.tsx:1897,2006,2197,2565 · tsc green · Pending: none.
-2026-09-03 · Antigravity · Added 'Copy Info' button copying all extracted policy fields, custom fields, and detected extra benefits; unified Extra Benefits card styling in review-phase.tsx:726,1693,2270,2420 · tsc green · Pending: none.
-2026-09-03 · Antigravity · Planned excess amount 0.00 default, validity fallback to cover start date, valuation type 'NO' -> Market Value fix, template element placement, and AI learned memory viewer tab · Created implementation plan artifact · Pending: user approval.
-2026-09-03 · Antigravity · Implemented excess default 0.00, validity fallback, valuation type negative check in candidate_finder.py:818, draft_mapper.py:129, published template revisions, added GET /settings/ai-memory and Learned Memory tab in ai-context/page.tsx · 547 pytest passing + tsc clean · Pending: none.
-2026-09-03 · Antigravity · Fixed AttributeError 'str' object has no attribute 'get' in build_rag_system_prompt and extraction pipeline by handling string plan lists in gemini_extractor.py:323, routes.py:683,774, orchestrator.py:116 · 15/15 regression tests passing · Pending: none.
-2026-09-03 · Antigravity · Formulated plan to resolve IDE type checker diagnostics in gemini_extractor.py:289, draft_mapper.py:159, and test_extraction_regression.py:302 · Created implementation plan artifact · Pending: user approval.
-2026-09-03 · Antigravity · Resolved IDE type checker diagnostics in gemini_extractor.py:10,288,416, draft_mapper.py:158; Pyright 0 errors, 15/15 regression tests green · Pending: none.
-2026-09-03 · Antigravity · Cleared redundant str() call warnings in gemini_extractor.py:304,317,328; pyright 0 errors and 0 warnings across all files · Pending: none.
-2026-09-03 · Antigravity · Confirmed project context, active stack, and recent progress for the user · Reviewed docs/core/START-HERE.md, STATE.md, and PROJECT-CONTEXT.md · Pending: none.
-2026-09-03 · Antigravity · Drafted implementation plan for complex fixes (visibility toggles, revisions UI, vehicle deduplication, AI memory, sequential refs) and pushed back on deleting backend revisions to preserve immutability · Created implementation_plan.md · Pending: User review and approval.
-# Risklocker Active Working Memory (STATE.md)
-
-Current high-signal snapshot of active development. Rotate old entries to docs/history/MEMORY-YYYY-MM.md when this file exceeds ~80 lines.
-
-## Active System State (Current Snapshot)
-- **Architecture**: Next.js 15.5 frontend (:3000) + FastAPI backend (:8100) + Supabase/PostgreSQL pooler + Private Storage.
-Done: Investigated run 33628313695 failure; identified 	est_template_publication.py failing because list_published_templates in 	emplate_revision_service.py:312 skipped checking 
-evision.state == 'published' in memory (relying only on SQL where clause which FakeDb does not evaluate in unit tests); added explicit 
-evision.state != 'published' check; verified 541/541 pytest tests passing and Next.js build clean.
-Pending: Commit and push fix to resolve GitHub Actions CI.
-
-### 2026-09-02 Ã‚Â· Antigravity Ã‚Â· UI Layout Fixes & Benefit Visibility Toggles
-Asked: Fix duplicated addons, equalize masonry grid heights, add per-benefit visibility toggles, and clarify revision system.
-Done: Filtered current_benefits in shared.tsx, migrated layout to equal-height CSS Grid, added Eye toggle buttons to IncludedCard and AddonCard in 
-eview-phase.tsx for real-time live preview updates.
-Pending: none.
-
-### 2026-09-02 Ã‚Â· Antigravity (Gemini 3.1 Pro) Ã‚Â· Egress Optimization & Workspace Fixes
-Asked: Fix 50MB egress and latency issue for templates API, fix road tax calculation bug, Extra Benefits RM prefix, and production PDF viewer iframe.
-Done: Optimized list_published_templates in 	emplate_revision_service.py to use SQL where and defer(config); replaced parseInt with parseFloat in 
-eview-phase.tsx, removed forced RM prefix for non-monetary limits, and bypassed CSP for application/pdf in http_security.py.
-Pending: none.
-
-### 2026-09-02 Â· Antigravity (Gemini 3.1 Pro) Â· Analysis of Implementation Plan
-Asked: Analyze the previous AI's implementation plan, check if issues are true, if fixes would break things, and find hidden issues.
-Done: Audited codebase against the claims. Validated that many schema "issues" (string money values, untyped JSON, ephemeral files) are actually intentional and required behavior. Confirmed critical RAG learning loop gap, code duplication, and discovered a new bug (db_packs is missing from extraction context). Wrote analysis report and concrete fix plan in "implementation_plan.md".
-Pending: User review of the plan and decision on Admin Approval for the AI learning loop.
-
-### 2026-09-02 · Antigravity (Gemini 3.1 Pro) · Analysis of Egress Issues & Final Plan
-Asked: Do a final analysis prioritizing DB egress and memory spikes (e.g. 700 revisions crash) and enforce a strict 200MB/day limit. Start plan with branch v13 creation.
-Done: Investigated template_revision_service and admin_service. Found exact cause of the egress spike: querying all TemplateRevisions without deferring the massive JSON config column. Updated the implementation_plan.md with 5 tasks, inserting a new Task 1 to fix all missing config defers. Ensured all new tasks (packs, corrections) use strict DB-level aggregations and limits to minimize payload size.
-Pending: User approval to execute the final egress-safe plan.
-
-### 2026-09-02 · Antigravity (Gemini 3.1 Pro) · System-Wide Egress Sweep
-Asked: Search for other discrepancies/issues in the system beyond just template revisions.
-Done: Swept the codebase for missing defers on heavy JSON columns (GeneratedPdfVersion, OutputTemplateConfig, QuotationDraft). Expanded the implementation plan to patch trash_service, legacy_asset_inventory, and workspace_service to prevent egress spikes across the entire backend.
-Pending: User approval to execute the final plan.
-
-2026-09-02 * Antigravity * User requested to finalize extraction logic and verify egress * Fixed missing defers across admin/template/trash services, added total_premium fallback, integrated db_packs and correction memory into Gemini extraction, skipped Task 4 to prevent bugs * Verified build successfully
-2026-09-03 · Antigravity · Audited project architecture and fixed upload failure; resolved distributed worker collision via node_host payload/claim filtering in job_service.py:42-133, fixed TypeError/NameError in sandbox.py:31-95 and orchestrator.py:18-75, added pipeline observability logs in extraction_worker.py:168-410, added step failure prefix in upload/page.tsx:160 · 542 pytest passing + Next.js build clean · Pending: none.
-2026-09-03 · Antigravity · Fixed Document.new_page typing diagnostic in test_extraction_regression.py:177 with Any annotation; encoded rule to inspect and resolve IDE problem diagnostics after every change into AGENTS.md:38,53 and INSTRUCTIONS.md:25 · All checks green · Pending: none.
-2026-09-03 · Antigravity · Fixed NameError 'defer' in workspace_service.py:13,131 by importing defer and removing bad defer on fixed_fields; smoke-tested build_workspace_snapshot on session d59d824a · 26 workspace tests passing · Pending: none.
-2026-09-03 · Antigravity · Cleared 8 redundant str() linter warnings in workspace_service.py:1343-1799 · All 24 workspace tests green · Pending: none.
-2026-09-03 · Antigravity · Implemented 'valuation_type' field across extraction, master template, and sessions UI; added QBE/addon detection in candidate_finder.py:33,818 and draft_mapper.py:130, inserted Row 7 in master_template_service.py:175, added dropdown in review-phase.tsx:75,2285 · 544 pytest passing + Next.js build clean · Pending: none.
-2026-09-03 · Antigravity · Fixed benefit extraction false positives and fragmentation; added table row stitching, section termination, and noise filtering in benefit_lines.py:42-425, catalog_review_service.py:552-570, workspace_service.py:610-660 · 546 pytest passing + Next.js build clean · Pending: none.
-2026-09-03 · Antigravity · Restored text copy/selection on review page by removing global select-none and restored Card design token styling on rl-tour-fields in review-phase.tsx:1897,2006,2197,2565 · tsc green · Pending: none.
-2026-09-03 · Antigravity · Added 'Copy Info' button copying all extracted policy fields, custom fields, and detected extra benefits; unified Extra Benefits card styling in review-phase.tsx:726,1693,2270,2420 · tsc green · Pending: none.
-2026-09-03 · Antigravity · Planned excess amount 0.00 default, validity fallback to cover start date, valuation type 'NO' -> Market Value fix, template element placement, and AI learned memory viewer tab · Created implementation plan artifact · Pending: user approval.
-2026-09-03 · Antigravity · Implemented excess default 0.00, validity fallback, valuation type negative check in candidate_finder.py:818, draft_mapper.py:129, published template revisions, added GET /settings/ai-memory and Learned Memory tab in ai-context/page.tsx · 547 pytest passing + tsc clean · Pending: none.
-2026-09-03 · Antigravity · Fixed AttributeError 'str' object has no attribute 'get' in build_rag_system_prompt and extraction pipeline by handling string plan lists in gemini_extractor.py:323, routes.py:683,774, orchestrator.py:116 · 15/15 regression tests passing · Pending: none.
-2026-09-03 · Antigravity · Formulated plan to resolve IDE type checker diagnostics in gemini_extractor.py:289, draft_mapper.py:159, and test_extraction_regression.py:302 · Created implementation plan artifact · Pending: user approval.
-2026-09-03 · Antigravity · Resolved IDE type checker diagnostics in gemini_extractor.py:10,288,416, draft_mapper.py:158; Pyright 0 errors, 15/15 regression tests green · Pending: none.
-2026-09-03 · Antigravity · Cleared redundant str() call warnings in gemini_extractor.py:304,317,328; pyright 0 errors and 0 warnings across all files · Pending: none.
-2026-09-03 · Antigravity · Confirmed project context, active stack, and recent progress for the user · Reviewed docs/core/START-HERE.md, STATE.md, and PROJECT-CONTEXT.md · Pending: none.
-2026-09-03 · Antigravity · Drafted implementation plan for complex fixes (visibility toggles, revisions UI, vehicle deduplication, AI memory, sequential refs) and pushed back on deleting backend revisions to preserve immutability · Created implementation_plan.md · Pending: User review and approval.
-2026-09-03 · Antigravity · Committed and pushed v13 to origin/v13 and origin/main; published new branch v14 to origin/v14 and checked out · 548 pytest green, tsc green, build clean · Pending: none.
-
-
-2026-09-06 · Antigravity · Implemented live preview zoom drag bounds, unified layout switch, fixed panel resizing rules, unified collapse buttons · review-phase.tsx, builder/templates/page.tsx · Pending: global display options control panel.
-2026-09-06 · Antigravity (Opus) · Full project audit: security, config, structure, deployment, code hygiene · Found 22 issues: shared AUTH_HASH_SECRET across envs, PM2 embedded worker contradiction, rate limit defaults drift, stray root scripts, PII in sample_upload, CSP font risk, dead imports · Created implementation_plan.md audit report · Pending: user review and prioritization.
-* 2026-09-06 · antigravity · Audited internal codebase and updated extraction schema. · Updated `gemini_extractor.py` schema with `client_type`, `ic_or_brn`, and `representative_name`. Fixed `main.py` double routing. Consolidated tests into `backend/tests/test_gemini_extraction.py` and deleted 279 stray files in `.qc-tmp/`. Tests passing. · Ready for Client Records extraction tests.
-* 2026-09-06 · gemini-1.5-pro · Migrated entire Cloud Supabase DB to Self-Hosted Docker on OVH 51.79.147.205 · Updated .env, backend/app/core/config.py · Pending: None.
-* 2026-09-06 · antigravity · Created human-readable system overview. · Wrote `docs/h.md` explaining the core PDF extraction, AI learning, and security features without technical jargon. · Pending: None.
-2026-09-06 · Antigravity · Run Python structural analysis script over company PDFs · Generated ANALYSIS.md files in company folders · Pending: None.
-2026-09-06 · Antigravity · Conducted deep semantic structural analysis across 8 insurers · Wrote master company_based/ANALYSIS.md mapping unique math quirks and layout patterns · Pending: None.
-2026-09-06 · Antigravity · Upgraded backend extraction architecture for 100% precision · Fixed multimodal blindspot, patched schema negative values, enhanced alias learning loop in gemini_extractor.py · Tested successfully on QBE PDFs · Pending: None.
+### Recent Activity
+2026-09-06 A Antigravity A Implemented live preview zoom drag bounds, unified layout switch, fixed panel resizing rules, unified collapse buttons A review-phase.tsx, builder/templates/page.tsx A Pending: global display options control panel.
+2026-09-06 A Antigravity (Opus) A Full project audit: security, config, structure, deployment, code hygiene A Found 22 issues: shared AUTH_HASH_SECRET across envs, PM2 embedded worker contradiction, rate limit defaults drift, stray root scripts, PII in sample_upload, CSP font risk, dead imports A Created implementation_plan.md audit report A Pending: user review and prioritization.
+2026-09-06 A antigravity A Audited internal codebase and updated extraction schema A Updated gemini_extractor.py schema with client_type, ic_or_brn, and representative_name; consolidated tests into test_gemini_extraction.py A Pending: none.
+2026-09-06 A gemini-1.5-pro A Migrated entire Cloud Supabase DB to Self-Hosted Docker on OVH 51.79.147.205 A Updated .env, backend/app/core/config.py A Pending: None.
+2026-09-06 A antigravity A Created human-readable system overview A Wrote docs/h.md explaining PDF extraction, AI learning, and security A Pending: None.
+2026-09-06 A Antigravity A Deep semantic structural analysis across 8 insurers A Wrote master company_based/ANALYSIS.md mapping unique math quirks and layout patterns A Pending: None.
+2026-09-06 A Antigravity A Upgraded backend extraction architecture for 100% precision A Fixed multimodal blindspot, patched schema negative values, enhanced alias learning loop in gemini_extractor.py A Tested successfully on QBE PDFs A Pending: None.
+2026-09-06 A Antigravity A Tested E2E pipeline and fixed missing assets A Updated routes.py:1737 to catch StorageNotFound, executed import-v7-assets.py to upload assets to Supabase A All E2E passing A Pending: None.
+2026-09-06 A Antigravity A Resolved 404 assets in Supabase A Fixed 39 derivative asset paths in business_assets.derivative_manifest via .qc-tmp/fix_db_assets.py A Pending: None.
+2026-09-07 A Antigravity A Planned 255 bulk UI icon generation A Wrote plan for 5 style sets; scheduled wait timer to bypass limit A Pending: Bulk generation upon quota reset.
+2026-09-07 A Gemini 3.1 Pro A Checked Supabase storage contents A Verified assets in 'risklocker-pdfs' under assets/original, assets/derivative, and source A Pending: None.
+2026-09-07 A Antigravity A Audited /builder/templates against review phase & PDF generator A Found disconnects in custom presets persistence (localStorage vs backend DB) and icon sizing A Pending: User decision on architecture alignment.
+2026-09-07 A Antigravity A Decoupled template builder into unnumbered subtabs A Created /builder/templates/quotation-templates & /builder/templates/benefit-templates, removed numbers 1/2, wired HTTP 307 redirects in middleware.ts, updated builder-nav.tsx:8 and app-shell.tsx:30 A Pending: none.
+2026-09-07 A Antigravity A Implemented benefit card 3-section 5-component visibility control panel, preset save/reset, 60px icon scaling, and review/PDF integration A benefit-presets.ts:1, benefit-templates/page.tsx:1, shared.tsx:502, review-phase.tsx:51, generation_service.py:8, template_renderer.py:271 A Pending: none.
+2026-09-07 A Antigravity A Permanently removed top-right category badges from benefit cards A Removed badge span from benefit-templates/page.tsx:454 to eliminate redundancy with category tables A Pending: none.
+2026-09-07 A Antigravity A Removed category badges across global-benefits and benefit-templates; verified zero impact on backend A global-benefits/page.tsx:408, benefit-templates/page.tsx:980 A Pending: none.
+2026-09-07 A Antigravity A Fixed missing Risklocker & Hong Leong Bank logos; upgraded top-right payment box text nodes to real image elements A admin_service.py:190, workspace_source_service.py:104, template_renderer.py:235, template_config.py:152, shared.tsx:321, quotation-templates/page.tsx:86, benefits/page.tsx:702 A Pending: none.
+2026-09-07 A Antigravity A Analyzed logo sizing, master template polish, session rebinding, added-addons icon sizing, and valuation_type false-negation bug; prepared implementation_plan.md A Pending: user plan approval.
+2026-09-07 A Gemini 3.1 Pro A Created implementation_plan.md for bulletproof template editability, layer locking, group dragging, session rebinding, and valuation fix A STATE.md:29 A Pending: User plan approval.
+2026-09-07 A Gemini 3.1 Pro A Implemented dynamic template resolution, valuation_type synonyms, updated master templates and fixed QA PDFs script A workspace_service.py:127, validators.py:89, generation_service.py:417, qa-v7-master-pdfs.py:55 A Pending: None.
+2026-09-07 A Gemini 3.1 Pro A Fixed "Added Add-ons" grid desyncing from global icon size overrides by inheriting full styling payload during dynamic split A shared.tsx:1451, template_renderer.py:859 A Pending: None.
+2026-09-07 · Gemini 3.8 Flash · Removed "Dense A4", "Extended Portrait", and "Standard A4" master templates; kept "Copy of Bilingual Agency Motor" as default · Updated master_template_service.py:276, workspace_service.py:133, test_v7_master_templates.py:17, test_frontend_template_publication_contract.py:8, retired DB records · Pending: None.
+2026-09-07 · Gemini 3.8 Flash · User provided current_problems diagnostic report; requested plan · Investigated Pyright type errors in test_workspace_service.py, test_upload_intake.py, test_app_lifecycle.py, and scratch script; prepared implementation_plan.md · Pending: User plan approval.
+2026-09-07 · Gemini 3.8 Flash · Executed approved Pyright fix plan across tests and scratch script · Fixed type annotations and None checks in test_workspace_service.py:50, test_upload_intake.py:100, test_app_lifecycle.py:103, scratch/check_grid.py:1; 555 tests passing · Pending: None.
+2026-09-07 · Antigravity · Fix Added Add-ons icon shrinkage, stale review memo, column packing, and visual parity · Integrated live preset sync, dynamic row height scaling, 2-column balancing, amber card styling and styled pill cost badges in review-phase.tsx:962, shared.tsx:740, template_renderer.py:421; verified 555 tests and build · Pending: None.
+2026-09-07 · Antigravity · Fixed 422 on benefit-concepts POST by permitting display_overrides, verified 557 tests, build, and PDF parity · schemas.py:234, business_setup_service.py:627, test_benefit_setup_api.py:852 · Pending: Commit & push release pipeline.

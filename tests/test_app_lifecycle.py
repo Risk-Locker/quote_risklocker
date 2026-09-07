@@ -7,6 +7,7 @@ import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 
@@ -64,11 +65,13 @@ def test_web_startup_checks_dependencies_without_mutating_schema_credentials_or_
         main_module,
         "seed_defaults",
         lambda *_args: calls.__setitem__("seed", calls["seed"] + 1),
+        raising=False,
     )
     monkeypatch.setattr(
         main_module,
         "purge_expired_pdfs",
         lambda *_args: calls.__setitem__("retention", calls["retention"] + 1),
+        raising=False,
     )
     monkeypatch.setattr(main_module, "SessionLocal", FakeSessionContext)
 
@@ -97,6 +100,6 @@ def test_default_data_seed_never_bootstraps_or_resets_primary_admin(monkeypatch)
     monkeypatch.setattr(init_db, "ensure_super_admin", bootstrap)
     db = MagicMock()
 
-    init_db.seed_defaults(db, SimpleNamespace())
+    init_db.seed_defaults(db, cast(Any, SimpleNamespace()))
 
     bootstrap.assert_not_called()

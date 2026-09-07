@@ -849,6 +849,43 @@ def test_concept_save_route_carries_description_variants(monkeypatch):
     assert captured["description_variants"][0]["template"] == "Coverage up to RM {value}"
 
 
+def test_concept_save_route_carries_display_overrides(monkeypatch):
+    captured = {}
+
+    def save(_db, _user, payload):
+        captured.update(payload)
+        return {"id": "b1", **payload}
+
+    monkeypatch.setattr(routes, "save_benefit_concept", save)
+    response = client().post(
+        "/api/business/benefit-concepts",
+        json={
+            "concept_key": "towing",
+            "label": "Towing",
+            "display_overrides": {"showCost": False, "showCoverage": True},
+        },
+    )
+    assert response.status_code == 200
+    assert captured["display_overrides"] == {"showCost": False, "showCoverage": True}
+
+
+def test_concept_service_persists_display_overrides():
+    from app.services.business_setup_service import save_benefit_concept
+
+    def fresh():
+        return BenefitConcept(id="b1", concept_key="towing", label="Towing", revision=1)
+
+    db = FakeDb(rows={BenefitConcept: [fresh()]})
+    saved = save_benefit_concept(db, _staff(), {
+        "id": "b1",
+        "base_revision": 1,
+        "concept_key": "towing",
+        "label": "Towing",
+        "display_overrides": {"showCost": False, "showDescription": True},
+    })
+    assert saved["display_overrides"] == {"showCost": False, "showDescription": True}
+
+
 # ---------------------------------------------------------------------------
 # 033 seed rows and ledger discipline
 # ---------------------------------------------------------------------------

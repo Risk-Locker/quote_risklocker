@@ -7,6 +7,15 @@
       ]
     },
     {
+      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.agents\\skills",
+      "skills": [
+        "playwright-best-practices",
+        "playwright-cli",
+        "playwright-explore-website",
+        "security-best-practices"
+      ]
+    },
+    {
       "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\anthropic-skills",
       "skills": [
         "frontend-design"
@@ -55,18 +64,15 @@
       ]
     },
     {
-      "source": "vercel-labs/agent-browser",
+      "source": "prime-skills/runcomfy-agent-skills",
       "skills": [
-        "agent-browser"
+        "image-edit"
       ]
     },
     {
-      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.agents\\skills",
+      "source": "vercel-labs/agent-browser",
       "skills": [
-        "playwright-best-practices",
-        "playwright-cli",
-        "playwright-explore-website",
-        "security-best-practices"
+        "agent-browser"
       ]
     },
     {

@@ -176,12 +176,22 @@ def _style(element: dict[str, Any]) -> str:
     return ";".join(css)
 
 
+SYSTEM_DEFAULT_SLOTS = {
+    "risklocker_logo": "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f",
+    "bank_logo": "2168eaee-3e56-4903-8c4f-841f01ff2407",
+    "all_driver_icon": "91116a7dc3540d62",
+    "background": "49e754a6faa949c2",
+}
+
+
 def _asset_id_for_slot(config: dict[str, Any], slot: str | None, fields: dict, db: Any = None) -> str:
     if not slot:
         return ""
     assets = config.get("assets") or {}
     if assets.get(slot):
         return str(assets[slot])
+    if slot in SYSTEM_DEFAULT_SLOTS:
+        return SYSTEM_DEFAULT_SLOTS[slot]
     if slot == "insurer_logo":
         company_name = _value(fields, "insurance_company").lower().strip()
         if company_name and db is not None:
@@ -212,7 +222,7 @@ def _asset_id_for_slot(config: dict[str, Any], slot: str | None, fields: dict, d
                 if result:
                     return result
     hints = config.get("asset_slots", {}).get(slot) or [slot]
-    return find_asset_by_hint(None, [str(item) for item in hints])
+    return find_asset_by_hint(db, [str(item) for item in hints])
 
 
 def _image_html(
@@ -222,11 +232,36 @@ def _image_html(
     resolved_assets: dict[str, str] | None = None,
     db: Any = None,
 ) -> str:
-    asset_id = str(element.get("assetId") or _asset_id_for_slot(config, element.get("assetSlot"), fields, db))
+    slot = element.get("assetSlot")
+    eid = element.get("id") or ""
+    if not slot:
+        if eid in {"risklocker_logo", "pay_holder", "text_ltaa394"}:
+            slot = "risklocker_logo"
+        elif eid in {"bank_logo", "pay_bank_logo", "pay_bank_sub", "text_ul2w5ka"}:
+            slot = "bank_logo"
+        elif eid in {"driver_icon", "all_driver_icon"}:
+            slot = "all_driver_icon"
+
+    asset_id = str(element.get("assetId") or _asset_id_for_slot(config, slot, fields, db))
+    if (not asset_id or asset_id == "None") and slot in SYSTEM_DEFAULT_SLOTS:
+        asset_id = SYSTEM_DEFAULT_SLOTS[slot]
+    
+    if not asset_id or asset_id == "None":
+        if slot in SYSTEM_DEFAULT_SLOTS:
+            asset_id = SYSTEM_DEFAULT_SLOTS[slot]
+        elif eid in SYSTEM_DEFAULT_SLOTS:
+            asset_id = SYSTEM_DEFAULT_SLOTS[eid]
+        elif eid in {"pay_holder", "text_ltaa394"}:
+            asset_id = SYSTEM_DEFAULT_SLOTS["risklocker_logo"]
+        elif eid in {"pay_bank_logo", "pay_bank_sub", "text_ul2w5ka"}:
+            asset_id = SYSTEM_DEFAULT_SLOTS["bank_logo"]
+
     if resolved_assets is not None:
         src = resolved_assets.get(asset_id, "")
     else:
         src = asset_data_uri(db, asset_id)
+    if not src and asset_id in SYSTEM_DEFAULT_SLOTS:
+        src = asset_data_uri(db, SYSTEM_DEFAULT_SLOTS[asset_id])
     if not src:
         # Preserve the authored geometry when an optional or legacy image is
         # unavailable. A broken-image glyph must never leak into a customer PDF.
@@ -271,6 +306,16 @@ def _dynamic_benefit_grid(
         def get_vis(key, default_val=True):
             if disp_ovr.get("enabled") and key in disp_ovr:
                 return disp_ovr[key]
+            sec_vis_map = element.get("sectionVisibility")
+            if sec_vis_map and isinstance(sec_vis_map, dict):
+                is_extra = bool(card.get("is_extra") or (card.get("cost_status") == "paid" and kind == "current_benefits") or card.get("price"))
+                sec_key = "optionalAddons" if kind == "available_addons" else ("addedAddons" if is_extra else "default")
+                sec_vis = sec_vis_map.get(sec_key)
+                if sec_vis and isinstance(sec_vis, dict):
+                    if key in {"showGroup", "showTitle"} and "showTitle" in sec_vis:
+                        return bool(sec_vis["showTitle"])
+                    if key in sec_vis:
+                        return bool(sec_vis[key])
             if disp_opts.get("enabled") is not False:
                 cat = "addon" if card.get("is_addon") else "default"
                 cat_opts = disp_opts.get(cat) or {}
@@ -285,7 +330,7 @@ def _dynamic_benefit_grid(
         card["_showDescription"] = get_vis("showDescription", True)
         card["_showCost"] = get_vis("showCost", True)
         card["_showAsset"] = get_vis("showAsset", True)
-        card["_showGroup"] = get_vis("showGroup", True)
+        card["_showGroup"] = get_vis("showGroup", True) and get_vis("showTitle", True)
         visible_cards.append(card)
     cards = visible_cards
     ordered = cards
@@ -304,12 +349,14 @@ def _dynamic_benefit_grid(
         width=float(element.get("w") or 0),
         height=float(element.get("h") or 0),
     )
+    custom_icon_size = float(element.get("iconSize") or 0)
+    ref_h = max(float(packing.get("referenceHeight") or 50), (custom_icon_size + 18) if custom_icon_size > 0 else 50)
     spec = GridSpec(
         strategy=str(packing.get("strategy") or "balanced"),
         alignment=str(packing.get("alignment") or "center"),
         aspect_ratio=float(packing.get("aspectRatio") or 4.5),
         reference_width=float(packing.get("referenceWidth") or 226),
-        reference_height=float(packing.get("referenceHeight") or 50),
+        reference_height=ref_h,
         gap_ratio=float(packing["gapRatio"]) if packing.get("gapRatio") is not None else 0.04,
         padding_ratio=float(packing["paddingRatio"]) if packing.get("paddingRatio") is not None else 0.02,
         stagger_ratio=float(packing.get("staggerRatio") if packing.get("staggerRatio") is not None else 0.0),
@@ -350,8 +397,34 @@ def _dynamic_benefit_grid(
         is_elevated = element.get("benefitPreset") == "elevated-3d" or element.get("cardStyle") == "soft"
         is_grid_tile = element.get("benefitPreset") == "grid-tile" or element.get("cardStyle") == "outlined"
 
-        if is_purchased_extra:
+        shape = str(element.get("shape") or "")
+        radius_map = {
+            "racetrack": "999px",
+            "oval": "24px / 14px",
+            "soft": "12px",
+            "square": "0px",
+            "rounded": "8px",
+        }
+        card_radius = radius_map.get(shape, "6px")
+
+        elevation = str(element.get("elevation") or "")
+        elevation_shadow = (
+            "box-shadow:0 4px 12px rgba(0,0,0,0.08);" if elevation == "shadow"
+            else ("box-shadow:0 8px 20px rgba(0,0,0,0.12);" if elevation == "lift" else "")
+        )
+
+        bg_col = element.get("bgColor")
+        border_col = element.get("borderColor")
+        border_w = element.get("borderWidth")
+        border_s = element.get("borderStyle") or "solid"
+
+        if is_purchased_extra or kind in {"extras", "purchased_extras"}:
             card_border_css = "border:1.5px solid #F59E0B;background:#FFFDF7;box-shadow:0 1px 3px rgba(245,158,11,0.15)"
+        elif border_col or bg_col or border_w is not None:
+            bw = f"{border_w}px" if border_w is not None else "1px"
+            bc = border_col or "#E2E8F0"
+            bg = bg_col or "#FFFFFF"
+            card_border_css = f"border:{bw} {border_s} {bc};background:{bg};{elevation_shadow}"
         elif is_dark:
             card_border_css = "border:1px solid #334155;background:#0F172A;box-shadow:0 1px 3px rgba(0,0,0,0.3)"
         elif is_elevated:
@@ -364,22 +437,38 @@ def _dynamic_benefit_grid(
             card_border_css = card_style_css
 
         pad = 3 if is_minimal else density["padding"]
-        icon_sz = (density["icon"] - 2) if is_minimal else density["icon"]
+        if custom_icon_size > 0:
+            icon_sz = min(60.0, max(16.0, custom_icon_size))
+        else:
+            icon_sz = (density["icon"] - 2) if is_minimal else density["icon"]
+
+        uniform_h = float(element.get("uniformHeight") or 0)
+        h_style = f"min-height:{uniform_h}px;" if uniform_h > 0 else ""
+
         lbl_fs = (density["label"] - 0.5) if is_minimal else density["label"]
+        if element.get("titleSize"):
+            try:
+                lbl_fs = float(element.get("titleSize"))
+            except (ValueError, TypeError):
+                pass
+
         val_fs = density["value"]
         desc_fs = density["desc"]
-        title_color = "#FFFFFF" if is_dark else "#0F172A"
+        title_color = escape(str(element.get("textColor") or ("#FFFFFF" if is_dark else "#0F172A")))
         desc_color = "#94A3B8" if is_dark else "#64748B"
         val_color = "#F8FAFC" if is_dark else "#0F172A"
 
         # --- Image cell (bottom-left) ---
-        icon_radius = "999px" if is_grid_tile else "4px"
+        pad_shape = str(element.get("iconPadShape") or "")
+        icon_radius = "999px" if (pad_shape == "circle" or is_grid_tile) else ("6px" if pad_shape == "box" else ("0px" if pad_shape == "none" else "4px"))
+        img_fit = escape(str(element.get("imageFit") or "contain"))
+
         if not card.get("_showAsset", True):
             image_html = ""
         elif asset_uri_c:
             image_html = (
                 f'<img alt="" src="{escape(asset_uri_c)}" '
-                f'style="width:{icon_sz}px;height:{icon_sz}px;object-fit:contain;display:block;flex-shrink:0;border-radius:{icon_radius}" />'
+                f'style="width:{icon_sz}px;height:{icon_sz}px;object-fit:{img_fit};display:block;flex-shrink:0;border-radius:{icon_radius}" />'
             )
         else:
             initials = label_str[:2].upper() if label_str else "?"
@@ -442,15 +531,20 @@ def _dynamic_benefit_grid(
                     p_str = f"Cost : MYR {p_num:,.2f}"
                 except Exception:
                     clean_pval = str(p_val).replace("RM ", "").replace("RM", "")
-                    p_str = f"Cost : MYR {clean_pval}"
+                badge_bg = "#FEF3C7" if (is_purchased_extra or kind in {"extras", "purchased_extras"}) else ("#450A0A" if is_dark else "#FEE2E2")
+                badge_fg = "#B45309" if (is_purchased_extra or kind in {"extras", "purchased_extras"}) else ("#FCA5A5" if is_dark else "#B91C1C")
+                badge_border = "#FCD34D" if (is_purchased_extra or kind in {"extras", "purchased_extras"}) else ("#7F1D1D" if is_dark else "#FECACA")
                 price_badge = (
-                    f'<span style="display:block;margin-top:1px;font-size:{desc_fs}px;font-weight:700;'
-                    f'color:{"#EF4444" if is_dark else "#DC2626"};line-height:1.15;white-space:nowrap">{p_str}</span>'
+                    f'<div style="margin-top:2px"><span style="display:inline-block;padding:1px 5px;border-radius:4px;'
+                    f'font-size:{max(7.5, desc_fs - 0.5)}px;font-weight:700;line-height:1.2;white-space:nowrap;'
+                    f'background:{badge_bg};color:{badge_fg};border:1px solid {badge_border}">{p_str}</span></div>'
                 )
             elif kind == "available_addons":
                 price_badge = (
-                    f'<span style="display:block;margin-top:1px;font-size:{desc_fs}px;font-weight:700;'
-                    f'color:{"#EF4444" if is_dark else "#DC2626"};line-height:1.15;white-space:nowrap">Cost : As quoted</span>'
+                    f'<div style="margin-top:2px"><span style="display:inline-block;padding:1px 5px;border-radius:4px;'
+                    f'font-size:{max(7.5, desc_fs - 0.5)}px;font-weight:700;line-height:1.2;white-space:nowrap;'
+                    f'background:{"#450A0A" if is_dark else "#FEE2E2"};color:{"#FCA5A5" if is_dark else "#B91C1C"};'
+                    f'border:1px solid {"#7F1D1D" if is_dark else "#FECACA"}">Cost : As quoted</span></div>'
                 )
 
         # Title font: shrink for long labels
@@ -483,8 +577,8 @@ def _dynamic_benefit_grid(
             f'<article data-benefit-card="1" data-card-scale="{scale:.12f}" '
             f'data-card-style="{escape(card_style_name)}" data-text-density="{escape(density_name)}" '
             f'style="{pos_style}box-sizing:border-box">'
-            f'<div style="width:100%;display:flex;flex-direction:column;'
-            f'padding:{pad}px;box-sizing:border-box;border-radius:6px;{card_border_css};overflow:hidden">'
+            f'<div style="width:100%;{h_style}display:flex;flex-direction:column;'
+            f'padding:{pad}px;box-sizing:border-box;border-radius:{card_radius};{card_border_css};overflow:hidden">'
             f'{inner_html}'
             f'</div></article>'
         )
@@ -687,12 +781,14 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     pad = 4.0
 
     has_explicit_extras_grid = any(e.get("gridKind") in {"extras", "purchased_extras"} for e in elements)
-    has_extras_section = has_explicit_extras_grid and len(extras_cards) > 0
+    has_extras_section = len(extras_cards) > 0
 
     cols = max(1, int(grid1.get("columns") or 3)) if grid1 else 3
     is_minimal = bool(grid1 and (grid1.get("benefitPreset") == "compact-minimal" or grid1.get("cardStyle") == "minimal"))
-    default_row_height = 40.0 if is_minimal else (72.0 if cols == 2 else 68.0)
-    addon_row_height = 40.0 if is_minimal else (88.0 if cols == 2 else 84.0)
+    custom_icon_size = float(grid1.get("iconSize") or 0) if grid1 else 0.0
+    dynamic_icon_extra = max(0.0, custom_icon_size - 20.0) if custom_icon_size > 32.0 else 0.0
+    default_row_height = (40.0 if is_minimal else (72.0 if cols == 2 else 68.0)) + dynamic_icon_extra
+    addon_row_height = (40.0 if is_minimal else (88.0 if cols == 2 else 84.0)) + dynamic_icon_extra
     card_gap = 5.0
 
     if has_extras_section:
@@ -700,8 +796,9 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
         n_ext = len(extras_cards)
         n2 = len(addon_cards)
 
+        extras_cols = min(2, cols) if n_ext <= 2 else cols
         rows1 = max(1, (n1 + cols - 1) // cols) if n1 > 0 else 0
-        rows_ext = max(1, (n_ext + cols - 1) // cols) if n_ext > 0 else 0
+        rows_ext = max(1, (n_ext + extras_cols - 1) // extras_cols) if n_ext > 0 else 0
         rows2 = max(1, (n2 + cols - 1) // cols) if n2 > 0 else 0
 
         h1 = rows1 * default_row_height + max(0, rows1 - 1) * card_gap if rows1 > 0 else 40.0
@@ -736,9 +833,9 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
                 adjusted_elements.append({
                     "id": "extras_header_bg",
                     "type": "rectangle",
-                    "x": 40,
+                    "x": float(grid1.get("x") or 40),
                     "y": y_h_ext,
-                    "w": 714,
+                    "w": float(grid1.get("w") or 714),
                     "h": hdr_h,
                     "z": 2,
                     "style": {"background": "#1E293B", "borderWidth": 0, "borderColor": "transparent", "borderRadius": 4},
@@ -746,30 +843,28 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
                 adjusted_elements.append({
                     "id": "extras_header_txt",
                     "type": "text",
-                    "text": "Purchased Extras & Add-ons / 特别附加项目",
-                    "x": 52,
+                    "text": "Purchased Extras & Add-ons / 已附加特别项目",
+                    "x": float(grid1.get("x") or 40) + 12,
                     "y": y_h_ext + 5,
-                    "w": 690,
+                    "w": float(grid1.get("w") or 714) - 24,
                     "h": 16,
                     "z": 5,
                     "style": {"fontSize": 10.5, "fontWeight": "700", "color": "#FFFFFF", "textAlign": "left"},
                 })
-                adjusted_elements.append({
+                extras_elem = dict(grid1)
+                extras_elem.update({
                     "id": "extras_grid",
                     "type": "benefit-grid",
                     "gridKind": "extras",
-                    "x": 40,
+                    "x": float(grid1.get("x") or 40),
                     "y": y_g_ext,
-                    "w": 714,
+                    "w": float(grid1.get("w") or 714),
                     "h": h_ext,
                     "z": 4,
-                    "benefitPreset": grid1.get("benefitPreset"),
-                    "layoutMode": grid1.get("layoutMode"),
-                    "columns": cols,
-                    "cardStyle": grid1.get("cardStyle") or "standard",
-                    "textDensity": grid1.get("textDensity") or "compact",
+                    "columns": extras_cols,
                     "emptyState": "hide",
                 })
+                adjusted_elements.append(extras_elem)
                 continue
             elif eid == "addons_header_bg" and hdr2_bg:
                 e["y"] = y_h2
@@ -941,8 +1036,15 @@ def _element_html(
     resolved_assets: dict[str, str] | None = None,
 ) -> str:
     element_type = element.get("type")
+    eid = element.get("id") or ""
     if element.get("visible") is False or element_type == "layer-group":
         return ""
+    if element_type == "text" and eid in {"pay_holder", "text_ltaa394", "pay_bank_sub", "text_ul2w5ka"}:
+        element_type = "image"
+        if eid in {"pay_holder", "text_ltaa394"}:
+            element = dict(element, type="image", assetSlot="risklocker_logo", assetId=SYSTEM_DEFAULT_SLOTS["risklocker_logo"])
+        else:
+            element = dict(element, type="image", assetSlot="bank_logo", assetId=SYSTEM_DEFAULT_SLOTS["bank_logo"])
     if element_type == "image":
         return _image_html(element, config, fields, resolved_assets, db)
     if element_type == "line":

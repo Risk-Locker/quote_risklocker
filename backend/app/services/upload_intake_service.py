@@ -120,7 +120,7 @@ async def create_queued_upload(
     from app.services.review_service import move_to_trash
     from app.services.trash_service import permanent_delete_session
 
-    user = db.get(User, owner_id)
+    user = db.get(User, owner_id) if hasattr(db, "get") else None
     if user:
         duplicates = db.scalars(
             select(UploadedFile).where(

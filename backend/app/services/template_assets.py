@@ -144,9 +144,22 @@ def folder_summary(db: Session) -> list[dict[str, Any]]:
     return [{"folder": folder, "count": count} for folder, count in rows]
 
 
+SYSTEM_ASSET_ALIASES: dict[str, str] = {
+    "risklocker_logo": "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f",
+    "bank_logo": "2168eaee-3e56-4903-8c4f-841f01ff2407",
+    "hongleong": "2168eaee-3e56-4903-8c4f-841f01ff2407",
+    "all_driver_icon": "91116a7dc3540d62",
+    "background": "49e754a6faa949c2",
+}
+
+
 def resolve_template_asset(db: Session | None, asset_id: str) -> Path | bytes:
     if not asset_id:
         raise FileNotFoundError(asset_id)
+
+    # Translate slot aliases to canonical UUIDs/hashes if applicable
+    if asset_id in SYSTEM_ASSET_ALIASES:
+        asset_id = SYSTEM_ASSET_ALIASES[asset_id]
 
     # Try local assets first.
     if re.fullmatch(r"[a-f0-9]{16}", asset_id):
@@ -158,8 +171,8 @@ def resolve_template_asset(db: Session | None, asset_id: str) -> Path | bytes:
                         raise FileNotFoundError(asset_id)
                     return resolved
 
-    # Try uploaded assets.
-    if db is not None:
+    # Try uploaded assets if asset_id is a valid UUID.
+    if db is not None and re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", asset_id):
         record = db.get(TemplateAsset, asset_id)
         if record and record.status == AccountStatus.ACTIVE.value:
             try:
@@ -176,7 +189,34 @@ def resolve_template_asset(db: Session | None, asset_id: str) -> Path | bytes:
                 storage_path = str(item.get("storage_path") or business.storage_path)
                 return SupabaseStorage(settings).download_bytes(storage_path)
             except Exception as exc:
+                # If Supabase storage is unavailable, fallback to local compatibility files
+                for root in (asset_root(), compatibility_asset_root()):
+                    for path in root.iterdir() if root.exists() else []:
+                        if path.is_file() and path.suffix.lower() in ALLOWED_EXTENSIONS:
+                            if (asset_id == "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f" and "risklocker" in path.name.lower()) or \
+                               (asset_id == "2168eaee-3e56-4903-8c4f-841f01ff2407" and "hongleong" in path.name.lower()):
+                                return path.resolve()
                 raise FileNotFoundError(asset_id) from exc
+
+    # Local fallback for system UUIDs or aliases when db is None or not in database
+    if asset_id in {"e9685e1f-ac95-410c-a2e9-eccb7ca35d5f", "risklocker_logo", "3653a3b861c06f00"}:
+        compat = compatibility_asset_root() / "Risklocker Logo.png"
+        if compat.exists():
+            return compat.resolve()
+    elif asset_id in {"2168eaee-3e56-4903-8c4f-841f01ff2407", "bank_logo", "hongleong", "c4d540c072507abc"}:
+        compat = compatibility_asset_root() / "hongleongbanl.png"
+        if compat.exists():
+            return compat.resolve()
+    elif asset_id in {"91116a7dc3540d62", "all_driver_icon"}:
+        for root in (asset_root(), compatibility_asset_root()):
+            for path in root.iterdir() if root.exists() else []:
+                if path.is_file() and "driver" in path.name.lower():
+                    return path.resolve()
+    elif asset_id in {"49e754a6faa949c2", "background"}:
+        for root in (asset_root(), compatibility_asset_root()):
+            for path in root.iterdir() if root.exists() else []:
+                if path.is_file() and "template_bg" in path.name.lower():
+                    return path.resolve()
 
     raise FileNotFoundError(asset_id)
 
@@ -211,6 +251,19 @@ def find_asset_by_hint(db: Session | None, hints: list[str]) -> str:
         for asset_id, filename, label in lowered:
             if token in filename or token in label:
                 return asset_id
+
+    # Fallback to system canonical assets for common hints
+    for hint in hints:
+        token = hint.lower()
+        if "risklocker" in token:
+            return "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f"
+        if "hongleong" in token or "bank" in token:
+            return "2168eaee-3e56-4903-8c4f-841f01ff2407"
+        if "driver" in token:
+            return "91116a7dc3540d62"
+        if "template_bg" in token or "bg" in token:
+            return "49e754a6faa949c2"
+
     return ""
 
 def _extension_for_mime(mime: str) -> str:

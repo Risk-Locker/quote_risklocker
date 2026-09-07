@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 const SESSION_COOKIE = process.env.SESSION_COOKIE_NAME || "risklocker_session";
 
 export function middleware(request: NextRequest) {
-  const { pathname, search } = request.nextUrl;
+  const { pathname, search, searchParams } = request.nextUrl;
   if (!request.cookies.get(SESSION_COOKIE)) {
     const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
     const proto = request.headers.get("x-forwarded-proto") || (request.url.startsWith("https") ? "https" : "http");
@@ -11,6 +11,18 @@ export function middleware(request: NextRequest) {
     const loginUrl = new URL(`/login?redirect=${encodeURIComponent(pathname + search)}`, origin);
     return NextResponse.redirect(loginUrl);
   }
+
+  // Instant redirects for template builder sub-tabs
+  if (pathname === "/builder/templates" || pathname === "/builder/templates/") {
+    const target = searchParams.get("tab") === "benefits"
+      ? "/builder/templates/benefit-templates"
+      : "/builder/templates/quotation-templates";
+    return NextResponse.redirect(new URL(target, request.url));
+  }
+  if (pathname === "/builder/templates/benefits" || pathname === "/builder/templates/benefits/") {
+    return NextResponse.redirect(new URL("/builder/templates/benefit-templates", request.url));
+  }
+
   return NextResponse.next();
 }
 

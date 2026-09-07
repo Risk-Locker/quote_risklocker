@@ -57,7 +57,7 @@ from app.rendering.render_context import (
     resolve_benefit_cards,
 )
 from app.services.catalog_review_service import _resolve_vehicle_category, auto_apply_extracted_benefits, initialize_catalog_review, pin_catalog_context, seed_base_benefits
-from app.extraction.validators import normalize_date, normalize_money
+from app.extraction.validators import normalize_date, normalize_money, normalize_valuation_type
 
 
 SCALAR_DECISIONS = frozenset({"confirm", "edit", "clear", "keep_check_needed"})
@@ -122,9 +122,26 @@ def _rows_for_draft(db, model, draft_id: str) -> list:
 
 
 def _template_for_draft(db, draft: QuotationDraft) -> TemplateRevision | None:
+    if draft.layout_override is not None and draft.layout_override_template_revision_id:
+        rev = db.get(TemplateRevision, draft.layout_override_template_revision_id)
+        if rev:
+            return rev
+
     if draft.template_revision_id:
         rev = db.get(TemplateRevision, draft.template_revision_id)
         if rev:
+            latest_revs = list(
+                db.scalars(
+                    select(TemplateRevision)
+                    .where(
+                        TemplateRevision.template_id == rev.template_id,
+                        TemplateRevision.state.in_(["published", "compatibility"]),
+                    )
+                    .order_by(TemplateRevision.revision_number.desc())
+                ).all()
+            )
+            if latest_revs:
+                return latest_revs[0]
             return rev
     # Look for active template marked is_default=True or agency_bilingual
     templates = list(
@@ -138,22 +155,27 @@ def _template_for_draft(db, draft: QuotationDraft) -> TemplateRevision | None:
         ),
     )
     if default_tmpl:
-        rev = db.scalars(
-            select(TemplateRevision)
-            .where(
-                TemplateRevision.template_id == default_tmpl.id,
-                TemplateRevision.state.in_(["published", "compatibility"]),
-            )
-            .order_by(TemplateRevision.revision_number.desc())
-        ).first()
-        if rev:
-            return rev
+        found_revs = list(
+            db.scalars(
+                select(TemplateRevision)
+                .where(
+                    TemplateRevision.template_id == default_tmpl.id,
+                    TemplateRevision.state.in_(["published", "compatibility"]),
+                )
+                .order_by(TemplateRevision.revision_number.desc())
+            ).all()
+        )
+        if found_revs:
+            return found_revs[0]
 
-    return db.scalars(
-        select(TemplateRevision)
-        .where(TemplateRevision.state.in_(["published", "compatibility"]))
-        .order_by(TemplateRevision.revision_number.desc())
-    ).first()
+    all_revs = list(
+        db.scalars(
+            select(TemplateRevision)
+            .where(TemplateRevision.state.in_(["published", "compatibility"]))
+            .order_by(TemplateRevision.revision_number.desc())
+        ).all()
+    )
+    return all_revs[0] if all_revs else None
 
 
 def generation_blockers(
@@ -1108,12 +1130,7 @@ def _normalize_edited_value(field_name: str, raw) -> str | None:
             raise AppError("Enter NCD as a percentage number, for example 25.", 422)
         return text
     if field_name == "valuation_type":
-        s = str(raw).strip()
-        if "agreed" in s.lower() or "dipersetujui" in s.lower():
-            return "Agreed Value"
-        if "market" in s.lower() or "pasaran" in s.lower():
-            return "Market Value"
-        return s or "Market Value"
+        return normalize_valuation_type(str(raw))
     return str(raw)
 
 

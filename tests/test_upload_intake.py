@@ -6,6 +6,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -43,6 +44,17 @@ class FakeDb:
 
     def scalar(self, _statement):
         return self.scalar_values.pop(0) if self.scalar_values else None
+
+    def get(self, model, object_id):
+        for item in self.added:
+            if isinstance(item, model) and getattr(item, "id", None) == object_id:
+                return item
+        return None
+
+    def scalars(self, _statement):
+        class _Scalars:
+            def all(self): return []
+        return _Scalars()
 
     def add(self, item):
         self.added.append(item)
@@ -105,18 +117,20 @@ async def test_new_upload_creates_one_queued_session_transaction_and_no_expiry()
     upload = Upload(b"%PDF-1.4 queued")
 
     result = await create_queued_upload(
-        db,
-        settings(),
+        cast(Any, db),
+        cast(Any, settings()),
         owner_id="user-1",
-        upload=upload,
+        upload=cast(Any, upload),
         idempotency_key="upload-key-1",
         enhanced_reading=False,
-        storage=storage,
+        storage=cast(Any, storage),
         quarantine=scan,
     )
 
     assert result.created is True
     assert result.job.state == "queued"
+    assert result.draft is not None
+    assert result.session is not None
     assert result.job.session_id == result.session.id
     assert result.job.uploaded_file_id == result.uploaded_file.id
     assert result.uploaded_file.storage_expires_at is None
@@ -153,18 +167,19 @@ async def test_safe_retry_returns_existing_job_without_reading_or_uploading_file
     upload = Upload(b"not even inspected")
 
     result = await create_queued_upload(
-        db,
-        settings(),
+        cast(Any, db),
+        cast(Any, settings()),
         owner_id="user-1",
-        upload=upload,
+        upload=cast(Any, upload),
         idempotency_key="same-key",
         enhanced_reading=False,
-        storage=storage,
+        storage=cast(Any, storage),
         quarantine=scan,
     )
 
     assert result.created is False
     assert result.job is existing
+    assert result.session is not None
     assert result.session.id == "session-existing"
     assert upload.reads == 0
     assert storage.uploads == []
@@ -175,8 +190,8 @@ async def test_idempotency_key_owned_by_another_user_is_conflict():
     existing = SimpleNamespace(owner_id="other-user")
     with pytest.raises(AppError, match="idempotency key") as error:
         await create_queued_upload(
-            FakeDb([existing]), settings(), owner_id="user-1", upload=Upload(b"%PDF"),
-            idempotency_key="same-key", enhanced_reading=False, storage=Storage(), quarantine=scan,
+            cast(Any, FakeDb([existing])), cast(Any, settings()), owner_id="user-1", upload=cast(Any, Upload(b"%PDF")),
+            idempotency_key="same-key", enhanced_reading=False, storage=cast(Any, Storage()), quarantine=scan,
         )
     assert error.value.status_code == 409
 
@@ -188,8 +203,8 @@ async def test_database_failure_rolls_back_and_reconciles_uploaded_object():
 
     with pytest.raises(RuntimeError, match="database unavailable"):
         await create_queued_upload(
-            db, settings(), owner_id="user-1", upload=Upload(b"%PDF-1.4 queued"),
-            idempotency_key="key", enhanced_reading=False, storage=storage, quarantine=scan,
+            cast(Any, db), cast(Any, settings()), owner_id="user-1", upload=cast(Any, Upload(b"%PDF-1.4 queued")),
+            idempotency_key="key", enhanced_reading=False, storage=cast(Any, storage), quarantine=scan,
         )
 
     assert db.rollbacks == 1
@@ -203,6 +218,6 @@ async def test_upload_requires_nonempty_bounded_idempotency_key():
     for key in ("", "x" * 161):
         with pytest.raises(AppError, match="Idempotency-Key"):
             await create_queued_upload(
-                FakeDb(), settings(), owner_id="user-1", upload=Upload(b"%PDF"),
-                idempotency_key=key, enhanced_reading=False, storage=Storage(), quarantine=scan,
+                cast(Any, FakeDb()), cast(Any, settings()), owner_id="user-1", upload=cast(Any, Upload(b"%PDF")),
+                idempotency_key=key, enhanced_reading=False, storage=cast(Any, Storage()), quarantine=scan,
             )

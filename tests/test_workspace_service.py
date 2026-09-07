@@ -15,6 +15,8 @@ BACKEND = ROOT / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
+from typing import Any
+
 from app.core.errors import AppError
 from app.models.enums import RecordStatus
 from app.models.tables import (
@@ -47,7 +49,7 @@ from app.services.workspace_service import (
 NOW = datetime.now(timezone.utc)
 
 
-def objects():
+def objects() -> list[Any]:
     uploaded = UploadedFile(
         id="file-1",
         batch_id="batch-1",
@@ -109,12 +111,13 @@ def objects():
         id="template-revision-1", template_id="template-1", revision_number=2, state="published",
         page_profile_id="profile-1", config={"canvas": {"width": 794, "height": 1123, "elements": []}}, config_hash="a" * 64,
     )
-    return uploaded, draft, session, extraction, line, decision, selection, template_revision
+    return [uploaded, draft, session, extraction, line, decision, selection, template_revision]
 
 
 class Scalars:
     def __init__(self, rows): self.rows = rows
     def all(self): return list(self.rows)
+    def first(self): return self.rows[0] if self.rows else None
 
 
 class FakeDb:
@@ -186,6 +189,7 @@ def test_patch_only_changes_explicit_scalar_decision_and_never_confirms_untouche
         operations=[{"op": "scalar_decision", "field": "customer_name", "decision": "edit", "value": "Correct Name"}],
     )
     draft = db.get(QuotationDraft, "draft-1")
+    assert draft is not None
 
     assert result["revision"] == 4
     assert draft.fields["customer_name"]["value"] == "Correct Name"
@@ -203,6 +207,7 @@ def test_keep_check_needed_remains_blocking_and_clear_is_explicit():
         operations=[{"op": "scalar_decision", "field": "customer_name", "decision": "keep_check_needed"}],
     )
     draft = db.get(QuotationDraft, "draft-1")
+    assert draft is not None
     assert draft.fields["customer_name"]["status"] == "check_needed"
     assert draft.fields["customer_name"]["value"] == "Test Customer"
 
@@ -210,6 +215,8 @@ def test_keep_check_needed_remains_blocking_and_clear_is_explicit():
         db, user(), "draft-1", base_revision=4,
         operations=[{"op": "scalar_decision", "field": "customer_name", "decision": "clear"}],
     )
+    draft = db.get(QuotationDraft, "draft-1")
+    assert draft is not None
     assert draft.fields["customer_name"]["value"] is None
     assert draft.fields["customer_name"]["status"] == "ready"
 
@@ -217,6 +224,7 @@ def test_keep_check_needed_remains_blocking_and_clear_is_explicit():
 def test_stale_revision_returns_409_and_changes_nothing():
     db = FakeDb(objects())
     draft = db.get(QuotationDraft, "draft-1")
+    assert draft is not None
     original = dict(draft.fields["customer_name"])
 
     with pytest.raises(AppError) as error:
@@ -250,6 +258,8 @@ def test_source_disposition_and_custom_selection_are_atomic_and_validated():
 
     created = next(item for item in db.added if isinstance(item, DraftBenefitSelection))
     decision = db.get(DraftSourceLineDecision, "decision-1")
+    assert decision is not None
+    assert created.typed_value_override is not None
     assert created.typed_value_override["value"] == "1700"
     assert decision.disposition == "custom"
     assert decision.selection_id == created.id
@@ -287,6 +297,7 @@ def test_explicit_upgrade_replaces_current_value_preserves_exact_override_and_ca
     selected = next(item for item in db.added if isinstance(item, DraftBenefitSelection))
     assert current.state == "superseded" and current.superseded_by_id == selected.id
     assert selected.state == "current" and selected.cost_status == "foc"
+    assert selected.typed_value_override is not None
     assert selected.typed_value_override["value"] == "999"
     assert len([item for item in db.values.values() if isinstance(item, DraftBenefitSelection) and item.state == "current" and item.concept_id == base.concept_id]) == 1
 
@@ -325,6 +336,7 @@ def test_layout_override_requires_exact_template_binding():
         }],
     )
     draft = db.get(QuotationDraft, "draft-1")
+    assert draft is not None
     assert draft.layout_override_template_id == "template-1"
     assert draft.layout_override_template_revision_id == "template-revision-1"
 
@@ -526,6 +538,7 @@ def test_money_edits_normalize_to_rm_and_recompute_total():
         {"op": "scalar_decision", "field": "service_fee", "decision": "edit", "value": "20"},
     ])
     draft = db.get(QuotationDraft, "draft-1")
+    assert draft is not None
     assert draft.fields["premium"]["value"] == "1234.50"
     assert draft.fields["roadtax"]["value"] == "90.00"
     assert draft.fields["total_amount"]["value"] == "1344.50"
@@ -549,6 +562,7 @@ def test_date_edits_store_date_only_and_ncd_stores_percentage_number():
         {"op": "scalar_decision", "field": "ncd_percent", "decision": "edit", "value": "25%"},
     ])
     draft = db.get(QuotationDraft, "draft-1")
+    assert draft is not None
     assert draft.fields["issue_date"]["value"] == "2026-01-25"
     assert draft.fields["ncd_percent"]["value"] == "25"
 

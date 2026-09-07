@@ -87,3 +87,16 @@ def validate_engine_cc(value: str | None) -> tuple[bool, str | None]:
     if not match:
         return False, "Please check this value."
     return (int(match.group(0)) > 0, None)
+
+
+def normalize_valuation_type(value: str | None) -> str:
+    """Normalize valuation type considering English and Malay terms."""
+    if not value:
+        return "Market Value"
+    s = value.strip().lower()
+    if "agreed" in s or "dipersetujui" in s:
+        return "Agreed Value"
+    if "market" in s or "pasaran" in s:
+        return "Market Value"
+    return "Market Value"
+

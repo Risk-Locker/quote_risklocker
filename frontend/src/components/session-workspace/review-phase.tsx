@@ -48,7 +48,13 @@ import {
   balanceBenefitGridElements,
   type CanvasElement,
 } from "@/components/template-canvas/shared";
-import { SYSTEM_BENEFIT_PRESETS, applyPresetToCanvasElement } from "@/lib/benefit-presets";
+import {
+  SYSTEM_BENEFIT_PRESETS,
+  applyPresetToCanvasElement,
+  getAllBenefitPresets,
+  getBenefitPreset,
+  type BenefitCardStyle,
+} from "@/lib/benefit-presets";
 import {
   useWorkspaceActions,
   useWorkspaceData,
@@ -915,6 +921,17 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     };
   }, []);
 
+  const [allBenefitPresets, setAllBenefitPresets] = useState<BenefitCardStyle[]>(() => {
+    return getAllBenefitPresets();
+  });
+
+  // Re-fetch benefit presets on focus so user edits from /builder/templates/benefit-templates are picked up instantly
+  useEffect(() => {
+    const updatePresets = () => setAllBenefitPresets(getAllBenefitPresets());
+    window.addEventListener("focus", updatePresets);
+    return () => window.removeEventListener("focus", updatePresets);
+  }, []);
+
   const [selectedBenefitPreset, setSelectedBenefitPreset] = useState<string>(() => {
     try {
       const stored = (workspace?.fields?.benefit_preset as any)?.value;
@@ -931,6 +948,8 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       localStorage.setItem("risklocker_default_benefit_preset", presetId);
     } catch {}
     decideField("benefit_preset", "edit", presetId);
+    const cfg = getBenefitPreset(presetId);
+    decideField("benefit_preset_config", "edit", JSON.stringify(cfg));
   }, [decideField]);
 
   const displayOptions = useMemo(() => {
@@ -953,7 +972,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       extras: workspace?.extras,
       displayOptions,
     } as any);
-  }, [previewTemplate, workspace?.benefit_cards, workspace?.extras, selectedBenefitPreset, displayOptions]);
+  }, [previewTemplate, workspace?.benefit_cards, workspace?.extras, selectedBenefitPreset, displayOptions, allBenefitPresets]);
 
   const canvasH = useMemo(() => {
     const baseHeight = previewTemplate?.config?.canvas?.height || 1123;
@@ -1282,6 +1301,19 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       label: key,
       url: id.includes("-") ? `/business/assets/${id}/content?profile=ui` : `/template-assets/${id}`,
     }));
+    const systemDefaults: Array<{ id: string; label: string; url: string }> = [
+      { id: "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f", label: "risklocker_logo", url: "/business/assets/e9685e1f-ac95-410c-a2e9-eccb7ca35d5f/content?profile=ui" },
+      { id: "2168eaee-3e56-4903-8c4f-841f01ff2407", label: "bank_logo", url: "/business/assets/2168eaee-3e56-4903-8c4f-841f01ff2407/content?profile=ui" },
+      { id: "3653a3b861c06f00", label: "risklocker_logo", url: "/template-assets/3653a3b861c06f00" },
+      { id: "c4d540c072507abc", label: "bank_logo", url: "/template-assets/c4d540c072507abc" },
+      { id: "91116a7dc3540d62", label: "all_driver_icon", url: "/template-assets/91116a7dc3540d62" },
+      { id: "49e754a6faa949c2", label: "background", url: "/template-assets/49e754a6faa949c2" },
+    ];
+    for (const sys of systemDefaults) {
+      if (!list.some((a) => a.id === sys.id)) {
+        list.push(sys);
+      }
+    }
     for (const el of previewTemplate.config.canvas?.elements || []) {
       if (el.assetId && !list.some((a) => a.id === el.assetId)) {
         list.push({
@@ -2371,11 +2403,11 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                         Benefits Card Template
                       </label>
                       <span className="text-[11px] text-[var(--rl-text-muted)] font-medium">
-                        {SYSTEM_BENEFIT_PRESETS.find((p) => p.id === selectedBenefitPreset)?.name || "Masonry Flow"}
+                        {allBenefitPresets.find((p) => p.id === selectedBenefitPreset)?.name || "Masonry Flow"}
                       </span>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                      {SYSTEM_BENEFIT_PRESETS.map((preset) => {
+                      {allBenefitPresets.map((preset) => {
                         const isSelected = selectedBenefitPreset === preset.id;
                         return (
                           <button
@@ -2823,7 +2855,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                           onChange={(e) => handleSelectBenefitPreset(e.target.value)}
                           className="bg-transparent font-semibold text-[var(--rl-text-strong)] cursor-pointer outline-hidden text-[10px]"
                         >
-                          {SYSTEM_BENEFIT_PRESETS.map((p) => (
+                          {allBenefitPresets.map((p) => (
                             <option key={p.id} value={p.id}>{p.shortName}</option>
                           ))}
                         </select>
@@ -2904,6 +2936,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                               selected={false}
                               readOnly={true}
                               onPointerDown={() => { }}
+                              config={previewTemplate.config}
                               variableValues={previewFields}
                               benefitData={{ ...workspace.benefit_cards, extras: workspace.extras, displayOptions }}
                               conceptAssets={conceptAssets}

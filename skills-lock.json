@@ -7,20 +7,32 @@
       "skillPath": "skills/agent-browser/SKILL.md",
       "computedHash": "a674b7d81066e3cc471a7512ddb4ae724418cbfefa75cbb050b0dc430e4d57a0"
     },
+    "ai-image-generation": {
+      "source": "prime-skills/runcomfy-agent-skills",
+      "sourceType": "github",
+      "skillPath": "ai-image-generation/SKILL.md",
+      "computedHash": "06f41b40b32a080bc38536156b80a7d4a3175e1b1eeece55fc125e54bee467f3"
+    },
     "brainstorming": {
-      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\superpowers",
+      "source": "../../../../../user/Desktop/dev/quote/quote_risklocker/.skill-sources/superpowers",
       "sourceType": "local",
       "computedHash": "79fec75eb8cb46ec4d5e119a08d5366dfe2f1b56d876b2ea5633fa80f8aa1f7c"
     },
     "fastapi": {
-      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\fastapi",
+      "source": "../../../../../user/Desktop/dev/quote/quote_risklocker/.skill-sources/fastapi",
       "sourceType": "local",
       "computedHash": "187b2e06c41cdb6c6beeab15e6db4aeb1bf62f57735974646ad5646af8aacc66"
     },
     "frontend-design": {
-      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\anthropic-skills",
+      "source": "../../../../../user/Desktop/dev/quote/quote_risklocker/.skill-sources/anthropic-skills",
       "sourceType": "local",
       "computedHash": "93f53fd1c0352d3d7ec17b8f73d7351bf76f4821e55d123c9d2abc2c53ba48e4"
+    },
+    "image-edit": {
+      "source": "prime-skills/runcomfy-agent-skills",
+      "sourceType": "github",
+      "skillPath": "image-edit/SKILL.md",
+      "computedHash": "9200d5fda0755433f7b0f4b706c08ad3017108f641bdd13d08d101b6f87c3843"
     },
     "playwright-automation-fill-in-form": {
       "source": "github/awesome-copilot",
@@ -47,7 +59,7 @@
       "computedHash": "ac361696198c2db22a0f9d3aa456d2f83c9f0110bf00d6ca529f735395fe3a5c"
     },
     "python-testing": {
-      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\python-skills",
+      "source": "../../../../../user/Desktop/dev/quote/quote_risklocker/.skill-sources/python-skills",
       "sourceType": "local",
       "computedHash": "72aa686b0fc4ef5688c6b79874e21126cecd908cac8af9efe439da913255f411"
     },
@@ -58,37 +70,37 @@
       "computedHash": "0c42fff660b6f7e85add36437edc36976466bb254b7cd9eb38ec67b2ad64a9bf"
     },
     "shadcn": {
-      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\shadcn-ui",
+      "source": "../../../../../user/Desktop/dev/quote/quote_risklocker/.skill-sources/shadcn-ui",
       "sourceType": "local",
       "computedHash": "f99ef49d9909d380ca683ceb8dc8c25775c20ee38140112c394e037d8c11ee18"
     },
     "systematic-debugging": {
-      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\superpowers",
+      "source": "../../../../../user/Desktop/dev/quote/quote_risklocker/.skill-sources/superpowers",
       "sourceType": "local",
       "computedHash": "a2750dfbaed1690da73b120254892c4f926b4576cb82eb16fc877783941fe39b"
     },
     "test-driven-development": {
-      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\superpowers",
+      "source": "../../../../../user/Desktop/dev/quote/quote_risklocker/.skill-sources/superpowers",
       "sourceType": "local",
       "computedHash": "a4126a9c5f17be3c228aa9e5755898ade283448b86099f56f40852e8c14532be"
     },
     "using-superpowers": {
-      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\superpowers",
+      "source": "../../../../../user/Desktop/dev/quote/quote_risklocker/.skill-sources/superpowers",
       "sourceType": "local",
       "computedHash": "a77a803b7fc1a19c87605cf7a5ef318c5adc233de10b9ebeecb2ee2609f5454e"
     },
     "vercel-composition-patterns": {
-      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\vercel-agent-skills",
+      "source": "../../../../../user/Desktop/dev/quote/quote_risklocker/.skill-sources/vercel-agent-skills",
       "sourceType": "local",
       "computedHash": "10eb4ec94577b79ae98c63ce3e7f35f8a6a06436a4011bff083b397de6960eeb"
     },
     "vercel-react-best-practices": {
-      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\vercel-agent-skills",
+      "source": "../../../../../user/Desktop/dev/quote/quote_risklocker/.skill-sources/vercel-agent-skills",
       "sourceType": "local",
       "computedHash": "6b526d013e28073246a36f99b529bc43745d30832ecfa8217b359c34f260ca6b"
     },
     "web-design-guidelines": {
-      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\vercel-agent-skills",
+      "source": "../../../../../user/Desktop/dev/quote/quote_risklocker/.skill-sources/vercel-agent-skills",
       "sourceType": "local",
       "computedHash": "d8e7d3afe37dcc8a97b99ffb5afdb4d0919ae0092ea8b68f44eb201f035e33ac"
     },
@@ -99,7 +111,7 @@
       "computedHash": "3f14af7f5690695209c22fbf8c8d133769a86d64892602c09bb13f135e14e857"
     },
     "writing-plans": {
-      "source": "C:\\Users\\user\\Desktop\\dev\\quote\\quote_risklocker\\.skill-sources\\superpowers",
+      "source": "../../../../../user/Desktop/dev/quote/quote_risklocker/.skill-sources/superpowers",
       "sourceType": "local",
       "computedHash": "a8a8b0d07b744173079b25d26c6a189a0b5e7ddd80444ce92055b974dab7352b"
     }

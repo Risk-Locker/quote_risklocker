@@ -53,6 +53,13 @@ def main() -> int:
                 height = int(config["canvas"]["height"])
                 for count in COUNTS:
                     context = {"current_benefits": cards(count), "available_addons": cards(count), "generation_blockers": []}
+                    from app.rendering.template_renderer import _balance_benefit_grid_elements
+                    balanced = _balance_benefit_grid_elements(config.get("canvas", {}).get("elements") or [], context)
+                    max_y = max((float(e.get("y") or 0) + float(e.get("h") or 0) for e in balanced), default=0.0)
+                    active_height = height
+                    if max_y + 30.0 > active_height:
+                        active_height = int(max_y + 30.0)
+
                     html = render_quotation_html(fields, template_name=master["name"], template_config=config, render_context=context, resolved_assets={})
                     stem = f'{master["key"]}-{count:02d}'
                     html_path = destination / f"{stem}.html"
@@ -60,13 +67,13 @@ def main() -> int:
                     pdf_path = destination / f"{stem}.pdf"
                     raster_path = destination / f"{stem}-pdf.png"
                     html_path.write_text(html, encoding="utf-8")
-                    page = browser.new_page(viewport={"width": width, "height": height}, device_scale_factor=1)
+                    page = browser.new_page(viewport={"width": width, "height": active_height}, device_scale_factor=1)
                     started = time.perf_counter()
                     page.set_content(html, wait_until="load")
                     page.emulate_media(media="print")
                     card_boxes = page.locator('[data-benefit-card="1"]').evaluate_all("els => els.map(el => { const r=el.getBoundingClientRect(); return {x:r.x,y:r.y,w:r.width,h:r.height,scale:Number(el.dataset.cardScale)}; })")
                     page.screenshot(path=str(preview_path), full_page=False)
-                    page.pdf(path=str(pdf_path), width=f"{width}px", height=f"{height}px", print_background=True, margin={"top": "0", "right": "0", "bottom": "0", "left": "0"}, prefer_css_page_size=True, tagged=True)
+                    page.pdf(path=str(pdf_path), width=f"{width}px", height=f"{active_height}px", print_background=True, margin={"top": "0", "right": "0", "bottom": "0", "left": "0"}, prefer_css_page_size=True, tagged=True)
                     duration_ms = round((time.perf_counter() - started) * 1000)
                     page.close()
 
@@ -82,7 +89,7 @@ def main() -> int:
                     if len(card_boxes) != expected_cards:
                         raise RuntimeError(f"{stem}: rendered {len(card_boxes)} cards, expected {expected_cards}")
                     scales = [round(float(item["scale"]), 12) for item in card_boxes]
-                    if any(float(item["x"]) < -0.01 or float(item["y"]) < -0.01 or float(item["x"]) + float(item["w"]) > width + 0.01 or float(item["y"]) + float(item["h"]) > height + 0.01 for item in card_boxes):
+                    if any(float(item["x"]) < -0.01 or float(item["y"]) < -0.01 or float(item["x"]) + float(item["w"]) > width + 0.01 or float(item["y"]) + float(item["h"]) > active_height + 0.01 for item in card_boxes):
                         raise RuntimeError(f"{stem}: a card escaped the fixed page")
                     report["scenarios"].append({"master": master["key"], "count_per_grid": count, "card_count": len(card_boxes), "scales": sorted(set(scales)), "render_ms": duration_ms, "preview_pdf_mean_error": mean_error, "preview": preview_path.name, "pdf_raster": raster_path.name})
         finally:

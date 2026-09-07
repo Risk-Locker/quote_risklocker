@@ -27,7 +27,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 const nav: Array<{ href: Route; label: string; icon: typeof Upload }> = [
   { href: "/upload", label: "Upload", icon: Upload },
   { href: "/sessions", label: "Sessions", icon: SquaresFour },
-  { href: "/builder/templates", label: "Builder", icon: Wrench },
+  { href: "/builder/templates/quotation-templates" as Route, label: "Builder", icon: Wrench },
   { href: "/extraction/company-detection" as Route, label: "Extraction & Aliases", icon: FunnelSimple },
   { href: "/ai-context" as Route, label: "AI & Memory", icon: Brain },
   { href: "/settings/system-checks", label: "Settings", icon: Gear },
@@ -208,7 +208,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <nav className="flex flex-col gap-1">
                 {visibleNav.map((item) => {
                   const Icon = item.icon;
-                  const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                  const isBuilder = item.href.startsWith("/builder");
+                  const active = isBuilder
+                    ? pathname.startsWith("/builder")
+                    : pathname === item.href || pathname.startsWith(`${item.href}/`);
                   return (
                     <Link
                       key={item.href}
@@ -261,7 +264,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <nav className="flex flex-col gap-1 sticky top-[80px]">
             {visibleNav.map((item) => {
               const Icon = item.icon;
-              const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+              const isBuilder = item.href.startsWith("/builder");
+              const active = isBuilder
+                ? pathname.startsWith("/builder")
+                : pathname === item.href || pathname.startsWith(`${item.href}/`);
 
               const navLink = (
                 <Link

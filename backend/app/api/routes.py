@@ -213,7 +213,7 @@ from app.services.road_tax_service import (
     upsert_rule as upsert_road_tax_rule,
 )
 from app.services.import_export import parse_tabular, parse_vehicles_workbook
-from app.storage.supabase import StorageError, SupabaseStorage
+from app.storage.supabase import StorageError, StorageNotFound, SupabaseStorage
 from app.services.business_setup_service import (
     create_benefit_catalog,
     create_new_draft_revision,
@@ -291,18 +291,19 @@ def _pdf_response(data: bytes, filename: str, range_header: str | None, download
 @router.get("/health")
 def health(settings: Settings = Depends(settings_dep)) -> dict:
     db_host = "Unknown"
-    if settings.database_url:
-        parts = settings.database_url.split('@') if isinstance(settings.database_url, str) else str(settings.database_url).split('@')
+    db_url = getattr(settings, "database_url", None)
+    if db_url:
+        parts = db_url.split('@') if isinstance(db_url, str) else str(db_url).split('@')
         if len(parts) > 1:
             db_host = parts[-1].split('/')[0]
             
     return {
         "status": "Ready", 
-        "app": settings.app_name,
-        "env": settings.app_env,
-        "supabase_url": settings.supabase_url,
+        "app": getattr(settings, "app_name", "Risklocker Quotation Converter"),
+        "env": getattr(settings, "app_env", "local"),
+        "supabase_url": getattr(settings, "supabase_url", ""),
         "database_host": db_host,
-        "storage_bucket": settings.supabase_storage_bucket
+        "storage_bucket": getattr(settings, "supabase_storage_bucket", ""),
     }
 
 
@@ -1734,6 +1735,8 @@ def business_asset_content(
     content_type = str((item or {}).get("content_type") or asset.content_type)
     try:
         data = SupabaseStorage(settings).download_bytes(storage_path)
+    except StorageNotFound as exc:
+        raise AppError("Asset not found in storage.", 404) from exc
     except StorageError as exc:
         raise AppError("Asset content is unavailable.", 503) from exc
     return Response(

@@ -21,6 +21,7 @@ from app.core.errors import register_error_handlers
 from app.core.http_security import RequestSecurityMiddleware, SecurityHeadersMiddleware
 from app.core.rate_limit import RateLimitMiddleware
 from app.db.session import SessionLocal, verify_database_connection, verify_schema_version
+from app.models.tables import Base
 from app.storage.supabase import SupabaseStorage, close_shared_storage_client
 
 

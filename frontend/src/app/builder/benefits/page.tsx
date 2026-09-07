@@ -699,6 +699,19 @@ ${aiMarkdownTable}`;
       label: key,
       url: id.includes("-") ? `/business/assets/${id}/content?profile=ui` : `/template-assets/${id}`,
     }));
+    const systemDefaults: Array<{ id: string; label: string; url: string }> = [
+      { id: "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f", label: "risklocker_logo", url: "/business/assets/e9685e1f-ac95-410c-a2e9-eccb7ca35d5f/content?profile=ui" },
+      { id: "2168eaee-3e56-4903-8c4f-841f01ff2407", label: "bank_logo", url: "/business/assets/2168eaee-3e56-4903-8c4f-841f01ff2407/content?profile=ui" },
+      { id: "3653a3b861c06f00", label: "risklocker_logo", url: "/template-assets/3653a3b861c06f00" },
+      { id: "c4d540c072507abc", label: "bank_logo", url: "/template-assets/c4d540c072507abc" },
+      { id: "91116a7dc3540d62", label: "all_driver_icon", url: "/template-assets/91116a7dc3540d62" },
+      { id: "49e754a6faa949c2", label: "background", url: "/template-assets/49e754a6faa949c2" },
+    ];
+    for (const sys of systemDefaults) {
+      if (!list.some((a) => a.id === sys.id)) {
+        list.push(sys);
+      }
+    }
     for (const el of activeTemplate.fixed_fields.canvas?.elements || []) {
       if (el.assetId && !list.some((a) => a.id === el.assetId)) {
         list.push({
