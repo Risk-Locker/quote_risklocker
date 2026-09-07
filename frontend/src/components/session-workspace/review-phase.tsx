@@ -1726,7 +1726,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       backgroundColor: "#ffffff",
       width,
       height,
-      pixelRatio: 2.5,
+      pixelRatio: 4,
       skipFonts: false,
       style: {
         transform: "none",
@@ -1901,11 +1901,11 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       const width = previewTemplate?.config.canvas?.width || 794;
       const height = canvasH || 1123;
 
-      // Capture high-definition canvas at 2.5x pixel ratio for ultra-crisp print quality
+      // Capture 4K ultra-high-definition canvas at 4x pixel ratio for maximum print & display clarity
       const imgData = await toPng(live, {
         cacheBust: false,
         backgroundColor: "#ffffff",
-        pixelRatio: 2.5,
+        pixelRatio: 4,
         width,
         height,
         style: {
@@ -1928,7 +1928,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       const pdfW = pdf.internal.pageSize.getWidth();
       const pdfH = pdf.internal.pageSize.getHeight();
 
-      pdf.addImage(imgData, "PNG", 0, 0, pdfW, pdfH, undefined, "FAST");
+      pdf.addImage(imgData, "PNG", 0, 0, pdfW, pdfH, undefined, "SLOW");
 
       const blob = pdf.output("blob");
       const url = URL.createObjectURL(blob);

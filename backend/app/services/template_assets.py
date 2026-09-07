@@ -185,7 +185,7 @@ def resolve_template_asset(db: Session | None, asset_id: str) -> Path | bytes:
         if business and business.status in {"active", "unassigned"}:
             try:
                 settings = get_settings()
-                item = (business.derivative_manifest or {}).get("ui") or {}
+                item = (business.derivative_manifest or {}).get("pdf") or (business.derivative_manifest or {}).get("ui") or {}
                 storage_path = str(item.get("storage_path") or business.storage_path)
                 return SupabaseStorage(settings).download_bytes(storage_path)
             except Exception as exc:

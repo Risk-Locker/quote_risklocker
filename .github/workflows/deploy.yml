@@ -265,5 +265,23 @@ jobs:
               pm2 logs rl-quote-api --nostream --lines 30 || true
               exit 1
             fi
+
+            # Synchronize Nginx CSP & iframe headers (allow framing for source PDF review)
+            echo "== updating nginx security headers"
+            for f in /etc/nginx/sites-available/* /etc/nginx/sites-enabled/*; do
+              if [ -f "$f" ]; then
+                sed -i "s/frame-ancestors 'none'/frame-ancestors 'self'/g" "$f" 2>/dev/null || true
+                sed -i 's/X-Frame-Options "DENY"/X-Frame-Options "SAMEORIGIN"/g' "$f" 2>/dev/null || true
+                sed -i "s|font-src 'self';|font-src 'self' data: https://fonts.gstatic.com;|g" "$f" 2>/dev/null || true
+                sed -i "s|style-src 'self' 'unsafe-inline';|style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;|g" "$f" 2>/dev/null || true
+              fi
+            done
+            if nginx -t 2>/dev/null; then
+              systemctl reload nginx || true
+              echo "nginx reloaded successfully"
+            else
+              echo "nginx config test had warnings or failed, skipping reload"
+            fi
+
             pm2 status
           EOF

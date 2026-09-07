@@ -37,10 +37,17 @@ def html_to_pdf(
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page(
                 viewport={"width": max(1, round(width)), "height": max(1, round(height))},
-                device_scale_factor=1,
+                device_scale_factor=2,
             )
             page.set_default_timeout(timeout_ms)
-            page.set_content(html, wait_until="domcontentloaded", timeout=timeout_ms)
+            try:
+                page.set_content(html, wait_until="networkidle", timeout=min(5000, timeout_ms))
+            except Exception:
+                page.set_content(html, wait_until="load", timeout=timeout_ms)
+            try:
+                page.evaluate("() => document.fonts.ready")
+            except Exception:
+                pass
             page.emulate_media(media="print")
             page.pdf(
                 path=str(output_path),
