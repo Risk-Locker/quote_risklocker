@@ -519,12 +519,31 @@ export function CanvasElementView({
           const isAddons = element.gridKind === "available_addons";
           const isExtras = element.gridKind === "extras" || element.gridKind === "purchased_extras";
           const currentCards = benefitData?.current_benefits || [];
+          const checkPaid = (b: any) => {
+            if (b?.is_extra || b?.badge || b?.cost_status === "paid") return true;
+            const p = b?.price ?? b?.optional_price;
+            if (p !== null && p !== undefined) {
+              if (typeof p === "object") {
+                const amt = p.amount ?? p.value;
+                const n = typeof amt === "string" ? parseFloat(amt.replace(/,/g, "")) : Number(amt);
+                if (Number.isFinite(n) && n > 0) return true;
+              } else if (typeof p === "number" && Number.isFinite(p) && p > 0) {
+                return true;
+              } else if (typeof p === "string") {
+                const n = parseFloat(p.replace(/[^0-9.]/g, ""));
+                if (Number.isFinite(n) && n > 0) return true;
+              }
+            }
+            return false;
+          };
           const items = benefitData
             ? (isAddons
                 ? benefitData.available_addons || []
                 : isExtras
-                  ? currentCards.filter((b: any) => b.price || b.badge || b.cost_status === "paid")
-                  : currentCards.filter((b: any) => !b.price && !b.badge && b.cost_status !== "paid"))
+                  ? currentCards.filter(checkPaid)
+                  : (element as any).excludeExtras
+                    ? currentCards.filter((b: any) => !checkPaid(b))
+                    : currentCards)
             : [];
           const groups = !isAddons && benefitData?.groups?.length ? benefitData.groups : [];
           const groupById = new Map(groups.map((g) => [String(g.plan_id), g]));
@@ -740,8 +759,6 @@ export function CanvasElementView({
                   const cardIconPad = (element as any).iconPadShape;
                   const iconPadRadius = cardIconPad === "circle" ? "999px" : cardIconPad === "box" ? "6px" : cardIconPad === "none" ? "0px" : "4px";
 
-                  const isAmberCard = isExtras || (b?.is_detected && element.gridKind === "available_addons");
-
                   return (
                     <article
                       key={card.index}
@@ -750,21 +767,19 @@ export function CanvasElementView({
                     >
                       <div
                         className={`w-full h-full flex flex-col overflow-hidden ${
-                          isAmberCard
-                            ? "border-2 border-amber-400 bg-amber-50/30 shadow-xs ring-1 ring-amber-300/40"
-                            : element.cardStyle === "minimal"
-                              ? "bg-transparent border border-transparent"
-                              : element.cardStyle === "soft"
-                                ? "bg-[#f3f0f0] border border-gray-200 shadow-xs"
-                                : "border border-[var(--rl-border)] bg-white shadow-xs"
+                          element.cardStyle === "minimal"
+                            ? "bg-transparent border border-transparent"
+                            : element.cardStyle === "soft"
+                              ? "bg-[#f3f0f0] border border-gray-200 shadow-xs"
+                              : "border border-[var(--rl-border)] bg-white shadow-xs"
                         }`}
                         style={{
                           padding: density.padding,
                           borderRadius: cardShape ? cardRadius : undefined,
-                          boxShadow: isAmberCard ? "0 1px 3px rgba(245, 158, 11, 0.15)" : (cardElevation ? cardShadow : undefined),
-                          backgroundColor: isAmberCard ? "#FFFDF7" : (cardBg || undefined),
-                          borderColor: isAmberCard ? "#F59E0B" : (cardBorderColor || undefined),
-                          borderWidth: isAmberCard ? "1.5px" : (cardBorderWidth !== undefined ? `${cardBorderWidth}px` : undefined),
+                          boxShadow: cardElevation ? cardShadow : undefined,
+                          backgroundColor: cardBg || undefined,
+                          borderColor: cardBorderColor || undefined,
+                          borderWidth: cardBorderWidth !== undefined ? `${cardBorderWidth}px` : undefined,
                           borderStyle: cardBorderStyle || undefined,
                         }}
                       >
@@ -846,11 +861,9 @@ export function CanvasElementView({
                                     <div className="mt-1 flex items-center">
                                       <span
                                         className={`inline-block rounded px-1.5 py-0.5 font-bold whitespace-nowrap leading-tight border ${
-                                          isExtras
-                                            ? isDark ? "bg-amber-950/40 text-amber-300 border-amber-700/50" : "bg-amber-50 text-amber-800 border-amber-300/80"
-                                            : isDark
-                                              ? "bg-red-950/40 text-red-300 border-red-800/50"
-                                              : "bg-red-50 text-red-600 border-red-200"
+                                          isDark
+                                            ? "bg-red-950/40 text-red-300 border-red-800/50"
+                                            : "bg-red-50 text-red-600 border-red-200"
                                         }`}
                                         style={{ fontSize: Math.max(8.5, density.desc) }}
                                       >
@@ -993,31 +1006,27 @@ export function CanvasElementView({
                         const cardIconPad = (element as any).iconPadShape;
                         const iconPadRadius = cardIconPad === "circle" ? "999px" : cardIconPad === "box" ? "6px" : cardIconPad === "none" ? "0px" : (isGridTile ? "999px" : "4px");
 
-                        const isAmberCard = isExtras || (b?.is_detected && element.gridKind === "available_addons");
-
                         return (
                           <article
                             key={`benefit-card-${idx}`}
                             className={`w-full h-full flex flex-col overflow-hidden transition-all ${
-                              isAmberCard
-                                ? "border-2 border-amber-400 bg-amber-50/30 shadow-xs ring-1 ring-amber-300/40"
-                                : isDark
-                                  ? "border border-slate-700 bg-slate-900 shadow-xs"
-                                  : isMinimal
-                                    ? "border border-neutral-400 bg-white/90 shadow-none hover:border-neutral-500"
-                                    : isElevated
-                                      ? "border border-neutral-400 bg-white shadow-sm hover:shadow"
-                                      : isGridTile
-                                        ? "border border-neutral-400 bg-white shadow-none"
-                                        : "border border-neutral-400 bg-white shadow-xs"
+                              isDark
+                                ? "border border-slate-700 bg-slate-900 shadow-xs"
+                                : isMinimal
+                                  ? "border border-neutral-400 bg-white/90 shadow-none hover:border-neutral-500"
+                                  : isElevated
+                                    ? "border border-neutral-400 bg-white shadow-sm hover:shadow"
+                                    : isGridTile
+                                      ? "border border-neutral-400 bg-white shadow-none"
+                                      : "border border-neutral-400 bg-white shadow-xs"
                             }`}
                             style={{
                               padding: isMinimal ? "3px 5px" : density.padding,
                               borderRadius: cardShape ? cardRadius : "6px",
-                              boxShadow: isAmberCard ? "0 1px 3px rgba(245, 158, 11, 0.15)" : (cardElevation ? cardShadow : undefined),
-                              backgroundColor: isAmberCard ? "#FFFDF7" : (cardBg || undefined),
-                              borderColor: isAmberCard ? "#F59E0B" : (cardBorderColor || undefined),
-                              borderWidth: isAmberCard ? "1.5px" : (cardBorderWidth !== undefined ? `${cardBorderWidth}px` : undefined),
+                              boxShadow: cardElevation ? cardShadow : undefined,
+                              backgroundColor: cardBg || undefined,
+                              borderColor: cardBorderColor || undefined,
+                              borderWidth: cardBorderWidth !== undefined ? `${cardBorderWidth}px` : undefined,
                               borderStyle: cardBorderStyle || undefined,
                             }}
                           >
@@ -1099,11 +1108,9 @@ export function CanvasElementView({
                                             <div className="mt-1 flex items-center">
                                               <span
                                                 className={`inline-block rounded px-1.5 py-0.5 font-bold whitespace-nowrap leading-tight border ${
-                                                  isExtras
-                                                    ? isDark ? "bg-amber-950/40 text-amber-300 border-amber-700/50" : "bg-amber-50 text-amber-800 border-amber-300/80"
-                                                    : isDark
-                                                      ? "bg-red-950/40 text-red-300 border-red-800/50"
-                                                      : "bg-red-50 text-red-600 border-red-200"
+                                                  isDark
+                                                    ? "bg-red-950/40 text-red-300 border-red-800/50"
+                                                    : "bg-red-50 text-red-600 border-red-200"
                                                 }`}
                                                 style={{ fontSize: Math.max(8.5, density.desc) }}
                                               >
@@ -1389,10 +1396,28 @@ export function balanceBenefitGridElements(
   const currentCards = benefitData?.current_benefits || [];
   const addonCards = benefitData?.available_addons || [];
 
+  const isPaidExtra = (c: any) => {
+    if (c?.is_extra || c?.badge || c?.cost_status === "paid") return true;
+    const p = c?.price ?? c?.optional_price;
+    if (p !== null && p !== undefined) {
+      if (typeof p === "object") {
+        const amt = p.amount ?? p.value;
+        const n = typeof amt === "string" ? parseFloat(amt.replace(/,/g, "")) : Number(amt);
+        if (Number.isFinite(n) && n > 0) return true;
+      } else if (typeof p === "number" && Number.isFinite(p) && p > 0) {
+        return true;
+      } else if (typeof p === "string") {
+        const n = parseFloat(p.replace(/[^0-9.]/g, ""));
+        if (Number.isFinite(n) && n > 0) return true;
+      }
+    }
+    return false;
+  };
+
   // Separate true FOC benefits from purchased extras / priced add-ons
-  const extrasCards = currentCards.filter((c: any) => c.price || c.badge || c.cost_status === "paid");
+  const extrasCards = currentCards.filter(isPaidExtra);
   const focCards = extrasCards.length > 0
-    ? currentCards.filter((c: any) => !(c.price || c.badge || c.cost_status === "paid"))
+    ? currentCards.filter((c: any) => !isPaidExtra(c))
     : currentCards;
 
   const grid1 = elements.find((e) => e.type === "benefit-grid" && e.gridKind === "current_benefits");
@@ -1413,16 +1438,9 @@ export function balanceBenefitGridElements(
   const cols = Number(grid1.columns || 3);
   const isMinimal = grid1.benefitPreset === "compact-minimal" || grid1.cardStyle === "minimal";
   const customIconSize = Number((grid1 as any).iconSize || 0);
-  const defaultRowHeight = isMinimal
-    ? 38
-    : cols === 2
-      ? Math.max(54, customIconSize > 0 ? customIconSize + 10 : 54)
-      : Math.max(50, customIconSize > 0 ? customIconSize + 8 : 50);
-  const addonRowHeight = isMinimal
-    ? 38
-    : cols === 2
-      ? Math.max(60, customIconSize > 0 ? customIconSize + 14 : 60)
-      : Math.max(56, customIconSize > 0 ? customIconSize + 12 : 56);
+  const dynamicIconExtra = customIconSize > 32 ? Math.max(0, customIconSize - 20) : 0;
+  const defaultRowHeight = (isMinimal ? 38 : (cols === 2 ? 72 : 68)) + dynamicIconExtra;
+  const addonRowHeight = (isMinimal ? 38 : (cols === 2 ? 88 : 84)) + dynamicIconExtra;
   const cardGap = 5;
 
   const hasExplicitExtrasGrid = elements.some((e) => e.gridKind === "extras" || e.gridKind === "purchased_extras");
@@ -1464,6 +1482,7 @@ export function balanceBenefitGridElements(
       } else if (e.type === "benefit-grid" && e.gridKind === "current_benefits") {
         e.y = yG1;
         e.h = h1;
+        (e as any).excludeExtras = true;
         adjusted.push(e);
         // Insert Extras section
         adjusted.push({

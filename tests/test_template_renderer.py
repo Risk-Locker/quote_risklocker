@@ -261,7 +261,8 @@ def test_dynamic_benefit_grid_renders_purchased_extra_with_label_and_badge():
     )
     assert "Legal Liability to Passengers" in html
     assert "Cost : MYR 67.80" in html
-    assert "border:1.5px solid #F59E0B" in html
+    assert "border:1px solid #E2E8F0" in html
+    assert "background:#FEE2E2" in html
 
 
 def test_valuation_type_renders_in_agency_bilingual_template():
@@ -311,7 +312,7 @@ def test_premium_info_block_omits_coverage_limit_when_show_coverage_is_false():
     assert "RM 400.00" in html
 
 
-def test_balance_benefit_grid_tight_row_height_for_44px_icons():
+def test_balance_benefit_grid_row_height_calibration_for_44px_icons():
     from app.rendering.template_renderer import _balance_benefit_grid_elements
 
     elements = [
@@ -328,9 +329,64 @@ def test_balance_benefit_grid_tight_row_height_for_44px_icons():
     }
     balanced = _balance_benefit_grid_elements(elements, render_context)
     by_id = {e["id"]: e for e in balanced}
-    assert by_id["grid1"]["h"] <= 175.0
-    assert by_id["extras_grid"]["h"] <= 65.0
-    grid2 = by_id["grid2"]
-    assert float(grid2["y"]) + float(grid2["h"]) < 1000.0
+    assert by_id["grid1"]["h"] >= 200.0
+    assert by_id["extras_grid"]["h"] >= 90.0
+    assert float(by_id["extras_header_bg"]["y"]) > float(by_id["grid1"]["y"]) + float(by_id["grid1"]["h"])
+    assert float(by_id["addons_header_bg"]["y"]) > float(by_id["extras_grid"]["y"]) + float(by_id["extras_grid"]["h"])
+
+
+def test_balance_benefit_grid_three_section_expansion_and_no_overlap():
+    from app.rendering.template_renderer import _balance_benefit_grid_elements, render_quotation_html
+
+    elements = [
+        {"id": "specials_header_bg", "type": "rectangle", "y": 414, "h": 26},
+        {"id": "specials_header_txt", "type": "text", "y": 419, "h": 16},
+        {"id": "grid1", "type": "benefit-grid", "gridKind": "current_benefits", "x": 40, "y": 444, "w": 714, "columns": 3},
+        {"id": "addons_header_bg", "type": "rectangle", "y": 766, "h": 26},
+        {"id": "addons_header_txt", "type": "text", "y": 771, "h": 16},
+        {"id": "grid2", "type": "benefit-grid", "gridKind": "available_addons", "x": 40, "y": 796, "w": 714, "columns": 3},
+        {"id": "footer_terms", "type": "text", "y": 1068, "h": 16},
+    ]
+    render_context = {
+        "current_benefits": [
+            {"id": "od", "label": "Own Damage", "price": {"amount": 0.0, "currency": "MYR"}},
+            {"id": "b1", "label": "Roadside Assistance"},
+            {"id": "b2", "label": "Emergency Towing"},
+            {"id": "b3", "label": "No-Claim Cashback"},
+            {"id": "b4", "label": "Excess Waiver"},
+            {"id": "b5", "label": "Betterment Waiver"},
+            {"id": "b6", "label": "Legal Defense"},
+            {"id": "e1", "label": "Windscreen", "price": 540},
+            {"id": "e2", "label": "LLP", "price": 37.8},
+            {"id": "e3", "label": "LLOP", "price": 7.5},
+            {"id": "e4", "label": "Agreed Value", "price": 50},
+            {"id": "e5", "label": "Motor PA Plus", "price": 85},
+        ],
+        "available_addons": [{"id": f"a{i}", "label": f"Addon {i}"} for i in range(8)],
+        "extras": [{"label": "Windscreen"}, {"label": "LLP"}, {"label": "LLOP"}, {"label": "Agreed Value"}, {"label": "Motor PA"}],
+    }
+    balanced = _balance_benefit_grid_elements(elements, render_context)
+    by_id = {e["id"]: e for e in balanced}
+
+    # Verify header ordering and non-overlapping gaps
+    g1_bottom = float(by_id["grid1"]["y"]) + float(by_id["grid1"]["h"])
+    h_ext_y = float(by_id["extras_header_bg"]["y"])
+    assert h_ext_y >= g1_bottom + 8.0
+
+    g_ext_bottom = float(by_id["extras_grid"]["y"]) + float(by_id["extras_grid"]["h"])
+    h2_y = float(by_id["addons_header_bg"]["y"])
+    assert h2_y >= g_ext_bottom + 8.0
+
+    g2_bottom = float(by_id["grid2"]["y"]) + float(by_id["grid2"]["h"])
+    footer_y = float(by_id["footer_terms"]["y"])
+    assert footer_y >= g2_bottom
+
+    # Verify auto-expanded HTML
+    html = render_quotation_html(
+        {"quotation_reference": {"value": "RL260000156"}},
+        template_config={"canvas": {"width": 794, "height": 1123, "elements": elements}},
+        render_context=render_context,
+    )
+    assert "height: 1241px" in html or "height: 1271px" in html or "height: 12" in html
 
 

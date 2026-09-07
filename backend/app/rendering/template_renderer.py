@@ -277,6 +277,31 @@ def _benefit_section(element: dict[str, Any], db: Any = None) -> str:
     return f'<div style="{grid}">{cards}</div>'
 
 
+def _is_paid_extra(card: dict[str, Any]) -> bool:
+    if card.get("is_extra") or card.get("badge") or card.get("cost_status") == "paid":
+        return True
+    price = card.get("price") or card.get("optional_price")
+    if price is not None:
+        if isinstance(price, dict):
+            amt = price.get("amount") if price.get("amount") is not None else price.get("value")
+            try:
+                clean = re.sub(r"[^0-9.]", "", str(amt or 0))
+                return bool(clean and float(clean) > 0)
+            except Exception:
+                return False
+        try:
+            clean = re.sub(r"[^0-9.]", "", str(price))
+            return bool(clean and float(clean) > 0)
+        except Exception:
+            return False
+    return False
+
+
+def _is_core_motor_cover(card: dict[str, Any]) -> bool:
+    label = str(card.get("label") or "")
+    return bool(re.search(r"own damage|third\s?-?\s?party bodily|third\s?-?\s?party property", label, re.I))
+
+
 def _dynamic_benefit_grid(
     element: dict[str, Any],
     render_context: dict[str, Any],
@@ -288,10 +313,14 @@ def _dynamic_benefit_grid(
     if kind == "available_addons":
         cards = list(render_context.get("available_addons") or [])
     elif kind in {"extras", "purchased_extras"}:
-        current = list(render_context.get("current_benefits") or [])
-        cards = [c for c in current if c.get("badge") or c.get("price") or c.get("cost_status") == "paid"]
+        current = [c for c in list(render_context.get("current_benefits") or []) if not _is_core_motor_cover(c)]
+        cards = [c for c in current if _is_paid_extra(c)]
     else:
-        cards = list(render_context.get("current_benefits") or [])
+        current = [c for c in list(render_context.get("current_benefits") or []) if not _is_core_motor_cover(c)]
+        if element.get("excludeExtras"):
+            cards = [c for c in current if not _is_paid_extra(c)]
+        else:
+            cards = current
     groups = list(render_context.get("groups") or []) if kind in {"current_benefits", "extras", "purchased_extras"} else []
     group_by_id = {str(item.get("plan_id")): item for item in groups if item.get("plan_id")}
     disp_opts = (
@@ -425,9 +454,7 @@ def _dynamic_benefit_grid(
         border_w = element.get("borderWidth")
         border_s = element.get("borderStyle") or "solid"
 
-        if is_purchased_extra or kind in {"extras", "purchased_extras"}:
-            card_border_css = "border:1.5px solid #F59E0B;background:#FFFDF7;box-shadow:0 1px 3px rgba(245,158,11,0.15)"
-        elif border_col or bg_col or border_w is not None:
+        if border_col or bg_col or border_w is not None:
             bw = f"{border_w}px" if border_w is not None else "1px"
             bc = border_col or "#E2E8F0"
             bg = bg_col or "#FFFFFF"
@@ -538,9 +565,9 @@ def _dynamic_benefit_grid(
                     p_str = f"Cost : MYR {p_num:,.2f}"
                 except Exception:
                     clean_pval = str(p_val).replace("RM ", "").replace("RM", "")
-                badge_bg = "#FEF3C7" if (is_purchased_extra or kind in {"extras", "purchased_extras"}) else ("#450A0A" if is_dark else "#FEE2E2")
-                badge_fg = "#B45309" if (is_purchased_extra or kind in {"extras", "purchased_extras"}) else ("#FCA5A5" if is_dark else "#B91C1C")
-                badge_border = "#FCD34D" if (is_purchased_extra or kind in {"extras", "purchased_extras"}) else ("#7F1D1D" if is_dark else "#FECACA")
+                badge_bg = "#450A0A" if is_dark else "#FEE2E2"
+                badge_fg = "#FCA5A5" if is_dark else "#B91C1C"
+                badge_border = "#7F1D1D" if is_dark else "#FECACA"
                 price_badge = (
                     f'<div style="margin-top:2px"><span style="display:inline-block;padding:1px 5px;border-radius:4px;'
                     f'font-size:{max(7.5, desc_fs - 0.5)}px;font-weight:700;line-height:1.2;white-space:nowrap;'
@@ -786,12 +813,12 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     extras = list((render_context or {}).get("extras") or []) if render_context else []
     extra_shift = (len(extras) + (1 if extras else 0)) * 15.0
 
-    current_cards = list((render_context or {}).get("current_benefits") or []) if render_context else []
+    current_cards = [c for c in list((render_context or {}).get("current_benefits") or []) if not _is_core_motor_cover(c)] if render_context else []
     addon_cards = list((render_context or {}).get("available_addons") or []) if render_context else []
 
     # Separate true FOC benefits from purchased extras / priced add-ons
-    extras_cards = [c for c in current_cards if c.get("badge") or c.get("price") or c.get("cost_status") == "paid"]
-    foc_cards = [c for c in current_cards if not (c.get("badge") or c.get("price") or c.get("cost_status") == "paid")] if extras_cards else current_cards
+    extras_cards = [c for c in current_cards if _is_paid_extra(c)]
+    foc_cards = [c for c in current_cards if not _is_paid_extra(c)] if extras_cards else current_cards
 
     grid1 = next((e for e in elements if e.get("type") == "benefit-grid" and e.get("gridKind") == "current_benefits"), None)
     grid2 = next((e for e in elements if e.get("type") == "benefit-grid" and e.get("gridKind") == "available_addons"), None)
@@ -817,18 +844,9 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     cols = max(1, int(grid1.get("columns") or 3)) if grid1 else 3
     is_minimal = bool(grid1 and (grid1.get("benefitPreset") == "compact-minimal" or grid1.get("cardStyle") == "minimal"))
     custom_icon_size = float(grid1.get("iconSize") or 0) if grid1 else 0.0
-    default_row_height = (
-        38.0 if is_minimal else (
-            max(54.0, custom_icon_size + 10.0 if custom_icon_size > 0 else 54.0) if cols == 2
-            else max(50.0, custom_icon_size + 8.0 if custom_icon_size > 0 else 50.0)
-        )
-    )
-    addon_row_height = (
-        38.0 if is_minimal else (
-            max(60.0, custom_icon_size + 14.0 if custom_icon_size > 0 else 60.0) if cols == 2
-            else max(56.0, custom_icon_size + 12.0 if custom_icon_size > 0 else 56.0)
-        )
-    )
+    dynamic_icon_extra = max(0.0, custom_icon_size - 20.0) if custom_icon_size > 32.0 else 0.0
+    default_row_height = (38.0 if is_minimal else (72.0 if cols == 2 else 68.0)) + dynamic_icon_extra
+    addon_row_height = (38.0 if is_minimal else (88.0 if cols == 2 else 84.0)) + dynamic_icon_extra
     card_gap = 5.0
 
     if has_extras_section:
@@ -868,6 +886,7 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
             elif e.get("type") == "benefit-grid" and e.get("gridKind") == "current_benefits":
                 e["y"] = y_g1
                 e["h"] = h1
+                e["excludeExtras"] = True
                 adjusted_elements.append(e)
                 # Insert Extras section right after current_benefits_grid
                 adjusted_elements.append({
