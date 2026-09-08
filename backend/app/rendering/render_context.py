@@ -210,15 +210,21 @@ def adjusted_total_text(fields: dict, extras: list[dict]) -> str:
                     ctype_val = ctype_raw.get("value") if isinstance(ctype_raw, dict) else ctype_raw
                     cname_raw = (fields or {}).get("insured_name") or (fields or {}).get("customer_name")
                     cname_val = cname_raw.get("value") if isinstance(cname_raw, dict) else cname_raw
-                    from app.extraction.entity_classifier import is_corporate_name
+                    cmodel_raw = (fields or {}).get("car_model")
+                    cmodel_val = cmodel_raw.get("value") if isinstance(cmodel_raw, dict) else cmodel_raw
+                    cbrand_raw = (fields or {}).get("car_brand")
+                    cbrand_val = cbrand_raw.get("value") if isinstance(cbrand_raw, dict) else cbrand_raw
+                    from app.extraction.entity_classifier import classify_vehicle_ev_status, is_corporate_name
                     is_corp = (
                         str(ctype_val or "").lower() in {"company", "corporate", "business"}
                         or "company" in str(vtype_val or "").lower()
                         or is_corporate_name(str(cname_val or ""))
                     )
+                    is_ev, ev_cat = classify_vehicle_ev_status(str(cbrand_val or ""), str(cmodel_val or ""), str(cc_val or ""))
+                    vtype_to_use = ev_cat if (is_ev and ev_cat) else str(vtype_val or "Car")
                     rt_calc = calculate_road_tax(
                         clean_cc,
-                        str(vtype_val or "Car"),
+                        vtype_to_use,
                         owner_type="Company" if is_corp else "Individual",
                     )
                     if rt_calc > 0:

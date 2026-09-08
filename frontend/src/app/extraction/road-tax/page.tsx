@@ -55,7 +55,7 @@ type CalculationBreakdown = {
   matched_tier: string;
 };
 
-const VEHICLE_TYPES = ["Car", "NonSaloonCar", "Motorcycle", "Lorry"];
+const VEHICLE_TYPES = ["Car", "NonSaloonCar", "Motorcycle", "Lorry", "EVSaloonCar", "EVNonSaloonCar", "EVMotorcycle"];
 const OWNER_TYPES = ["Individual", "Company"];
 const JURISDICTIONS = ["West Malaysia", "Sabah", "Sarawak", "Labuan"];
 const JURISDICTION_TABS = ["All", "West Malaysia", "Sabah", "Sarawak", "Labuan"] as const;
@@ -64,8 +64,11 @@ const RATE_TABLES = [
   { vehicle: "Car", owner: "Individual", title: "Car — Private Saloon (Individual)" },
   { vehicle: "Car", owner: "Company", title: "Car — Company Saloon (Corporate)" },
   { vehicle: "NonSaloonCar", owner: "Individual", title: "Non-Saloon (SUV / MPV / 4x4 / Pickup - Private & Company)" },
+  { vehicle: "EVSaloonCar", owner: "Individual", title: "EV Saloon Car (ZEV 2026 - Private & Company)" },
+  { vehicle: "EVNonSaloonCar", owner: "Individual", title: "EV Non-Saloon (SUV / MPV / Pickup - Private & Company)" },
   { vehicle: "Motorcycle", owner: "Individual", title: "Motorcycle — Private" },
   { vehicle: "Motorcycle", owner: "Company", title: "Motorcycle — Company" },
+  { vehicle: "EVMotorcycle", owner: "Individual", title: "EV Motorcycle (ZEV 2026 - Private & Company)" },
 ] as const;
 
 function formatEffective(r: RoadTaxRule) {
@@ -411,13 +414,13 @@ export default function RoadTaxPage() {
 
             <div>
               <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
-                Engine Capacity (CC)
+                {calcVehicle.startsWith("EV") ? "Motor Output (kW or Watts)" : "Engine Capacity (CC)"}
               </label>
               <Input
                 type="number"
                 value={calcCc}
                 onChange={(e) => setCalcCc(e.target.value)}
-                placeholder="e.g. 1998"
+                placeholder={calcVehicle.startsWith("EV") ? "e.g. 150 (kW) or 150000 (W)" : "e.g. 1998"}
                 className="mt-1 text-xs font-mono font-bold"
               />
             </div>
@@ -458,7 +461,7 @@ export default function RoadTaxPage() {
                   {breakdown.jurisdiction} · {breakdown.vehicle_type} ({breakdown.owner_type})
                 </span>
                 <p className="font-mono text-xs font-bold text-emerald-900">
-                  {breakdown.engine_cc} cc
+                  {breakdown.engine_cc} {breakdown.vehicle_type.startsWith("EV") ? "kW" : "cc"}
                 </p>
               </div>
             </div>
@@ -635,7 +638,7 @@ export default function RoadTaxPage() {
                     <thead>
                       <tr className="border-b border-[var(--rl-border)] bg-[var(--rl-bg)]">
                         <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
-                          CC Range
+                          {vehicle.startsWith("EV") ? "Motor Output Range (Watts / kW)" : "CC Range"}
                         </th>
                         <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
                           Base Rate
@@ -674,7 +677,9 @@ export default function RoadTaxPage() {
                           >
                             <td className="px-4 py-2.5 text-[13px] font-mono font-bold text-[var(--rl-text-strong)]">
                               {r.min_cc}
-                              {r.max_cc != null ? ` – ${r.max_cc} cc` : "+ cc"}
+                              {r.max_cc != null
+                                ? ` – ${r.max_cc} ${vehicle.startsWith("EV") ? "kW" : "cc"}`
+                                : `+ ${vehicle.startsWith("EV") ? "kW" : "cc"}`}
                             </td>
                             <td className="px-4 py-2.5 text-[13px] font-semibold text-emerald-700">
                               RM {r.base_rate.toFixed(2)}

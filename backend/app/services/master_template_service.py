@@ -183,9 +183,9 @@ def _agency_bilingual_config() -> dict:
         _text("lbl_car_model", "Car Model / 车型", 52, 192, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR, locked=True),
         _variable("val_car_model", "car_model", 216, 192, 266, 14, 5, size=9.5, weight="700", color=DARK, locked=True),
 
-        # Row 4: Vehicle CC
-        _text("lbl_engine_cc", "Vehicle CC / 引擎容量", 52, 206, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR, locked=True),
-        _variable("val_engine_cc", "engine_cc", 216, 206, 266, 14, 5, size=9.5, weight="700", color=DARK, suffix=" cc", locked=True),
+        # Row 4: Vehicle Capacity
+        _text("lbl_engine_cc", "Engine Capacity/发动机排量 : ", 52, 206, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR, locked=True),
+        _variable("val_engine_cc", "engine_cc", 216, 206, 266, 14, 5, size=9.5, weight="700", color=DARK, suffix="", locked=True),
 
         # Row 5: NCD
         _text("lbl_ncd", "NCD", 52, 220, 160, 14, 5, size=9.0, weight="600", color=LABEL_COLOR, locked=True),

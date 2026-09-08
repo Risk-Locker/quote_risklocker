@@ -136,7 +136,7 @@ GEMINI_EXTRACTION_SCHEMA = {
         },
         "engine_cc": {
             "type": "string",
-            "description": "Engine capacity in CC (e.g. '998 CC' or '1500').",
+            "description": "Engine capacity or electric motor power. For standard combustion engine cars, extract capacity in CC (e.g. '1495 CC' or '1500'). For electric vehicles (EV), extract motor power in kW or W (e.g. '150 kW' or '150000 W'). If given in kW or W, preserve the unit.",
         },
         "chassis_no": {
             "type": "string",
@@ -422,6 +422,9 @@ Extract accurate, grounded JSON data matching the provided schema from the quota
    - DO NOT extract underwriter reference numbers, quote numbers, or ref numbers from the document. Quotation reference is strictly an internal Risklocker system sequence.
 14. **ROAD TAX**:
    - NEVER extract road tax from the quotation document under any circumstances. Road tax is an internal, dynamically computed government tariff.
+15. **ENGINE CAPACITY / MOTOR OUTPUT**:
+   - For petrol/diesel vehicles, extract capacity in CC (e.g. '1495 CC' or '1500').
+   - For Electric Vehicles (EV), extract the electric motor power in kW or W (e.g. '150 kW', '150000 W', '50 kW'). If quoted with kW or W, preserve the unit.
 
 {grounding_context}
 Return strictly structured JSON adhering to the provided schema.

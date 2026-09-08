@@ -65,6 +65,14 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Extraction Shield: Prohibited quotation reference extraction from insurer documents in `gemini_extractor.py`, `candidate_finder.py`, and `draft_mapper.py`; preserved internal sequence in `extraction_worker.py` and `workspace_service.py`.
 - Tests: `tests/test_quotation_reference_service.py`.
 
+## EV & Official 2026 JPJ Road Tax Engine (v16) Additions
+
+- Entity & EV Classifier: `backend/app/extraction/entity_classifier.py` canonical model/brand matching (`TESLA`, `BYD`, `ORA GOOD CAT`, `TAYCAN`, etc.), vehicle category assignment (`EVSaloonCar`, `EVNonSaloonCar`, `EVMotorcycle`), and power normalization (kW / Watts).
+- Official 2026 JPJ ZEV Rates: `backend/app/services/road_tax_service.py` implements the official power-band rate schedule announced by MOT Malaysia / Anthony Loke (effective Jan 1, 2026). Identical rates for private/company ownership; 50% discount for Sabah/Sarawak and Labuan (> 100 kW).
+- Quotation Template Decoupling: Template row 4 label updated to `Engine Capacity/发动机排量 : `, rendering either `cc` for ICE or `kW` for EV (never both) in `backend/app/rendering/template_renderer.py` and `frontend/src/components/template-canvas/shared.tsx`.
+- Road Tax Tester & Admin Preview: `frontend/src/app/extraction/road-tax/page.tsx` supports kW testing and displays kW units for EV rules.
+- Tests: `backend/tests/test_ev_road_tax.py` covering classification, power normalization, official 2026 power-band calculations, and template renderer string formatting.
+
 ## Benefit Configuration Matrix
 
 - `docs/domain/benefits/BENEFITS-CONFIGURATION.md` — canonical per-insurer benefits/add-on matrix: global benefit library (51 concepts), dimensions, and every company × coverage type × vehicle category row including add-on system (`single` vs `package`), package tiers, and seed status (seeded / draft / pending). Registered in `docs/core/START-HERE.md`.

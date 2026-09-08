@@ -221,6 +221,8 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
     # Classify customer entity (Private Individual vs Company) and vehicle type
     from app.extraction.entity_classifier import classify_client_entity
 
+    car_brand_val = fields.get("car_brand", {}).get("value")
+    cc_val = fields.get("engine_cc", {}).get("value")
     cust_name = fields.get("customer_name", {}).get("value")
     doc_no = fields.get("ic_or_brn", {}).get("value")
     ai_type = fields.get("client_type", {}).get("value")
@@ -232,6 +234,8 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
         ai_client_type=ai_type,
         current_vehicle_type=curr_vtype,
         car_model=car_model_val,
+        car_brand=car_brand_val,
+        capacity_str=cc_val,
     )
 
     if "client_type" not in fields:
@@ -250,29 +254,40 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
         fields["vehicle_type"]["warnings"] = []
         fields["vehicle_type"]["message"] = ""
 
-    # Extract numeric CC safely from raw string (e.g. '998 CC', '1,498 cc', '1.0', '1.5L')
-    cc_val = fields.get("engine_cc", {}).get("value")
+    # Extract numeric CC or kW safely from raw string
     effective_cc = None
+    is_ev_vehicle = resolved_vtype in {"EVSaloonCar", "EVNonSaloonCar", "EVMotorcycle"} or "ev" in resolved_vtype.lower()
     if cc_val:
         cleaned_cc_str = re.sub(r"[^\d.]", "", str(cc_val)).strip()
         if cleaned_cc_str:
             try:
-                num_cc = float(cleaned_cc_str)
-                if 0.5 <= num_cc <= 8.0:
-                    # Litres format (e.g. 1.0 -> 998, 1.5 -> 1496)
-                    inferred_from_litres = {1.0: 998, 1.2: 1197, 1.3: 1329, 1.5: 1496, 1.6: 1598, 1.8: 1798, 2.0: 1998, 2.5: 2494, 3.0: 2998}
-                    effective_cc = inferred_from_litres.get(round(num_cc, 1), round(num_cc * 1000))
-                elif num_cc > 8.0:
-                    effective_cc = round(num_cc)
+                num_val = float(cleaned_cc_str)
+                if is_ev_vehicle:
+                    # EV: if >= 1000, value is in Watts -> convert to kW
+                    kw = (num_val / 1000.0) if num_val >= 1000.0 else num_val
+                    effective_cc = kw
+                    disp_kw = f"{int(kw)}" if kw == int(kw) else f"{kw:.1f}"
+                    if "engine_cc" in fields:
+                        fields["engine_cc"]["value"] = f"{disp_kw} kW"
+                        fields["engine_cc"]["status"] = "ready"
+                else:
+                    if 0.5 <= num_val <= 8.0:
+                        # Litres format (e.g. 1.0 -> 998, 1.5 -> 1496)
+                        inferred_from_litres = {1.0: 998, 1.2: 1197, 1.3: 1329, 1.5: 1496, 1.6: 1598, 1.8: 1798, 2.0: 1998, 2.5: 2494, 3.0: 2998}
+                        effective_cc = inferred_from_litres.get(round(num_val, 1), round(num_val * 1000))
+                    elif num_val > 8.0:
+                        effective_cc = round(num_val)
+                    if effective_cc and "engine_cc" in fields:
+                        fields["engine_cc"]["value"] = f"{effective_cc} CC"
+                        fields["engine_cc"]["status"] = "ready"
             except (ValueError, TypeError):
                 pass
 
     if not effective_cc:
         effective_cc = inferred_cc
-
-    if "engine_cc" in fields and not fields["engine_cc"].get("value") and effective_cc:
-        fields["engine_cc"]["value"] = str(effective_cc)
-        fields["engine_cc"]["status"] = "ready"
+        if effective_cc and "engine_cc" in fields and not fields["engine_cc"].get("value"):
+            fields["engine_cc"]["value"] = f"{effective_cc} CC"
+            fields["engine_cc"]["status"] = "ready"
 
     # Service fee / Runner fee: preserve if explicitly extracted from PDF
     if "service_fee" in fields and not fields["service_fee"].get("value"):

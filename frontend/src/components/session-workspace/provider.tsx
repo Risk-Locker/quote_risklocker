@@ -35,8 +35,7 @@ function _recalcAdjustedTotal(snapshot: WorkspaceSnapshot, nextExtras: Workspace
     const ccRaw = snapshot.fields?.engine_cc;
     const ccVal = typeof ccRaw === "object" && ccRaw !== null ? (ccRaw as Record<string, unknown>).value : ccRaw;
     const cleanCC = ccVal ? parseFloat(String(ccVal).replace(/[^0-9.]/g, "")) : 0;
-    const parsedCC = cleanCC > 0 && cleanCC <= 7000 ? Math.round(cleanCC) : 0;
-    if (parsedCC > 0) {
+    if (cleanCC > 0) {
       const vRaw = snapshot.fields?.vehicle_type;
       const vVal = typeof vRaw === "object" && vRaw !== null ? (vRaw as any).value : vRaw;
       const vtype = String(vVal ?? "").toUpperCase();
@@ -49,39 +48,72 @@ function _recalcAdjustedTotal(snapshot: WorkspaceSnapshot, nextExtras: Workspace
       const custVal = typeof custRaw === "object" && custRaw !== null ? (custRaw as any).value : custRaw;
       const custName = String(custVal ?? "").toUpperCase();
 
-      const isNonSaloon = vtype.includes("NONSALOON") || /(RANGER|HILUX|TRITON|D-MAX|NAVARA|BT-50|COLORADO|CR-V|HR-V|BR-V|X70|X50|X90|ARUZ|FORTUNER|CX-3|CX-5|CX-8|CX-9|SPORTAGE|TUCSON|SANTA FE|HARRIER|CROSS|RUSH|PAJERO|OUTLANDER|MU-X|EVEREST|TIGUAN|MACAN|CAYENNE|DEFENDER|DISCOVERY|EVOQUE|GLC|GLE|X1|X3|X4|X5|X6|XC40|XC60|XC90|ALZA|INNOVA|EXORA|VELLFIRE|ALPHARD|SERENA|ESTIMA|AVANZA|VELOZ|HIACE|URVAN|VAN|LORRY|TRUCK|MPV|SUV|4X4|4WD|PICKUP)/i.test(carModel);
-      const isCompany = vtype.includes("COMPANY") || /(SDN\s*BHD|BHD|ENTERPRISE|TRADING|LTD|LLC|PLT|COMPANY|ENT\.|CORP|HOLDINGS|CO\.)/i.test(custName);
+      const isEVMotorcycle = vtype.includes("EVMOTOR") || (vtype.includes("EV") && (vtype.includes("BIKE") || vtype.includes("MOTOR")));
+      const isEVNonSaloon = vtype.includes("EVNONSALOON") || (vtype.includes("EV") && (vtype.includes("SUV") || vtype.includes("MPV") || vtype.includes("NON")));
+      const isEVSaloon = vtype.includes("EVSALOON") || (vtype.includes("EV") && !isEVMotorcycle && !isEVNonSaloon);
 
-      if (isNonSaloon) {
-        if (parsedCC <= 1000) rt = 20;
-        else if (parsedCC <= 1200) rt = 85;
-        else if (parsedCC <= 1400) rt = 100;
-        else if (parsedCC <= 1600) rt = 120;
-        else if (parsedCC <= 1800) rt = 300 + (parsedCC - 1600) * 0.30;
-        else if (parsedCC <= 2000) rt = 360 + (parsedCC - 1800) * 0.40;
-        else if (parsedCC <= 2500) rt = 440 + (parsedCC - 2000) * 0.80;
-        else if (parsedCC <= 3000) rt = 840 + (parsedCC - 2500) * 1.60;
-        else rt = 1640 + (parsedCC - 3000) * 1.60;
-      } else if (isCompany) {
-        if (parsedCC <= 1000) rt = 20;
-        else if (parsedCC <= 1200) rt = 110;
-        else if (parsedCC <= 1400) rt = 140;
-        else if (parsedCC <= 1600) rt = 180;
-        else if (parsedCC <= 1800) rt = 400 + (parsedCC - 1600) * 0.80;
-        else if (parsedCC <= 2000) rt = 560 + (parsedCC - 1800) * 1.00;
-        else if (parsedCC <= 2500) rt = 760 + (parsedCC - 2000) * 3.00;
-        else if (parsedCC <= 3000) rt = 2260 + (parsedCC - 2500) * 7.50;
-        else rt = 6010 + (parsedCC - 3000) * 13.50;
+      if (isEVMotorcycle || isEVNonSaloon || isEVSaloon) {
+        const kw = cleanCC >= 1000 ? cleanCC / 1000 : cleanCC;
+        if (isEVMotorcycle) {
+          if (kw <= 7.5) rt = 2;
+          else if (kw <= 10.0) rt = 9;
+          else if (kw <= 12.5) rt = 12;
+          else if (kw <= 25.0) rt = 30;
+          else if (kw <= 40.0) rt = 40;
+          else rt = 42;
+        } else {
+          // Electric Passenger Cars (Saloon & Non-Saloon share official 2026 JPJ power bands)
+          if (kw <= 50.0) rt = 20;
+          else if (kw <= 100.0) rt = 20 + Math.ceil((kw - 50.0) / 10.0) * 10;
+          else if (kw <= 210.0) rt = 80 + (Math.ceil((kw - 100.0) / 10.0) - 1) * 20;
+          else if (kw <= 310.0) rt = 305 + (Math.ceil((kw - 210.0) / 10.0) - 1) * 30;
+          else if (kw <= 410.0) rt = 615 + (Math.ceil((kw - 310.0) / 10.0) - 1) * 50;
+          else if (kw <= 510.0) rt = 1140 + (Math.ceil((kw - 410.0) / 10.0) - 1) * 100;
+          else if (kw <= 610.0) rt = 2165 + (Math.ceil((kw - 510.0) / 10.0) - 1) * 150;
+          else if (kw <= 710.0) rt = 3695 + (Math.ceil((kw - 610.0) / 10.0) - 1) * 200;
+          else if (kw <= 810.0) rt = 5745 + (Math.ceil((kw - 710.0) / 10.0) - 1) * 250;
+          else if (kw <= 910.0) rt = 8295 + (Math.ceil((kw - 810.0) / 10.0) - 1) * 300;
+          else if (kw <= 1010.0) rt = 11345 + (Math.ceil((kw - 910.0) / 10.0) - 1) * 350;
+          else rt = 14895 + (Math.ceil((kw - 1010.0) / 10.0) - 1) * 400;
+        }
       } else {
-        if (parsedCC <= 1000) rt = 20;
-        else if (parsedCC <= 1200) rt = 55;
-        else if (parsedCC <= 1400) rt = 70;
-        else if (parsedCC <= 1600) rt = 90;
-        else if (parsedCC <= 1800) rt = 200 + (parsedCC - 1600) * 0.40;
-        else if (parsedCC <= 2000) rt = 280 + (parsedCC - 1800) * 0.50;
-        else if (parsedCC <= 2500) rt = 380 + (parsedCC - 2000) * 1.00;
-        else if (parsedCC <= 3000) rt = 880 + (parsedCC - 2500) * 2.50;
-        else rt = 2130 + (parsedCC - 3000) * 4.50;
+        const parsedCC = cleanCC <= 7000 ? Math.round(cleanCC) : 0;
+        if (parsedCC > 0) {
+          const isNonSaloon = vtype.includes("NONSALOON") || /(RANGER|HILUX|TRITON|D-MAX|NAVARA|BT-50|COLORADO|CR-V|HR-V|BR-V|X70|X50|X90|ARUZ|FORTUNER|CX-3|CX-5|CX-8|CX-9|SPORTAGE|TUCSON|SANTA FE|HARRIER|CROSS|RUSH|PAJERO|OUTLANDER|MU-X|EVEREST|TIGUAN|MACAN|CAYENNE|DEFENDER|DISCOVERY|EVOQUE|GLC|GLE|X1|X3|X4|X5|X6|XC40|XC60|XC90|ALZA|INNOVA|EXORA|VELLFIRE|ALPHARD|SERENA|ESTIMA|AVANZA|VELOZ|HIACE|URVAN|VAN|LORRY|TRUCK|MPV|SUV|4X4|4WD|PICKUP)/i.test(carModel);
+          const isCompany = vtype.includes("COMPANY") || /(SDN\s*BHD|BHD|ENTERPRISE|TRADING|LTD|LLC|PLT|COMPANY|ENT\.|CORP|HOLDINGS|CO\.)/i.test(custName);
+
+          if (isNonSaloon) {
+            if (parsedCC <= 1000) rt = 20;
+            else if (parsedCC <= 1200) rt = 85;
+            else if (parsedCC <= 1400) rt = 100;
+            else if (parsedCC <= 1600) rt = 120;
+            else if (parsedCC <= 1800) rt = 300 + (parsedCC - 1600) * 0.30;
+            else if (parsedCC <= 2000) rt = 360 + (parsedCC - 1800) * 0.40;
+            else if (parsedCC <= 2500) rt = 440 + (parsedCC - 2000) * 0.80;
+            else if (parsedCC <= 3000) rt = 840 + (parsedCC - 2500) * 1.60;
+            else rt = 1640 + (parsedCC - 3000) * 1.60;
+          } else if (isCompany) {
+            if (parsedCC <= 1000) rt = 20;
+            else if (parsedCC <= 1200) rt = 110;
+            else if (parsedCC <= 1400) rt = 140;
+            else if (parsedCC <= 1600) rt = 180;
+            else if (parsedCC <= 1800) rt = 400 + (parsedCC - 1600) * 0.80;
+            else if (parsedCC <= 2000) rt = 560 + (parsedCC - 1800) * 1.00;
+            else if (parsedCC <= 2500) rt = 760 + (parsedCC - 2000) * 3.00;
+            else if (parsedCC <= 3000) rt = 2260 + (parsedCC - 2500) * 7.50;
+            else rt = 6010 + (parsedCC - 3000) * 13.50;
+          } else {
+            if (parsedCC <= 1000) rt = 20;
+            else if (parsedCC <= 1200) rt = 55;
+            else if (parsedCC <= 1400) rt = 70;
+            else if (parsedCC <= 1600) rt = 90;
+            else if (parsedCC <= 1800) rt = 200 + (parsedCC - 1600) * 0.40;
+            else if (parsedCC <= 2000) rt = 280 + (parsedCC - 1800) * 0.50;
+            else if (parsedCC <= 2500) rt = 380 + (parsedCC - 2000) * 1.00;
+            else if (parsedCC <= 3000) rt = 880 + (parsedCC - 2500) * 2.50;
+            else rt = 2130 + (parsedCC - 3000) * 4.50;
+          }
+        }
       }
     }
   }

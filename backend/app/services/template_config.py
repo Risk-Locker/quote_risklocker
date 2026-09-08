@@ -19,7 +19,7 @@ CANVAS_HEIGHT = 1123
 SUMMARY_FIELDS = [
     {"field": "coverage_type", "label": "Coverage Type"},
     {"field": "car_model", "label": "Car Model"},
-    {"field": "engine_cc", "label": "Vehicle CC", "suffix": " cc"},
+    {"field": "engine_cc", "label": "Engine Capacity/发动机排量 : "},
     {"field": "ncd_percent", "label": "NCD", "suffix": "%"},
     {"field": "cover_period", "label": "Cover of Period"},
     {"field": "valuation_type", "label": "Valuation Type"},

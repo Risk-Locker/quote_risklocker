@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from datetime import date, timedelta
 from typing import Any
@@ -199,6 +200,120 @@ _COMMERCIAL_RATES = (
 )
 
 
+# ── 5. Electric Vehicle (ZEV) 2026 Rate Tables (Private & Company identical) ─
+# Official Malaysian JPJ 2026 Rate Structure (Anthony Loke / MOT)
+
+_EV_MOTORCYCLE_RATES = (
+    (7500, 2.00),
+    (10000, 9.00),
+    (12500, 12.00),
+    (25000, 30.00),
+    (40000, 40.00),
+    (float("inf"), 42.00),
+)
+
+
+def calculate_ev_car_road_tax(kw: float, jurisdiction: str = "West Malaysia") -> float:
+    """
+    Official Malaysian JPJ 2026 EV passenger car road tax structure (announced by Anthony Loke, MOT).
+    Applies equally to all electric passenger motorcars (Saloon, Non-Saloon, SUV, MPV).
+    """
+    if kw <= 0:
+        return 0.0
+    if kw <= 50.0:
+        rate = 20.00
+    elif kw <= 100.0:
+        blocks = math.ceil((kw - 50.0) / 10.0)
+        rate = 20.00 + blocks * 10.00
+    elif kw <= 210.0:
+        blocks = math.ceil((kw - 100.0) / 10.0)
+        rate = 80.00 + (blocks - 1) * 20.00
+    elif kw <= 310.0:
+        blocks = math.ceil((kw - 210.0) / 10.0)
+        rate = 305.00 + (blocks - 1) * 30.00
+    elif kw <= 410.0:
+        blocks = math.ceil((kw - 310.0) / 10.0)
+        rate = 615.00 + (blocks - 1) * 50.00
+    elif kw <= 510.0:
+        blocks = math.ceil((kw - 410.0) / 10.0)
+        rate = 1140.00 + (blocks - 1) * 100.00
+    elif kw <= 610.0:
+        blocks = math.ceil((kw - 510.0) / 10.0)
+        rate = 2165.00 + (blocks - 1) * 150.00
+    elif kw <= 710.0:
+        blocks = math.ceil((kw - 610.0) / 10.0)
+        rate = 3695.00 + (blocks - 1) * 200.00
+    elif kw <= 810.0:
+        blocks = math.ceil((kw - 710.0) / 10.0)
+        rate = 5745.00 + (blocks - 1) * 250.00
+    elif kw <= 910.0:
+        blocks = math.ceil((kw - 810.0) / 10.0)
+        rate = 8295.00 + (blocks - 1) * 300.00
+    elif kw <= 1010.0:
+        blocks = math.ceil((kw - 910.0) / 10.0)
+        rate = 11345.00 + (blocks - 1) * 350.00
+    else:
+        blocks = math.ceil((kw - 1010.0) / 10.0)
+        rate = 14895.00 + (blocks - 1) * 400.00
+
+    if jurisdiction == "Labuan" and kw > 100.0:
+        rate = rate * 0.5
+    elif jurisdiction in ("Sabah", "Sarawak"):
+        rate = rate * 0.5
+    return round(rate, 2)
+
+
+def calculate_ev_motorcycle_road_tax(kw: float, jurisdiction: str = "West Malaysia") -> float:
+    """Official Malaysian JPJ 2026 EV motorcycle road tax structure."""
+    if kw <= 0:
+        return 0.0
+    if kw <= 7.5:
+        rate = 2.00
+    elif kw <= 10.0:
+        rate = 9.00
+    elif kw <= 12.5:
+        rate = 12.00
+    elif kw <= 25.0:
+        rate = 30.00
+    elif kw <= 40.0:
+        rate = 40.00
+    else:
+        rate = 42.00
+
+    if jurisdiction in ("Sabah", "Sarawak", "Labuan"):
+        rate = max(2.00, round(rate * 0.5, 2))
+    return round(rate, 2)
+
+
+def normalize_power_to_watts(power_val: float | int | str | None) -> float:
+    """
+    Normalize vehicle power into Watts (W).
+    - If string has explicit 'kw' -> multiply by 1000.
+    - If string has explicit 'w' (not 'kw') -> keep unchanged.
+    - If numeric:
+      - < 1000 -> considered kW (e.g. 50, 85, 150, 200) -> multiply by 1000.
+      - >= 1000 -> considered Watts (e.g. 7500, 50000, 150000) -> keep unchanged.
+    """
+    if power_val is None:
+        return 0.0
+    val_str = str(power_val).strip().lower()
+    num_match = re.search(r"[\d.]+", val_str)
+    if not num_match:
+        return 0.0
+    try:
+        num = float(num_match.group(0))
+    except ValueError:
+        return 0.0
+
+    if "kw" in val_str:
+        return num * 1000.0
+    if "w" in val_str:
+        return num
+    if num < 1000.0:
+        return num * 1000.0
+    return num
+
+
 def _normalize_jurisdiction(j: str | None) -> str:
     if not j:
         return "West Malaysia"
@@ -228,7 +343,13 @@ def calculate_road_tax(
     norm_owner = (owner_type or "Individual").strip().capitalize()
     is_company = norm_owner in {"Company", "Corporate", "Business"} or "company" in low_vtype
 
-    if "nonsaloon" in low_vtype or "non-saloon" in low_vtype or "suv" in low_vtype or "mpv" in low_vtype:
+    if "evsaloon" in low_vtype:
+        norm_vtype = "EVSaloonCar"
+    elif "evnonsaloon" in low_vtype or ("ev" in low_vtype and ("suv" in low_vtype or "non" in low_vtype or "mpv" in low_vtype)):
+        norm_vtype = "EVNonSaloonCar"
+    elif "evmotor" in low_vtype or ("ev" in low_vtype and ("bike" in low_vtype or "motor" in low_vtype)):
+        norm_vtype = "EVMotorcycle"
+    elif "nonsaloon" in low_vtype or "non-saloon" in low_vtype or "suv" in low_vtype or "mpv" in low_vtype:
         norm_vtype = "NonSaloonCar"
     elif "motor" in low_vtype or "bike" in low_vtype:
         norm_vtype = "Motorcycle"
@@ -250,6 +371,14 @@ def calculate_road_tax(
         )
         if matched_rule is not None:
             return round(compute_rate(matched_rule, engine_cc), 2)
+
+    # 2. Electric Vehicles (ZEV - 2026 JPJ Guideline)
+    if norm_vtype in {"EVSaloonCar", "EVNonSaloonCar", "EVMotorcycle"}:
+        watts = normalize_power_to_watts(cc)
+        kw = watts / 1000.0
+        if norm_vtype == "EVMotorcycle":
+            return calculate_ev_motorcycle_road_tax(kw, norm_jur)
+        return calculate_ev_car_road_tax(kw, norm_jur)
 
     # 2. Non-Saloon Car (SUV / MPV / 4x4 / Pickup - Identical for Individual & Company)
     if norm_vtype == "NonSaloonCar":
@@ -331,7 +460,13 @@ def calculate_breakdown(
     norm_owner = (owner_type or "Individual").strip().capitalize()
     is_company = norm_owner in {"Company", "Corporate", "Business"} or "company" in low_vtype
 
-    if "nonsaloon" in low_vtype or "non-saloon" in low_vtype or "suv" in low_vtype or "mpv" in low_vtype:
+    if "evsaloon" in low_vtype:
+        norm_vtype = "EVSaloonCar"
+    elif "evnonsaloon" in low_vtype or ("ev" in low_vtype and ("suv" in low_vtype or "non" in low_vtype or "mpv" in low_vtype)):
+        norm_vtype = "EVNonSaloonCar"
+    elif "evmotor" in low_vtype or ("ev" in low_vtype and ("bike" in low_vtype or "motor" in low_vtype)):
+        norm_vtype = "EVMotorcycle"
+    elif "nonsaloon" in low_vtype or "non-saloon" in low_vtype or "suv" in low_vtype or "mpv" in low_vtype:
         norm_vtype = "NonSaloonCar"
     elif "motor" in low_vtype or "bike" in low_vtype:
         norm_vtype = "Motorcycle"
@@ -341,6 +476,90 @@ def calculate_breakdown(
         norm_vtype = "Car"
 
     norm_jur = _normalize_jurisdiction(jurisdiction)
+
+    # Electric Vehicles (ZEV - 2026 JPJ Guideline)
+    if norm_vtype in {"EVSaloonCar", "EVNonSaloonCar", "EVMotorcycle"}:
+        watts = normalize_power_to_watts(cc)
+        kw = watts / 1000.0
+        if norm_vtype == "EVMotorcycle":
+            rates = _EV_MOTORCYCLE_RATES
+            for max_w, rate in rates:
+                if watts <= max_w:
+                    tier_label = f"≤ {max_w} W ({max_w/1000:g} kW)" if max_w != float("inf") else "> 40,000 W (40 kW)"
+                    return {
+                        "engine_cc": int(watts),
+                        "vehicle_type": "EVMotorcycle",
+                        "owner_type": "Company" if is_company else "Individual",
+                        "jurisdiction": norm_jur,
+                        "base_rate": rate,
+                        "progressive_rate": 0.0,
+                        "excess_cc": 0,
+                        "progressive_amount": 0.0,
+                        "total_road_tax": rate,
+                        "formula_text": f"Fixed JPJ 2026 EV rate for {tier_label}",
+                        "matched_tier": tier_label,
+                    }
+            return {
+                "engine_cc": int(watts),
+                "vehicle_type": "EVMotorcycle",
+                "owner_type": "Company" if is_company else "Individual",
+                "jurisdiction": norm_jur,
+                "base_rate": 42.0,
+                "progressive_rate": 0.0,
+                "excess_cc": 0,
+                "progressive_amount": 0.0,
+                "total_road_tax": 42.0,
+                "formula_text": "Fixed JPJ 2026 EV rate for > 40,000 W",
+                "matched_tier": "> 40,000 W",
+            }
+        else:
+            total = calculate_ev_car_road_tax(kw, norm_jur)
+            vname = "Saloon EV" if norm_vtype == "EVSaloonCar" else "Non-Saloon EV"
+            if kw <= 50.0:
+                tier_label = "≤ 50 kW"
+                formula_text = "Official JPJ 2026 rate: RM 20.00 flat"
+            elif kw <= 100.0:
+                blocks = math.ceil((kw - 50.0) / 10.0)
+                tier_label = "50.1 – 100 kW"
+                formula_text = f"RM 20.00 + ({blocks} blocks × RM 10.00) = RM {total:.2f}"
+            elif kw <= 210.0:
+                blocks = math.ceil((kw - 100.0) / 10.0)
+                tier_label = "100.1 – 210 kW"
+                formula_text = f"RM 80.00 + ({blocks - 1} blocks × RM 20.00) = RM {total:.2f}"
+            elif kw <= 310.0:
+                blocks = math.ceil((kw - 210.0) / 10.0)
+                tier_label = "210.1 – 310 kW"
+                formula_text = f"RM 305.00 + ({blocks - 1} blocks × RM 30.00) = RM {total:.2f}"
+            elif kw <= 410.0:
+                blocks = math.ceil((kw - 310.0) / 10.0)
+                tier_label = "310.1 – 410 kW"
+                formula_text = f"RM 615.00 + ({blocks - 1} blocks × RM 50.00) = RM {total:.2f}"
+            elif kw <= 510.0:
+                blocks = math.ceil((kw - 410.0) / 10.0)
+                tier_label = "410.1 – 510 kW"
+                formula_text = f"RM 1,140.00 + ({blocks - 1} blocks × RM 100.00) = RM {total:.2f}"
+            elif kw <= 610.0:
+                blocks = math.ceil((kw - 510.0) / 10.0)
+                tier_label = "510.1 – 610 kW"
+                formula_text = f"RM 2,165.00 + ({blocks - 1} blocks × RM 150.00) = RM {total:.2f}"
+            else:
+                blocks = math.ceil((kw - 610.0) / 10.0)
+                tier_label = "> 610 kW"
+                formula_text = f"RM 3,695.00 + ({blocks - 1} blocks × RM 200.00) = RM {total:.2f}"
+
+            return {
+                "engine_cc": int(watts),
+                "vehicle_type": norm_vtype,
+                "owner_type": "Company" if is_company else "Individual",
+                "jurisdiction": norm_jur,
+                "base_rate": total,
+                "progressive_rate": 0.0,
+                "excess_cc": int(kw),
+                "progressive_amount": 0.0,
+                "total_road_tax": total,
+                "formula_text": formula_text,
+                "matched_tier": tier_label,
+            }
 
     # Non-Saloon Car
     if norm_vtype == "NonSaloonCar":
@@ -890,6 +1109,33 @@ STANDARD_ROAD_TAX_RULES = [
     {"vehicle_type": "Lorry", "owner_type": "Company", "jurisdiction": "Sarawak", "min_cc": 5001, "max_cc": None, "base_rate": 720.00, "formula": None, "source": "JPJ Commercial Schedule (East Malaysia)"},
 ]
 
+# ── 6. Electric Vehicles (ZEV - Official JPJ 2026 Schedule) ───────────────────
+_EV_RULES_TEMPLATE: list[dict[str, Any]] = []
+for _jur in ("West Malaysia", "Sabah", "Sarawak", "Labuan"):
+    for _owner in ("Individual", "Company"):
+        for _vtype in ("EVSaloonCar", "EVNonSaloonCar"):
+            _EV_RULES_TEMPLATE.extend([
+                {"vehicle_type": _vtype, "owner_type": _owner, "jurisdiction": _jur, "min_cc": 1, "max_cc": 50000, "base_rate": 20.00, "formula": None, "source": "Official JPJ 2026 ZEV Structure"},
+                {"vehicle_type": _vtype, "owner_type": _owner, "jurisdiction": _jur, "min_cc": 50001, "max_cc": 100000, "base_rate": 20.00, "formula": "20 + (ceil((cc - 50000) / 10000) * 10)", "source": "Official JPJ 2026 ZEV Structure"},
+                {"vehicle_type": _vtype, "owner_type": _owner, "jurisdiction": _jur, "min_cc": 100001, "max_cc": 210000, "base_rate": 80.00, "formula": "80 + ((ceil((cc - 100000) / 10000) - 1) * 20)", "source": "Official JPJ 2026 ZEV Structure"},
+                {"vehicle_type": _vtype, "owner_type": _owner, "jurisdiction": _jur, "min_cc": 210001, "max_cc": 310000, "base_rate": 305.00, "formula": "305 + ((ceil((cc - 210000) / 10000) - 1) * 30)", "source": "Official JPJ 2026 ZEV Structure"},
+                {"vehicle_type": _vtype, "owner_type": _owner, "jurisdiction": _jur, "min_cc": 310001, "max_cc": 410000, "base_rate": 615.00, "formula": "615 + ((ceil((cc - 310000) / 10000) - 1) * 50)", "source": "Official JPJ 2026 ZEV Structure"},
+                {"vehicle_type": _vtype, "owner_type": _owner, "jurisdiction": _jur, "min_cc": 410001, "max_cc": 510000, "base_rate": 1140.00, "formula": "1140 + ((ceil((cc - 410000) / 10000) - 1) * 100)", "source": "Official JPJ 2026 ZEV Structure"},
+                {"vehicle_type": _vtype, "owner_type": _owner, "jurisdiction": _jur, "min_cc": 510001, "max_cc": 610000, "base_rate": 2165.00, "formula": "2165 + ((ceil((cc - 510000) / 10000) - 1) * 150)", "source": "Official JPJ 2026 ZEV Structure"},
+                {"vehicle_type": _vtype, "owner_type": _owner, "jurisdiction": _jur, "min_cc": 610001, "max_cc": None, "base_rate": 3695.00, "formula": "3695 + ((ceil((cc - 610000) / 10000) - 1) * 200)", "source": "Official JPJ 2026 ZEV Structure"},
+            ])
+        # Electric Motorcycle
+        _EV_RULES_TEMPLATE.extend([
+            {"vehicle_type": "EVMotorcycle", "owner_type": _owner, "jurisdiction": _jur, "min_cc": 1, "max_cc": 7500, "base_rate": 2.00, "formula": None, "source": "Official JPJ 2026 ZEV Structure"},
+            {"vehicle_type": "EVMotorcycle", "owner_type": _owner, "jurisdiction": _jur, "min_cc": 7501, "max_cc": 10000, "base_rate": 9.00, "formula": None, "source": "Official JPJ 2026 ZEV Structure"},
+            {"vehicle_type": "EVMotorcycle", "owner_type": _owner, "jurisdiction": _jur, "min_cc": 10001, "max_cc": 12500, "base_rate": 12.00, "formula": None, "source": "Official JPJ 2026 ZEV Structure"},
+            {"vehicle_type": "EVMotorcycle", "owner_type": _owner, "jurisdiction": _jur, "min_cc": 12501, "max_cc": 25000, "base_rate": 30.00, "formula": None, "source": "Official JPJ 2026 ZEV Structure"},
+            {"vehicle_type": "EVMotorcycle", "owner_type": _owner, "jurisdiction": _jur, "min_cc": 25001, "max_cc": 40000, "base_rate": 40.00, "formula": None, "source": "Official JPJ 2026 ZEV Structure"},
+            {"vehicle_type": "EVMotorcycle", "owner_type": _owner, "jurisdiction": _jur, "min_cc": 40001, "max_cc": None, "base_rate": 42.00, "formula": None, "source": "Official JPJ 2026 ZEV Structure"},
+        ])
+
+STANDARD_ROAD_TAX_RULES = STANDARD_ROAD_TAX_RULES + _EV_RULES_TEMPLATE
+
 
 def seed_standard_road_tax_rules(db: Session) -> dict[str, int]:
     """Seed or update standard Malaysian road tax rules across all jurisdictions."""
@@ -905,11 +1151,18 @@ def seed_standard_road_tax_rules(db: Session) -> dict[str, int]:
                 RoadTaxRule.min_cc == item["min_cc"],
             )
         )
+        base_rate_raw = item.get("base_rate")
+        base_rate = float(base_rate_raw) if base_rate_raw is not None else 0.0
+        min_cc_raw = item.get("min_cc")
+        min_cc = int(min_cc_raw) if min_cc_raw is not None else 0
+        max_cc_raw = item.get("max_cc")
+        max_cc = int(max_cc_raw) if max_cc_raw is not None else None
+
         if existing:
-            existing.max_cc = int(item["max_cc"]) if item["max_cc"] is not None else None
-            existing.base_rate = float(item["base_rate"])
-            existing.formula = str(item["formula"]) if item["formula"] is not None else None
-            existing.source = str(item["source"]) if item["source"] is not None else None
+            existing.max_cc = max_cc
+            existing.base_rate = base_rate
+            existing.formula = str(item["formula"]) if item.get("formula") is not None else None
+            existing.source = str(item["source"]) if item.get("source") is not None else None
             existing.status = "active"
             updated += 1
         else:
@@ -917,11 +1170,11 @@ def seed_standard_road_tax_rules(db: Session) -> dict[str, int]:
                 vehicle_type=str(item["vehicle_type"]),
                 owner_type=str(item["owner_type"]),
                 jurisdiction=str(item["jurisdiction"]),
-                min_cc=int(item["min_cc"]),
-                max_cc=int(item["max_cc"]) if item["max_cc"] is not None else None,
-                base_rate=float(item["base_rate"]),
-                formula=str(item["formula"]) if item["formula"] is not None else None,
-                source=str(item["source"]) if item["source"] is not None else None,
+                min_cc=min_cc,
+                max_cc=max_cc,
+                base_rate=base_rate,
+                formula=str(item["formula"]) if item.get("formula") is not None else None,
+                source=str(item["source"]) if item.get("source") is not None else None,
                 effective_from=today,
                 status="active",
             )

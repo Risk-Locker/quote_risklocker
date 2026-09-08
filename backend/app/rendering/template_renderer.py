@@ -17,7 +17,7 @@ FIELD_LABELS = {
     "coverage_type": "Coverage Type",
     "cover_period": "Cover of Period",
     "car_model": "Car Model",
-    "engine_cc": "Vehicle CC",
+    "engine_cc": "Engine Capacity",
     "ncd_percent": "NCD",
     "valuation_type": "Valuation Type",
     "coverage_amount": "Coverage",
@@ -171,8 +171,9 @@ def _style(element: dict[str, Any]) -> str:
         css.append(f"box-shadow:{escape(str(style['boxShadow']))}")
     if style.get("rotation"):
         css.append(f"transform:rotate({float(style['rotation'])}deg)")
-    if element.get("opacity") is not None:
-        css.append(f"opacity:{float(element.get('opacity'))}")
+    op_val = element.get("opacity")
+    if op_val is not None:
+        css.append(f"opacity:{float(op_val)}")
     return ";".join(css)
 
 
@@ -395,7 +396,7 @@ def _dynamic_benefit_grid(
         reference_height=ref_h,
         gap_ratio=float(packing["gapRatio"]) if packing.get("gapRatio") is not None else 0.04,
         padding_ratio=float(packing["paddingRatio"]) if packing.get("paddingRatio") is not None else 0.02,
-        stagger_ratio=float(packing.get("staggerRatio") if packing.get("staggerRatio") is not None else 0.0),
+        stagger_ratio=float(packing.get("staggerRatio") or 0.0),
         empty_state=str(element.get("emptyState") or "hide"),
     )
     layout = pack_fixed_grid(len(ordered), bounds, spec)
@@ -480,9 +481,10 @@ def _dynamic_benefit_grid(
         h_style = f"min-height:{uniform_h}px;" if uniform_h > 0 else ""
 
         lbl_fs = (density["label"] - 0.5) if is_minimal else density["label"]
-        if element.get("titleSize"):
+        title_sz = element.get("titleSize")
+        if title_sz is not None:
             try:
-                lbl_fs = float(element.get("titleSize"))
+                lbl_fs = float(title_sz)
             except (ValueError, TypeError):
                 pass
 
@@ -564,7 +566,8 @@ def _dynamic_benefit_grid(
                     p_num = float(re.sub(r"[^0-9.]", "", str(p_val)))
                     p_str = f"Cost : MYR {p_num:,.2f}"
                 except Exception:
-                    clean_pval = str(p_val).replace("RM ", "").replace("RM", "")
+                    clean_pval = str(p_val).replace("RM ", "").replace("RM", "").strip()
+                    p_str = f"Cost : MYR {clean_pval}"
                 badge_bg = "#450A0A" if is_dark else "#FEE2E2"
                 badge_fg = "#FCA5A5" if is_dark else "#B91C1C"
                 badge_border = "#7F1D1D" if is_dark else "#FECACA"
@@ -760,15 +763,21 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
                     ctype_val = ctype_raw.get("value") if isinstance(ctype_raw, dict) else ctype_raw
                     cname_raw = (fields or {}).get("insured_name") or (fields or {}).get("customer_name")
                     cname_val = cname_raw.get("value") if isinstance(cname_raw, dict) else cname_raw
-                    from app.extraction.entity_classifier import is_corporate_name
+                    cmodel_raw = (fields or {}).get("car_model")
+                    cmodel_val = cmodel_raw.get("value") if isinstance(cmodel_raw, dict) else cmodel_raw
+                    cbrand_raw = (fields or {}).get("car_brand")
+                    cbrand_val = cbrand_raw.get("value") if isinstance(cbrand_raw, dict) else cbrand_raw
+                    from app.extraction.entity_classifier import classify_vehicle_ev_status, is_corporate_name
                     is_corp = (
                         str(ctype_val or "").lower() in {"company", "corporate", "business"}
                         or "company" in str(vtype_val or "").lower()
                         or is_corporate_name(str(cname_val or ""))
                     )
+                    is_ev, ev_cat = classify_vehicle_ev_status(str(cbrand_val or ""), str(cmodel_val or ""), str(cc_val or ""))
+                    vtype_to_use = ev_cat if (is_ev and ev_cat) else str(vtype_val or "Car")
                     calc_rt = calculate_road_tax(
                         clean_cc,
-                        str(vtype_val or "Car"),
+                        vtype_to_use,
                         owner_type="Company" if is_corp else "Individual",
                     )
                     if calc_rt > 0:
@@ -1132,7 +1141,33 @@ def _element_html(
     if element_type in {"shape", "group", "rectangle", "ellipse", "triangle", "diamond"}:
         return f'<div style="{_style(element)}"></div>'
     if element_type == "variable":
-        value = _format_value(_variable_value(fields, config, element.get("variableId")), str(element.get("prefix") or ""), str(element.get("suffix") or ""))
+        var_id = element.get("variableId")
+        if var_id == "engine_cc":
+            raw_val = _variable_value(fields, config, "engine_cc")
+            if raw_val:
+                from app.extraction.entity_classifier import classify_vehicle_ev_status
+                cbrand = _value(fields, "car_brand")
+                cmodel = _value(fields, "car_model")
+                vtype = _value(fields, "vehicle_type")
+                is_ev, _ = classify_vehicle_ev_status(cbrand, cmodel, raw_val)
+                if not is_ev and "ev" in vtype.lower():
+                    is_ev = True
+                
+                clean_num = re.sub(r"(?i)\s*(?:cc|kw|kilowatt|watt|w)\b", "", raw_val).strip()
+                try:
+                    num = float(clean_num)
+                    if is_ev:
+                        if num >= 1000.0:
+                            num = num / 1000.0
+                        disp_val = f"{int(num)}" if num == int(num) else f"{num:.1f}"
+                        value = f"{disp_val} kW"
+                    else:
+                        disp_val = f"{int(num)}" if num == int(num) else f"{num:.1f}"
+                        value = f"{disp_val} cc"
+                except Exception:
+                    value = f"{clean_num} kW" if is_ev else f"{clean_num} cc"
+                return f'<div style="{_style(element)}">{escape(value)}</div>'
+        value = _format_value(_variable_value(fields, config, var_id), str(element.get("prefix") or ""), str(element.get("suffix") or ""))
         return f'<div style="{_style(element)}">{escape(value)}</div>'
     if element_type == "special":
         return _special_html(element, config)
@@ -1143,6 +1178,8 @@ def _element_html(
     if element_type == "premium-info-block":
         return _premium_info_block(element, fields, render_context or {})
     text = str(element.get("text") or "")
+    if eid in {"lbl_engine_cc", "label_engine_cc"} or "Vehicle CC" in text or ("Engine Capacity" in text and "发动机排量" not in text):
+        text = "Engine Capacity/发动机排量 : "
     if "{" in text:
         def _replace_var(m):
             v_name = m.group(1)

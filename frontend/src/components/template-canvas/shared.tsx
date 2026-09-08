@@ -475,6 +475,9 @@ export function CanvasElementView({
       ) : element.type === "text" && !isImageOrLogo ? (
         (() => {
           let text = element.text || "";
+          if (element.id === "lbl_engine_cc" || text.includes("Vehicle CC / 引擎容量") || (text.includes("Engine Capacity") && !text.includes("发动机排量"))) {
+            text = "Engine Capacity/发动机排量 : ";
+          }
           if (text.includes("{") && variableValues) {
             text = text.replace(/\{([a-zA-Z0-9_-]+)\}/g, (match, varName) => {
               const val = resolveVariableValue(variableValues, varName);
@@ -489,6 +492,31 @@ export function CanvasElementView({
           let raw = resolveVariableValue(variableValues, element.variableId);
           if (raw === null && (element.variableId === "excess_amount" || element.variableId === "excess")) {
             raw = "0.00";
+          }
+          if (element.variableId === "engine_cc" && raw !== null) {
+            const vType = String(variableValues?.vehicle_type || "").toUpperCase();
+            const cModel = String(variableValues?.car_model || variableValues?.vehicle_model || "").toUpperCase();
+            const cBrand = String(variableValues?.car_brand || "").toUpperCase();
+            const rawStr = String(raw).trim();
+            const isEV = vType.includes("EV") || /\b(BYD|SEAL|ATTO|DOLPHIN|TESLA|MODEL 3|MODEL Y|ORA|GOOD CAT|NETA|IONIQ|EV6|TAYCAN|EQA|EQB|EQC|EQE|EQS|IX3|IX|E-TRON|ZEEKR|XPENG|LUMEN|BLUESHARK)\b/i.test(`${cBrand} ${cModel}`) || /\b(?:kw|kilowatt|watt|w)\b/i.test(rawStr);
+            const cleanNum = rawStr.replace(/\s*(?:cc|kw|kilowatt|watt|w)\b/gi, "").trim();
+            const num = parseFloat(cleanNum);
+            let displayValue = cleanNum;
+            if (!isNaN(num) && num > 0) {
+              if (isEV) {
+                const kw = num >= 1000 ? num / 1000 : num;
+                displayValue = `${Number.isInteger(kw) ? kw : kw.toFixed(1)} kW`;
+              } else {
+                displayValue = `${Number.isInteger(num) ? num : num.toFixed(1)} cc`;
+              }
+            } else {
+              displayValue = isEV ? `${cleanNum} kW` : `${cleanNum} cc`;
+            }
+            return (
+              <span className="text-[var(--rl-red)]">
+                {displayValue}
+              </span>
+            );
           }
           if (raw !== null) {
             return (
@@ -1182,56 +1210,80 @@ export function CanvasElementView({
           if (!roadtax || roadtax === "0" || roadtax === "0.00") {
             const ccStr = variableValues?.engine_cc || "";
             const cleanCC = ccStr ? parseFloat(String(ccStr).replace(/[^0-9.]/g, "")) : 0;
-            const parsedCC = cleanCC > 0 && cleanCC <= 7000 ? Math.round(cleanCC) : 0;
-            if (parsedCC > 0) {
+            if (cleanCC > 0) {
               const carModel = String(variableValues?.car_model || variableValues?.vehicle_model || "").toUpperCase();
               const custName = String(variableValues?.customer_name || variableValues?.insured_name || "").toUpperCase();
-              
               const vType = String(variableValues?.vehicle_type || "").toUpperCase();
               const cType = String(variableValues?.client_type || "").toUpperCase();
-              const isNonSaloon = vType.includes("NONSALOON") || /(RANGER|HILUX|TRITON|D-MAX|NAVARA|BT-50|COLORADO|CR-V|HR-V|BR-V|X70|X50|X90|ARUZ|FORTUNER|CX-3|CX-5|CX-8|CX-9|SPORTAGE|TUCSON|SANTA FE|HARRIER|CROSS|RUSH|PAJERO|OUTLANDER|MU-X|EVEREST|TIGUAN|MACAN|CAYENNE|DEFENDER|DISCOVERY|EVOQUE|GLC|GLE|X1|X3|X4|X5|X6|XC40|XC60|XC90|ALZA|INNOVA|EXORA|VELLFIRE|ALPHARD|SERENA|ESTIMA|AVANZA|VELOZ|HIACE|URVAN|VAN|LORRY|TRUCK|MPV|SUV|4X4|4WD|PICKUP)/i.test(carModel);
-              const isCompany = cType.includes("COMPANY") || cType.includes("CORP") || vType.includes("COMPANY") || /(SDN\s*BHD|BHD|ENTERPRISE|TRADING|LTD|LLC|PLT|COMPANY|ENT\.|CORP|HOLDINGS|CO\.)/i.test(custName);
 
-              if (isNonSaloon) {
-                if (parsedCC <= 1000) roadtax = "20.00";
-                else if (parsedCC <= 1200) roadtax = "85.00";
-                else if (parsedCC <= 1400) roadtax = "100.00";
-                else if (parsedCC <= 1600) roadtax = "120.00";
-                else if (parsedCC <= 1800) roadtax = (300 + (parsedCC - 1600) * 0.30).toFixed(2);
-                else if (parsedCC <= 2000) roadtax = (360 + (parsedCC - 1800) * 0.40).toFixed(2);
-                else if (parsedCC <= 2500) roadtax = (440 + (parsedCC - 2000) * 0.80).toFixed(2);
-                else if (parsedCC <= 3000) roadtax = (840 + (parsedCC - 2500) * 1.60).toFixed(2);
-                else roadtax = (1640 + (parsedCC - 3000) * 1.60).toFixed(2);
-              } else if (isCompany) {
-                if (parsedCC <= 1000) roadtax = "20.00";
-                else if (parsedCC <= 1200) roadtax = "110.00";
-                else if (parsedCC <= 1400) roadtax = "140.00";
-                else if (parsedCC <= 1600) roadtax = "180.00";
-                else if (parsedCC <= 1800) roadtax = (400 + (parsedCC - 1600) * 0.80).toFixed(2);
-                else if (parsedCC <= 2000) roadtax = (560 + (parsedCC - 1800) * 1.00).toFixed(2);
-                else if (parsedCC <= 2500) roadtax = (760 + (parsedCC - 2000) * 3.00).toFixed(2);
-                else if (parsedCC <= 3000) roadtax = (2260 + (parsedCC - 2500) * 7.50).toFixed(2);
-                else roadtax = (6010 + (parsedCC - 3000) * 13.50).toFixed(2);
-              } else if (isNonSaloon) {
-                if (parsedCC <= 1000) roadtax = "20.00";
-                else if (parsedCC <= 1200) roadtax = "85.00";
-                else if (parsedCC <= 1400) roadtax = "100.00";
-                else if (parsedCC <= 1600) roadtax = "120.00";
-                else if (parsedCC <= 1800) roadtax = (300 + (parsedCC - 1600) * 0.30).toFixed(2);
-                else if (parsedCC <= 2000) roadtax = (360 + (parsedCC - 1800) * 0.40).toFixed(2);
-                else if (parsedCC <= 2500) roadtax = (440 + (parsedCC - 2000) * 0.80).toFixed(2);
-                else if (parsedCC <= 3000) roadtax = (840 + (parsedCC - 2500) * 1.60).toFixed(2);
-                else roadtax = (1640 + (parsedCC - 3000) * 1.60).toFixed(2);
+              const isEVMotorcycle = vType.includes("EVMOTOR") || (vType.includes("EV") && (vType.includes("BIKE") || vType.includes("MOTOR")));
+              const isEVNonSaloon = vType.includes("EVNONSALOON") || (vType.includes("EV") && (vType.includes("SUV") || vType.includes("MPV") || vType.includes("NON")));
+              const isEVSaloon = vType.includes("EVSALOON") || (vType.includes("EV") && !isEVMotorcycle && !isEVNonSaloon);
+
+              if (isEVMotorcycle || isEVNonSaloon || isEVSaloon) {
+                const kw = cleanCC >= 1000 ? cleanCC / 1000 : cleanCC;
+                if (isEVMotorcycle) {
+                  if (kw <= 7.5) roadtax = "2.00";
+                  else if (kw <= 10.0) roadtax = "9.00";
+                  else if (kw <= 12.5) roadtax = "12.00";
+                  else if (kw <= 25.0) roadtax = "30.00";
+                  else if (kw <= 40.0) roadtax = "40.00";
+                  else roadtax = "42.00";
+                } else {
+                  // Electric Passenger Cars (Saloon & Non-Saloon share official 2026 JPJ power bands)
+                  let rate = 20;
+                  if (kw <= 50.0) rate = 20;
+                  else if (kw <= 100.0) rate = 20 + Math.ceil((kw - 50.0) / 10.0) * 10;
+                  else if (kw <= 210.0) rate = 80 + (Math.ceil((kw - 100.0) / 10.0) - 1) * 20;
+                  else if (kw <= 310.0) rate = 305 + (Math.ceil((kw - 210.0) / 10.0) - 1) * 30;
+                  else if (kw <= 410.0) rate = 615 + (Math.ceil((kw - 310.0) / 10.0) - 1) * 50;
+                  else if (kw <= 510.0) rate = 1140 + (Math.ceil((kw - 410.0) / 10.0) - 1) * 100;
+                  else if (kw <= 610.0) rate = 2165 + (Math.ceil((kw - 510.0) / 10.0) - 1) * 150;
+                  else if (kw <= 710.0) rate = 3695 + (Math.ceil((kw - 610.0) / 10.0) - 1) * 200;
+                  else if (kw <= 810.0) rate = 5745 + (Math.ceil((kw - 710.0) / 10.0) - 1) * 250;
+                  else if (kw <= 910.0) rate = 8295 + (Math.ceil((kw - 810.0) / 10.0) - 1) * 300;
+                  else if (kw <= 1010.0) rate = 11345 + (Math.ceil((kw - 910.0) / 10.0) - 1) * 350;
+                  else rate = 14895 + (Math.ceil((kw - 1010.0) / 10.0) - 1) * 400;
+                  roadtax = rate.toFixed(2);
+                }
               } else {
-                if (parsedCC <= 1000) roadtax = "20.00";
-                else if (parsedCC <= 1200) roadtax = "55.00";
-                else if (parsedCC <= 1400) roadtax = "70.00";
-                else if (parsedCC <= 1600) roadtax = "90.00";
-                else if (parsedCC <= 1800) roadtax = (200 + (parsedCC - 1600) * 0.40).toFixed(2);
-                else if (parsedCC <= 2000) roadtax = (280 + (parsedCC - 1800) * 0.50).toFixed(2);
-                else if (parsedCC <= 2500) roadtax = (380 + (parsedCC - 2000) * 1.00).toFixed(2);
-                else if (parsedCC <= 3000) roadtax = (840 + (parsedCC - 2500) * 2.50).toFixed(2);
-                else roadtax = (2130 + (parsedCC - 3000) * 4.50).toFixed(2);
+                const parsedCC = cleanCC <= 7000 ? Math.round(cleanCC) : 0;
+                if (parsedCC > 0) {
+                  const isNonSaloon = vType.includes("NONSALOON") || /(RANGER|HILUX|TRITON|D-MAX|NAVARA|BT-50|COLORADO|CR-V|HR-V|BR-V|X70|X50|X90|ARUZ|FORTUNER|CX-3|CX-5|CX-8|CX-9|SPORTAGE|TUCSON|SANTA FE|HARRIER|CROSS|RUSH|PAJERO|OUTLANDER|MU-X|EVEREST|TIGUAN|MACAN|CAYENNE|DEFENDER|DISCOVERY|EVOQUE|GLC|GLE|X1|X3|X4|X5|X6|XC40|XC60|XC90|ALZA|INNOVA|EXORA|VELLFIRE|ALPHARD|SERENA|ESTIMA|AVANZA|VELOZ|HIACE|URVAN|VAN|LORRY|TRUCK|MPV|SUV|4X4|4WD|PICKUP)/i.test(carModel);
+                  const isCompany = cType.includes("COMPANY") || cType.includes("CORP") || vType.includes("COMPANY") || /(SDN\s*BHD|BHD|ENTERPRISE|TRADING|LTD|LLC|PLT|COMPANY|ENT\.|CORP|HOLDINGS|CO\.)/i.test(custName);
+
+                  if (isNonSaloon) {
+                    if (parsedCC <= 1000) roadtax = "20.00";
+                    else if (parsedCC <= 1200) roadtax = "85.00";
+                    else if (parsedCC <= 1400) roadtax = "100.00";
+                    else if (parsedCC <= 1600) roadtax = "120.00";
+                    else if (parsedCC <= 1800) roadtax = (300 + (parsedCC - 1600) * 0.30).toFixed(2);
+                    else if (parsedCC <= 2000) roadtax = (360 + (parsedCC - 1800) * 0.40).toFixed(2);
+                    else if (parsedCC <= 2500) roadtax = (440 + (parsedCC - 2000) * 0.80).toFixed(2);
+                    else if (parsedCC <= 3000) roadtax = (840 + (parsedCC - 2500) * 1.60).toFixed(2);
+                    else roadtax = (1640 + (parsedCC - 3000) * 1.60).toFixed(2);
+                  } else if (isCompany) {
+                    if (parsedCC <= 1000) roadtax = "20.00";
+                    else if (parsedCC <= 1200) roadtax = "110.00";
+                    else if (parsedCC <= 1400) roadtax = "140.00";
+                    else if (parsedCC <= 1600) roadtax = "180.00";
+                    else if (parsedCC <= 1800) roadtax = (400 + (parsedCC - 1600) * 0.80).toFixed(2);
+                    else if (parsedCC <= 2000) roadtax = (560 + (parsedCC - 1800) * 1.00).toFixed(2);
+                    else if (parsedCC <= 2500) roadtax = (760 + (parsedCC - 2000) * 3.00).toFixed(2);
+                    else if (parsedCC <= 3000) roadtax = (2260 + (parsedCC - 2500) * 7.50).toFixed(2);
+                    else roadtax = (6010 + (parsedCC - 3000) * 13.50).toFixed(2);
+                  } else {
+                    if (parsedCC <= 1000) roadtax = "20.00";
+                    else if (parsedCC <= 1200) roadtax = "55.00";
+                    else if (parsedCC <= 1400) roadtax = "70.00";
+                    else if (parsedCC <= 1600) roadtax = "90.00";
+                    else if (parsedCC <= 1800) roadtax = (200 + (parsedCC - 1600) * 0.40).toFixed(2);
+                    else if (parsedCC <= 2000) roadtax = (280 + (parsedCC - 1800) * 0.50).toFixed(2);
+                    else if (parsedCC <= 2500) roadtax = (380 + (parsedCC - 2000) * 1.00).toFixed(2);
+                    else if (parsedCC <= 3000) roadtax = (840 + (parsedCC - 2500) * 2.50).toFixed(2);
+                    else roadtax = (2130 + (parsedCC - 3000) * 4.50).toFixed(2);
+                  }
+                }
               }
             }
           }

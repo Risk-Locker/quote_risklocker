@@ -87,9 +87,7 @@ DEFAULT_ALIASES = {
     "cover_end_date": ["cover end", "period to", "to date", "expiry date"],
     "car_brand": ["make", "brand", "car"],
     "car_model": ["model", "vehicle model"],
-    "vehicle_year": ["year", "manufacture year", "mfg year"],
-    "engine_cc": ["engine cc", "capacity", "cubic capacity", "engine capacity", "keupayaan enjin", "cc"],
-    "engine_no": ["engine/motor no", "engine no", "motor no", "no. enjin"],
+    "engine_cc": ["engine cc", "capacity", "cubic capacity", "engine capacity", "keupayaan enjin", "cc", "motor capacity", "keupayaan motor", "electric motor", "motor output", "output", "kw", "watt"],
     "excess_amount": ["excess amount", "excess all claims", "excess", "policy excess", "ekses", "ekses polisi", "compulsory excess", "lebihan"],
     "valid_until": ["quotation validity", "tarikh sah quotation", "tarikh sah", "tempoh sah", "sah laku sehingga", "valid until", "validity period", "validity date", "validity", "this quotation will expire on", "quotation will expire on", "expire on", "expiry date", "tarikh luput", "sah sehingga"],
     "coverage_amount": ["sum insured", "coverage amount", "insured value", "market value", "agreed value", "sum covered", "jumlah diinsuranskan", "nilai yang dipersetujui"],
@@ -167,8 +165,12 @@ def _add(results: dict[str, list[CandidateValue]], field: str, value: str | None
                 break
         cleaned = matched_cov or ("Comprehensive" if not cleaned or "PERLINDUNGAN" in cleaned.upper() else cleaned)
     if field == "engine_cc":
-        cc_match = re.search(r"\d{3,5}", cleaned)
-        cleaned = cc_match.group(0) if cc_match else cleaned
+        kw_match = re.search(r"\b\d{1,4}(?:\.\d+)?\s*(?:KW|KILOWATT)\b|\b\d{4,6}\s*(?:W|WATT)\b", cleaned, re.IGNORECASE)
+        if kw_match:
+            cleaned = kw_match.group(0).strip()
+        else:
+            cc_match = re.search(r"\b\d{2,5}(?:\.\d+)?\b", cleaned)
+            cleaned = cc_match.group(0) if cc_match else cleaned
     if field in {"cover_start_date", "cover_end_date", "issue_date", "valid_until"}:
         norm_date = normalize_date(cleaned)
         if not norm_date:
