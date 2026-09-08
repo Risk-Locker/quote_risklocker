@@ -218,10 +218,37 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
         car_model_val = " ".join(deduped)
         fields["car_model"]["value"] = car_model_val
     inferred_cc, inferred_type = infer_vehicle_cc_and_type(car_model_val)
-    if "vehicle_type" in fields:
-        if not fields["vehicle_type"].get("value"):
-            fields["vehicle_type"]["value"] = inferred_type
-            fields["vehicle_type"]["status"] = "ready"
+    # Classify customer entity (Private Individual vs Company) and vehicle type
+    from app.extraction.entity_classifier import classify_client_entity
+
+    cust_name = fields.get("customer_name", {}).get("value")
+    doc_no = fields.get("ic_or_brn", {}).get("value")
+    ai_type = fields.get("client_type", {}).get("value")
+    curr_vtype = fields.get("vehicle_type", {}).get("value") or inferred_type or "Car"
+
+    entity_type, resolved_vtype = classify_client_entity(
+        customer_name=cust_name,
+        ic_or_brn=doc_no,
+        ai_client_type=ai_type,
+        current_vehicle_type=curr_vtype,
+        car_model=car_model_val,
+    )
+
+    if "client_type" not in fields:
+        fields["client_type"] = {"value": entity_type, "status": "ready", "warnings": [], "message": ""}
+    else:
+        fields["client_type"]["value"] = entity_type
+        fields["client_type"]["status"] = "ready"
+        fields["client_type"]["warnings"] = []
+        fields["client_type"]["message"] = ""
+
+    if "vehicle_type" not in fields:
+        fields["vehicle_type"] = {"value": resolved_vtype, "status": "ready", "warnings": [], "message": ""}
+    else:
+        fields["vehicle_type"]["value"] = resolved_vtype
+        fields["vehicle_type"]["status"] = "ready"
+        fields["vehicle_type"]["warnings"] = []
+        fields["vehicle_type"]["message"] = ""
 
     # Extract numeric CC safely from raw string (e.g. '998 CC', '1,498 cc', '1.0', '1.5L')
     cc_val = fields.get("engine_cc", {}).get("value")
@@ -254,36 +281,23 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
         fields["service_fee"]["warnings"] = []
         fields["service_fee"]["message"] = ""
 
-    # Road tax: preserve if explicitly extracted from PDF; otherwise automatically compute from engine CC
-    if "roadtax" in fields:
-        raw_rt = fields["roadtax"].get("value")
-        parsed_rt = None
-        if raw_rt:
-            try:
-                cleaned_rt = re.sub(r"[^\d.]", "", str(raw_rt)).strip()
-                if cleaned_rt:
-                    parsed_rt = float(cleaned_rt)
-            except (ValueError, TypeError):
-                pass
+    # Road tax: NEVER extract or trust raw roadtax from PDF; strictly calculate dynamically
+    auto_rt = 0.0
+    if effective_cc:
+        auto_rt = calculate_road_tax(
+            cc=effective_cc,
+            vehicle_type=resolved_vtype,
+            owner_type=entity_type,
+            jurisdiction="West Malaysia",
+        )
 
-        if parsed_rt is not None and parsed_rt > 0:
-            fields["roadtax"]["value"] = f"{parsed_rt:.2f}"
-            fields["roadtax"]["status"] = "ready"
-            fields["roadtax"]["warnings"] = []
-            fields["roadtax"]["message"] = ""
-        else:
-            # Auto-compute road tax from engine CC and vehicle type
-            auto_rt = 0.0
-            if effective_cc:
-                vtype = (fields.get("vehicle_type", {}).get("value") or inferred_type or "Car")
-                auto_rt = calculate_road_tax(cc=effective_cc, vehicle_type=vtype)
-            if auto_rt > 0:
-                fields["roadtax"]["value"] = f"{auto_rt:.2f}"
-            else:
-                fields["roadtax"]["value"] = ""
-            fields["roadtax"]["status"] = "ready"
-            fields["roadtax"]["warnings"] = []
-            fields["roadtax"]["message"] = ""
+    if "roadtax" not in fields:
+        fields["roadtax"] = {"value": f"{auto_rt:.2f}" if auto_rt > 0 else "", "status": "ready", "warnings": [], "message": ""}
+    else:
+        fields["roadtax"]["value"] = f"{auto_rt:.2f}" if auto_rt > 0 else ""
+        fields["roadtax"]["status"] = "ready"
+        fields["roadtax"]["warnings"] = []
+        fields["roadtax"]["message"] = ""
 
     # Ensure premium is the net base insurance premium (excluding extras)
     try:

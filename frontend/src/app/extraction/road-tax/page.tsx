@@ -55,14 +55,15 @@ type CalculationBreakdown = {
   matched_tier: string;
 };
 
-const VEHICLE_TYPES = ["Car", "Motorcycle", "Lorry"];
+const VEHICLE_TYPES = ["Car", "NonSaloonCar", "Motorcycle", "Lorry"];
 const OWNER_TYPES = ["Individual", "Company"];
 const JURISDICTIONS = ["West Malaysia", "Sabah", "Sarawak", "Labuan"];
 const JURISDICTION_TABS = ["All", "West Malaysia", "Sabah", "Sarawak", "Labuan"] as const;
 
 const RATE_TABLES = [
-  { vehicle: "Car", owner: "Individual", title: "Car — Private (Individual)" },
-  { vehicle: "Car", owner: "Company", title: "Car — Company (Corporate)" },
+  { vehicle: "Car", owner: "Individual", title: "Car — Private Saloon (Individual)" },
+  { vehicle: "Car", owner: "Company", title: "Car — Company Saloon (Corporate)" },
+  { vehicle: "NonSaloonCar", owner: "Individual", title: "Non-Saloon (SUV / MPV / 4x4 / Pickup - Private & Company)" },
   { vehicle: "Motorcycle", owner: "Individual", title: "Motorcycle — Private" },
   { vehicle: "Motorcycle", owner: "Company", title: "Motorcycle — Company" },
 ] as const;

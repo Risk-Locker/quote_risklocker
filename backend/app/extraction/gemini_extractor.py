@@ -206,10 +206,6 @@ GEMINI_EXTRACTION_SCHEMA = {
             "type": "string",
             "description": "Final total quotation amount payable (e.g. '2,522.42' or '1,150.97').",
         },
-        "roadtax": {
-            "type": "string",
-            "description": "Road tax amount if specified.",
-        },
         "valid_until": {
             "type": "string",
             "description": "Quotation validity expiry date or duration (e.g. '18-03-2026', '15/09/2026', or '30 Days'). Look for 'This quotation will expire on DD-MM-YYYY', 'Quotation will expire on...', 'Validity', 'Valid Until', 'Sah Sehingga', 'Tarikh Tamat', 'Tarikh Luput'.",
@@ -383,9 +379,10 @@ Return strictly structured JSON adhering to the provided schema.
 Extract accurate, grounded JSON data matching the provided schema from the quotation document text or image.
 
 ### CRITICAL GROUNDING RULES:
-1. **CUSTOMER NAME (The Insured)**:
+1. **CUSTOMER NAME & CLIENT TYPE (The Insured)**:
    - Extract the customer/policyholder name (e.g. under 'The Insured / Pihak Diinsuranskan', 'Insured Name', 'Participant').
    - NEVER extract the Agent's Name, Broker Name, Agency Name, or Account Number (e.g. IGNORE 'Account No. / Agent\'s Name', 'Nama Ejen', '02103586', 'RISKLOCKER SDN.BHD.').
+   - **CLIENT TYPE**: Cross-confirm whether the customer name represents an Individual person (Private) or a Business / Legal entity (Company). If the name contains words like 'SDN BHD', 'BHD', 'ENTERPRISE', 'TRADING', 'PLT', 'LTD', 'CORP', 'CO.', 'PERUSAHAAN', or has a Business Registration Number (BRN/ROC/ROB/SSM), classify `client_type` strictly as 'Company'. Only classify as 'Private' if the insured is a natural human person with a personal IC number.
 2. **COVERAGE TYPE**:
    - MUST be normalized to 'Comprehensive', 'Third Party Fire & Theft', or 'Third Party'.
    - NEVER output 'Jenis Perlindungan' (which is simply the Malay translation of 'Cover Type').
@@ -423,6 +420,8 @@ Extract accurate, grounded JSON data matching the provided schema from the quota
 {corrections_str}
 13. **QUOTATION REFERENCE**:
    - DO NOT extract underwriter reference numbers, quote numbers, or ref numbers from the document. Quotation reference is strictly an internal Risklocker system sequence.
+14. **ROAD TAX**:
+   - NEVER extract road tax from the quotation document under any circumstances. Road tax is an internal, dynamically computed government tariff.
 
 {grounding_context}
 Return strictly structured JSON adhering to the provided schema.

@@ -697,11 +697,29 @@ def session_extract_gemini(
     # Apply extracted fields to draft
     fields = dict(draft.fields or {})
     for key, val in gemini_res.items():
-        if key in {"detected_benefits", "detected_package_name"} or val is None:
+        if key in {"detected_benefits", "detected_package_name", "roadtax"} or val is None:
             continue
         clean_val = str(val).strip()
         if clean_val:
             fields[key] = {"value": clean_val, "status": "ready", "message": ""}
+
+    # Classify customer entity (Private Individual vs Company) and vehicle type
+    from app.extraction.entity_classifier import classify_client_entity
+    cust_name = fields.get("customer_name", {}).get("value")
+    doc_no = fields.get("ic_or_brn", {}).get("value")
+    ai_type = fields.get("client_type", {}).get("value")
+    curr_vtype = fields.get("vehicle_type", {}).get("value") or "Car"
+    car_model_val = fields.get("car_model", {}).get("value")
+
+    entity_type, resolved_vtype = classify_client_entity(
+        customer_name=cust_name,
+        ic_or_brn=doc_no,
+        ai_client_type=ai_type,
+        current_vehicle_type=curr_vtype,
+        car_model=car_model_val,
+    )
+    fields["client_type"] = {"value": entity_type, "status": "ready", "message": ""}
+    fields["vehicle_type"] = {"value": resolved_vtype, "status": "ready", "message": ""}
 
     # Sum detected optional extras cost to net out from total_amount
     gemini_benefits = gemini_res.get("detected_benefits") or []
@@ -748,23 +766,24 @@ def session_extract_gemini(
             except Exception:
                 pass
 
-    if "roadtax" not in gemini_res or not gemini_res.get("roadtax") or str(gemini_res.get("roadtax")).strip() in {"0", "0.00"}:
-        cc_val = fields.get("engine_cc", {}).get("value")
-        rt_calc = 0.0
-        if cc_val:
-            try:
-                from app.services.road_tax_service import calculate_road_tax
-                clean_cc = int(re.sub(r"[^\d]", "", str(cc_val)))
-                vtype = str(fields.get("vehicle_type", {}).get("value") or "Car")
-                owner_type = "Company" if "company" in vtype.lower() or "corp" in vtype.lower() else "Individual"
-                base_type = "Motorcycle" if "motor" in vtype.lower() else ("Lorry" if "lorry" in vtype.lower() or "other" in vtype.lower() else "Car")
-                rt_calc = calculate_road_tax(cc=clean_cc, vehicle_type=base_type, owner_type=owner_type, jurisdiction="West Malaysia", db=db)
-            except Exception:
-                rt_calc = 0.0
-        if rt_calc > 0:
-            fields["roadtax"] = {"value": f"{rt_calc:.2f}", "status": "ready", "message": ""}
-        else:
-            fields["roadtax"] = {"value": "", "status": "ready", "message": ""}
+    # Road tax: strictly calculate dynamically
+    cc_val = fields.get("engine_cc", {}).get("value")
+    rt_calc = 0.0
+    if cc_val:
+        try:
+            from app.services.road_tax_service import calculate_road_tax
+            clean_cc = int(re.sub(r"[^\d]", "", str(cc_val)))
+            rt_calc = calculate_road_tax(
+                cc=clean_cc,
+                vehicle_type=resolved_vtype,
+                owner_type=entity_type,
+                jurisdiction="West Malaysia",
+                db=db,
+            )
+        except Exception:
+            rt_calc = 0.0
+    fields["roadtax"] = {"value": f"{rt_calc:.2f}" if rt_calc > 0 else "", "status": "ready", "message": ""}
+
     if "service_fee" not in gemini_res or not gemini_res.get("service_fee"):
         fields["service_fee"] = {"value": "", "status": "ready", "message": ""}
 

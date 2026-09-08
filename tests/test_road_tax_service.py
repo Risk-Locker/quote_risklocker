@@ -90,6 +90,9 @@ def test_calculate_road_tax_company_car():
     assert calculate_road_tax(1197, vehicle_type="Car", owner_type="Company") == 110.00
     assert calculate_road_tax(1329, vehicle_type="Car", owner_type="Company") == 140.00
     assert calculate_road_tax(1496, vehicle_type="Car", owner_type="Company") == 180.00
+    # Also verify vehicle_type="CompanyCar" works seamlessly without passing owner_type="Company"
+    assert calculate_road_tax(1495, vehicle_type="CompanyCar") == 180.00
+    assert calculate_road_tax(1495, vehicle_type="CompanyCar", owner_type="Individual") == 180.00
     # 1601-1800: 400 + 0.80 * (1798 - 1600) = 400 + 158.4 = 558.40
     assert calculate_road_tax(1798, vehicle_type="Car", owner_type="Company") == 558.40
     # 1801-2000: 560 + 1.00 * (1998 - 1800) = 560 + 198 = 758.00
@@ -151,5 +154,49 @@ def test_calculate_breakdown():
     assert bd["excess_cc"] == 198
     assert bd["progressive_amount"] == 99.00
     assert bd["total_road_tax"] == 379.00
+
+
+def test_calculate_road_tax_non_saloon_car():
+    from app.services.road_tax_service import calculate_road_tax
+
+    # West Malaysia Non-Saloon rates (same for Individual and Company)
+    # Perodua Alza 1495cc -> Flat 120.00
+    assert calculate_road_tax(1495, vehicle_type="NonSaloonCar", owner_type="Individual") == 120.00
+    assert calculate_road_tax(1495, vehicle_type="NonSaloonCar", owner_type="Company") == 120.00
+    assert calculate_road_tax(998, vehicle_type="NonSaloonCar") == 20.00
+    assert calculate_road_tax(1197, vehicle_type="NonSaloonCar") == 85.00
+    assert calculate_road_tax(1329, vehicle_type="NonSaloonCar") == 100.00
+    assert calculate_road_tax(1598, vehicle_type="NonSaloonCar") == 120.00
+    # 1601-1800: 300 + 0.30 * (1798 - 1600) = 300 + 59.40 = 359.40
+    assert calculate_road_tax(1798, vehicle_type="NonSaloonCar") == 359.40
+    # 1801-2000: 360 + 0.40 * (1998 - 1800) = 360 + 79.20 = 439.20
+    assert calculate_road_tax(1998, vehicle_type="NonSaloonCar") == 439.20
+    # 2001-2500: 440 + 0.80 * (2494 - 2000) = 440 + 395.20 = 835.20
+    assert calculate_road_tax(2494, vehicle_type="NonSaloonCar") == 835.20
+    # 2501-3000: 840 + 1.60 * (2997 - 2500) = 840 + 795.20 = 1635.20
+    assert calculate_road_tax(2997, vehicle_type="NonSaloonCar") == 1635.20
+    # >3000: 1640 + 1.60 * (3456 - 3000) = 1640 + 729.60 = 2369.60
+    assert calculate_road_tax(3456, vehicle_type="NonSaloonCar") == 2369.60
+
+    # East Malaysia Non-Saloon rates
+    assert calculate_road_tax(1495, vehicle_type="NonSaloonCar", jurisdiction="Sabah") == 96.00
+    assert calculate_road_tax(1495, vehicle_type="NonSaloonCar", jurisdiction="Sarawak") == 96.00
+
+    # Labuan Non-Saloon rates
+    assert calculate_road_tax(1495, vehicle_type="NonSaloonCar", jurisdiction="Labuan") == 60.00
+
+
+def test_calculate_breakdown_non_saloon():
+    from app.services.road_tax_service import calculate_breakdown
+
+    bd = calculate_breakdown(1495, vehicle_type="NonSaloonCar", owner_type="Company", jurisdiction="West Malaysia")
+    assert bd["engine_cc"] == 1495
+    assert bd["vehicle_type"] == "NonSaloonCar"
+    assert bd["base_rate"] == 120.00
+    assert bd["progressive_rate"] == 0.0
+    assert bd["excess_cc"] == 0
+    assert bd["progressive_amount"] == 0.0
+    assert bd["total_road_tax"] == 120.00
+    assert bd["matched_tier"] == "1401 – 1600 cc"
 
 

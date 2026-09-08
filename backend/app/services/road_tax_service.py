@@ -56,6 +56,18 @@ _WEST_MY_COMPANY_CAR_RATES = (
     (float("inf"), 6010.00, 13.50, 3000),
 )
 
+_WEST_MY_NON_SALOON_RATES = (
+    (1000, 20.00, 0.0, 0),
+    (1200, 85.00, 0.0, 1000),
+    (1400, 100.00, 0.0, 1200),
+    (1600, 120.00, 0.0, 1400),
+    (1800, 300.00, 0.30, 1600),
+    (2000, 360.00, 0.40, 1800),
+    (2500, 440.00, 0.80, 2000),
+    (3000, 840.00, 1.60, 2500),
+    (float("inf"), 1640.00, 1.60, 3000),
+)
+
 _WEST_MY_PRIVATE_MOTORCYCLE_RATES = (
     (150, 2.00),
     (200, 30.00),
@@ -107,6 +119,18 @@ _EAST_MY_COMPANY_CAR_RATES = (
     (float("inf"), 2908.00, 4.00, 3000),
 )
 
+_EAST_MY_NON_SALOON_RATES = (
+    (1000, 20.00, 0.0, 0),
+    (1200, 68.00, 0.0, 1000),
+    (1400, 80.00, 0.0, 1200),
+    (1600, 96.00, 0.0, 1400),
+    (1800, 240.00, 0.24, 1600),
+    (2000, 288.00, 0.32, 1800),
+    (2500, 352.00, 0.64, 2000),
+    (3000, 672.00, 1.28, 2500),
+    (float("inf"), 1312.00, 1.28, 3000),
+)
+
 _EAST_MY_MOTORCYCLE_RATES = (
     (150, 2.00),
     (200, 9.00),
@@ -141,6 +165,18 @@ _LABUAN_COMPANY_CAR_RATES = (
     (2500, 380.00, 1.50, 2000),
     (3000, 1130.00, 3.75, 2500),
     (float("inf"), 3005.00, 6.75, 3000),
+)
+
+_LABUAN_NON_SALOON_RATES = (
+    (1000, 10.00, 0.0, 0),
+    (1200, 42.50, 0.0, 1000),
+    (1400, 50.00, 0.0, 1200),
+    (1600, 60.00, 0.0, 1400),
+    (1800, 150.00, 0.15, 1600),
+    (2000, 180.00, 0.20, 1800),
+    (2500, 220.00, 0.40, 2000),
+    (3000, 420.00, 0.80, 2500),
+    (float("inf"), 820.00, 0.80, 3000),
 )
 
 _LABUAN_MOTORCYCLE_RATES = (
@@ -187,9 +223,20 @@ def calculate_road_tax(
     if cc is None or cc <= 0:
         return 0.0
     engine_cc = round(cc)
-    norm_vtype = (vehicle_type or "Car").strip().capitalize()
+    raw_vtype = (vehicle_type or "Car").strip()
+    low_vtype = raw_vtype.lower()
     norm_owner = (owner_type or "Individual").strip().capitalize()
-    is_company = norm_owner in {"Company", "Corporate", "Business"}
+    is_company = norm_owner in {"Company", "Corporate", "Business"} or "company" in low_vtype
+
+    if "nonsaloon" in low_vtype or "non-saloon" in low_vtype or "suv" in low_vtype or "mpv" in low_vtype:
+        norm_vtype = "NonSaloonCar"
+    elif "motor" in low_vtype or "bike" in low_vtype:
+        norm_vtype = "Motorcycle"
+    elif "lorry" in low_vtype or "truck" in low_vtype or "commercial" in low_vtype:
+        norm_vtype = "Lorry"
+    else:
+        norm_vtype = "Car"
+
     norm_jur = _normalize_jurisdiction(jurisdiction)
 
     # 1. Try resolving through active DB rules if Session provided
@@ -204,7 +251,22 @@ def calculate_road_tax(
         if matched_rule is not None:
             return round(compute_rate(matched_rule, engine_cc), 2)
 
-    # 2. Motorcycle
+    # 2. Non-Saloon Car (SUV / MPV / 4x4 / Pickup - Identical for Individual & Company)
+    if norm_vtype == "NonSaloonCar":
+        if norm_jur in {"Sabah", "Sarawak"}:
+            rates = _EAST_MY_NON_SALOON_RATES
+        elif norm_jur == "Labuan":
+            rates = _LABUAN_NON_SALOON_RATES
+        else:
+            rates = _WEST_MY_NON_SALOON_RATES
+
+        for max_cc, base, per_cc, threshold in rates:
+            if engine_cc <= max_cc:
+                if per_cc == 0.0:
+                    return round(base, 2)
+                return round(base + ((engine_cc - threshold) * per_cc), 2)
+
+    # 3. Motorcycle
     if norm_vtype in {"Motorcycle", "Bike", "Motor"}:
         if norm_jur in {"Sabah", "Sarawak"}:
             rates = _EAST_MY_MOTORCYCLE_RATES
@@ -217,13 +279,13 @@ def calculate_road_tax(
             if engine_cc <= max_cc:
                 return rate
 
-    # 3. Lorry / Commercial vehicle
+    # 4. Lorry / Commercial vehicle
     if norm_vtype in {"Lorry", "Truck", "Commercial", "Others"}:
         for max_cc, rate in _COMMERCIAL_RATES:
             if engine_cc <= max_cc:
                 return rate
 
-    # 4. Car (Private vs Company across Jurisdictions)
+    # 5. Car (Private vs Company across Jurisdictions)
     if norm_jur in {"Sabah", "Sarawak"}:
         car_rates = _EAST_MY_COMPANY_CAR_RATES if is_company else _EAST_MY_PRIVATE_CAR_RATES
     elif norm_jur == "Labuan":
@@ -264,10 +326,56 @@ def calculate_breakdown(
         }
 
     engine_cc = round(cc)
-    norm_vtype = (vehicle_type or "Car").strip().capitalize()
+    raw_vtype = (vehicle_type or "Car").strip()
+    low_vtype = raw_vtype.lower()
     norm_owner = (owner_type or "Individual").strip().capitalize()
-    is_company = norm_owner in {"Company", "Corporate", "Business"}
+    is_company = norm_owner in {"Company", "Corporate", "Business"} or "company" in low_vtype
+
+    if "nonsaloon" in low_vtype or "non-saloon" in low_vtype or "suv" in low_vtype or "mpv" in low_vtype:
+        norm_vtype = "NonSaloonCar"
+    elif "motor" in low_vtype or "bike" in low_vtype:
+        norm_vtype = "Motorcycle"
+    elif "lorry" in low_vtype or "truck" in low_vtype or "commercial" in low_vtype:
+        norm_vtype = "Lorry"
+    else:
+        norm_vtype = "Car"
+
     norm_jur = _normalize_jurisdiction(jurisdiction)
+
+    # Non-Saloon Car
+    if norm_vtype == "NonSaloonCar":
+        if norm_jur in {"Sabah", "Sarawak"}:
+            rates = _EAST_MY_NON_SALOON_RATES
+        elif norm_jur == "Labuan":
+            rates = _LABUAN_NON_SALOON_RATES
+        else:
+            rates = _WEST_MY_NON_SALOON_RATES
+
+        for max_cc, base, per_cc, threshold in rates:
+            if engine_cc <= max_cc:
+                excess_cc = max(0, engine_cc - threshold) if per_cc > 0 else 0
+                prog_amount = round(excess_cc * per_cc, 2)
+                total = round(base + prog_amount, 2)
+                tier_label = f"{threshold + 1} – {max_cc} cc" if max_cc != float("inf") else f"Over {threshold} cc"
+
+                if per_cc == 0.0:
+                    formula_text = f"Flat base rate for {tier_label}"
+                else:
+                    formula_text = f"RM {base:.2f} + ({excess_cc} cc × RM {per_cc:.2f})"
+
+                return {
+                    "engine_cc": engine_cc,
+                    "vehicle_type": "NonSaloonCar",
+                    "owner_type": "Company" if is_company else "Individual",
+                    "jurisdiction": norm_jur,
+                    "base_rate": base,
+                    "progressive_rate": per_cc,
+                    "excess_cc": excess_cc,
+                    "progressive_amount": prog_amount,
+                    "total_road_tax": total,
+                    "formula_text": formula_text,
+                    "matched_tier": tier_label,
+                }
 
     # Motorcycle
     if norm_vtype in {"Motorcycle", "Bike", "Motor"}:
@@ -568,6 +676,27 @@ STANDARD_ROAD_TAX_RULES = [
     {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 2501, "max_cc": 3000, "base_rate": 2260.00, "formula": "2260 + ((cc - 2500) * 7.50)", "source": "JPJ Schedule (Peninsular)"},
     {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 3001, "max_cc": None, "base_rate": 6010.00, "formula": "6010 + ((cc - 3000) * 13.50)", "source": "JPJ Schedule (Peninsular)"},
 
+    # Non-Saloon Car (SUV / MPV / 4x4 / Pickup / Van - West Malaysia)
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1, "max_cc": 1000, "base_rate": 20.00, "formula": None, "source": "JPJ Schedule (Non-Saloon)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1001, "max_cc": 1200, "base_rate": 85.00, "formula": None, "source": "JPJ Schedule (Non-Saloon)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1201, "max_cc": 1400, "base_rate": 100.00, "formula": None, "source": "JPJ Schedule (Non-Saloon)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1401, "max_cc": 1600, "base_rate": 120.00, "formula": None, "source": "JPJ Schedule (Non-Saloon)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1601, "max_cc": 1800, "base_rate": 300.00, "formula": "300 + ((cc - 1600) * 0.30)", "source": "JPJ Schedule (Non-Saloon)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1801, "max_cc": 2000, "base_rate": 360.00, "formula": "360 + ((cc - 1800) * 0.40)", "source": "JPJ Schedule (Non-Saloon)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 2001, "max_cc": 2500, "base_rate": 440.00, "formula": "440 + ((cc - 2000) * 0.80)", "source": "JPJ Schedule (Non-Saloon)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 2501, "max_cc": 3000, "base_rate": 840.00, "formula": "840 + ((cc - 2500) * 1.60)", "source": "JPJ Schedule (Non-Saloon)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 3001, "max_cc": None, "base_rate": 1640.00, "formula": "1640 + ((cc - 3000) * 1.60)", "source": "JPJ Schedule (Non-Saloon)"},
+
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 1, "max_cc": 1000, "base_rate": 20.00, "formula": None, "source": "JPJ Schedule (Non-Saloon)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 1001, "max_cc": 1200, "base_rate": 85.00, "formula": None, "source": "JPJ Schedule (Non-Saloon)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 1201, "max_cc": 1400, "base_rate": 100.00, "formula": None, "source": "JPJ Schedule (Non-Saloon)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 1401, "max_cc": 1600, "base_rate": 120.00, "formula": None, "source": "JPJ Schedule (Non-Saloon)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 1601, "max_cc": 1800, "base_rate": 300.00, "formula": "300 + ((cc - 1600) * 0.30)", "source": "JPJ Schedule (Non-Saloon)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 1801, "max_cc": 2000, "base_rate": 360.00, "formula": "360 + ((cc - 1800) * 0.40)", "source": "JPJ Schedule (Non-Saloon)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 2001, "max_cc": 2500, "base_rate": 440.00, "formula": "440 + ((cc - 2000) * 0.80)", "source": "JPJ Schedule (Non-Saloon)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 2501, "max_cc": 3000, "base_rate": 840.00, "formula": "840 + ((cc - 2500) * 1.60)", "source": "JPJ Schedule (Non-Saloon)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 3001, "max_cc": None, "base_rate": 1640.00, "formula": "1640 + ((cc - 3000) * 1.60)", "source": "JPJ Schedule (Non-Saloon)"},
+
     # Motorcycle Private (West Malaysia)
     {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1, "max_cc": 150, "base_rate": 2.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
     {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 151, "max_cc": 200, "base_rate": 30.00, "formula": None, "source": "JPJ Schedule (Peninsular)"},
@@ -607,6 +736,27 @@ STANDARD_ROAD_TAX_RULES = [
     {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "Sabah", "min_cc": 2501, "max_cc": 3000, "base_rate": 1408.00, "formula": "1408 + ((cc - 2500) * 3.00)", "source": "JPJ Schedule (East Malaysia)"},
     {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "Sabah", "min_cc": 3001, "max_cc": None, "base_rate": 2908.00, "formula": "2908 + ((cc - 3000) * 4.00)", "source": "JPJ Schedule (East Malaysia)"},
 
+    # Non-Saloon Car (SUV / MPV / 4x4 / Pickup / Van - Sabah)
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Sabah", "min_cc": 1, "max_cc": 1000, "base_rate": 20.00, "formula": None, "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Sabah", "min_cc": 1001, "max_cc": 1200, "base_rate": 68.00, "formula": None, "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Sabah", "min_cc": 1201, "max_cc": 1400, "base_rate": 80.00, "formula": None, "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Sabah", "min_cc": 1401, "max_cc": 1600, "base_rate": 96.00, "formula": None, "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Sabah", "min_cc": 1601, "max_cc": 1800, "base_rate": 240.00, "formula": "240 + ((cc - 1600) * 0.24)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Sabah", "min_cc": 1801, "max_cc": 2000, "base_rate": 288.00, "formula": "288 + ((cc - 1800) * 0.32)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Sabah", "min_cc": 2001, "max_cc": 2500, "base_rate": 352.00, "formula": "352 + ((cc - 2000) * 0.64)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Sabah", "min_cc": 2501, "max_cc": 3000, "base_rate": 672.00, "formula": "672 + ((cc - 2500) * 1.28)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Sabah", "min_cc": 3001, "max_cc": None, "base_rate": 1312.00, "formula": "1312 + ((cc - 3000) * 1.28)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Sabah", "min_cc": 1, "max_cc": 1000, "base_rate": 20.00, "formula": None, "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Sabah", "min_cc": 1001, "max_cc": 1200, "base_rate": 68.00, "formula": None, "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Sabah", "min_cc": 1201, "max_cc": 1400, "base_rate": 80.00, "formula": None, "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Sabah", "min_cc": 1401, "max_cc": 1600, "base_rate": 96.00, "formula": None, "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Sabah", "min_cc": 1601, "max_cc": 1800, "base_rate": 240.00, "formula": "240 + ((cc - 1600) * 0.24)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Sabah", "min_cc": 1801, "max_cc": 2000, "base_rate": 288.00, "formula": "288 + ((cc - 1800) * 0.32)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Sabah", "min_cc": 2001, "max_cc": 2500, "base_rate": 352.00, "formula": "352 + ((cc - 2000) * 0.64)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Sabah", "min_cc": 2501, "max_cc": 3000, "base_rate": 672.00, "formula": "672 + ((cc - 2500) * 1.28)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Sabah", "min_cc": 3001, "max_cc": None, "base_rate": 1312.00, "formula": "1312 + ((cc - 3000) * 1.28)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+
     # Motorcycle Private & Company (Sabah)
     {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "Sabah", "min_cc": 1, "max_cc": 150, "base_rate": 2.00, "formula": None, "source": "JPJ Schedule (East Malaysia)"},
     {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "Sabah", "min_cc": 151, "max_cc": 200, "base_rate": 9.00, "formula": None, "source": "JPJ Schedule (East Malaysia)"},
@@ -645,6 +795,27 @@ STANDARD_ROAD_TAX_RULES = [
     {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "Sarawak", "min_cc": 2501, "max_cc": 3000, "base_rate": 1408.00, "formula": "1408 + ((cc - 2500) * 3.00)", "source": "JPJ Schedule (East Malaysia)"},
     {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "Sarawak", "min_cc": 3001, "max_cc": None, "base_rate": 2908.00, "formula": "2908 + ((cc - 3000) * 4.00)", "source": "JPJ Schedule (East Malaysia)"},
 
+    # Non-Saloon Car (SUV / MPV / 4x4 / Pickup / Van - Sarawak)
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Sarawak", "min_cc": 1, "max_cc": 1000, "base_rate": 20.00, "formula": None, "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Sarawak", "min_cc": 1001, "max_cc": 1200, "base_rate": 68.00, "formula": None, "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Sarawak", "min_cc": 1201, "max_cc": 1400, "base_rate": 80.00, "formula": None, "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Sarawak", "min_cc": 1401, "max_cc": 1600, "base_rate": 96.00, "formula": None, "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Sarawak", "min_cc": 1601, "max_cc": 1800, "base_rate": 240.00, "formula": "240 + ((cc - 1600) * 0.24)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Sarawak", "min_cc": 1801, "max_cc": 2000, "base_rate": 288.00, "formula": "288 + ((cc - 1800) * 0.32)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Sarawak", "min_cc": 2001, "max_cc": 2500, "base_rate": 352.00, "formula": "352 + ((cc - 2000) * 0.64)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Sarawak", "min_cc": 2501, "max_cc": 3000, "base_rate": 672.00, "formula": "672 + ((cc - 2500) * 1.28)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Sarawak", "min_cc": 3001, "max_cc": None, "base_rate": 1312.00, "formula": "1312 + ((cc - 3000) * 1.28)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Sarawak", "min_cc": 1, "max_cc": 1000, "base_rate": 20.00, "formula": None, "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Sarawak", "min_cc": 1001, "max_cc": 1200, "base_rate": 68.00, "formula": None, "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Sarawak", "min_cc": 1201, "max_cc": 1400, "base_rate": 80.00, "formula": None, "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Sarawak", "min_cc": 1401, "max_cc": 1600, "base_rate": 96.00, "formula": None, "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Sarawak", "min_cc": 1601, "max_cc": 1800, "base_rate": 240.00, "formula": "240 + ((cc - 1600) * 0.24)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Sarawak", "min_cc": 1801, "max_cc": 2000, "base_rate": 288.00, "formula": "288 + ((cc - 1800) * 0.32)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Sarawak", "min_cc": 2001, "max_cc": 2500, "base_rate": 352.00, "formula": "352 + ((cc - 2000) * 0.64)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Sarawak", "min_cc": 2501, "max_cc": 3000, "base_rate": 672.00, "formula": "672 + ((cc - 2500) * 1.28)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Sarawak", "min_cc": 3001, "max_cc": None, "base_rate": 1312.00, "formula": "1312 + ((cc - 3000) * 1.28)", "source": "JPJ Schedule (Non-Saloon East MY)"},
+
     # Motorcycle Private & Company (Sarawak)
     {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "Sarawak", "min_cc": 1, "max_cc": 150, "base_rate": 2.00, "formula": None, "source": "JPJ Schedule (East Malaysia)"},
     {"vehicle_type": "Motorcycle", "owner_type": "Individual", "jurisdiction": "Sarawak", "min_cc": 151, "max_cc": 200, "base_rate": 9.00, "formula": None, "source": "JPJ Schedule (East Malaysia)"},
@@ -680,6 +851,27 @@ STANDARD_ROAD_TAX_RULES = [
     {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "Labuan", "min_cc": 2001, "max_cc": 2500, "base_rate": 380.00, "formula": "380 + ((cc - 2000) * 1.50)", "source": "JPJ Labuan Duty-Free Concession"},
     {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "Labuan", "min_cc": 2501, "max_cc": 3000, "base_rate": 1130.00, "formula": "1130 + ((cc - 2500) * 3.75)", "source": "JPJ Labuan Duty-Free Concession"},
     {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "Labuan", "min_cc": 3001, "max_cc": None, "base_rate": 3005.00, "formula": "3005 + ((cc - 3000) * 6.75)", "source": "JPJ Labuan Duty-Free Concession"},
+
+    # Non-Saloon Car (SUV / MPV / 4x4 / Pickup / Van - Labuan)
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Labuan", "min_cc": 1, "max_cc": 1000, "base_rate": 10.00, "formula": None, "source": "JPJ Labuan Duty-Free Concession"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Labuan", "min_cc": 1001, "max_cc": 1200, "base_rate": 42.50, "formula": None, "source": "JPJ Labuan Duty-Free Concession"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Labuan", "min_cc": 1201, "max_cc": 1400, "base_rate": 50.00, "formula": None, "source": "JPJ Labuan Duty-Free Concession"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Labuan", "min_cc": 1401, "max_cc": 1600, "base_rate": 60.00, "formula": None, "source": "JPJ Labuan Duty-Free Concession"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Labuan", "min_cc": 1601, "max_cc": 1800, "base_rate": 150.00, "formula": "150 + ((cc - 1600) * 0.15)", "source": "JPJ Labuan Duty-Free Concession"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Labuan", "min_cc": 1801, "max_cc": 2000, "base_rate": 180.00, "formula": "180 + ((cc - 1800) * 0.20)", "source": "JPJ Labuan Duty-Free Concession"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Labuan", "min_cc": 2001, "max_cc": 2500, "base_rate": 220.00, "formula": "220 + ((cc - 2000) * 0.40)", "source": "JPJ Labuan Duty-Free Concession"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Labuan", "min_cc": 2501, "max_cc": 3000, "base_rate": 420.00, "formula": "420 + ((cc - 2500) * 0.80)", "source": "JPJ Labuan Duty-Free Concession"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Individual", "jurisdiction": "Labuan", "min_cc": 3001, "max_cc": None, "base_rate": 820.00, "formula": "820 + ((cc - 3000) * 0.80)", "source": "JPJ Labuan Duty-Free Concession"},
+
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Labuan", "min_cc": 1, "max_cc": 1000, "base_rate": 10.00, "formula": None, "source": "JPJ Labuan Duty-Free Concession"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Labuan", "min_cc": 1001, "max_cc": 1200, "base_rate": 42.50, "formula": None, "source": "JPJ Labuan Duty-Free Concession"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Labuan", "min_cc": 1201, "max_cc": 1400, "base_rate": 50.00, "formula": None, "source": "JPJ Labuan Duty-Free Concession"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Labuan", "min_cc": 1401, "max_cc": 1600, "base_rate": 60.00, "formula": None, "source": "JPJ Labuan Duty-Free Concession"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Labuan", "min_cc": 1601, "max_cc": 1800, "base_rate": 150.00, "formula": "150 + ((cc - 1600) * 0.15)", "source": "JPJ Labuan Duty-Free Concession"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Labuan", "min_cc": 1801, "max_cc": 2000, "base_rate": 180.00, "formula": "180 + ((cc - 1800) * 0.20)", "source": "JPJ Labuan Duty-Free Concession"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Labuan", "min_cc": 2001, "max_cc": 2500, "base_rate": 220.00, "formula": "220 + ((cc - 2000) * 0.40)", "source": "JPJ Labuan Duty-Free Concession"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Labuan", "min_cc": 2501, "max_cc": 3000, "base_rate": 420.00, "formula": "420 + ((cc - 2500) * 0.80)", "source": "JPJ Labuan Duty-Free Concession"},
+    {"vehicle_type": "NonSaloonCar", "owner_type": "Company", "jurisdiction": "Labuan", "min_cc": 3001, "max_cc": None, "base_rate": 820.00, "formula": "820 + ((cc - 3000) * 0.80)", "source": "JPJ Labuan Duty-Free Concession"},
 
     # ── 5. Commercial Lorry / Goods Vehicles (All Jurisdictions) ──
     {"vehicle_type": "Lorry", "owner_type": "Company", "jurisdiction": "West Malaysia", "min_cc": 1, "max_cc": 1600, "base_rate": 120.00, "formula": None, "source": "JPJ Commercial Schedule"},

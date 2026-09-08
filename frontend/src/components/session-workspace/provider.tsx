@@ -34,8 +34,13 @@ function _recalcAdjustedTotal(snapshot: WorkspaceSnapshot, nextExtras: Workspace
   if (rt === 0) {
     const ccRaw = snapshot.fields?.engine_cc;
     const ccVal = typeof ccRaw === "object" && ccRaw !== null ? (ccRaw as Record<string, unknown>).value : ccRaw;
-    const parsedCC = ccVal ? parseInt(String(ccVal).replace(/[^0-9]/g, ""), 10) : 0;
+    const cleanCC = ccVal ? parseFloat(String(ccVal).replace(/[^0-9.]/g, "")) : 0;
+    const parsedCC = cleanCC > 0 && cleanCC <= 7000 ? Math.round(cleanCC) : 0;
     if (parsedCC > 0) {
+      const vRaw = snapshot.fields?.vehicle_type;
+      const vVal = typeof vRaw === "object" && vRaw !== null ? (vRaw as any).value : vRaw;
+      const vtype = String(vVal ?? "").toUpperCase();
+
       const carRaw = snapshot.fields?.car_model || snapshot.fields?.vehicle_model;
       const carVal = typeof carRaw === "object" && carRaw !== null ? (carRaw as any).value : carRaw;
       const carModel = String(carVal ?? "").toUpperCase();
@@ -44,8 +49,8 @@ function _recalcAdjustedTotal(snapshot: WorkspaceSnapshot, nextExtras: Workspace
       const custVal = typeof custRaw === "object" && custRaw !== null ? (custRaw as any).value : custRaw;
       const custName = String(custVal ?? "").toUpperCase();
 
-      const isCompany = /(SDN\s*BHD|BHD|ENTERPRISE|TRADING|LTD|LLC|PLT|COMPANY|ENT\.)/i.test(custName);
-      const isNonSaloon = /(RANGER|HILUX|TRITON|D-MAX|NAVARA|BT-50|COLORADO|CR-V|HR-V|BR-V|X70|X50|X90|ARUZ|FORTUNER|CX-3|CX-5|CX-8|CX-9|SPORTAGE|TUCSON|SANTA FE|HARRIER|CROSS|RUSH|PAJERO|OUTLANDER|MU-X|EVEREST|TIGUAN|MACAN|CAYENNE|DEFENDER|DISCOVERY|EVOQUE|GLC|GLE|X1|X3|X4|X5|X6|XC40|XC60|XC90|ALZA|INNOVA|EXORA|VELLFIRE|ALPHARD|SERENA|ESTIMA|AVANZA|VELOZ|HIACE|URVAN|VAN|LORRY|TRUCK)/i.test(carModel);
+      const isNonSaloon = vtype.includes("NONSALOON") || /(RANGER|HILUX|TRITON|D-MAX|NAVARA|BT-50|COLORADO|CR-V|HR-V|BR-V|X70|X50|X90|ARUZ|FORTUNER|CX-3|CX-5|CX-8|CX-9|SPORTAGE|TUCSON|SANTA FE|HARRIER|CROSS|RUSH|PAJERO|OUTLANDER|MU-X|EVEREST|TIGUAN|MACAN|CAYENNE|DEFENDER|DISCOVERY|EVOQUE|GLC|GLE|X1|X3|X4|X5|X6|XC40|XC60|XC90|ALZA|INNOVA|EXORA|VELLFIRE|ALPHARD|SERENA|ESTIMA|AVANZA|VELOZ|HIACE|URVAN|VAN|LORRY|TRUCK|MPV|SUV|4X4|4WD|PICKUP)/i.test(carModel);
+      const isCompany = vtype.includes("COMPANY") || /(SDN\s*BHD|BHD|ENTERPRISE|TRADING|LTD|LLC|PLT|COMPANY|ENT\.|CORP|HOLDINGS|CO\.)/i.test(custName);
 
       if (isNonSaloon) {
         if (parsedCC <= 1000) rt = 20;

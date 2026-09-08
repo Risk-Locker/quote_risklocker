@@ -1181,13 +1181,16 @@ export function CanvasElementView({
           let roadtax = variableValues?.roadtax || "";
           if (!roadtax || roadtax === "0" || roadtax === "0.00") {
             const ccStr = variableValues?.engine_cc || "";
-            const parsedCC = ccStr ? parseInt(String(ccStr).replace(/[^0-9]/g, ""), 10) : 0;
+            const cleanCC = ccStr ? parseFloat(String(ccStr).replace(/[^0-9.]/g, "")) : 0;
+            const parsedCC = cleanCC > 0 && cleanCC <= 7000 ? Math.round(cleanCC) : 0;
             if (parsedCC > 0) {
               const carModel = String(variableValues?.car_model || variableValues?.vehicle_model || "").toUpperCase();
               const custName = String(variableValues?.customer_name || variableValues?.insured_name || "").toUpperCase();
               
-              const isCompany = /(SDN\s*BHD|BHD|ENTERPRISE|TRADING|LTD|LLC|PLT|COMPANY|ENT\.)/i.test(custName);
-              const isNonSaloon = /(RANGER|HILUX|TRITON|D-MAX|NAVARA|BT-50|COLORADO|CR-V|HR-V|BR-V|X70|X50|X90|ARUZ|FORTUNER|CX-3|CX-5|CX-8|CX-9|SPORTAGE|TUCSON|SANTA FE|HARRIER|CROSS|RUSH|PAJERO|OUTLANDER|MU-X|EVEREST|TIGUAN|MACAN|CAYENNE|DEFENDER|DISCOVERY|EVOQUE|GLC|GLE|X1|X3|X4|X5|X6|XC40|XC60|XC90|ALZA|INNOVA|EXORA|VELLFIRE|ALPHARD|SERENA|ESTIMA|AVANZA|VELOZ|HIACE|URVAN|VAN|LORRY|TRUCK)/i.test(carModel);
+              const vType = String(variableValues?.vehicle_type || "").toUpperCase();
+              const cType = String(variableValues?.client_type || "").toUpperCase();
+              const isNonSaloon = vType.includes("NONSALOON") || /(RANGER|HILUX|TRITON|D-MAX|NAVARA|BT-50|COLORADO|CR-V|HR-V|BR-V|X70|X50|X90|ARUZ|FORTUNER|CX-3|CX-5|CX-8|CX-9|SPORTAGE|TUCSON|SANTA FE|HARRIER|CROSS|RUSH|PAJERO|OUTLANDER|MU-X|EVEREST|TIGUAN|MACAN|CAYENNE|DEFENDER|DISCOVERY|EVOQUE|GLC|GLE|X1|X3|X4|X5|X6|XC40|XC60|XC90|ALZA|INNOVA|EXORA|VELLFIRE|ALPHARD|SERENA|ESTIMA|AVANZA|VELOZ|HIACE|URVAN|VAN|LORRY|TRUCK|MPV|SUV|4X4|4WD|PICKUP)/i.test(carModel);
+              const isCompany = cType.includes("COMPANY") || cType.includes("CORP") || vType.includes("COMPANY") || /(SDN\s*BHD|BHD|ENTERPRISE|TRADING|LTD|LLC|PLT|COMPANY|ENT\.|CORP|HOLDINGS|CO\.)/i.test(custName);
 
               if (isNonSaloon) {
                 if (parsedCC <= 1000) roadtax = "20.00";
@@ -1209,6 +1212,16 @@ export function CanvasElementView({
                 else if (parsedCC <= 2500) roadtax = (760 + (parsedCC - 2000) * 3.00).toFixed(2);
                 else if (parsedCC <= 3000) roadtax = (2260 + (parsedCC - 2500) * 7.50).toFixed(2);
                 else roadtax = (6010 + (parsedCC - 3000) * 13.50).toFixed(2);
+              } else if (isNonSaloon) {
+                if (parsedCC <= 1000) roadtax = "20.00";
+                else if (parsedCC <= 1200) roadtax = "85.00";
+                else if (parsedCC <= 1400) roadtax = "100.00";
+                else if (parsedCC <= 1600) roadtax = "120.00";
+                else if (parsedCC <= 1800) roadtax = (300 + (parsedCC - 1600) * 0.30).toFixed(2);
+                else if (parsedCC <= 2000) roadtax = (360 + (parsedCC - 1800) * 0.40).toFixed(2);
+                else if (parsedCC <= 2500) roadtax = (440 + (parsedCC - 2000) * 0.80).toFixed(2);
+                else if (parsedCC <= 3000) roadtax = (840 + (parsedCC - 2500) * 1.60).toFixed(2);
+                else roadtax = (1640 + (parsedCC - 3000) * 1.60).toFixed(2);
               } else {
                 if (parsedCC <= 1000) roadtax = "20.00";
                 else if (parsedCC <= 1200) roadtax = "55.00";
@@ -1217,7 +1230,7 @@ export function CanvasElementView({
                 else if (parsedCC <= 1800) roadtax = (200 + (parsedCC - 1600) * 0.40).toFixed(2);
                 else if (parsedCC <= 2000) roadtax = (280 + (parsedCC - 1800) * 0.50).toFixed(2);
                 else if (parsedCC <= 2500) roadtax = (380 + (parsedCC - 2000) * 1.00).toFixed(2);
-                else if (parsedCC <= 3000) roadtax = (880 + (parsedCC - 2500) * 2.50).toFixed(2);
+                else if (parsedCC <= 3000) roadtax = (840 + (parsedCC - 2500) * 2.50).toFixed(2);
                 else roadtax = (2130 + (parsedCC - 3000) * 4.50).toFixed(2);
               }
             }

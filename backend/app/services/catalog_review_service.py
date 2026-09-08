@@ -113,6 +113,21 @@ def _resolve_vehicle_category(db, text_val: str, draft_fields: dict | None = Non
 
 
 def _resolve_segment(db, draft_fields: dict) -> str | None:
+    from app.extraction.entity_classifier import is_corporate_name
+
+    cust_raw = (draft_fields or {}).get("customer_name")
+    cust_val = cust_raw.get("value") if isinstance(cust_raw, dict) else cust_raw
+    client_type_raw = (draft_fields or {}).get("client_type")
+    client_type_val = client_type_raw.get("value") if isinstance(client_type_raw, dict) else client_type_raw
+
+    segments = _rows(db, Segment)
+
+    # 1. High priority: Check if customer is a corporate entity or classified as Company
+    if is_corporate_name(str(cust_val or "")) or str(client_type_val or "").lower() == "company":
+        for seg in segments:
+            if seg.segment_key in {"commercial", "corporate"}:
+                return seg.id
+
     combined = []
     for k in ("policy_type", "vehicle_type", "vehicle_category", "product_name", "customer_name"):
         raw = (draft_fields or {}).get(k)
@@ -120,15 +135,17 @@ def _resolve_segment(db, draft_fields: dict) -> str | None:
         if v:
             combined.append(str(v))
     normalized = _norm(" ".join(combined))
-    segments = _rows(db, Segment)
-    if any(w in normalized for w in ("private", "persendirian", "individual", "personal")):
-        for seg in segments:
-            if seg.segment_key in {"private", "individual"}:
-                return seg.id
+
     if any(w in normalized for w in ("commercial", "perdagangan", "company car", "corporate", "fleet")):
         for seg in segments:
             if seg.segment_key in {"commercial", "corporate"}:
                 return seg.id
+
+    if any(w in normalized for w in ("private", "persendirian", "individual", "personal")):
+        for seg in segments:
+            if seg.segment_key in {"private", "individual"}:
+                return seg.id
+
     return None
 
 

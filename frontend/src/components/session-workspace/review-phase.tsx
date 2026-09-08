@@ -203,10 +203,23 @@ function formatCoverPeriod(raw: string | null | undefined): string {
 }
 
 function computeMalaysianRoadTax(cc: number, vehicleType: string = "Car", ownerType: string = "Individual"): number {
-  if (!cc || cc <= 0) return 0;
+  if (!cc || cc <= 0 || cc > 7000) return 0;
   const normType = (vehicleType || "Car").toLowerCase();
   const normOwner = (ownerType || "Individual").toLowerCase();
   const isCompany = normOwner.includes("company") || normOwner.includes("corp") || normType.includes("company");
+
+  // Non-Saloon Car (SUV / MPV / 4x4 / Pickup) - Identical for Private & Company
+  if (normType.includes("nonsaloon") || normType.includes("non-saloon") || normType.includes("suv") || normType.includes("mpv")) {
+    if (cc <= 1000) return 20;
+    if (cc <= 1200) return 85;
+    if (cc <= 1400) return 100;
+    if (cc <= 1600) return 120;
+    if (cc <= 1800) return 300 + ((cc - 1600) * 0.30);
+    if (cc <= 2000) return 360 + ((cc - 1800) * 0.40);
+    if (cc <= 2500) return 440 + ((cc - 2000) * 0.80);
+    if (cc <= 3000) return 840 + ((cc - 2500) * 1.60);
+    return 1640 + ((cc - 3000) * 1.60);
+  }
 
   if (normType.includes("motor") || normType.includes("bike")) {
     if (cc <= 150) return 2;
@@ -245,6 +258,14 @@ function computeMalaysianRoadTax(cc: number, vehicleType: string = "Car", ownerT
   if (cc <= 2500) return 380 + ((cc - 2000) * 1.00);
   if (cc <= 3000) return 840 + ((cc - 2500) * 2.50);
   return 2130 + ((cc - 3000) * 4.50);
+}
+
+function isNonSaloonCarModel(modelStr: string | null | undefined): boolean {
+  if (!modelStr) return false;
+  const s = modelStr.toUpperCase();
+  if (/\b(ALZA|EXORA|INNOVA|VELLFIRE|ALPHARD|SERENA|AVANZA|VELOZ|SIENTA|CARNIVAL|STARIA|VOXY|NOAH|ESQUIRE|ESTIMA|WISH|STREAM|FREED|BIANTE|ERTIGA|LIVINA|GRAND LIVINA|LODGY|SPACIO|TOURAN|SHARAN|ODYSSEY|CITAN|TRAVET|HIACE|URVAN|VAN|MPV)\b/i.test(s)) return true;
+  if (/\b(ATIVA|ARUZ|X50|X70|X90|CR-V|CRV|HR-V|HRV|BR-V|BRV|WR-V|WRV|ZR-V|ZRV|FORTUNER|HARRIER|COROLLA CROSS|CROSS|CX-3|CX-5|CX-8|CX-30|CX-60|CX-90|TUCSON|SANTA FE|CRETA|KONA|SPORTAGE|SORENTO|SELTOS|FORESTER|XV|OUTBACK|CROSSTREK|RAV4|KICKS|X-TRAIL|XTRAIL|TIGUAN|TOUAREG|Q3|Q5|Q7|GLA|GLB|GLC|GLE|GLS|X1|X3|X4|X5|X6|X7|MACAN|CAYENNE|URUS|DEFENDER|DISCOVERY|RANGE ROVER|EVOQUE|VELAR|CHEROKEE|WRANGLER|COMPASS|RENEGADE|DMAX|D-MAX|HILUX|RANGER|TRITON|NAVARA|BT-50|BT50|GLADIATOR|AMAROK|COLORADO|4X4|4WD|PICKUP|SUV)\b/i.test(s)) return true;
+  return false;
 }
 
 function inferCCFromCarModel(modelStr: string | null | undefined): number | null {
@@ -1004,17 +1025,40 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       values.excess_amount = "0.00";
     }
 
-    // Auto-compute road tax if missing or 0
-    const currentRT = parseFloat(String(values.roadtax || "").replace(/[^0-9.]/g, "")) || 0;
-    if (currentRT === 0) {
-      const ccStr = values.engine_cc || (workspace.fields?.engine_cc as WorkspaceField | undefined)?.value || "";
-      const parsedCC = ccStr ? parseInt(String(ccStr).replace(/[^0-9]/g, ""), 10) : 0;
-      if (parsedCC > 0) {
-        const vtype = values.vehicle_type || (workspace.fields?.vehicle_type as WorkspaceField | undefined)?.value || "Car";
-        const isCompany = String(vtype).toLowerCase().includes("company") || String(vtype).toLowerCase().includes("corp");
-        const baseType = String(vtype).toLowerCase().includes("motor") ? "Motorcycle" : (String(vtype).toLowerCase().includes("lorry") || String(vtype).toLowerCase().includes("other")) ? "Lorry" : "Car";
-        const computedRT = computeMalaysianRoadTax(parsedCC, baseType, isCompany ? "Company" : "Individual");
-        if (computedRT > 0) {
+    // Auto-compute road tax if missing, 0, or corporate mismatch
+    const custName = values.insured_name || values.customer_name || (workspace.fields?.insured_name as WorkspaceField | undefined)?.value || "";
+    const clientType = values.client_type || (workspace.fields?.client_type as WorkspaceField | undefined)?.value || "";
+    const isCorpName = /(SDN\s*BHD|BHD|ENTERPRISE|TRADING|LTD|LLC|PLT|COMPANY|ENT\.|CORP|HOLDINGS|CO\.)/i.test(String(custName));
+    const isCorp = String(clientType).toLowerCase().includes("company") || String(clientType).toLowerCase().includes("corp") || isCorpName;
+
+    const carModel = values.car_model || (workspace.fields?.car_model as WorkspaceField | undefined)?.value || "";
+    let vtype = values.vehicle_type || (workspace.fields?.vehicle_type as WorkspaceField | undefined)?.value || "Car";
+
+    // Non-Saloon Detection (SUV / MPV / 4x4 / Pickup)
+    if (isNonSaloonCarModel(carModel) || vtype.toLowerCase().includes("nonsaloon") || vtype.toLowerCase().includes("non-saloon") || vtype.toLowerCase().includes("suv") || vtype.toLowerCase().includes("mpv")) {
+      vtype = "NonSaloonCar";
+      values.vehicle_type = "NonSaloonCar";
+    } else if (isCorp && (vtype === "Car" || vtype.toLowerCase().includes("saloon"))) {
+      vtype = "CompanyCar";
+      values.vehicle_type = "CompanyCar";
+    } else if (isCorp && vtype === "Motorcycle") {
+      vtype = "CompanyMotorcycle";
+      values.vehicle_type = "CompanyMotorcycle";
+    }
+    if (isCorp && !values.client_type) {
+      values.client_type = "Company";
+    }
+
+    const ccStr = values.engine_cc || (workspace.fields?.engine_cc as WorkspaceField | undefined)?.value || "";
+    const rawParsed = ccStr ? parseFloat(String(ccStr).replace(/[^0-9.]/g, "")) : inferCCFromCarModel(carModel);
+    const parsedCC = rawParsed && rawParsed > 0 && rawParsed <= 7000 ? Math.round(rawParsed) : 0;
+    if (parsedCC > 0) {
+      const isCompany = isCorp || String(vtype).toLowerCase().includes("company") || String(vtype).toLowerCase().includes("corp");
+      const baseType = vtype === "NonSaloonCar" ? "NonSaloonCar" : String(vtype).toLowerCase().includes("motor") ? "Motorcycle" : (String(vtype).toLowerCase().includes("lorry") || String(vtype).toLowerCase().includes("other")) ? "Lorry" : "Car";
+      const computedRT = computeMalaysianRoadTax(parsedCC, baseType, isCompany ? "Company" : "Individual");
+      if (computedRT > 0) {
+        const currentRT = parseFloat(String(values.roadtax || "").replace(/[^0-9.]/g, "")) || 0;
+        if (currentRT === 0 || currentRT > 10000 || (isCompany && currentRT < computedRT) || vtype === "NonSaloonCar") {
           values.roadtax = computedRT.toFixed(2);
         }
       }
@@ -1399,16 +1443,33 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     }
 
     // Road tax aliases
+    const custName = formValues["insured_name"] || formValues["customer_name"] || fields["insured_name"] || fields["customer_name"] || "";
+    const clientType = formValues["client_type"] || fields["client_type"] || "";
+    const isCorpName = /(SDN\s*BHD|BHD|ENTERPRISE|TRADING|LTD|LLC|PLT|COMPANY|ENT\.|CORP|HOLDINGS|CO\.)/i.test(String(custName));
+    const isCorp = String(clientType).toLowerCase().includes("company") || String(clientType).toLowerCase().includes("corp") || isCorpName;
+
+    const carModel = formValues["car_model"] || fields["car_model"] || "";
     let rtax = formValues["roadtax"] || fields["roadtax"] || formValues["road_tax_amount"] || fields["road_tax_amount"] || "";
-    if (!rtax || rtax === "0" || rtax === "0.00") {
-      const ccStr = formValues["engine_cc"] || fields["engine_cc"] || "";
-      const parsedCC = ccStr ? parseInt(String(ccStr).replace(/[^0-9]/g, ""), 10) : 0;
-      if (parsedCC > 0) {
-        const vtype = formValues["vehicle_type"] || fields["vehicle_type"] || "Car";
-        const isCompany = String(vtype).toLowerCase().includes("company") || String(vtype).toLowerCase().includes("corp");
-        const baseType = String(vtype).toLowerCase().includes("motor") ? "Motorcycle" : (String(vtype).toLowerCase().includes("lorry") || String(vtype).toLowerCase().includes("other")) ? "Lorry" : "Car";
-        const computedRT = computeMalaysianRoadTax(parsedCC, baseType, isCompany ? "Company" : "Individual");
-        if (computedRT > 0) {
+    const ccStr = formValues["engine_cc"] || fields["engine_cc"] || "";
+    const rawParsed = ccStr ? parseFloat(String(ccStr).replace(/[^0-9.]/g, "")) : inferCCFromCarModel(carModel);
+    const parsedCC = rawParsed && rawParsed > 0 && rawParsed <= 7000 ? Math.round(rawParsed) : 0;
+    if (parsedCC > 0) {
+      let vtype = formValues["vehicle_type"] || fields["vehicle_type"] || "Car";
+      if (isNonSaloonCarModel(carModel) || vtype.toLowerCase().includes("nonsaloon") || vtype.toLowerCase().includes("non-saloon") || vtype.toLowerCase().includes("suv") || vtype.toLowerCase().includes("mpv")) {
+        vtype = "NonSaloonCar";
+        formValues["vehicle_type"] = "NonSaloonCar";
+        fields["vehicle_type"] = "NonSaloonCar";
+      } else if (isCorp && (vtype === "Car" || vtype.toLowerCase().includes("saloon"))) {
+        vtype = "CompanyCar";
+        formValues["vehicle_type"] = "CompanyCar";
+        fields["vehicle_type"] = "CompanyCar";
+      }
+      const isCompany = isCorp || String(vtype).toLowerCase().includes("company") || String(vtype).toLowerCase().includes("corp");
+      const baseType = vtype === "NonSaloonCar" ? "NonSaloonCar" : String(vtype).toLowerCase().includes("motor") ? "Motorcycle" : (String(vtype).toLowerCase().includes("lorry") || String(vtype).toLowerCase().includes("other")) ? "Lorry" : "Car";
+      const computedRT = computeMalaysianRoadTax(parsedCC, baseType, isCompany ? "Company" : "Individual");
+      if (computedRT > 0) {
+        const currentRT = parseFloat(String(rtax || "").replace(/[^0-9.]/g, "")) || 0;
+        if (currentRT === 0 || currentRT > 10000 || (isCompany && currentRT < computedRT) || vtype === "NonSaloonCar") {
           rtax = computedRT.toFixed(2);
         }
       }
@@ -2510,27 +2571,36 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                           {field.kind === "vehicle_type" ? (
                             <Select
                               value={formValues[field.name] || "Car"}
-                              onChange={(event) => {
-                                const newVtype = event.target.value;
-                                setFormValues((values) => ({ ...values, [field.name]: newVtype }));
-                                commitFieldDirectly(field.name, newVtype);
-                                const currentCCStr = formValues["engine_cc"] || (workspace.fields["engine_cc"] as WorkspaceField | undefined)?.value;
-                                const parsedCC = currentCCStr ? parseFloat(currentCCStr.replace(/[^0-9.]/g, "")) : inferCCFromCarModel(formValues["car_model"] || (workspace.fields["car_model"] as WorkspaceField | undefined)?.value);
-                                if (parsedCC && parsedCC > 0) {
+                                onChange={(event) => {
+                                  const newVtype = event.target.value;
                                   const isCompany = newVtype.toLowerCase().includes("company") || newVtype.toLowerCase().includes("corp");
-                                  const baseType = newVtype.toLowerCase().includes("motor") ? "Motorcycle" : (newVtype.toLowerCase().includes("lorry") || newVtype.toLowerCase().includes("other")) ? "Lorry" : "Car";
-                                  const computedRT = computeMalaysianRoadTax(parsedCC, baseType, isCompany ? "Company" : "Individual");
-                                  if (computedRT > 0) {
-                                    const rtFormatted = computedRT.toFixed(2);
-                                    setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
-                                    commitFieldDirectly("roadtax", rtFormatted);
+                                  setFormValues((values) => ({
+                                    ...values,
+                                    [field.name]: newVtype,
+                                    ...(isCompany ? { client_type: "Company" } : {}),
+                                  }));
+                                  commitFieldDirectly(field.name, newVtype);
+                                  if (isCompany) {
+                                    commitFieldDirectly("client_type", "Company");
                                   }
-                                }
-                              }}
+                                  const currentCCStr = formValues["engine_cc"] || (workspace.fields["engine_cc"] as WorkspaceField | undefined)?.value;
+                                  const rawParsed = currentCCStr ? parseFloat(String(currentCCStr).replace(/[^0-9.]/g, "")) : inferCCFromCarModel(formValues["car_model"] || (workspace.fields["car_model"] as WorkspaceField | undefined)?.value);
+                                  const parsedCC = rawParsed && rawParsed > 0 && rawParsed <= 7000 ? Math.round(rawParsed) : 0;
+                                  if (parsedCC > 0) {
+                                    const baseType = newVtype === "NonSaloonCar" ? "NonSaloonCar" : newVtype.toLowerCase().includes("motor") ? "Motorcycle" : (newVtype.toLowerCase().includes("lorry") || newVtype.toLowerCase().includes("other")) ? "Lorry" : "Car";
+                                    const computedRT = computeMalaysianRoadTax(parsedCC, baseType, isCompany ? "Company" : "Individual");
+                                    if (computedRT > 0) {
+                                      const rtFormatted = computedRT.toFixed(2);
+                                      setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
+                                      commitFieldDirectly("roadtax", rtFormatted);
+                                    }
+                                  }
+                                }}
                               className="text-xs font-medium"
                             >
                               <option value="Car">Car (Private Saloon)</option>
                               <option value="CompanyCar">Car (Company / Corporate Saloon)</option>
+                              <option value="NonSaloonCar">Non-Saloon (SUV / MPV / 4x4 / Pickup - Private & Company)</option>
                               <option value="Motorcycle">Motorcycle (Private)</option>
                               <option value="CompanyMotorcycle">Motorcycle (Corporate)</option>
                               <option value="Lorry">Lorry / Commercial</option>
@@ -2565,17 +2635,35 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                 onChange={(event) => setFormValues((values) => ({ ...values, [field.name]: event.target.value }))}
                                 onBlur={() => {
                                   commitField(field);
-                                  if (field.name === "engine_cc" || field.name === "car_model") {
+                                  if (field.name === "engine_cc" || field.name === "car_model" || field.name === "insured_name" || field.name === "customer_name" || field.name === "client_type") {
+                                    const custName = formValues["insured_name"] || formValues["customer_name"] || "";
+                                    const isCorp = /(SDN\s*BHD|BHD|ENTERPRISE|TRADING|LTD|LLC|PLT|COMPANY|ENT\.|CORP|HOLDINGS|CO\.)/i.test(String(custName)) || String(formValues["client_type"] || "").toLowerCase().includes("company");
+                                    const carModel = formValues["car_model"] || "";
+                                    let vtype = formValues["vehicle_type"] || "Car";
+
+                                    if (isNonSaloonCarModel(carModel) || vtype === "NonSaloonCar") {
+                                      vtype = "NonSaloonCar";
+                                      setFormValues((v) => ({ ...v, vehicle_type: "NonSaloonCar" }));
+                                      commitFieldDirectly("vehicle_type", "NonSaloonCar");
+                                    } else if (isCorp && (vtype === "Car" || vtype.toLowerCase().includes("saloon"))) {
+                                      vtype = "CompanyCar";
+                                      setFormValues((v) => ({ ...v, vehicle_type: "CompanyCar", client_type: "Company" }));
+                                      commitFieldDirectly("vehicle_type", "CompanyCar");
+                                      commitFieldDirectly("client_type", "Company");
+                                    } else if (isCorp && !formValues["client_type"]) {
+                                      setFormValues((v) => ({ ...v, client_type: "Company" }));
+                                      commitFieldDirectly("client_type", "Company");
+                                    }
                                     const currentCCStr = formValues["engine_cc"] || (field.name === "car_model" ? inferCCFromCarModel(formValues["car_model"])?.toString() : null);
-                                    const parsedCC = currentCCStr ? parseFloat(currentCCStr.replace(/[^0-9.]/g, "")) : null;
-                                    if (parsedCC && parsedCC > 0) {
+                                    const rawParsed = currentCCStr ? parseFloat(String(currentCCStr).replace(/[^0-9.]/g, "")) : null;
+                                    const parsedCC = rawParsed && rawParsed > 0 && rawParsed <= 7000 ? Math.round(rawParsed) : 0;
+                                    if (parsedCC > 0) {
                                       if (!formValues["engine_cc"]) {
                                         setFormValues((values) => ({ ...values, engine_cc: `${parsedCC} CC` }));
                                         commitFieldDirectly("engine_cc", `${parsedCC} CC`);
                                       }
-                                      const vtype = formValues["vehicle_type"] || "Car";
-                                      const isCompany = vtype.toLowerCase().includes("company") || vtype.toLowerCase().includes("corp");
-                                      const baseType = vtype.toLowerCase().includes("motor") ? "Motorcycle" : (vtype.toLowerCase().includes("lorry") || vtype.toLowerCase().includes("other")) ? "Lorry" : "Car";
+                                      const isCompany = isCorp || vtype.toLowerCase().includes("company") || vtype.toLowerCase().includes("corp");
+                                      const baseType = vtype === "NonSaloonCar" ? "NonSaloonCar" : vtype.toLowerCase().includes("motor") ? "Motorcycle" : (vtype.toLowerCase().includes("lorry") || vtype.toLowerCase().includes("other")) ? "Lorry" : "Car";
                                       const computedRT = computeMalaysianRoadTax(parsedCC, baseType, isCompany ? "Company" : "Individual");
                                       if (computedRT > 0) {
                                         const rtFormatted = computedRT.toFixed(2);

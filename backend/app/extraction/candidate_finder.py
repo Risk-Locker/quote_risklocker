@@ -15,9 +15,13 @@ DRAFT_FIELDS = [
     "source_template_category",
     "product_name",
     "customer_name",
+    "client_type",
+    "ic_or_brn",
+    "representative_name",
     "issue_date",
     "valid_until",
     "vehicle_no",
+    "vehicle_type",
     "vehicle_class",
     "car_brand",
     "car_model",
@@ -99,7 +103,6 @@ DEFAULT_ALIASES = {
     "premium": ["total premium", "premium payable", "jumlah premium", "total contribution", "jumlah caruman", "net premium", "gross premium", "premium kasar", "premium"],
     "total_amount": ["total payable", "total amount", "amount payable", "gross amount", "jumlah bayaran", "total / jumlah"],
     "optional_cover_amount": ["total optional cover amount", "total optional cover", "extra benefit", "manfaat tambahan", "optional cover amount"],
-    "roadtax": ["road tax", "roadtax", "cukai jalan"],
     "service_fee": ["service fee", "runner fee", "runner charge", "upah runner"],
     "ncd_percent": ["ncd", "ncb", "no claim discount", "no claim bonus", "dtt", "diskaun tanpa tuntutan"],
     "windscreen": ["windscreen", "cermin hadapan"],
@@ -134,7 +137,7 @@ def _add(results: dict[str, list[CandidateValue]], field: str, value: str | None
     cleaned = re.sub(r"\s+", " ", value).strip(" :;.-_/\\")
     if not cleaned:
         return
-    if field in {"quotation_reference", "quotation_ref"}:
+    if field in {"quotation_reference", "quotation_ref", "roadtax", "road_tax"}:
         return
     if field == "customer_name":
         upper_c = cleaned.upper()
@@ -764,7 +767,7 @@ def find_candidates(
             _add(results, "vehicle_year", year, "pattern_year", 0.67, text, match.start(), match.end(), page_text)
 
     money_pattern = MONEY_RE
-    for label, field in [("total payable", "total_amount"), ("amount payable", "total_amount"), ("gross amount", "total_amount"), ("gross premium", "premium"), ("premium", "premium"), ("sum insured", "coverage_amount"), ("roadtax", "roadtax"), ("road tax", "roadtax"), ("service fee", "service_fee"), ("runner fee", "service_fee")]:
+    for label, field in [("total payable", "total_amount"), ("amount payable", "total_amount"), ("gross amount", "total_amount"), ("gross premium", "premium"), ("premium", "premium"), ("sum insured", "coverage_amount"), ("service fee", "service_fee"), ("runner fee", "service_fee")]:
         for match in re.finditer(rf"(?i){re.escape(label)}[^\dRM]{{0,25}}(?P<money>{money_pattern})", text):
             _add(results, field, match.group("money"), "label_money", 0.84, text, match.start(), match.end(), page_text)
 
