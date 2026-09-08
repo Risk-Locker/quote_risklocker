@@ -59,22 +59,13 @@ def format_money_amount(raw_price: dict | None) -> str:
 
 
 def _clean_extra_label(raw_label: str) -> str:
+    """Normalize common legal liability acronyms without altering curated titles."""
     label = (raw_label or "").strip()
     lower = label.lower()
-    if "windscreen" in lower and len(label) > 15:
-        return "Windscreen"
-    if "all driver" in lower and len(label) > 15:
-        return "All Drivers"
-    if "legal liability to passenger" in lower or "lltp" in lower:
+    if "legal liability to passenger" in lower or lower == "lltp":
         return "Legal Liability to Passengers (LLTP)"
-    if "legal liability of passenger" in lower or "llop" in lower:
+    if "legal liability of passenger" in lower or lower == "llop":
         return "Legal Liability of Passengers (LLOP)"
-    if ("cart" in lower or "assessed repair time" in lower) and len(label) > 10:
-        return "CART"
-    if "special peril" in lower and len(label) > 18:
-        return "Special Perils"
-    if "betterment" in lower and len(label) > 20:
-        return "Betterment Waiver"
     return label
 
 
@@ -103,7 +94,31 @@ def build_extras(selections: Iterable[Any], concepts: Iterable[Any], offerings: 
         elif disp_ovr.get("showCoverage") is False:
             show_cov = False
 
-        raw_label = str(getattr(sel, "label_override", None) or "").strip() or concept_labels.get(str(getattr(sel, "concept_id", None)), "Extra benefit")
+        concept_id_str = str(getattr(sel, "concept_id", None))
+        concept_title = concept_labels.get(concept_id_str)
+        offering_override = getattr(offering, "label_override", None)
+        sel_override = getattr(sel, "label_override", None)
+        evidence = getattr(sel, "evidence_snapshot", {}) or {}
+        if not isinstance(evidence, dict):
+            evidence = {}
+        is_manual_edit = bool(evidence.get("manually_edited") or getattr(sel, "item_kind", None) == "custom")
+
+        # Display Title Resolution Hierarchy:
+        # 1. Manual staff edit from Review Workspace (if staff explicitly edited this card)
+        # 2. Offering marketing override (if configured on the specific insurer offering)
+        # 3. Global Benefit Title from database concept (the curated max ~3 words title)
+        # 4. Explicit selection override or fallback default
+        if is_manual_edit and sel_override and str(sel_override).strip():
+            raw_label = str(sel_override).strip()
+        elif offering_override and str(offering_override).strip():
+            raw_label = str(offering_override).strip()
+        elif concept_title and str(concept_title).strip():
+            raw_label = str(concept_title).strip()
+        elif sel_override and str(sel_override).strip():
+            raw_label = str(sel_override).strip()
+        else:
+            raw_label = "Extra benefit"
+
         label = _clean_extra_label(raw_label)
         label = re.sub(r"(\bplan\s*\d+)\s*\(RM\s*[\d,.]+\)", r"\1", label, flags=re.I).strip()
         if not show_cov:

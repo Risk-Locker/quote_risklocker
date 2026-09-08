@@ -204,18 +204,7 @@ def update_draft_fields(
         current["status"] = "ready"
         current["message"] = ""
         fields[field_name] = current
-        if original_value != new_value:
-            db.add(
-                CorrectionMemory(
-                    draft_id=draft.id,
-                    uploaded_file_id=draft.uploaded_file_id,
-                    field_name=field_name,
-                    original_value=original_value,
-                    corrected_value=new_value,
-                    insurance_company_id=draft.uploaded_file.insurance_company_id if draft.uploaded_file else None,
-                    corrected_by=user.id,
-                )
-            )
+        # // RL-DISABLED correction_memory — disabled 2026-09-08; restore when semantic provenance and context-aware learning are implemented
     draft.fields = fields
     flag_modified(draft, "fields")
     draft.status = RecordStatus.READY.value if all(field.get("status") != "check_needed" for field in fields.values()) else RecordStatus.CHECK_NEEDED.value

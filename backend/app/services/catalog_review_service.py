@@ -613,9 +613,12 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
         if not target_concept_id:
             line_norm = _norm(line.raw_label or line.normalized_label)
             if "windscreen" in line_norm or "wndscrn" in line_norm:
-                target_concept_id = concepts_by_key.get("windscreen").id if "windscreen" in concepts_by_key else None
+                c = concepts_by_key.get("windscreen")
+                target_concept_id = c.id if c else None
             elif "legal liability" in line_norm and "passenger" in line_norm:
-                target_concept_id = concepts_by_key.get("legal-liability-of-passengers").id if "legal-liability-of-passengers" in concepts_by_key else (concepts_by_key.get("legal-liability-to-passengers").id if "legal-liability-to-passengers" in concepts_by_key else None)
+                c1 = concepts_by_key.get("legal-liability-of-passengers")
+                c2 = concepts_by_key.get("legal-liability-to-passengers")
+                target_concept_id = c1.id if c1 else (c2.id if c2 else None)
             if not target_concept_id:
                 for norm_k, c_obj in concepts_by_norm.items():
                     if len(line_norm) >= 6 and (norm_k in line_norm or re.search(r"\b" + re.escape(line_norm) + r"\b", norm_k)):
@@ -702,9 +705,9 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     item_kind="catalog",
                     state="current",
                     cost_status=current.cost_status or "included",
-                    label_override=matched.label_override or line.raw_label,
+                    label_override=matched.label_override if (matched and matched.label_override) else None,
                     typed_value_override=extracted if not _value_matches(matched.typed_value, extracted) else None,
-                    evidence_snapshot={"source_line_id": line.id, "source": "extracted_upgrade", "is_detected": True},
+                    evidence_snapshot={"source_line_id": line.id, "source": "extracted_upgrade", "is_detected": True, "extracted_label": line.raw_label},
                     sort_order=int(matched.sort_order or 0),
                     selected_by=draft.owner_id,
                     price=price_dict,
@@ -761,9 +764,9 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     item_kind="catalog",
                     state="current",
                     cost_status="paid",
-                    label_override=matched.label_override or line.raw_label,
+                    label_override=matched.label_override if (matched and matched.label_override) else None,
                     typed_value_override=typed_val if (typed_val and not _value_matches(matched.typed_value, typed_val)) else None,
-                    evidence_snapshot={"source_line_id": line.id, "source": "extracted_addon", "is_detected": True, "coverage_limit": cov_limit, "premium_cost": premium_cost},
+                    evidence_snapshot={"source_line_id": line.id, "source": "extracted_addon", "is_detected": True, "extracted_label": line.raw_label, "coverage_limit": cov_limit, "premium_cost": premium_cost},
                     sort_order=int(matched.sort_order or 0),
                     selected_by=draft.owner_id,
                     price=price_dict,
@@ -791,9 +794,9 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     item_kind="custom",
                     state="current",
                     cost_status="paid" if premium_cost else "included",
-                    label_override=line.raw_label,
+                    label_override=line.raw_label if not target_concept_id else None,
                     typed_value_override=typed_val,
-                    evidence_snapshot={"source_line_id": line.id, "source": "extracted_custom", "is_detected": True, "coverage_limit": cov_limit, "premium_cost": premium_cost},
+                    evidence_snapshot={"source_line_id": line.id, "source": "extracted_custom", "is_detected": True, "extracted_label": line.raw_label, "coverage_limit": cov_limit, "premium_cost": premium_cost},
                     sort_order=50 + applied,
                     selected_by=draft.owner_id,
                     price=price_dict,

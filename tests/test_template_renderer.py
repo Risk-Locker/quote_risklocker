@@ -390,3 +390,46 @@ def test_balance_benefit_grid_three_section_expansion_and_no_overlap():
     assert "height: 1241px" in html or "height: 1271px" in html or "height: 12" in html
 
 
+def test_build_extras_uses_global_benefit_title_and_preserves_manual_override():
+    from app.rendering.render_context import build_extras
+    from unittest.mock import MagicMock
+
+    c1 = MagicMock(id="c1", label="Windscreen", concept_key="windscreen", display_overrides={})
+    c2 = MagicMock(id="c2", label="Special Perils", concept_key="special-perils", display_overrides={})
+
+    s1 = MagicMock(
+        id="s1",
+        state="current",
+        concept_id="c1",
+        catalog_offering_id="off1",
+        label_override=None,
+        price={"amount": 120.0, "currency": "MYR"},
+        cost_status="paid",
+        coverage_limit="800",
+        evidence_snapshot={"extracted_label": "Repair of Windscreen, Window and Sunroof"},
+        sort_order=1,
+    )
+    s2 = MagicMock(
+        id="s2",
+        state="current",
+        concept_id="c2",
+        catalog_offering_id="off2",
+        label_override="Special Perils (Full Storm)",
+        price={"amount": 40.0, "currency": "MYR"},
+        cost_status="paid",
+        coverage_limit="",
+        evidence_snapshot={"manually_edited": True},
+        sort_order=2,
+    )
+
+    off1 = MagicMock(id="off1", label_override=None, optional_price=None)
+    off2 = MagicMock(id="off2", label_override=None, optional_price=None)
+
+    extras = build_extras([s1, s2], concepts=[c1, c2], offerings=[off1, off2])
+    assert len(extras) == 2
+    assert extras[0]["label"] == "Windscreen"
+    assert extras[0]["coverage_limit"] == "(RM 800)"
+    assert extras[1]["label"] == "Special Perils (Full Storm)"
+
+
+

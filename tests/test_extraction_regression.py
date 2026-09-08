@@ -310,7 +310,8 @@ def test_rag_system_prompt_string_tiers_and_benefits_defensive():
     assert "Standard Pack (plans: Silver, Gold)" in prompt
     assert "Windscreen Damage" in prompt
     assert "AmAssurance" in prompt
-    assert "Field 'vehicle_year'" in prompt
+    # Blind correction_memory prompt injection decommissioned
+    assert "Field 'vehicle_year'" not in prompt
 
 
 

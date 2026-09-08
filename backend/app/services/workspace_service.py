@@ -1125,16 +1125,7 @@ def _apply_scalar_decision(db, draft: QuotationDraft, user, operation: dict) -> 
         "decided_by": user.id,
         "decided_at": _utcnow().isoformat(),
     }
-    if original != field.get("value"):
-        db.add(CorrectionMemory(
-            draft_id=draft.id,
-            uploaded_file_id=draft.uploaded_file_id,
-            field_name=field_name,
-            original_value=original,
-            corrected_value=field.get("value"),
-            insurance_company_id=draft.company_id,
-            corrected_by=user.id,
-        ))
+    # // RL-DISABLED correction_memory — disabled 2026-09-08; restore when semantic provenance and context-aware learning are implemented
     if decision == "edit" and field_name in PIN_SENSITIVE_FIELDS:
         _reconcile_catalog_pin(db, draft, changed_field=field_name)
     if field_name in TOTAL_SOURCES:

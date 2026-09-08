@@ -342,20 +342,7 @@ def build_rag_system_prompt(
             packs_list.append(f"- {pn}" + (f" (plans: {tier_names})" if tier_names else ""))
     packs_str = "\n".join(packs_list) if packs_list else ""
 
-    corrections_list = []
-    for corr in (correction_memory or []):
-        if not isinstance(corr, dict):
-            continue
-        field = corr.get("field") or ""
-        old = corr.get("original_value") or ""
-        new = corr.get("corrected_value") or ""
-        freq = corr.get("frequency") or 2
-        if field and new:
-            if field == "benefit_label":
-                corrections_list.append(f"- Benefit Label Correction: You previously extracted the benefit label as '{old}', but the human corrected it to '{new}' ({freq} times). You MUST output '{new}' instead of '{old}' when detecting this benefit.")
-            else:
-                corrections_list.append(f"- Field '{field}': Previously extracted as '{old}', corrected to '{new}' ({freq} times). Please apply this correction automatically if you encounter the same pattern.")
-    corrections_str = "\n".join(corrections_list) if corrections_list else "- No corrections found for this context."
+    # // RL-DISABLED correction_memory — disabled 2026-09-08; restore when semantic provenance and context-aware learning are implemented
 
     grounding_context = f"""
 ### LIVE DATABASE GROUNDING CONTEXT (always authoritative):
@@ -416,13 +403,11 @@ Extract accurate, grounded JSON data matching the provided schema from the quota
    - ONLY extract concrete coverages, riders, or add-ons that are explicitly listed in the quotation's pricing schedule, benefits table, or endorsements summary.
    - NEVER extract the core coverage type or vehicle use class (e.g. 'Comprehensive', 'Third Party', 'Third Party Fire & Theft', 'TPFT', 'Private Car - Private Use', 'Motorcycle') as a benefit. These belong in the main vehicle/policy fields.
    - If a PDF contains 30 pages of generic policy wording, IGNORE the generic text completely.
-12. **LEARNING FROM PREVIOUS HUMAN CORRECTIONS**:
-{corrections_str}
-13. **QUOTATION REFERENCE**:
+12. **QUOTATION REFERENCE**:
    - DO NOT extract underwriter reference numbers, quote numbers, or ref numbers from the document. Quotation reference is strictly an internal Risklocker system sequence.
-14. **ROAD TAX**:
+13. **ROAD TAX**:
    - NEVER extract road tax from the quotation document under any circumstances. Road tax is an internal, dynamically computed government tariff.
-15. **ENGINE CAPACITY / MOTOR OUTPUT**:
+14. **ENGINE CAPACITY / MOTOR OUTPUT**:
    - For petrol/diesel vehicles, extract capacity in CC (e.g. '1495 CC' or '1500').
    - For Electric Vehicles (EV), extract the electric motor power in kW or W (e.g. '150 kW', '150000 W', '50 kW'). If quoted with kW or W, preserve the unit.
 

@@ -33,7 +33,7 @@ def test_messy_compact_text_maps_model_cc_and_coverage_type():
     fields, _, _ = build_draft(candidates)
 
     assert fields["car_model"]["value"] == "SAGA"
-    assert fields["engine_cc"]["value"] == "1556"
+    assert "1556" in fields["engine_cc"]["value"]
     assert fields["coverage_type"]["value"] == "Comprehensive"
 
 

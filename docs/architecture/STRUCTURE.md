@@ -73,6 +73,14 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Road Tax Tester & Admin Preview: `frontend/src/app/extraction/road-tax/page.tsx` supports kW testing and displays kW units for EV rules.
 - Tests: `backend/tests/test_ev_road_tax.py` covering classification, power normalization, official 2026 power-band calculations, and template renderer string formatting.
 
+## Global Benefit Titles & Correction Memory Decommission (v17) Additions
+
+- Global Benefit Titles Decoupling: In `backend/app/rendering/render_context.py`, extras display titles resolve to canonical Global Benefit Titles (English and Chinese) via standard benefit ID and concept code lookup, providing clean customer-facing quotation presentation without mutating raw policy codes.
+- Staff Manual Edits Preservation: Explicit staff overrides during quotation review in `backend/app/services/workspace_service.py` and `backend/app/services/catalog_review_service.py` are prioritized and preserved.
+- AI Correction Memory Decommission: Decommissioned noisy machine learning `CorrectionMemory` lookup/persistence from `backend/app/extraction/gemini_extractor.py` and `backend/app/extraction/db_lookups.py` to prevent cascading hallucinated prompts.
+- Database Maintenance: `commands/purge-invalid-correction-memory.py` safely purges historical invalid correction memory records from Postgres.
+- Tests: `tests/test_template_renderer.py`, `tests/test_extraction_pipeline.py`, and `tests/test_extraction_regression.py` validating canonical benefit title resolution and clean extraction.
+
 ## Benefit Configuration Matrix
 
 - `docs/domain/benefits/BENEFITS-CONFIGURATION.md` — canonical per-insurer benefits/add-on matrix: global benefit library (51 concepts), dimensions, and every company × coverage type × vehicle category row including add-on system (`single` vs `package`), package tiers, and seed status (seeded / draft / pending). Registered in `docs/core/START-HERE.md`.
