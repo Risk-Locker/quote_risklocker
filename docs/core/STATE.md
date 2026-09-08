@@ -28,3 +28,4 @@ Current high-signal snapshot of active development. Rotate old entries to docs/h
 2026-09-08 · Antigravity · Resolved pyright rowcount diagnostic in purge script · commands/purge-invalid-correction-memory.py:22 · Pending: None.
 2026-09-08 · Gemini 3.8 Flash · Created branch v17, resolved pyright optional member access, updated STRUCTURE.md and BUSINESS-RULES.md, verified 612 tests and frontend build, committed and pushed to origin/v17 · catalog_review_service.py:616, STRUCTURE.md:76, BUSINESS-RULES.md:23 · Pending: None.
 2026-09-08 · Gemini 3.8 Flash · Audited branch v17 for extraction pipeline issue: 612 tests passing, frontend build clean (39 routes), pipeline assertion already reconciled · Pending: None.
+2026-09-08 · Gemini 3.8 Flash · Merged v17 into main, verified 612 tests, frontend typecheck, build, schema verification, and pushed to origin/main · deploy.yml:48, deploy.yml:63, deploy.yml:67 · Pending: None.
