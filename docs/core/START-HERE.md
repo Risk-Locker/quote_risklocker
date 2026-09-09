@@ -29,6 +29,7 @@ External chat tools cannot be forced to follow repository instructions. Give the
 | Testing, failures, regression coverage | `docs/architecture/TESTING.md` | relevant tests and implementation |
 | Environment, local run, deployment, retention | `docs/architecture/OPERATIONS.md`, `docs/architecture/SETUP.md` | config and command scripts |
 | Deployment, VPS, subdomains, infrastructure | `docs/architecture/SETUP.md` | `docs/architecture/OPERATIONS.md` env tables |
+| Commit, push, publish branch, or deploy pre-flight | `docs/architecture/TESTING.md`, `docs/core/INSTRUCTIONS.md` | `AGENTS.md`, `.github/workflows/deploy.yml` |
 | How the owner talks / how to interpret him | `docs/core/INSTRUCTIONS.md` | `AGENTS.md` interaction rules |
 | Recent work, active snapshot | `docs/core/STATE.md` | files cited in the latest entries |
 | Historical work & past decisions archive | `docs/history/MEMORY-2026-08.md` | historical entries by date |

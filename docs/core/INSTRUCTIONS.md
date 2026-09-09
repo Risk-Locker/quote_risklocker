@@ -23,3 +23,10 @@ How the owner talks, how to interpret him, and how every interaction must run. T
 5. **Never claim success without the verification chain** in AGENTS.md (pytest, tsc, build, zero IDE/lint problems on touched files, code-map check).
 6. **Update this file** whenever the owner expresses a new interaction preference — that is part of the logbook duty, not an optional chore.
 7. **Check code problems/diagnostics after each change.** Always inspect and resolve IDE diagnostic problems, type errors (Pyright/TypeScript), and linter warnings on touched files immediately after making changes.
+8. **Pre-Commit / Pre-Push / Branch Publish Verification Gate (Mandatory):** Whenever the owner or user prompts something related to committing, pushing (to `origin main`, `origin v18`, `origin v19`, or any branch), or creating and publishing a new branch, NEVER rush to run `git commit` or `git push` or touch git. The agent MUST first execute a complete pre-flight check mirroring `.github/workflows/deploy.yml` so that deployment will pass without any build error, type error, test failure, or code error:
+    - Backend tests: `.\.venv\Scripts\python.exe -m pytest -q` (all green)
+    - Frontend type-check: `npx tsc --noEmit` in `frontend/` (zero errors)
+    - Frontend production build: `npm run build` in `frontend/` (clean build)
+    - Schema integrity: `PYTHONPATH=backend .\.venv\Scripts\python.exe -c "from app.db.session import verify_schema_version; verify_schema_version(); print('schema OK')"`
+    - Zero IDE/lint diagnostics on touched files, and brain integrity: `.\.venv\Scripts\python.exe commands/verify-brain.py`
+    If ANY check fails, NEVER proceed to commit, push, or publish. Fix all errors first and re-verify until 100% green. Deployment must never fail downstream.

@@ -30,6 +30,36 @@
 - The CI test job installs Playwright Chromium so `test_pdf_generation_smoke` runs instead of skipping.
 - Frontend static: `npx tsc --noEmit` and `npm run build` in `frontend/`.
 
+## Pre-Commit & Pre-Push Verification Gate (deploy.yml Parity)
+
+Whenever the owner or user prompts to **commit**, **push** (e.g. to `origin main`, `origin v18`, `origin v19`, or any branch), or **create and publish** a new branch:
+
+> [!CAUTION]
+> **NEVER touch git or execute `git commit` / `git push` immediately.**
+> The agent must run the pre-deployment verification check first to guarantee that the GitHub Actions workflow (`.github/workflows/deploy.yml`) and VPS deployment pass with 100% certainty.
+
+### Verification Checklist Before Git Commit / Push:
+1. **Backend Tests:**
+   `.\.venv\Scripts\python.exe -m pytest -q`
+   Must pass with zero failures and zero errors.
+2. **Frontend Type-Check:**
+   In `frontend/`: `npx tsc --noEmit`
+   Must finish with zero type errors.
+3. **Frontend Production Build:**
+   In `frontend/`: `npm run build`
+   Must compile all routes and static pages cleanly with zero build errors.
+4. **Database Schema & Migrations Check:**
+   `PYTHONPATH=backend .\.venv\Scripts\python.exe -c "from app.db.session import verify_schema_version; verify_schema_version(); print('schema OK')"`
+   Ensures the current database schema matches the expected application version.
+5. **Brain & Documentation Integrity:**
+   `.\.venv\Scripts\python.exe commands/verify-brain.py`
+   Ensures docs, links, and registry are consistent.
+6. **Zero IDE / Diagnostics on Changed Files:**
+   All diagnostic errors, type warnings, or lint issues on modified files must be cleared.
+
+If **any** check fails, **stop immediately**. Do not commit, do not push, and do not publish. Fix the issue, re-run the verification pipeline until fully green, and only then proceed with git operations.
+
+
 ## Browser E2E (in-repo QA tooling)
 
 - Scripts live in `/.qc-tmp/` (gitignored): `groups3-e2e.js` (builder group/marquee E2E), `marquee-probe.js` (marquee diagnostics). Run with `node .qc-tmp/<script>.js` while backend :8100 and frontend :3000 are up. Playwright comes from `frontend/node_modules`; screenshots go to `.qc-tmp/shots/`. See OPERATIONS.md for the full runbook.

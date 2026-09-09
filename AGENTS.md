@@ -36,7 +36,8 @@ This file plus the whole `docs/` folder is a portable agent brain. Copy `AGENTS.
 - When code is deleted or commented out, mark it inline: `// RL-DISABLED <feature> — disabled <date>; restore when <condition>` so future agents know why and when to bring it back.
 - Match existing code style. No gratuitous comments; no refactors bundled into unrelated work.
 - Inspect and resolve all IDE problems, typechecker diagnostics (e.g. Pyright/TypeScript), and lint issues on any modified or newly created files after every change.
-- Commit only when the user explicitly asks. Documentation updates never depend on committing.
+- Commit and push only when the user explicitly asks. Documentation updates never depend on committing.
+- Mandatory Pre-Commit & Pre-Push Gate: When the user asks to commit, push (to `origin main`, `origin v18`, `origin v19`, or any branch), or create/publish a new branch, NEVER touch git or run commit/push commands immediately. You MUST first run the pre-deployment verification check mirroring `.github/workflows/deploy.yml` (backend `pytest`, frontend `tsc --noEmit` and `npm run build`, schema verification). If ANY check fails, do NOT commit or push — fix all errors first so CI/CD deployment never fails downstream.
 
 ## 6. Interaction Rules
 
