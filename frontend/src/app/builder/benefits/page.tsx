@@ -357,7 +357,7 @@ function BenefitsPageContent() {
     setCompanies(activeCompanies);
     setSegments(activeSegments);
     setVehicles(activeVehicles);
-    setConcepts(conceptResult.benefit_concepts.items);
+    setConcepts(conceptResult.benefit_concepts.items.filter((item) => item.status !== "retired"));
     setSources(sourceResult.sources.items);
     setTemplates(allTemplates);
 
@@ -512,12 +512,12 @@ ${aiMarkdownTable}`;
 
   // ── 2. Memos ───────────────────────────────────────────────────────────
   const defaultConcepts = useMemo(
-    () => concepts.filter((c) => (c.category || (c.sort_order && c.sort_order <= 11 ? "default" : "addon")) === "default"),
+    () => concepts.filter((c) => c.status !== "retired" && (c.category || (c.sort_order && c.sort_order <= 11 ? "default" : "addon")) === "default"),
     [concepts]
   );
 
   const addonConcepts = useMemo(
-    () => concepts.filter((c) => (c.category || (c.sort_order && c.sort_order <= 11 ? "default" : "addon")) === "addon"),
+    () => concepts.filter((c) => c.status !== "retired" && (c.category || (c.sort_order && c.sort_order <= 11 ? "default" : "addon")) === "addon"),
     [concepts]
   );
 
@@ -579,29 +579,39 @@ ${aiMarkdownTable}`;
 
   const allOfferings = useMemo(() => catalogWorkspace?.offerings || [], [catalogWorkspace]);
 
+  const retiredConceptIdSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of concepts) {
+      if (c.status === "retired") set.add(c.id);
+    }
+    return set;
+  }, [concepts]);
+
   const currentPackageOfferings = useMemo(() => {
     if (!selectedCatalog) return [];
     const targetPkgId = activePackage?.id;
     return (allOfferings || []).filter((item) => {
       if (!item || item.status === "retired") return false;
+      if (item.concept?.status === "retired") return false;
+      if (item.concept_id && retiredConceptIdSet.has(item.concept_id)) return false;
       if (isPackaged && targetPkgId) {
         return item.applies_to_id === targetPkgId;
       }
       return !item.applies_to_id || item.applies_to_id === selectedCatalog.product_id || item.applies_to_type === "product";
     });
-  }, [allOfferings, selectedCatalog, isPackaged, activePackage]);
+  }, [allOfferings, selectedCatalog, isPackaged, activePackage, retiredConceptIdSet]);
 
   const defaultOfferings = useMemo(() => {
     return (currentPackageOfferings || [])
-      .filter((item) => effectiveRole(item) === "included")
+      .filter((item) => effectiveRole(item) === "included" && item.concept?.status !== "retired" && (!item.concept_id || !retiredConceptIdSet.has(item.concept_id)))
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || String(a.offering_key || "").localeCompare(String(b.offering_key || "")));
-  }, [currentPackageOfferings]);
+  }, [currentPackageOfferings, retiredConceptIdSet]);
 
   const addonOfferings = useMemo(() => {
     return (currentPackageOfferings || [])
-      .filter((item) => effectiveRole(item) === "addon_option")
+      .filter((item) => effectiveRole(item) === "addon_option" && item.concept?.status !== "retired" && (!item.concept_id || !retiredConceptIdSet.has(item.concept_id)))
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || String(a.offering_key || "").localeCompare(String(b.offering_key || "")));
-  }, [currentPackageOfferings]);
+  }, [currentPackageOfferings, retiredConceptIdSet]);
 
   const activeConceptIdSet = useMemo(() => {
     const map = new Map<string, Offering>();
@@ -1564,7 +1574,7 @@ ${aiMarkdownTable}`;
                       }`}
                   >
                     {c.logo?.url ? (
-                      <img src={fileUrl(c.logo.url)} alt={c.name} className="h-4 w-4 rounded-[2px] object-contain bg-white" />
+                      <img src={fileUrl(c.logo.url)} alt={c.name} loading="lazy" className="h-4 w-4 rounded-[2px] object-contain bg-white" />
                     ) : (
                       <Buildings size={15} className={active ? "text-white" : "text-[var(--rl-text-muted)]"} />
                     )}
@@ -2064,7 +2074,7 @@ ${aiMarkdownTable}`;
               <div className="flex items-center gap-3">
                 <div className="grid h-10 w-10 place-items-center rounded-[var(--rl-radius-sm)] bg-[var(--rl-bg)] border border-[var(--rl-border)] p-1 shrink-0">
                   {selectedCompany?.logo?.url ? (
-                    <img src={fileUrl(selectedCompany.logo.url)} alt={selectedCompany.name} className="h-full w-full object-contain" />
+                    <img src={fileUrl(selectedCompany.logo.url)} alt={selectedCompany.name} loading="lazy" className="h-full w-full object-contain" />
                   ) : (
                     <Buildings size={20} className="text-[var(--rl-text-strong)]" />
                   )}
@@ -2188,7 +2198,7 @@ ${aiMarkdownTable}`;
                               }`}
                           >
                             {concept.default_asset?.url ? (
-                              <img src={fileUrl(concept.default_asset.url)} alt={concept.label} className="h-4 w-4 object-contain" />
+                              <img src={fileUrl(concept.default_asset.url)} alt={concept.label} loading="lazy" className="h-4 w-4 object-contain" />
                             ) : (
                               <ShieldCheck size={16} />
                             )}
@@ -2286,7 +2296,7 @@ ${aiMarkdownTable}`;
                                 }`}
                             >
                               {concept.default_asset?.url ? (
-                                <img src={fileUrl(concept.default_asset.url)} alt={concept.label} className="h-4 w-4 object-contain" />
+                                <img src={fileUrl(concept.default_asset.url)} alt={concept.label} loading="lazy" className="h-4 w-4 object-contain" />
                               ) : (
                                 <Sparkle size={16} />
                               )}
@@ -2497,7 +2507,7 @@ ${aiMarkdownTable}`;
                               }`}
                           >
                             {concept.default_asset?.url ? (
-                              <img src={fileUrl(concept.default_asset.url)} alt={concept.label} className="h-4 w-4 object-contain" />
+                              <img src={fileUrl(concept.default_asset.url)} alt={concept.label} loading="lazy" className="h-4 w-4 object-contain" />
                             ) : (
                               <ShieldCheck size={16} />
                             )}
@@ -2595,7 +2605,7 @@ ${aiMarkdownTable}`;
                                 }`}
                             >
                               {concept.default_asset?.url ? (
-                                <img src={fileUrl(concept.default_asset.url)} alt={concept.label} className="h-4 w-4 object-contain" />
+                                <img src={fileUrl(concept.default_asset.url)} alt={concept.label} loading="lazy" className="h-4 w-4 object-contain" />
                               ) : (
                                 <Sparkle size={16} />
                               )}

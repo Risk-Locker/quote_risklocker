@@ -17,12 +17,14 @@ class LoginRequest(StrictRequest):
 
 
 class UserCreateRequest(StrictRequest):
+    name: str | None = Field(default=None, max_length=120)
     email: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=8, max_length=255)
     role: str = "staff"
 
 
 class UserUpdateRequest(StrictRequest):
+    name: str | None = Field(default=None, max_length=120)
     email: str | None = Field(default=None, min_length=3, max_length=255)
     role: str | None = None
     status: str | None = None

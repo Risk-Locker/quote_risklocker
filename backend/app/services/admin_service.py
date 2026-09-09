@@ -582,3 +582,31 @@ def set_runner_fee_default(db: Session, user, amount: float) -> float:
     db.commit()
     db.refresh(setting)
     return amount
+
+
+def get_bulk_upload_limit(db: Session) -> int:
+    setting = db.get(AppSetting, "bulk_upload_limit")
+    if not setting or not isinstance(setting.value, dict):
+        return 5
+    val = setting.value.get("max_files", 5)
+    try:
+        val_int = int(val)
+        return val_int if val_int >= 3 else 3
+    except (ValueError, TypeError):
+        return 5
+
+
+def set_bulk_upload_limit(db: Session, user, limit: int) -> int:
+    require_admin(user)
+    if limit < 3:
+        raise AppError("Bulk upload limit cannot be less than 3 PDFs.", 400)
+    setting = db.get(AppSetting, "bulk_upload_limit")
+    if not setting:
+        setting = AppSetting(key="bulk_upload_limit", value={"max_files": limit})
+        db.add(setting)
+    else:
+        setting.value = {"max_files": limit}
+    db.commit()
+    db.refresh(setting)
+    return limit
+

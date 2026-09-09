@@ -160,8 +160,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            <span className="text-[13px] font-medium text-[var(--rl-text-muted)] hidden sm:inline">
-              {user?.email}
+            <span className="text-[13px] font-medium text-[var(--rl-text-strong)] hidden sm:inline">
+              {user?.name || user?.email}
             </span>
             <Button
               variant="ghost"

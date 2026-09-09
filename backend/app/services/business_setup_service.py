@@ -712,7 +712,46 @@ def retire_benefit_concept(db, user, concept_id: str) -> None:
         raise AppError("Benefit concept not found.", 404)
     concept.status = "retired"
     _audit(db, user, "business.benefit_concept.retire", "benefit_concept", concept.id, {"concept_key": concept.concept_key})
+    # Cascade status to offerings in draft revisions (published revisions remain immutable)
+    draft_rev_ids = list(db.scalars(
+        select(BenefitCatalogRevision.id).where(BenefitCatalogRevision.state != "published")
+    ).all())
+    if draft_rev_ids:
+        db.execute(
+            update(CatalogOffering)
+            .where(
+                CatalogOffering.concept_id == concept.id,
+                CatalogOffering.catalog_revision_id.in_(draft_rev_ids),
+            )
+            .values(status="retired")
+        )
     db.commit()
+
+
+def restore_benefit_concept(db, user, concept_id: str) -> dict:
+    _require_business(user)
+    concept = db.scalar(select(BenefitConcept).where(BenefitConcept.id == concept_id).with_for_update())
+    if concept is None:
+        raise AppError("Benefit concept not found.", 404)
+    concept.status = "active"
+    concept.revision += 1
+    _audit(db, user, "business.benefit_concept.restore", "benefit_concept", concept.id, {"concept_key": concept.concept_key})
+    # Restore offerings in draft revisions
+    draft_rev_ids = list(db.scalars(
+        select(BenefitCatalogRevision.id).where(BenefitCatalogRevision.state != "published")
+    ).all())
+    if draft_rev_ids:
+        db.execute(
+            update(CatalogOffering)
+            .where(
+                CatalogOffering.concept_id == concept.id,
+                CatalogOffering.catalog_revision_id.in_(draft_rev_ids),
+            )
+            .values(status="active")
+        )
+    db.commit()
+    db.refresh(concept)
+    return serialize_concept(db, concept)
 
 
 def list_business_assets(db, user, *, search: str, kind: str | None, page: int, page_size: int) -> dict:
@@ -880,7 +919,7 @@ def update_catalog_context(db, user, catalog_id: str, payload: dict) -> dict:
 def _offering(item: CatalogOffering) -> dict:
     disp_val = item.display_value
     if disp_val:
-        d_str = str(disp_val).strip()
+        d_str = disp_val.strip()
         has_digits = any(c.isdigit() for c in d_str)
         is_unlimited = d_str.lower() == "unlimited"
         if not has_digits and not is_unlimited:
@@ -1486,6 +1525,9 @@ def get_catalog_workspace(db, user, catalog_id: str) -> dict:
                 "concept": serialize_concept(db, concepts[item.concept_id]) if item.concept_id in concepts else None,
             }
             for item in offerings
+            if item.concept_id in concepts
+            and getattr(concepts[item.concept_id], "status", "active") != "retired"
+            and item.status != "retired"
         ],
         "relations": [
             {

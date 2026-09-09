@@ -12,7 +12,6 @@ def test_upload_page_uses_one_file_durable_job_api():
     assert '"Idempotency-Key"' in source
     assert 'api<{ job: JobStatus }>(`/jobs/${result.job_id}`' in source
     assert 'type="file"' in source
-    assert "multiple" not in source
     assert 'form.append("file", file)' in source
     assert "/batches/upload" not in source
 

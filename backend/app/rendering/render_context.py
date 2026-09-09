@@ -503,7 +503,8 @@ def resolve_benefit_cards(
         return _global_expanded_cards(selection, offering, concept, facets_by_id, eval_context=eval_context, insurer_catalog=insurer_catalog)
 
     offerings_by_id = _index(offerings)
-    concepts_by_id = _index(concepts)
+    retired_concept_ids = {str(getattr(c, "id", "")) for c in concepts if getattr(c, "status", "active") == "retired"}
+    concepts_by_id = {k: v for k, v in _index(concepts).items() if k not in retired_concept_ids}
     facets_by_id = _index(facets)
     removed_offering_ids = {
         str(item.catalog_offering_id)
@@ -520,7 +521,7 @@ def resolve_benefit_cards(
         for item in selections
         if item.catalog_offering_id and item.state in {"current", "superseded", "removed"}
     }
-    current = [item for item in selections if item.state == "current"]
+    current = [item for item in selections if item.state == "current" and str(item.concept_id or "") not in retired_concept_ids]
     current_by_concept: dict[str, list[Any]] = {}
     for item in current:
         concept_id = str(item.concept_id or "")
@@ -532,6 +533,8 @@ def resolve_benefit_cards(
     current_cards: list[dict] = []
     for item in sorted(current, key=lambda row: (int(row.sort_order or 0), str(row.selection_key))):
         if item.item_kind == "custom":
+            if item.concept_id and str(item.concept_id) in retired_concept_ids:
+                continue
             concept = concepts_by_id.get(str(item.concept_id))
             concept = concept or type("CustomConcept", (), {
                 "id": item.concept_id or f"custom:{item.id}", "concept_key": item.selection_key,

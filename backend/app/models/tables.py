@@ -48,6 +48,7 @@ class User(Base, TimestampMixin):
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     role: Mapped[str] = mapped_column(String(50), nullable=False, default=Role.STAFF.value, index=True)
@@ -219,8 +220,11 @@ class Session(Base, TimestampMixin):
     detected_company: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default=AccountStatus.ACTIVE.value)
     quotation_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_edited_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    last_edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    owner: Mapped[User] = relationship()
+    owner: Mapped[User] = relationship(foreign_keys=[owner_id])
+    last_edited_by: Mapped[User | None] = relationship(foreign_keys=[last_edited_by_id])
     uploaded_file: Mapped[UploadedFile] = relationship()
     draft: Mapped[QuotationDraft] = relationship()
 

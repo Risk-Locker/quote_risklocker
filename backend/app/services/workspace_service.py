@@ -365,7 +365,11 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
         relations: list = []
         facets: list = []
         plans: list = []
-        valid_selections = [s for s in selections if s.item_kind != "catalog"]
+        retired_concept_ids = {str(item.id) for item in concepts if getattr(item, "status", "active") == "retired"}
+        valid_selections = [
+            s for s in selections
+            if s.item_kind != "catalog" and str(s.concept_id or "") not in retired_concept_ids
+        ]
     else:
         offerings = list(
             db.scalars(
@@ -407,9 +411,11 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
             if package_ids
             else []
         )
+        retired_concept_ids = {str(item.id) for item in concepts if getattr(item, "status", "active") == "retired"}
         valid_selections = [
             s for s in selections
-            if s.item_kind != "catalog" or s.catalog_offering_id in offering_ids
+            if (s.item_kind != "catalog" or s.catalog_offering_id in offering_ids)
+            and str(s.concept_id or "") not in retired_concept_ids
         ]
     from app.services.formula_evaluator import extract_evaluation_context
     from app.services.benefit_catalog_matrix import get_catalog_for_product
@@ -2023,12 +2029,15 @@ def apply_workspace_patch(
                 "changed_paths": changed_paths,
             },
         ))
+        session = db.scalar(select(Session).where(Session.draft_id == draft.id))
+        if session:
+            session.last_edited_by_id = user.id
+            session.last_edited_at = _utcnow()
         db.commit()
         db.refresh(draft)
     except AppError:
         db.rollback()
         raise
-    session = db.scalar(select(Session).where(Session.draft_id == draft.id))
     session_ref = session.quotation_ref if session else None
     return {
         "draft_id": draft.id,

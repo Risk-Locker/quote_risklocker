@@ -412,9 +412,12 @@ def seed_base_benefits(db, draft: QuotationDraft, revision: BenefitCatalogRevisi
 
     all_offerings = list(
         db.scalars(
-            select(CatalogOffering).where(
+            select(CatalogOffering)
+            .join(BenefitConcept, CatalogOffering.concept_id == BenefitConcept.id)
+            .where(
                 CatalogOffering.catalog_revision_id == revision.id,
                 CatalogOffering.status.in_(["active", "compatibility"]),
+                BenefitConcept.status == "active",
             )
         ).all()
     )

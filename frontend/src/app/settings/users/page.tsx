@@ -13,10 +13,11 @@ import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 
-type User = { id: string; email: string; role: string; status: string };
+type User = { id: string; name?: string | null; email: string; role: string; status: string };
 
 export default function SettingsUsersPage() {
   const [users, setUsers] = useState<User[]>([]);
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("staff");
@@ -36,7 +37,8 @@ export default function SettingsUsersPage() {
     event.preventDefault();
     setError("");
     try {
-      await api("/users", { method: "POST", body: JSON.stringify({ email, password, role }) });
+      await api("/users", { method: "POST", body: JSON.stringify({ name: name.trim() || undefined, email, password, role }) });
+      setName("");
       setEmail("");
       setPassword("");
       toast("User created.", "success");
@@ -68,7 +70,7 @@ export default function SettingsUsersPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-[30px] font-bold text-[var(--rl-text-strong)] font-[var(--font-manrope)]">Users</h1>
-            <p className="text-[14px] text-[var(--rl-text-muted)]">Manage users and roles.</p>
+            <p className="text-[14px] text-[var(--rl-text-muted)]">Manage users, staff identities, and roles.</p>
           </div>
           <Button variant="secondary" icon={<ArrowsClockwise size={16} weight="bold" />} onClick={load}>
             Refresh
@@ -82,8 +84,12 @@ export default function SettingsUsersPage() {
 
         <Card>
           <form className="grid gap-4 p-5" onSubmit={createUser}>
-            <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">Users & Roles</h2>
-            <div className="grid gap-4 sm:grid-cols-3">
+            <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">Add Staff or User</h2>
+            <div className="grid gap-4 sm:grid-cols-4">
+              <div className="grid gap-1.5">
+                <label className="text-[13px] font-semibold text-[var(--rl-text-strong)]">Staff Name</label>
+                <Input placeholder="e.g. Nina or Alex" value={name} onChange={(event) => setName(event.target.value)} />
+              </div>
               <div className="grid gap-1.5">
                 <label className="text-[13px] font-semibold text-[var(--rl-text-strong)]">Email</label>
                 <Input type="email" placeholder="Email" value={email} onChange={(event) => setEmail(event.target.value)} required />
@@ -105,9 +111,10 @@ export default function SettingsUsersPage() {
               <Button type="submit" icon={<Plus size={16} weight="bold" />}>Add user</Button>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[520px]">
+              <table className="w-full min-w-[580px]">
                 <thead>
                   <tr>
+                    <th className="px-4 py-2.5 text-left text-[12px] font-semibold text-[var(--rl-text-muted)] uppercase tracking-wider">Staff Name</th>
                     <th className="px-4 py-2.5 text-left text-[12px] font-semibold text-[var(--rl-text-muted)] uppercase tracking-wider">Email</th>
                     <th className="px-4 py-2.5 text-left text-[12px] font-semibold text-[var(--rl-text-muted)] uppercase tracking-wider">Role</th>
                     <th className="px-4 py-2.5 text-left text-[12px] font-semibold text-[var(--rl-text-muted)] uppercase tracking-wider">Status</th>
@@ -116,7 +123,10 @@ export default function SettingsUsersPage() {
                 </thead>
                 <tbody>
                   {users.map((user) => (
-                    <tr key={user.id}>
+                    <tr key={user.id} className="border-t border-[var(--rl-border)]">
+                      <td className="px-4 py-2.5 text-[14px] font-semibold text-[var(--rl-text-strong)]">
+                        {user.name || <span className="text-[var(--rl-text-muted)] font-normal italic">No name</span>}
+                      </td>
                       <td className="px-4 py-2.5 text-[14px] font-medium text-[var(--rl-text-strong)]">{user.email}</td>
                       <td className="px-4 py-2.5 text-[14px]">
                         <Badge variant={roleVariant(user.role)}>{user.role}</Badge>
@@ -140,3 +150,4 @@ export default function SettingsUsersPage() {
     </AppShell>
   );
 }
+

@@ -120,6 +120,20 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Frontend Benefits Matrix: `frontend/src/app/builder/benefits/page.tsx` updated with view switcher (`Interactive Builder` vs `Company Overview Matrix`), full tabular policy matrix, Word/Excel downloads, and AI Seed & Sync Spec dialog with non-destructive delta tester.
 - Frontend Road Tax Cockpit: `frontend/src/app/extraction/road-tax/page.tsx` updated with jurisdiction tabs, live dynamic road tax tester, progressive calculation formulas, and "Seed Standard JPJ Rules" action.
 
+## Bulk Upload & Rate Limit Management Additions
+
+- Backend Limits: `get_bulk_upload_limit` / `set_bulk_upload_limit` in `backend/app/services/admin_service.py` (persisted in `app_settings`), exposed in `GET /settings/limits`, `GET /admin/settings/upload-limits`, and `POST /admin/settings/upload-limits` in `backend/app/api/routes.py`.
+- Upload Page: Dual-mode switcher (`[ Single Upload ]` / `[ Bulk Upload ]`) in `frontend/src/app/upload/page.tsx` preserving 100% of the original single-file workflow while providing multi-file staging, batch progress dashboard, and "Open All in New Tabs".
+- Builder Upload Settings: Dedicated configuration page at `frontend/src/app/builder/uploads/page.tsx` linked in `frontend/src/components/builder-nav.tsx` (enforcing minimum 3 PDFs limit).
+- Tests: `tests/test_upload_limits.py` and `tests/test_frontend_v7_upload_contract.py`.
+
+## Sessions Upgrade & Global Benefit Invariant Additions
+
+- Migration `migrations/040_user_name_and_session_edit_tracking.sql`: adds `users.full_name`, `sessions.last_edited_at`, and `sessions.last_edited_by` for multi-staff attribution.
+- Sessions Dossier & Vehicle Grouping: `frontend/src/app/sessions/page.tsx` updated with vehicle dossiers, real statuses, prominent new-tab actions, and duplicate detection; backend endpoints in `backend/app/api/routes.py` and `backend/app/services/session_service.py`.
+- Global Benefit Invariant: cascaded retirement across draft catalog offerings, runtime filtering in `get_catalog_workspace`, strict `BenefitConcept.status == 'active'` check in `seed_base_benefits`, dynamic filtering in `workspace_service.py` & `render_context.py`, and canvas preview filtering in `frontend/src/app/builder/benefits/page.tsx`.
+- Tests: `tests/test_sessions_upgrade.py` and `tests/test_global_benefit_retirement_cascade.py`.
+
 ## Deployment Additions
 
 - `.github/workflows/deploy.yml` — on push to `main`: backend pytest + frontend `tsc --noEmit` + `next build` on GitHub, then rsync to the VPS, install deps, run migrations, `pm2 startOrReload`.

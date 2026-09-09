@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowClockwise, Check, CheckCircle, FloppyDisk, ImageSquare, MagnifyingGlass, Plus, ShieldCheck, Tag, Trash, X } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowCounterClockwise, Check, CheckCircle, FloppyDisk, ImageSquare, MagnifyingGlass, Plus, ShieldCheck, Tag, Trash, X } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
 import { BuilderNav } from "@/components/builder-nav";
 import { GuidedTour } from "@/components/guided-tour";
@@ -57,7 +57,7 @@ export default function GlobalBenefitsPage() {
   const [companyWorkspace, setCompanyWorkspace] = useState<any>(null);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<"all" | "default" | "addon">("all");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("active");
   const [selectedId, setSelectedId] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -173,8 +173,10 @@ export default function GlobalBenefitsPage() {
     });
   }, [benefits, search, categoryFilter, statusFilter, insurerConceptKeys]);
 
-  const defaultCount = useMemo(() => benefits.filter((b) => (b.category || (b.sort_order <= 11 ? "default" : "addon")) === "default").length, [benefits]);
-  const addonCount = useMemo(() => benefits.filter((b) => (b.category || (b.sort_order <= 11 ? "default" : "addon")) === "addon").length, [benefits]);
+  const activeCount = useMemo(() => benefits.filter((b) => b.status === "active").length, [benefits]);
+  const defaultCount = useMemo(() => benefits.filter((b) => b.status === "active" && (b.category || (b.sort_order <= 11 ? "default" : "addon")) === "default").length, [benefits]);
+  const addonCount = useMemo(() => benefits.filter((b) => b.status === "active" && (b.category || (b.sort_order <= 11 ? "default" : "addon")) === "addon").length, [benefits]);
+  const trashCount = useMemo(() => benefits.filter((b) => b.status === "retired").length, [benefits]);
 
   const selected = benefits.find((item) => item.id === selectedId) || null;
 
@@ -361,23 +363,44 @@ export default function GlobalBenefitsPage() {
     }
   }
 
-  const [retiring, setRetiring] = useState(false);
-  const [showRetireConfirm, setShowRetireConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  async function handleRetireConcept() {
+  async function handleDeleteConcept() {
     if (!selected) return;
-    setRetiring(true);
+    setDeleting(true);
     setError("");
     try {
       await api(`/business/benefit-concepts/${selected.id}`, { method: "DELETE" });
-      setShowRetireConfirm(false);
+      setShowDeleteConfirm(false);
+      const deletedLabel = selected.label;
       await refresh(false);
       setSelectedId("");
       setIsNew(false);
+      setSuccessMessage(`Benefit "${deletedLabel}" was moved to Trash.`);
+      setTimeout(() => setSuccessMessage(""), 5000);
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
-      setRetiring(false);
+      setDeleting(false);
+    }
+  }
+
+  async function handleRestoreConcept() {
+    if (!selected) return;
+    setRestoring(true);
+    setError("");
+    try {
+      await api(`/business/benefit-concepts/${selected.id}/restore`, { method: "POST" });
+      const restoredLabel = selected.label;
+      await refresh(false);
+      setSuccessMessage(`Benefit "${restoredLabel}" restored to active library!`);
+      setTimeout(() => setSuccessMessage(""), 5000);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setRestoring(false);
     }
   }
 
@@ -427,18 +450,18 @@ export default function GlobalBenefitsPage() {
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => setCategoryFilter("all")}
-              className={`rounded-md px-3 py-1.5 text-xs font-bold transition-all ${categoryFilter === "all"
+              onClick={() => { setCategoryFilter("all"); setStatusFilter("active"); }}
+              className={`rounded-md px-3 py-1.5 text-xs font-bold transition-all ${categoryFilter === "all" && statusFilter === "active"
                   ? "bg-[var(--rl-black)] text-white shadow-xs"
                   : "bg-white border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
                 }`}
             >
-              All Library ({benefits.length})
+              All Active ({activeCount})
             </button>
             <button
               type="button"
-              onClick={() => setCategoryFilter("default")}
-              className={`rounded-md px-3 py-1.5 text-xs font-bold transition-all ${categoryFilter === "default"
+              onClick={() => { setCategoryFilter("default"); setStatusFilter("active"); }}
+              className={`rounded-md px-3 py-1.5 text-xs font-bold transition-all ${categoryFilter === "default" && statusFilter === "active"
                   ? "bg-[var(--rl-black)] text-white shadow-xs"
                   : "bg-white border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
                 }`}
@@ -447,13 +470,23 @@ export default function GlobalBenefitsPage() {
             </button>
             <button
               type="button"
-              onClick={() => setCategoryFilter("addon")}
-              className={`rounded-md px-3 py-1.5 text-xs font-bold transition-all ${categoryFilter === "addon"
+              onClick={() => { setCategoryFilter("addon"); setStatusFilter("active"); }}
+              className={`rounded-md px-3 py-1.5 text-xs font-bold transition-all ${categoryFilter === "addon" && statusFilter === "active"
                   ? "bg-[var(--rl-black)] text-white shadow-xs"
                   : "bg-white border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
                 }`}
             >
               Unique Add-ons ({addonCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => { setCategoryFilter("all"); setStatusFilter("retired"); }}
+              className={`rounded-md px-3 py-1.5 text-xs font-bold transition-all ${statusFilter === "retired"
+                  ? "bg-red-600 text-white shadow-xs"
+                  : "bg-white border border-red-200 text-red-700 hover:bg-red-50"
+                }`}
+            >
+              🗑️ Trash ({trashCount})
             </button>
 
             {companies.length > 0 ? (
@@ -488,8 +521,9 @@ export default function GlobalBenefitsPage() {
                   <Input aria-label="Search benefits" className="h-8 pl-8 text-xs" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, key, or plan..." />
                 </label>
                 <Select aria-label="Filter by status" className="h-8 text-xs" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-                  <option value="all">All statuses</option>
                   <option value="active">Active only</option>
+                  <option value="retired">Trash / Deleted ({trashCount})</option>
+                  <option value="all">All (Including Trash)</option>
                   <option value="inactive">Inactive only</option>
                 </Select>
               </div>
@@ -513,7 +547,7 @@ export default function GlobalBenefitsPage() {
                     <span className="grid h-9 w-9 place-items-center rounded border border-[var(--rl-border)] bg-[var(--rl-bg)]">
                       {item.default_asset ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={fileUrl(item.default_asset.url)} alt="" className="max-h-7 max-w-7 object-contain" />
+                        <img src={fileUrl(item.default_asset.url)} alt="" loading="lazy" className="max-h-7 max-w-7 object-contain" />
                       ) : (
                         <ShieldCheck size={16} className="text-[var(--rl-text-muted)]" />
                       )}
@@ -522,6 +556,11 @@ export default function GlobalBenefitsPage() {
                       <span className="block truncate text-xs font-bold text-[var(--rl-text-strong)]">{item.label}</span>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         <span className="truncate font-mono text-[10px] text-[var(--rl-text-muted)]">#{item.sort_order} · {item.concept_key}</span>
+                        {item.status === "retired" ? (
+                          <span className="shrink-0 rounded bg-red-50 px-1 text-[9px] font-bold text-red-700 border border-red-200">
+                            Trash
+                          </span>
+                        ) : null}
                         {hasVariants ? (
                           <span className="shrink-0 rounded bg-[var(--rl-bg)] px-1 text-[9px] font-semibold text-[var(--rl-text-strong)] border border-[var(--rl-border)]">
                             {item.variants?.length} Plans
@@ -551,6 +590,11 @@ export default function GlobalBenefitsPage() {
                   <div>
                     <div className="flex items-center gap-2">
                       <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">{isNew ? "New Benefit Definition" : selected?.label}</h2>
+                      {selected?.status === "retired" && (
+                        <span className="rounded-full bg-red-50 border border-red-200 px-2.5 py-0.5 text-[10px] font-bold text-red-700">
+                          In Trash / Deleted
+                        </span>
+                      )}
                       <span className="rounded-full bg-[var(--rl-bg)] border border-[var(--rl-border)] px-2.5 py-0.5 text-[10px] font-bold text-[var(--rl-text-strong)]">
                         {formCategory === "default" ? "Category 1: Default Benefit" : "Category 2: Unique Add-on"}
                       </span>
@@ -578,15 +622,28 @@ export default function GlobalBenefitsPage() {
                       Manage aliases
                     </Link>
                     {!isNew && selected && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)]"
-                        onClick={() => setShowRetireConfirm(true)}
-                        icon={<Trash size={14} />}
-                      >
-                        Retire
-                      </Button>
+                      selected.status === "retired" ? (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          loading={restoring}
+                          className="text-emerald-700 hover:bg-emerald-50 border-emerald-300 font-bold"
+                          onClick={handleRestoreConcept}
+                          icon={<ArrowCounterClockwise size={14} weight="bold" />}
+                        >
+                          Restore
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] font-semibold"
+                          onClick={() => setShowDeleteConfirm(true)}
+                          icon={<Trash size={14} />}
+                        >
+                          Delete
+                        </Button>
+                      )
                     )}
                     <Button variant="secondary" size="sm" onClick={newBenefit} icon={<Plus size={14} />}>New</Button>
                     <Button
@@ -852,13 +909,13 @@ export default function GlobalBenefitsPage() {
       </section>
 
       <ConfirmDialog
-        open={showRetireConfirm}
-        onOpenChange={setShowRetireConfirm}
-        title="Retire Benefit Concept"
-        message={`Are you sure you want to retire "${selected?.label}"? It will be marked as retired and hidden from new catalogs.`}
-        confirmLabel="Retire Concept"
-        loading={retiring}
-        onConfirm={handleRetireConcept}
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        title="Delete Benefit Concept"
+        message={`Are you sure you want to delete "${selected?.label}"? It will be removed from active catalogs and stored in Trash, where it can be restored anytime.`}
+        confirmLabel="Delete to Trash"
+        loading={deleting}
+        onConfirm={handleDeleteConcept}
       />
     </AppShell>
   );

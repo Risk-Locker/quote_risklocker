@@ -43,8 +43,10 @@ def _audit(db: Session, actor_id: str | None, action: str, entity_type: str, ent
 
 
 def serialize_user(user: User) -> dict:
+    name = user.name or (user.email.split("@")[0].capitalize() if user.email else "Staff")
     return {
         "id": user.id,
+        "name": name,
         "email": user.email,
         "role": user.role,
         "status": user.status,
@@ -216,6 +218,7 @@ def create_user(
     role: str,
     password: str | None = None,
     status: str = AccountStatus.ACTIVE.value,
+    name: str | None = None,
 ) -> User:
     _require_user_management_permission(actor)
     normalized = _normalize_email(email)
@@ -227,6 +230,7 @@ def create_user(
         raise AppError("A user with this email already exists.", 409)
 
     user = User(
+        name=name.strip() if name else None,
         email=normalized,
         password_hash=hash_password(password) if password else "",
         role=role,
@@ -235,7 +239,7 @@ def create_user(
     db.add(user)
     db.commit()
     db.refresh(user)
-    _audit(db, actor.id, "create_user", "user", user.id, {"email": normalized, "role": role})
+    _audit(db, actor.id, "create_user", "user", user.id, {"email": normalized, "role": role, "name": user.name})
     db.commit()
     return user
 
@@ -248,8 +252,11 @@ def update_user(
     role: str | None = None,
     status: str | None = None,
     password: str | None = None,
+    name: str | None = None,
 ) -> User:
     _require_user_management_permission(actor, target)
+    if name is not None:
+        target.name = name.strip() if name else None
     if email is not None:
         normalized = _normalize_email(email)
         existing = db.scalar(select(User).where(User.email == normalized, User.id != target.id))

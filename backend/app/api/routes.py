@@ -7,6 +7,7 @@ import re
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
+from threading import Lock
 
 from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, Response as FastAPIResponse, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -105,6 +106,7 @@ from app.services.admin_service import (
     delete_vehicle_brand,
     delete_vehicle_model,
     dictionary_contains,
+    get_bulk_upload_limit,
     get_runner_fee_default,
     import_vehicles_workbook,
     learn_dictionary_value,
@@ -113,6 +115,7 @@ from app.services.admin_service import (
     save_strategy_settings,
     serialize_special,
     serialize_template,
+    set_bulk_upload_limit,
     set_runner_fee_default,
     update_template,
     upsert_company,
@@ -170,10 +173,15 @@ from app.services.template_assets import (
     resolve_template_asset,
     upload_template_asset,
 )
+from app.services.job_service import cancel_job, serialize_job
 from app.services.upload_service import serialize_batch
 from app.services.upload_intake_service import create_queued_upload
-from app.services.job_service import cancel_job, serialize_job
-from app.services.session_service import get_session, list_sessions, serialize_session
+from app.services.session_service import (
+    get_session,
+    get_session_filter_options,
+    list_sessions,
+    serialize_session,
+)
 from app.services.workspace_service import apply_workspace_patch, build_workspace_snapshot, template_selection_impact
 from app.services.workspace_service import workspace_capabilities
 from app.services.workspace_source_service import get_source_evidence, get_source_pages, get_workspace_template_config
@@ -226,6 +234,7 @@ from app.services.business_setup_service import (
     list_source_documents,
     save_benefit_concept,
     retire_benefit_concept,
+    restore_benefit_concept,
     save_business_company,
     delete_business_company,
     save_business_product,
@@ -366,7 +375,7 @@ def system_checks(db: Session = Depends(get_db), settings: Settings = Depends(se
 
 @router.post("/users")
 def user_create(payload: UserCreateRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    created = create_user(db, user, payload.email, payload.role, password=payload.password)
+    created = create_user(db, user, payload.email, payload.role, password=payload.password, name=payload.name)
     return serialize_user(created)
 
 
@@ -393,6 +402,7 @@ def users_update(user_id: str, payload: UserUpdateRequest, db: Session = Depends
         role=payload.role,
         status=payload.status,
         password=payload.password,
+        name=payload.name,
     )
     return serialize_user(updated)
 
@@ -540,9 +550,39 @@ def generate_selected(payload: GenerateSelectedRequest, db: Session = Depends(ge
 
 
 @router.get("/sessions")
-def sessions_list(search: str | None = None, limit: int = 25, offset: int = 0, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    sessions, total = list_sessions(db, user.id, search=search, limit=min(max(limit, 1), 100), offset=max(offset, 0))
-    return {"sessions": [serialize_session(s) for s in sessions], "total": total}
+def sessions_list(
+    search: str | None = None,
+    company: str | None = None,
+    staff_id: str | None = None,
+    user_id: str | None = None,
+    status: str | None = None,
+    sort_by: str = "vehicle",
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    effective_user_id = staff_id or user_id
+    sessions, total = list_sessions(
+        db,
+        user.id,
+        search=search,
+        company=company,
+        staff_id=effective_user_id,
+        status=status,
+        sort_by=sort_by,
+        limit=min(max(limit, 1), 100),
+        offset=max(offset, 0),
+    )
+    filter_options = get_session_filter_options(db) if offset == 0 else {"companies": [], "users": [], "staff": []}
+
+    serialized = [serialize_session(s) for s in sessions]
+
+    return {
+        "sessions": serialized,
+        "total": total,
+        "filter_options": filter_options,
+    }
 
 
 @router.post("/sessions/bulk-delete")
@@ -560,6 +600,32 @@ def sessions_bulk_delete(payload: BulkDeleteRequest, db: Session = Depends(get_d
 def session_detail(session_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     session = get_session(db, session_id)
     return {"session": serialize_session(session)}
+
+
+@router.delete("/sessions/{session_id}")
+def session_delete(
+    session_id: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    session = get_session(db, session_id)
+    active_jobs = db.scalars(
+        select(Job).where(
+            Job.session_id == session_id,
+            Job.state.in_(["queued", "processing"]),
+        )
+    ).all()
+    for j in active_jobs:
+        try:
+            cancel_job(db, j)
+        except Exception:
+            pass
+
+    if session.uploaded_file_id:
+        move_to_trash(db, settings, user, session.uploaded_file_id)
+    return {"deleted": True, "session_id": session_id}
+
 
 
 @router.get("/sessions/{session_id}/workspace")
@@ -1549,6 +1615,15 @@ def business_benefit_concept_retire(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.post("/business/benefit-concepts/{concept_id}/restore")
+def business_benefit_concept_restore(
+    concept_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"benefit_concept": restore_benefit_concept(db, user, concept_id)}
+
+
 @router.get("/business/segments")
 def business_segments(
     search: str = Query(default="", max_length=200),
@@ -1737,9 +1812,45 @@ def business_assets(
     }
 
 
+_ASSET_CACHE_DIR = Path(__file__).resolve().parents[3] / ".qc-tmp" / "asset-cache"
+_asset_memory_cache: dict[str, bytes] = {}
+_asset_cache_lock = Lock()
+
+
+def _get_cached_asset_bytes(storage_path: str, settings: Settings) -> bytes:
+    if storage_path in _asset_memory_cache:
+        return _asset_memory_cache[storage_path]
+
+    with _asset_cache_lock:
+        if storage_path in _asset_memory_cache:
+            return _asset_memory_cache[storage_path]
+
+        safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", storage_path) + ".bin"
+        disk_path = _ASSET_CACHE_DIR / safe_name
+        if disk_path.exists():
+            try:
+                data = disk_path.read_bytes()
+                _asset_memory_cache[storage_path] = data
+                return data
+            except Exception:
+                pass
+
+        data = SupabaseStorage(settings).download_bytes(storage_path)
+
+        try:
+            _ASSET_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            disk_path.write_bytes(data)
+        except Exception:
+            pass
+
+        _asset_memory_cache[storage_path] = data
+        return data
+
+
 @router.get("/business/assets/{asset_id}/content")
 def business_asset_content(
     asset_id: str,
+    request: Request,
     profile: str = Query(default="ui", pattern="^(ui|pdf|original)$"),
     db: Session = Depends(get_db),
     settings: Settings = Depends(settings_dep),
@@ -1752,8 +1863,21 @@ def business_asset_content(
     item = (asset.derivative_manifest or {}).get(profile) if profile != "original" else None
     storage_path = str((item or {}).get("storage_path") or asset.storage_path)
     content_type = str((item or {}).get("content_type") or asset.content_type)
+    content_hash = str((item or {}).get("content_hash") or asset.content_hash)
+    etag = f'"{content_hash}"'
+
+    if_none_match = request.headers.get("if-none-match")
+    if if_none_match and content_hash in if_none_match:
+        return Response(
+            status_code=status.HTTP_304_NOT_MODIFIED,
+            headers={
+                "Cache-Control": "private, max-age=86400, immutable",
+                "ETag": etag,
+            },
+        )
+
     try:
-        data = SupabaseStorage(settings).download_bytes(storage_path)
+        data = _get_cached_asset_bytes(storage_path, settings)
     except StorageNotFound as exc:
         raise AppError("Asset not found in storage.", 404) from exc
     except StorageError as exc:
@@ -1763,7 +1887,7 @@ def business_asset_content(
         media_type=content_type,
         headers={
             "Cache-Control": "private, max-age=86400, immutable",
-            "ETag": f'"{str((item or {}).get("content_hash") or asset.content_hash)}"',
+            "ETag": etag,
         },
     )
 
@@ -2410,8 +2534,32 @@ def runner_fee_set(payload: dict, db: Session = Depends(get_db), user: User = De
     return {"amount": amount}
 
 
+@router.get("/admin/settings/upload-limits")
+def upload_limits_get(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    return {
+        "max_bulk_upload_files": get_bulk_upload_limit(db),
+        "min_allowed": 3,
+    }
+
+
+@router.post("/admin/settings/upload-limits")
+def upload_limits_set(payload: dict, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    raw_val = payload.get("max_bulk_upload_files")
+    if raw_val is None:
+        raise AppError("max_bulk_upload_files is required.", 400)
+    try:
+        limit = int(raw_val)
+    except (ValueError, TypeError):
+        raise AppError("max_bulk_upload_files must be an integer.", 400)
+    saved = set_bulk_upload_limit(db, user, limit)
+    return {"max_bulk_upload_files": saved, "min_allowed": 3}
+
+
 @router.get("/settings/limits")
 def settings_limits(
+    db: Session = Depends(get_db),
     settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
 ) -> dict:
@@ -2419,8 +2567,10 @@ def settings_limits(
     pool = get_key_pool()
     stats = pool.get_quota_stats()
     count = stats["keys_count"]
+    bulk_limit = get_bulk_upload_limit(db)
     return {
         "max_upload_files": 1,
+        "max_bulk_upload_files": bulk_limit,
         "max_upload_bytes": settings.max_upload_bytes,
         "max_source_pdf_bytes": settings.max_source_pdf_bytes,
         "gemini": {
@@ -2440,6 +2590,7 @@ def settings_limits(
             "message": f"Connected ({count} key{'s' if count > 1 else ''} in pool, {stats['rpd_remaining']:,} / {stats['rpd_limit']:,} RPD remaining today)" if count else "No GEMINI_API_KEY set in .env",
         },
     }
+
 
 
 @router.get("/settings/ai-context")
