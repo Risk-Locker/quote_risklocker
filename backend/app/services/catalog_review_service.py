@@ -785,6 +785,12 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     clean_p = str(premium_cost).upper().replace("RM", "").replace(",", "").strip()
                     price_dict = {"amount": float(clean_p) if any(c.isdigit() for c in clean_p) else clean_p, "currency": "MYR"}
 
+                custom_label = (line.raw_label or "").strip()
+                if not custom_label and target_concept_id and str(target_concept_id) in all_concepts:
+                    custom_label = all_concepts[str(target_concept_id)].label
+                if not custom_label:
+                    custom_label = "Custom Benefit"
+
                 new_selection = DraftBenefitSelection(
                     id=selection_id,
                     draft_id=draft.id,
@@ -794,7 +800,7 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     item_kind="custom",
                     state="current",
                     cost_status="paid" if premium_cost else "included",
-                    label_override=line.raw_label if not target_concept_id else None,
+                    label_override=custom_label,
                     typed_value_override=typed_val,
                     evidence_snapshot={"source_line_id": line.id, "source": "extracted_custom", "is_detected": True, "extracted_label": line.raw_label, "coverage_limit": cov_limit, "premium_cost": premium_cost},
                     sort_order=50 + applied,

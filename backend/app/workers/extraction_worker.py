@@ -415,7 +415,8 @@ def run_one_job(
             exc.safe_message,
         )
         db.rollback()
-        fail_job(db, job, worker_id=worker_id, code=exc.code, message=exc.safe_message)
+        fresh_job = db.get(Job, job.id) or job
+        fail_job(db, fresh_job, worker_id=worker_id, code=exc.code, message=exc.safe_message)
     except RenderJobProcessingError as exc:
         logger.error(
             "Job %s (%s) failed with RenderJobProcessingError: [%s] %s",
@@ -425,13 +426,15 @@ def run_one_job(
             exc.safe_message,
         )
         db.rollback()
-        fail_job(db, job, worker_id=worker_id, code=exc.code, message=exc.safe_message)
+        fresh_job = db.get(Job, job.id) or job
+        fail_job(db, fresh_job, worker_id=worker_id, code=exc.code, message=exc.safe_message)
     except Exception:
         logger.exception("Job %s (%s) failed with unhandled exception", job.id, job.job_type)
         db.rollback()
+        fresh_job = db.get(Job, job.id) or job
         fail_job(
             db,
-            job,
+            fresh_job,
             worker_id=worker_id,
             code="processing_failed",
             message="The background task failed safely and will be retried.",

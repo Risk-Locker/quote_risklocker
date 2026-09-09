@@ -355,7 +355,7 @@ export default function UploadPage() {
                 <div className="flex items-center justify-between gap-4">
                   <span className="font-semibold text-sm text-[var(--rl-text-strong)] flex items-center gap-2">
                     <CircleNotch size={16} weight="bold" className="animate-spin text-[var(--rl-black)]" />
-                    Preparing Quotation with AI
+                    {job?.phase === "retry_wait" ? "Retrying step..." : "Preparing Quotation with AI"}
                   </span>
                   <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-[var(--rl-text-muted)]">
                     <ClockCountdown aria-hidden="true" size={14} /> Elapsed {formatElapsed(elapsed)}
