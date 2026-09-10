@@ -22,6 +22,7 @@ FIELD_LABELS = {
     "valuation_type": "Valuation Type",
     "coverage_amount": "Coverage",
     "excess_amount": "Policy Excess",
+    "compulsory_excess": "Compulsory Excess",
     "premium": "Insurance Premium",
     "roadtax": "Roadtax",
     "service_fee": "Runner Fee",
@@ -65,7 +66,8 @@ FIELD_FALLBACK_MAP: dict[str, tuple[str, ...]] = {
     "total_amount": ("total_premium_adjusted", "gross_premium"),
     "total_premium_adjusted": ("total_amount", "gross_premium"),
     "engine_cc": ("vehicle_cc", "engine_capacity", "cubic_capacity"),
-    "excess_amount": ("policy_excess", "compulsory_excess", "excess", "lebihan", "ekses", "ekses_polisi"),
+    "excess_amount": ("policy_excess", "excess", "lebihan", "ekses", "ekses_polisi"),
+    "compulsory_excess": ("compulsory_excess_amount", "ekses_wajib", "ekses_mandatori"),
     "valid_until": ("validity_date", "expiry_date", "validity", "quotation_validity", "valid_to", "expire_on"),
     "insurance_company": ("company_name", "insurer_name"),
     "quotation_reference": ("quotation_ref", "quote_ref", "reference_no", "quote_no"),
@@ -101,11 +103,11 @@ def _variable_value(fields: dict, config: dict[str, Any], variable_id: str | Non
             if variable.get("source") == "fixed":
                 return str(variable.get("fixed_value") or "")
             val = _value(fields, variable.get("field") or variable_id)
-            if not val and (variable_id in {"excess_amount", "excess"} or variable.get("field") in {"excess_amount", "excess"}):
+            if not val and (variable_id in {"excess_amount", "excess", "compulsory_excess"} or variable.get("field") in {"excess_amount", "excess", "compulsory_excess"}):
                 return "0.00"
             return val
     val = _value(fields, variable_id)
-    if not val and variable_id in {"excess_amount", "excess"}:
+    if not val and variable_id in {"excess_amount", "excess", "compulsory_excess"}:
         return "0.00"
     return val
 

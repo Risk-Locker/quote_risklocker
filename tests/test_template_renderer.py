@@ -601,3 +601,27 @@ def test_dynamic_benefit_grid_renders_equal_height_rows_not_masonry():
     assert 'align-items:flex-start;">' not in html
 
 
+def test_excess_and_compulsory_excess_rendering():
+    from app.services.master_template_service import _agency_bilingual_config
+
+    config = _agency_bilingual_config()
+    fields = {
+        "excess_amount": "500.00",
+        "compulsory_excess": "0.00",
+    }
+    html = render_quotation_html(fields, template_config=config)
+    assert "Policy Excess / 自负额" in html
+    assert "Compulsory Excess / 强制自负额" in html
+    assert "RM 500.00" in html
+    assert "RM 0.00" in html
+
+    # Scenario 2: Compulsory excess 400.00, policy excess 0.00
+    fields2 = {
+        "excess_amount": "0.00",
+        "compulsory_excess": "400.00",
+    }
+    html2 = render_quotation_html(fields2, template_config=config)
+    assert "RM 400.00" in html2
+
+
+

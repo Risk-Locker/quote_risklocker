@@ -239,9 +239,11 @@ def _agency_bilingual_config() -> dict:
         _text("all_driver_title", "All Driver Included", 528, 249, 206, 15, 5, size=10, weight="700", color=DARK, group_id="grp_excess_card"),
         _text("all_driver_sub", "Authorised Drivers Covered", 528, 264, 206, 13, 5, size=8.5, weight="500", color=MUTED_COLOR, group_id="grp_excess_card"),
         _line("divider_driver_excess", 528, 280, 206, 4, color=BORDER_COLOR, height=1, group_id="grp_excess_card"),
-        _text("excess_label", "Policy Excess / 自负额", 528, 286, 206, 14, 5, size=9, weight="600", color=LABEL_COLOR, group_id="grp_excess_card"),
-        _variable("excess_val", "excess_amount", 528, 301, 206, 16, 5, size=11, weight="800", color=DARK, prefix="RM ", group_id="grp_excess_card"),
-        _text("excess_note", "Compulsory Excess as per quotation", 528, 318, 206, 12, 5, size=7.5, weight="500", color=MUTED_COLOR, group_id="grp_excess_card"),
+        _text("excess_label", "Policy Excess / 自负额", 528, 286, 206, 14, 5, size=8.5, weight="600", color=LABEL_COLOR, group_id="grp_excess_card"),
+        _variable("excess_val", "excess_amount", 528, 300, 206, 15, 5, size=10.5, weight="800", color=DARK, prefix="RM ", group_id="grp_excess_card"),
+        _text("compulsory_excess_label", "Compulsory Excess / 强制自负额", 528, 318, 206, 14, 5, size=8.5, weight="600", color=LABEL_COLOR, group_id="grp_excess_card"),
+        _variable("compulsory_excess_val", "compulsory_excess", 528, 332, 206, 15, 5, size=10.5, weight="800", color=DARK, prefix="RM ", group_id="grp_excess_card"),
+        _text("excess_note", "Compulsory Excess as per quotation schedule", 528, 350, 206, 12, 5, size=7.5, weight="500", color=MUTED_COLOR, group_id="grp_excess_card"),
 
         # 6. Section 1: Our Specials / 特别优惠 (Included Benefits Grid)
         _rectangle("specials_header_bg", 40, 414, 714, 26, 2, background=NAVY, border="", radius=4, locked=True),

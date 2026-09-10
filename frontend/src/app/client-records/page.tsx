@@ -38,6 +38,7 @@ type ClientRecord = {
   market_value?: string | null;
   agreed_value?: string | null;
   excess_amount?: string | null;
+  compulsory_excess?: string | null;
   basic_premium?: string | null;
   ncd_amount?: string | null;
   service_tax?: string | null;
@@ -64,7 +65,7 @@ const DETAIL_FIELDS: Array<[string, string]> = [
   ["roadtax", "Roadtax"], ["service_fee", "Runner Fee"], ["total_premium", "Total Premium"],
   ["issue_date", "Issued Date"], ["valid_until", "Valid Until"], ["vehicle_year", "Vehicle Year"],
   ["capacity", "Capacity"], ["engine_no", "Engine/Motor No"], ["chassis_no", "Chassis No"],
-  ["market_value", "Market Value"], ["agreed_value", "Agreed Value"], ["excess_amount", "Excess Amount"],
+  ["market_value", "Market Value"], ["agreed_value", "Agreed Value"], ["excess_amount", "Excess Amount"], ["compulsory_excess", "Compulsory Excess"],
   ["basic_premium", "Basic Premium"], ["ncd_amount", "NCD Amount"], ["service_tax", "Service Tax"],
   ["stamp_duty", "Stamp Duty"], ["gross_premium", "Gross Premium"], ["optional_covers", "Optional Covers"],
   ["notes", "Notes"],

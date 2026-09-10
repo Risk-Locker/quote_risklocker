@@ -364,3 +364,37 @@ def test_normalize_vehicle_model_text():
         normalize_vehicle_model_text(": MODEL 3 (AUTOPILO", "TESLA")
         == "TESLA MODEL 3 (AUTOPILOT)"
     )
+
+
+def test_excess_and_compulsory_excess_disambiguation_scenarios():
+    # Scenario 1: Policy Excess stated, compulsory excess not stated
+    text1 = """
+    QUOTATION DETAILS
+    Policy Excess: RM 500.00
+    Compulsory Excess as per quotation
+    """
+    c1 = find_candidates(text1, [{"page": 1, "text": text1}], source_filename="quote.pdf", db_companies=COMPANY_RECORDS)
+    f1, _, _ = build_draft(c1)
+    assert f1["excess_amount"]["value"] == "500.00"
+    assert f1["compulsory_excess"]["value"] == "0.00"
+
+    # Scenario 2: Compulsory Excess stated, policy excess not stated
+    text2 = """
+    QUOTATION DETAILS
+    Compulsory Excess: RM 400.00
+    """
+    c2 = find_candidates(text2, [{"page": 1, "text": text2}], source_filename="quote.pdf", db_companies=COMPANY_RECORDS)
+    f2, _, _ = build_draft(c2)
+    assert f2["excess_amount"]["value"] == "0.00"
+    assert f2["compulsory_excess"]["value"] == "400.00"
+
+    # Scenario 3: Neither stated or both 0
+    text3 = """
+    QUOTATION DETAILS
+    Vehicle No: WXY1234
+    """
+    c3 = find_candidates(text3, [{"page": 1, "text": text3}], source_filename="quote.pdf", db_companies=COMPANY_RECORDS)
+    f3, _, _ = build_draft(c3)
+    assert f3["excess_amount"]["value"] == "0.00"
+    assert f3["compulsory_excess"]["value"] == "0.00"
+

@@ -145,7 +145,8 @@ export const VARIABLE_FALLBACK_MAP: Record<string, string[]> = {
   total_amount: ["total_premium_adjusted", "gross_premium", "total_payable"],
   total_premium_adjusted: ["total_amount", "gross_premium", "total_payable"],
   engine_cc: ["vehicle_cc", "engine_capacity", "cubic_capacity"],
-  excess_amount: ["policy_excess", "compulsory_excess", "excess", "lebihan", "ekses", "ekses_polisi"],
+  excess_amount: ["policy_excess", "excess", "lebihan", "ekses", "ekses_polisi"],
+  compulsory_excess: ["compulsory_excess_amount", "ekses_wajib", "ekses_mandatori"],
   valid_until: ["validity_date", "expiry_date", "validity", "quotation_validity", "valid_to", "expire_on"],
   insurance_company: ["company_name", "insurer_name", "insurance_name"],
   company_name: ["insurance_company", "insurer_name", "insurance_name"],
@@ -490,7 +491,7 @@ export function CanvasElementView({
       {element.type === "variable" ? (
         (() => {
           let raw = resolveVariableValue(variableValues, element.variableId);
-          if (raw === null && (element.variableId === "excess_amount" || element.variableId === "excess")) {
+          if (raw === null && (element.variableId === "excess_amount" || element.variableId === "excess" || element.variableId === "compulsory_excess")) {
             raw = "0.00";
           }
           if (element.variableId === "engine_cc" && raw !== null) {

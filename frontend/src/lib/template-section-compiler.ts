@@ -74,6 +74,7 @@ export const AVAILABLE_VARIABLES: VariableDescriptor[] = [
   { variableId: "coverage_amount", labelEn: "Sum Insured / Coverage", labelZh: "保险金额", category: "pricing", defaultPrefix: "RM " },
   { variableId: "ncd_percent", labelEn: "NCD", labelZh: "无索偿折扣", category: "pricing", defaultSuffix: "%" },
   { variableId: "excess_amount", labelEn: "Policy Excess", labelZh: "自负额", category: "pricing", defaultPrefix: "RM " },
+  { variableId: "compulsory_excess", labelEn: "Compulsory Excess", labelZh: "强制自负额", category: "pricing", defaultPrefix: "RM " },
   { variableId: "premium", labelEn: "Insurance Premium", labelZh: "基本保费", category: "pricing", defaultPrefix: "RM " },
   { variableId: "roadtax", labelEn: "Roadtax", labelZh: "路税", category: "pricing", defaultPrefix: "RM " },
   { variableId: "service_fee", labelEn: "Runner Fee", labelZh: "跑腿服务费", category: "pricing", defaultPrefix: "RM " },

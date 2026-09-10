@@ -216,6 +216,15 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
             "message": "",
         }
 
+    # Ensure compulsory_excess defaults to 0.00 if missing or empty
+    if "compulsory_excess" not in fields or not str(fields.get("compulsory_excess", {}).get("value") or "").strip():
+        fields["compulsory_excess"] = {
+            "value": "0.00",
+            "status": "ready",
+            "warnings": [],
+            "message": "",
+        }
+
     # Ensure valid_until falls back to cover_start_date or start_dmy if missing or empty
     if "valid_until" not in fields or not str(fields.get("valid_until", {}).get("value") or "").strip():
         fallback_validity = start_dmy or start_raw or ""

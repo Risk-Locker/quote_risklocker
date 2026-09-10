@@ -152,7 +152,11 @@ GEMINI_EXTRACTION_SCHEMA = {
         },
         "excess_amount": {
             "type": "string",
-            "description": "Excess amount or policy excess in RM (e.g. '0.00', '1,000.00', '500.00', '400.00'). Look for 'Excess', 'Lebihan', '*Excess Amount', 'Excess Amount', 'Policy Excess', 'Excess all claims', 'Ekses Polisi'. ALWAYS output '0.00' if excess is stated as 0 or 0.00.",
+            "description": "Voluntary/policy excess amount in RM (e.g. '0.00', '500.00', '1,000.00'). Look for 'Policy Excess', 'Excess', 'Lebihan', 'Ekses Polisi', 'Excess all claims'. Do NOT extract Compulsory Excess here. ALWAYS output '0.00' if excess is stated as 0 or 0.00.",
+        },
+        "compulsory_excess": {
+            "type": "string",
+            "description": "Compulsory excess (statutory excess) in RM (e.g. '0.00', '400.00'). Look for 'Compulsory Excess', 'Ekses Wajib', 'Ekses Mandatori'. ALWAYS output '0.00' if zero, not mentioned, or stated as per quotation/schedule.",
         },
         "coverage_amount": {
             "type": "string",
@@ -390,8 +394,9 @@ Extract accurate, grounded JSON data matching the provided schema from the quota
    - NEVER report or infer a package if it is not purchased with an explicit price. Do NOT report marketing notices, generic headings, or standard policy names as packages. If no explicit purchased package is present, `detected_packs` MUST BE EMPTY `[]`.
    - Known packs and their plan levels for reference:
 {packs_str}
-9. **EXCESS AMOUNT, VALIDITY & OPTIONAL COVER BREAKDOWN**:
-   - Extract `excess_amount` if stated (e.g. 'Excess / Lebihan 0.00' -> '0.00', '*Excess Amount : RM 1,000.00' -> '1,000.00', 'Policy Excess: RM 500.00', 'Ekses Polisi'). Output '0.00' if excess is 0 or zero.
+9. **EXCESS AMOUNT, COMPULSORY EXCESS, VALIDITY & OPTIONAL COVER BREAKDOWN**:
+   - Extract `excess_amount` for Policy Excess if stated (e.g. 'Policy Excess: RM 500.00' -> '500.00', 'Excess / Lebihan 0.00' -> '0.00', '*Excess Amount : RM 1,000.00' -> '1,000.00', 'Ekses Polisi'). Output '0.00' if excess is 0 or zero.
+   - Extract `compulsory_excess` for Compulsory Excess if stated (e.g. 'Compulsory Excess: RM 400.00' -> '400.00', 'Ekses Wajib: RM 400.00' -> '400.00'). Output '0.00' if zero, not mentioned, or nominal schedule terms.
    - Extract `valid_until` date (e.g. 'This quotation will expire on 18-03-2026' -> '18-03-2026', 'Valid Until 05-07-2026', 'Tarikh Luput').
    - Extract `total_optional_cover_amount` (e.g. 'Total Optional Cover Amount : RM 845.35' or 'Extra Benefit / Manfaat Tambahan : RM 20.00').
 10. **DISTINGUISHING COVERAGE LIMIT vs PREMIUM COST**:

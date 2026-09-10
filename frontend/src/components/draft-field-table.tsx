@@ -53,6 +53,7 @@ const labels: Record<string, string> = {
   market_value: "Market Value",
   agreed_value: "Agreed Value",
   excess_amount: "Excess Amount",
+  compulsory_excess: "Compulsory Excess",
   basic_premium_vehicle: "Basic Premium (Vehicle)",
   basic_premium_trailer: "Basic Premium (Trailer)",
   premium: "Insurance Premium",
@@ -80,7 +81,7 @@ const fallbackGroups: ReviewGroup[] = [
   {
     id: "source_details",
     title: "More Source Details",
-    fields: ["insurance_company", "source_template_category", "product_name", "customer_name", "vehicle_no", "issued_date", "valid_until", "vehicle_year", "engine_cc", "engine_no", "chassis_no", "market_value", "agreed_value", "excess_amount", "basic_premium_vehicle", "ncd_amount", "service_tax", "stamp_duty", "gross_premium", "optional_cover_amount", "optional_covers", "notes"]
+    fields: ["insurance_company", "source_template_category", "product_name", "customer_name", "vehicle_no", "issued_date", "valid_until", "vehicle_year", "engine_cc", "engine_no", "chassis_no", "market_value", "agreed_value", "excess_amount", "compulsory_excess", "basic_premium_vehicle", "ncd_amount", "service_tax", "stamp_duty", "gross_premium", "optional_cover_amount", "optional_covers", "notes"]
   }
 ];
 

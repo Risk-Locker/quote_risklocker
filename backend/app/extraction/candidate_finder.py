@@ -39,6 +39,7 @@ DRAFT_FIELDS = [
     "market_value",
     "agreed_value",
     "excess_amount",
+    "compulsory_excess",
     "basic_premium_vehicle",
     "basic_premium_trailer",
     "premium",
@@ -65,6 +66,7 @@ MONEY_FIELDS = {
     "market_value",
     "agreed_value",
     "excess_amount",
+    "compulsory_excess",
     "basic_premium_vehicle",
     "basic_premium_trailer",
     "premium",
@@ -88,7 +90,8 @@ DEFAULT_ALIASES = {
     "car_brand": ["make", "brand", "car"],
     "car_model": ["model", "vehicle model"],
     "engine_cc": ["engine cc", "capacity", "cubic capacity", "engine capacity", "keupayaan enjin", "cc", "motor capacity", "keupayaan motor", "electric motor", "motor output", "output", "kw", "watt"],
-    "excess_amount": ["excess amount", "excess all claims", "excess", "policy excess", "ekses", "ekses polisi", "compulsory excess", "lebihan"],
+    "excess_amount": ["excess amount", "excess all claims", "excess", "policy excess", "ekses", "ekses polisi", "lebihan"],
+    "compulsory_excess": ["compulsory excess", "ekses wajib", "ekses mandatori"],
     "valid_until": ["quotation validity", "tarikh sah quotation", "tarikh sah", "tempoh sah", "sah laku sehingga", "valid until", "validity period", "validity date", "validity", "this quotation will expire on", "quotation will expire on", "expire on", "expiry date", "tarikh luput", "sah sehingga"],
     "coverage_amount": ["sum insured", "coverage amount", "insured value", "market value", "agreed value", "sum covered", "jumlah diinsuranskan", "nilai yang dipersetujui"],
     "sum_insured": ["sum insured", "coverage amount", "insured value", "market value", "agreed value", "sum covered", "jumlah diinsuranskan", "nilai yang dipersetujui", "nilai pasaran"],
@@ -351,7 +354,9 @@ def _semantic_label_map() -> list[tuple[str, str]]:
         ("excess all claims", "excess_amount"),
         ("excess amount", "excess_amount"),
         ("policy excess", "excess_amount"),
-        ("compulsory excess", "excess_amount"),
+        ("compulsory excess", "compulsory_excess"),
+        ("ekses wajib", "compulsory_excess"),
+        ("ekses mandatori", "compulsory_excess"),
         ("excess", "excess_amount"),
         ("lebihan", "excess_amount"),
         ("ekses", "excess_amount"),
@@ -389,6 +394,10 @@ def _add_semantic_label_values(text: str, page_text: list[dict], results: dict[s
         has_colon = ":" in line
         head = line.split(":", 1)[0].lower().strip(" :-") if has_colon else ""
         for label, field in label_map:
+            if field == "excess_amount" and any(k in head or k in normalized for k in ["compulsory", "wajib", "mandatori"]):
+                continue
+            if field == "compulsory_excess" and any(k in head or k in normalized for k in ["policy", "polisi"]):
+                continue
             matched = False
             if has_colon:
                 matched = head == label or head.endswith(label) or head.startswith(label)
@@ -465,7 +474,10 @@ def _add_contribution_rows(text: str, page_text: list[dict], results: dict[str, 
             amount = row_amount(index)
             if amount:
                 _add_line_value(results, "stamp_duty", amount, "semantic_contribution_row", 0.95, line, text, page_text)
-        if "policy excess" in lower or "lebihan" in lower or "ekses" in lower or (lower.startswith("excess") and any(c.isdigit() for c in window)):
+        if "compulsory excess" in lower or "ekses wajib" in lower or "ekses mandatori" in lower:
+            if money_values:
+                _add_line_value(results, "compulsory_excess", money_values[0], "semantic_contribution_row", 0.94, line, text, page_text)
+        elif "policy excess" in lower or "lebihan" in lower or "ekses" in lower or (lower.startswith("excess") and any(c.isdigit() for c in window)):
             if money_values:
                 _add_line_value(results, "excess_amount", money_values[0], "semantic_contribution_row", 0.92, line, text, page_text)
         if "total optional cover" in lower or "extra benefit" in lower or "manfaat tambahan" in lower:
@@ -603,7 +615,8 @@ def _add_amgen_profile(text: str, page_text: list[dict], results: dict[str, list
         ("market_value", r"ISM-ABI Market Value\s+(?P<money>RM\s*[\d,]+\.\d{2})", 0.92),
         ("engine_no", r"Engine/Motor No\s*:?\s*(?P<value>[A-Z0-9-]+)", 0.92),
         ("chassis_no", r"Chassis No\.?\s*:?\s*(?P<value>[A-Z0-9-]+)", 0.94),
-        ("excess_amount", r"(?:\*?Excess(?:\s+Amount)?|Lebihan|Ekses(?:\s+Polisi)?|Policy\s+Excess)\s*:?\s*(?:RM\s*)?(?P<money>[\d,]+\.\d{2})", 0.92),
+        ("excess_amount", r"(?:(?<!Compulsory\s)(?<!Ekses\s)\*?Excess(?:\s+Amount)?|Lebihan|Ekses(?:\s+Polisi)?|Policy\s+Excess)\s*:?\s*(?:RM\s*)?(?P<money>[\d,]+\.\d{2})", 0.92),
+        ("compulsory_excess", r"(?:Compulsory\s+Excess|Ekses\s+Wajib|Ekses\s+Mandatori)\s*:?\s*(?:RM\s*)?(?P<money>[\d,]+\.\d{2})", 0.94),
     ]:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
@@ -732,6 +745,14 @@ def find_candidates(
         for alias in field_aliases:
             pattern = re.compile(rf"(?i)\b{re.escape(alias)}\b\s*[:\-]?\s*(?P<value>[^\n\r]{{1,90}})")
             for match in pattern.finditer(text):
+                if field == "excess_amount":
+                    prefix = text[max(0, match.start() - 20) : match.start()].lower()
+                    if any(k in prefix for k in ["compulsory", "wajib", "mandatori"]):
+                        continue
+                if field == "compulsory_excess":
+                    prefix = text[max(0, match.start() - 20) : match.start()].lower()
+                    if any(k in prefix for k in ["policy", "polisi"]):
+                        continue
                 value = match.group("value")
                 value = re.split(r"\s{2,}|(?i:\b(vehicle|model|premium|total|road\s*tax|ncd|sum insured|cover)\b)", value)[0]
                 _add(results, field, value, "label_nearby", 0.78, text, match.start(), match.end(), page_text)

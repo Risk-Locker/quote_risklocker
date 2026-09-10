@@ -82,6 +82,7 @@ const FORM_FIELDS: FormField[] = [
   { name: "valuation_type", label: "Valuation Type", kind: "valuation_type" },
   { name: "valid_until", label: "Quotation validity", kind: "text" },
   { name: "excess_amount", label: "Excess amount", kind: "money" },
+  { name: "compulsory_excess", label: "Compulsory excess", kind: "money" },
   { name: "ncd_percent", label: "NCD", kind: "percent" },
   { name: "premium", label: "Insurance Premium After NCD, Excluding Add-Ons", kind: "money" },
   { name: "insurance_premium_total", label: "Insurance premium", kind: "total" },
@@ -1115,6 +1116,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
     if (!values.excess_amount || values.excess_amount.trim() === "" || values.excess_amount === "—") {
       values.excess_amount = "0.00";
+    }
+
+    if (!values.compulsory_excess || values.compulsory_excess.trim() === "" || values.compulsory_excess === "—") {
+      values.compulsory_excess = "0.00";
     }
 
     // Auto-compute road tax if missing, 0, or corporate mismatch
