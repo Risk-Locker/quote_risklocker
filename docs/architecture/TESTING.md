@@ -39,22 +39,18 @@ Whenever the owner or user prompts to **commit**, **push** (e.g. to `origin main
 > The agent must run the pre-deployment verification check first to guarantee that the GitHub Actions workflow (`.github/workflows/deploy.yml`) and VPS deployment pass with 100% certainty.
 
 ### Verification Checklist Before Git Commit / Push:
-1. **Backend Tests:**
-   `.\.venv\Scripts\python.exe -m pytest -q`
-   Must pass with zero failures and zero errors.
-2. **Frontend Type-Check:**
-   In `frontend/`: `npx tsc --noEmit`
-   Must finish with zero type errors.
-3. **Frontend Production Build:**
-   In `frontend/`: `npm run build`
-   Must compile all routes and static pages cleanly with zero build errors.
-4. **Database Schema & Migrations Check:**
-   `PYTHONPATH=backend .\.venv\Scripts\python.exe -c "from app.db.session import verify_schema_version; verify_schema_version(); print('schema OK')"`
-   Ensures the current database schema matches the expected application version.
-5. **Brain & Documentation Integrity:**
-   `.\.venv\Scripts\python.exe commands/verify-brain.py`
-   Ensures docs, links, and registry are consistent.
-6. **Zero IDE / Diagnostics on Changed Files:**
+1. **Automated Verification Script (1:1 CI Parity):**
+   `.\commands\verify-deploy-gate.ps1`
+   This deterministic script executes all 6 gates with the exact environment variables from `.github/workflows/deploy.yml`:
+   - Backend pytest under sealed dummy CI environment (`DATABASE_URL=postgresql://postgres:ci@db.ci.supabase.co:5432/postgres?sslmode=require`).
+   - Frontend `tsc --noEmit` with zero type errors.
+   - Frontend `npm run build` compiling all routes cleanly.
+   - Database schema version validation (`verify_schema_version()`).
+   - Codebase map freshness (`update-code-map.py --check`).
+   - Agent brain documentation integrity (`verify-brain.py`).
+2. **Hermetic Test Rule:**
+   All unit and regression tests in `tests/` MUST be 100% hermetic (in-memory SQLite or mocks). Tests must NEVER instantiate `SessionLocal()` or attempt live network database connections, ensuring tests can never pollute or mutate production data.
+3. **Zero IDE / Diagnostics on Changed Files:**
    All diagnostic errors, type warnings, or lint issues on modified files must be cleared.
 
 If **any** check fails, **stop immediately**. Do not commit, do not push, and do not publish. Fix the issue, re-run the verification pipeline until fully green, and only then proceed with git operations.

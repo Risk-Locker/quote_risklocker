@@ -7,10 +7,11 @@ BACKEND = ROOT / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-from sqlalchemy import select, delete
+from sqlalchemy import create_engine, select, delete
+from sqlalchemy.orm import Session
 
-from app.db.session import SessionLocal
 from app.models.tables import (
+    Base,
     BenefitCatalog,
     BenefitCatalogRevision,
     BenefitConcept,
@@ -31,20 +32,24 @@ from app.services.catalog_review_service import seed_base_benefits
 from app.rendering.render_context import resolve_benefit_cards
 
 
+def _create_in_memory_db() -> Session:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    return Session(engine)
+
+
 def test_retire_and_restore_benefit_concept_cascade():
-    db = SessionLocal()
+    db = _create_in_memory_db()
     try:
-        admin_user = db.scalar(select(User).where(User.role == "admin"))
-        if not admin_user:
-            admin_user = User(
-                id=new_id(),
-                email="admin@test.local",
-                role="admin",
-                name="Admin",
-                password_hash="mock",
-            )
-            db.add(admin_user)
-            db.commit()
+        admin_user = User(
+            id=new_id(),
+            email="admin@test.local",
+            role="admin",
+            name="Admin",
+            password_hash="mock",
+        )
+        db.add(admin_user)
+        db.commit()
 
         # Create a test concept
         concept = BenefitConcept(
@@ -55,11 +60,9 @@ def test_retire_and_restore_benefit_concept_cascade():
         )
         db.add(concept)
 
-        company = db.scalar(select(InsuranceCompany))
-        if not company:
-            company = InsuranceCompany(id=new_id(), name="Test Insurer", company_key=f"test-ins-{new_id()[:6]}", status="active")
-            db.add(company)
-            db.commit()
+        company = InsuranceCompany(id=new_id(), name="Test Insurer", slug=f"test-ins-{new_id()[:6]}", status="active")
+        db.add(company)
+        db.commit()
 
         product = InsuranceProduct(
             id=new_id(),
@@ -142,7 +145,7 @@ def test_retire_and_restore_benefit_concept_cascade():
 
 
 def test_seed_base_benefits_excludes_retired_concepts():
-    db = SessionLocal()
+    db = _create_in_memory_db()
     try:
         # Setup active concept & retired concept
         active_concept = BenefitConcept(
@@ -159,11 +162,9 @@ def test_seed_base_benefits_excludes_retired_concepts():
         )
         db.add_all([active_concept, retired_concept])
 
-        company = db.scalar(select(InsuranceCompany))
-        if not company:
-            company = InsuranceCompany(id=new_id(), name="Test Insurer Seed", company_key=f"test-seed-{new_id()[:6]}", status="active")
-            db.add(company)
-            db.commit()
+        company = InsuranceCompany(id=new_id(), name="Test Insurer Seed", slug=f"test-seed-{new_id()[:6]}", status="active")
+        db.add(company)
+        db.commit()
 
         product = InsuranceProduct(
             id=new_id(),
@@ -219,7 +220,7 @@ def test_seed_base_benefits_excludes_retired_concepts():
             user = User(
                 id=new_id(),
                 email=f"test-{new_id()[:8]}@example.com",
-                full_name="Test User",
+                name="Test User",
                 role="admin",
             )
             db.add(user)

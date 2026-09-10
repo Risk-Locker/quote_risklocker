@@ -88,7 +88,8 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Global Benefit Lifecycle & Invariant Cascade: Soft-delete trash/restore pattern replacing retire, active-status filtering cascade across database seeding, runtime queries, and builder canvas in `business_setup_service.py` and `catalog_review_service.py`. Maintenance script in `commands/clean_test_concepts_and_update_descriptions.py`.
 - Benefit Template Typography & Description Expansion: Custom font sizes, colors, and weights for benefit templates; full 3-line short descriptions with auto-fitting row heights in `frontend/src/components/template-canvas/shared.tsx` and `backend/app/rendering/template_renderer.py`.
 - Extraction Robustness & Vehicle Normalization: Resilient Gemini multi-model fallback rotation, scoped native benefit line extraction in `backend/app/extraction/gemini_extractor.py` and `backend/app/extraction/benefit_lines.py`, and canonical `brand + model` normalization in `backend/app/extraction/draft_mapper.py`.
-- Tests: `tests/test_sessions_upgrade.py`, `tests/test_upload_limits.py`, `tests/test_global_benefit_retirement_cascade.py`, `tests/test_benefit_line_extraction.py`.
+- Pre-Deployment Gate & CI Parity Script: `commands/verify-deploy-gate.ps1` runs backend pytest under sealed dummy CI environment, frontend tsc, build, schema, and brain verification mirroring `.github/workflows/deploy.yml` 1:1.
+- Tests: `tests/test_sessions_upgrade.py`, `tests/test_upload_limits.py`, `tests/test_global_benefit_retirement_cascade.py` (hermetic in-memory SQLite), `tests/test_benefit_line_extraction.py`.
 
 ## Benefit Configuration Matrix
 
