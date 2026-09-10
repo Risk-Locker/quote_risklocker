@@ -62,7 +62,7 @@ def test_etiqa_fixture_extracts_semantic_values():
     assert field_value(fields, "customer_name") == "ALICE TESTER"
     assert field_value(fields, "vehicle_no") == "TST5678"
     assert field_value(fields, "car_brand") == "PERODUA"
-    assert field_value(fields, "car_model") == "ATIVA 1.0L TURBO AV"
+    assert field_value(fields, "car_model") == "PERODUA ATIVA 1.0L TURBO AV"
     assert field_value(fields, "vehicle_year") == "2023"
     assert field_value(fields, "cover_start_date") == "2026-05-16"
     assert field_value(fields, "cover_end_date") == "2027-05-15"
@@ -314,4 +314,53 @@ def test_rag_system_prompt_string_tiers_and_benefits_defensive():
     assert "Field 'vehicle_year'" not in prompt
 
 
+def test_normalize_vehicle_model_text():
+    from app.extraction.draft_mapper import normalize_vehicle_model_text
 
+    # Tesla quotation truncation + missing parenthesis + brand prepend
+    assert (
+        normalize_vehicle_model_text("MODEL 3 PREMIUM RWD (ENHANCED AUTOPILO", "TESLA")
+        == "TESLA MODEL 3 PREMIUM RWD (ENHANCED AUTOPILOT)"
+    )
+
+    # Make is BMW, Model is BMW M3 -> no duplicate brand
+    assert normalize_vehicle_model_text("BMW M3", "BMW") == "BMW M3"
+
+    # Make is BMW, Model accidentally has duplicate BMW BMW M3 -> dedup to BMW M3
+    assert normalize_vehicle_model_text("BMW BMW M3", "BMW") == "BMW M3"
+
+    # Make is HONDA, Model is HONDA CIVIC 1.5 TC-P (A) -> keep as HONDA CIVIC
+    assert (
+        normalize_vehicle_model_text("HONDA CIVIC 1.5 TC-P (A)", "HONDA")
+        == "HONDA CIVIC 1.5 TC-P (A)"
+    )
+
+    # Make is HONDA, Model is CIVIC 1.5 TC-P (A) -> prepend HONDA
+    assert (
+        normalize_vehicle_model_text("CIVIC 1.5 TC-P (A)", "HONDA")
+        == "HONDA CIVIC 1.5 TC-P (A)"
+    )
+
+    # Make is HONDA, Model is CITY 1.5L V SENSING -> prepend HONDA
+    assert (
+        normalize_vehicle_model_text("CITY 1.5L V SENSING", "HONDA")
+        == "HONDA CITY 1.5L V SENSING"
+    )
+
+    # Make is MERCEDES-BENZ, Model is C200 AMG -> prepend MERCEDES-BENZ
+    assert (
+        normalize_vehicle_model_text("C200 AMG", "MERCEDES-BENZ")
+        == "MERCEDES-BENZ C200 AMG"
+    )
+
+    # Make is MERCEDES-BENZ, Model is MERCEDES BENZ C200 -> no duplicate
+    assert (
+        normalize_vehicle_model_text("MERCEDES BENZ C200", "MERCEDES-BENZ")
+        == "MERCEDES BENZ C200"
+    )
+
+    # Leading colon or hyphen cleanup
+    assert (
+        normalize_vehicle_model_text(": MODEL 3 (AUTOPILO", "TESLA")
+        == "TESLA MODEL 3 (AUTOPILOT)"
+    )

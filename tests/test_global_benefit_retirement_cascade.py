@@ -7,7 +7,7 @@ BACKEND = ROOT / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from app.db.session import SessionLocal
 from app.models.tables import (
@@ -127,7 +127,18 @@ def test_retire_and_restore_benefit_concept_cascade():
         offering_ids_after = [o["id"] for o in workspace_after["offerings"]]
         assert offering.id in offering_ids_after
     finally:
-        db.close()
+        try:
+            if 'offering' in locals() and offering.id:
+                db.execute(delete(CatalogOffering).where(CatalogOffering.id == offering.id))
+            if 'concept' in locals() and concept.id:
+                db.execute(delete(BenefitConcept).where(BenefitConcept.id == concept.id))
+            db.commit()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            db.rollback()
+        finally:
+            db.close()
 
 
 def test_seed_base_benefits_excludes_retired_concepts():
@@ -257,7 +268,29 @@ def test_seed_base_benefits_excludes_retired_concepts():
         assert active_concept.id in concept_ids
         assert retired_concept.id not in concept_ids
     finally:
-        db.close()
+        try:
+            if 'draft' in locals() and draft.id:
+                db.execute(delete(DraftBenefitSelection).where(DraftBenefitSelection.draft_id == draft.id))
+                db.execute(delete(QuotationDraft).where(QuotationDraft.id == draft.id))
+            if 'uploaded_file' in locals() and uploaded_file.id:
+                db.execute(delete(UploadedFile).where(UploadedFile.id == uploaded_file.id))
+            if 'batch' in locals() and batch.id:
+                db.execute(delete(Batch).where(Batch.id == batch.id))
+            if 'active_offering' in locals() and active_offering.id:
+                db.execute(delete(CatalogOffering).where(CatalogOffering.id == active_offering.id))
+            if 'retired_offering' in locals() and retired_offering.id:
+                db.execute(delete(CatalogOffering).where(CatalogOffering.id == retired_offering.id))
+            if 'active_concept' in locals() and active_concept.id:
+                db.execute(delete(BenefitConcept).where(BenefitConcept.id == active_concept.id))
+            if 'retired_concept' in locals() and retired_concept.id:
+                db.execute(delete(BenefitConcept).where(BenefitConcept.id == retired_concept.id))
+            db.commit()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            db.rollback()
+        finally:
+            db.close()
 
 
 def test_resolve_benefit_cards_excludes_retired_concepts():

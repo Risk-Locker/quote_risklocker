@@ -636,7 +636,7 @@ export default function SessionsPage() {
                           {distinctCompanies.map((comp) => (
                             <span
                               key={comp}
-                              className="text-[11px] font-semibold px-2 py-0.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20"
+                              className="text-[11px] font-bold px-2 py-0.5 rounded-[var(--rl-radius-sm)] bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 shadow-2xs tracking-wide"
                             >
                               {comp}
                             </span>
@@ -821,7 +821,7 @@ function QuotationRow({
           <div className="flex flex-wrap items-center gap-2">
             {s.detected_company ? (
               <span
-                className="inline-flex items-center text-[12px] font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20"
+                className="inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-[var(--rl-radius-sm)] bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 shadow-2xs tracking-wide"
                 title="Underwriting Insurer"
               >
                 {s.detected_company}

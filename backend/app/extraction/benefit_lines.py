@@ -13,6 +13,9 @@ SELECTED_HEADINGS = (
     "selected optional covers",
     "selected benefits",
     "optional cover list",
+    "optional covers list",
+    "list of optional coverage",
+    "list of optional covers",
     "optional covers selected",
     "benefits included",
     "extra coverage",
@@ -62,6 +65,15 @@ STOP_HEADINGS = (
     "quotation type",
     "important notice",
     "acceptance of any referred case",
+    "head office",
+    "customer contact centre",
+    "customer contact center",
+    "customer care",
+    "branch & workshop",
+    "kurnia one touch",
+    "one touch",
+    "mobile app",
+    "www.",
 )
 NON_BENEFIT_PREFIXES = (
     "total optional cover",
@@ -71,6 +83,11 @@ NON_BENEFIT_PREFIXES = (
     "service tax",
     "sst",
     "class of vehicle",
+    "vehicle class",
+    "private car ex goods",
+    "private car",
+    "commercial vehicle",
+    "motorcycle",
     "kelas kenderaan",
     "cover type",
     "jenis perlindungan",
@@ -79,17 +96,31 @@ NON_BENEFIT_PREFIXES = (
     "hire purchase",
     "period insurance",
     "sum insured",
+    "excess amount",
     "excess",
     "trailer",
     "cubic capacity",
+    "capacity",
     "year of manufacture",
+    "year of make",
     "seating capacity",
     "engine no",
     "chassis no",
     "registration no",
+    "vehicle no",
     "regn. card",
     "make & type",
+    "make & model",
     "named driver",
+    "insured name",
+    "issued date",
+    "valid until",
+    "start date",
+    "expiry date",
+    "vehicle sum insured",
+    "trailer sum insured",
+    "quotation ref no",
+    "ref no",
     "this quotation will expire",
     "endorsement attaching",
     "important notice",
@@ -119,10 +150,51 @@ NON_BENEFIT_PREFIXES = (
     "scheme",
     "agreed value",
     "market value",
+    "under-insurance",
+    "clause",
+    "you have to bear",
+    "compulsory excess",
+    "betterment will apply",
+    "you're covered for",
+    "the premium outlined",
+    "jalan",
+    "taman",
+    "menara",
+    "peti surat",
+    "customer contact",
+    "head office",
+    "postal address",
+    "website",
+    "kurnia",
+    "one touch",
+    "branch & workshop",
+    "s.o.s emergency",
+    "instant claim notification",
 )
 NARRATIVE_PREFIXES = ("example:", "example ", "note:", "important:", "disclaimer :", "disclaimer:")
+NARRATIVE_INDICATORS = (
+    "will apply",
+    "you are required",
+    "you have to bear",
+    "is the first amount",
+    "in the course of",
+    "you're covered for",
+    "liabilities to third party",
+    "due to accidental",
+    "per round trip",
+    "many more!",
+    "age of vehicle is",
+    "based upon information",
+    "current policy has already",
+    "compulsory excess",
+)
 MONEY_RE = re.compile(r"(?:RM\s*)?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?", re.IGNORECASE)
 PURE_AMOUNT_RE = re.compile(r"^[:\-•*+~]?\s*(?:RM|MYR)?\s*[\d,]+(?:\.\d{1,2})?\s*%?\s*$", re.IGNORECASE)
+BENEFIT_KEYWORDS = (
+    "cover", "benefit", "liability", "damage", "perils", "waiver", "towing", "rider",
+    "protection", "windscreen", "passenger", "driver", "accident", "pillion", "cart",
+    "allowance", "compensation", "breakage", "strike", "riot", "flood", "storm", "theft",
+)
 
 
 def _normalized(value: str) -> str:
@@ -352,17 +424,25 @@ def _candidate_mappings(
 def _heading_scope(line: str) -> tuple[str, str] | None:
     normalized = re.sub(r"\s+", " ", line).strip(" :-;.").lower()
     if re.match(r"^total(?:\s*[:\-].*|\s+payable.*|\s+contribution.*|\s+premium.*|\s+amount.*)?$", normalized):
-        return "outside", "unknown"
-    if normalized in SELECTED_HEADINGS:
-        return "quotation_selected", "selected"
+        return "stop", "unknown"
     if normalized in AVAILABLE_HEADINGS:
         return "quotation_available", "not_selected"
+    if normalized in SELECTED_HEADINGS:
+        return "quotation_selected", "selected"
     if normalized in PDS_HEADINGS:
         return "pds", "unknown"
     if normalized in GENERIC_HEADINGS:
         return "unknown", "unknown"
-    if normalized in STOP_HEADINGS:
-        return "outside", "unknown"
+    if normalized in STOP_HEADINGS or any(normalized.startswith(sh) for sh in STOP_HEADINGS):
+        return "stop", "unknown"
+    if any(normalized.endswith(ah) for ah in AVAILABLE_HEADINGS):
+        return "quotation_available", "not_selected"
+    if any(normalized.endswith(sh) for sh in SELECTED_HEADINGS):
+        return "quotation_selected", "selected"
+    if any(normalized.endswith(ph) for ph in PDS_HEADINGS):
+        return "pds", "unknown"
+    if any(normalized.endswith(gh) for gh in GENERIC_HEADINGS):
+        return "unknown", "unknown"
     return None
 
 
@@ -374,13 +454,34 @@ def _looks_like_benefit(raw: str, concepts: list[dict], in_section: bool) -> boo
         return False
     if PURE_AMOUNT_RE.match(normalized):
         return False
-    if any(candidate for candidate in _candidate_mappings(normalized, concepts)):
-        return True
+
+    # Check for policy clause narrative text
+    lower = raw.lower()
+    if len(normalized) > 85 or any(ind in lower for ind in NARRATIVE_INDICATORS):
+        return False
+
+    # Reject date lines (e.g. 29-12-2021, 18/02/2023)
+    if re.match(r"^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}", normalized):
+        return False
+
     if raw.startswith((*CHECKED_PREFIXES, *UNCHECKED_PREFIXES)):
         return True
-    if in_section and len(normalized) >= 4 and not normalized.startswith(NARRATIVE_PREFIXES):
-        if any(normalized.startswith(nbp) for nbp in NON_BENEFIT_PREFIXES):
-            return False
+
+    # Endorsement codes (e.g. "Endorsement 112 - Passenger Liability", "Endt 89:")
+    if re.match(r"^(?:endorsement|endt\.?|clause)\s*(?:no\.?)?\s*(?:\d{1,3}[a-z]?|\([0-9a-z]+\))(?:\s*[-:])?\s+", normalized):
+        return True
+
+    # If outside any benefit section, do not loosely match sentences as benefits!
+    if not in_section:
+        return False
+
+    # Within a recognized benefit section:
+    if any(candidate for candidate in _candidate_mappings(normalized, concepts)):
+        return True
+    has_amount = bool(MONEY_RE.search(raw))
+    has_keyword = any(k in normalized for k in BENEFIT_KEYWORDS)
+    has_bullet = raw.startswith(("•", "-", "*", "·"))
+    if has_amount or has_keyword or (has_bullet and len(normalized) >= 4):
         return True
     return False
 
@@ -445,7 +546,7 @@ def extract_benefit_lines(
                 continue
             lower = raw.lower()
             narrative = scope == "pds" or lower.startswith(NARRATIVE_PREFIXES) or " may cover " in f" {lower} " or " could " in f" {lower} " or "not included" in lower
-            in_section = scope not in {"outside", "pds"}
+            in_section = scope not in {"outside", "pds", "stop"}
             if not _looks_like_benefit(raw, concept_rows, in_section) and not narrative:
                 continue
             normalized = _normalized(raw)

@@ -45,7 +45,7 @@ import { api, fileUrl } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { CanvasElementView, FONT_LIBRARY, type CanvasElement, type CanvasStyle, SNAP, snapValue, computeGuides } from "@/components/template-canvas/shared";
 import { LayersPanel, type LayerAction } from "@/components/template-builder/layers-panel";
-import { SYSTEM_BENEFIT_PRESETS, getBenefitPreset } from "@/lib/benefit-presets";
+import { SYSTEM_BENEFIT_PRESETS, getBenefitPreset, applyPresetToCanvasElement } from "@/lib/benefit-presets";
 
 type TemplateVariable = { id: string; label: string; type: string; source: string; field?: string; fixed_value?: string };
 type BenefitCard = { icon?: string; title?: string; subtitle?: string; lines?: string[]; asset_id?: string };
@@ -1998,13 +1998,8 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                         disabled={readOnly || Boolean(selected.locked)}
                         onChange={(event) => {
                           const preset = getBenefitPreset(event.target.value);
-                          updateElement(selected.id, {
-                            benefitPreset: preset.id,
-                            layoutMode: preset.layoutMode,
-                            columns: preset.columns,
-                            cardStyle: preset.cardStyle,
-                            textDensity: preset.textDensity,
-                          });
+                          const applied = applyPresetToCanvasElement(selected, preset);
+                          updateElement(selected.id, applied);
                         }}
                       >
                         {SYSTEM_BENEFIT_PRESETS.map((p) => (

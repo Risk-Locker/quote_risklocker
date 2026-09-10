@@ -416,7 +416,7 @@ export function CanvasElementView({
     lineHeight: style.lineHeight,
     transform: style.rotation ? `rotate(${style.rotation}deg)` : undefined,
     opacity: element.opacity ?? 1,
-    overflow: element.type === "premium-info-block" ? "visible" : "hidden",
+    overflow: element.type === "premium-info-block" || element.type === "benefit-grid" ? "visible" : "hidden",
     whiteSpace: "pre-wrap",
     display: isSpecial ? "flex" : undefined,
     flexDirection: isSpecial ? "column" : undefined,
@@ -817,7 +817,7 @@ export function CanvasElementView({
                             style={{
                               fontSize: (element as any).titleSize || density.label,
                               marginBottom: 3,
-                              color: (element as any).textColor || undefined,
+                              color: (element as any).titleColor || (element as any).textColor || undefined,
                             }}
                           >
                             {label}
@@ -867,20 +867,33 @@ export function CanvasElementView({
                                 }
                               }
 
+                              const customCovSize = (element as any).coverageSize ? Number((element as any).coverageSize) : density.value;
+                              const customCovColor = (element as any).coverageColor;
+                              const customDescSize = (element as any).descSize ? Number((element as any).descSize) : density.desc;
+                              const customDescWeight = (element as any).descWeight;
+                              const customDescColor = (element as any).descColor;
+                              const customCostSize = (element as any).costSize ? Number((element as any).costSize) : Math.max(8.5, density.desc);
+                              const customCostColor = (element as any).costColor;
+                              const customCostBg = (element as any).costBgColor;
+
                               return (
                                 <>
                                   {val && !computedHideCoverage && (
                                     <span
                                       className="font-bold leading-tight text-[var(--rl-text-strong)] truncate"
-                                      style={{ fontSize: density.value }}
+                                      style={{ fontSize: customCovSize, color: customCovColor || undefined }}
                                     >
                                       {val}
                                     </span>
                                   )}
                                   {desc && showDescription && (
                                     <span
-                                      className="leading-snug text-[var(--rl-text-muted)]"
-                                      style={{ fontSize: density.desc }}
+                                      className="line-clamp-4 leading-snug text-[var(--rl-text-muted)]"
+                                      style={{
+                                        fontSize: customDescSize,
+                                        fontWeight: customDescWeight ? (customDescWeight === "bold" ? 700 : customDescWeight === "semibold" ? 600 : customDescWeight === "medium" ? 500 : 400) : undefined,
+                                        color: customDescColor || undefined,
+                                      }}
                                     >
                                       {desc}
                                     </span>
@@ -889,11 +902,18 @@ export function CanvasElementView({
                                     <div className="mt-1 flex items-center">
                                       <span
                                         className={`inline-block rounded px-1.5 py-0.5 font-bold whitespace-nowrap leading-tight border ${
-                                          isDark
-                                            ? "bg-red-950/40 text-red-300 border-red-800/50"
-                                            : "bg-red-50 text-red-600 border-red-200"
+                                          customCostBg || customCostColor
+                                            ? ""
+                                            : isDark
+                                              ? "bg-red-950/40 text-red-300 border-red-800/50"
+                                              : "bg-red-50 text-red-600 border-red-200"
                                         }`}
-                                        style={{ fontSize: Math.max(8.5, density.desc) }}
+                                        style={{
+                                          fontSize: customCostSize,
+                                          color: customCostColor || undefined,
+                                          backgroundColor: customCostBg || undefined,
+                                          borderColor: customCostBg || undefined,
+                                        }}
                                       >
                                         {costBadge}
                                       </span>
@@ -1064,7 +1084,7 @@ export function CanvasElementView({
                                 style={{
                                   fontSize: isMinimal ? density.label - 0.5 : ((element as any).titleSize || density.label),
                                   marginBottom: isMinimal ? 1 : 3,
-                                  color: (element as any).textColor || undefined,
+                                  color: (element as any).titleColor || (element as any).textColor || undefined,
                                 }}
                               >
                                 {label}
@@ -1114,20 +1134,33 @@ export function CanvasElementView({
                                         }
                                       }
 
+                                      const customCovSize = (element as any).coverageSize ? Number((element as any).coverageSize) : density.value;
+                                      const customCovColor = (element as any).coverageColor;
+                                      const customDescSize = (element as any).descSize ? Number((element as any).descSize) : density.desc;
+                                      const customDescWeight = (element as any).descWeight;
+                                      const customDescColor = (element as any).descColor;
+                                      const customCostSize = (element as any).costSize ? Number((element as any).costSize) : Math.max(8.5, density.desc);
+                                      const customCostColor = (element as any).costColor;
+                                      const customCostBg = (element as any).costBgColor;
+
                                       return (
                                         <>
                                           {val && !computedHideCoverage && (
                                             <span
                                               className={`font-bold leading-tight truncate ${isDark ? "text-white" : "text-[var(--rl-text-strong)]"}`}
-                                              style={{ fontSize: density.value }}
+                                              style={{ fontSize: customCovSize, color: customCovColor || undefined }}
                                             >
                                               {val}
                                             </span>
                                           )}
                                           {!isMinimal && desc && showDescription && (
                                             <span
-                                              className={`leading-snug ${isDark ? "text-slate-400" : "text-[var(--rl-text-muted)]"}`}
-                                              style={{ fontSize: density.desc }}
+                                              className={`line-clamp-4 leading-snug ${isDark ? "text-slate-400" : "text-[var(--rl-text-muted)]"}`}
+                                              style={{ 
+                                                fontSize: customDescSize,
+                                                fontWeight: customDescWeight ? (customDescWeight === "bold" ? 700 : customDescWeight === "semibold" ? 600 : customDescWeight === "medium" ? 500 : 400) : undefined,
+                                                color: customDescColor || undefined 
+                                              }}
                                             >
                                               {desc}
                                             </span>
@@ -1136,11 +1169,18 @@ export function CanvasElementView({
                                             <div className="mt-1 flex items-center">
                                               <span
                                                 className={`inline-block rounded px-1.5 py-0.5 font-bold whitespace-nowrap leading-tight border ${
-                                                  isDark
-                                                    ? "bg-red-950/40 text-red-300 border-red-800/50"
-                                                    : "bg-red-50 text-red-600 border-red-200"
+                                                  customCostBg || customCostColor
+                                                    ? ""
+                                                    : isDark
+                                                      ? "bg-red-950/40 text-red-300 border-red-800/50"
+                                                      : "bg-red-50 text-red-600 border-red-200"
                                                 }`}
-                                                style={{ fontSize: Math.max(8.5, density.desc) }}
+                                                style={{
+                                                  fontSize: customCostSize,
+                                                  color: customCostColor || undefined,
+                                                  backgroundColor: customCostBg || undefined,
+                                                  borderColor: customCostBg || undefined,
+                                                }}
                                               >
                                                 {costBadge}
                                               </span>
@@ -1504,8 +1544,17 @@ export function balanceBenefitGridElements(
   const isMinimal = grid1.benefitPreset === "compact-minimal" || grid1.cardStyle === "minimal";
   const customIconSize = Number((grid1 as any).iconSize || 0);
   const dynamicIconExtra = customIconSize > 32 ? Math.max(0, customIconSize - 20) : 0;
-  const defaultRowHeight = (isMinimal ? 38 : (cols === 2 ? 72 : 68)) + dynamicIconExtra;
-  const addonRowHeight = (isMinimal ? 38 : (cols === 2 ? 88 : 84)) + dynamicIconExtra;
+
+  const descSize = Number((grid1 as any).descSize || 8);
+  const showDesc = (grid1 as any).showDescription !== false;
+  const showCov = (grid1 as any).showCoverage !== false;
+  const baseCardHeight = 52 + dynamicIconExtra;
+  const descHeight = showDesc ? Math.max(38, Math.round(descSize * 4.0)) : 0;
+  const covHeight = showCov ? 14 : 0;
+  const costHeight = 22;
+
+  const defaultRowHeight = isMinimal ? 38 : Math.max(cols === 2 ? 84 : 80, baseCardHeight + descHeight);
+  const addonRowHeight = isMinimal ? 38 : Math.max(cols === 2 ? 112 : 106, baseCardHeight + covHeight + descHeight + costHeight);
   const cardGap = 5;
 
   const hasExplicitExtrasGrid = elements.some((e) => e.gridKind === "extras" || e.gridKind === "purchased_extras");

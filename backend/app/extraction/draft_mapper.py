@@ -12,6 +12,87 @@ from app.extraction.validators import validate_date_range, validate_engine_cc, v
 from app.models.enums import RecordStatus
 
 
+COMMON_TRUNCATIONS = {
+    "AUTOPILO": "AUTOPILOT",
+    "AUTOMATI": "AUTOMATIC",
+    "COMPREHENSI": "COMPREHENSIVE",
+    "TRANSMISSI": "TRANSMISSION",
+    "ELECTRI": "ELECTRIC",
+    "STANDAR": "STANDARD",
+    "PREMIU": "PREMIUM",
+    "HYBRI": "HYBRID",
+    "PETRO": "PETROL",
+    "DIESE": "DIESEL",
+    "TURB": "TURBO",
+    "NAVIGATI": "NAVIGATION",
+}
+
+
+def normalize_vehicle_model_text(car_model: str | None, car_brand: str | None = None) -> str:
+    """
+    Normalizes vehicle model text:
+    - CAR MODEL = CAR BRAND + CAR MODEL (e.g. 'TESLA' + 'MODEL 3 ...' -> 'TESLA MODEL 3 ...')
+    - If model already starts with the brand (e.g. 'BMW M3' or 'HONDA CIVIC'), do NOT duplicate brand.
+    - Repairs common table cell truncations ('AUTOPILO' -> 'AUTOPILOT', 'AUTOMATI' -> 'AUTOMATIC').
+    - Balances unclosed parentheses.
+    - Deduplicates adjacent identical tokens (e.g. 'BMW BMW M3' -> 'BMW M3').
+    """
+    if not car_model or not car_model.strip():
+        return (car_brand or "").strip()
+
+    text = car_model.strip()
+
+    # Clean leading/trailing punctuation like colons, hyphens
+    text = re.sub(r"^[\s:\-]+", "", text).strip()
+
+    # Repair known cell-boundary truncations
+    for truncated, full in COMMON_TRUNCATIONS.items():
+        pattern = r"\b" + re.escape(truncated) + r"(?=[^a-zA-Z]|$)"
+        text = re.sub(pattern, full, text, flags=re.IGNORECASE)
+
+    # Balance unclosed parentheses
+    open_p = text.count("(")
+    close_p = text.count(")")
+    if open_p > close_p:
+        text = text + (")" * (open_p - close_p))
+
+    # Deduplicate adjacent duplicate words (e.g. 'BMW BMW M3' -> 'BMW M3')
+    parts = re.split(r"[\s]+", text)
+    deduped = []
+    for p in parts:
+        if p and (not deduped or deduped[-1].upper() != p.upper()):
+            deduped.append(p)
+    text = " ".join(deduped)
+
+    # Prepend brand if not already present
+    brand = (car_brand or "").strip()
+    if brand:
+        brand_tokens = [b for b in re.split(r"[\s\-]+", brand) if b]
+        first_brand_token = brand_tokens[0].upper() if brand_tokens else ""
+        first_model_token = parts[0].upper() if parts else ""
+
+        text_upper = text.upper()
+        brand_upper = brand.upper()
+
+        starts_with_brand = False
+        if text_upper.startswith(brand_upper):
+            rest = text_upper[len(brand_upper):]
+            if not rest or rest[0] in " -/:()":
+                starts_with_brand = True
+        elif first_brand_token and first_model_token == first_brand_token:
+            starts_with_brand = True
+
+        if not starts_with_brand:
+            text = f"{brand} {text}"
+
+        # Re-check adjacent deduplication at start in case of e.g. 'BMW BMW M3'
+        start_tokens = re.split(r"[\s]+", text)
+        if len(start_tokens) >= 2 and start_tokens[0].upper() == start_tokens[1].upper():
+            text = " ".join(start_tokens[1:])
+
+    return text.strip()
+
+
 def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list[dict] | None = None) -> tuple[dict, list[str], str]:
     selections = select_all(candidates, DRAFT_FIELDS)
     fields = {field: selection.to_draft_field() for field, selection in selections.items()}
@@ -208,20 +289,14 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
     from app.services.vehicle_catalog_service import infer_vehicle_cc_and_type
     from app.services.road_tax_service import calculate_road_tax
 
+    car_brand_val = fields.get("car_brand", {}).get("value")
     car_model_val = fields.get("car_model", {}).get("value")
     if car_model_val:
-        parts = re.split(r'[\s\-]+', str(car_model_val).strip())
-        deduped = []
-        for p in parts:
-            if p and (not deduped or deduped[-1].upper() != p.upper()):
-                deduped.append(p)
-        car_model_val = " ".join(deduped)
+        car_model_val = normalize_vehicle_model_text(car_model_val, car_brand_val)
         fields["car_model"]["value"] = car_model_val
     inferred_cc, inferred_type = infer_vehicle_cc_and_type(car_model_val)
     # Classify customer entity (Private Individual vs Company) and vehicle type
     from app.extraction.entity_classifier import classify_client_entity
-
-    car_brand_val = fields.get("car_brand", {}).get("value")
     cc_val = fields.get("engine_cc", {}).get("value")
     cust_name = fields.get("customer_name", {}).get("value")
     doc_no = fields.get("ic_or_brn", {}).get("value")

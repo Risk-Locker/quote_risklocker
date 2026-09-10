@@ -21,7 +21,7 @@ def test_messy_text_maps_customer_vehicle_and_year():
 
     assert fields["customer_name"]["value"] == "XKSFSKSGS"
     assert fields["car_brand"]["value"] == "PROTON"
-    assert fields["car_model"]["value"] == "SAGA BLM"
+    assert fields["car_model"]["value"] == "PROTON SAGA BLM"
     assert fields["vehicle_year"]["value"] == "2010"
     assert status in {"Check Needed", "Cannot Read"}
     assert warnings

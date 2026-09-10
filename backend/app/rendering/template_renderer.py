@@ -489,10 +489,24 @@ def _dynamic_benefit_grid(
                 pass
 
         val_fs = density["value"]
+        cov_sz = element.get("coverageSize")
+        if cov_sz is not None:
+            try:
+                val_fs = float(cov_sz)
+            except (ValueError, TypeError):
+                pass
+
         desc_fs = density["desc"]
-        title_color = escape(str(element.get("textColor") or ("#FFFFFF" if is_dark else "#0F172A")))
-        desc_color = "#94A3B8" if is_dark else "#64748B"
-        val_color = "#F8FAFC" if is_dark else "#0F172A"
+        desc_sz = element.get("descSize")
+        if desc_sz is not None:
+            try:
+                desc_fs = float(desc_sz)
+            except (ValueError, TypeError):
+                pass
+
+        title_color = escape(str(element.get("titleColor") or element.get("textColor") or ("#FFFFFF" if is_dark else "#0F172A")))
+        desc_color = escape(str(element.get("descColor") or ("#94A3B8" if is_dark else "#64748B")))
+        val_color = escape(str(element.get("coverageColor") or ("#F8FAFC" if is_dark else "#0F172A")))
 
         # --- Image cell (bottom-left) ---
         pad_shape = str(element.get("iconPadShape") or "")
@@ -543,9 +557,11 @@ def _dynamic_benefit_grid(
         )
 
         # --- Short description row ---
+        desc_weight = "700" if element.get("descWeight") == "bold" else ("600" if element.get("descWeight") == "semibold" else ("500" if element.get("descWeight") == "medium" else "400"))
+        desc_max_h = max(55.0, desc_fs * 5.0)
         desc_html = (
-            f'<span style="display:block;font-size:{desc_fs}px;line-height:1.2;color:{desc_color};'
-            f'overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">'
+            f'<span style="display:block;font-size:{desc_fs}px;font-weight:{desc_weight};line-height:1.2;color:{desc_color};'
+            f'max-height:{desc_max_h}px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical">'
             f'{desc_str}</span>'
             if (desc_str and not is_minimal and card.get("_showDescription", True)) else ""
         )
@@ -561,6 +577,17 @@ def _dynamic_benefit_grid(
             elif card.get("detected_cost"):
                 p_val = card.get("detected_cost")
 
+            cost_fs = max(7.5, desc_fs - 0.5)
+            cost_sz = element.get("costSize")
+            if cost_sz is not None:
+                try:
+                    cost_fs = float(cost_sz)
+                except (ValueError, TypeError):
+                    pass
+            badge_bg = escape(str(element.get("costBgColor") or ("#450A0A" if is_dark else "#FEE2E2")))
+            badge_fg = escape(str(element.get("costColor") or ("#FCA5A5" if is_dark else "#B91C1C")))
+            badge_border = escape("#7F1D1D" if is_dark else ("#FECACA" if not element.get("costBgColor") else badge_bg))
+
             if p_val is not None and str(p_val).strip() and str(p_val).strip() not in {"0", "0.00", "0.0"}:
                 try:
                     p_num = float(re.sub(r"[^0-9.]", "", str(p_val)))
@@ -568,20 +595,17 @@ def _dynamic_benefit_grid(
                 except Exception:
                     clean_pval = str(p_val).replace("RM ", "").replace("RM", "").strip()
                     p_str = f"Cost : MYR {clean_pval}"
-                badge_bg = "#450A0A" if is_dark else "#FEE2E2"
-                badge_fg = "#FCA5A5" if is_dark else "#B91C1C"
-                badge_border = "#7F1D1D" if is_dark else "#FECACA"
                 price_badge = (
                     f'<div style="margin-top:2px"><span style="display:inline-block;padding:1px 5px;border-radius:4px;'
-                    f'font-size:{max(7.5, desc_fs - 0.5)}px;font-weight:700;line-height:1.2;white-space:nowrap;'
+                    f'font-size:{cost_fs}px;font-weight:700;line-height:1.2;white-space:nowrap;'
                     f'background:{badge_bg};color:{badge_fg};border:1px solid {badge_border}">{p_str}</span></div>'
                 )
             elif kind == "available_addons":
                 price_badge = (
                     f'<div style="margin-top:2px"><span style="display:inline-block;padding:1px 5px;border-radius:4px;'
-                    f'font-size:{max(7.5, desc_fs - 0.5)}px;font-weight:700;line-height:1.2;white-space:nowrap;'
-                    f'background:{"#450A0A" if is_dark else "#FEE2E2"};color:{"#FCA5A5" if is_dark else "#B91C1C"};'
-                    f'border:1px solid {"#7F1D1D" if is_dark else "#FECACA"}">Cost : As quoted</span></div>'
+                    f'font-size:{cost_fs}px;font-weight:700;line-height:1.2;white-space:nowrap;'
+                    f'background:{badge_bg};color:{badge_fg};'
+                    f'border:1px solid {badge_border}">Cost : As quoted</span></div>'
                 )
 
         # Title font: shrink for long labels
@@ -868,8 +892,17 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     is_minimal = bool(grid1 and (grid1.get("benefitPreset") == "compact-minimal" or grid1.get("cardStyle") == "minimal"))
     custom_icon_size = float(grid1.get("iconSize") or 0) if grid1 else 0.0
     dynamic_icon_extra = max(0.0, custom_icon_size - 20.0) if custom_icon_size > 32.0 else 0.0
-    default_row_height = (38.0 if is_minimal else (72.0 if cols == 2 else 68.0)) + dynamic_icon_extra
-    addon_row_height = (38.0 if is_minimal else (88.0 if cols == 2 else 84.0)) + dynamic_icon_extra
+
+    desc_sz = float(grid1.get("descSize") or 8.0) if grid1 else 8.0
+    has_desc = grid1.get("showDescription") is not False if grid1 else True
+    has_cov = grid1.get("showCoverage") is not False if grid1 else True
+    desc_h = max(38.0, desc_sz * 4.0) if has_desc else 0.0
+    cov_h = 14.0 if has_cov else 0.0
+    cost_h = 22.0
+    base_card_h = 52.0 + dynamic_icon_extra
+
+    default_row_height = 38.0 if is_minimal else max(84.0 if cols == 2 else 80.0, base_card_h + desc_h)
+    addon_row_height = 38.0 if is_minimal else max(112.0 if cols == 2 else 106.0, base_card_h + cov_h + desc_h + cost_h)
     card_gap = 5.0
 
     if has_extras_section:

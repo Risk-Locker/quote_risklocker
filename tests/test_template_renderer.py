@@ -387,7 +387,9 @@ def test_balance_benefit_grid_three_section_expansion_and_no_overlap():
         template_config={"canvas": {"width": 794, "height": 1123, "elements": elements}},
         render_context=render_context,
     )
-    assert "height: 1241px" in html or "height: 1271px" in html or "height: 12" in html
+    import re
+    height_match = re.search(r"@page\s*\{\s*size:\s*\d+px\s*(\d+)px", html)
+    assert height_match and int(height_match.group(1)) > 1123
 
 
 def test_build_extras_uses_global_benefit_title_and_preserves_manual_override():
@@ -431,5 +433,128 @@ def test_build_extras_uses_global_benefit_title_and_preserves_manual_override():
     assert extras[0]["coverage_limit"] == "(RM 800)"
     assert extras[1]["label"] == "Special Perils (Full Storm)"
 
+def test_benefit_grid_custom_typography_and_colors():
+    elements = [
+        {
+            "id": "bg1",
+            "type": "benefit-grid",
+            "gridKind": "current_benefits",
+            "x": 20,
+            "y": 50,
+            "w": 750,
+            "h": 300,
+            "columns": 2,
+            "cardStyle": "standard",
+            "titleSize": 13,
+            "titleColor": "#1e3a8a",
+            "coverageSize": 12,
+            "coverageColor": "#059669",
+            "descSize": 10,
+            "descColor": "#475569",
+            "costSize": 10,
+            "costColor": "#991b1b",
+            "costBgColor": "#fef2f2",
+        }
+    ]
+    render_context = {
+        "current_benefits": [
+            {
+                "label": "Roadside Towing",
+                "coverage_limit": "300km",
+                "description": "Unlimited breakdown towing assistance",
+                "price": {"amount": 50.0},
+                "is_addon": True,
+                "_showAsset": False,
+                "_showTitle": True,
+                "_showCoverage": True,
+                "_showDescription": True,
+                "_showCost": True,
+            }
+        ],
+        "available_addons": [],
+    }
+    html = render_quotation_html(
+        {},
+        template_config={"canvas": {"width": 794, "height": 1123, "elements": elements}},
+        render_context=render_context,
+    )
+    assert "Roadside Towing" in html
+    assert "300km" in html
+    assert "color:#059669" in html
+    assert "color:#475569" in html
+    assert "color:#991b1b" in html
+    assert "background:#fef2f2" in html
 
+
+def test_benefit_card_description_allows_three_lines_without_truncation():
+    from app.rendering.template_renderer import _balance_benefit_grid_elements
+    elements = [
+        {
+            "id": "grid1",
+            "type": "benefit-grid",
+            "gridKind": "current_benefits",
+            "x": 40,
+            "y": 444,
+            "w": 714,
+            "h": 100,
+            "columns": 3,
+            "cardStyle": "standard",
+            "descSize": 8.5,
+            "showDescription": True,
+        },
+        {
+            "id": "grid2",
+            "type": "benefit-grid",
+            "gridKind": "available_addons",
+            "x": 40,
+            "y": 600,
+            "w": 714,
+            "h": 100,
+            "columns": 3,
+            "cardStyle": "standard",
+            "descSize": 8.5,
+            "showDescription": True,
+        },
+    ]
+    render_context = {
+        "current_benefits": [
+            {
+                "label": "Emergency Towing Assistance",
+                "description": "24/7 accident towing service to the nearest authorized workshop or panel repairer",
+                "_showTitle": True,
+                "_showDescription": True,
+            }
+        ],
+        "available_addons": [
+            {
+                "label": "Windscreen & Window Glass",
+                "coverage_limit": "RM 1,000",
+                "description": "Repair or replacement of broken windscreen, windows, and tint film without NCD loss.",
+                "price": {"amount": 150.0},
+                "_showTitle": True,
+                "_showCoverage": True,
+                "_showDescription": True,
+                "_showCost": True,
+            }
+        ],
+        "extras": [],
+    }
+    
+    # Check layout calculations
+    balanced = _balance_benefit_grid_elements(elements, render_context)
+    by_id = {e["id"]: e for e in balanced}
+    # With 1 card in grid1 (3 columns) -> 1 row >= 90px
+    assert float(by_id["grid1"]["h"]) >= 90.0
+    # With 1 card in grid2 (3 columns) -> 1 row >= 126px
+    assert float(by_id["grid2"]["h"]) >= 126.0
+
+    html = render_quotation_html(
+        {},
+        template_config={"canvas": {"width": 794, "height": 1123, "elements": elements}},
+        render_context=render_context,
+    )
+    # Ensure line-clamp-2 and rigid 24px max-height are completely gone
+    assert "-webkit-line-clamp:2" not in html
+    assert "max-height:24.0px" not in html
+    assert "-webkit-line-clamp:4" in html
 

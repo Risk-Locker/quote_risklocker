@@ -781,10 +781,17 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                 decision.selection_id = selection_id
                 continue
             else:
-                # Custom add-on fallback for any detected rider/extra benefit with price or selected state
+                # Custom add-on fallback: ONLY auto-apply if it has a price or is explicitly selected
+                has_cost = bool(premium_cost and re.search(r"\d", str(premium_cost)))
+                is_explicitly_selected = (line.inclusion_state == "selected")
+
+                if not has_cost and not is_explicitly_selected:
+                    decision.disposition = "source_only"
+                    continue
+
                 selection_id = new_id()
                 price_dict = None
-                if premium_cost:
+                if has_cost:
                     clean_p = str(premium_cost).upper().replace("RM", "").replace(",", "").strip()
                     price_dict = {"amount": float(clean_p) if any(c.isdigit() for c in clean_p) else clean_p, "currency": "MYR"}
 
@@ -802,7 +809,7 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     concept_id=target_concept_id,
                     item_kind="custom",
                     state="current",
-                    cost_status="paid" if premium_cost else "included",
+                    cost_status="paid" if has_cost else "included",
                     label_override=custom_label,
                     typed_value_override=typed_val,
                     evidence_snapshot={"source_line_id": line.id, "source": "extracted_custom", "is_detected": True, "extracted_label": line.raw_label, "coverage_limit": cov_limit, "premium_cost": premium_cost},

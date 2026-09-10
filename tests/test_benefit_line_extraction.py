@@ -276,3 +276,65 @@ TOTAL PAYABLE : RM 2,822.85
     lines = extract_benefit_lines([{"page": 1, "text": text}], concepts=CONCEPTS)
     assert len(lines) == 0
 
+
+def test_vehicle_class_and_policy_clauses_never_extracted_as_benefits():
+    text = """QUOTATION
+Vehicle Class: PRIVATE CAR EX GOODS
+Vehicle No: JRW1813
+Total Payable : RM 2,465.86
+Under-insurance clause will apply if your vehicle is under-insured for more than 10% of the market value.
+vehicle: a. Excess is the first amount that you are required to pay towards a claim you make on your car.
+Betterment will apply when in the course of repairing an accident-damaged vehicle (age of vehicle is five years and above),
+You're covered for liabilities to third party for bodily injury and death, third party property loss or damage and loss or damage to
+your own vehicle due to accidental fire, theft or an accidental damage, damage due to falling tree, attempted theft, allowance for loss of vehicle, towing service up to 365km per round trip and many more!
+"""
+    lines = extract_benefit_lines([{"page": 1, "text": text}], concepts=CONCEPTS)
+    assert len(lines) == 0
+
+
+def test_amgen_list_of_optional_coverage_scope():
+    page1 = """QUOTATION
+Vehicle Class
+PRIVATE CAR EX GOODS
+Gross Premium RM 2,316.85
+Total Payable : RM 2,465.86
+vehicle: a. Excess is the first amount that you are required to pay towards a claim you make on your car.
+"""
+    page2 = """AmGeneral Insurance Berhad
+List of Optional Coverage
+Insured Name: CTS M&E ENGINEERING SDN BHD
+OPTIONAL COVER LIST
+Legal Liability Of Passengers
+Legal Liability To Passengers
+Windscreen Damage (Tempered/Laminated Glass Inclusive Labour Cost) RM 2,650.00
+RM 7.50
+RM 41.85
+RM 397.50
+Kurnia One Touch Mobile App today!
+Head Office
+Customer Contact Centre
+"""
+    # Concepts including windscreen and liability
+    concepts = [
+        *CONCEPTS,
+        {
+            "concept_id": "llop",
+            "concept_key": "legal-liability-passengers",
+            "label": "Legal Liability Of Passengers",
+            "match_dataset": ["legal liability of passengers", "legal liability to passengers"],
+            "aliases": [],
+        },
+    ]
+    lines = extract_benefit_lines(
+        [{"page": 1, "text": page1}, {"page": 2, "text": page2}],
+        concepts=concepts,
+    )
+    extracted_labels = [line["normalized_label"] for line in lines]
+    assert "private car ex goods" not in extracted_labels
+    assert not any("excess" in l for l in extracted_labels)
+    assert "legal liability of passengers" in extracted_labels
+    assert "legal liability to passengers" in extracted_labels
+    assert any("windscreen" in l for l in extracted_labels)
+    assert len(lines) == 3
+
+

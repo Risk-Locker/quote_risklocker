@@ -152,10 +152,12 @@ def _template_config(draft: QuotationDraft, revision: TemplateRevision, page: Te
                         for k in [
                             "layoutMode", "columns", "cardStyle", "textDensity",
                             "iconSize", "shape", "elevation", "borderWidth", "borderStyle",
-                            "imageFit", "iconPadShape", "titleSize", "titleWeight",
-                            "textWrap", "valueBadgeStyle", "bgColor", "borderColor",
-                            "textColor", "accentColor", "rowHeight", "uniformHeight",
-                            "sectionVisibility", "showDescription", "showCoverage", "showCost"
+                            "imageFit", "iconPadShape", "titleSize", "titleWeight", "titleColor",
+                            "textWrap", "valueBadgeStyle", "coverageSize", "coverageColor",
+                            "descSize", "descWeight", "descColor", "costSize", "costColor", "costBgColor",
+                            "bgColor", "borderColor", "textColor", "accentColor",
+                            "rowHeight", "uniformHeight", "sectionVisibility",
+                            "showDescription", "showCoverage", "showCost"
                         ]:
                             if k in preset_config:
                                 el[k] = preset_config[k]
@@ -282,7 +284,7 @@ def _snapshot_assets(db, config: dict, cards: dict, draft: QuotationDraft) -> tu
     hashes: dict[str, str] = {}
     for asset_id in sorted(_referenced_asset_ids(config, cards)):
         try:
-            uuid.UUID(str(asset_id))
+            uuid.UUID(asset_id)
         except (ValueError, TypeError):
             continue
         business = db.get(BusinessAsset, asset_id)
@@ -340,8 +342,10 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
     # Needs to be called with db, draft, decisions (empty list is fine for generation), selections
     extras_section = _workspace_extracted_benefits_section(db, draft, [], selections)
     eval_context = extract_evaluation_context(draft.fields or {}, extras_section.get("extras", []))
-    insurer_key = str(getattr(draft.company, "company_key", "") or "etiqa") if hasattr(draft, "company") and draft.company else "etiqa"
-    product_type = str(getattr(draft.product, "name", "private_car") or "private_car") if hasattr(draft, "product") and draft.product else "private_car"
+    company = getattr(draft, "company", None)
+    product = getattr(draft, "product", None)
+    insurer_key = str(getattr(company, "company_key", "") or "etiqa") if company else "etiqa"
+    product_type = str(getattr(product, "name", "private_car") or "private_car") if product else "private_car"
     insurer_catalog = get_catalog_for_product(insurer_key, product_type)
 
     try:

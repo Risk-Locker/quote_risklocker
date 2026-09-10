@@ -394,8 +394,59 @@ export default function BenefitCardTemplatesPage() {
 
   function renderBenefitCardPreview(benefit: (typeof previewItems)[0]) {
     const isDark = customStyle.bgColor === "#0f172a" || customStyle.bgColor === "#1b1717";
-    const textColor = isDark ? "#ffffff" : customStyle.textColor;
-    const subTextColor = isDark ? "#94a3b8" : "#64748b";
+    const textColor = customStyle.titleColor || (isDark ? "#ffffff" : customStyle.textColor);
+    const subTextColor = customStyle.descColor || (isDark ? "#94a3b8" : "#64748b");
+    const covSize = customStyle.coverageSize || 11;
+    const covColor = customStyle.coverageColor || (isDark ? "#34d399" : "#10b981");
+    const descSize = customStyle.descSize || 9;
+    const descColor = customStyle.descColor || (isDark ? "#94a3b8" : "#64748b");
+    const costSize = customStyle.costSize || 9;
+    const customCostColor = customStyle.costColor;
+    const customCostBg = customStyle.costBgColor;
+
+    const renderCostBadge = (costText: string, isDef: boolean) => {
+      if (customCostBg || customCostColor) {
+        return (
+          <span
+            style={{
+              fontSize: `${costSize}px`,
+              color: customCostColor || undefined,
+              backgroundColor: customCostBg || undefined,
+              borderColor: customCostBg || undefined,
+            }}
+            className="inline-block rounded px-2 py-0.5 font-bold border leading-tight"
+          >
+            {costText}
+          </span>
+        );
+      }
+      if (customStyle.valueBadgeStyle === "green" || (isDef && customStyle.valueBadgeStyle !== "red")) {
+        return (
+          <span style={{ fontSize: `${costSize}px` }} className="inline-block rounded px-2 py-0.5 font-bold border bg-emerald-50 text-emerald-700 border-emerald-200">
+            {costText}
+          </span>
+        );
+      }
+      if (customStyle.valueBadgeStyle === "pill") {
+        return (
+          <span style={{ fontSize: `${costSize}px` }} className="inline-block rounded-full px-2.5 py-0.5 font-bold bg-slate-900 text-white">
+            {costText}
+          </span>
+        );
+      }
+      if (customStyle.valueBadgeStyle === "subtle") {
+        return (
+          <span style={{ fontSize: `${costSize}px` }} className="inline-block rounded px-2 py-0.5 font-bold border bg-neutral-100 text-neutral-700 border-neutral-200">
+            {costText}
+          </span>
+        );
+      }
+      return (
+        <span style={{ fontSize: `${costSize}px` }} className={`inline-block rounded px-2 py-0.5 font-bold border ${isDark ? "bg-red-950/40 text-red-300 border-red-800/50" : "bg-red-50 text-red-600 border-red-200"}`}>
+          {costText}
+        </span>
+      );
+    };
 
     // 5-component visibility resolution for this specific section
     const secVis = activeVisibility[benefit.sectionKind];
@@ -519,8 +570,8 @@ export default function BenefitCardTemplatesPage() {
               {/* Coverage Info (Component 3) */}
               {showCoverage && (
                 <span
-                  className="font-bold tracking-tight text-[var(--rl-red)] leading-tight"
-                  style={{ fontSize: `${Math.max(11, customStyle.titleSize)}px` }}
+                  className="font-bold tracking-tight leading-tight truncate"
+                  style={{ fontSize: `${covSize}px`, color: covColor }}
                 >
                   {benefit.coverage}
                 </span>
@@ -529,8 +580,12 @@ export default function BenefitCardTemplatesPage() {
               {/* Description (Component 4) */}
               {showDescription && benefit.description && (
                 <p
-                  style={{ color: subTextColor }}
-                  className="text-[10.5px] leading-snug mt-0.5"
+                  style={{
+                    color: descColor,
+                    fontSize: `${descSize}px`,
+                    fontWeight: customStyle.descWeight ? (customStyle.descWeight === "bold" ? 700 : customStyle.descWeight === "semibold" ? 600 : customStyle.descWeight === "medium" ? 500 : 400) : undefined,
+                  }}
+                  className="leading-snug mt-0.5 line-clamp-4"
                 >
                   {benefit.description}
                 </p>
@@ -539,15 +594,7 @@ export default function BenefitCardTemplatesPage() {
               {/* Costing (Component 5) */}
               {showCost && (
                 <div className="mt-1.5 flex items-center gap-1.5">
-                  <span
-                    className={`inline-block rounded px-2 py-0.5 text-[9.5px] font-bold border ${
-                      isDefault
-                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                        : "bg-red-50 text-red-600 border-red-200"
-                    }`}
-                  >
-                    {benefit.cost}
-                  </span>
+                  {renderCostBadge(benefit.cost, isDefault)}
                 </div>
               )}
             </div>
@@ -603,22 +650,27 @@ export default function BenefitCardTemplatesPage() {
           )}
 
           {showCoverage && (
-            <span className="text-[11px] font-bold text-[var(--rl-red)] mt-0.5 block truncate w-full">
+            <span style={{ fontSize: `${covSize}px`, color: covColor }} className="font-bold mt-0.5 block truncate w-full">
               {benefit.coverage}
             </span>
           )}
 
           {showDescription && benefit.description && (
-            <p style={{ color: subTextColor }} className="text-[10px] line-clamp-2 mt-1 w-full leading-snug">
+            <p
+              style={{
+                color: descColor,
+                fontSize: `${descSize}px`,
+                fontWeight: customStyle.descWeight ? (customStyle.descWeight === "bold" ? 700 : customStyle.descWeight === "semibold" ? 600 : customStyle.descWeight === "medium" ? 500 : 400) : undefined,
+              }}
+              className="line-clamp-4 mt-1 w-full leading-snug"
+            >
               {benefit.description}
             </p>
           )}
 
           {showCost && (
             <div className="mt-2">
-              <span className="text-[9px] font-bold rounded px-2 py-0.5 bg-red-50 text-red-600 border border-red-200">
-                {benefit.cost}
-              </span>
+              {renderCostBadge(benefit.cost, isDefault)}
             </div>
           )}
         </div>
@@ -664,21 +716,28 @@ export default function BenefitCardTemplatesPage() {
                 </h5>
               )}
               {showCoverage && (
-                <span className="text-[11px] font-bold text-[var(--rl-red)] block truncate">
+                <span style={{ fontSize: `${covSize}px`, color: covColor }} className="font-bold block truncate">
                   {benefit.coverage}
                 </span>
               )}
               {showDescription && (
-                <p style={{ color: subTextColor }} className="text-[10px] truncate leading-snug">
+                <p
+                  style={{
+                    color: descColor,
+                    fontSize: `${descSize}px`,
+                    fontWeight: customStyle.descWeight ? (customStyle.descWeight === "bold" ? 700 : customStyle.descWeight === "semibold" ? 600 : customStyle.descWeight === "medium" ? 500 : 400) : undefined,
+                  }}
+                  className="truncate leading-snug"
+                >
                   {benefit.description}
                 </p>
               )}
             </div>
           </div>
           {showCost && (
-            <span className="shrink-0 text-[10px] font-bold rounded px-2 py-0.5 bg-red-50 text-red-600 border border-red-200">
-              {benefit.cost}
-            </span>
+            <div className="shrink-0">
+              {renderCostBadge(benefit.cost, isDefault)}
+            </div>
           )}
         </div>
       );
@@ -1258,75 +1317,338 @@ export default function BenefitCardTemplatesPage() {
                 </div>
               </div>
 
-              {/* Section 3: Typography & Text Settings */}
-              <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-4 shadow-sm space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
-                  3. Typography & Badges
-                </h4>
+              {/* Section 3: Typography, Colors & Badges */}
+              <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-4 shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
+                    3. Typography & Colors
+                  </h4>
+                  <span className="rounded bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-700">
+                    Granular Control
+                  </span>
+                </div>
 
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div>
-                    <label className="block font-semibold text-[var(--rl-text-strong)]">Title Size</label>
-                    <div className="mt-1.5 grid grid-cols-4 gap-1">
-                      {[11, 12, 13, 14].map((size) => (
-                        <button
-                          key={size}
-                          type="button"
-                          onClick={() => setCustomStyle({ ...customStyle, titleSize: size })}
-                          className={`rounded border py-1 text-center font-medium ${
-                            customStyle.titleSize === size ? "bg-[var(--rl-black)] text-white font-bold" : "bg-[var(--rl-bg)] border-[var(--rl-border)]"
-                          }`}
-                        >
-                          {size}px
-                        </button>
-                      ))}
+                {/* Sub-item A: Benefit Title */}
+                <div className="space-y-2 border-b border-black/5 pb-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-[var(--rl-text-strong)] flex items-center gap-1.5">
+                      <TextT size={14} className="text-violet-600" weight="bold" />
+                      <span>Title Typography</span>
+                    </label>
+                    <span className="text-xs font-bold text-[var(--rl-red)]">{customStyle.titleSize}px</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="block text-[11px] text-[var(--rl-text-muted)] mb-1">Font Size</span>
+                      <div className="grid grid-cols-4 gap-1">
+                        {[11, 12, 13, 14].map((size) => (
+                          <button
+                            key={size}
+                            type="button"
+                            onClick={() => setCustomStyle({ ...customStyle, titleSize: size })}
+                            className={`rounded border py-1 text-center font-medium ${
+                              customStyle.titleSize === size
+                                ? "bg-[var(--rl-black)] text-white font-bold"
+                                : "bg-[var(--rl-bg)] border-[var(--rl-border)] hover:border-neutral-400"
+                            }`}
+                          >
+                            {size}px
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="block text-[11px] text-[var(--rl-text-muted)] mb-1">Text Wrap</span>
+                      <div className="grid grid-cols-2 gap-1">
+                        {[
+                          { key: "truncate", label: "1-Line" },
+                          { key: "wrap", label: "2-Lines" },
+                        ].map((item) => (
+                          <button
+                            key={item.key}
+                            type="button"
+                            onClick={() => setCustomStyle({ ...customStyle, textWrap: item.key as "truncate" | "wrap" })}
+                            className={`rounded border py-1 text-center font-medium ${
+                              customStyle.textWrap === item.key
+                                ? "bg-[var(--rl-black)] text-white font-bold"
+                                : "bg-[var(--rl-bg)] border-[var(--rl-border)] hover:border-neutral-400"
+                            }`}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
-
                   <div>
-                    <label className="block font-semibold text-[var(--rl-text-strong)]">Text Wrap</label>
-                    <div className="mt-1.5 grid grid-cols-2 gap-1">
-                      {[
-                        { key: "truncate", label: "1-Line" },
-                        { key: "wrap", label: "2-Lines" },
-                      ].map((item) => (
+                    <span className="block text-[11px] text-[var(--rl-text-muted)] mb-1">Title Color</span>
+                    <div className="flex items-center gap-1.5">
+                      {["#0f172a", "#1e293b", "#334155", "#1e3a8a", "#065f46", "#ffffff"].map((col) => (
                         <button
-                          key={item.key}
+                          key={col}
                           type="button"
-                          onClick={() => setCustomStyle({ ...customStyle, textWrap: item.key as "truncate" | "wrap" })}
-                          className={`rounded border py-1 text-center font-medium ${
-                            customStyle.textWrap === item.key ? "bg-[var(--rl-black)] text-white font-bold" : "bg-[var(--rl-bg)] border-[var(--rl-border)]"
+                          onClick={() => setCustomStyle({ ...customStyle, titleColor: col })}
+                          className={`h-6 w-6 rounded-full border shadow-2xs transition-all ${
+                            (customStyle.titleColor || "#0f172a") === col ? "ring-2 ring-[var(--rl-red)] ring-offset-2 scale-110" : "border-neutral-300"
                           }`}
-                        >
-                          {item.label}
-                        </button>
+                          style={{ backgroundColor: col }}
+                          title={col}
+                        />
                       ))}
+                      <input
+                        type="text"
+                        value={customStyle.titleColor || "#0f172a"}
+                        onChange={(e) => setCustomStyle({ ...customStyle, titleColor: e.target.value })}
+                        className="h-6 w-20 rounded border border-[var(--rl-border)] px-1.5 text-[11px] font-mono uppercase bg-[var(--rl-bg)]"
+                        placeholder="#0F172A"
+                      />
                     </div>
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-[var(--rl-text-strong)]">Cost / Tag Badge Style</label>
-                  <div className="mt-1.5 grid grid-cols-4 gap-1 text-xs">
-                    {[
-                      { key: "red", label: "Red Accent" },
-                      { key: "green", label: "Green FOC" },
-                      { key: "pill", label: "Dark Pill" },
-                      { key: "subtle", label: "Subtle Gray" },
-                    ].map((item) => (
-                      <button
-                        key={item.key}
-                        type="button"
-                        onClick={() => setCustomStyle({ ...customStyle, valueBadgeStyle: item.key as BenefitCardStyle["valueBadgeStyle"] })}
-                        className={`rounded-[var(--rl-radius-sm)] border py-1.5 text-center text-xs font-medium transition-all ${
-                          customStyle.valueBadgeStyle === item.key
-                            ? "border-[var(--rl-black)] bg-[var(--rl-black)] text-white font-bold"
-                            : "border-[var(--rl-border)] bg-[var(--rl-bg)] text-[var(--rl-text-strong)] hover:border-[var(--rl-text-muted)]"
-                        }`}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
+                {/* Sub-item B: Coverage Info / Limit */}
+                <div className="space-y-2 border-b border-black/5 pb-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-[var(--rl-text-strong)] flex items-center gap-1.5">
+                      <ShieldCheck size={14} className="text-emerald-600" weight="bold" />
+                      <span>Coverage Limit Typography</span>
+                    </label>
+                    <span className="text-xs font-bold text-emerald-600">{customStyle.coverageSize || 11}px</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="block text-[11px] text-[var(--rl-text-muted)] mb-1">Text Size</span>
+                      <div className="grid grid-cols-5 gap-1">
+                        {[9, 10, 11, 12, 13].map((size) => (
+                          <button
+                            key={size}
+                            type="button"
+                            onClick={() => setCustomStyle({ ...customStyle, coverageSize: size })}
+                            className={`rounded border py-1 text-center font-medium ${
+                              (customStyle.coverageSize || 11) === size
+                                ? "bg-[var(--rl-black)] text-white font-bold"
+                                : "bg-[var(--rl-bg)] border-[var(--rl-border)] hover:border-neutral-400"
+                            }`}
+                          >
+                            {size}px
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="block text-[11px] text-[var(--rl-text-muted)] mb-1">Coverage Color</span>
+                      <div className="flex items-center gap-1.5 pt-0.5">
+                        {["#10b981", "#0f172a", "#dc2626", "#1d4ed8", "#475569"].map((col) => (
+                          <button
+                            key={col}
+                            type="button"
+                            onClick={() => setCustomStyle({ ...customStyle, coverageColor: col })}
+                            className={`h-6 w-6 rounded-full border shadow-2xs transition-all ${
+                              (customStyle.coverageColor || "#10b981") === col ? "ring-2 ring-[var(--rl-red)] ring-offset-2 scale-110" : "border-neutral-300"
+                            }`}
+                            style={{ backgroundColor: col }}
+                            title={col}
+                          />
+                        ))}
+                        <input
+                          type="text"
+                          value={customStyle.coverageColor || "#10b981"}
+                          onChange={(e) => setCustomStyle({ ...customStyle, coverageColor: e.target.value })}
+                          className="h-6 w-20 rounded border border-[var(--rl-border)] px-1 text-[11px] font-mono uppercase bg-[var(--rl-bg)]"
+                          placeholder="#10B981"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sub-item C: Short Description */}
+                <div className="space-y-2 border-b border-black/5 pb-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-[var(--rl-text-strong)] flex items-center gap-1.5">
+                      <Article size={14} className="text-amber-600" weight="bold" />
+                      <span>Short Description Typography</span>
+                    </label>
+                    <span className="text-xs font-bold text-slate-600">{customStyle.descSize || 9}px</span>
+                  </div>
+                  <div className="space-y-3 text-xs">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="block text-[11px] text-[var(--rl-text-muted)] mb-1">Text Size</span>
+                        <div className="grid grid-cols-7 gap-1">
+                          {[8, 9, 10, 11, 12, 13, 14].map((size) => (
+                            <button
+                              key={size}
+                              type="button"
+                              onClick={() => setCustomStyle({ ...customStyle, descSize: size })}
+                              className={`rounded border py-1 text-center font-medium ${
+                                (customStyle.descSize || 9) === size
+                                  ? "bg-[var(--rl-black)] text-white font-bold"
+                                  : "bg-[var(--rl-bg)] border-[var(--rl-border)] hover:border-neutral-400"
+                              }`}
+                            >
+                              {size}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="block text-[11px] text-[var(--rl-text-muted)] mb-1">Text Color</span>
+                        <div className="flex items-center gap-1.5 pt-0.5">
+                          {["#0f172a", "#1e293b", "#334155", "#475569", "#64748b", "#000000"].map((col) => (
+                            <button
+                              key={col}
+                              type="button"
+                              onClick={() => setCustomStyle({ ...customStyle, descColor: col })}
+                              className={`h-6 w-6 rounded-full border shadow-2xs transition-all ${
+                                (customStyle.descColor || "#64748b") === col ? "ring-2 ring-[var(--rl-red)] ring-offset-2 scale-110" : "border-neutral-300"
+                              }`}
+                              style={{ backgroundColor: col }}
+                              title={col}
+                            />
+                          ))}
+                          <input
+                            type="text"
+                            value={customStyle.descColor || "#64748b"}
+                            onChange={(e) => setCustomStyle({ ...customStyle, descColor: e.target.value })}
+                            className="h-6 w-16 rounded border border-[var(--rl-border)] px-1 text-[10px] font-mono uppercase bg-[var(--rl-bg)]"
+                            placeholder="#64748B"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <span className="block text-[11px] text-[var(--rl-text-muted)] mb-1">Font Weight</span>
+                      <div className="grid grid-cols-4 gap-1">
+                        {[
+                          { key: "normal", label: "Normal (400)" },
+                          { key: "medium", label: "Medium (500)" },
+                          { key: "semibold", label: "Semibold (600)" },
+                          { key: "bold", label: "Bold (700)" },
+                        ].map((w) => (
+                          <button
+                            key={w.key}
+                            type="button"
+                            onClick={() => setCustomStyle({ ...customStyle, descWeight: w.key as any })}
+                            className={`rounded border py-1 text-center font-medium ${
+                              (customStyle.descWeight || "normal") === w.key
+                                ? "bg-[var(--rl-black)] text-white font-bold"
+                                : "bg-[var(--rl-bg)] border-[var(--rl-border)] hover:border-neutral-400"
+                            }`}
+                          >
+                            {w.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sub-item D: Cost / Tag Badge Style & Colors */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-[var(--rl-text-strong)] flex items-center gap-1.5">
+                      <CurrencyCircleDollar size={14} className="text-red-600" weight="bold" />
+                      <span>Cost Badge & Custom Colors</span>
+                    </label>
+                    <span className="text-xs font-bold text-red-600">{customStyle.costSize || 9}px</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="block text-[11px] text-[var(--rl-text-muted)] mb-1">Badge Text Size</span>
+                      <div className="grid grid-cols-4 gap-1">
+                        {[8, 9, 10, 11].map((size) => (
+                          <button
+                            key={size}
+                            type="button"
+                            onClick={() => setCustomStyle({ ...customStyle, costSize: size })}
+                            className={`rounded border py-1 text-center font-medium ${
+                              (customStyle.costSize || 9) === size
+                                ? "bg-[var(--rl-black)] text-white font-bold"
+                                : "bg-[var(--rl-bg)] border-[var(--rl-border)] hover:border-neutral-400"
+                            }`}
+                          >
+                            {size}px
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="block text-[11px] text-[var(--rl-text-muted)] mb-1">Badge Style</span>
+                      <div className="grid grid-cols-4 gap-1">
+                        {[
+                          { key: "red", label: "Red" },
+                          { key: "green", label: "Green" },
+                          { key: "pill", label: "Pill" },
+                          { key: "subtle", label: "Gray" },
+                        ].map((item) => (
+                          <button
+                            key={item.key}
+                            type="button"
+                            onClick={() => setCustomStyle({ ...customStyle, valueBadgeStyle: item.key as BenefitCardStyle["valueBadgeStyle"] })}
+                            className={`rounded border py-1 text-center font-medium ${
+                              customStyle.valueBadgeStyle === item.key
+                                ? "bg-[var(--rl-black)] text-white font-bold"
+                                : "bg-[var(--rl-bg)] border-[var(--rl-border)] hover:border-neutral-400"
+                            }`}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                    <div>
+                      <span className="block text-[11px] text-[var(--rl-text-muted)] mb-1">Custom Text Color</span>
+                      <div className="flex items-center gap-1.5">
+                        {["#b91c1c", "#047857", "#0f172a", "#475569"].map((col) => (
+                          <button
+                            key={col}
+                            type="button"
+                            onClick={() => setCustomStyle({ ...customStyle, costColor: col })}
+                            className={`h-5 w-5 rounded-full border shadow-2xs transition-all ${
+                              customStyle.costColor === col ? "ring-2 ring-[var(--rl-red)] ring-offset-1 scale-110" : "border-neutral-300"
+                            }`}
+                            style={{ backgroundColor: col }}
+                            title={col}
+                          />
+                        ))}
+                        <input
+                          type="text"
+                          value={customStyle.costColor || ""}
+                          onChange={(e) => setCustomStyle({ ...customStyle, costColor: e.target.value })}
+                          className="h-6 w-20 rounded border border-[var(--rl-border)] px-1 text-[11px] font-mono uppercase bg-[var(--rl-bg)]"
+                          placeholder="#B91C1C"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <span className="block text-[11px] text-[var(--rl-text-muted)] mb-1">Custom BG Color</span>
+                      <div className="flex items-center gap-1.5">
+                        {["#fee2e2", "#d1fae5", "#f1f5f9", "#0f172a"].map((col) => (
+                          <button
+                            key={col}
+                            type="button"
+                            onClick={() => setCustomStyle({ ...customStyle, costBgColor: col })}
+                            className={`h-5 w-5 rounded-full border shadow-2xs transition-all ${
+                              customStyle.costBgColor === col ? "ring-2 ring-[var(--rl-red)] ring-offset-1 scale-110" : "border-neutral-300"
+                            }`}
+                            style={{ backgroundColor: col }}
+                            title={col}
+                          />
+                        ))}
+                        <input
+                          type="text"
+                          value={customStyle.costBgColor || ""}
+                          onChange={(e) => setCustomStyle({ ...customStyle, costBgColor: e.target.value })}
+                          className="h-6 w-20 rounded border border-[var(--rl-border)] px-1 text-[11px] font-mono uppercase bg-[var(--rl-bg)]"
+                          placeholder="#FEE2E2"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1378,7 +1700,7 @@ export default function BenefitCardTemplatesPage() {
             </div>
 
             {/* Right Column (7 cols): Live Dynamic Benefit Cards Grid Preview */}
-            <div className="lg:col-span-7 space-y-5">
+            <div className="lg:col-span-7 space-y-5 lg:sticky lg:top-6 lg:self-start max-h-[calc(100vh-3rem)] overflow-y-auto pr-1">
               <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm space-y-4">
                 <div className="flex flex-wrap items-center justify-between border-b border-[var(--rl-border)] pb-3 gap-2">
                   <div>

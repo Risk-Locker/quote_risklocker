@@ -81,6 +81,15 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Database Maintenance: `commands/purge-invalid-correction-memory.py` safely purges historical invalid correction memory records from Postgres.
 - Tests: `tests/test_template_renderer.py`, `tests/test_extraction_pipeline.py`, and `tests/test_extraction_regression.py` validating canonical benefit title resolution and clean extraction.
 
+## Sessions Dossier, Dual Upload, and Benefit Architecture (v18) Additions
+
+- Sessions Dossier & Multi-Staff Tracking: Migration `migrations/040_user_name_and_session_edit_tracking.sql`, vehicle grouping dossiers, timestamps down to second, duplicate vehicle quote detection, toolbar filtering/sorting, and fast copy actions in `frontend/src/app/sessions/page.tsx` and `backend/app/services/session_service.py`.
+- Dual-Mode Intake & Configurable Batch Limits: Single and Bulk upload tabs with live multi-file progress, batch size limits managed via `/builder/uploads` (`frontend/src/app/builder/uploads/page.tsx`), and multi-tab opening.
+- Global Benefit Lifecycle & Invariant Cascade: Soft-delete trash/restore pattern replacing retire, active-status filtering cascade across database seeding, runtime queries, and builder canvas in `business_setup_service.py` and `catalog_review_service.py`. Maintenance script in `commands/clean_test_concepts_and_update_descriptions.py`.
+- Benefit Template Typography & Description Expansion: Custom font sizes, colors, and weights for benefit templates; full 3-line short descriptions with auto-fitting row heights in `frontend/src/components/template-canvas/shared.tsx` and `backend/app/rendering/template_renderer.py`.
+- Extraction Robustness & Vehicle Normalization: Resilient Gemini multi-model fallback rotation, scoped native benefit line extraction in `backend/app/extraction/gemini_extractor.py` and `backend/app/extraction/benefit_lines.py`, and canonical `brand + model` normalization in `backend/app/extraction/draft_mapper.py`.
+- Tests: `tests/test_sessions_upgrade.py`, `tests/test_upload_limits.py`, `tests/test_global_benefit_retirement_cascade.py`, `tests/test_benefit_line_extraction.py`.
+
 ## Benefit Configuration Matrix
 
 - `docs/domain/benefits/BENEFITS-CONFIGURATION.md` — canonical per-insurer benefits/add-on matrix: global benefit library (51 concepts), dimensions, and every company × coverage type × vehicle category row including add-on system (`single` vs `package`), package tiers, and seed status (seeded / draft / pending). Registered in `docs/core/START-HERE.md`.

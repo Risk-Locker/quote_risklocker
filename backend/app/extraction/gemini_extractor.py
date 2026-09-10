@@ -128,7 +128,7 @@ GEMINI_EXTRACTION_SCHEMA = {
         },
         "car_model": {
             "type": "string",
-            "description": "Complete vehicle model, variant, transmission, and body type text (e.g. 'PERODUA ATIVA AV MY21 D55L 4D WAGON 1 SP AUTOMATIC CONSTANTLY VARIABLE (CVT) / 4D WAGON').",
+            "description": "Complete vehicle model including make/brand prefix in canonical format (e.g. 'TESLA MODEL 3 PREMIUM RWD (ENHANCED AUTOPILOT)', 'PERODUA ATIVA AV MY21 D55L 4D WAGON', 'BMW M3'). CAR MODEL SIMPLY MEANS: CAR BRAND + CAR MODEL. If Make is listed separately as 'BMW' and Model is 'BMW M3', do not duplicate Make (result is 'BMW M3'). If Make is 'TESLA' and Model is 'MODEL 3 ...', prepend Make to get 'TESLA MODEL 3 ...'. If text was truncated at table margins (such as 'AUTOPILO' or 'AUTOMATI'), reconstruct the full word ('AUTOPILOT', 'AUTOMATIC') and close any open parentheses.",
         },
         "vehicle_year": {
             "type": "string",
@@ -490,14 +490,12 @@ def extract_with_gemini_sync(
 
     candidate_models = [
         configured_model,
-        "gemini-3.1-flash-lite-preview",
         "gemini-flash-latest",
-        "gemini-3.7-flash",
-        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite-preview",
+        "gemini-2.5-flash",
     ]
     seen_models: set[str] = set()
     models_to_try = [m for m in candidate_models if m and not (m in seen_models or seen_models.add(m))]
-    failed_models: set[str] = set()
 
     # Timeout: ensure sufficient time for complete structured JSON extraction (typically 5-7s)
     effective_timeout = max(timeout_seconds or 20.0, 15.0)
@@ -505,11 +503,6 @@ def extract_with_gemini_sync(
     api_key = pool.get_next_key()
     if not api_key:
         return None
-
-    # Try configured model first; fallback to gemini-3.1-flash-lite-preview if different
-    models_to_try = [configured_model]
-    if configured_model != "gemini-3.1-flash-lite-preview":
-        models_to_try.append("gemini-3.1-flash-lite-preview")
 
     for m_name in models_to_try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{m_name}:generateContent?key={api_key}"
@@ -527,21 +520,27 @@ def extract_with_gemini_sync(
                             pool.record_request()
                             logger.info("Gemini AI extraction succeeded with %s.", m_name)
                             return parsed
+                elif response.status_code in (500, 502, 503, 504):
+                    logger.warning("Gemini model %s returned server error (%d), trying fallback.", m_name, response.status_code)
+                    continue
                 elif response.status_code == 429:
-                    logger.warning("Gemini model %s returned rate-limit (429), yielding to native extraction.", m_name)
-                    break
+                    logger.warning("Gemini model %s returned rate-limit (429), rotating key or fallback.", m_name)
+                    next_key = pool.get_next_key()
+                    if next_key and next_key != api_key:
+                        api_key = next_key
+                    continue
                 elif response.status_code == 404:
                     logger.warning("Gemini model %s returned 404, trying fallback.", m_name)
                     continue
                 else:
-                    logger.warning("Gemini API returned status %d: %s", response.status_code, response.text[:200])
-                    break
+                    logger.warning("Gemini API returned status %d on %s: %s", response.status_code, m_name, response.text[:200])
+                    continue
         except (httpx.TimeoutException, TimeoutError):
-            logger.info("Gemini AI extraction timed out (6.0s limit); seamlessly falling back to high-speed native extraction.")
-            break
+            logger.warning("Gemini extraction timed out on %s; trying fallback model.", m_name)
+            continue
         except Exception as exc:
-            logger.warning("Gemini extraction attempt failed on %s: %s", m_name, exc)
-            break
+            logger.warning("Gemini extraction attempt failed on %s: %s; trying fallback model.", m_name, exc)
+            continue
 
 
     logger.error("All Gemini API keys and models in pool failed or exhausted.")
