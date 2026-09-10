@@ -638,40 +638,50 @@ def _dynamic_benefit_grid(
             f'<article data-benefit-card="1" data-card-scale="{scale:.12f}" '
             f'data-card-style="{escape(card_style_name)}" data-text-density="{escape(density_name)}" '
             f'style="{pos_style}box-sizing:border-box">'
-            f'<div style="width:100%;{h_style}display:flex;flex-direction:column;'
+            f'<div style="width:100%;height:100%;{h_style}display:flex;flex-direction:column;'
             f'padding:{pad}px;box-sizing:border-box;border-radius:{card_radius};{card_border_css};overflow:hidden">'
             f'{inner_html}'
             f'</div></article>'
         )
 
     if layout_mode != "normal":
-        # Pure 3-Column Masonry System (Default)
+        # Equal-Height Row System (Non-masonry, Tabular Alignment)
         col_count = max(1, int(element.get("columns") or 3))
         gap = density["gap"]
-        cols: list[list[dict[str, Any]]] = [[] for _ in range(col_count)]
-        for idx, card in enumerate(ordered):
-            cols[idx % col_count].append(card)
+        row_chunks: list[list[dict[str, Any]]] = [
+            ordered[i : i + col_count] for i in range(0, len(ordered), col_count)
+        ]
 
-        cols_html = []
-        for col_cards in cols:
-            cards_html = "".join(
-                _build_card_html(
-                    card, 0, 0, 0, 0, 1.0,
-                    extra_style="position:relative;width:100%;box-sizing:border-box;",
+        rows_html = []
+        for row_cards in row_chunks:
+            cards_html = []
+            for card in row_cards:
+                cards_html.append(
+                    _build_card_html(
+                        card,
+                        0,
+                        0,
+                        0,
+                        0,
+                        1.0,
+                        extra_style="flex:1;min-width:0;height:100%;display:flex;flex-direction:column;box-sizing:border-box;",
+                    )
                 )
-                for card in col_cards
-            )
-            cols_html.append(
-                f'<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:{gap}px;">'
-                f'{cards_html}</div>'
+            # Pad partial row with empty flex items to ensure equal column widths
+            for _ in range(col_count - len(row_cards)):
+                cards_html.append('<div style="flex:1;min-width:0;box-sizing:border-box;"></div>')
+
+            rows_html.append(
+                f'<div style="display:flex;flex-direction:row;gap:{gap}px;align-items:stretch;width:100%;box-sizing:border-box;">'
+                f'{"".join(cards_html)}</div>'
             )
 
         warning = escape(layout.warning or "")
         return (
             f'<section data-grid-kind="{escape(kind)}" data-density-warning="{warning}" '
             f'style="position:absolute;left:{bounds.x:.8f}px;top:{bounds.y:.8f}px;'
-            f'width:{bounds.width:.8f}px;display:flex;flex-direction:row;gap:{gap}px;align-items:flex-start;">'
-            f'{"".join(cols_html)}</section>'
+            f'width:{bounds.width:.8f}px;display:flex;flex-direction:column;gap:{gap}px;">'
+            f'{"".join(rows_html)}</section>'
         )
 
 
@@ -891,18 +901,20 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     cols = max(1, int(grid1.get("columns") or 3)) if grid1 else 3
     is_minimal = bool(grid1 and (grid1.get("benefitPreset") == "compact-minimal" or grid1.get("cardStyle") == "minimal"))
     custom_icon_size = float(grid1.get("iconSize") or 0) if grid1 else 0.0
-    dynamic_icon_extra = max(0.0, custom_icon_size - 20.0) if custom_icon_size > 32.0 else 0.0
+    dynamic_icon_extra = max(0.0, custom_icon_size - 24.0) if custom_icon_size > 24.0 else 0.0
 
     desc_sz = float(grid1.get("descSize") or 8.0) if grid1 else 8.0
     has_desc = grid1.get("showDescription") is not False if grid1 else True
     has_cov = grid1.get("showCoverage") is not False if grid1 else True
-    desc_h = max(38.0, desc_sz * 4.0) if has_desc else 0.0
-    cov_h = 14.0 if has_cov else 0.0
-    cost_h = 22.0
-    base_card_h = 52.0 + dynamic_icon_extra
 
-    default_row_height = 38.0 if is_minimal else max(84.0 if cols == 2 else 80.0, base_card_h + desc_h)
-    addon_row_height = 38.0 if is_minimal else max(112.0 if cols == 2 else 106.0, base_card_h + cov_h + desc_h + cost_h)
+    default_row_height = (
+        36.0 if is_minimal
+        else max(56.0 if cols == 2 else 52.0, 40.0 + dynamic_icon_extra + (12.0 if has_desc else 0.0))
+    )
+    addon_row_height = (
+        36.0 if is_minimal
+        else max(72.0 if cols == 2 else 68.0, 40.0 + dynamic_icon_extra + (8.0 if has_cov else 0.0) + (10.0 if has_desc else 0.0) + 14.0)
+    )
     card_gap = 5.0
 
     if has_extras_section:

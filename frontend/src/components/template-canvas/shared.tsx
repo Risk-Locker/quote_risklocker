@@ -1543,18 +1543,17 @@ export function balanceBenefitGridElements(
   const cols = Number(grid1.columns || 3);
   const isMinimal = grid1.benefitPreset === "compact-minimal" || grid1.cardStyle === "minimal";
   const customIconSize = Number((grid1 as any).iconSize || 0);
-  const dynamicIconExtra = customIconSize > 32 ? Math.max(0, customIconSize - 20) : 0;
+  const dynamicIconExtra = customIconSize > 24 ? Math.max(0, customIconSize - 24) : 0;
 
-  const descSize = Number((grid1 as any).descSize || 8);
   const showDesc = (grid1 as any).showDescription !== false;
   const showCov = (grid1 as any).showCoverage !== false;
-  const baseCardHeight = 52 + dynamicIconExtra;
-  const descHeight = showDesc ? Math.max(38, Math.round(descSize * 4.0)) : 0;
-  const covHeight = showCov ? 14 : 0;
-  const costHeight = 22;
 
-  const defaultRowHeight = isMinimal ? 38 : Math.max(cols === 2 ? 84 : 80, baseCardHeight + descHeight);
-  const addonRowHeight = isMinimal ? 38 : Math.max(cols === 2 ? 112 : 106, baseCardHeight + covHeight + descHeight + costHeight);
+  const defaultRowHeight = isMinimal
+    ? 36
+    : Math.max(cols === 2 ? 56 : 52, 40 + dynamicIconExtra + (showDesc ? 12 : 0));
+  const addonRowHeight = isMinimal
+    ? 36
+    : Math.max(cols === 2 ? 72 : 68, 40 + dynamicIconExtra + (showCov ? 8 : 0) + (showDesc ? 10 : 0) + 14);
   const cardGap = 5;
 
   const hasExplicitExtrasGrid = elements.some((e) => e.gridKind === "extras" || e.gridKind === "purchased_extras");

@@ -144,6 +144,14 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Global Benefit Invariant: cascaded retirement across draft catalog offerings, runtime filtering in `get_catalog_workspace`, strict `BenefitConcept.status == 'active'` check in `seed_base_benefits`, dynamic filtering in `workspace_service.py` & `render_context.py`, and canvas preview filtering in `frontend/src/app/builder/benefits/page.tsx`.
 - Tests: `tests/test_sessions_upgrade.py` and `tests/test_global_benefit_retirement_cascade.py`.
 
+## Structured Section & Slot-Based Template Builder (v19) Additions
+
+- Section Compiler Engine: `frontend/src/lib/template-section-compiler.ts` providing bidirectional sync between structured visual sections (`VehicleSpecFieldSlot`, `StructuredSections`, `SectionFooterConfig`) and canonical `canvas.elements` with deterministic geometry compilation.
+- Server-Side Compiler Mirror: `backend/app/services/template_section_compiler.py` providing hermetic validation and round-trip consistency checks for template section compilation.
+- Structured Section UI: `frontend/src/components/template-builder/section-editor/add-field-dialog.tsx` (extracted variable picker and custom text), `vehicle-fields-manager.tsx` (reorderable slots with arrow controls, visibility toggles, inline labels), `footer-section-manager.tsx` (bank accounts, payment notices, terms).
+- Builder Integration: `frontend/src/app/builder/templates/[id]/builder/page.tsx` dual-mode switcher (`[ Sections ] | [ Freeform ]`), 3-tab layout, real-time live canvas compilation, and selection-only lock to prevent accidental canvas element shifting in section mode.
+- Tests: `tests/test_template_section_compiler.py`.
+
 ## Deployment Additions
 
 - `.github/workflows/deploy.yml` — on push to `main`: backend pytest + frontend `tsc --noEmit` + `next build` on GitHub, then rsync to the VPS, install deps, run migrations, `pm2 startOrReload`.

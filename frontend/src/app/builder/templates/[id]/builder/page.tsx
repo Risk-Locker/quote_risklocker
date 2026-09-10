@@ -26,6 +26,8 @@ import {
   Plus,
   Square,
   Star,
+  ListDashes,
+  SquaresFour,
   TextIndent,
   TextOutdent,
   TextT,
@@ -46,6 +48,15 @@ import { useAuth } from "@/lib/auth";
 import { CanvasElementView, FONT_LIBRARY, type CanvasElement, type CanvasStyle, SNAP, snapValue, computeGuides } from "@/components/template-canvas/shared";
 import { LayersPanel, type LayerAction } from "@/components/template-builder/layers-panel";
 import { SYSTEM_BENEFIT_PRESETS, getBenefitPreset, applyPresetToCanvasElement } from "@/lib/benefit-presets";
+import { VehicleFieldsManager } from "@/components/template-builder/section-editor/vehicle-fields-manager";
+import { FooterSectionManager } from "@/components/template-builder/section-editor/footer-section-manager";
+import {
+  extractSectionsFromCanvas,
+  compileSectionsToCanvas,
+  type StructuredSections,
+  type VehicleSpecFieldSlot,
+  type SectionFooterConfig,
+} from "@/lib/template-section-compiler";
 
 type TemplateVariable = { id: string; label: string; type: string; source: string; field?: string; fixed_value?: string };
 type BenefitCard = { icon?: string; title?: string; subtitle?: string; lines?: string[]; asset_id?: string };
@@ -157,6 +168,8 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
   const [showRight, setShowRight] = useState(true);
   const [leftWidth, setLeftWidth] = useState(280);
   const [rightWidth, setRightWidth] = useState(320);
+  const [builderMode, setBuilderMode] = useState<"sections" | "freeform">("sections");
+  const [activeSectionTab, setActiveSectionTab] = useState<"section1" | "benefits" | "footer">("section1");
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [rulerGuides, setRulerGuides] = useState<{ x: number[]; y: number[] }>({ x: [], y: [] });
   const [rulerDrag, setRulerDrag] = useState<{ axis: "x" | "y"; pos: number; active: boolean; origin?: number; outside?: boolean } | null>(null);
@@ -234,6 +247,46 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
   const readOnly = Boolean(template?.locked) || previewMode;
   const dirty = Boolean(template && savedFingerprint && templateFingerprint(template) !== savedFingerprint);
   const selectedCard = selected?.cardId && config?.cards ? config.cards[selected.cardId] : null;
+
+  const currentSections = useMemo(() => {
+    return extractSectionsFromCanvas(elements, (config as any)?.sections);
+  }, [elements, config]);
+
+  const handleVehicleFieldsChange = (updatedFields: VehicleSpecFieldSlot[]) => {
+    const nextSections: StructuredSections = {
+      ...currentSections,
+      section1: {
+        ...currentSections.section1,
+        vehicleFields: updatedFields,
+      },
+    };
+    const recompiled = compileSectionsToCanvas(nextSections, elements);
+    commit((curr) => ({
+      ...curr,
+      sections: nextSections as any,
+      canvas: {
+        ...curr.canvas,
+        elements: recompiled,
+      },
+    }));
+  };
+
+  const handleFooterChange = (updatedFooter: SectionFooterConfig) => {
+    const nextSections: StructuredSections = {
+      ...currentSections,
+      footer: updatedFooter,
+    };
+    const recompiled = compileSectionsToCanvas(nextSections, elements);
+    commit((curr) => ({
+      ...curr,
+      sections: nextSections as any,
+      canvas: {
+        ...curr.canvas,
+        elements: recompiled,
+      },
+    }));
+  };
+
   const sortedElements = useMemo(() => {
     const byId = new Map(elements.map((item) => [item.id, item]));
     const inheritedState = (groupId?: string, visited = new Set<string>()): { visible: boolean; locked: boolean } => {
@@ -1203,6 +1256,35 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
           {template?.locked ? <Badge variant="warning">Locked default</Badge> : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* Mode Switcher */}
+          <div className="flex items-center p-0.5 bg-neutral-100 rounded-md border border-[var(--rl-border)] text-xs mr-1">
+            <button
+              type="button"
+              onClick={() => setBuilderMode("sections")}
+              className={`px-2.5 py-1 rounded transition-all flex items-center gap-1.5 text-xs font-semibold ${
+                builderMode === "sections"
+                  ? "bg-white text-[var(--rl-text-strong)] shadow-sm font-bold"
+                  : "text-neutral-500 hover:text-neutral-800"
+              }`}
+              title="Structured Section & Slot Editor (+ Add Field, Reorder)"
+            >
+              <ListDashes size={13} weight="bold" />
+              Sections
+            </button>
+            <button
+              type="button"
+              onClick={() => setBuilderMode("freeform")}
+              className={`px-2.5 py-1 rounded transition-all flex items-center gap-1.5 text-xs font-semibold ${
+                builderMode === "freeform"
+                  ? "bg-white text-[var(--rl-text-strong)] shadow-sm font-bold"
+                  : "text-neutral-500 hover:text-neutral-800"
+              }`}
+              title="Freeform Layers (Manual Drag & Drop Coordinates)"
+            >
+              <SquaresFour size={13} weight="bold" />
+              Freeform
+            </button>
+          </div>
           <Button
             variant="secondary"
             size="sm"
@@ -1372,14 +1454,164 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
       <div
         className="hidden min-h-0 flex-1 lg:grid"
         style={{
-          gridTemplateColumns: `${showLeft && !previewMode ? leftWidth : 0}px 6px minmax(0,1fr) 6px ${showRight && !previewMode ? rightWidth : 0}px`,
+          gridTemplateColumns: `${showLeft && !previewMode ? (builderMode === "sections" ? Math.max(leftWidth, 380) : leftWidth) : 0}px 6px minmax(0,1fr) 6px ${showRight && !previewMode ? rightWidth : 0}px`,
           transition: "grid-template-columns 160ms ease",
         }}
       >
         {!previewMode && showLeft ? (
-          <aside className="min-h-0 overflow-y-auto border-r border-[var(--rl-border)] bg-[var(--rl-surface)]">
-            <div className="h-[44vh] min-h-52 overflow-hidden border-b border-[var(--rl-border)]">
-              <LayersPanel
+          <aside className="min-h-0 overflow-y-auto border-r border-[var(--rl-border)] bg-[var(--rl-surface)] flex flex-col">
+            {builderMode === "sections" ? (
+              <div className="flex flex-col h-full overflow-hidden">
+                {/* Section Subtabs */}
+                <div className="flex border-b border-[var(--rl-border)] bg-neutral-50/80 p-2 gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setActiveSectionTab("section1")}
+                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-bold transition-all text-center ${
+                      activeSectionTab === "section1"
+                        ? "bg-[var(--rl-primary)] text-white shadow-sm"
+                        : "text-[var(--rl-text-muted)] hover:bg-neutral-200/60 hover:text-[var(--rl-text-strong)]"
+                    }`}
+                  >
+                    [1] Specs
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSectionTab("benefits")}
+                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-bold transition-all text-center ${
+                      activeSectionTab === "benefits"
+                        ? "bg-[var(--rl-primary)] text-white shadow-sm"
+                        : "text-[var(--rl-text-muted)] hover:bg-neutral-200/60 hover:text-[var(--rl-text-strong)]"
+                    }`}
+                  >
+                    [2] Benefits
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSectionTab("footer")}
+                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-bold transition-all text-center ${
+                      activeSectionTab === "footer"
+                        ? "bg-[var(--rl-primary)] text-white shadow-sm"
+                        : "text-[var(--rl-text-muted)] hover:bg-neutral-200/60 hover:text-[var(--rl-text-strong)]"
+                    }`}
+                  >
+                    [3] Footer
+                  </button>
+                </div>
+
+                {/* Section Content */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  {activeSectionTab === "section1" && (
+                    <VehicleFieldsManager
+                      fields={currentSections.section1.vehicleFields}
+                      onChange={handleVehicleFieldsChange}
+                    />
+                  )}
+
+                  {activeSectionTab === "benefits" && (
+                    <div className="space-y-4 text-xs">
+                      <div className="pb-3 border-b border-[var(--rl-border)]">
+                        <h4 className="text-sm font-bold text-[var(--rl-text-strong)]">
+                          Benefits & Add-ons Grid
+                        </h4>
+                        <p className="text-xs text-[var(--rl-text-muted)]">
+                          Select a layout preset, card styling, and column structure for the dynamic benefit cards.
+                        </p>
+                      </div>
+
+                      {(() => {
+                        const currentGrid =
+                          elements.find(
+                            (e) => e.type === "benefit-grid" && e.gridKind === "current_benefits"
+                          ) || elements.find((e) => e.type === "benefit-grid");
+                        if (!currentGrid) {
+                          return (
+                            <div className="p-4 rounded border border-dashed border-neutral-300 text-center text-neutral-500">
+                              No dynamic benefit grid found in this template.
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="space-y-3">
+                            <div>
+                              <label className="block text-xs font-bold text-[var(--rl-text-strong)] mb-1">
+                                Benefit Template Preset
+                              </label>
+                              <Select
+                                value={currentGrid.benefitPreset || "masonry-flow"}
+                                disabled={readOnly}
+                                onChange={(event) => {
+                                  const preset = getBenefitPreset(event.target.value);
+                                  const applied = applyPresetToCanvasElement(currentGrid, preset);
+                                  updateElement(currentGrid.id, applied);
+                                }}
+                              >
+                                {SYSTEM_BENEFIT_PRESETS.map((p) => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.name}
+                                  </option>
+                                ))}
+                              </Select>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs font-bold text-[var(--rl-text-strong)] mb-1">
+                                  Columns
+                                </label>
+                                <Select
+                                  value={String(currentGrid.columns || 3)}
+                                  disabled={readOnly}
+                                  onChange={(e) =>
+                                    updateElement(currentGrid.id, {
+                                      columns: Number(e.target.value),
+                                    })
+                                  }
+                                >
+                                  <option value="2">2 Columns</option>
+                                  <option value="3">3 Columns</option>
+                                  <option value="4">4 Columns</option>
+                                </Select>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-bold text-[var(--rl-text-strong)] mb-1">
+                                  Card Style
+                                </label>
+                                <Select
+                                  value={currentGrid.cardStyle || "standard"}
+                                  disabled={readOnly}
+                                  onChange={(e) =>
+                                    updateElement(currentGrid.id, {
+                                      cardStyle: e.target.value as any,
+                                    })
+                                  }
+                                >
+                                  <option value="standard">Standard</option>
+                                  <option value="outlined">Outlined</option>
+                                  <option value="soft">Soft</option>
+                                  <option value="minimal">Minimal</option>
+                                </Select>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {activeSectionTab === "footer" && (
+                    <FooterSectionManager
+                      footer={currentSections.footer}
+                      onChange={handleFooterChange}
+                    />
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col h-full overflow-y-auto">
+                <div className="h-[44vh] min-h-52 overflow-hidden border-b border-[var(--rl-border)]">
+                  <LayersPanel
                 elements={elements}
                 selectedIds={selectedIds}
                 readOnly={readOnly}
@@ -1637,6 +1869,8 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
             </PanelSection>
 
             </div>
+            </div>
+            )}
           </aside>
         ) : <div />}
 
@@ -1850,8 +2084,8 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                     config={config}
                     scenarioCount={scenarioCount}
                     readOnly={readOnly}
-                    onPointerDown={(event) => pointerDown(event, element, "move")}
-                    onResizePointerDown={(event, handle) => pointerDown(event, element, "resize", handle)}
+                    onPointerDown={(event) => builderMode === "sections" ? selectOnly(element.id) : pointerDown(event, element, "move")}
+                    onResizePointerDown={(event, handle) => builderMode === "sections" ? selectOnly(element.id) : pointerDown(event, element, "resize", handle)}
                     onContextMenu={(event) => {
                       if (readOnly) return;
                       event.preventDefault();

@@ -543,10 +543,10 @@ def test_benefit_card_description_allows_three_lines_without_truncation():
     # Check layout calculations
     balanced = _balance_benefit_grid_elements(elements, render_context)
     by_id = {e["id"]: e for e in balanced}
-    # With 1 card in grid1 (3 columns) -> 1 row >= 90px
-    assert float(by_id["grid1"]["h"]) >= 90.0
-    # With 1 card in grid2 (3 columns) -> 1 row >= 126px
-    assert float(by_id["grid2"]["h"]) >= 126.0
+    # With 1 card in grid1 (3 columns) -> tightly calibrated row height ~52px (not inflated 90px)
+    assert 50.0 <= float(by_id["grid1"]["h"]) <= 60.0
+    # With 1 card in grid2 (3 columns) -> tightly calibrated row height ~72px (not inflated 126px)
+    assert 68.0 <= float(by_id["grid2"]["h"]) <= 80.0
 
     html = render_quotation_html(
         {},
@@ -557,4 +557,47 @@ def test_benefit_card_description_allows_three_lines_without_truncation():
     assert "-webkit-line-clamp:2" not in html
     assert "max-height:24.0px" not in html
     assert "-webkit-line-clamp:4" in html
+
+
+def test_dynamic_benefit_grid_renders_equal_height_rows_not_masonry():
+    from app.rendering.template_renderer import render_quotation_html
+
+    elements = [
+        {
+            "id": "grid1",
+            "type": "benefit-grid",
+            "gridKind": "current_benefits",
+            "x": 40,
+            "y": 444,
+            "w": 714,
+            "h": 120,
+            "columns": 3,
+            "layoutMode": "masonry",  # default non-fixed mode
+        }
+    ]
+    # 4 cards in a 3-column grid -> Row 1 has 3 cards, Row 2 has 1 card + 2 spacers
+    render_context = {
+        "current_benefits": [
+            {"id": "c1", "label": "Card 1", "description": "Short"},
+            {"id": "c2", "label": "Card 2", "description": "A very long description that spans multiple lines to test height stretching across the entire row"},
+            {"id": "c3", "label": "Card 3", "description": "Medium description"},
+            {"id": "c4", "label": "Card 4", "description": "Row 2 single card"},
+        ],
+        "available_addons": [],
+    }
+    html = render_quotation_html(
+        {},
+        template_config={"canvas": {"width": 794, "height": 1123, "elements": elements}},
+        render_context=render_context,
+    )
+    # Verify equal-height row styling: rows with align-items: stretch
+    assert "align-items:stretch" in html
+    assert "display:flex;flex-direction:row" in html
+    # Verify cards have height: 100% to fill the stretched cell
+    assert "height:100%" in html
+    # Verify partial row (Row 2 with 1 card in 3 columns) has 2 spacers
+    assert html.count('<div style="flex:1;min-width:0;box-sizing:border-box;"></div>') == 2
+    # Verify legacy masonry column styling with align-items: flex-start is gone
+    assert 'align-items:flex-start;">' not in html
+
 
