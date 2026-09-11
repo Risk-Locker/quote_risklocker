@@ -328,6 +328,8 @@ def _card(
     branch_key: str | None = None,
     eval_context: dict | None = None,
     insurer_catalog: list[dict] | None = None,
+    active_conditional_descriptions: dict[str, str] | None = None,
+    company_baseline_descriptions: dict[str, str] | None = None,
 ) -> dict:
     price = getattr(selection, "price", None) or getattr(offering, "optional_price", None)
     cost_status = getattr(selection, "cost_status", None)
@@ -422,6 +424,45 @@ def _card(
         or (catalog_def and catalog_def.get("category") == "addon")
     )
 
+    # Resolve description through 7-tier precedence:
+    # 1. Selection override (typed_value_override["description"] or manual edit)
+    # 2. Dynamic conditional upgrade (company_benefit_conditions when trigger benefit/plan is active)
+    # 3. Scenario catalog offering override (CatalogOffering.description_override)
+    # 4. Company master baseline description (CompanyBenefitConfig.baseline_description)
+    # 5. Insurer matrix catalog fallback (benefit_catalog_matrix.py)
+    # 6. Master concept default (BenefitConcept.description)
+    # 7. Fallback ("")
+    concept_id_key = str(getattr(concept, "id", None) or "")
+    sel_typed = getattr(selection, "typed_value_override", None)
+    sel_desc = sel_typed.get("description") if isinstance(sel_typed, dict) else None
+    cond_desc = (active_conditional_descriptions or {}).get(concept_id_key)
+    offering_desc = getattr(offering, "description_override", None)
+    comp_base_desc = (company_baseline_descriptions or {}).get(concept_id_key)
+    cat_desc = catalog_def.get("description") if catalog_def and catalog_def.get("description") else None
+    concept_desc = getattr(concept, "description", None)
+
+    if sel_desc and str(sel_desc).strip():
+        final_desc = str(sel_desc).strip()
+    elif cond_desc and str(cond_desc).strip():
+        final_desc = str(cond_desc).strip()
+    elif offering_desc and str(offering_desc).strip():
+        final_desc = str(offering_desc).strip()
+    elif comp_base_desc and str(comp_base_desc).strip():
+        final_desc = str(comp_base_desc).strip()
+    elif cat_desc and str(cat_desc).strip():
+        final_desc = str(cat_desc).strip()
+    elif concept_desc and str(concept_desc).strip():
+        final_desc = str(concept_desc).strip()
+    else:
+        final_desc = ""
+
+    is_custom_desc = bool(
+        (sel_desc and str(sel_desc).strip())
+        or (cond_desc and str(cond_desc).strip())
+        or (offering_desc and str(offering_desc).strip())
+        or (comp_base_desc and str(comp_base_desc).strip())
+    )
+
     return {
         "card_key": f"{getattr(selection, 'id', 'offer')}:{offering.id}:{facet_id or 'parent'}",
         "entitlement_key": str(getattr(selection, "id", f"offer:{offering.id}")),
@@ -433,7 +474,10 @@ def _card(
         "facet_id": facet_id,
         "branch_key": branch_key,
         "label": label or getattr(offering, "label_override", None) or concept.label,
-        "description": str(getattr(concept, "description", None) or ""),
+        "description": final_desc,
+        "is_custom_description": is_custom_desc,
+        "description_override": offering_desc,
+        "conditional_description": cond_desc if cond_desc else None,
         "value": card_val,
         "typed_value": typed_value,
         "price": price,
@@ -453,11 +497,29 @@ def _card(
 
 
 
-def _expanded_cards(selection: Any, offering: Any, concept: Any, facets_by_id: dict[str, Any], eval_context: dict | None = None, insurer_catalog: list[dict] | None = None) -> list[dict]:
+def _expanded_cards(
+    selection: Any,
+    offering: Any,
+    concept: Any,
+    facets_by_id: dict[str, Any],
+    eval_context: dict | None = None,
+    insurer_catalog: list[dict] | None = None,
+    active_conditional_descriptions: dict[str, str] | None = None,
+    company_baseline_descriptions: dict[str, str] | None = None,
+) -> list[dict]:
     typed_value = getattr(selection, "typed_value_override", None) or offering.typed_value
     facet_ids = list(offering.presentation_facet_ids or [])
     if not facet_ids:
-        return [_card(selection=selection, offering=offering, concept=concept, typed_value=typed_value, eval_context=eval_context, insurer_catalog=insurer_catalog)]
+        return [_card(
+            selection=selection,
+            offering=offering,
+            concept=concept,
+            typed_value=typed_value,
+            eval_context=eval_context,
+            insurer_catalog=insurer_catalog,
+            active_conditional_descriptions=active_conditional_descriptions,
+            company_baseline_descriptions=company_baseline_descriptions,
+        )]
     cards: list[dict] = []
     for facet_id in facet_ids:
         facet = facets_by_id.get(str(facet_id))
@@ -473,6 +535,8 @@ def _expanded_cards(selection: Any, offering: Any, concept: Any, facets_by_id: d
             facet_id=facet.id,
             eval_context=eval_context,
             insurer_catalog=insurer_catalog,
+            active_conditional_descriptions=active_conditional_descriptions,
+            company_baseline_descriptions=company_baseline_descriptions,
         ))
     return cards
 
@@ -487,24 +551,73 @@ def resolve_benefit_cards(
     plans: list[Any] | None = None,
     eval_context: dict | None = None,
     insurer_catalog: list[dict] | None = None,
+    company_conditions: list[Any] | None = None,
+    company_configs: list[Any] | None = None,
 ) -> dict[str, list[dict]]:
     """Resolve current and available cards solely from pinned rows and decisions."""
     _global_card = globals().get("_card")
     _global_expanded_cards = globals().get("_expanded_cards")
 
+    retired_concept_ids = {str(getattr(c, "id", "")) for c in concepts if getattr(c, "status", "active") == "retired"}
+    concepts_by_id = {k: v for k, v in _index(concepts).items() if k not in retired_concept_ids}
+    current = [item for item in selections if item.state == "current" and str(item.concept_id or "") not in retired_concept_ids]
+
+    # Dynamic conditional upgrades from company rules
+    active_concept_ids = {str(item.concept_id) for item in current if item.concept_id}
+    active_conditional_descriptions: dict[str, str] = {}
+    for cond in (company_conditions or []):
+        if not getattr(cond, "is_active", True):
+            continue
+        trig_id = str(getattr(cond, "trigger_concept_id", "") or "")
+        if trig_id in active_concept_ids:
+            plan_filter = getattr(cond, "trigger_plan_filter", None)
+            matched = False
+            if not plan_filter or not str(plan_filter).strip():
+                matched = True
+            else:
+                filter_term = str(plan_filter).strip().lower()
+                trig_sels = [s for s in current if str(s.concept_id) == trig_id]
+                for s in trig_sels:
+                    cov = str(getattr(s, "coverage_limit", "") or "").lower()
+                    lbl = str(getattr(s, "label_override", "") or "").lower()
+                    plan = str(getattr(s, "package_plan_id", "") or "").lower()
+                    tv = getattr(s, "typed_value_override", {}) or {}
+                    plan_k = str(tv.get("plan_key", "") if isinstance(tv, dict) else "").lower()
+                    disp = str(tv.get("display_text", "") if isinstance(tv, dict) else "").lower()
+                    if (filter_term in cov or filter_term in lbl or filter_term in plan or filter_term in plan_k or filter_term in disp):
+                        matched = True
+                        break
+            if matched:
+                active_conditional_descriptions[str(cond.target_concept_id)] = cond.replacement_description
+
+    company_baseline_descriptions: dict[str, str] = {
+        str(cfg.concept_id): cfg.baseline_description
+        for cfg in (company_configs or [])
+        if getattr(cfg, "concept_id", None) and getattr(cfg, "baseline_description", None) and str(cfg.baseline_description).strip()
+    }
+
     def _card(**kwargs):
         kwargs["eval_context"] = eval_context
         kwargs["insurer_catalog"] = insurer_catalog
+        kwargs["active_conditional_descriptions"] = active_conditional_descriptions
+        kwargs["company_baseline_descriptions"] = company_baseline_descriptions
         assert _global_card is not None
         return _global_card(**kwargs)
 
     def _expanded_cards(selection, offering, concept, facets_by_id):
         assert _global_expanded_cards is not None
-        return _global_expanded_cards(selection, offering, concept, facets_by_id, eval_context=eval_context, insurer_catalog=insurer_catalog)
+        return _global_expanded_cards(
+            selection,
+            offering,
+            concept,
+            facets_by_id,
+            eval_context=eval_context,
+            insurer_catalog=insurer_catalog,
+            active_conditional_descriptions=active_conditional_descriptions,
+            company_baseline_descriptions=company_baseline_descriptions,
+        )
 
     offerings_by_id = _index(offerings)
-    retired_concept_ids = {str(getattr(c, "id", "")) for c in concepts if getattr(c, "status", "active") == "retired"}
-    concepts_by_id = {k: v for k, v in _index(concepts).items() if k not in retired_concept_ids}
     facets_by_id = _index(facets)
     removed_offering_ids = {
         str(item.catalog_offering_id)
@@ -521,7 +634,6 @@ def resolve_benefit_cards(
         for item in selections
         if item.catalog_offering_id and item.state in {"current", "superseded", "removed"}
     }
-    current = [item for item in selections if item.state == "current" and str(item.concept_id or "") not in retired_concept_ids]
     current_by_concept: dict[str, list[Any]] = {}
     for item in current:
         concept_id = str(item.concept_id or "")

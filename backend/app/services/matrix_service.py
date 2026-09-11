@@ -180,7 +180,9 @@ def get_company_matrix_data(db: Session, company_id: str) -> dict[str, Any]:
             conc = concepts.get(o.concept_id)
             c_key = conc.concept_key if conc else o.offering_key
             c_label = o.label_override or (conc.label if conc else o.offering_key)
-            c_desc = conc.description if conc else ""
+            off_desc = getattr(o, "description_override", None)
+            is_custom = bool(off_desc and str(off_desc).strip())
+            c_desc = str(off_desc).strip() if is_custom else (conc.description if conc and conc.description else "")
 
             is_default = o.role == "included" or o.offering_kind == "base"
             if is_default:
@@ -190,6 +192,8 @@ def get_company_matrix_data(db: Session, company_id: str) -> dict[str, Any]:
                     "concept_key": c_key,
                     "label": c_label,
                     "description": c_desc,
+                    "is_custom_description": is_custom,
+                    "description_override": off_desc,
                     "display_value": o.display_value or "Included",
                     "price": 0.0,
                     "price_text": "0 RM",
@@ -219,6 +223,8 @@ def get_company_matrix_data(db: Session, company_id: str) -> dict[str, Any]:
                     "concept_key": c_key,
                     "label": c_label,
                     "description": c_desc,
+                    "is_custom_description": is_custom,
+                    "description_override": off_desc,
                     "display_value": o.display_value or "Optional",
                     "price": price_val,
                     "price_text": price_str,
@@ -589,6 +595,8 @@ def generate_company_matrix_xlsx(data: dict[str, Any]) -> io.BytesIO:
         "Benefit Type",
         "Concept Key",
         "Benefit Label",
+        "Short Description",
+        "Description Source",
         "Coverage Limit / Value",
         "Base Price (RM)",
         "Price Text / Formula",
@@ -614,6 +622,8 @@ def generate_company_matrix_xlsx(data: dict[str, Any]) -> io.BytesIO:
                 "Default (Included)",
                 d["concept_key"],
                 d["label"],
+                d.get("description", ""),
+                "Custom (Company)" if d.get("is_custom_description") else "Global Default",
                 d["display_value"],
                 0.0,
                 "0 RM",
@@ -632,6 +642,8 @@ def generate_company_matrix_xlsx(data: dict[str, Any]) -> io.BytesIO:
                 "Add-on (Optional)",
                 a["concept_key"],
                 a["label"],
+                a.get("description", ""),
+                "Custom (Company)" if a.get("is_custom_description") else "Global Default",
                 a["display_value"],
                 a["price"],
                 a["price_text"],

@@ -91,6 +91,19 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Pre-Deployment Gate & CI Parity Script: `commands/verify-deploy-gate.ps1` runs backend pytest under sealed dummy CI environment, frontend tsc, build, schema, and brain verification mirroring `.github/workflows/deploy.yml` 1:1.
 - Tests: `tests/test_sessions_upgrade.py`, `tests/test_upload_limits.py`, `tests/test_global_benefit_retirement_cascade.py` (hermetic in-memory SQLite), `tests/test_benefit_line_extraction.py`.
 
+## Benefit Cockpit Tabs, Dynamic Conditions & EV/ICE Engine Type (v20) Additions
+
+- **Catalog Applies Check Fix**: `backend/app/services/business_setup_service.py` ensures assignment targets for product/package scope are cleanly resolved before checking `catalog_offerings_applies_check` constraint.
+- **4-Tab Benefits Cockpit**: `frontend/src/app/builder/benefits/page.tsx` splits configuration into 4 tabs:
+  1. *Company Benefits*: Master pool selection and insurer baseline short descriptions (`company_benefit_configs`).
+  2. *Company Catalogs*: Scenario allocation across Segment, Engine Type (ICE/EV), Vehicle Type, and Coverage.
+  3. *Benefit Conditions*: Dynamic conditional upgrade logic rules (`company_benefit_conditions`).
+  4. *Overview Matrix*: Underwriting matrix table with Word/Excel export.
+- **Dynamic Precedence Hierarchy**: `backend/app/rendering/render_context.py` evaluates 7-tier description precedence: selection override -> dynamic conditional upgrade -> catalog offering override -> company baseline description -> matrix fallback -> concept default -> fallback.
+- **Engine Type Architecture**: Decoupled monolithic vehicle type selector into Engine Type toggle (`ICE` | `EV`) + filtered vehicle type dropdown in `frontend/src/components/session-workspace/review-phase.tsx` and scenario bar in `builder/benefits`.
+- **Migrations**: `migrations/041_catalog_offering_description_override.sql`, `migrations/042_company_benefit_conditions_and_engine_type.sql`, and `migrations/043_add_tuition_purpose_concept.sql`.
+- **Tests**: `tests/test_catalog_offering_description_override.py` and `tests/test_company_benefit_conditions.py`.
+
 ## Benefit Configuration Matrix
 
 - `docs/domain/benefits/BENEFITS-CONFIGURATION.md` — canonical per-insurer benefits/add-on matrix: global benefit library (51 concepts), dimensions, and every company × coverage type × vehicle category row including add-on system (`single` vs `package`), package tiers, and seed status (seeded / draft / pending). Registered in `docs/core/START-HERE.md`.
@@ -151,6 +164,17 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Structured Section UI: `frontend/src/components/template-builder/section-editor/add-field-dialog.tsx` (extracted variable picker and custom text), `vehicle-fields-manager.tsx` (reorderable slots with arrow controls, visibility toggles, inline labels), `footer-section-manager.tsx` (bank accounts, payment notices, terms).
 - Builder Integration: `frontend/src/app/builder/templates/[id]/builder/page.tsx` dual-mode switcher (`[ Sections ] | [ Freeform ]`), 3-tab layout, real-time live canvas compilation, and selection-only lock to prevent accidental canvas element shifting in section mode.
 - Tests: `tests/test_template_section_compiler.py`.
+
+## Company-Specific Benefit Short Descriptions & Scenario Hierarchy (v20) Additions
+
+- Migration `migrations/041_catalog_offering_description_override.sql`: adds `description_override TEXT` to `catalog_offerings` for company- and vehicle-specific short benefit wording.
+- Model & Schema: `CatalogOffering.description_override` in `backend/app/models/tables.py` and `CatalogOfferingSaveRequest.description_override` in `backend/app/api/schemas.py`.
+- Lifecycle & Cloning: `save_catalog_offering`, `remove_catalog_offering`, and `new_catalog_draft` in `backend/app/services/business_setup_service.py`, plus `copy_package_offerings` in `backend/app/services/benefit_setup_service.py` preserve description overrides across revisions and package creation.
+- 5-Tier Precedence Engine: `resolve_benefit_cards` in `backend/app/rendering/render_context.py` enforces Draft Selection Custom Description -> Catalog Offering Override -> Insurer Matrix Fallback -> Global Master Concept -> Empty fallback, with `is_custom_description` and `description_override` telemetry.
+- Matrix Serialization & Export: `backend/app/services/matrix_service.py` exports `description`, `is_custom_description`, and `description_override` in JSON API, Word documents, and multi-sheet Excel workbooks with `Short Description` and `Description Source` audit columns.
+- Seeders: `commands/seed-demo.py` and `commands/seed-company-benefits.py` providing curated descriptions across Car, Motorcycle, Commercial Lorry, and EV scenarios for QBE, Etiqa, and Allianz.
+- Benefits Builder UI: `frontend/src/app/builder/benefits/page.tsx` with inline description editors on benefit tiles, `Custom (Company)` vs `Global Default` status badges, reset-to-default buttons, and overview matrix display.
+- Tests: `tests/test_catalog_offering_description_override.py`.
 
 ## Deployment Additions
 

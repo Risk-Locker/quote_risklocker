@@ -49,6 +49,8 @@ import type {
   CatalogRevisionSummary as CatalogRevision,
   CatalogSummary as Catalog,
   CatalogWorkspaceData as CatalogWorkspace,
+  CompanyBenefitCondition,
+  CompanyBenefitConfig,
   CompanySummary as Company,
   CompanyWorkspaceData as CompanyWorkspace,
   ConceptSummary as Concept,
@@ -85,6 +87,8 @@ type MatrixOffering = {
   concept_key: string;
   label: string;
   description: string;
+  is_custom_description?: boolean;
+  description_override?: string | null;
   display_value: string;
   price: number;
   price_text: string;
@@ -277,8 +281,30 @@ function BenefitsPageContent() {
   const [planMemberOverride, setPlanMemberOverride] = useState<string>("");
   const [planSaving, setPlanSaving] = useState(false);
 
-  // Matrix and AI sync states
-  const [screenTab, setScreenTab] = useState<"builder" | "matrix">("builder");
+  // 4 Core Cockpit Tabs: Company Benefits, Catalogs, Conditions, Matrix
+  type ScreenTab = "company_benefits" | "catalogs" | "conditions" | "matrix";
+  const [screenTab, setScreenTab] = useState<ScreenTab>("catalogs");
+  const [selectedEngineType, setSelectedEngineType] = useState<"ice" | "ev">("ice");
+
+  // Tab 1: Company-Based Benefits state
+  const [companyConfigs, setCompanyConfigs] = useState<CompanyBenefitConfig[]>([]);
+  const [configsLoading, setConfigsLoading] = useState(false);
+  const [configsSaving, setConfigsSaving] = useState(false);
+  const [configsSearch, setConfigsSearch] = useState("");
+  const [configsCategoryFilter, setConfigsCategoryFilter] = useState<"all" | "default" | "addon">("all");
+
+  // Tab 3: Company Conditions state
+  const [companyConditions, setCompanyConditions] = useState<CompanyBenefitCondition[]>([]);
+  const [conditionsLoading, setConditionsLoading] = useState(false);
+  const [conditionDialog, setConditionDialog] = useState(false);
+  const [conditionSaving, setConditionSaving] = useState(false);
+  const [condFormName, setCondFormName] = useState("");
+  const [condTriggerId, setCondTriggerId] = useState("");
+  const [condPlanFilter, setCondPlanFilter] = useState("");
+  const [condTargetId, setCondTargetId] = useState("");
+  const [condReplacement, setCondReplacement] = useState("");
+
+  // Tab 4: Matrix and AI sync states
   const [matrixData, setMatrixData] = useState<CompanyMatrixData | null>(null);
   const [matrixLoading, setMatrixLoading] = useState(false);
   const [matrixSearch, setMatrixSearch] = useState("");
@@ -303,6 +329,100 @@ function BenefitsPageContent() {
   }, []);
 
   // ── 1. Callbacks ───────────────────────────────────────────────────────
+  const loadCompanyConfigs = useCallback(async (companyId: string) => {
+    if (!companyId) return;
+    setConfigsLoading(true);
+    try {
+      const res = await api<{ configs: CompanyBenefitConfig[] }>(`/business/companies/${companyId}/benefit-configs`);
+      if (mountedRef.current) setCompanyConfigs(res.configs || []);
+    } catch (err) {
+      if (mountedRef.current) setError(apiErrorMessage(err));
+    } finally {
+      if (mountedRef.current) setConfigsLoading(false);
+    }
+  }, []);
+
+  const saveCompanyConfigs = useCallback(async () => {
+    if (!selectedCompanyId) return;
+    setConfigsSaving(true);
+    setError("");
+    try {
+      const res = await api<{ configs: CompanyBenefitConfig[] }>(`/business/companies/${selectedCompanyId}/benefit-configs`, {
+        method: "PUT",
+        body: JSON.stringify({ configs: companyConfigs }),
+      });
+      if (mountedRef.current) {
+        setCompanyConfigs(res.configs || []);
+      }
+    } catch (err) {
+      if (mountedRef.current) setError(apiErrorMessage(err));
+    } finally {
+      if (mountedRef.current) setConfigsSaving(false);
+    }
+  }, [selectedCompanyId, companyConfigs]);
+
+  const loadCompanyConditions = useCallback(async (companyId: string) => {
+    if (!companyId) return;
+    setConditionsLoading(true);
+    try {
+      const res = await api<{ conditions: CompanyBenefitCondition[] }>(`/business/companies/${companyId}/conditions`);
+      if (mountedRef.current) setCompanyConditions(res.conditions || []);
+    } catch (err) {
+      if (mountedRef.current) setError(apiErrorMessage(err));
+    } finally {
+      if (mountedRef.current) setConditionsLoading(false);
+    }
+  }, []);
+
+  const saveCompanyCondition = useCallback(async () => {
+    if (!selectedCompanyId || !condFormName.trim() || !condTriggerId || !condTargetId || !condReplacement.trim()) {
+      setError("Please fill all required fields for the conditional rule.");
+      return;
+    }
+    setConditionSaving(true);
+    setError("");
+    try {
+      await api(`/business/companies/${selectedCompanyId}/conditions`, {
+        method: "POST",
+        body: JSON.stringify({
+          name: condFormName.trim(),
+          trigger_concept_id: condTriggerId,
+          trigger_plan_filter: condPlanFilter.trim() || null,
+          target_concept_id: condTargetId,
+          replacement_description: condReplacement.trim(),
+          is_active: true,
+        }),
+      });
+      setConditionDialog(false);
+      setCondFormName("");
+      setCondTriggerId("");
+      setCondPlanFilter("");
+      setCondTargetId("");
+      setCondReplacement("");
+      await loadCompanyConditions(selectedCompanyId);
+    } catch (err) {
+      if (mountedRef.current) setError(apiErrorMessage(err));
+    } finally {
+      if (mountedRef.current) setConditionSaving(false);
+    }
+  }, [selectedCompanyId, condFormName, condTriggerId, condPlanFilter, condTargetId, condReplacement, loadCompanyConditions]);
+
+  const deleteCompanyCondition = useCallback(async (conditionId: string) => {
+    if (!selectedCompanyId) return;
+    if (!window.confirm("Are you sure you want to delete this conditional rule?")) return;
+    setConditionsLoading(true);
+    try {
+      await api(`/business/companies/${selectedCompanyId}/conditions/${conditionId}`, {
+        method: "DELETE",
+      });
+      await loadCompanyConditions(selectedCompanyId);
+    } catch (err) {
+      if (mountedRef.current) setError(apiErrorMessage(err));
+    } finally {
+      if (mountedRef.current) setConditionsLoading(false);
+    }
+  }, [selectedCompanyId, loadCompanyConditions]);
+
   const loadMatrix = useCallback(async (companyId: string) => {
     if (!companyId) return;
     setMatrixLoading(true);
@@ -406,10 +526,17 @@ function BenefitsPageContent() {
         if (!mountedRef.current) return;
         setCompanyWorkspace(result.workspace);
         setSelectedCompanyId(companyId);
-        const product = result.workspace.products.find((item) => item.id === preferredProduct) || result.workspace.products[0];
+        const product =
+          result.workspace.products.find((item) => item.id === preferredProduct) ||
+          result.workspace.products.find((item) => (item.name || "").toLowerCase().includes("car") && !(item.name || "").toLowerCase().includes("commercial") && !(item.name || "").toLowerCase().includes("tpft") && !(item.name || "").toLowerCase().includes("third party")) ||
+          result.workspace.products.find((item) => (item.name || "").toLowerCase().includes("car")) ||
+          result.workspace.products[0];
         setSelectedProductId(product?.id || "");
         const catalogs = result.workspace.catalogs.filter((item) => !product || !item.product_id || item.product_id === product.id);
-        const catalog = catalogs.find((item) => item.id === preferredCatalog) || catalogs[0];
+        const catalog =
+          catalogs.find((item) => item.id === preferredCatalog) ||
+          catalogs.find((item) => (item.engine_type || "ice") === "ice" && !(item.name || "").toLowerCase().includes("tpft") && !(item.name || "").toLowerCase().includes("third party")) ||
+          catalogs[0];
         syncUrl(companyId, product?.id || "", catalog?.id || "");
         await loadCatalog(catalog?.id || "");
       } catch (err) {
@@ -421,6 +548,13 @@ function BenefitsPageContent() {
     },
     [loadCatalog, selectedCatalogId, selectedProductId, syncUrl]
   );
+
+  useEffect(() => {
+    if (selectedCompanyId) {
+      loadCompanyConfigs(selectedCompanyId);
+      loadCompanyConditions(selectedCompanyId);
+    }
+  }, [selectedCompanyId, loadCompanyConfigs, loadCompanyConditions]);
 
   useEffect(() => {
     if (screenTab === "matrix" && selectedCompanyId) {
@@ -511,21 +645,128 @@ ${aiMarkdownTable}`;
   }
 
   // ── 2. Memos ───────────────────────────────────────────────────────────
-  const defaultConcepts = useMemo(
-    () => concepts.filter((c) => c.status !== "retired" && (c.category || (c.sort_order && c.sort_order <= 11 ? "default" : "addon")) === "default"),
-    [concepts]
-  );
+  // Filter concepts by company-enabled benefits pool (Tab 1)
+  const enabledConceptIds = useMemo(() => {
+    if (!companyConfigs || companyConfigs.length === 0) return null;
+    return new Set(companyConfigs.filter((c) => c.is_enabled).map((c) => c.concept_id));
+  }, [companyConfigs]);
 
-  const addonConcepts = useMemo(
-    () => concepts.filter((c) => c.status !== "retired" && (c.category || (c.sort_order && c.sort_order <= 11 ? "default" : "addon")) === "addon"),
-    [concepts]
-  );
+
+  const toggleConfigEnabled = useCallback((conceptId: string, enabled: boolean) => {
+    setCompanyConfigs((prev) => {
+      const idx = prev.findIndex((item) => item.concept_id === conceptId);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = { ...copy[idx], is_enabled: enabled };
+        return copy;
+      }
+      return [
+        ...prev,
+        {
+          id: `temp-${conceptId}`,
+          company_id: selectedCompanyId,
+          concept_id: conceptId,
+          is_enabled: enabled,
+          baseline_description: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ];
+    });
+  }, [selectedCompanyId]);
+
+  const updateConfigBaseline = useCallback((conceptId: string, text: string) => {
+    setCompanyConfigs((prev) => {
+      const idx = prev.findIndex((item) => item.concept_id === conceptId);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = { ...copy[idx], baseline_description: text };
+        return copy;
+      }
+      return [
+        ...prev,
+        {
+          id: `temp-${conceptId}`,
+          company_id: selectedCompanyId,
+          concept_id: conceptId,
+          is_enabled: true,
+          baseline_description: text,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ];
+    });
+  }, [selectedCompanyId]);
+
+  const setAllConfigsEnabled = useCallback((enabled: boolean) => {
+    setCompanyConfigs((prev) => {
+      const configMap = new Map(prev.map((c) => [c.concept_id, c]));
+      return concepts.map((c) => {
+        const existing = configMap.get(c.id);
+        if (existing) {
+          return { ...existing, is_enabled: enabled };
+        }
+        return {
+          id: `temp-${c.id}`,
+          company_id: selectedCompanyId,
+          concept_id: c.id,
+          is_enabled: enabled,
+          baseline_description: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+      });
+    });
+  }, [concepts, selectedCompanyId]);
+
+  const enabledConfigsCount = useMemo(() => {
+    const configMap = new Map(companyConfigs.map((c) => [c.concept_id, c]));
+    return concepts.filter((c) => {
+      const cfg = configMap.get(c.id);
+      return cfg ? cfg.is_enabled : true;
+    }).length;
+  }, [concepts, companyConfigs]);
+
+  const filteredCompanyBenefitRows = useMemo(() => {
+    const configMap = new Map(companyConfigs.map((c) => [c.concept_id, c]));
+    return concepts
+      .filter((c) => {
+        const cfg = configMap.get(c.id);
+        const isDefault = c.value_schema?.category === "default" || c.category === "default" || (c.sort_order !== undefined && c.sort_order <= 11);
+        if (configsCategoryFilter === "default" && !isDefault) return false;
+        if (configsCategoryFilter === "addon" && isDefault) return false;
+        if (configsSearch.trim()) {
+          const q = configsSearch.toLowerCase();
+          const labelMatch = c.label?.toLowerCase().includes(q);
+          const keyMatch = c.concept_key?.toLowerCase().includes(q);
+          const descMatch = (cfg?.baseline_description || c.description || "").toLowerCase().includes(q);
+          if (!labelMatch && !keyMatch && !descMatch) return false;
+        }
+        return true;
+      })
+      .map((c) => {
+        const cfg = configMap.get(c.id);
+        return {
+          concept: c,
+          config: cfg,
+          isEnabled: cfg ? cfg.is_enabled : true,
+          baselineDescription: cfg?.baseline_description ?? null,
+        };
+      })
+      .sort((a, b) => {
+        if (a.isEnabled !== b.isEnabled) {
+          return a.isEnabled ? -1 : 1;
+        }
+        return (a.concept.sort_order ?? 99) - (b.concept.sort_order ?? 99);
+      });
+  }, [concepts, companyConfigs, configsCategoryFilter, configsSearch]);
 
   const productConfigs = useMemo(() => {
     const items = (companyWorkspace?.catalogs || []).filter(
       (item) => !item.tier_id && 
       (!selectedProductId || !item.product_id || item.product_id === selectedProductId) &&
-      (!item.package || item.package.package_kind === builderCoverageFilter)
+      (!item.package || item.package.package_kind === builderCoverageFilter) &&
+      ((item.engine_type || "ice") === selectedEngineType)
     );
     return items.sort((a, b) => {
       const aOrder = a.package?.sort_order ?? 0;
@@ -534,7 +775,15 @@ ${aiMarkdownTable}`;
       const bName = b.package?.name || b.name || "";
       return aOrder - bOrder || aName.localeCompare(bName);
     });
-  }, [companyWorkspace, selectedProductId]);
+  }, [companyWorkspace, selectedProductId, builderCoverageFilter, selectedEngineType]);
+
+  useEffect(() => {
+    if (!productConfigs || productConfigs.length === 0) return;
+    const exists = productConfigs.some((c) => c.id === selectedCatalogId);
+    if (!exists && productConfigs[0]) {
+      loadCatalog(productConfigs[0].id);
+    }
+  }, [productConfigs, selectedCatalogId, loadCatalog]);
 
   const selectedCatalog = catalogWorkspace?.catalog || null;
 
@@ -622,6 +871,32 @@ ${aiMarkdownTable}`;
     }
     return map;
   }, [currentPackageOfferings]);
+
+  const defaultConcepts = useMemo(() => {
+    return concepts.filter((c) => {
+      if (c.status === "retired") return false;
+      if (enabledConceptIds && !enabledConceptIds.has(c.id)) return false;
+      const offering = activeConceptIdSet.get(c.id);
+      if (offering) {
+        return effectiveRole(offering) === "included";
+      }
+      const cat = c.value_schema?.category || c.category || (c.sort_order && c.sort_order <= 11 ? "default" : "addon");
+      return cat === "default";
+    });
+  }, [concepts, enabledConceptIds, activeConceptIdSet]);
+
+  const addonConcepts = useMemo(() => {
+    return concepts.filter((c) => {
+      if (c.status === "retired") return false;
+      if (enabledConceptIds && !enabledConceptIds.has(c.id)) return false;
+      const offering = activeConceptIdSet.get(c.id);
+      if (offering) {
+        return effectiveRole(offering) === "addon_option";
+      }
+      const cat = c.value_schema?.category || c.category || (c.sort_order && c.sort_order <= 11 ? "default" : "addon");
+      return cat === "addon";
+    });
+  }, [concepts, enabledConceptIds, activeConceptIdSet]);
 
   const bundles = useMemo(
     () => (catalogWorkspace?.packages || []).filter((item) => item && item.package_kind === "addon_bundle" && item.status === "active"),
@@ -1019,6 +1294,52 @@ ${aiMarkdownTable}`;
       setSaving(false);
     }
 
+    });
+  }
+
+  // ── Inline Short Description Editor (Optimistic UI, Zero Reload) ───────────
+  async function updateOfferingDescriptionInline(offering: Offering, newDesc: string) {
+    enqueueTask(async () => {
+      if (!selectedCatalog || !catalogWorkspace) return;
+      setSaving(true);
+      setError("");
+      const prevOfferings = catalogWorkspace.offerings;
+      const cleanDesc = newDesc && newDesc.trim().length > 0 ? newDesc.trim() : null;
+
+      setCatalogWorkspace((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          offerings: prev.offerings.map((o) => (o.id === offering.id ? { ...o, description_override: cleanDesc } : o)),
+        };
+      });
+
+      try {
+        const payload = {
+          id: offering.id,
+          offering_key: offering.offering_key,
+          offering_kind: offering.offering_kind,
+          concept_id: offering.concept_id,
+          applies_to_type: offering.applies_to_type,
+          applies_to_id: offering.applies_to_id,
+          role: offering.role,
+          base_revision: selectedCatalog.revision,
+          display_value: offering.display_value || undefined,
+          typed_value: offering.typed_value || undefined,
+          optional_price: offering.optional_price || undefined,
+          description_override: cleanDesc,
+        };
+        await api(`/business/catalogs/${selectedCatalog.id}/offerings`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        await loadCatalog(selectedCatalog.id, true);
+      } catch (err) {
+        setCatalogWorkspace((prev) => (prev ? { ...prev, offerings: prevOfferings } : prev));
+        setError(apiErrorMessage(err));
+      } finally {
+        setSaving(false);
+      }
     });
   }
 
@@ -1425,19 +1746,49 @@ ${aiMarkdownTable}`;
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {/* View Switcher: Interactive Builder vs Company Overview Matrix */}
+            {/* View Switcher: 4 Tabs */}
             <div className="flex items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-0.5 text-xs font-semibold">
               <button
                 type="button"
-                onClick={() => setScreenTab("builder")}
+                onClick={() => {
+                  setScreenTab("company_benefits");
+                  if (selectedCompanyId) loadCompanyConfigs(selectedCompanyId);
+                }}
                 className={`flex items-center gap-1.5 rounded-[3px] px-3 py-1 transition-all ${
-                  screenTab === "builder"
+                  screenTab === "company_benefits"
                     ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] shadow-sm font-bold border border-[var(--rl-border)]"
                     : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
                 }`}
               >
-                <TreeStructure size={14} weight={screenTab === "builder" ? "bold" : "regular"} />
-                <span>Interactive Builder</span>
+                <Buildings size={14} weight={screenTab === "company_benefits" ? "bold" : "regular"} />
+                <span>1. Company Benefits</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setScreenTab("catalogs")}
+                className={`flex items-center gap-1.5 rounded-[3px] px-3 py-1 transition-all ${
+                  screenTab === "catalogs"
+                    ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] shadow-sm font-bold border border-[var(--rl-border)]"
+                    : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                }`}
+              >
+                <TreeStructure size={14} weight={screenTab === "catalogs" ? "bold" : "regular"} />
+                <span>2. Company Catalogs</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setScreenTab("conditions");
+                  if (selectedCompanyId) loadCompanyConditions(selectedCompanyId);
+                }}
+                className={`flex items-center gap-1.5 rounded-[3px] px-3 py-1 transition-all ${
+                  screenTab === "conditions"
+                    ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] shadow-sm font-bold border border-[var(--rl-border)]"
+                    : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                }`}
+              >
+                <Lightning size={14} weight={screenTab === "conditions" ? "bold" : "regular"} />
+                <span>3. Benefit Conditions</span>
               </button>
               <button
                 type="button"
@@ -1452,89 +1803,117 @@ ${aiMarkdownTable}`;
                 }`}
               >
                 <Table size={14} weight={screenTab === "matrix" ? "bold" : "regular"} />
-                <span>Company Overview Matrix</span>
+                <span>4. Overview Matrix</span>
               </button>
             </div>
 
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setShowLiveTemplate(!showLiveTemplate)}
-              className="gap-1.5"
-            >
-              {showLiveTemplate ? <EyeSlash size={14} weight="bold" /> : <Eye size={14} weight="bold" />}
-              {showLiveTemplate ? "Hide Template Preview" : "Live Template Preview"}
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={refreshCurrent}
-              disabled={workspaceLoading || saving}
-              className="gap-1.5"
-            >
-              <ArrowClockwise size={14} className={workspaceLoading ? "animate-spin" : ""} />
-              Refresh
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                setFormName("");
-                setFormPackageName("");
-                setFormAsPackage(false);
-                setDialog("config");
-              }}
-              className="gap-1.5"
-            >
-              <Plus size={14} weight="bold" />
-              Add configuration
-            </Button>
-            {isPackaged && activePackage && (
+            {/* Context-aware buttons */}
+            {screenTab === "company_benefits" && (
               <Button
-                variant="secondary"
                 size="sm"
-                onClick={() => {
-                  setFormName(`${activePackage.name} Copy`);
-                  setFormPackageKey("");
-                  setDialog("clone");
-                }}
-                className="gap-1.5"
+                onClick={saveCompanyConfigs}
+                disabled={configsSaving}
+                className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold"
               >
-                <Copy size={14} />
-                Clone package
+                {configsSaving ? <ArrowClockwise size={14} className="animate-spin" /> : <CheckCircle size={14} weight="bold" />}
+                <span>{configsSaving ? "Saving..." : "Save Benefit Pool"}</span>
               </Button>
             )}
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                setFormName("");
-                setFormPackageKey("");
-                setDialog("bundle");
-              }}
-              className="gap-1.5"
-            >
-              <PackageIcon size={14} />
-              New bundle
-            </Button>
-            <GuidedTour
-              storageKey="tour:builder-benefits"
-              title="Benefits & Add-ons Architecture"
-              description="Configure which global benefits each insurer product includes by default and offers as add-ons, build package tiers, and create add-on bundles with plan levels."
-              steps={BENEFITS_TOUR_STEPS}
-            />
-            {selectedCatalog && (
-              (catalogWorkspace?.active_revision?.state === "published" && selectedCatalog.status === "published") ? (
-                <Button variant="secondary" size="sm" onClick={openNewDraft} disabled={saving} className="gap-1.5">
-                  <PencilSimple size={14} weight="bold" />
-                  New draft
+
+            {screenTab === "conditions" && (
+              <Button
+                size="sm"
+                onClick={() => setConditionDialog(true)}
+                className="gap-1.5 bg-[var(--rl-black)] text-white shadow-sm font-semibold"
+              >
+                <Plus size={14} weight="bold" />
+                <span>Add Conditional Rule</span>
+              </Button>
+            )}
+
+            {screenTab === "catalogs" && (
+              <>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowLiveTemplate(!showLiveTemplate)}
+                  className="gap-1.5"
+                >
+                  {showLiveTemplate ? <EyeSlash size={14} weight="bold" /> : <Eye size={14} weight="bold" />}
+                  {showLiveTemplate ? "Hide Template Preview" : "Live Template Preview"}
                 </Button>
-              ) : (
-                <Button size="sm" onClick={publishConfig} disabled={saving} className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold">
-                  <CheckCircle size={14} weight="bold" />
-                  Publish Changes
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={refreshCurrent}
+                  disabled={workspaceLoading || saving}
+                  className="gap-1.5"
+                >
+                  <ArrowClockwise size={14} className={workspaceLoading ? "animate-spin" : ""} />
+                  Refresh
                 </Button>
-              )
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setFormName("");
+                    setFormPackageName("");
+                    setFormAsPackage(false);
+                    setDialog("config");
+                  }}
+                  className="gap-1.5"
+                >
+                  <Plus size={14} weight="bold" />
+                  Add configuration
+                </Button>
+                {isPackaged && activePackage && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setFormName(`${activePackage.name} Copy`);
+                      setFormPackageKey("");
+                      setDialog("clone");
+                    }}
+                    className="gap-1.5"
+                  >
+                    <Copy size={14} />
+                    Clone package
+                  </Button>
+                )}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setFormName("");
+                    setFormPackageKey("");
+                    setDialog("bundle");
+                  }}
+                  className="gap-1.5"
+                >
+                  <PackageIcon size={14} />
+                  New bundle
+                </Button>
+                <GuidedTour
+                  storageKey="tour:builder-benefits"
+                  title="Benefits & Add-ons Architecture"
+                  description="Configure which global benefits each insurer product includes by default and offers as add-ons, build package tiers, and create add-on bundles with plan levels."
+                  steps={BENEFITS_TOUR_STEPS}
+                />
+                {selectedCatalog && (
+                  (catalogWorkspace?.active_revision?.state === "published" && selectedCatalog.status === "published") ? (
+                    <Button variant="secondary" size="sm" onClick={openNewDraft} disabled={saving} className="gap-1.5">
+                      <PencilSimple size={14} weight="bold" />
+                      New draft
+                    </Button>
+                  ) : (
+                    <Button size="sm" onClick={publishConfig} disabled={saving} className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold">
+                      <CheckCircle size={14} weight="bold" />
+                      Publish Changes
+                    </Button>
+                  )
+                )}
+              </>
             )}
           </div>
         </div>
@@ -1593,133 +1972,563 @@ ${aiMarkdownTable}`;
             </div>
           </div>
 
-          {/* Row 2: Segment + Vehicle Type + Coverage (Clear separate parameters row) */}
-          <div className="flex flex-wrap items-center gap-4 border-t border-[var(--rl-border)] pt-3 text-xs">
-            {/* Step 2: Segment */}
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
-                  2. Segment:
-                </span>
-                <Tooltip content="Choose private vs commercial vehicle policy scope">
-                  <Info size={11} className="text-[var(--rl-text-muted)]" />
-                </Tooltip>
-              </div>
-              <div className="flex gap-1">
-                {segments.map((seg) => {
-                  const active = seg.id === selectedSegmentId;
-                  return (
-                    <button
-                      key={seg.id}
-                      onClick={() => setSelectedSegmentId(seg.id)}
-                      className={`rounded-[var(--rl-radius-sm)] px-2.5 py-1 text-xs font-medium transition-all ${active
-                        ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] border border-[var(--rl-border)] shadow-sm font-semibold"
-                        : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                        }`}
-                    >
-                      {seg.key === "private" ? "Private" : "Company / Commercial"}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="hidden h-5 w-px bg-[var(--rl-border)] sm:block" />
-
-            {/* Step 3: Vehicle Type */}
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
-                3. Vehicle type:
+          {screenTab === "company_benefits" ? (
+            <div className="flex items-center gap-2 border-t border-[var(--rl-border)] pt-3 text-xs text-[var(--rl-text-muted)]">
+              <ShieldCheck size={16} className="text-emerald-600 shrink-0" weight="fill" />
+              <span>
+                <strong>Insurer Master Benefit Pool:</strong> Enable or disable benefits and customize short descriptions for <strong>{selectedCompany?.name || "this insurer"}</strong>. Scenario catalogs below strictly inherit from this enabled set.
               </span>
-              <div className="flex gap-1">
-                {vehicles.map((v) => {
-                  const active = v.id === selectedVehicleId;
-                  return (
-                    <button
-                      key={v.id}
-                      onClick={() => setSelectedVehicleId(v.id)}
-                      className={`rounded-[var(--rl-radius-sm)] px-2.5 py-1 text-xs font-medium transition-all ${active
-                        ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] border border-[var(--rl-border)] shadow-sm font-semibold"
-                        : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                        }`}
-                    >
-                      {v.name}
-                    </button>
-                  );
-                })}
-              </div>
             </div>
-
-            <div className="hidden h-5 w-px bg-[var(--rl-border)] sm:block" />
-
-            {/* Step 4: Coverage Type */}
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
-                4. Coverage:
+          ) : screenTab === "conditions" ? (
+            <div className="flex items-center gap-2 border-t border-[var(--rl-border)] pt-3 text-xs text-[var(--rl-text-muted)]">
+              <Lightning size={16} className="text-amber-500 shrink-0" weight="fill" />
+              <span>
+                <strong>Dynamic Condition Rules:</strong> Cross-benefit conditional upgrades for <strong>{selectedCompany?.name || "this insurer"}</strong>. Evaluates in realtime during quote calculations and PDF generation.
               </span>
-              <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
-                {[
-                  { id: "comprehensive", label: "Comprehensive", hint: "(Third Party available)" },
-                  { id: "tpft", label: "Third Party, Fire & Theft", hint: "" },
-                  { id: "tpo", label: "Third Party", hint: "" }
-                ].map((cov) => {
-                  const active = builderCoverageFilter === cov.id;
-                  return (
-                    <button
-                      key={cov.id}
-                      onClick={() => setBuilderCoverageFilter(cov.id as any)}
-                      className={`flex items-center gap-1.5 rounded-[var(--rl-radius-sm)] px-2.5 py-1 transition-all ${
-                        active
-                          ? "bg-[var(--rl-surface)] border border-[var(--rl-border)] text-[var(--rl-text-strong)] shadow-sm"
-                          : "border border-transparent text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                      }`}
-                    >
-                      <span>{cov.label}</span>
-                      {cov.hint && <span className="text-[11px] font-normal text-[var(--rl-text-muted)]">{cov.hint}</span>}
-                    </button>
-                  );
-                })}
-              </div>
             </div>
-          </div>
-
-          {/* Row 3: Product / Configuration Selection */}
-          <div className="rl-tour-product flex flex-wrap items-center gap-2 border-t border-[var(--rl-border)] pt-3">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
-              5. Product:
-            </span>
-
-            {productConfigs.length === 0 ? (
-              <span className="text-xs text-[var(--rl-text-muted)]">No configurations for this product yet.</span>
-            ) : (
-              productConfigs.map((config) => {
-                const active = config.id === selectedCatalogId;
-                const displayName = config.package ? config.package.name : "Single";
-                return (
-                  <button
-                    key={config.id}
-                    onClick={() => loadCatalog(config.id)}
-                    className={`flex items-center gap-2 rounded-[var(--rl-radius-sm)] px-3 py-1.5 text-xs font-semibold transition-all ${active
-                      ? "bg-[var(--rl-black)] text-white shadow-sm"
-                      : "border border-[var(--rl-border)] bg-[var(--rl-surface)] text-[var(--rl-text-strong)] hover:border-[var(--rl-text-muted)]"
-                      }`}
-                  >
-                    <TreeStructure size={14} className={active ? "text-white" : "text-[var(--rl-text-muted)]"} />
-                    <span>{displayName}</span>
-                    <span className={`text-[10px] font-normal ${active ? "text-neutral-300" : "text-[var(--rl-text-muted)]"}`}>
-                      {config.package ? "Package mode" : "Single mode"}
+          ) : screenTab === "matrix" ? (
+            <div className="flex items-center gap-2 border-t border-[var(--rl-border)] pt-3 text-xs text-[var(--rl-text-muted)]">
+              <Table size={16} className="text-purple-600 shrink-0" weight="fill" />
+              <span>
+                <strong>Underwriting Matrix:</strong> Complete policy breakdown of default benefits, add-on riders, and bundled packages for <strong>{selectedCompany?.name || "this insurer"}</strong>.
+              </span>
+            </div>
+          ) : (
+            <>
+              {/* Row 2: Segment + Engine Type + Vehicle Type + Coverage */}
+              <div className="flex flex-wrap items-center gap-4 border-t border-[var(--rl-border)] pt-3 text-xs">
+                {/* Step 2: Segment */}
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
+                      2. Segment:
                     </span>
-                  </button>
-                );
-              })
-            )}
-          </div>
+                    <Tooltip content="Choose private vs commercial vehicle policy scope">
+                      <Info size={11} className="text-[var(--rl-text-muted)]" />
+                    </Tooltip>
+                  </div>
+                  <div className="flex gap-1">
+                    {segments.map((seg) => {
+                      const active = seg.id === selectedSegmentId;
+                      return (
+                        <button
+                          key={seg.id}
+                          onClick={() => setSelectedSegmentId(seg.id)}
+                          className={`rounded-[var(--rl-radius-sm)] px-2.5 py-1 text-xs font-medium transition-all ${active
+                            ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] border border-[var(--rl-border)] shadow-sm font-semibold"
+                            : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                            }`}
+                        >
+                          {seg.key === "private" ? "Private" : "Company / Commercial"}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="hidden h-5 w-px bg-[var(--rl-border)] sm:block" />
+
+                {/* Step 3: Engine Type */}
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
+                      3. Engine:
+                    </span>
+                    <Tooltip content="Filter policy products for internal combustion (ICE) or electric vehicles (EV)">
+                      <Info size={11} className="text-[var(--rl-text-muted)]" />
+                    </Tooltip>
+                  </div>
+                  <div className="flex gap-1">
+                    {(["ice", "ev"] as const).map((eng) => {
+                      const active = selectedEngineType === eng;
+                      return (
+                        <button
+                          key={eng}
+                          onClick={() => setSelectedEngineType(eng)}
+                          className={`flex items-center gap-1 rounded-[var(--rl-radius-sm)] px-2.5 py-1 text-xs font-medium transition-all ${
+                            active
+                              ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] border border-[var(--rl-border)] shadow-sm font-semibold"
+                              : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                          }`}
+                        >
+                          {eng === "ev" && <Lightning size={12} weight="fill" className="text-amber-500" />}
+                          <span>{eng === "ice" ? "ICE (Petrol/Diesel)" : "EV (Electric)"}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="hidden h-5 w-px bg-[var(--rl-border)] sm:block" />
+
+                {/* Step 4: Vehicle Type */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
+                    4. Vehicle type:
+                  </span>
+                  <div className="flex gap-1">
+                    {vehicles.map((v) => {
+                      const active = v.id === selectedVehicleId;
+                      return (
+                        <button
+                          key={v.id}
+                          onClick={() => setSelectedVehicleId(v.id)}
+                          className={`rounded-[var(--rl-radius-sm)] px-2.5 py-1 text-xs font-medium transition-all ${active
+                            ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] border border-[var(--rl-border)] shadow-sm font-semibold"
+                            : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                            }`}
+                        >
+                          {v.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="hidden h-5 w-px bg-[var(--rl-border)] sm:block" />
+
+                {/* Step 5: Coverage Type */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
+                    5. Coverage:
+                  </span>
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
+                    {[
+                      { id: "comprehensive", label: "Comprehensive", hint: "(Third Party available)" },
+                      { id: "tpft", label: "Third Party, Fire & Theft", hint: "" },
+                      { id: "tpo", label: "Third Party", hint: "" }
+                    ].map((cov) => {
+                      const active = builderCoverageFilter === cov.id;
+                      return (
+                        <button
+                          key={cov.id}
+                          onClick={() => setBuilderCoverageFilter(cov.id as any)}
+                          className={`flex items-center gap-1.5 rounded-[var(--rl-radius-sm)] px-2.5 py-1 transition-all ${
+                            active
+                              ? "bg-[var(--rl-surface)] border border-[var(--rl-border)] text-[var(--rl-text-strong)] shadow-sm"
+                              : "border border-transparent text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                          }`}
+                        >
+                          <span>{cov.label}</span>
+                          {cov.hint && <span className="text-[11px] font-normal text-[var(--rl-text-muted)]">{cov.hint}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Row 3: Product / Configuration Selection */}
+              <div className="rl-tour-product flex flex-wrap items-center gap-2 border-t border-[var(--rl-border)] pt-3">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
+                  6. Product:
+                </span>
+
+                {productConfigs.length === 0 ? (
+                  <span className="text-xs text-[var(--rl-text-muted)]">No configurations for this product yet.</span>
+                ) : (
+                  productConfigs.map((config) => {
+                    const active = config.id === selectedCatalogId;
+                    const displayName = config.package ? config.package.name : "Single";
+                    return (
+                      <button
+                        key={config.id}
+                        onClick={() => loadCatalog(config.id)}
+                        className={`flex items-center gap-2 rounded-[var(--rl-radius-sm)] px-3 py-1.5 text-xs font-semibold transition-all ${active
+                          ? "bg-[var(--rl-black)] text-white shadow-sm"
+                          : "border border-[var(--rl-border)] bg-[var(--rl-surface)] text-[var(--rl-text-strong)] hover:border-[var(--rl-text-muted)]"
+                          }`}
+                      >
+                        <TreeStructure size={14} className={active ? "text-white" : "text-[var(--rl-text-muted)]"} />
+                        <span>{displayName}</span>
+                        <span className={`text-[10px] font-normal ${active ? "text-neutral-300" : "text-[var(--rl-text-muted)]"}`}>
+                          {config.package ? "Package mode" : "Single mode"}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
       {/* ── Main Workspace Body ────────────────────────────────────────── */}
       <div className="p-6">
-        {screenTab === "matrix" ? (
+        {screenTab === "company_benefits" ? (
+          <div className="space-y-6">
+            {/* Header & Filter Controls */}
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">
+                    {selectedCompany?.name || "Insurance Company"} — Master Benefit Pool & Baseline Descriptions
+                  </h2>
+                  <Badge variant="default">
+                    {enabledConfigsCount} of {concepts.length} Enabled
+                  </Badge>
+                </div>
+                <p className="mt-1 text-xs text-[var(--rl-text-muted)]">
+                  Toggle which benefits are offered by this insurer and set insurer-specific baseline short descriptions.
+                  Scenario catalogs strictly inherit only from enabled benefits here.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Search input */}
+                <div className="relative min-w-[220px]">
+                  <MagnifyingGlass size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--rl-text-muted)]" />
+                  <Input
+                    value={configsSearch}
+                    onChange={(e) => setConfigsSearch(e.target.value)}
+                    placeholder="Search benefit or description..."
+                    className="pl-8 text-xs h-8"
+                  />
+                </div>
+
+                {/* Category filters */}
+                <div className="flex items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-0.5 text-xs">
+                  <button
+                    onClick={() => setConfigsCategoryFilter("all")}
+                    className={`rounded-[3px] px-2.5 py-1 font-medium transition-all ${
+                      configsCategoryFilter === "all"
+                        ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] shadow-sm font-semibold"
+                        : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                    }`}
+                  >
+                    All ({concepts.length})
+                  </button>
+                  <button
+                    onClick={() => setConfigsCategoryFilter("default")}
+                    className={`rounded-[3px] px-2.5 py-1 font-medium transition-all ${
+                      configsCategoryFilter === "default"
+                        ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] shadow-sm font-semibold"
+                        : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                    }`}
+                  >
+                    Core Defaults
+                  </button>
+                  <button
+                    onClick={() => setConfigsCategoryFilter("addon")}
+                    className={`rounded-[3px] px-2.5 py-1 font-medium transition-all ${
+                      configsCategoryFilter === "addon"
+                        ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] shadow-sm font-semibold"
+                        : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                    }`}
+                  >
+                    Add-ons
+                  </button>
+                </div>
+
+                {/* Quick Toggle Buttons */}
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setAllConfigsEnabled(true)}
+                    className="h-8 text-xs font-medium"
+                  >
+                    Enable All
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setAllConfigsEnabled(false)}
+                    className="h-8 text-xs font-medium text-[var(--rl-text-muted)]"
+                  >
+                    Disable All
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={saveCompanyConfigs}
+                    disabled={configsSaving}
+                    className="h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold"
+                  >
+                    {configsSaving ? <ArrowClockwise size={14} className="animate-spin" /> : <CheckCircle size={14} weight="bold" />}
+                    <span>{configsSaving ? "Saving..." : "Save Benefit Pool"}</span>
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Benefit Configs Table */}
+            {configsLoading ? (
+              <PageLoading />
+            ) : filteredCompanyBenefitRows.length === 0 ? (
+              <div className="rounded-[var(--rl-radius)] border border-dashed border-[var(--rl-border)] bg-[var(--rl-surface)] p-12 text-center text-xs text-[var(--rl-text-muted)]">
+                No benefits match your search or filter.
+              </div>
+            ) : (
+              <Card className="overflow-hidden border border-[var(--rl-border)] shadow-sm">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[860px] text-xs">
+                    <thead>
+                      <tr className="border-b border-[var(--rl-border)] bg-[#1F2937] text-white">
+                        <th className="w-12 px-4 py-3 text-center text-[11px] font-bold uppercase tracking-wider">
+                          Active
+                        </th>
+                        <th className="w-[30%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                          Global Benefit Concept
+                        </th>
+                        <th className="w-[45%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                          Insurer Baseline Short Description (Used in Quotation Cards)
+                        </th>
+                        <th className="w-[15%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                          Global Default Fallback
+                        </th>
+                        <th className="w-[10%] px-4 py-3 text-center text-[11px] font-bold uppercase tracking-wider">
+                          Status
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--rl-border)]/70 bg-[var(--rl-surface)]">
+                      {filteredCompanyBenefitRows.map(({ concept: c, isEnabled, baselineDescription }) => {
+                        const isDefault = c.category === "default" || (c.sort_order !== undefined && c.sort_order <= 11);
+                        const hasCustom = Boolean(baselineDescription && baselineDescription.trim() && baselineDescription.trim() !== (c.description || "").trim());
+
+                        return (
+                          <tr
+                            key={c.id}
+                            className={`transition-colors ${
+                              isEnabled ? "hover:bg-[var(--rl-bg)]/50" : "bg-neutral-50/50 opacity-60 hover:opacity-100"
+                            }`}
+                          >
+                            {/* Checkbox */}
+                            <td className="px-4 py-3 text-center align-middle">
+                              <input
+                                type="checkbox"
+                                checked={isEnabled}
+                                onChange={(e) => toggleConfigEnabled(c.id, e.target.checked)}
+                                className="h-4 w-4 rounded border-[var(--rl-border)] text-[var(--rl-black)] focus:ring-[var(--rl-black)] cursor-pointer"
+                              />
+                            </td>
+
+                            {/* Benefit Concept */}
+                            <td className="px-4 py-3 align-top">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className={`font-bold text-[13px] leading-snug ${isEnabled ? "text-[var(--rl-text-strong)]" : "text-[var(--rl-text-muted)] line-through"}`}>
+                                    {c.label}
+                                  </span>
+                                  <span className="rounded bg-[var(--rl-bg)] border border-[var(--rl-border)] px-1.5 py-0.5 text-[10px] font-mono text-[var(--rl-text-muted)]">
+                                    {c.concept_key}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2 pt-0.5">
+                                  <Badge variant={isDefault ? "success" : "default"}>
+                                    {isDefault ? "Core Default" : "Optional Add-on"}
+                                  </Badge>
+                                  {hasCustom && (
+                                    <span className="rounded bg-blue-100 text-blue-800 border border-blue-200 px-1.5 py-0.2 text-[9px] font-bold uppercase">
+                                      Customized for Insurer
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Baseline Short Description */}
+                            <td className="px-4 py-3 align-top">
+                              <div className="space-y-1">
+                                <Input
+                                  value={baselineDescription ?? ""}
+                                  onChange={(e) => updateConfigBaseline(c.id, e.target.value)}
+                                  placeholder={c.description || "Enter insurer baseline short description..."}
+                                  disabled={!isEnabled}
+                                  className="text-xs h-8 bg-[var(--rl-bg)] focus:bg-[var(--rl-surface)] border-[var(--rl-border)] font-medium"
+                                />
+                                <div className="flex items-center justify-between text-[10px] text-[var(--rl-text-muted)]">
+                                  <span>Displays under benefit card on Review Workspace & generated PDFs</span>
+                                  {hasCustom && (
+                                    <button
+                                      onClick={() => updateConfigBaseline(c.id, "")}
+                                      className="text-blue-600 hover:underline font-semibold"
+                                    >
+                                      Reset to Global Default
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Global Fallback */}
+                            <td className="px-4 py-3 align-top text-[11px] text-[var(--rl-text-muted)] italic leading-relaxed">
+                              {c.description || "No description set"}
+                            </td>
+
+                            {/* Status */}
+                            <td className="px-4 py-3 text-center align-middle">
+                              <Badge variant={isEnabled ? "success" : "default"}>
+                                {isEnabled ? "Active" : "Excluded"}
+                              </Badge>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            )}
+          </div>
+        ) : screenTab === "conditions" ? (
+          <div className="space-y-6">
+            {/* Header */}
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-[var(--rl-text-strong)]">
+                    {selectedCompany?.name || "Insurance Company"} — Benefit Conditions & Logic Rules
+                  </h2>
+                  <Badge variant="default">
+                    {companyConditions.length} Rule{companyConditions.length === 1 ? "" : "s"} Active
+                  </Badge>
+                </div>
+                <p className="mt-1 text-xs text-[var(--rl-text-muted)]">
+                  Dynamic rules evaluate during quotation review and PDF generation.
+                  Example: If the customer purchases Driver Passenger Protector, Towing & Assistance is upgraded to &quot;Unlimited towing distance&quot;.
+                </p>
+              </div>
+
+              <Button
+                size="sm"
+                onClick={() => {
+                  setCondFormName("");
+                  setCondTriggerId("");
+                  setCondPlanFilter("");
+                  setCondTargetId("");
+                  setCondReplacement("");
+                  setConditionDialog(true);
+                }}
+                className="gap-1.5 bg-[var(--rl-black)] text-white shadow-sm font-semibold"
+              >
+                <Plus size={14} weight="bold" />
+                <span>Add Conditional Rule</span>
+              </Button>
+            </div>
+
+            {/* Conditions Table or Empty State */}
+            {conditionsLoading ? (
+              <PageLoading />
+            ) : companyConditions.length === 0 ? (
+              <div className="rounded-[var(--rl-radius)] border border-dashed border-[var(--rl-border)] bg-[var(--rl-surface)] p-12 text-center">
+                <Lightning size={40} className="mx-auto text-amber-500 mb-3" weight="duotone" />
+                <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">
+                  No Conditional Rules Configured
+                </h3>
+                <p className="mt-1.5 text-xs text-[var(--rl-text-muted)] max-w-md mx-auto leading-relaxed">
+                  Configure dynamic cross-benefit rules. When a user selects a specific endorsement or plan, other benefits automatically upgrade their limit or description.
+                </p>
+                <div className="mt-4 flex justify-center gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      const dpp = concepts.find((c) => c.concept_key.includes("driver_passenger") || c.concept_key.includes("personal_accident"));
+                      const tow = concepts.find((c) => c.concept_key.includes("towing") || c.concept_key.includes("roadside"));
+                      setCondFormName(`${selectedCompany?.name || "Insurer"} Unlimited Towing Upgrade`);
+                      setCondTriggerId(dpp?.id || "");
+                      setCondPlanFilter("");
+                      setCondTargetId(tow?.id || "");
+                      setCondReplacement("Unlimited towing distance within Malaysia");
+                      setConditionDialog(true);
+                    }}
+                    className="gap-1.5 bg-[var(--rl-black)] text-white shadow-sm font-semibold"
+                  >
+                    <Plus size={14} weight="bold" />
+                    <span>Create Driver Passenger → Unlimited Towing Rule</span>
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <Card className="overflow-hidden border border-[var(--rl-border)] shadow-sm">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[760px] text-xs">
+                    <thead>
+                      <tr className="border-b border-[var(--rl-border)] bg-[#1F2937] text-white">
+                        <th className="w-[25%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                          Rule Name
+                        </th>
+                        <th className="w-[25%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                          Trigger Condition (When Active)
+                        </th>
+                        <th className="w-[20%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                          Target Benefit Modified
+                        </th>
+                        <th className="w-[22%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                          Upgraded Description
+                        </th>
+                        <th className="w-[8%] px-4 py-3 text-center text-[11px] font-bold uppercase tracking-wider">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--rl-border)]/70 bg-[var(--rl-surface)]">
+                      {companyConditions.map((cond) => {
+                        const triggerConcept = concepts.find((c) => c.id === cond.trigger_concept_id);
+                        const targetConcept = concepts.find((c) => c.id === cond.target_concept_id);
+
+                        return (
+                          <tr key={cond.id} className="hover:bg-[var(--rl-bg)]/40 transition-colors">
+                            <td className="px-4 py-3.5 align-top">
+                              <div className="font-bold text-[13px] text-[var(--rl-text-strong)]">
+                                {cond.name}
+                              </div>
+                              <span className="text-[10px] text-[var(--rl-text-muted)]">
+                                Priority {cond.sort_order ?? 0}
+                              </span>
+                            </td>
+
+                            <td className="px-4 py-3.5 align-top">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1.5 font-semibold text-emerald-950">
+                                  <Lightning size={14} className="text-amber-500 shrink-0" weight="fill" />
+                                  <span>{triggerConcept?.label || cond.trigger_concept_id}</span>
+                                </div>
+                                {cond.trigger_plan_filter && (
+                                  <Badge variant="default" className="text-[10px]">
+                                    Plan filter: {cond.trigger_plan_filter}
+                                  </Badge>
+                                )}
+                              </div>
+                            </td>
+
+                            <td className="px-4 py-3.5 align-top">
+                              <div className="font-semibold text-[var(--rl-text-strong)]">
+                                {targetConcept?.label || cond.target_concept_id}
+                              </div>
+                              <div className="text-[10px] font-mono text-[var(--rl-text-muted)]">
+                                {targetConcept?.concept_key}
+                              </div>
+                            </td>
+
+                            <td className="px-4 py-3.5 align-top">
+                              <div className="rounded border border-blue-200 bg-blue-50/70 p-2 text-blue-950 font-medium text-[11px] leading-snug">
+                                &quot;{cond.replacement_description}&quot;
+                              </div>
+                            </td>
+
+                            <td className="px-4 py-3.5 align-middle text-center">
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => deleteCompanyCondition(cond.id)}
+                                className="h-7 w-7 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                                title="Delete Rule"
+                              >
+                                <Trash size={13} />
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            )}
+          </div>
+        ) : screenTab === "matrix" ? (
           <div className="space-y-6">
             {/* Header & Stats Bar */}
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm">
@@ -1905,8 +2714,18 @@ ${aiMarkdownTable}`;
                                             0 RM
                                           </span>
                                         </div>
-                                        <div className="mt-0.5 text-[11px] text-emerald-800">
-                                          {d.display_value || d.description || "Included in base policy"}
+                                        {d.display_value && (
+                                          <div className="mt-0.5 font-semibold text-[11px] text-emerald-900">
+                                            Limit: {d.display_value}
+                                          </div>
+                                        )}
+                                        <div className="mt-0.5 text-[10.5px] text-emerald-800/90 leading-tight flex items-start gap-1">
+                                          <span className="flex-1">{d.description || "Included in base policy"}</span>
+                                          {d.is_custom_description && (
+                                            <span className="shrink-0 rounded bg-emerald-200 text-emerald-900 px-1 py-0.2 text-[8.5px] font-bold uppercase">
+                                              Custom
+                                            </span>
+                                          )}
                                         </div>
                                       </div>
                                     ))}
@@ -1941,8 +2760,18 @@ ${aiMarkdownTable}`;
                                             {a.price_text}
                                           </span>
                                         </div>
-                                        <div className="mt-0.5 text-[11px] text-blue-800">
-                                          {a.display_value || a.description || "Optional payable endorsement"}
+                                        {a.display_value && (
+                                          <div className="mt-0.5 font-semibold text-[11px] text-blue-900">
+                                            Limit: {a.display_value}
+                                          </div>
+                                        )}
+                                        <div className="mt-0.5 text-[10.5px] text-blue-800/90 leading-tight flex items-start gap-1">
+                                          <span className="flex-1">{a.description || "Optional payable endorsement"}</span>
+                                          {a.is_custom_description && (
+                                            <span className="shrink-0 rounded bg-blue-200 text-blue-900 px-1 py-0.2 text-[8.5px] font-bold uppercase">
+                                              Custom
+                                            </span>
+                                          )}
                                         </div>
                                       </div>
                                     ))}
@@ -2164,14 +2993,14 @@ ${aiMarkdownTable}`;
               <div className="mb-4 flex items-center justify-between border-b border-[var(--rl-border)] pb-3">
                 <div>
                   <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">
-                    Category 1: Default / Global Benefits (11 items)
+                    Category 1: Core Defaults ({defaultConcepts.length} items)
                   </h3>
                   <p className="text-xs text-[var(--rl-text-muted)]">
                     Click any tile to toggle on/off standard included policy coverages for {isPackaged && activePackage ? activePackage.name : "this configuration"}.
                   </p>
                 </div>
                 <span className="text-xs font-bold text-[var(--rl-text-strong)]">
-                  {defaultOfferings.length} / 11 Active in this tier
+                  {defaultOfferings.length} / {defaultConcepts.length} Active in this tier
                 </span>
               </div>
 
@@ -2249,6 +3078,58 @@ ${aiMarkdownTable}`;
                         )}
                         <span className="text-[10px] font-semibold text-[var(--rl-text-muted)] shrink-0">Default</span>
                       </div>
+
+                      {isActive ? (
+                        <div className="mt-2 pt-1.5 border-t border-[var(--rl-border)]/50 space-y-1" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className="text-[var(--rl-text-muted)] font-medium">Description:</span>
+                            {offering?.description_override ? (
+                              <div className="flex items-center gap-1">
+                                <span className="rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-1 py-0.2 text-[9.5px] font-semibold">
+                                  Custom (Company)
+                                </span>
+                                <button
+                                  type="button"
+                                  title="Reset to global default"
+                                  onClick={() => {
+                                    if (offering) updateOfferingDescriptionInline(offering, "");
+                                  }}
+                                  className="text-[var(--rl-text-muted)] hover:text-[var(--rl-red)] transition-colors p-0.5"
+                                >
+                                  <ArrowCounterClockwise size={11} />
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="rounded bg-[var(--rl-bg)] border border-[var(--rl-border)] text-[var(--rl-text-muted)] px-1 py-0.2 text-[9.5px]">
+                                Global Default
+                              </span>
+                            )}
+                          </div>
+                          <input
+                            type="text"
+                            defaultValue={offering?.description_override ?? concept.description ?? ""}
+                            key={`${offering?.id}-${offering?.description_override || "default"}`}
+                            onBlur={(e) => {
+                              if (offering) {
+                                const val = e.target.value.trim();
+                                const current = offering.description_override || "";
+                                if (val !== current) {
+                                  updateOfferingDescriptionInline(offering, val);
+                                }
+                              }
+                            }}
+                            className="w-full rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[10.5px] text-[var(--rl-text-strong)] placeholder:text-[var(--rl-text-muted)] placeholder:italic focus:outline-none focus:ring-1 focus:ring-[var(--rl-black)]"
+                            placeholder={concept.description || "Enter short description..."}
+                            title="Short benefit description shown on quote cards"
+                          />
+                        </div>
+                      ) : (
+                        concept.description ? (
+                          <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] truncate" title={concept.description}>
+                            {concept.description}
+                          </div>
+                        ) : null
+                      )}
                     </div>
                   );
                 })}
@@ -2260,14 +3141,14 @@ ${aiMarkdownTable}`;
               <div className="mb-4 flex items-center justify-between border-b border-[var(--rl-border)] pb-3">
                 <div>
                   <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">
-                    Category 2: Unique Add-ons & Multi-Plan Variations (23 items)
+                    Category 2: Optional Riders & Add-ons ({addonConcepts.length} items)
                   </h3>
                   <p className="text-xs text-[var(--rl-text-muted)]">
                     Click any tile to toggle on/off optional endorsements and select plan variations (Plan A/B/C/D, etc.) in 1 click.
                   </p>
                 </div>
                 <span className="text-xs font-bold text-[var(--rl-text-strong)]">
-                  {addonOfferings.length} / 23 Active in this tier
+                  {addonOfferings.length} / {addonConcepts.length} Active in this tier
                 </span>
               </div>
 
@@ -2378,6 +3259,58 @@ ${aiMarkdownTable}`;
                         )}
                         <span className="text-[10px] font-semibold text-[var(--rl-text-muted)] shrink-0">Add-on</span>
                       </div>
+
+                      {isActive ? (
+                        <div className="mt-2 pt-1.5 border-t border-[var(--rl-border)]/50 space-y-1" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className="text-[var(--rl-text-muted)] font-medium">Description:</span>
+                            {offering?.description_override ? (
+                              <div className="flex items-center gap-1">
+                                <span className="rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-1 py-0.2 text-[9.5px] font-semibold">
+                                  Custom (Company)
+                                </span>
+                                <button
+                                  type="button"
+                                  title="Reset to global default"
+                                  onClick={() => {
+                                    if (offering) updateOfferingDescriptionInline(offering, "");
+                                  }}
+                                  className="text-[var(--rl-text-muted)] hover:text-[var(--rl-red)] transition-colors p-0.5"
+                                >
+                                  <ArrowCounterClockwise size={11} />
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="rounded bg-[var(--rl-bg)] border border-[var(--rl-border)] text-[var(--rl-text-muted)] px-1 py-0.2 text-[9.5px]">
+                                Global Default
+                              </span>
+                            )}
+                          </div>
+                          <input
+                            type="text"
+                            defaultValue={offering?.description_override ?? concept.description ?? ""}
+                            key={`${offering?.id}-${offering?.description_override || "default"}`}
+                            onBlur={(e) => {
+                              if (offering) {
+                                const val = e.target.value.trim();
+                                const current = offering.description_override || "";
+                                if (val !== current) {
+                                  updateOfferingDescriptionInline(offering, val);
+                                }
+                              }
+                            }}
+                            className="w-full rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[10.5px] text-[var(--rl-text-strong)] placeholder:text-[var(--rl-text-muted)] placeholder:italic focus:outline-none focus:ring-1 focus:ring-[var(--rl-black)]"
+                            placeholder={concept.description || "Enter short description..."}
+                            title="Short benefit description shown on quote cards"
+                          />
+                        </div>
+                      ) : (
+                        concept.description ? (
+                          <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] truncate" title={concept.description}>
+                            {concept.description}
+                          </div>
+                        ) : null
+                      )}
                     </div>
                   );
                 })}
@@ -3193,6 +4126,114 @@ ${aiMarkdownTable}`;
                 )}
               </div>
             )}
+          </div>
+        </Dialog>
+      )}
+
+      {/* ── Dialog: Add / Edit Benefit Condition Rule ───────────────── */}
+      {conditionDialog && (
+        <Dialog
+          open={conditionDialog}
+          onOpenChange={setConditionDialog}
+          title="New Dynamic Benefit Condition Rule"
+        >
+          <div className="max-w-lg p-6 space-y-4 text-xs">
+            <p className="text-[var(--rl-text-muted)]">
+              Define a dynamic condition for <strong>{selectedCompany?.name}</strong>. When the trigger benefit is active in a quote, the target benefit description automatically upgrades.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block font-semibold text-[var(--rl-text-strong)] mb-1">
+                  Rule Name *
+                </label>
+                <Input
+                  value={condFormName}
+                  onChange={(e) => setCondFormName(e.target.value)}
+                  placeholder="e.g. DPP -> Unlimited Towing Upgrade"
+                  className="w-full"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[var(--rl-text-strong)] mb-1">
+                  When this Trigger Benefit is Active / Purchased *
+                </label>
+                <select
+                  value={condTriggerId}
+                  onChange={(e) => setCondTriggerId(e.target.value)}
+                  className="w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-2 text-xs text-[var(--rl-text-strong)] focus:outline-none"
+                >
+                  <option value="">-- Select Trigger Benefit --</option>
+                  {concepts.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label} ({c.concept_key})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[var(--rl-text-strong)] mb-1">
+                  Trigger Plan Filter (Optional)
+                </label>
+                <Input
+                  value={condPlanFilter}
+                  onChange={(e) => setCondPlanFilter(e.target.value)}
+                  placeholder="e.g. Plan B, or leave blank for any plan / purchase"
+                  className="w-full"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[var(--rl-text-strong)] mb-1">
+                  Target Benefit to Modify *
+                </label>
+                <select
+                  value={condTargetId}
+                  onChange={(e) => setCondTargetId(e.target.value)}
+                  className="w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-2 text-xs text-[var(--rl-text-strong)] focus:outline-none"
+                >
+                  <option value="">-- Select Target Benefit --</option>
+                  {concepts.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label} ({c.concept_key})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[var(--rl-text-strong)] mb-1">
+                  Upgraded / Replacement Description *
+                </label>
+                <textarea
+                  value={condReplacement}
+                  onChange={(e) => setCondReplacement(e.target.value)}
+                  placeholder="e.g. Unlimited towing distance within Malaysia"
+                  rows={3}
+                  className="w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-2.5 text-xs text-[var(--rl-text-strong)] focus:outline-none resize-none font-medium"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-[var(--rl-border)]">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setConditionDialog(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={saveCompanyCondition}
+                disabled={conditionSaving || !condFormName.trim() || !condTriggerId || !condTargetId || !condReplacement.trim()}
+                className="bg-[var(--rl-black)] text-white shadow-sm font-semibold"
+              >
+                {conditionSaving ? "Saving Rule..." : "Create Condition Rule"}
+              </Button>
+            </div>
           </div>
         </Dialog>
       )}

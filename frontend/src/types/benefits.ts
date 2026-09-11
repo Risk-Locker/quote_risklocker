@@ -68,6 +68,7 @@ export type CatalogSummary = {
   vehicle_category_id?: string | null;
   vehicle_subcategory_id?: string | null;
   coverage_type_id?: string | null;
+  engine_type?: "ice" | "ev" | string | null;
   name: string;
   revision: number;
   status: string;
@@ -92,6 +93,7 @@ export type ConceptSummary = {
   value_schema: { type?: string; category?: string; variants?: string[] };
   display_template: string;
   required_variables: string[];
+  description?: string | null;
   default_asset?: AssetSummary | null;
   status: string;
 };
@@ -106,6 +108,7 @@ export type OfferingSummary = {
   applies_to_id?: string | null;
   role?: string | null;
   label_override?: string | null;
+  description_override?: string | null;
   display_value?: string | null;
   typed_value?: { type?: string; display_text?: string; [key: string]: unknown } | null;
   optional_price?: { type?: string; value?: number; amount?: string | number; currency?: string } | null;
@@ -127,6 +130,29 @@ export type PackageEntity = {
   sort_order: number;
   revision: number;
   status: string;
+};
+
+export type CompanyBenefitConfig = {
+  id?: string;
+  company_id: string;
+  concept_id: string;
+  is_enabled: boolean;
+  baseline_description?: string | null;
+  concept?: ConceptSummary | null;
+};
+
+export type CompanyBenefitCondition = {
+  id: string;
+  company_id: string;
+  name: string;
+  trigger_concept_id: string;
+  trigger_plan_filter?: string | null;
+  target_concept_id: string;
+  replacement_description: string;
+  is_active: boolean;
+  sort_order?: number;
+  trigger_concept?: ConceptSummary | null;
+  target_concept?: ConceptSummary | null;
 };
 
 export type CompanyWorkspaceData = {

@@ -24,12 +24,15 @@ from app.models.tables import (
     BusinessAsset,
     CatalogOffering,
     CompanyAlias,
+    CompanyBenefitCondition,
+    CompanyBenefitConfig,
     InsuranceCompany,
     InsuranceProduct,
     InsuranceProductTier,
     QuotationDraft,
     SourceDocument,
     new_id,
+    utcnow,
 )
 from app.rendering.render_context import canonical_context_hash
 from app.services.asset_intake import create_derivative, validate_image_bytes
@@ -268,6 +271,7 @@ def _catalog(db, item: BenefitCatalog) -> dict:
         "vehicle_category_id": item.vehicle_category_id,
         "vehicle_subcategory_id": item.vehicle_subcategory_id,
         "coverage_type_id": item.coverage_type_id,
+        "engine_type": getattr(item, "engine_type", None) or "ice",
         "name": item.name,
         "revision": item.revision,
         "status": item.status,
@@ -894,6 +898,8 @@ def _validate_catalog_context(db, payload: dict) -> dict:
         if value and db.get(model, value) is None:
             raise AppError(f"{field.replace('_', ' ')} is invalid.", 422)
         context[field] = value or None
+    engine_type = payload.get("engine_type", "ice")
+    context["engine_type"] = engine_type if engine_type in {"ice", "ev"} else "ice"
     return context
 
 
@@ -937,6 +943,7 @@ def _offering(item: CatalogOffering) -> dict:
         "applies_to_id": item.applies_to_id,
         "role": item.role,
         "label_override": item.label_override,
+        "description_override": getattr(item, "description_override", None),
         "typed_value": item.typed_value,
         "display_value": disp_val,
         "optional_price": item.optional_price,
@@ -1054,6 +1061,11 @@ def _validate_assignment_context(db, catalog: BenefitCatalog, revision: BenefitC
     if applies_type is None and not legacy:
         applies_type = "package" if is_catalog_packaged else "product"
         applies_id = (catalog.package_id or (rev_packages[0].id if rev_packages else None)) if is_catalog_packaged else catalog.product_id
+    elif applies_type == "product" and applies_id is None and catalog.product_id:
+        applies_id = catalog.product_id
+    elif applies_type == "package" and applies_id is None:
+        applies_id = catalog.package_id or (rev_packages[0].id if rev_packages else None)
+
     if applies_type is not None and applies_type not in {"product", "package", "bundle"}:
         raise AppError("Assignment target type must be product, package, or bundle.", 422)
     if role is not None and role not in {"included", "addon_option", "bundle_component"}:
@@ -1110,8 +1122,12 @@ def _validate_assignment_context(db, catalog: BenefitCatalog, revision: BenefitC
                     payload["optional_price"] = None
         else:
             raise AppError("Optional price must be a typed value object or price amount.", 422)
+    if applies_id is None:
+        applies_type = None
+    elif applies_type is None:
+        applies_id = None
     payload["applies_to_type"] = applies_type
-    payload["applies_to_id"] = applies_id if applies_type is not None else None
+    payload["applies_to_id"] = applies_id
     return payload
 
 
@@ -1160,7 +1176,9 @@ def save_catalog_offering(db, user, catalog_id: str, payload: dict) -> dict:
                     concept_id=off.concept_id, offering_kind=off.offering_kind,
                     applies_to_type=off.applies_to_type,
                     applies_to_id=package_map.get(str(off.applies_to_id)) if off.applies_to_id else None,
-                    role=off.role, label_override=off.label_override, typed_value=off.typed_value,
+                    role=off.role, label_override=off.label_override,
+                    description_override=getattr(off, "description_override", None),
+                    typed_value=off.typed_value,
                     display_value=off.display_value, optional_price=off.optional_price,
                     source_document_id=off.source_document_id, source_citation=off.source_citation,
                     source_aliases=list(off.source_aliases or []),
@@ -1216,12 +1234,15 @@ def save_catalog_offering(db, user, catalog_id: str, payload: dict) -> dict:
         db.add(offering)
     for key in (
         "offering_key", "concept_id", "offering_kind", "applies_to_type", "applies_to_id", "role",
-        "label_override", "typed_value", "display_value", "optional_price", "source_document_id",
+        "label_override", "description_override", "typed_value", "display_value", "optional_price", "source_document_id",
         "source_citation", "source_aliases", "presentation_facet_ids", "sort_order", "status",
     ):
         if key in payload:
             val = payload[key]
-            if key == "display_value" and val:
+            if key == "description_override" and val is not None:
+                v_str = str(val).strip()
+                val = v_str if v_str else None
+            elif key == "display_value" and val:
                 v_str = str(val).strip()
                 if not any(c.isdigit() for c in v_str) and v_str.lower() != "unlimited":
                     val = None
@@ -1288,7 +1309,9 @@ def remove_catalog_offering(db, user, catalog_id: str, offering_id: str, *, base
                     concept_id=off.concept_id, offering_kind=off.offering_kind,
                     applies_to_type=off.applies_to_type,
                     applies_to_id=package_map.get(str(off.applies_to_id)) if off.applies_to_id else None,
-                    role=off.role, label_override=off.label_override, typed_value=off.typed_value,
+                    role=off.role, label_override=off.label_override,
+                    description_override=getattr(off, "description_override", None),
+                    typed_value=off.typed_value,
                     display_value=off.display_value, optional_price=off.optional_price,
                     source_document_id=off.source_document_id, source_citation=off.source_citation,
                     source_aliases=list(off.source_aliases or []),
@@ -1389,7 +1412,9 @@ def create_new_draft_revision(db, user, catalog_id: str, *, base_revision: int) 
             concept_id=offering.concept_id, offering_kind=offering.offering_kind,
             applies_to_type=offering.applies_to_type,
             applies_to_id=package_map.get(str(offering.applies_to_id)) if offering.applies_to_id else None,
-            role=offering.role, label_override=offering.label_override, typed_value=offering.typed_value,
+            role=offering.role, label_override=offering.label_override,
+            description_override=getattr(offering, "description_override", None),
+            typed_value=offering.typed_value,
             display_value=offering.display_value, optional_price=offering.optional_price,
             source_document_id=offering.source_document_id, source_citation=offering.source_citation,
             source_aliases=list(offering.source_aliases or []),
@@ -1589,3 +1614,200 @@ def list_source_documents(db, user, *, page: int, page_size: int) -> dict:
         "page": page,
         "page_size": page_size,
     }
+
+
+def get_company_benefit_configs(db, user, company_id: str) -> list[dict]:
+    _require_business(user)
+    configs = list(
+        db.scalars(
+            select(CompanyBenefitConfig)
+            .where(CompanyBenefitConfig.company_id == company_id)
+        ).all()
+    )
+    return [
+        {
+            "id": c.id,
+            "company_id": c.company_id,
+            "concept_id": c.concept_id,
+            "is_enabled": c.is_enabled,
+            "baseline_description": c.baseline_description,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        }
+        for c in configs
+    ]
+
+
+def update_company_benefit_configs(db, user, company_id: str, items: list[dict]) -> list[dict]:
+    _require_business(user)
+    company = db.get(InsuranceCompany, company_id)
+    if company is None:
+        raise AppError("Company not found.", 404)
+
+    results = []
+    for item in items:
+        concept_id = item.get("concept_id")
+        if not concept_id:
+            continue
+        concept = db.get(BenefitConcept, concept_id)
+        if concept is None:
+            continue
+
+        cfg = db.scalar(
+            select(CompanyBenefitConfig).where(
+                CompanyBenefitConfig.company_id == company_id,
+                CompanyBenefitConfig.concept_id == concept_id,
+            )
+        )
+        is_enabled = bool(item.get("is_enabled", True))
+        desc_raw = item.get("baseline_description")
+        desc = desc_raw.strip() if isinstance(desc_raw, str) and desc_raw.strip() else None
+
+        if cfg is not None:
+            cfg.is_enabled = is_enabled
+            cfg.baseline_description = desc
+            cfg.updated_at = utcnow()
+        else:
+            cfg = CompanyBenefitConfig(
+                id=new_id(),
+                company_id=company_id,
+                concept_id=concept_id,
+                is_enabled=is_enabled,
+                baseline_description=desc,
+                created_at=utcnow(),
+                updated_at=utcnow(),
+            )
+            db.add(cfg)
+        results.append(cfg)
+
+    _audit(db, user, "business.company.benefit_configs", "insurance_company", company_id, {"count": len(results)})
+    db.commit()
+
+    return [
+        {
+            "id": c.id,
+            "company_id": c.company_id,
+            "concept_id": c.concept_id,
+            "is_enabled": c.is_enabled,
+            "baseline_description": c.baseline_description,
+        }
+        for c in results
+    ]
+
+
+def list_company_conditions(db, user, company_id: str) -> list[dict]:
+    _require_business(user)
+    conditions = list(
+        db.scalars(
+            select(CompanyBenefitCondition)
+            .where(CompanyBenefitCondition.company_id == company_id)
+            .order_by(CompanyBenefitCondition.created_at.asc())
+        ).all()
+    )
+    return [
+        {
+            "id": c.id,
+            "company_id": c.company_id,
+            "name": c.name,
+            "trigger_concept_id": c.trigger_concept_id,
+            "trigger_plan_filter": c.trigger_plan_filter,
+            "target_concept_id": c.target_concept_id,
+            "replacement_description": c.replacement_description,
+            "is_active": c.is_active,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        }
+        for c in conditions
+    ]
+
+
+def save_company_condition(db, user, company_id: str, payload: dict) -> dict:
+    _require_business(user)
+    company = db.get(InsuranceCompany, company_id)
+    if company is None:
+        raise AppError("Company not found.", 404)
+
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        raise AppError("Condition name is required.", 422)
+
+    trigger_concept_id = payload.get("trigger_concept_id")
+    if not trigger_concept_id or db.get(BenefitConcept, trigger_concept_id) is None:
+        raise AppError("Trigger benefit concept is invalid.", 422)
+
+    target_concept_id = payload.get("target_concept_id")
+    if not target_concept_id or db.get(BenefitConcept, target_concept_id) is None:
+        raise AppError("Target benefit concept is invalid.", 422)
+
+    replacement_desc = str(payload.get("replacement_description") or "").strip()
+    if not replacement_desc:
+        raise AppError("Replacement description is required.", 422)
+
+    trigger_plan_filter = payload.get("trigger_plan_filter")
+    if isinstance(trigger_plan_filter, str):
+        trigger_plan_filter = trigger_plan_filter.strip() or None
+    else:
+        trigger_plan_filter = None
+
+    is_active = bool(payload.get("is_active", True))
+
+    cond_id = payload.get("id")
+    if cond_id:
+        cond = db.scalar(
+            select(CompanyBenefitCondition).where(
+                CompanyBenefitCondition.id == cond_id,
+                CompanyBenefitCondition.company_id == company_id,
+            ).with_for_update()
+        )
+        if cond is None:
+            raise AppError("Condition not found.", 404)
+        cond.name = name
+        cond.trigger_concept_id = trigger_concept_id
+        cond.trigger_plan_filter = trigger_plan_filter
+        cond.target_concept_id = target_concept_id
+        cond.replacement_description = replacement_desc
+        cond.is_active = is_active
+        cond.updated_at = utcnow()
+    else:
+        cond = CompanyBenefitCondition(
+            id=new_id(),
+            company_id=company_id,
+            name=name,
+            trigger_concept_id=trigger_concept_id,
+            trigger_plan_filter=trigger_plan_filter,
+            target_concept_id=target_concept_id,
+            replacement_description=replacement_desc,
+            is_active=is_active,
+            created_at=utcnow(),
+            updated_at=utcnow(),
+        )
+        db.add(cond)
+
+    _audit(db, user, "business.company.condition.save", "company_benefit_condition", cond.id, {"name": cond.name})
+    db.commit()
+    db.refresh(cond)
+    return {
+        "id": cond.id,
+        "company_id": cond.company_id,
+        "name": cond.name,
+        "trigger_concept_id": cond.trigger_concept_id,
+        "trigger_plan_filter": cond.trigger_plan_filter,
+        "target_concept_id": cond.target_concept_id,
+        "replacement_description": cond.replacement_description,
+        "is_active": cond.is_active,
+    }
+
+
+def delete_company_condition(db, user, company_id: str, condition_id: str) -> None:
+    _require_business(user)
+    cond = db.scalar(
+        select(CompanyBenefitCondition).where(
+            CompanyBenefitCondition.id == condition_id,
+            CompanyBenefitCondition.company_id == company_id,
+        ).with_for_update()
+    )
+    if cond is None:
+        raise AppError("Condition not found.", 404)
+    db.delete(cond)
+    _audit(db, user, "business.company.condition.delete", "company_benefit_condition", condition_id, {"company_id": company_id})
+    db.commit()

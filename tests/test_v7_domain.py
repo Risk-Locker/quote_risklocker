@@ -70,10 +70,10 @@ def test_v7_schema_migrations_are_additive_and_cover_every_new_table():
     v7_sql = "\n".join(
         item.path.read_text(encoding="utf-8").lower()
         for item in migrations
-        if item.version in {23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40}
+        if item.version in {23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43}
     )
 
-    assert [item.version for item in migrations][-18:] == [23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40]
+    assert [item.version for item in migrations][-21:] == [23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43]
     for table in V7_TABLES:
         assert f"{table}" in v7_sql
     assert "drop table" not in v7_sql

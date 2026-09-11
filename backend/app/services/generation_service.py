@@ -25,6 +25,8 @@ from app.models.tables import (
     BenefitRelation,
     BusinessAsset,
     CatalogOffering,
+    CompanyBenefitCondition,
+    CompanyBenefitConfig,
     BenefitCatalogRevision,
     DraftBenefitSelection,
     DraftSourceLineDecision,
@@ -348,6 +350,21 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
     product_type = str(getattr(product, "name", "private_car") or "private_car") if product else "private_car"
     insurer_catalog = get_catalog_for_product(insurer_key, product_type)
 
+    company_conditions = []
+    company_configs = []
+    if getattr(draft, "company_id", None):
+        company_conditions = list(db.scalars(
+            select(CompanyBenefitCondition).where(
+                CompanyBenefitCondition.company_id == draft.company_id,
+                CompanyBenefitCondition.is_active.is_(True),
+            )
+        ).all())
+        company_configs = list(db.scalars(
+            select(CompanyBenefitConfig).where(
+                CompanyBenefitConfig.company_id == draft.company_id,
+            )
+        ).all())
+
     try:
         cards = resolve_benefit_cards(
             selections=selections,
@@ -358,6 +375,8 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
             plans=plans,
             eval_context=eval_context,
             insurer_catalog=insurer_catalog,
+            company_conditions=company_conditions,
+            company_configs=company_configs,
         )
     except RenderContextError as exc:
         raise AppError(str(exc), 409) from exc

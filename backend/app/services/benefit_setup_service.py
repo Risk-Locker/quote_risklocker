@@ -615,6 +615,7 @@ def clone_package(db, user, catalog_id: str, source_package_id: str, payload: di
             applies_to_id=target.id,
             role=offering.role,
             label_override=offering.label_override,
+            description_override=getattr(offering, "description_override", None),
             typed_value=offering.typed_value,
             display_value=offering.display_value,
             optional_price=offering.optional_price,

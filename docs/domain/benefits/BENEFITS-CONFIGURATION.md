@@ -34,7 +34,7 @@ The standardized master library across all Malaysian motor underwriters. Every c
 13. `personal-belongings-theft` — Personal Belongings & Vehicle Break-in Theft
 14. `ambulance-fees` — Emergency Ambulance Transport Reimbursement
 
-### 2. Standard Riders & Add-ons (20 Concepts)
+### 2. Standard Riders & Add-ons (21 Concepts)
 15. `windscreen` — Windscreen, Window & Sunroof Glass Damage
 16. `special-perils` — Full Convulsion of Nature (Flood, Landslide, Typhoon, Storm)
 17. `first-loss-flood` — First-Loss Flood Special Perils
@@ -55,25 +55,26 @@ The standardized master library across all Malaysian motor underwriters. Every c
 32. `e-hailing-extension` — E-Hailing Passenger & Liability Extension
 33. `agreed-value-market-value` — Agreed Value Sum Insured Settlement
 34. `cashback-no-claim` — No-Claim Cashback / Surplus Sharing
+35. `tuition-purpose` — Extension of Motor Policy for Driving Tuition / Instructional Use
 
 ### 3. Commercial, EV & Specialty Protection (17 Concepts)
-35. `personal-accident` — Driver & Passenger Personal Accident (PA)
-36. `driver-passenger-protector` — Packaged Driver & Passenger Protector PA
-37. `out-of-pocket-allowance` — Inconvenience & Out-of-Pocket Expense Allowance
-38. `car-detailing-cleanup` — Post-Repair Interior Detailing & Sanitisation
-39. `brand-new-spare-parts` — Brand-New OEM Spare Parts Guarantee
-40. `compassionate-allowance` — Compassionate Accidental Cash Grant
-41. `document-replacement` — Official Vehicle Document & Registration Replacement
-42. `hotel-accommodation` — Outstation Breakdown Hotel Accommodation
-43. `daily-hospital-income` — Intensive Care Hospital Income
-44. `tyre-rim-protection` — Accidental Tyre & Wheel Rim Cover
-45. `sunroof-glass-protection` — Panoramic Glass & Sunroof Replacement
-46. `valet-theft-protection` — Valet Parking & Third-Party Service Theft
-47. `overturning` — Commercial Overturning & Loading Accident Damage
-48. `boom-damage` — Hydraulic Crane Boom & Mechanism Damage
-49. `tool-of-trade` — Commercial Tool of Trade Liability
-50. `authorized-attendants` — Legal Liability to Authorised Attendants & Loaders
-51. `ev-wall-charger` — EV Home Wallbox & Charging Cable Damage Protection
+36. `personal-accident` — Driver & Passenger Personal Accident (PA)
+37. `driver-passenger-protector` — Packaged Driver & Passenger Protector PA
+38. `out-of-pocket-allowance` — Inconvenience & Out-of-Pocket Expense Allowance
+39. `car-detailing-cleanup` — Post-Repair Interior Detailing & Sanitisation
+40. `brand-new-spare-parts` — Brand-New OEM Spare Parts Guarantee
+41. `compassionate-allowance` — Compassionate Accidental Cash Grant
+42. `document-replacement` — Official Vehicle Document & Registration Replacement
+43. `hotel-accommodation` — Outstation Breakdown Hotel Accommodation
+44. `daily-hospital-income` — Intensive Care Hospital Income
+45. `tyre-rim-protection` — Accidental Tyre & Wheel Rim Cover
+46. `sunroof-glass-protection` — Panoramic Glass & Sunroof Replacement
+47. `valet-theft-protection` — Valet Parking & Third-Party Service Theft
+48. `overturning` — Commercial Overturning & Loading Accident Damage
+49. `boom-damage` — Hydraulic Crane Boom & Mechanism Damage
+50. `tool-of-trade` — Commercial Tool of Trade Liability
+51. `authorized-attendants` — Legal Liability to Authorised Attendants & Loaders
+52. `ev-wall-charger` — EV Home Wallbox & Charging Cable Damage Protection
 
 ---
 
@@ -94,11 +95,11 @@ All 7 insurers are ✅ seeded across 6 product lines $\times$ 3 coverage types (
    - Bundles: `Smart Driver DPA Plan A` (RM 70.00), `Plan B` (RM 120.00), `Plan C` (RM 180.00), `Plan D` (RM 260.00), `Lonpac EV Smart Pack` (RM 160.00)
    - Add-ons: Windscreen (15%), Special Perils (0.20%), CART (RM 60/day), All Drivers (RM 20), LLTP, LLOP.
 5. **QBE Insurance (Malaysia) Berhad**
-   - Bundles: `Driver Passenger Protector Plan A` (RM 70.00), `Plan B` (RM 120.00), `Plan C` (RM 175.00), `Plan D` (RM 260.00)
-   - Add-ons: Windscreen (15%), Special Perils (0.25%), First-Loss Flood (RM 30), Out-of-Pocket (RM 90), Car Detailing (RM 35), LLTP, LLOP.
+   - **Defaults (7)**: Comprehensive Accidental Own-Damage base, 24/7 Roadside Towing (`towing`), Betterment Waiver (`betterment-protection`), Legal Defence Costs (`legal-costs-defense`), Compassionate Allowance (`total-loss-theft-allowance`), All Driver Excess Waiver (`all-drivers`), Key Care and Replacement (`key-replacement`).
+   - **Add-ons (14 offerings across 12 concepts)**: CART RM100/day 14 days, CART RM50/day 14 days (`repair-allowance`), Cleaning Cost (`car-detailing-cleanup`), Inclusion of Special Perils (`special-perils`), Legal Liability of Passengers (`legal-liability-of-passengers`), Legal Liability to Passengers (`legal-liability-to-passengers`), NCD Protector (`ncd-relief`), Out of Pocket Allowance (`out-of-pocket-allowance`), Special Perils First Loss RM 10k & RM 5k (`first-loss-flood`), Strike Riot & Civil Commotion (`strike-riot-civil-commotion`), Tuition Purpose (`tuition-purpose`), Vehicle Accessories (`vehicle-accessories`), Windscreen Damage (`windscreen`).
 6. **Syarikat Takaful Malaysia Am Berhad (STMB)**
-   - Bundles: `Driver & Passenger Protection (DPP)` (RM 75.00), `Motor PA Plus Plan 1` (RM 60.00), `Plan 2` (RM 110.00), `Bike PA Plus Plan 1-2`
-   - Add-ons: Windscreen (15%), Special Perils (0.20%), CART Allowance (RM 100/day), 15% No-Claim Cash Back, LLTP, LLOP.
+   - **Defaults (8)**: Comprehensive Accidental Own Damage base (`own-damage`), Complimentary PA (`personal-accident`), 24/7 Roadside Towing (`towing`), Non-Claim Cashback (`cashback-no-claim`), Legal Defense Costs (`legal-costs-defense`), All Drivers Excess Waiver (`all-drivers`), Agreed Value Settlement (`agreed-value-market-value`), Betterment Waiver (`betterment-protection`).
+   - **Add-ons (5)**: Motor PA PLUS Plans 1-4 (`motor-pa-plus`), Inclusion of Special Perils (`special-perils`), Breakage of Glass in W/Screen (`windscreen`), Legal Liability of Passenger - LLOP (`legal-liability-of-passengers`), Passenger Liability Cover - LLTP (`legal-liability-to-passengers`).
 7. **Tune Protect Malaysia Berhad**
    - Bundles: `Autobuddy Plan A` (RM 58.30), `Autobuddy Plan B` (RM 98.00), `MotorShield PA Package` (RM 135.00)
    - Add-ons: Windscreen (15%), Special Perils (0.25%), Key Care (RM 35), Spray Paint (RM 250), LLTP, LLOP.

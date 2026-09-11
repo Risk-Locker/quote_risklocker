@@ -273,6 +273,7 @@ def seed_company_package_chains(db, dry_run: bool) -> list[str]:
                     if ck not in concepts:
                         continue
                     off_key = f"{catalog.id[:8]}-def-{ck}"
+                    desc_over = d_item.get("description_override")
                     off = existing_off_keys.get(off_key)
                     if not off:
                         off = CatalogOffering(
@@ -285,6 +286,7 @@ def seed_company_package_chains(db, dry_run: bool) -> list[str]:
                             applies_to_id=None,
                             role="included",
                             label_override=d_item.get("label_override"),
+                            description_override=desc_over,
                             display_value=d_item.get("display_value"),
                             typed_value={"type": "text", "value": d_item.get("display_value")},
                             optional_price=None,
@@ -294,6 +296,8 @@ def seed_company_package_chains(db, dry_run: bool) -> list[str]:
                         db.add(off)
                     else:
                         off.display_value = d_item.get("display_value")
+                        if desc_over is not None:
+                            off.description_override = desc_over
                         off.role = "included"
                         off.status = "active"
                         off.sort_order = order_idx
@@ -315,6 +319,7 @@ def seed_company_package_chains(db, dry_run: bool) -> list[str]:
                     off_key = f"{catalog.id[:8]}-add-{ck}"
                     price_val = a_item.get("price")
                     opt_price = {"type": "money", "value": float(price_val), "currency": "MYR"} if price_val is not None else None
+                    desc_over = a_item.get("description_override")
                     off = existing_off_keys.get(off_key)
                     if not off:
                         off = CatalogOffering(
@@ -327,6 +332,7 @@ def seed_company_package_chains(db, dry_run: bool) -> list[str]:
                             applies_to_id=None,
                             role="addon_option",
                             label_override=a_item.get("label_override"),
+                            description_override=desc_over,
                             display_value=a_item.get("display_value"),
                             typed_value={"type": "text", "value": a_item.get("display_value")} if a_item.get("display_value") else None,
                             optional_price=opt_price,
@@ -338,6 +344,8 @@ def seed_company_package_chains(db, dry_run: bool) -> list[str]:
                         off.display_value = a_item.get("display_value")
                         if a_item.get("display_value"):
                             off.typed_value = {"type": "text", "value": a_item.get("display_value")}
+                        if desc_over is not None:
+                            off.description_override = desc_over
                         off.optional_price = opt_price
                         off.role = "addon_option"
                         off.status = "active"

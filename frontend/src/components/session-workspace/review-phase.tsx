@@ -2703,8 +2703,43 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                             {needsCheck ? <span className="text-[10px] text-amber-700 font-bold">Check value</span> : null}
                           </span>
                           {field.kind === "vehicle_type" ? (
-                            <Select
-                              value={formValues[field.name] || "Car"}
+                            <div className="grid gap-1.5">
+                              {/* Engine Type Segmented Toggle */}
+                              <div className="flex items-center gap-1 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-0.5 text-xs">
+                                {(["ICE", "EV"] as const).map((eng) => {
+                                  const currentVal = String(formValues[field.name] || "");
+                                  const isCurrentEV = currentVal.startsWith("EV");
+                                  const active = eng === "EV" ? isCurrentEV : !isCurrentEV;
+                                  return (
+                                    <button
+                                      key={eng}
+                                      type="button"
+                                      onClick={() => {
+                                        if (eng === "EV" && !isCurrentEV) {
+                                          const newVtype = currentVal === "NonSaloonCar" ? "EVNonSaloonCar" : (currentVal.toLowerCase().includes("motor") ? "EVMotorcycle" : "EVSaloonCar");
+                                          setFormValues((v) => ({ ...v, [field.name]: newVtype }));
+                                          commitFieldDirectly(field.name, newVtype);
+                                        } else if (eng === "ICE" && isCurrentEV) {
+                                          const newVtype = currentVal === "EVNonSaloonCar" ? "NonSaloonCar" : (currentVal === "EVMotorcycle" ? "Motorcycle" : "Car");
+                                          setFormValues((v) => ({ ...v, [field.name]: newVtype }));
+                                          commitFieldDirectly(field.name, newVtype);
+                                        }
+                                      }}
+                                      className={`flex-1 py-1 text-center font-bold text-[11px] rounded-[3px] transition-all ${
+                                        active
+                                          ? "bg-[var(--rl-black)] text-white shadow-xs"
+                                          : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                                      }`}
+                                    >
+                                      {eng === "ICE" ? "ICE (Petrol / Diesel)" : "EV (Electric)"}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              {/* Filtered Vehicle Type Dropdown */}
+                              <Select
+                                value={formValues[field.name] || (String(formValues[field.name] || "").startsWith("EV") ? "EVSaloonCar" : "Car")}
                                 onChange={(event) => {
                                   const newVtype = event.target.value;
                                   const isCompany = newVtype.toLowerCase().includes("company") || newVtype.toLowerCase().includes("corp");
@@ -2740,19 +2775,27 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                     }
                                   }
                                 }}
-                              className="text-xs font-medium"
-                            >
-                              <option value="Car">Car (Private Saloon)</option>
-                              <option value="CompanyCar">Car (Company / Corporate Saloon)</option>
-                              <option value="NonSaloonCar">Non-Saloon (SUV / MPV / 4x4 / Pickup - Private & Company)</option>
-                              <option value="EVSaloonCar">Electric Vehicle - Saloon (Company / Private)</option>
-                              <option value="EVNonSaloonCar">Electric Vehicle - Non-Saloon (SUV / MPV / Pickup) (Company / Private)</option>
-                              <option value="Motorcycle">Motorcycle (Private)</option>
-                              <option value="CompanyMotorcycle">Motorcycle (Corporate)</option>
-                              <option value="EVMotorcycle">Electric Motorcycle (Company / Private)</option>
-                              <option value="Lorry">Lorry / Commercial</option>
-                              <option value="Others">Others</option>
-                            </Select>
+                                className="text-xs font-medium"
+                              >
+                                {String(formValues[field.name] || "").startsWith("EV") ? (
+                                  <>
+                                    <option value="EVSaloonCar">EV Saloon (Sedan / Coupe - Private & Company)</option>
+                                    <option value="EVNonSaloonCar">EV Non-Saloon (SUV / MPV / Crossover / Pickup)</option>
+                                    <option value="EVMotorcycle">Electric Motorcycle (Private & Company)</option>
+                                  </>
+                                ) : (
+                                  <>
+                                    <option value="Car">Car (Private Saloon)</option>
+                                    <option value="CompanyCar">Car (Company / Corporate Saloon)</option>
+                                    <option value="NonSaloonCar">Non-Saloon (SUV / MPV / 4x4 / Pickup)</option>
+                                    <option value="Motorcycle">Motorcycle (Private)</option>
+                                    <option value="CompanyMotorcycle">Motorcycle (Corporate)</option>
+                                    <option value="Lorry">Lorry / Commercial</option>
+                                    <option value="Others">Others</option>
+                                  </>
+                                )}
+                              </Select>
+                            </div>
                           ) : field.kind === "valuation_type" ? (
                             <Select
                               value={formValues[field.name] || "Market Value"}

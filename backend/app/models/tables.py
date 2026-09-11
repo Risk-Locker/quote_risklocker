@@ -723,6 +723,7 @@ class BenefitCatalog(Base, TimestampMixin):
     vehicle_category_id: Mapped[str | None] = mapped_column(ForeignKey("vehicle_categories.id", ondelete="SET NULL"), nullable=True)
     vehicle_subcategory_id: Mapped[str | None] = mapped_column(ForeignKey("vehicle_subcategories.id", ondelete="SET NULL"), nullable=True)
     coverage_type_id: Mapped[str | None] = mapped_column(ForeignKey("coverage_types.id", ondelete="SET NULL"), nullable=True)
+    engine_type: Mapped[str] = mapped_column(String(20), nullable=False, default="ice")
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="draft", index=True)
@@ -755,6 +756,7 @@ class CatalogOffering(Base, TimestampMixin):
     applies_to_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True)
     role: Mapped[str | None] = mapped_column(String(40), nullable=True)
     label_override: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    description_override: Mapped[str | None] = mapped_column(Text, nullable=True)
     typed_value: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     display_value: Mapped[str | None] = mapped_column(String(500), nullable=True)
     optional_price: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -988,3 +990,34 @@ class RenderSnapshot(Base, TimestampMixin):
     context: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     asset_hashes: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     renderer_version: Mapped[str] = mapped_column(String(80), nullable=False)
+
+
+class CompanyBenefitConfig(Base, TimestampMixin):
+    __tablename__ = "company_benefit_configs"
+    __table_args__ = (UniqueConstraint("company_id", "concept_id", name="uq_company_concept_config"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    company_id: Mapped[str] = mapped_column(ForeignKey("insurance_companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    concept_id: Mapped[str] = mapped_column(ForeignKey("benefit_concepts.id", ondelete="CASCADE"), nullable=False, index=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    baseline_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    company: Mapped["InsuranceCompany"] = relationship()
+    concept: Mapped["BenefitConcept"] = relationship()
+
+
+class CompanyBenefitCondition(Base, TimestampMixin):
+    __tablename__ = "company_benefit_conditions"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    company_id: Mapped[str] = mapped_column(ForeignKey("insurance_companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    trigger_concept_id: Mapped[str] = mapped_column(ForeignKey("benefit_concepts.id", ondelete="CASCADE"), nullable=False, index=True)
+    trigger_plan_filter: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    target_concept_id: Mapped[str] = mapped_column(ForeignKey("benefit_concepts.id", ondelete="CASCADE"), nullable=False, index=True)
+    replacement_description: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    company: Mapped["InsuranceCompany"] = relationship()
+    trigger_concept: Mapped["BenefitConcept"] = relationship(foreign_keys=[trigger_concept_id])
+    target_concept: Mapped["BenefitConcept"] = relationship(foreign_keys=[target_concept_id])

@@ -33,6 +33,8 @@ from app.models.tables import (
     BenefitPackagePlanItem,
     BenefitRelation,
     CatalogOffering,
+    CompanyBenefitCondition,
+    CompanyBenefitConfig,
     CorrectionMemory,
     DraftBenefitSelection,
     DraftSourceLineDecision,
@@ -431,9 +433,25 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
     
     insurer_catalog = get_catalog_for_product(insurer_key, product_type)
 
+    company_conditions = []
+    company_configs = []
+    if getattr(draft, "company_id", None):
+        company_conditions = list(db.scalars(
+            select(CompanyBenefitCondition).where(
+                CompanyBenefitCondition.company_id == draft.company_id,
+                CompanyBenefitCondition.is_active.is_(True),
+            )
+        ).all())
+        company_configs = list(db.scalars(
+            select(CompanyBenefitConfig).where(
+                CompanyBenefitConfig.company_id == draft.company_id,
+            )
+        ).all())
+
     return resolve_benefit_cards(
         selections=valid_selections, offerings=offerings, concepts=concepts, relations=relations, facets=facets,
         plans=plans, eval_context=eval_context, insurer_catalog=insurer_catalog,
+        company_conditions=company_conditions, company_configs=company_configs,
     )
 
 

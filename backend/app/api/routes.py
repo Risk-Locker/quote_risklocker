@@ -48,6 +48,8 @@ from app.api.schemas import (
     PackageSaveRequest,
     RoadTaxRuleSaveRequest,
     RoadTaxCalculateRequest,
+    CompanyBenefitConfigsUpdateRequest,
+    CompanyBenefitConditionSaveRequest,
     CompanyMatrixDiffRequest,
     RecordBulkActionRequest,
     RecordSavedViewRequest,
@@ -225,14 +227,19 @@ from app.storage.supabase import StorageError, StorageNotFound, SupabaseStorage
 from app.services.business_setup_service import (
     create_benefit_catalog,
     create_new_draft_revision,
+    delete_company_condition,
     get_catalog_workspace,
     get_business_company_workspace,
+    get_company_benefit_configs,
     list_benefit_concepts,
     list_business_assets,
     list_business_companies,
     list_company_aliases,
+    list_company_conditions,
     list_source_documents,
     save_benefit_concept,
+    save_company_condition,
+    update_company_benefit_configs,
     retire_benefit_concept,
     restore_benefit_concept,
     save_business_company,
@@ -1464,6 +1471,56 @@ def business_company_workspace(
     user: User = Depends(current_user),
 ) -> dict:
     return {"workspace": get_business_company_workspace(db, user, company_id)}
+
+
+@router.get("/business/companies/{company_id}/benefit-configs")
+def business_company_benefit_configs(
+    company_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"configs": get_company_benefit_configs(db, user, company_id)}
+
+
+@router.put("/business/companies/{company_id}/benefit-configs")
+def business_company_benefit_configs_update(
+    company_id: str,
+    payload: CompanyBenefitConfigsUpdateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    updated = update_company_benefit_configs(db, user, company_id, [item.model_dump() for item in payload.items])
+    return {"configs": updated}
+
+
+@router.get("/business/companies/{company_id}/conditions")
+def business_company_conditions_list(
+    company_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"conditions": list_company_conditions(db, user, company_id)}
+
+
+@router.post("/business/companies/{company_id}/conditions")
+def business_company_condition_save(
+    company_id: str,
+    payload: CompanyBenefitConditionSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"condition": save_company_condition(db, user, company_id, payload.model_dump())}
+
+
+@router.delete("/business/companies/{company_id}/conditions/{condition_id}")
+def business_company_condition_delete(
+    company_id: str,
+    condition_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    delete_company_condition(db, user, company_id, condition_id)
+    return {"ok": True}
 
 
 @router.get("/business/companies/{company_id}/matrix")

@@ -291,6 +291,7 @@ class BenefitCatalogSaveRequest(StrictRequest):
     vehicle_category_id: str | None = None
     vehicle_subcategory_id: str | None = None
     coverage_type_id: str | None = None
+    engine_type: str = Field(default="ice", pattern=r"^(ice|ev)$")
     name: str = Field(min_length=1, max_length=255)
 
 
@@ -300,6 +301,27 @@ class CatalogContextRequest(StrictRequest):
     vehicle_category_id: str | None = None
     vehicle_subcategory_id: str | None = None
     coverage_type_id: str | None = None
+    engine_type: str | None = Field(default=None, pattern=r"^(ice|ev)$")
+
+
+class CompanyBenefitConfigItem(StrictRequest):
+    concept_id: str
+    is_enabled: bool = True
+    baseline_description: str | None = Field(default=None, max_length=1000)
+
+
+class CompanyBenefitConfigsUpdateRequest(StrictRequest):
+    items: list[CompanyBenefitConfigItem] = Field(default_factory=list)
+
+
+class CompanyBenefitConditionSaveRequest(StrictRequest):
+    id: str | None = None
+    name: str = Field(min_length=1, max_length=255)
+    trigger_concept_id: str
+    trigger_plan_filter: str | None = Field(default=None, max_length=255)
+    target_concept_id: str
+    replacement_description: str = Field(min_length=1, max_length=1000)
+    is_active: bool = True
 
 
 class CatalogOfferingSaveRequest(StrictRequest):
@@ -312,6 +334,7 @@ class CatalogOfferingSaveRequest(StrictRequest):
     applies_to_id: str | None = None
     role: str | None = Field(default=None, pattern=r"^(included|addon_option|bundle_component)$")
     label_override: str | None = Field(default=None, max_length=255)
+    description_override: str | None = Field(default=None, max_length=1000)
     typed_value: BenefitValue | None = None
     display_value: str | None = Field(default=None, max_length=500)
     optional_price: dict | None = None
