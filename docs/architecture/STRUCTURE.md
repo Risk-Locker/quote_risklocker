@@ -106,6 +106,19 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - **Template Row Height Calibrations**: `_balance_benefit_grid_elements` calibrated to 74px/84px in `backend/app/rendering/template_renderer.py` and `frontend/src/components/template-canvas/shared.tsx`, eliminating multi-row card overlap and footer clipping.
 - **Tests**: `tests/test_catalog_offering_description_override.py`, `tests/test_company_benefit_conditions.py`, and `tests/test_template_renderer.py`.
 
+## Unified Global Benefit Profile Architecture (v21) Additions
+
+- **Unified Global Profile Governance**: Migration `migrations/045_unified_benefit_profiles.sql` replaces legacy per-company profiles with unified global `benefit_profiles` (`id`, `name`, `version_number`, `is_active`, `status`, `notes`) with partial unique index `uq_single_active_benefit_profile` enforcing exactly one active profile platform-wide across all insurance companies simultaneously.
+- **Scoped Configs & Conditions**: `company_benefit_configs` and `company_benefit_conditions` re-scoped with `profile_id` foreign keys to `benefit_profiles(id)` with compound unique constraint `uq_company_profile_concept_config` on `(company_id, profile_id, concept_id)`.
+- **Service Layer & Immutability**: `backend/app/services/business_setup_service.py` provides global profile CRUD, multi-company deep-clone (`clone_benefit_profile` copies all configs and conditions across all insurers), atomic activation (`activate_benefit_profile`), and strict immutability checks on archived profiles.
+- **Global Cascade Exclusions**:
+  1. *Review Seeding*: `backend/app/services/catalog_review_service.py:seed_base_benefits` omits disabled concepts for that company under the active global profile.
+  2. *Workspace Suggestions*: `backend/app/services/workspace_service.py:suggest_workspace_actions` scopes configs to active global profile.
+  3. *Available Cards Suppression*: `backend/app/rendering/render_context.py:resolve_benefit_cards` suppresses disabled concepts from available cards/add-ons while strictly preserving customer-purchased extras (`item_kind == 'extra'`, `state == 'current'`).
+  4. *PDF Generation*: `backend/app/services/generation_service.py:generate_quotation_pdf` scopes to active global profile.
+- **Frontend Cockpit**: Top Profile Bar in `frontend/src/app/builder/benefits/page.tsx` acts as global version switcher across all 4 cockpit tabs and all insurers, with status badges (`Active Master`, `Draft`, `Archived`), atomic activation button, clone modal dialog, draft deletion, and amber `"Excluded"` badge on Tab 2 offerings.
+- **Hermetic Test Suite**: `tests/test_company_benefit_profiles.py` covering global profile schemas, auto-provisioning, multi-company deep-clone, lifecycle CRUD, atomic activation, archived immutability, review seeding cascade exclusion, and render context suppression.
+
 ## Benefit Configuration Matrix
 
 - `docs/domain/benefits/BENEFITS-CONFIGURATION.md` — canonical per-insurer benefits/add-on matrix: global benefit library (51 concepts), dimensions, and every company × coverage type × vehicle category row including add-on system (`single` vs `package`), package tiers, and seed status (seeded / draft / pending). Registered in `docs/core/START-HERE.md`.

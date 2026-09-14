@@ -436,17 +436,25 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
     company_conditions = []
     company_configs = []
     if getattr(draft, "company_id", None):
-        company_conditions = list(db.scalars(
-            select(CompanyBenefitCondition).where(
-                CompanyBenefitCondition.company_id == draft.company_id,
-                CompanyBenefitCondition.is_active.is_(True),
-            )
-        ).all())
-        company_configs = list(db.scalars(
-            select(CompanyBenefitConfig).where(
-                CompanyBenefitConfig.company_id == draft.company_id,
-            )
-        ).all())
+        from app.services.business_setup_service import get_active_benefit_profile
+        try:
+            active_prof = get_active_benefit_profile(db)
+            if active_prof:
+                company_conditions = list(db.scalars(
+                    select(CompanyBenefitCondition).where(
+                        CompanyBenefitCondition.company_id == draft.company_id,
+                        CompanyBenefitCondition.profile_id == active_prof.id,
+                        CompanyBenefitCondition.is_active.is_(True),
+                    )
+                ).all())
+                company_configs = list(db.scalars(
+                    select(CompanyBenefitConfig).where(
+                        CompanyBenefitConfig.company_id == draft.company_id,
+                        CompanyBenefitConfig.profile_id == active_prof.id,
+                    )
+                ).all())
+        except Exception:
+            pass
 
     return resolve_benefit_cards(
         selections=valid_selections, offerings=offerings, concepts=concepts, relations=relations, facets=facets,

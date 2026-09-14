@@ -44,7 +44,7 @@ from app.services.business_setup_service import _revision_content_payload
 BUSINESS_ROLES = frozenset({Role.STAFF.value, Role.ADMIN.value, Role.SUPER_ADMIN.value})
 STATUSES = frozenset({"active", "inactive", "retired"})
 ALIAS_SCOPES = frozenset({"global", "company", "product", "package"})
-PACKAGE_KINDS = frozenset({"comprehensive", "addon_bundle"})
+PACKAGE_KINDS = frozenset({"comprehensive", "addon_bundle", "tpft", "tpo"})
 
 
 def _require_business(user) -> None:

@@ -154,7 +154,7 @@ export default function SessionsPage() {
   const [company, setCompany] = useState("");
   const [userId, setUserId] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [sortBy, setSortBy] = useState("vehicle");
+  const [sortBy, setSortBy] = useState("date_desc");
 
   // States
   const [error, setError] = useState("");
@@ -271,14 +271,14 @@ export default function SessionsPage() {
     setCompany("");
     setUserId("");
     setStatusFilter("");
-    setSortBy("vehicle");
+    setSortBy("date_desc");
     setSelected(new Set());
     load(true, {
       searchTerm: "",
       companyFilter: "",
       userFilter: "",
       statusVal: "",
-      sortVal: "vehicle",
+      sortVal: "date_desc",
     });
   }
 
@@ -367,7 +367,7 @@ export default function SessionsPage() {
   }
 
   const hasActiveFilters = Boolean(
-    appliedSearch || company || userId || statusFilter || sortBy !== "vehicle"
+    appliedSearch || company || userId || statusFilter || sortBy !== "date_desc"
   );
   const allSelected = sessions.length > 0 && selected.size === sessions.length;
 
@@ -480,8 +480,8 @@ export default function SessionsPage() {
               onChange={(e) => handleSortChange(e.target.value)}
               className="h-9 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-2.5 text-[13px] font-semibold text-[var(--rl-text-strong)] transition-colors hover:border-[var(--rl-text-muted)] focus:border-[var(--rl-black)] focus:outline-none"
             >
-              <option value="vehicle">Group by Vehicle</option>
               <option value="date_desc">Newest Upload (Timeline)</option>
+              <option value="vehicle">Group by Vehicle</option>
               <option value="date_asc">Oldest Upload</option>
               <option value="customer_asc">Customer Name (A-Z)</option>
               <option value="ref_asc">Quote Ref (A-Z)</option>

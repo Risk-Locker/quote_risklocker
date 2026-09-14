@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -992,25 +992,56 @@ class RenderSnapshot(Base, TimestampMixin):
     renderer_version: Mapped[str] = mapped_column(String(80), nullable=False)
 
 
+class BenefitProfile(Base, TimestampMixin):
+    __tablename__ = "benefit_profiles"
+    __table_args__ = (
+        Index("uq_single_active_benefit_profile", "is_active", unique=True, postgresql_where=text("is_active = true"), sqlite_where=text("is_active = 1")),
+        Index("idx_benefit_profiles_status", "status"),
+        Index("idx_benefit_profiles_version", "version_number"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="draft")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    configs: Mapped[list["CompanyBenefitConfig"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
+    conditions: Mapped[list["CompanyBenefitCondition"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
+
+
+CompanyBenefitProfile = BenefitProfile
+
+
 class CompanyBenefitConfig(Base, TimestampMixin):
     __tablename__ = "company_benefit_configs"
-    __table_args__ = (UniqueConstraint("company_id", "concept_id", name="uq_company_concept_config"),)
+    __table_args__ = (
+        UniqueConstraint("company_id", "profile_id", "concept_id", name="uq_company_profile_concept_config"),
+        Index("idx_company_benefit_configs_profile", "profile_id"),
+    )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
     company_id: Mapped[str] = mapped_column(ForeignKey("insurance_companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    profile_id: Mapped[str | None] = mapped_column(ForeignKey("benefit_profiles.id", ondelete="CASCADE"), nullable=True, index=True)
     concept_id: Mapped[str] = mapped_column(ForeignKey("benefit_concepts.id", ondelete="CASCADE"), nullable=False, index=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     baseline_description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     company: Mapped["InsuranceCompany"] = relationship()
+    profile: Mapped[BenefitProfile | None] = relationship(back_populates="configs")
     concept: Mapped["BenefitConcept"] = relationship()
 
 
 class CompanyBenefitCondition(Base, TimestampMixin):
     __tablename__ = "company_benefit_conditions"
+    __table_args__ = (
+        Index("idx_company_benefit_conditions_profile", "profile_id"),
+    )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
     company_id: Mapped[str] = mapped_column(ForeignKey("insurance_companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    profile_id: Mapped[str | None] = mapped_column(ForeignKey("benefit_profiles.id", ondelete="CASCADE"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     trigger_concept_id: Mapped[str] = mapped_column(ForeignKey("benefit_concepts.id", ondelete="CASCADE"), nullable=False, index=True)
     trigger_plan_filter: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -1019,5 +1050,6 @@ class CompanyBenefitCondition(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     company: Mapped["InsuranceCompany"] = relationship()
+    profile: Mapped[BenefitProfile | None] = relationship(back_populates="conditions")
     trigger_concept: Mapped["BenefitConcept"] = relationship(foreign_keys=[trigger_concept_id])
     target_concept: Mapped["BenefitConcept"] = relationship(foreign_keys=[target_concept_id])

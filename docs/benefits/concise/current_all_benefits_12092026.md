@@ -24,273 +24,180 @@
 ## 1. QBE Insurance (`qbe`)
 
 ### Defaults (Included at RM 0 / Base Cover — Comprehensive):
-1. **Betterment Waiver (`betterment-protection`)** (`betterment-protection`) — Waives betterment cost-sharing on older vehicles repaired with new parts.
-2. **Compassionate Cash / Death & Total Loss Allowance** — Lump-sum total loss or theft compassionate payout of 5% sum insured up to RM5k.
-3. **Emergency Towing Assistance** — 24/7 emergency accident towing to preferred workshop or home across Malaysia.
-4. **Key Replacement Cover** — Reimburses car lock and key replacement up to RM500 for break-in or theft.
-5. **Legal Defense Costs** — Reimburses court legal representation and defense fees up to RM2,000.
+1. **All Driver Excess Waiver (`all-drivers`)** — Waives RM400 compulsory excess for unnamed licensed drivers/riders.
+2. **Betterment Waiver (`betterment-protection`)** — Waives betterment cost-sharing on older vehicles repaired with parts.
+3. **Compassionate Allowance on Total Loss / Theft (`total-loss-theft-allowance`)** — Immediate emergency cash payout (RM1,000-RM3,000) upon vehicle flood / total loss.
+4. **Key Care and Replacement (`key-replacement`)** — Reimburses replacement and reprogramming of lost or stolen keys.
+5. **Legal Defence Costs (`legal-costs-defense`)** — Reimburses court legal representation and defense fees up to RM2,000.
+6. **Towing (`towing`)** — 24/7 accidental Towing service to nearest approved repairer upto RM500.
 
 ### Add-ons (Optional Riders):
-6. **Accidental Boom Damage (Mobile Cranes)** — Covers accidental structural damage to mobile crane booms and jibs.
-7. **Accidental Overturning (Cranes & Special Equipment)** — Covers damage from accidental overturning of cranes and heavy machinery.
-8. **All Drivers / Unnamed Driver Excess Waiver** — Waives RM400 compulsory excess for all unnamed authorized licensed drivers.
-9. **Compensation for Assessed Repair Time (CART)** — Daily cash allowance for workshop repair days assessed by loss adjuster.
-10. **Comprehensive Driver & Passenger PA Bundle (DPP / DPA)** — Multi-plan personal accident rider for driver and passengers.
-11. **Cross-Border Extension (Thailand / Kalimantan)** — Extends comprehensive insurance coverage into Thailand, Kalimantan, or Brunei.
-12. **Ferry Transit Extension (Sabah / Labuan / Penang)** — Covers loss or damage while vehicle is transported by ferry or vessel.
-13. **First Loss Special Perils (Limited Flood)** — Standalone first loss natural disaster and flood coverage up to RM10,000.
-14. **Flood & Water Damage Interior Cleaning** — Water damage interior car cleaning reimbursement up to RM1,500 after flood.
-15. **Inconvenience & Out-of-Pocket Expense Allowance** — Replacement car RM150/day (7 days), hotel RM250/day (5 days) & spray RM1.5k.
-16. **Increased Third Party Property Damage (TPPD)** — Increases third-party property damage limit beyond RM3,000,000.
-17. **Legal Liability of Passengers (LLOP)** — Protects against third-party claims caused by passenger negligence.
-18. **Legal Liability to Authorized Attendants / Loaders** — Employer liability protection for accidental injury to lorry attendants.
-19. **Legal Liability to Passengers / Pillion (LLP)** — Protects driver from lawsuits for injury/death caused to passengers.
-20. **Non-Standard Accessories & Fitted Equipment Cover** — Covers fitted aftermarket accessories, multimedia, dashcams, and rims.
-21. **Personal Accident: Accidental Death** — Lump-sum cash benefit paid to beneficiaries upon accidental road death.
-22. **Personal Accident: Ambulance Transportation Fee** — Reimburses emergency ambulance transport charges from accident scene.
-23. **Personal Accident: Bereavement & Funeral Allowance** — Lump-sum cash assistance for funeral and bereavement expenses upon death.
-24. **Personal Accident: Daily Hospital Income Allowance** — Daily cash payout during continuous inpatient hospital stays (up to 60 days).
-25. **Personal Accident: Double Indemnity Payout** — Doubles death/paralysis payout if accident occurs during public holidays.
-26. **Personal Accident: Medical Expenses Reimbursement** — Reimburses medical and hospital treatment expenses following an accident.
-27. **Personal Accident: Permanent Disablement** — Tiered payout for permanent loss of limbs, sight, speech, or paralysis.
-28. **Snatch Theft & Smash-and-Grab Personal Property Cover** — Reimburses personal belongings lost to snatch theft or smash-and-grab.
-29. **Special Perils (Flood & Natural Disasters)** — Full cover for flood, storm, landslide, earthquake & fallen trees.
-30. **Strike, Riot & Civil Commotion (SRCC)** — Covers damage directly caused by strikes, riots, or civil commotion.
-31. **Tool of Trade / Mobile Plant Working Risks** — Third-party liability while mobile plant operates as a tool of trade.
-32. **Windscreen & Window Glass Coverage** — Covers windscreen, window glass & tint repair without affecting NCD.
+1. **Compensation for Assessed Repair Time / CART (`repair-allowance`)** — RM50/day for 14 days or RM100/day for 14 days.
+2. **Cleaning Cost (`car-detailing-cleanup`)** — Water damage interior car cleaning reimbursement after flood.
+3. **Inclusion of Special Perils (`special-perils`)** — Full cover for flood, storm, landslide & natural convulsions.
+4. **Legal Liability of Passengers / LLOP (`legal-liability-of-passengers`)** — Protects against third-party claims caused by passenger negligence.
+5. **Legal Liability to Passengers / LLTP (`legal-liability-to-passengers`)** — Protects driver from lawsuits for injury/death caused to passengers.
+6. **NCD Protector (`ncd-relief`)** — Protects accumulated No Claim Discount from loss following an own-damage claim.
+7. **Out of Pocket Allowance (`out-of-pocket-allowance`)** — Daily cash allowance for transit and expenses during repairs.
+8. **Special Peril First Loss (`first-loss-flood`)** — Standalone first loss flood/disaster cover (5k/10k).
+9. **Strike Riot & Civil Commotion / SRCC (`strike-riot-civil-commotion`)** — Covers damage directly caused by strikes, riots, or civil commotion.
+10. **Tuition Purpose (`tuition`)** — Extends coverage while vehicle is used for driving tuition or instruction.
+11. **Vehicle Accessories (`vehicle-accessories`)** — Covers fitted aftermarket accessories, multimedia, dashcams, and rims.
+12. **Windscreen Damage (`windscreen`)** — Covers windscreen, window glass & sunroof repair without affecting NCD.
+13. **Driver & Passenger Personal Accident / Plan 1 to 4 (`personal-accident`)** — Driver & passenger PA for death, disability & hospital.
 
 ---
 
 ## 2. STMB / Takaful Malaysia (`takaful-malaysia`)
 
 ### Defaults (Included at RM 0 / Base Cover — Comprehensive):
-33. **Agreed Value Settlement Protection** — Settles total loss or theft on agreed value without depreciation disputes.
-34. **All Drivers / Unnamed Driver Excess Waiver** — Waives RM400 compulsory excess penalty for all authorized licensed drivers.
-35. **Emergency Towing Assistance** — 24/7 breakdown and accident towing assistance up to 100 km round trip.
-36. **Legal Defense Costs** — Reimburses court legal representation and defense fees up to RM2,000.
-37. **No Claim Cashback (Islamic Surplus Sharing)** — Up to 15-50% surplus cashback return if no claims are incurred during the year.
-38. **Personal Accident: Accidental Death** — RM15,000 accidental death cover for participant with RM1,000 bereavement.
+1. **Agreed Value Settlement (`agreed-value-market-value`)** — Settles total loss or theft on agreed value without depreciation disputes.
+2. **All Drivers (`all-drivers`)** — Waives RM400 compulsory excess penalty for all authorized licensed drivers.
+3. **Betterment Waiver (`betterment-protection`)** — Waives betterment deductions on new original parts for vehicles up to 12 years.
+4. **Complimentary Personal Accident PA (`personal-accident`)** — Complimentary accidental death cover for participant with bereavement allowance.
+5. **Legal Defense (`legal-costs-defense`)** — Reimburses court legal representation and defense fees up to RM2,000.
+6. **Non-Claim Cashback 15% (`cashback-no-claim`)** — 15% surplus cashback return if no claims are incurred during the year.
+7. **Roadside Towing (`towing`)** — 24/7 breakdown and accident towing assistance up to 100 km round trip.
 
 ### Add-ons (Optional Riders):
-39. **Betterment Waiver / New Spare Parts Buyback** — Waives betterment deductions on new original parts for vehicles up to 12 years.
-40. **Cargo Protection & Goods in Transit Liability** — Protects commercial cargo against freight damage and carrier liability.
-41. **Compensation for Assessed Repair Time (CART)** — Daily cash allowance for workshop repair days assessed by loss adjuster.
-42. **Comprehensive Driver & Passenger PA Bundle (DPP / DPA)** — Multi-plan personal accident rider for driver and passengers.
-43. **Cross-Border Extension (Thailand / Kalimantan)** — Extends comprehensive insurance coverage into Thailand, Kalimantan, or Brunei.
-44. **Extended & Unlimited Towing Upgrade** — Upgrades 100 km towing cap to unlimited distance towing across Malaysia.
-45. **Flood & Water Damage Interior Cleaning** — Reimburses interior cabin water extraction and cleaning after a flood.
-46. **Increased Third Party Property Damage (TPPD)** — Increases third-party property damage limit beyond RM3,000,000.
-47. **Key Replacement Cover** — Reimburses replacement of lost, damaged, or stolen car keys up to RM1,000.
-48. **Legal Liability of Passengers (LLOP)** — Protects against third-party claims caused by passenger negligence.
-49. **Legal Liability to Passengers / Pillion (LLP)** — Protects driver from lawsuits for injury/death caused to passengers.
-50. **Motorcycle PA & Rider Protection Bundle** — Personal accident and roadside breakdown towing for riders and pillions.
-51. **NCD Relief (Current Year NCD Protection)** — Compensates for lost No Claim Discount (NCD) after an own-damage claim.
-52. **Personal Accident: Accidental Death** — RM15,000 accidental death cover for participant with RM1,000 bereavement.
-53. **Personal Accident: Daily Hospital Income Allowance** — Daily cash payout during continuous inpatient hospital stays (up to 60 days).
-54. **Personal Accident: Double Indemnity Payout** — Doubles death/paralysis payout if accident occurs during public holidays.
-55. **Personal Accident: Medical Expenses Reimbursement** — Reimburses medical and hospital treatment expenses following an accident.
-56. **Personal Accident: Permanent Disablement** — Tiered payout for permanent loss of limbs, sight, speech, or paralysis.
-57. **Special Perils (Flood & Natural Disasters)** — Full cover for flood, storm, landslide, earthquake & fallen trees.
-58. **Strike, Riot & Civil Commotion (SRCC)** — Covers damage directly caused by strikes, riots, or civil commotion.
-59. **Windscreen & Window Glass Coverage** — Covers windscreen, window glass & tint repair without affecting NCD.
+1. **Motor PA PLUS Plan 1-4 (`motor-pa-plus`)** — Motor PA PLUS (Plans 1, 2, 3, and 4) personal accident rider for driver and passengers.
+2. **Inclusion of Special Perils (`special-perils`)** — Full cover for flood, storm, landslide, earthquake & fallen trees.
+3. **Breakage of Glass in Windscreen (`windscreen`)** — Covers windscreen, window glass & tint repair without affecting NCD.
+4. **Legal Liability of Passenger / LLOP (`legal-liability-of-passengers`)** — Protects against third-party claims caused by passenger negligence.
+5. **Passenger Liability Cover / LLTP (`legal-liability-to-passengers`)** — Protects driver from lawsuits for injury/death caused to passengers.
 
 ---
 
 ## 3. Etiqa Insurance & Takaful (`etiqa`)
 
 ### Defaults (Included at RM 0 / Base Cover — Comprehensive):
-60. **Emergency Towing Assistance** — 24/7 emergency accident towing to nearest approved repairer up to RM200.
-61. **Legal Defense Costs** — Reimburses court legal representation and defense fees up to RM2,000.
+1. **Emergency Towing Assistance (`towing`)** — 24/7 accidental Towing service to nearest approved repairer upto RM200.
+2. **Legal Defense Costs (`legal-costs-defense`)** — Reimburses court legal representation and defense fees up to RM2,000.
 
 ### Add-ons (Optional Riders):
-62. **Accidental Boom Damage (Mobile Cranes)** — Covers accidental structural damage to mobile crane booms and jibs.
-63. **Betterment Waiver / New Spare Parts Buyback** — Waives betterment deduction on new replacement parts for vehicles up to 10 yrs.
-64. **Child Car Safety Seat Replacement Cover** — Reimburses replacement or repair of child safety seats damaged in a crash.
-65. **Compassionate Cash / Death & Total Loss Allowance** — Immediate compassionate flood relief cash grant of RM1,000 without NCD loss.
-66. **Compensation for Assessed Repair Time (CART)** — Daily cash allowance for workshop repair days assessed by loss adjuster.
-67. **Comprehensive Driver & Passenger PA Bundle (DPP / DPA)** — Multi-plan personal accident rider for driver and passengers.
-68. **Drive-Less Save-More / Mileage Telematics Cash Rebate** — Drive-Less Save-More cash rebate up to 30% of base premium for low mileage.
-69. **EV Home Wall Charger / Wallbox Damage Cover** — Covers accidental damage, fire, or theft of home EV wallbox (up to RM12k).
-70. **Extended & Unlimited Towing Upgrade** — 24/7 unlimited towing upgrade to policyholder preferred panel workshop.
-71. **Ferry Transit Extension (Sabah / Labuan / Penang)** — Covers loss or damage while vehicle is transported by ferry or vessel.
-72. **Inconvenience & Out-of-Pocket Expense Allowance** — Daily cash allowance for transit and expenses during workshop repairs.
-73. **Increased Third Party Property Damage (TPPD)** — Increases third-party property damage limit beyond RM3,000,000.
-74. **Key Replacement Cover** — Reimburses car key and lock replacement up to RM1,000 following loss or theft.
-75. **Legal Liability of Passengers (LLOP)** — Protects against third-party claims caused by passenger negligence.
-76. **Legal Liability to Authorized Attendants / Loaders** — Employer liability protection for accidental injury to lorry attendants.
-77. **Legal Liability to Passengers / Pillion (LLP)** — Protects driver from lawsuits for injury/death caused to passengers.
-78. **Motorcycle PA & Rider Protection Bundle** — Personal accident and roadside breakdown towing for riders and pillions.
-79. **NCD Relief (Current Year NCD Protection)** — Compensates for lost No Claim Discount (NCD) after an own-damage claim.
-80. **Non-Standard Accessories & Fitted Equipment Cover** — Covers fitted aftermarket accessories, multimedia, dashcams, and rims.
-81. **Personal Accident: Accidental Death** — Lump-sum cash benefit paid to beneficiaries upon accidental road death.
-82. **Personal Accident: Bereavement & Funeral Allowance** — Lump-sum cash assistance for funeral and bereavement expenses upon death.
-83. **Personal Accident: Daily Hospital Income Allowance** — Daily cash payout during continuous inpatient hospital stays (up to 60 days).
-84. **Personal Accident: Double Indemnity Payout** — Doubles death/paralysis payout if accident occurs during public holidays.
-85. **Personal Accident: Medical Expenses Reimbursement** — Reimburses medical and hospital treatment expenses following an accident.
-86. **Personal Accident: Permanent Disablement** — Tiered payout for permanent loss of limbs, sight, speech, or paralysis.
-87. **Special Perils (Flood & Natural Disasters)** — Full cover for flood, storm, landslide, earthquake & fallen trees.
-88. **Strike, Riot & Civil Commotion (SRCC)** — Covers damage directly caused by strikes, riots, or civil commotion.
-89. **Tool of Trade / Mobile Plant Working Risks** — Third-party liability while mobile plant operates as a tool of trade.
-90. **Vehicle Respray / Spray Painting Cover** — Reimburses full exterior vehicle spray painting after an accident repair.
-91. **Windscreen & Window Glass Coverage** — Covers windscreen, window glass & tint repair without affecting NCD.
+1. **Drive Less Save More FREE (`drive-less-save-more`)** — Drive-Less Save-More cash rebate up to 30% of base premium for low mileage.
+2. **Windscreen (`windscreen`)** — Covers windscreen, window glass & tint repair without affecting NCD.
+3. **All Driver (`all-drivers`)** — Waives RM400 compulsory excess penalty for unnamed authorized drivers.
+4. **Inclusion of Special Perils (`special-perils`)** — Full cover for flood, storm, landslide, earthquake & fallen trees.
+5. **Legal Liability to Passenger / LLTP (`legal-liability-to-passengers`)** — Protects driver from lawsuits for injury/death caused to passengers.
+6. **Legal Liability of Passengers for Negligent Acts / LLOP (`legal-liability-of-passengers`)** — Protects against third-party claims caused by passenger negligence.
+7. **Strike, Riot & Civil Commotion (`strike-riot-civil-commotion`)** — Covers damage directly caused by strikes, riots, or civil commotion.
+8. **Vehicle Accessories (`vehicle-accessories`)** — Covers fitted aftermarket accessories, multimedia, dashcams, and rims.
+9. **Gas Conversion Kit and Tank (`gas-conversion`)** — Dedicated damage cover for installed NGV gas conversion tanks and kits.
+10. **NCD Relief (`ncd-relief`)** — 15% of NCD Value / (10 days x 50) (10 days x 100) (10 days x 150) (10 days x 200).
+11. **New Spare Part Replacement Cover (`betterment-protection`)** — Waives betterment deduction on new replacement parts for vehicles up to 10 yrs.
+12. **Smart Key Replacement / Key Care Cover (`key-replacement`)** — Reimburses car key and lock replacement up to RM1,000 following loss or theft.
+13. **Child Car Safety Seat (`child-safety-seat`)** — Reimburses replacement or repair of child safety seats damaged in a crash.
+14. **Car Re-Spray Cover (`vehicle-respray`)** — Reimburses full exterior vehicle spray painting after an accident repair (limit up to RM1,000).
+15. **Compensation for Assessed Repair Time (`repair-allowance`)** — Daily cash allowance for workshop repair days assessed by loss adjuster (7 days x RM50).
 
 ---
 
 ## 4. Lonpac Insurance (`lonpac`)
 
 ### Defaults (Included at RM 0 / Base Cover — Comprehensive):
-92. **All Drivers / Unnamed Driver Excess Waiver** — Waives RM400 compulsory excess for unnamed authorized drivers aged 21+.
-93. **Emergency Towing Assistance** — Emergency accident towing cost reimbursement up to RM200 to nearest repairer.
-94. **Inconvenience & Out-of-Pocket Expense Allowance** — PC Privilege 1 lump-sum transportation allowance of RM75 per own damage claim.
-95. **Legal Defense Costs** — Reimburses court legal representation and defense fees up to RM2,000.
-96. **Natural Falling Objects Damage Cover** — PC Privilege 2 impact damage from falling objects up to 25% vehicle sum.
-97. **Vehicle Registration & Document Replacement** — PC Privilege 3 smash-and-grab document replacement allowance up to RM150.
+1. **Emergency Towing Assistance (`towing`)** — 24/7 accidental Towing service to nearest approved repairer upto RM200.
+2. **Inconvenience & Out-of-Pocket Expense Allowance / Transport Allowance (`out-of-pocket-allowance`)** — PC Privilege 1 lump-sum transportation allowance of RM75 per own damage claim.
 
 ### Add-ons (Optional Riders):
-98. **Accidental Boom Damage (Mobile Cranes)** — Covers accidental structural damage to mobile crane booms and jibs.
-99. **Accidental Overturning (Cranes & Special Equipment)** — Covers damage from accidental overturning of cranes and heavy machinery.
-100. **Betterment Waiver / New Spare Parts Buyback** — Waives betterment cost-sharing on new original parts for cars aged 5-10 yrs.
-101. **Compensation for Assessed Repair Time (CART)** — Daily cash allowance for workshop repair days assessed by loss adjuster.
-102. **Comprehensive Driver & Passenger PA Bundle (DPP / DPA)** — Multi-plan personal accident rider for driver and passengers.
-103. **Cross-Border Extension (Thailand / Kalimantan)** — Extends comprehensive insurance coverage into Thailand, Kalimantan, or Brunei.
-104. **EV Battery Depletion Emergency Towing** — Flatbed recovery towing to nearest public EV charger upon flat battery.
-105. **EV Charging Bodily Injury Reimbursement** — Reimburses medical costs for electric shocks or burns while charging EV.
-106. **EV Charging Home Content / Fire Damage** — Covers home content fire damage caused by EV charger malfunction (RM50k).
-107. **EV Home Charger Third-Party Liability** — Third-party liability for injury or property damage from EV charger (RM50k).
-108. **EV Home Wall Charger / Wallbox Damage Cover** — Covers accidental damage, fire, or theft of home EV wallbox (up to RM12k).
-109. **Ferry Transit Extension (Sabah / Labuan / Penang)** — Covers loss or damage while vehicle is transported by ferry or vessel.
-110. **Flood & Water Damage Interior Cleaning** — Reimburses professional car interior cleaning up to RM5,000 after a flood.
-111. **Gas Conversion Kit & Tank Cover (NGV)** — Dedicated damage cover for installed NGV gas conversion tanks and kits.
-112. **Increased Third Party Property Damage (TPPD)** — Increases third-party property damage limit beyond RM3,000,000.
-113. **Key Replacement Cover** — Reimburses key and lock replacement up to RM2,000 due to theft or break-in.
-114. **Legal Liability of Passengers (LLOP)** — Protects against third-party claims caused by passenger negligence.
-115. **Legal Liability to Authorized Attendants / Loaders** — Employer liability protection for accidental injury to lorry attendants.
-116. **Legal Liability to Passengers / Pillion (LLP)** — Protects driver from lawsuits for injury/death caused to passengers.
-117. **Lonpac EV Smart Pack Bundle** — EV bundle combining wallbox cover, charger liability, and flatbed towing.
-118. **NCD Relief (Current Year NCD Protection)** — Compensates for lost No Claim Discount (NCD) after an own-damage claim.
-119. **Non-Standard Accessories & Fitted Equipment Cover** — Covers fitted aftermarket accessories, multimedia, dashcams, and rims.
-120. **Personal Accident: Accidental Death** — Lump-sum cash benefit paid to beneficiaries upon accidental road death.
-121. **Personal Accident: Ambulance Transportation Fee** — Reimburses emergency ambulance transport charges from accident scene.
-122. **Personal Accident: Bereavement & Funeral Allowance** — Lump-sum cash assistance for funeral and bereavement expenses upon death.
-123. **Personal Accident: Daily Hospital Income Allowance** — Daily cash payout during continuous inpatient hospital stays (up to 60 days).
-124. **Personal Accident: Double Indemnity Payout** — Doubles death/paralysis payout if accident occurs during public holidays.
-125. **Personal Accident: Medical Expenses Reimbursement** — Reimburses medical and hospital treatment expenses following an accident.
-126. **Personal Accident: Permanent Disablement** — Tiered payout for permanent loss of limbs, sight, speech, or paralysis.
-127. **Snatch Theft & Smash-and-Grab Personal Property Cover** — Reimburses personal belongings lost to snatch theft or smash-and-grab.
-128. **Special Perils (Flood & Natural Disasters)** — Full cover for flood, storm, landslide, earthquake & fallen trees.
-129. **Strike, Riot & Civil Commotion (SRCC)** — Covers damage directly caused by strikes, riots, or civil commotion.
-130. **Tool of Trade / Mobile Plant Working Risks** — Third-party liability while mobile plant operates as a tool of trade.
-131. **Vehicle Respray / Spray Painting Cover** — Reimburses complete exterior vehicle spray painting up to RM2,000 after repair.
-132. **Windscreen & Window Glass Coverage** — Covers windscreen, window glass & tint repair without affecting NCD.
+1. **Accessories (`vehicle-accessories`)** — Covers fitted aftermarket accessories, multimedia, dashcams, and rims.
+2. **Betterment Buyback (`betterment-protection`)** — Waives betterment cost-sharing on new original parts for cars aged 5-10 yrs.
+3. **CART (`repair-allowance`)** — Daily cash allowance for workshop repair days assessed by loss adjuster.
+4. **Cleaning Cost of Vehicle (`car-detailing-cleanup`)** — Professional car interior cleaning up to RM5,000 after a flood.
+5. **Current Year NCD Relief (`ncd-relief`)** — Compensates for lost No Claim Discount (NCD) after an own-damage claim.
+6. **E-Hailing (`e-hailing`)** — Comprehensive motor insurance coverage during commercial e-hailing work.
+7. **Enhanced Inclusion of Special Peril (`special-perils`)** — Full cover for flood, storm, landslide, earthquake & fallen trees.
+8. **Full Vehicle Body Painting (`vehicle-respray`)** — Reimburses complete exterior vehicle spray painting up to RM2,000 after repair.
+9. **Gas Conversion (`gas-conversion`)** — Dedicated damage cover for installed NGV gas conversion tanks and kits.
+10. **LLP for Negligent Acts / LLOP (`legal-liability-of-passengers`)** — Protects against third-party claims caused by passenger negligence.
+11. **Legal Liability to Passengers / LLP (`legal-liability-to-passengers`)** — Protects driver from lawsuits for injury/death caused to passengers.
+12. **Replacement Cost of Car Key (`key-replacement`)** — Reimburses key and lock replacement up to RM2,000 due to theft or break-in.
+13. **Strike Riot & Civil Commotion (`strike-riot-civil-commotion`)** — Covers damage directly caused by strikes, riots, or civil commotion.
+14. **Windscreen (`windscreen`)** — Covers windscreen, window glass & tint repair without affecting NCD.
+15. **E-Assist Smart Driver / Personal Accident (`personal-accident`)** — Plan 1 (Limited Towing) & Plan 2 (Unlimited Towing) driver & passenger PA.
 
 ---
 
 ## 5. Berjaya Sompo Insurance (`berjaya-sompo`)
 
 ### Defaults (Included at RM 0 / Base Cover — Comprehensive):
-133. **Agreed Value Settlement Protection** — Settles total loss or theft on agreed value for car models up to 3 years old.
-134. **All Drivers / Unnamed Driver Excess Waiver** — Waives RM400 compulsory excess for all authorized licensed drivers aged 21+.
-135. **Emergency Towing Assistance** — 24/7 unlimited distance towing to panel workshops and minor roadside repairs.
-136. **Legal Defense Costs** — Reimburses court legal representation and defense fees up to RM2,000.
-137. **Panel Repair Workmanship Warranty** — 12-month warranty on repair workmanship and replacement parts from panel shops.
-138. **Personal Accident: Accidental Death** — Lump-sum cash benefit paid to beneficiaries upon accidental road death.
-139. **Special Perils (Flood & Natural Disasters)** — Built-in full protection against flood, typhoon, storm, and natural disasters.
+1. **Agreed Value Settlement Protection (`agreed-value-market-value`)** — Settles total loss or theft on agreed value for car models up to 3 years old.
+2. **All Drivers / Unnamed Driver Excess Waiver (`all-drivers`)** — Waives RM400 compulsory excess for all authorized licensed drivers aged 21+.
+3. **Emergency Towing Assistance (`towing`)** — 24/7 unlimited distance towing to panel workshops and minor roadside repairs.
+4. **Legal Defense Costs (`legal-costs-defense`)** — Reimburses court legal representation and defense fees up to RM2,000.
+5. **Panel Repair Workmanship Warranty (`repair-warranty`)** — 12-month warranty on repair workmanship and replacement parts from panel shops.
+6. **Personal Accident: Accidental Death (`personal-accident`)** — Lump-sum cash benefit paid to beneficiaries upon accidental road death.
+7. **Special Perils (`special-perils`)** — Built-in full protection against flood, typhoon, storm, and natural disasters.
 
 ### Add-ons (Optional Riders):
-140. **Accidental Boom Damage (Mobile Cranes)** — Covers accidental structural damage to mobile crane booms and jibs.
-141. **Attached Trailers & Towing Units Cover** — Extends damage and liability coverage to attached trailers or boat haulers.
-142. **Betterment Waiver / New Spare Parts Buyback** — Waives betterment cost-sharing on new replacement parts for cars up to 15 yrs.
-143. **Compensation for Assessed Repair Time (CART)** — Daily cash allowance for workshop repair days assessed by loss adjuster.
-144. **Comprehensive Driver & Passenger PA Bundle (DPP / DPA)** — Multi-plan personal accident rider for driver and passengers.
-145. **E-Hailing / Private Hire Vehicle Endorsement** — Extends comprehensive motor insurance during commercial e-hailing work.
-146. **Extended & Unlimited Towing Upgrade** — Upgrades towing coverage to extended distance or unlimited breakdown towing.
-147. **Legal Liability of Passengers (LLOP)** — Protects against third-party claims caused by passenger negligence.
-148. **Legal Liability to Passengers / Pillion (LLP)** — Protects driver from lawsuits for injury/death caused to passengers.
-149. **Motorcycle PA & Rider Protection Bundle** — Personal accident and roadside breakdown towing for riders and pillions.
-150. **NCD Relief (Current Year NCD Protection)** — Compensates for lost No Claim Discount (NCD) after an own-damage claim.
-151. **SOMPO Motor N-hancer Multi-Pack** — Bundles CART downtime, passenger liability, RM25k PA per seat & RM1k key care.
-152. **Special Perils (Flood & Natural Disasters)** — Built-in full protection against flood, typhoon, storm, and natural disasters.
-153. **Strike, Riot & Civil Commotion (SRCC)** — Covers damage directly caused by strikes, riots, or civil commotion.
-154. **Tool of Trade / Mobile Plant Working Risks** — Third-party liability while mobile plant operates as a tool of trade.
-155. **Windscreen & Window Glass Coverage** — Covers windscreen, window glass & tint repair without affecting NCD.
+1. **Accidental Boom Damage (Mobile Cranes)** — Endorsement 38A covering accidental and unforeseen structural damage to mobile crane booms, jibs, outriggers, and hydraulic apparatus during work operations.
+2. **Attached Trailers & Towing Units Cover** — Endorsement 54 extending third-party liability and comprehensive damage cover to unspecified attached trailers, boat haulers, or commercial couplings.
+3. **Betterment Waiver / New Spare Parts Buyback** — Waives standard tariff betterment contribution percentages (deductible) when older vehicles aged 5 to 15 years are repaired with new original replacement parts.
+4. **Compensation for Assessed Repair Time (CART)** — Endorsement 112 daily cash payout for the workshop repair period assessed by the insurance claims loss adjuster (e.g. 7, 14, or 21 days at RM50 to RM200 per day).
+5. **Comprehensive Driver & Passenger PA Bundle (DPP / DPA)** — Pre-packaged multi-plan personal accident rider protecting driver and passengers across tiered coverage schedules.
+6. **E-Hailing / Private Hire Vehicle Endorsement** — Endorsement A008 permitting comprehensive motor insurance coverage during commercial ride-hailing and e-hailing app operations (e.g. Grab).
+7. **Extended & Unlimited Towing Upgrade** — Optional upgrade rider extending towing assistance distance or providing unlimited nationwide breakdown and accident towing service.
+8. **Legal Liability of Passengers (LLOP)** — Endorsement 72 protecting the vehicle owner against third-party liability claims resulting from negligent acts committed by vehicle passengers (e.g. opening a car door into oncoming traffic).
+9. **Legal Liability to Passengers / Pillion (LLP)** — Endorsement 100/108 protecting the insured driver/rider against legal liability lawsuits for death or bodily injury caused to authorized passengers in passenger cars or pillion riders on motorcycles.
+10. **Motorcycle PA & Rider Protection Bundle** — Pre-packaged personal accident rider with roadside towing tailored specifically for motorcycle riders and pillion passengers.
+11. **NCD Relief (Current Year NCD Protection)** — Endorsement 111 reimbursing or preserving the financial value of the forfeited No Claim Discount (NCD) percentage following an own-damage accident claim.
+12. **SOMPO Motor N-hancer Multi-Pack** — Berjaya Sompo proprietary multi-benefit bundle combining e-hailing CART, passenger liability, and enhanced personal accident.
+13. **Special Perils (Flood & Natural Disasters)** — Full comprehensive indemnity (Endorsement 57) covering loss or damage caused by flood, flash flood, typhoon, storm, landslide, earthquake, fallen trees, and convulsions of nature up to full vehicle sum insured.
+14. **Strike, Riot & Civil Commotion (SRCC)** — Endorsement 25 protection against physical loss or damage directly caused by strikers, locked-out workers, public civil unrest, or malicious riots.
+15. **Tool of Trade / Mobile Plant Working Risks** — Endorsement 41/42 extending third-party bodily injury and property liability while excavators, loaders, or mobile machinery operate as working tools of trade.
+16. **Windscreen & Window Glass Coverage** — Repair and replacement coverage for broken windscreen, front, rear, side window glass, and solar tint film without penalty or forfeiture of accumulated No Claim Discount (NCD).
 
 ---
 
 ## 6. Tune Protect (`tune-protect`)
 
 ### Defaults (Included at RM 0 / Base Cover — Comprehensive):
-156. **Drive-Less Save-More / Mileage Telematics Cash Rebate** — Pay-As-You-Drive cash rebate up to 30% of premium for low annual mileage.
-157. **Emergency Towing Assistance** — 24/7 emergency accident towing assistance to nearest workshop up to RM200.
-158. **Legal Defense Costs** — Reimburses court legal representation and defense fees up to RM2,000.
+1. **Drive-Less Save-More (`drive-less-save-more`)** — Pay-As-You-Drive cash rebate up to 30% of premium for low annual mileage.
+2. **Emergency Towing Assistance (`towing`)** — 24/7 emergency accident towing assistance to nearest workshop up to RM200.
+3. **Legal Defense Costs (`legal-costs-defense`)** — Reimburses court legal representation and defense fees up to RM2,000.
 
 ### Add-ons (Optional Riders):
-159. **Accidental Boom Damage (Mobile Cranes)** — Covers accidental structural damage to mobile crane booms and jibs.
-160. **All Drivers / Unnamed Driver Excess Waiver** — Waives RM400 compulsory excess penalty for unnamed authorized drivers.
-161. **Betterment Waiver / New Spare Parts Buyback** — Waives betterment cost-sharing on new replacement parts for cars up to 10 yrs.
-162. **Commercial Vehicle Driver & Crew PA Bundle** — Personal accident package protecting commercial drivers and crew loaders.
-163. **Compassionate Flood Relief Allowance** — Immediate compassionate flood cash grant up to RM1,000 without affecting NCD.
-164. **Compensation for Assessed Repair Time (CART)** — Daily cash allowance for workshop repair days assessed by loss adjuster.
-165. **Comprehensive Driver & Passenger PA Bundle (DPP / DPA)** — Multi-plan personal accident rider for driver and passengers.
-166. **Cross-Border Extension (Thailand / Kalimantan)** — Extends comprehensive insurance coverage into Thailand, Kalimantan, or Brunei.
-167. **Extended & Unlimited Towing Upgrade** — Upgrades basic towing to extended distance or unlimited emergency towing.
-168. **Ferry Transit Extension (Sabah / Labuan / Penang)** — Covers loss or damage while vehicle is transported by ferry or vessel.
-169. **First Loss Special Perils (Limited Flood)** — Partial flood cover up to RM5,000 or RM10,000 without penalty.
-170. **Inconvenience & Out-of-Pocket Expense Allowance** — Daily cash allowance for transit and expenses during workshop repairs.
-171. **Increased Third Party Property Damage (TPPD)** — Increases third-party property damage limit beyond RM3,000,000.
-172. **Key Replacement Cover** — Reimburses car key replacement and reprogramming up to RM1,000 following theft.
-173. **Legal Liability of Passengers (LLOP)** — Protects against third-party claims caused by passenger negligence.
-174. **Legal Liability to Authorized Attendants / Loaders** — Employer liability protection for accidental injury to lorry attendants.
-175. **Legal Liability to Passengers / Pillion (LLP)** — Protects driver from lawsuits for injury/death caused to passengers.
-176. **MotorShield Multi-in-1 Comprehensive Bundle** — Bundles personal accident, excess waiver, side mirror, keys, and towing.
-177. **Motorcycle PA & Rider Protection Bundle** — Personal accident and roadside breakdown towing for riders and pillions.
-178. **Non-Standard Accessories & Fitted Equipment Cover** — Covers fitted aftermarket accessories, multimedia, dashcams, and rims.
-179. **Personal Accident: Accidental Death** — Lump-sum cash benefit paid to beneficiaries upon accidental road death.
-180. **Personal Accident: Bereavement & Funeral Allowance** — Lump-sum cash assistance for funeral and bereavement expenses upon death.
-181. **Personal Accident: Daily Hospital Income Allowance** — Daily cash payout during continuous inpatient hospital stays (up to 60 days).
-182. **Personal Accident: Medical Expenses Reimbursement** — Reimburses medical and hospital treatment expenses following an accident.
-183. **Personal Accident: Permanent Disablement** — Tiered payout for permanent loss of limbs, sight, speech, or paralysis.
-184. **Side Mirror Damage Replacement Cover** — Repairs or replaces side mirrors without affecting accumulated NCD.
-185. **Special Perils (Flood & Natural Disasters)** — Full cover for flood, storm, landslide, earthquake & fallen trees.
-186. **Strike, Riot & Civil Commotion (SRCC)** — Covers damage directly caused by strikes, riots, or civil commotion.
-187. **Tool of Trade / Mobile Plant Working Risks** — Third-party liability while mobile plant operates as a tool of trade.
-188. **Vehicle Respray / Spray Painting Cover** — Reimburses full exterior vehicle spray painting after an accident repair.
-189. **Windscreen & Window Glass Coverage** — Covers windscreen, window glass & tint repair without affecting NCD.
+1. **All Drivers (`all-drivers`)** — Waives RM400 compulsory excess penalty for unnamed authorized drivers.
+2. **Windscreen Damage (`windscreen`)** — Covers windscreen, window glass & tint repair without affecting NCD.
+3. **Inclusion of Special Perils (`special-perils`)** — Full cover for flood, storm, landslide, earthquake & fallen trees.
+4. **Legal Liability to Passenger / LLP (`legal-liability-to-passengers`)** — Protects driver from lawsuits for injury/death caused to passengers.
+5. **Legal Liability to Third Party caused by Passenger / LLOP (`legal-liability-of-passengers`)** — Protects against third-party claims caused by passenger negligence.
+6. **Value of Accessories (`vehicle-accessories`)** — Covers fitted aftermarket accessories, multimedia, dashcams, and rims.
+7. **Damage to Gas Conversion Kit and Tank (`gas-conversion`)** — Dedicated damage cover for installed NGV gas conversion tanks and kits.
+8. **Damage to Luggage and/or Caravan Trailers (`trailers`)** — Extends damage and liability coverage to attached luggage or caravan trailers.
+9. **Compensation for Assessed Repair Time / CART (`repair-allowance`)** — Daily cash allowance for workshop repair days assessed by loss adjuster.
+10. **Ferry Transit to and / or from Sabah and Labuan (`ferry-transit`)** — Covers loss or damage while vehicle is transported by ferry or vessel.
+11. **Strike Riot and Civil Commotions / SRCC (`strike-riot-civil-commotion`)** — Covers damage directly caused by strikes, riots, or civil commotion.
+12. **Extension to Thailand (`cross-border`)** — Extends comprehensive insurance coverage into Thailand.
+13. **Extension to Kalimantan and Indonesia (`cross-border`)** — Extends comprehensive insurance coverage into Kalimantan and Indonesia.
+14. **Tune Drive Protect (`tune-drive-protect`)** — Personal accident, medical, and hospital income protection bundle.
+15. **Waiver of Betterment (`betterment-protection`)** — Waives betterment cost-sharing on new replacement parts for cars up to 10 yrs.
+16. **MotorShield Multi-in-1 Comprehensive Bundle (`motor-shield`)** — Bundles personal accident, excess waiver, side mirror, keys, and towing.
 
 ---
 
 ## 7. AmAssurance / Liberty Insurance (`amassurance`)
 
 ### Defaults (Included at RM 0 / Base Cover — Comprehensive):
-190. **Emergency Towing Assistance** — Accident emergency towing assistance up to RM200 to nearest panel repairer.
-191. **Legal Defense Costs** — Reimburses court legal representation and defense fees up to RM2,000.
-192. **Panel Repair Workmanship Warranty** — 3-year warranty on repair workmanship carried out by approved panel repairers.
+1. **Betterment Scale / Tariff Deductible (`betterment-protection`)** — Tariff-mandated partial cost-sharing scale applied when repairing damaged components with brand-new original items.
+2. **Emergency Towing Assistance (`towing`)** — Built-in 24/7 emergency accident towing assistance to nearest approved repairer up to policy limit.
+3. **Legal Defense Costs (`legal-costs-defense`)** — Reimbursement of court legal defense representation costs up to RM2,000 limit.
+4. **Panel Repair Workmanship Warranty (`repair-warranty`)** — Guaranteed warranty covering repair workmanship and genuine replacement parts from panel workshops.
 
 ### Add-ons (Optional Riders):
-193. **Accidental Boom Damage (Mobile Cranes)** — Covers accidental structural damage to mobile crane booms and jibs.
-194. **Accidental Overturning (Cranes & Special Equipment)** — Covers damage from accidental overturning of cranes and heavy machinery.
-195. **All Drivers / Unnamed Driver Excess Waiver** — Waives RM400 compulsory excess for unnamed authorized drivers (End C007).
-196. **Attached Trailers & Towing Units Cover** — Extends damage and liability coverage to attached trailers or boat haulers.
-197. **Auto365 Plus Multi-Rider Upgrade Pack** — Bundles All Drivers waiver, RM1,500 flood grant, RM1,000 key care & towing.
-198. **Betterment Waiver / New Spare Parts Buyback** — Waives betterment contribution on new original parts for vehicles 5+ years old.
-199. **Compensation for Assessed Repair Time (CART)** — Daily cash allowance for workshop repair days assessed by loss adjuster.
-200. **Comprehensive Driver & Passenger PA Bundle (DPP / DPA)** — Multi-plan personal accident rider for driver and passengers.
-201. **Cross-Border Extension (Thailand / Kalimantan)** — Extends comprehensive insurance coverage into Thailand, Kalimantan, or Brunei.
-202. **E-Hailing / Private Hire Vehicle Endorsement** — Extends comprehensive motor insurance during commercial e-hailing work.
-203. **Extended & Unlimited Towing Upgrade** — 24/7 breakdown towing assistance up to 150km round trip including toll charges.
-204. **Ferry Transit Extension (Sabah / Labuan / Penang)** — Covers loss or damage while vehicle is transported by ferry or vessel.
-205. **First Loss Special Perils (Limited Flood)** — Partial flood cover up to RM5,000 or RM10,000 without penalty.
-206. **Gas Conversion Kit & Tank Cover (NGV)** — Dedicated damage cover for installed NGV gas conversion tanks and kits.
-207. **Increased Third Party Property Damage (TPPD)** — Increases third-party property damage limit beyond RM3,000,000.
-208. **Legal Liability of Passengers (LLOP)** — Protects against third-party claims caused by passenger negligence.
-209. **Legal Liability to Authorized Attendants / Loaders** — Employer liability protection for accidental injury to lorry attendants.
-210. **Legal Liability to Passengers / Pillion (LLP)** — Protects driver from lawsuits for injury/death caused to passengers.
-211. **NCD Relief (Current Year NCD Protection)** — Compensates for lost No Claim Discount (NCD) after an own-damage claim.
-212. **Non-Standard Accessories & Fitted Equipment Cover** — Covers fitted aftermarket accessories, multimedia, dashcams, and rims.
-213. **Personal Accident: Accidental Death** — Lump-sum cash benefit paid to beneficiaries upon accidental road death.
-214. **Personal Accident: Permanent Disablement** — Tiered payout for permanent loss of limbs, sight, speech, or paralysis.
-215. **Special Perils (Flood & Natural Disasters)** — Full cover for flood, storm, landslide, earthquake & fallen trees.
-216. **Strike, Riot & Civil Commotion (SRCC)** — Covers damage directly caused by strikes, riots, or civil commotion.
-217. **Tool of Trade / Mobile Plant Working Risks** — Third-party liability while mobile plant operates as a tool of trade.
-218. **Windscreen & Window Glass Coverage** — Covers windscreen, window glass & tint repair without affecting NCD.
+1. **Private Hire Car / E-Hailing (`e-hailing`)** — Permits comprehensive motor insurance coverage during commercial ride-hailing operations.
+2. **Compensation for Assessed Repair Time / CART (`repair-allowance`)** — Daily cash payout for the workshop repair period assessed by loss adjuster.
+3. **Current Year NCD Relief (`ncd-relief`)** — Preserves the financial value of forfeited No Claim Discount (NCD) after an own-damage claim.
+4. **Inclusion of Special Perils / Convulsions of Nature (`special-perils`)** — Full cover for flood, storm, landslide, earthquake & convulsions of nature.
+5. **Legal Liability of Passengers / LLOP (`legal-liability-of-passengers`)** — Protects against third-party claims caused by passenger negligence.
+6. **Legal Liability to Passengers / LLP (`legal-liability-to-passengers`)** — Protects driver from lawsuits for injury/death caused to passengers.
+7. **NGV Gas (`gas-conversion`)** — Dedicated damage cover for installed NGV gas conversion tanks and kits.
+8. **Strike, Riot and Civil Commotion / SRCC (`strike-riot-civil-commotion`)** — Covers physical loss or damage directly caused by strikes, riots, or civil commotion.
+9. **Waiver of Betterment (`betterment-protection`)** — Waives betterment contribution on new original parts for vehicles 5+ years old.
+10. **Windscreen Damage (Tempered/Laminated Glass Inclusive Labour Cost) (`windscreen`)** — Repair and replacement of windscreen and glass without affecting NCD.
+11. **Windscreen Damage (Tinting Film Inclusive Labour Cost) (`windscreen-tint`)** — Repair and replacement of solar tint film inclusive of labour cost.
+12. **Private Car Plans 1 to 4 System / Driver & Passenger PA Bundle (`personal-accident`)** — Multi-plan personal accident rider protecting driver and passengers across tiered schedules.
 
 ---
+
+

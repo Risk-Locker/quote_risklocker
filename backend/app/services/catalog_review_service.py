@@ -19,6 +19,7 @@ from app.models.tables import (
     BenefitPackagePlanItem,
     BenefitRelation,
     CatalogOffering,
+    CompanyBenefitConfig,
     CoverageType,
     DraftBenefitSelection,
     DraftSourceLineDecision,
@@ -462,7 +463,27 @@ def seed_base_benefits(db, draft: QuotationDraft, revision: BenefitCatalogRevisi
     )
 
     base_offerings = []
+    disabled_concept_ids: set[str] = set()
+    if getattr(draft, "company_id", None):
+        from app.services.business_setup_service import get_active_benefit_profile
+        try:
+            active_profile = get_active_benefit_profile(db)
+            if active_profile:
+                disabled_concept_ids = set(
+                    db.scalars(
+                        select(CompanyBenefitConfig.concept_id).where(
+                            CompanyBenefitConfig.company_id == draft.company_id,
+                            CompanyBenefitConfig.profile_id == active_profile.id,
+                            CompanyBenefitConfig.is_enabled.is_(False),
+                        )
+                    ).all()
+                )
+        except Exception:
+            disabled_concept_ids = set()
+
     for item in all_offerings:
+        if str(item.concept_id) in disabled_concept_ids:
+            continue
         is_included = item.role == "included" or (item.offering_kind == "base" and item.role is None)
         if not is_included:
             continue

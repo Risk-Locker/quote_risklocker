@@ -49,8 +49,10 @@ import type {
   CatalogRevisionSummary as CatalogRevision,
   CatalogSummary as Catalog,
   CatalogWorkspaceData as CatalogWorkspace,
+  BenefitProfile,
   CompanyBenefitCondition,
   CompanyBenefitConfig,
+  CompanyBenefitProfile,
   CompanySummary as Company,
   CompanyWorkspaceData as CompanyWorkspace,
   ConceptSummary as Concept,
@@ -283,8 +285,17 @@ function BenefitsPageContent() {
 
   // 4 Core Cockpit Tabs: Company Benefits, Catalogs, Conditions, Matrix
   type ScreenTab = "company_benefits" | "catalogs" | "conditions" | "matrix";
-  const [screenTab, setScreenTab] = useState<ScreenTab>("catalogs");
+  const [screenTab, setScreenTab] = useState<ScreenTab>("company_benefits");
   const [selectedEngineType, setSelectedEngineType] = useState<"ice" | "ev">("ice");
+
+  // Profile governance states
+  const [profiles, setProfiles] = useState<BenefitProfile[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState<string>("");
+  const [profilesLoading, setProfilesLoading] = useState(false);
+  const [profileActionLoading, setProfileActionLoading] = useState(false);
+  const [cloneModalOpen, setCloneModalOpen] = useState(false);
+  const [cloneName, setCloneName] = useState("");
+  const [cloneNotes, setCloneNotes] = useState("");
 
   // Tab 1: Company-Based Benefits state
   const [companyConfigs, setCompanyConfigs] = useState<CompanyBenefitConfig[]>([]);
@@ -316,6 +327,21 @@ function BenefitsPageContent() {
   const [aiDiffLoading, setAiDiffLoading] = useState(false);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
 
+  // Derived profile status
+  const selectedProfile = useMemo(() => {
+    return profiles.find((p) => p.id === selectedProfileId) || profiles.find((p) => p.is_active) || profiles[0] || null;
+  }, [profiles, selectedProfileId]);
+
+  const isProfileArchived = selectedProfile?.status === "archived";
+
+  const disabledConceptIdSet = useMemo(() => {
+    return new Set(
+      companyConfigs
+        .filter((c) => c.is_enabled === false)
+        .map((c) => c.concept_id)
+    );
+  }, [companyConfigs]);
+
   // ── 0. Queue for sequential API calls ──────────────────────────────────
   const queueRef = useRef<Promise<void>>(Promise.resolve());
   const enqueueTask = useCallback((task: () => Promise<void>) => {
@@ -329,11 +355,14 @@ function BenefitsPageContent() {
   }, []);
 
   // ── 1. Callbacks ───────────────────────────────────────────────────────
-  const loadCompanyConfigs = useCallback(async (companyId: string) => {
+  const loadCompanyConfigs = useCallback(async (companyId: string, profileId?: string) => {
     if (!companyId) return;
     setConfigsLoading(true);
     try {
-      const res = await api<{ configs: CompanyBenefitConfig[] }>(`/business/companies/${companyId}/benefit-configs`);
+      const url = profileId
+        ? `/business/companies/${companyId}/benefit-configs?profile_id=${encodeURIComponent(profileId)}`
+        : `/business/companies/${companyId}/benefit-configs`;
+      const res = await api<{ configs: CompanyBenefitConfig[] }>(url);
       if (mountedRef.current) setCompanyConfigs(res.configs || []);
     } catch (err) {
       if (mountedRef.current) setError(apiErrorMessage(err));
@@ -342,30 +371,14 @@ function BenefitsPageContent() {
     }
   }, []);
 
-  const saveCompanyConfigs = useCallback(async () => {
-    if (!selectedCompanyId) return;
-    setConfigsSaving(true);
-    setError("");
-    try {
-      const res = await api<{ configs: CompanyBenefitConfig[] }>(`/business/companies/${selectedCompanyId}/benefit-configs`, {
-        method: "PUT",
-        body: JSON.stringify({ configs: companyConfigs }),
-      });
-      if (mountedRef.current) {
-        setCompanyConfigs(res.configs || []);
-      }
-    } catch (err) {
-      if (mountedRef.current) setError(apiErrorMessage(err));
-    } finally {
-      if (mountedRef.current) setConfigsSaving(false);
-    }
-  }, [selectedCompanyId, companyConfigs]);
-
-  const loadCompanyConditions = useCallback(async (companyId: string) => {
+  const loadCompanyConditions = useCallback(async (companyId: string, profileId?: string) => {
     if (!companyId) return;
     setConditionsLoading(true);
     try {
-      const res = await api<{ conditions: CompanyBenefitCondition[] }>(`/business/companies/${companyId}/conditions`);
+      const url = profileId
+        ? `/business/companies/${companyId}/conditions?profile_id=${encodeURIComponent(profileId)}`
+        : `/business/companies/${companyId}/conditions`;
+      const res = await api<{ conditions: CompanyBenefitCondition[] }>(url);
       if (mountedRef.current) setCompanyConditions(res.conditions || []);
     } catch (err) {
       if (mountedRef.current) setError(apiErrorMessage(err));
@@ -373,6 +386,55 @@ function BenefitsPageContent() {
       if (mountedRef.current) setConditionsLoading(false);
     }
   }, []);
+
+  const loadBenefitProfiles = useCallback(async (preferredProfileId?: string) => {
+    setProfilesLoading(true);
+    try {
+      const res = await api<{ profiles: BenefitProfile[] }>("/business/benefit-profiles");
+      const list = res.profiles || [];
+      if (mountedRef.current) setProfiles(list);
+      const target = (preferredProfileId && list.find((p) => p.id === preferredProfileId))
+        || list.find((p) => p.is_active)
+        || list[0];
+      const targetId = target ? target.id : "";
+      if (mountedRef.current) setSelectedProfileId(targetId);
+      return list;
+    } catch (err) {
+      if (mountedRef.current) setError(apiErrorMessage(err));
+      return [];
+    } finally {
+      if (mountedRef.current) setProfilesLoading(false);
+    }
+  }, []);
+
+  const saveCompanyConfigs = useCallback(async () => {
+    if (!selectedCompanyId) return;
+    setConfigsSaving(true);
+    setError("");
+    try {
+      const url = selectedProfileId
+        ? `/business/companies/${selectedCompanyId}/benefit-configs?profile_id=${encodeURIComponent(selectedProfileId)}`
+        : `/business/companies/${selectedCompanyId}/benefit-configs`;
+      const payloadItems = companyConfigs.map((c) => ({
+        concept_id: c.concept_id,
+        is_enabled: c.is_enabled,
+        baseline_description: c.baseline_description ?? null,
+      }));
+      const res = await api<{ configs: CompanyBenefitConfig[] }>(url, {
+        method: "PUT",
+        body: JSON.stringify({ items: payloadItems, configs: payloadItems }),
+      });
+      if (mountedRef.current) {
+        setCompanyConfigs(res.configs || []);
+      }
+      const profRes = await api<{ profiles: BenefitProfile[] }>("/business/benefit-profiles");
+      if (mountedRef.current) setProfiles(profRes.profiles || []);
+    } catch (err) {
+      if (mountedRef.current) setError(apiErrorMessage(err));
+    } finally {
+      if (mountedRef.current) setConfigsSaving(false);
+    }
+  }, [selectedCompanyId, selectedProfileId, companyConfigs]);
 
   const saveCompanyCondition = useCallback(async () => {
     if (!selectedCompanyId || !condFormName.trim() || !condTriggerId || !condTargetId || !condReplacement.trim()) {
@@ -382,7 +444,10 @@ function BenefitsPageContent() {
     setConditionSaving(true);
     setError("");
     try {
-      await api(`/business/companies/${selectedCompanyId}/conditions`, {
+      const url = selectedProfileId
+        ? `/business/companies/${selectedCompanyId}/conditions?profile_id=${encodeURIComponent(selectedProfileId)}`
+        : `/business/companies/${selectedCompanyId}/conditions`;
+      await api(url, {
         method: "POST",
         body: JSON.stringify({
           name: condFormName.trim(),
@@ -399,13 +464,15 @@ function BenefitsPageContent() {
       setCondPlanFilter("");
       setCondTargetId("");
       setCondReplacement("");
-      await loadCompanyConditions(selectedCompanyId);
+      await loadCompanyConditions(selectedCompanyId, selectedProfileId);
+      const profRes = await api<{ profiles: BenefitProfile[] }>("/business/benefit-profiles");
+      if (mountedRef.current) setProfiles(profRes.profiles || []);
     } catch (err) {
       if (mountedRef.current) setError(apiErrorMessage(err));
     } finally {
       if (mountedRef.current) setConditionSaving(false);
     }
-  }, [selectedCompanyId, condFormName, condTriggerId, condPlanFilter, condTargetId, condReplacement, loadCompanyConditions]);
+  }, [selectedCompanyId, selectedProfileId, condFormName, condTriggerId, condPlanFilter, condTargetId, condReplacement, loadCompanyConditions]);
 
   const deleteCompanyCondition = useCallback(async (conditionId: string) => {
     if (!selectedCompanyId) return;
@@ -415,13 +482,76 @@ function BenefitsPageContent() {
       await api(`/business/companies/${selectedCompanyId}/conditions/${conditionId}`, {
         method: "DELETE",
       });
-      await loadCompanyConditions(selectedCompanyId);
+      await loadCompanyConditions(selectedCompanyId, selectedProfileId);
+      const profRes = await api<{ profiles: BenefitProfile[] }>("/business/benefit-profiles");
+      if (mountedRef.current) setProfiles(profRes.profiles || []);
     } catch (err) {
       if (mountedRef.current) setError(apiErrorMessage(err));
     } finally {
       if (mountedRef.current) setConditionsLoading(false);
     }
-  }, [selectedCompanyId, loadCompanyConditions]);
+  }, [selectedCompanyId, selectedProfileId, loadCompanyConditions]);
+
+  const handleActivateProfile = useCallback(async (profileId: string) => {
+    if (!profileId) return;
+    if (!window.confirm("Activate this benefit profile? It will become the live master configuration across all insurance companies for quotations and PDF generation.")) return;
+    setProfileActionLoading(true);
+    setError("");
+    try {
+      await api(`/business/benefit-profiles/${profileId}/activate`, {
+        method: "POST",
+      });
+      await loadBenefitProfiles(profileId);
+    } catch (err) {
+      if (mountedRef.current) setError(apiErrorMessage(err));
+    } finally {
+      if (mountedRef.current) setProfileActionLoading(false);
+    }
+  }, [loadBenefitProfiles]);
+
+  const handleDeleteDraftProfile = useCallback(async (profileId: string) => {
+    if (!profileId) return;
+    if (!window.confirm("Are you sure you want to delete this draft profile? This cannot be undone.")) return;
+    setProfileActionLoading(true);
+    setError("");
+    try {
+      await api(`/business/benefit-profiles/${profileId}`, {
+        method: "DELETE",
+      });
+      await loadBenefitProfiles();
+    } catch (err) {
+      if (mountedRef.current) setError(apiErrorMessage(err));
+    } finally {
+      if (mountedRef.current) setProfileActionLoading(false);
+    }
+  }, [loadBenefitProfiles]);
+
+  const handleCloneProfile = useCallback(async () => {
+    if (!selectedProfileId) return;
+    setProfileActionLoading(true);
+    setError("");
+    try {
+      const res = await api<{ profile: BenefitProfile }>(
+        `/business/benefit-profiles/${selectedProfileId}/clone`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name: cloneName.trim() || undefined,
+            notes: cloneNotes.trim() || undefined,
+          }),
+        }
+      );
+      setCloneModalOpen(false);
+      setCloneName("");
+      setCloneNotes("");
+      const newProfId = res.profile?.id;
+      await loadBenefitProfiles(newProfId);
+    } catch (err) {
+      if (mountedRef.current) setError(apiErrorMessage(err));
+    } finally {
+      if (mountedRef.current) setProfileActionLoading(false);
+    }
+  }, [selectedProfileId, cloneName, cloneNotes, loadBenefitProfiles]);
 
   const loadMatrix = useCallback(async (companyId: string) => {
     if (!companyId) return;
@@ -550,11 +680,15 @@ function BenefitsPageContent() {
   );
 
   useEffect(() => {
-    if (selectedCompanyId) {
-      loadCompanyConfigs(selectedCompanyId);
-      loadCompanyConditions(selectedCompanyId);
+    loadBenefitProfiles();
+  }, [loadBenefitProfiles]);
+
+  useEffect(() => {
+    if (selectedCompanyId && selectedProfileId) {
+      loadCompanyConfigs(selectedCompanyId, selectedProfileId);
+      loadCompanyConditions(selectedCompanyId, selectedProfileId);
     }
-  }, [selectedCompanyId, loadCompanyConfigs, loadCompanyConditions]);
+  }, [selectedCompanyId, selectedProfileId, loadCompanyConfigs, loadCompanyConditions]);
 
   useEffect(() => {
     if (screenTab === "matrix" && selectedCompanyId) {
@@ -791,18 +925,11 @@ ${aiMarkdownTable}`;
 
   const comprehensivePackages = useMemo(() => {
     return (catalogWorkspace?.packages || [])
-      .filter((p) => {
-        if (!p || p.status !== "active") return false;
-        if (matrixFilterCoverage === "All") return true;
-        if (matrixFilterCoverage === "Comprehensive") return p.package_kind === "comprehensive";
-        if (matrixFilterCoverage === "Third Party, Fire & Theft") return p.package_kind === "tpft";
-        if (matrixFilterCoverage === "Third Party") return p.package_kind === "tpo";
-        return true;
-      })
+      .filter((p) => p && p.status === "active" && p.package_kind !== "addon_bundle")
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-  }, [catalogWorkspace, matrixFilterCoverage]);
+  }, [catalogWorkspace]);
 
-  const isPackaged = comprehensivePackages.length > 0;
+  const isPackaged = Boolean(selectedCatalog?.package_id || comprehensivePackages.length > 0);
 
   const activePackage = useMemo(() => {
     if (!isPackaged) return null;
@@ -1035,9 +1162,13 @@ ${aiMarkdownTable}`;
   }
 
   function offeringTarget(): { applies_to_type: string | null; applies_to_id: string | null } {
-    return isPackaged && activePackage
-      ? { applies_to_type: "package", applies_to_id: activePackage.id }
-      : { applies_to_type: selectedCatalog?.product_id ? "product" : null, applies_to_id: selectedCatalog?.product_id || null };
+    if (isPackaged) {
+      const targetPkg = activePackage || comprehensivePackages[0];
+      if (targetPkg) {
+        return { applies_to_type: "package", applies_to_id: targetPkg.id };
+      }
+    }
+    return { applies_to_type: selectedCatalog?.product_id ? "product" : null, applies_to_id: selectedCatalog?.product_id || null };
   }
 
   // ── 1-Click Fast Toggle Sticker Handler (Optimistic UI, Zero Reload) ───
@@ -1368,6 +1499,7 @@ ${aiMarkdownTable}`;
         name: formName.trim() || `${selectedProduct?.name || "Product"} · ${selectedVehicle?.name || "Vehicle"}`,
         segment_id: selectedSegmentId || null,
         vehicle_category_id: selectedVehicleId || null,
+        engine_type: selectedEngineType || "ice",
       };
       const config = await api<{ catalog: Catalog }>("/business/catalogs", { method: "POST", body: JSON.stringify(payload) });
       const configId = config.catalog.id;
@@ -1747,16 +1879,16 @@ ${aiMarkdownTable}`;
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2">
             {/* View Switcher: 4 Tabs */}
             <div className="flex items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-0.5 text-xs font-semibold">
               <button
                 type="button"
                 onClick={() => {
                   setScreenTab("company_benefits");
-                  if (selectedCompanyId) loadCompanyConfigs(selectedCompanyId);
+                  if (selectedCompanyId && selectedProfileId) loadCompanyConfigs(selectedCompanyId, selectedProfileId);
                 }}
-                className={`flex items-center gap-1.5 rounded-[3px] px-3 py-1 transition-all ${
+                className={`flex items-center gap-1.5 rounded-[3px] px-3 py-1.5 transition-all ${
                   screenTab === "company_benefits"
                     ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] shadow-sm font-bold border border-[var(--rl-border)]"
                     : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
@@ -1768,7 +1900,7 @@ ${aiMarkdownTable}`;
               <button
                 type="button"
                 onClick={() => setScreenTab("catalogs")}
-                className={`flex items-center gap-1.5 rounded-[3px] px-3 py-1 transition-all ${
+                className={`flex items-center gap-1.5 rounded-[3px] px-3 py-1.5 transition-all ${
                   screenTab === "catalogs"
                     ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] shadow-sm font-bold border border-[var(--rl-border)]"
                     : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
@@ -1781,9 +1913,9 @@ ${aiMarkdownTable}`;
                 type="button"
                 onClick={() => {
                   setScreenTab("conditions");
-                  if (selectedCompanyId) loadCompanyConditions(selectedCompanyId);
+                  if (selectedCompanyId && selectedProfileId) loadCompanyConditions(selectedCompanyId, selectedProfileId);
                 }}
-                className={`flex items-center gap-1.5 rounded-[3px] px-3 py-1 transition-all ${
+                className={`flex items-center gap-1.5 rounded-[3px] px-3 py-1.5 transition-all ${
                   screenTab === "conditions"
                     ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] shadow-sm font-bold border border-[var(--rl-border)]"
                     : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
@@ -1798,7 +1930,7 @@ ${aiMarkdownTable}`;
                   setScreenTab("matrix");
                   if (selectedCompanyId) loadMatrix(selectedCompanyId);
                 }}
-                className={`flex items-center gap-1.5 rounded-[3px] px-3 py-1 transition-all ${
+                className={`flex items-center gap-1.5 rounded-[3px] px-3 py-1.5 transition-all ${
                   screenTab === "matrix"
                     ? "bg-[var(--rl-black)] text-white shadow-sm font-bold"
                     : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
@@ -1808,115 +1940,6 @@ ${aiMarkdownTable}`;
                 <span>4. Overview Matrix</span>
               </button>
             </div>
-
-            {/* Context-aware buttons */}
-            {screenTab === "company_benefits" && (
-              <Button
-                size="sm"
-                onClick={saveCompanyConfigs}
-                disabled={configsSaving}
-                className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold"
-              >
-                {configsSaving ? <ArrowClockwise size={14} className="animate-spin" /> : <CheckCircle size={14} weight="bold" />}
-                <span>{configsSaving ? "Saving..." : "Save Benefit Pool"}</span>
-              </Button>
-            )}
-
-            {screenTab === "conditions" && (
-              <Button
-                size="sm"
-                onClick={() => setConditionDialog(true)}
-                className="gap-1.5 bg-[var(--rl-black)] text-white shadow-sm font-semibold"
-              >
-                <Plus size={14} weight="bold" />
-                <span>Add Conditional Rule</span>
-              </Button>
-            )}
-
-            {screenTab === "catalogs" && (
-              <>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setShowLiveTemplate(!showLiveTemplate)}
-                  className="gap-1.5"
-                >
-                  {showLiveTemplate ? <EyeSlash size={14} weight="bold" /> : <Eye size={14} weight="bold" />}
-                  {showLiveTemplate ? "Hide Template Preview" : "Live Template Preview"}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={refreshCurrent}
-                  disabled={workspaceLoading || saving}
-                  className="gap-1.5"
-                >
-                  <ArrowClockwise size={14} className={workspaceLoading ? "animate-spin" : ""} />
-                  Refresh
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    setFormName("");
-                    setFormPackageName("");
-                    setFormAsPackage(false);
-                    setDialog("config");
-                  }}
-                  className="gap-1.5"
-                >
-                  <Plus size={14} weight="bold" />
-                  Add configuration
-                </Button>
-                {isPackaged && activePackage && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      setFormName(`${activePackage.name} Copy`);
-                      setFormPackageKey("");
-                      setDialog("clone");
-                    }}
-                    className="gap-1.5"
-                  >
-                    <Copy size={14} />
-                    Clone package
-                  </Button>
-                )}
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    setFormName("");
-                    setFormPackageKey("");
-                    setDialog("bundle");
-                  }}
-                  className="gap-1.5"
-                >
-                  <PackageIcon size={14} />
-                  New bundle
-                </Button>
-                <GuidedTour
-                  storageKey="tour:builder-benefits"
-                  title="Benefits & Add-ons Architecture"
-                  description="Configure which global benefits each insurer product includes by default and offers as add-ons, build package tiers, and create add-on bundles with plan levels."
-                  steps={BENEFITS_TOUR_STEPS}
-                />
-                {selectedCatalog && (
-                  (catalogWorkspace?.active_revision?.state === "published" && selectedCatalog.status === "published") ? (
-                    <Button variant="secondary" size="sm" onClick={openNewDraft} disabled={saving} className="gap-1.5">
-                      <PencilSimple size={14} weight="bold" />
-                      New draft
-                    </Button>
-                  ) : (
-                    <Button size="sm" onClick={publishConfig} disabled={saving} className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold">
-                      <CheckCircle size={14} weight="bold" />
-                      Publish Changes
-                    </Button>
-                  )
-                )}
-              </>
-            )}
           </div>
         </div>
 
@@ -1971,6 +1994,114 @@ ${aiMarkdownTable}`;
                   </button>
                 );
               })}
+            </div>
+          </div>
+
+          {/* Row 1b: Benefit Profile Versioning & Governance Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-3 shadow-sm">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
+                  Benefit Profile:
+                </span>
+                <Tooltip content="Versioned governance for company benefits and conditions. Inactive or disabled benefits cascade to omit from quote suggestions, review seeding, and PDF generation.">
+                  <Info size={13} className="text-[var(--rl-text-muted)] cursor-pointer" />
+                </Tooltip>
+              </div>
+
+              {profilesLoading ? (
+                <span className="text-xs text-[var(--rl-text-muted)] animate-pulse">Loading profiles...</span>
+              ) : profiles.length === 0 ? (
+                <span className="text-xs text-[var(--rl-text-muted)] italic">No profiles found.</span>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={selectedProfileId}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setSelectedProfileId(nextId);
+                      if (selectedCompanyId) {
+                        loadCompanyConfigs(selectedCompanyId, nextId);
+                        loadCompanyConditions(selectedCompanyId, nextId);
+                      }
+                    }}
+                    className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] px-2.5 py-1 text-xs font-semibold text-[var(--rl-text-strong)] focus:outline-none focus:ring-1 focus:ring-[var(--rl-black)]"
+                  >
+                    {profiles.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        v{p.version_number}: {p.name} ({p.status.toUpperCase()}){p.is_active ? " ★ Active" : ""}
+                      </option>
+                    ))}
+                  </select>
+
+                  {selectedProfile && (
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={`rounded-[4px] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                          selectedProfile.is_active
+                            ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                            : selectedProfile.status === "archived"
+                            ? "bg-neutral-100 text-neutral-600 border border-neutral-300"
+                            : "bg-amber-100 text-amber-800 border border-amber-300"
+                        }`}
+                      >
+                        {selectedProfile.is_active ? "Active Master" : selectedProfile.status}
+                      </span>
+                      <span className="text-[11px] text-[var(--rl-text-muted)] font-medium">
+                        {selectedProfile.configs_count ?? companyConfigs.length} configs · {selectedProfile.conditions_count ?? companyConditions.length} rules
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedProfile && selectedProfile.status === "draft" && (
+                <>
+                  <Button
+                    size="sm"
+                    onClick={() => handleActivateProfile(selectedProfile.id)}
+                    disabled={profileActionLoading}
+                    className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm text-xs font-semibold h-7 px-2.5"
+                    title="Make this draft profile the live active configuration"
+                  >
+                    <CheckCircle size={13} weight="bold" />
+                    <span>Activate Profile</span>
+                  </Button>
+
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => handleDeleteDraftProfile(selectedProfile.id)}
+                    disabled={profileActionLoading}
+                    className="gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 text-xs h-7 px-2"
+                    title="Delete this draft profile"
+                  >
+                    <Trash size={13} />
+                    <span>Delete Draft</span>
+                  </Button>
+                </>
+              )}
+
+              {selectedProfile && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    const maxV = profiles.reduce((max, p) => Math.max(max, p.version_number), 0) || selectedProfile.version_number;
+                    setCloneName(`${selectedProfile.name.replace(/\s*\(v\d+\)$/, "")} (v${maxV + 1})`);
+                    setCloneNotes(selectedProfile.notes || "");
+                    setCloneModalOpen(true);
+                  }}
+                  disabled={profileActionLoading}
+                  className="gap-1.5 text-xs h-7 px-2.5"
+                  title="Clone this profile into a new editable draft"
+                >
+                  <Copy size={13} />
+                  <span>Clone as New Version</span>
+                </Button>
+              )}
             </div>
           </div>
 
@@ -2160,6 +2291,14 @@ ${aiMarkdownTable}`;
       <div className="p-6">
         {screenTab === "company_benefits" ? (
           <div className="space-y-6">
+            {isProfileArchived && (
+              <div className="flex items-center gap-2.5 rounded-[var(--rl-radius-sm)] border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-950 shadow-sm">
+                <Info size={18} className="text-amber-600 shrink-0" weight="fill" />
+                <span>
+                  <strong>Archived Profile (Read-Only):</strong> Profile <em>{selectedProfile?.name} (v{selectedProfile?.version_number})</em> is an immutable historical record. Toggling benefits and editing descriptions is locked. Click <strong>&quot;Clone as New Version&quot;</strong> in the profile bar above to create an editable draft.
+                </span>
+              </div>
+            )}
             {/* Header & Filter Controls */}
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm">
               <div>
@@ -2244,11 +2383,14 @@ ${aiMarkdownTable}`;
                   <Button
                     size="sm"
                     onClick={saveCompanyConfigs}
-                    disabled={configsSaving}
-                    className="h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold"
+                    disabled={configsSaving || isProfileArchived}
+                    className={`h-8 gap-1.5 text-white shadow-sm font-semibold ${
+                      isProfileArchived ? "bg-neutral-400 cursor-not-allowed" : "bg-emerald-600 hover:bg-emerald-700"
+                    }`}
+                    title={isProfileArchived ? "Archived profile is read-only. Clone it to modify." : "Save Benefit Pool"}
                   >
                     {configsSaving ? <ArrowClockwise size={14} className="animate-spin" /> : <CheckCircle size={14} weight="bold" />}
-                    <span>{configsSaving ? "Saving..." : "Save Benefit Pool"}</span>
+                    <span>{configsSaving ? "Saving..." : isProfileArchived ? "Archived (Read-Only)" : "Save Benefit Pool"}</span>
                   </Button>
                 </div>
               </div>
@@ -2376,6 +2518,14 @@ ${aiMarkdownTable}`;
           </div>
         ) : screenTab === "conditions" ? (
           <div className="space-y-6">
+            {isProfileArchived && (
+              <div className="flex items-center gap-2.5 rounded-[var(--rl-radius-sm)] border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-950 shadow-sm">
+                <Info size={18} className="text-amber-600 shrink-0" weight="fill" />
+                <span>
+                  <strong>Archived Profile (Read-Only):</strong> Profile <em>{selectedProfile?.name} (v{selectedProfile?.version_number})</em> is an immutable historical record. Adding, editing, or deleting condition rules is locked. Click <strong>&quot;Clone as New Version&quot;</strong> in the profile bar above to create an editable draft.
+                </span>
+              </div>
+            )}
             {/* Header */}
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm">
               <div>
@@ -2837,6 +2987,103 @@ ${aiMarkdownTable}`;
           </div>
         ) : (
           <div className="space-y-6">
+            {/* ── Catalog Toolbar: Actions & Publication ───────────────────── */}
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-3.5 shadow-sm">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="font-bold text-[var(--rl-text-strong)]">
+                  {selectedCatalog?.name || "Product Catalog"}
+                </span>
+                {catalogWorkspace?.active_revision && (
+                  <Badge variant={catalogWorkspace.active_revision.state === "published" ? "success" : "default"}>
+                    Rev {catalogWorkspace.active_revision.revision_number} ({catalogWorkspace.active_revision.state})
+                  </Badge>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowLiveTemplate(!showLiveTemplate)}
+                  className="gap-1.5 text-xs h-8"
+                >
+                  {showLiveTemplate ? <EyeSlash size={14} weight="bold" /> : <Eye size={14} weight="bold" />}
+                  <span>{showLiveTemplate ? "Hide Template Preview" : "Live Template Preview"}</span>
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={refreshCurrent}
+                  disabled={workspaceLoading || saving}
+                  className="gap-1.5 text-xs h-8"
+                >
+                  <ArrowClockwise size={14} className={workspaceLoading ? "animate-spin" : ""} />
+                  <span>Refresh</span>
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setFormName("");
+                    setFormPackageName("");
+                    setFormAsPackage(false);
+                    setDialog("config");
+                  }}
+                  className="gap-1.5 text-xs h-8"
+                >
+                  <Plus size={14} weight="bold" />
+                  <span>Add configuration</span>
+                </Button>
+                {isPackaged && activePackage && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setFormName(`${activePackage.name} Copy`);
+                      setFormPackageKey("");
+                      setDialog("clone");
+                    }}
+                    className="gap-1.5 text-xs h-8"
+                  >
+                    <Copy size={14} />
+                    <span>Clone package</span>
+                  </Button>
+                )}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setFormName("");
+                    setFormPackageKey("");
+                    setDialog("bundle");
+                  }}
+                  className="gap-1.5 text-xs h-8"
+                >
+                  <PackageIcon size={14} />
+                  <span>New bundle</span>
+                </Button>
+                <GuidedTour
+                  storageKey="tour:builder-benefits"
+                  title="Benefits & Add-ons Architecture"
+                  description="Configure which global benefits each insurer product includes by default and offers as add-ons, build package tiers, and create add-on bundles with plan levels."
+                  steps={BENEFITS_TOUR_STEPS}
+                />
+                {selectedCatalog && (
+                  (catalogWorkspace?.active_revision?.state === "published" && selectedCatalog.status === "published") ? (
+                    <Button variant="secondary" size="sm" onClick={openNewDraft} disabled={saving} className="gap-1.5 text-xs h-8">
+                      <PencilSimple size={14} weight="bold" />
+                      <span>New draft</span>
+                    </Button>
+                  ) : (
+                    <Button size="sm" onClick={publishConfig} disabled={saving} className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold text-xs h-8">
+                      <CheckCircle size={14} weight="bold" />
+                      <span>Publish Changes</span>
+                    </Button>
+                  )
+                )}
+              </div>
+            </div>
+
             {/* ── Package Tier Ladder (For Package System) ────────────────── */}
             {isPackaged && comprehensivePackages.length > 0 && (
               <div className="rl-tour-ladder rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm space-y-3">
@@ -3037,6 +3284,14 @@ ${aiMarkdownTable}`;
                           <span className="font-semibold text-xs text-[var(--rl-text-strong)] truncate">
                             {concept.label}
                           </span>
+                          {disabledConceptIdSet.has(concept.id) && (
+                            <span
+                              className="rounded bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 px-1 py-0.2 text-[8.5px] font-bold uppercase tracking-wider shrink-0"
+                              title="Excluded by active benefit profile cascade"
+                            >
+                              Excluded
+                            </span>
+                          )}
                         </div>
 
                         <div
@@ -3187,6 +3442,14 @@ ${aiMarkdownTable}`;
                             <span className="font-semibold text-xs text-[var(--rl-text-strong)] truncate">
                               {concept.label}
                             </span>
+                            {disabledConceptIdSet.has(concept.id) && (
+                              <span
+                                className="rounded bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 px-1 py-0.2 text-[8.5px] font-bold uppercase tracking-wider shrink-0"
+                                title="Excluded by active benefit profile cascade"
+                              >
+                                Excluded
+                              </span>
+                            )}
                           </div>
 
                           <div
@@ -3450,6 +3713,14 @@ ${aiMarkdownTable}`;
                           <span className="font-semibold text-xs text-[var(--rl-text-strong)] truncate">
                             {concept.label}
                           </span>
+                          {disabledConceptIdSet.has(concept.id) && (
+                            <span
+                              className="rounded bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 px-1 py-0.2 text-[8.5px] font-bold uppercase tracking-wider shrink-0"
+                              title="Excluded by active benefit profile cascade"
+                            >
+                              Excluded
+                            </span>
+                          )}
                         </div>
 
                         <div
@@ -3548,6 +3819,14 @@ ${aiMarkdownTable}`;
                             <span className="font-semibold text-xs text-[var(--rl-text-strong)] truncate">
                               {concept.label}
                             </span>
+                            {disabledConceptIdSet.has(concept.id) && (
+                              <span
+                                className="rounded bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 px-1 py-0.2 text-[8.5px] font-bold uppercase tracking-wider shrink-0"
+                                title="Excluded by active benefit profile cascade"
+                              >
+                                Excluded
+                              </span>
+                            )}
                           </div>
 
                           <div
@@ -4234,6 +4513,66 @@ ${aiMarkdownTable}`;
                 className="bg-[var(--rl-black)] text-white shadow-sm font-semibold"
               >
                 {conditionSaving ? "Saving Rule..." : "Create Condition Rule"}
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      {/* ── Dialog: Clone Benefit Profile ───────────────────────────── */}
+      {cloneModalOpen && (
+        <Dialog
+          open={cloneModalOpen}
+          onOpenChange={setCloneModalOpen}
+          title="Clone Benefit Profile as New Version"
+        >
+          <div className="max-w-md p-6 space-y-4 text-xs">
+            <p className="text-[var(--rl-text-muted)]">
+              Clone <strong>{selectedProfile?.name}</strong> to create a new draft version with all current benefit toggles, descriptions, and conditional rules copied across all insurance companies.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block font-semibold text-[var(--rl-text-strong)] mb-1">
+                  New Profile Name *
+                </label>
+                <Input
+                  value={cloneName}
+                  onChange={(e) => setCloneName(e.target.value)}
+                  placeholder="e.g. Main Baseline (v2)"
+                  className="w-full"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[var(--rl-text-strong)] mb-1">
+                  Notes (Optional)
+                </label>
+                <textarea
+                  value={cloneNotes}
+                  onChange={(e) => setCloneNotes(e.target.value)}
+                  placeholder="e.g. Endorsements updated for Q4 2026 revisions"
+                  rows={3}
+                  className="w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-2.5 text-xs text-[var(--rl-text-strong)] focus:outline-none resize-none font-medium"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-[var(--rl-border)]">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setCloneModalOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleCloneProfile}
+                disabled={profileActionLoading || !cloneName.trim()}
+                className="bg-[var(--rl-black)] text-white shadow-sm font-semibold"
+              >
+                {profileActionLoading ? "Cloning..." : "Create Cloned Draft"}
               </Button>
             </div>
           </div>

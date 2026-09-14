@@ -596,6 +596,12 @@ def resolve_benefit_cards(
         if getattr(cfg, "concept_id", None) and getattr(cfg, "baseline_description", None) and str(cfg.baseline_description).strip()
     }
 
+    disabled_concept_ids: set[str] = {
+        str(cfg.concept_id)
+        for cfg in (company_configs or [])
+        if getattr(cfg, "concept_id", None) and getattr(cfg, "is_enabled", True) is False
+    }
+
     def _card(**kwargs):
         kwargs["eval_context"] = eval_context
         kwargs["insurer_catalog"] = insurer_catalog
@@ -697,7 +703,7 @@ def resolve_benefit_cards(
         edges = sorted(outgoing.get(str(item.catalog_offering_id), []), key=lambda edge: (int(edge.sort_order or 0), str(edge.branch_key or ""), str(edge.to_offering_id)))
         for edge in edges:
             target = offerings_by_id.get(str(edge.to_offering_id))
-            if not target or target.status not in {"active", "compatibility"} or target.id in selected_offering_ids or target.id in offered_ids or target.id in removed_offering_ids or str(target.concept_id) in removed_concepts:
+            if not target or target.status not in {"active", "compatibility"} or target.id in selected_offering_ids or target.id in offered_ids or target.id in removed_offering_ids or str(target.concept_id) in removed_concepts or str(target.concept_id) in disabled_concept_ids:
                 continue
             concept = concepts_by_id.get(str(target.concept_id))
             if not concept:
@@ -722,6 +728,7 @@ def resolve_benefit_cards(
                 and off.id not in offered_ids
                 and off.id not in removed_offering_ids
                 and str(off.concept_id) not in removed_concepts
+                and str(off.concept_id) not in disabled_concept_ids
                 and off.status in {"active", "compatibility"}
                 and (off.offering_kind in {"upgrade", "optional"} or getattr(off, "role", None) in {"addon_option", "bundle_component"})
             ]
@@ -748,7 +755,7 @@ def resolve_benefit_cards(
         if is_optional and item.status in {"active", "compatibility"}:
             optionals_by_concept.setdefault(str(item.concept_id), []).append(item)
     for concept_id, items in optionals_by_concept.items():
-        if concept_id in active_concepts or concept_id in removed_concepts or any(str(item.id) in offered_ids for item in items):
+        if concept_id in active_concepts or concept_id in removed_concepts or concept_id in disabled_concept_ids or any(str(item.id) in offered_ids for item in items):
             continue
         first = min(items, key=lambda item: (int(item.sort_order or 0), str(item.offering_key)))
         concept = concepts_by_id.get(concept_id)
@@ -763,7 +770,7 @@ def resolve_benefit_cards(
             offered_ids.add(first.id)
 
     for item in sorted(available_selected, key=lambda row: (int(row.sort_order or 0), str(row.selection_key))):
-        if item.concept_id and (str(item.concept_id) in active_concepts or str(item.concept_id) in removed_concepts):
+        if item.concept_id and (str(item.concept_id) in active_concepts or str(item.concept_id) in removed_concepts or str(item.concept_id) in disabled_concept_ids):
             continue
         if item.item_kind == "custom":
             concept = concepts_by_id.get(str(item.concept_id))
@@ -780,7 +787,7 @@ def resolve_benefit_cards(
             available_cards.append(_card(selection=item, offering=pseudo, concept=concept, typed_value=item.typed_value_override))
             continue
         offering = offerings_by_id.get(str(item.catalog_offering_id))
-        if not offering or offering.id in offered_ids:
+        if not offering or offering.id in offered_ids or str(offering.concept_id) in disabled_concept_ids:
             continue
         concept = concepts_by_id.get(str(offering.concept_id))
         if concept:

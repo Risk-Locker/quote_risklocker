@@ -48,6 +48,12 @@ from app.api.schemas import (
     PackageSaveRequest,
     RoadTaxRuleSaveRequest,
     RoadTaxCalculateRequest,
+    BenefitProfileCreateRequest,
+    BenefitProfileCloneRequest,
+    BenefitProfileUpdateRequest,
+    CompanyBenefitProfileCreateRequest,
+    CompanyBenefitProfileCloneRequest,
+    CompanyBenefitProfileUpdateRequest,
     CompanyBenefitConfigsUpdateRequest,
     CompanyBenefitConditionSaveRequest,
     CompanyMatrixDiffRequest,
@@ -227,7 +233,17 @@ from app.storage.supabase import StorageError, StorageNotFound, SupabaseStorage
 from app.services.business_setup_service import (
     create_benefit_catalog,
     create_new_draft_revision,
+    activate_benefit_profile,
+    clone_benefit_profile,
+    create_benefit_profile,
+    delete_benefit_profile,
+    list_benefit_profiles,
+    update_benefit_profile,
+    activate_company_profile,
+    clone_company_profile,
+    create_company_profile,
     delete_company_condition,
+    delete_company_profile,
     get_catalog_workspace,
     get_business_company_workspace,
     get_company_benefit_configs,
@@ -236,10 +252,12 @@ from app.services.business_setup_service import (
     list_business_companies,
     list_company_aliases,
     list_company_conditions,
+    list_company_profiles,
     list_source_documents,
     save_benefit_concept,
     save_company_condition,
     update_company_benefit_configs,
+    update_company_profile,
     retire_benefit_concept,
     restore_benefit_concept,
     save_business_company,
@@ -1473,43 +1491,166 @@ def business_company_workspace(
     return {"workspace": get_business_company_workspace(db, user, company_id)}
 
 
-@router.get("/business/companies/{company_id}/benefit-configs")
-def business_company_benefit_configs(
+@router.get("/business/benefit-profiles")
+def business_benefit_profiles_list(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"profiles": list_benefit_profiles(db, user)}
+
+
+@router.post("/business/benefit-profiles")
+def business_benefit_profile_create(
+    payload: BenefitProfileCreateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"profile": create_benefit_profile(db, user, payload.model_dump())}
+
+
+@router.post("/business/benefit-profiles/{profile_id}/clone")
+def business_benefit_profile_clone(
+    profile_id: str,
+    payload: BenefitProfileCloneRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"profile": clone_benefit_profile(db, user, profile_id, payload.model_dump())}
+
+
+@router.put("/business/benefit-profiles/{profile_id}")
+def business_benefit_profile_update(
+    profile_id: str,
+    payload: BenefitProfileUpdateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"profile": update_benefit_profile(db, user, profile_id, payload.model_dump(exclude_unset=True))}
+
+
+@router.post("/business/benefit-profiles/{profile_id}/activate")
+def business_benefit_profile_activate(
+    profile_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"profile": activate_benefit_profile(db, user, profile_id)}
+
+
+@router.delete("/business/benefit-profiles/{profile_id}")
+def business_benefit_profile_delete(
+    profile_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    delete_benefit_profile(db, user, profile_id)
+    return {"ok": True}
+
+
+# Backwards-compatible company-nested profile endpoints
+@router.get("/business/companies/{company_id}/profiles")
+def business_company_profiles_list(
     company_id: str,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
-    return {"configs": get_company_benefit_configs(db, user, company_id)}
+    return {"profiles": list_benefit_profiles(db, user)}
+
+
+@router.post("/business/companies/{company_id}/profiles")
+def business_company_profile_create(
+    company_id: str,
+    payload: BenefitProfileCreateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"profile": create_benefit_profile(db, user, payload.model_dump())}
+
+
+@router.post("/business/companies/{company_id}/profiles/{profile_id}/clone")
+def business_company_profile_clone(
+    company_id: str,
+    profile_id: str,
+    payload: BenefitProfileCloneRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"profile": clone_benefit_profile(db, user, profile_id, payload.model_dump())}
+
+
+@router.put("/business/companies/{company_id}/profiles/{profile_id}")
+def business_company_profile_update(
+    company_id: str,
+    profile_id: str,
+    payload: BenefitProfileUpdateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"profile": update_benefit_profile(db, user, profile_id, payload.model_dump(exclude_unset=True))}
+
+
+@router.post("/business/companies/{company_id}/profiles/{profile_id}/activate")
+def business_company_profile_activate(
+    company_id: str,
+    profile_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"profile": activate_benefit_profile(db, user, profile_id)}
+
+
+@router.delete("/business/companies/{company_id}/profiles/{profile_id}")
+def business_company_profile_delete(
+    company_id: str,
+    profile_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    delete_benefit_profile(db, user, profile_id)
+    return {"ok": True}
+
+
+@router.get("/business/companies/{company_id}/benefit-configs")
+def business_company_benefit_configs(
+    company_id: str,
+    profile_id: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"configs": get_company_benefit_configs(db, user, company_id, profile_id=profile_id)}
 
 
 @router.put("/business/companies/{company_id}/benefit-configs")
 def business_company_benefit_configs_update(
     company_id: str,
     payload: CompanyBenefitConfigsUpdateRequest,
+    profile_id: str | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
-    updated = update_company_benefit_configs(db, user, company_id, [item.model_dump() for item in payload.items])
+    updated = update_company_benefit_configs(db, user, company_id, [item.model_dump() for item in payload.items], profile_id=profile_id)
     return {"configs": updated}
 
 
 @router.get("/business/companies/{company_id}/conditions")
 def business_company_conditions_list(
     company_id: str,
+    profile_id: str | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
-    return {"conditions": list_company_conditions(db, user, company_id)}
+    return {"conditions": list_company_conditions(db, user, company_id, profile_id=profile_id)}
 
 
 @router.post("/business/companies/{company_id}/conditions")
 def business_company_condition_save(
     company_id: str,
     payload: CompanyBenefitConditionSaveRequest,
+    profile_id: str | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
-    return {"condition": save_company_condition(db, user, company_id, payload.model_dump())}
+    return {"condition": save_company_condition(db, user, company_id, payload.model_dump(), profile_id=profile_id)}
 
 
 @router.delete("/business/companies/{company_id}/conditions/{condition_id}")

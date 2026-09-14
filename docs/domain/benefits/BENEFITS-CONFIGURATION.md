@@ -127,3 +127,31 @@ Located in `frontend/src/app/builder/benefits/page.tsx` via the **"Company Overv
   - The matrix view provides copyable Markdown tables formatted for Claude / ChatGPT / Gemini.
   - Non-destructive delta sync via `POST /business/companies/{id}/diff-matrix` allows AI agents to inspect incoming brochures and return only new/modified rows without re-seeding or overwriting existing catalogs.
 
+---
+
+## 5. Unified Global Benefit Profile Architecture
+
+Unified global multi-version profile governance (`benefit_profiles`) controlling benefit enablement, baseline descriptions, and conditional replacement rules across **all 7+ insurance companies simultaneously** in quotation workflows.
+
+### 5.1 Data Model & Lifecycle
+- **`benefit_profiles`**: Global table storing platform-wide versions (`id`, `name`, `version_number`, `is_active`, `status`, `notes`).
+- **Single Global Active Invariant**: Guaranteed by partial unique index `uq_single_active_benefit_profile` (`is_active` WHERE `is_active = true`). Exactly one profile is active platform-wide at any time.
+- **Profile-Scoped Configs & Conditions**: `company_benefit_configs` and `company_benefit_conditions` link to `benefit_profiles(id)`. Unique constraint `uq_company_profile_concept_config` on `(company_id, profile_id, concept_id)` guarantees deterministic overrides per company per profile version.
+- **Auto-Provisioning**: If no active profile exists, `get_active_benefit_profile` (`backend/app/services/business_setup_service.py:1620`) automatically provisions the baseline `v1` (Active Master) profile.
+- **Multi-Company Deep Cloning & Atomic Activation**:
+  - `clone_benefit_profile`: Clones an existing global profile into a new `status='draft'` version, deep-copying all configs and conditions across **all** companies in a single atomic transaction.
+  - `activate_benefit_profile`: Atomically deactivates the previous active profile (setting `is_active=False, status='archived'`) and activates the selected draft (`is_active=True, status='active'`) across the entire platform.
+  - **Archived Immutability**: Archived profiles cannot be modified, deleted, or have their configs/conditions altered. Any configuration update requires cloning to an editable draft.
+
+### 5.2 Global Cascade Exclusion Rules
+Toggling a benefit to `is_enabled=False` in Tab 1 (`Benefit Configuration`) for an insurer cascades through the system:
+1. **Quotation Review Seeding** (`backend/app/services/catalog_review_service.py:seed_base_benefits`): Disabled concepts in that company's active global profile are omitted from automatic base benefit seeding into quotation drafts.
+2. **Workspace Suggestions** (`backend/app/services/workspace_service.py:suggest_workspace_actions`): Evaluates conditions and configs scoped strictly to the company and active global profile.
+3. **Available Cards Suppression** (`backend/app/rendering/render_context.py:resolve_benefit_cards`): Disabled concepts are excluded from available add-ons, outgoing upgrade edges, optionals, and available selections.
+4. **Customer Extra Preservation**: Quotation drafts with purchased extra benefits (`item_kind == 'extra'`, `state == 'current'`) are **never purged or overridden** by the profile cascade; existing customer coverage remains visible and preserved.
+5. **PDF Generation** (`backend/app/services/generation_service.py:generate_quotation_pdf`): Renders cards using the company's active profile configs and conditional replacements.
+6. **Frontend Visual Feedback** (`frontend/src/app/builder/benefits/page.tsx`):
+   - **Top Profile Bar**: Dropdown selector governing all 4 tabs and all companies simultaneously, status badges (`Active Master`, `Draft`, `Archived`), atomic activation button, clone trigger, and draft deletion.
+   - **Tab 1 & Tab 3 Warning**: Yellow banner displayed when viewing an archived profile indicating read-only state.
+   - **Tab 2 Badging**: Catalog offerings associated with disabled concepts display an amber `"Excluded"` badge alerting administrators to the cascade suppression.
+

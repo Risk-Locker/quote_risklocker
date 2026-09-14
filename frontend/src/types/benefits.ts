@@ -132,9 +132,25 @@ export type PackageEntity = {
   status: string;
 };
 
+export type BenefitProfile = {
+  id: string;
+  name: string;
+  version_number: number;
+  is_active: boolean;
+  status: "active" | "draft" | "archived" | string;
+  notes?: string | null;
+  configs_count?: number;
+  conditions_count?: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type CompanyBenefitProfile = BenefitProfile;
+
 export type CompanyBenefitConfig = {
   id?: string;
   company_id: string;
+  profile_id?: string;
   concept_id: string;
   is_enabled: boolean;
   baseline_description?: string | null;
@@ -144,6 +160,7 @@ export type CompanyBenefitConfig = {
 export type CompanyBenefitCondition = {
   id: string;
   company_id: string;
+  profile_id?: string;
   name: string;
   trigger_concept_id: string;
   trigger_plan_filter?: string | null;

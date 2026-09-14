@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.benefits import BenefitValue
 
@@ -284,6 +285,7 @@ class BenefitAliasSaveRequest(StrictRequest):
 
 
 class BenefitCatalogSaveRequest(StrictRequest):
+    model_config = ConfigDict(extra="ignore")
     company_id: str
     product_id: str | None = None
     tier_id: str | None = None
@@ -304,17 +306,50 @@ class CatalogContextRequest(StrictRequest):
     engine_type: str | None = Field(default=None, pattern=r"^(ice|ev)$")
 
 
+class BenefitProfileCreateRequest(StrictRequest):
+    name: str = Field(min_length=1, max_length=255)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class BenefitProfileCloneRequest(StrictRequest):
+    name: str = Field(min_length=1, max_length=255)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class BenefitProfileUpdateRequest(StrictRequest):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+CompanyBenefitProfileCreateRequest = BenefitProfileCreateRequest
+CompanyBenefitProfileCloneRequest = BenefitProfileCloneRequest
+CompanyBenefitProfileUpdateRequest = BenefitProfileUpdateRequest
+
+
 class CompanyBenefitConfigItem(StrictRequest):
+    model_config = ConfigDict(extra="ignore")
     concept_id: str
     is_enabled: bool = True
     baseline_description: str | None = Field(default=None, max_length=1000)
 
 
 class CompanyBenefitConfigsUpdateRequest(StrictRequest):
+    model_config = ConfigDict(extra="ignore")
     items: list[CompanyBenefitConfigItem] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def support_configs_alias(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "configs" in data:
+            data = dict(data)
+            configs_val = data.pop("configs")
+            if "items" not in data:
+                data["items"] = configs_val
+        return data
 
 
 class CompanyBenefitConditionSaveRequest(StrictRequest):
+    model_config = ConfigDict(extra="ignore")
     id: str | None = None
     name: str = Field(min_length=1, max_length=255)
     trigger_concept_id: str
@@ -325,6 +360,7 @@ class CompanyBenefitConditionSaveRequest(StrictRequest):
 
 
 class CatalogOfferingSaveRequest(StrictRequest):
+    model_config = ConfigDict(extra="ignore")
     id: str | None = None
     base_revision: int = Field(ge=1)
     offering_key: str | None = Field(default=None, max_length=160)
@@ -347,24 +383,27 @@ class CatalogOfferingSaveRequest(StrictRequest):
 
 
 class PackageSaveRequest(StrictRequest):
+    model_config = ConfigDict(extra="ignore")
     id: str | None = None
     base_revision: int = Field(ge=1)
     package_key: str | None = Field(default=None, max_length=160)
     name: str = Field(min_length=1, max_length=255)
-    package_kind: str = Field(default="comprehensive", pattern=r"^(comprehensive|addon_bundle)$")
+    package_kind: str = Field(default="comprehensive", pattern=r"^(comprehensive|addon_bundle|tpft|tpo)$")
     sort_order: int = Field(default=0, ge=0)
     status: str = "active"
 
 
 class PackageCloneRequest(StrictRequest):
+    model_config = ConfigDict(extra="ignore")
     base_revision: int = Field(ge=1)
     package_key: str = Field(min_length=1, max_length=160)
     name: str = Field(min_length=1, max_length=255)
-    package_kind: str | None = Field(default=None, pattern=r"^(comprehensive|addon_bundle)$")
+    package_kind: str | None = Field(default=None, pattern=r"^(comprehensive|addon_bundle|tpft|tpo)$")
     sort_order: int = Field(default=0, ge=0)
 
 
 class PackagePlanSaveRequest(StrictRequest):
+    model_config = ConfigDict(extra="ignore")
     id: str | None = None
     base_revision: int = Field(ge=1)
     plan_key: str | None = Field(default=None, max_length=160)
@@ -374,12 +413,14 @@ class PackagePlanSaveRequest(StrictRequest):
 
 
 class PackagePlanItemEntry(StrictRequest):
+    model_config = ConfigDict(extra="ignore")
     offering_id: str
     typed_value_override: BenefitValue | None = None
     sort_order: int = Field(default=0, ge=0)
 
 
 class PackagePlanItemsRequest(StrictRequest):
+    model_config = ConfigDict(extra="ignore")
     base_revision: int = Field(ge=1)
     items: list[PackagePlanItemEntry] = Field(default_factory=list, max_length=100)
 
