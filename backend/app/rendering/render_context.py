@@ -316,6 +316,47 @@ def _index(rows: Iterable[Any]) -> dict[str, Any]:
     return {str(item.id): item for item in rows}
 
 
+def _is_valid_price(price: Any) -> bool:
+    if not price:
+        return False
+    if isinstance(price, (int, float)):
+        return price > 0
+    if isinstance(price, str):
+        s = price.strip().lower()
+        if not s:
+            return False
+        clean = re.sub(r"^(rm|myr)\s*", "", s).strip()
+        if clean in {"", "0", "00", "0.0", "0.00", "null", "none", "quoted", "as quoted", "foc", "included"}:
+            return False
+        if "%" in s:
+            return True
+        try:
+            num = float(re.sub(r"[^0-9.]", "", clean))
+            return num > 0
+        except Exception:
+            return False
+    if isinstance(price, dict):
+        disp = str(price.get("display_text") or "").strip().lower()
+        if disp:
+            clean_disp = re.sub(r"^(rm|myr)\s*", "", disp).strip()
+            if clean_disp in {"", "0", "00", "0.0", "0.00", "null", "none", "quoted", "as quoted", "foc", "included"}:
+                return False
+            if "%" in disp:
+                return False
+        val = price.get("value") if price.get("value") is not None else price.get("amount")
+        if val is not None:
+            val_str = str(val).strip()
+            if "%" in val_str or any(w in val_str.lower() for w in ("sum insured", "sum covered", "accessory")):
+                return False
+            try:
+                num = float(re.sub(r"[^0-9.]", "", val_str))
+                return num > 0
+            except Exception:
+                pass
+        return False
+    return False
+
+
 def _card(
     *,
     selection: Any | None,
@@ -330,8 +371,12 @@ def _card(
     insurer_catalog: list[dict] | None = None,
     active_conditional_descriptions: dict[str, str] | None = None,
     company_baseline_descriptions: dict[str, str] | None = None,
+    company_baseline_costs: dict[str, str] | None = None,
 ) -> dict:
     price = getattr(selection, "price", None) or getattr(offering, "optional_price", None)
+    if not _is_valid_price(price):
+        price = None
+
     cost_status = getattr(selection, "cost_status", None)
     is_detected = bool(
         (getattr(selection, "evidence_snapshot", None) or {}).get("is_detected")
@@ -339,6 +384,50 @@ def _card(
     )
     is_purchased_extra = cost_status == "paid" or getattr(selection, "is_purchased_extra", False)
     
+    concept_id_key = str(getattr(concept, "id", None) or "")
+    if not price and company_baseline_costs and concept_id_key in company_baseline_costs:
+        raw_b_cost = company_baseline_costs[concept_id_key]
+        if raw_b_cost and raw_b_cost.strip():
+            s_cost = raw_b_cost.strip()
+            if "%" in s_cost:
+                # Formula rate, e.g. "15% of Sum Covered" or "0.30% of Sum Insured"
+                try:
+                    windscreen_val = (eval_context or {}).get("windscreen_sum_covered") or (eval_context or {}).get("windscreen") or (eval_context or {}).get("windscreen_sum_insured")
+                    if windscreen_val and ("15%" in s_cost or "windscreen" in s_cost.lower()):
+                        clean_w = re.sub(r"[^0-9.]", "", str(windscreen_val))
+                        if clean_w and float(clean_w) > 0:
+                            calc_val = round(float(clean_w) * 0.15, 2)
+                            price = {"type": "money", "amount": calc_val, "value": calc_val, "currency": "MYR"}
+                        else:
+                            price = None
+                    else:
+                        pct_match = re.search(r"([0-9.]+)\s*%", s_cost)
+                        vsi_val = (eval_context or {}).get("vehicle_sum_insured") or (eval_context or {}).get("sum_insured")
+                        if pct_match and vsi_val and float(vsi_val) > 0:
+                            rate = float(pct_match.group(1))
+                            calc_val = round(float(vsi_val) * (rate / 100.0), 2)
+                            if calc_val > 0:
+                                price = {"type": "money", "amount": calc_val, "value": calc_val, "currency": "MYR"}
+                            else:
+                                price = None
+                        else:
+                            # Cannot reliably calculate cost: suppress price badge to avoid wrong numbers (e.g. MYR 0.30)
+                            price = None
+                except Exception:
+                    price = None
+            else:
+                try:
+                    num_val = float(re.sub(r"[^0-9.]", "", s_cost))
+                    if num_val > 0:
+                        price = {"type": "money", "amount": num_val, "value": num_val, "currency": "MYR"}
+                    else:
+                        price = None
+                except Exception:
+                    price = None
+
+    if not _is_valid_price(price):
+        price = None
+
     catalog_def = None
     if insurer_catalog and concept and hasattr(concept, "concept_key"):
         for item in insurer_catalog:
@@ -443,12 +532,12 @@ def _card(
 
     if sel_desc and str(sel_desc).strip():
         final_desc = str(sel_desc).strip()
-    elif cond_desc and str(cond_desc).strip():
-        final_desc = str(cond_desc).strip()
+    elif cond_desc and cond_desc.strip():
+        final_desc = cond_desc.strip()
+    elif comp_base_desc and comp_base_desc.strip():
+        final_desc = comp_base_desc.strip()
     elif offering_desc and str(offering_desc).strip():
         final_desc = str(offering_desc).strip()
-    elif comp_base_desc and str(comp_base_desc).strip():
-        final_desc = str(comp_base_desc).strip()
     elif cat_desc and str(cat_desc).strip():
         final_desc = str(cat_desc).strip()
     elif concept_desc and str(concept_desc).strip():
@@ -458,9 +547,9 @@ def _card(
 
     is_custom_desc = bool(
         (sel_desc and str(sel_desc).strip())
-        or (cond_desc and str(cond_desc).strip())
+        or (cond_desc and cond_desc.strip())
         or (offering_desc and str(offering_desc).strip())
-        or (comp_base_desc and str(comp_base_desc).strip())
+        or (comp_base_desc and comp_base_desc.strip())
     )
 
     return {
@@ -506,6 +595,7 @@ def _expanded_cards(
     insurer_catalog: list[dict] | None = None,
     active_conditional_descriptions: dict[str, str] | None = None,
     company_baseline_descriptions: dict[str, str] | None = None,
+    company_baseline_costs: dict[str, str] | None = None,
 ) -> list[dict]:
     typed_value = getattr(selection, "typed_value_override", None) or offering.typed_value
     facet_ids = list(offering.presentation_facet_ids or [])
@@ -519,6 +609,7 @@ def _expanded_cards(
             insurer_catalog=insurer_catalog,
             active_conditional_descriptions=active_conditional_descriptions,
             company_baseline_descriptions=company_baseline_descriptions,
+            company_baseline_costs=company_baseline_costs,
         )]
     cards: list[dict] = []
     for facet_id in facet_ids:
@@ -537,6 +628,7 @@ def _expanded_cards(
             insurer_catalog=insurer_catalog,
             active_conditional_descriptions=active_conditional_descriptions,
             company_baseline_descriptions=company_baseline_descriptions,
+            company_baseline_costs=company_baseline_costs,
         ))
     return cards
 
@@ -596,6 +688,12 @@ def resolve_benefit_cards(
         if getattr(cfg, "concept_id", None) and getattr(cfg, "baseline_description", None) and str(cfg.baseline_description).strip()
     }
 
+    company_baseline_costs: dict[str, str] = {
+        str(cfg.concept_id): cfg.baseline_cost
+        for cfg in (company_configs or [])
+        if getattr(cfg, "concept_id", None) and getattr(cfg, "baseline_cost", None) and str(cfg.baseline_cost).strip()
+    }
+
     disabled_concept_ids: set[str] = {
         str(cfg.concept_id)
         for cfg in (company_configs or [])
@@ -607,6 +705,7 @@ def resolve_benefit_cards(
         kwargs["insurer_catalog"] = insurer_catalog
         kwargs["active_conditional_descriptions"] = active_conditional_descriptions
         kwargs["company_baseline_descriptions"] = company_baseline_descriptions
+        kwargs["company_baseline_costs"] = company_baseline_costs
         assert _global_card is not None
         return _global_card(**kwargs)
 
@@ -621,6 +720,7 @@ def resolve_benefit_cards(
             insurer_catalog=insurer_catalog,
             active_conditional_descriptions=active_conditional_descriptions,
             company_baseline_descriptions=company_baseline_descriptions,
+            company_baseline_costs=company_baseline_costs,
         )
 
     offerings_by_id = _index(offerings)
@@ -749,7 +849,7 @@ def resolve_benefit_cards(
     optionals_by_concept: dict[str, list[Any]] = {}
     for item in offerings:
         is_optional = (
-            item.offering_kind == "optional"
+            getattr(item, "offering_kind", None) == "optional"
             or getattr(item, "role", None) in {"addon_option", "bundle_component"}
         )
         if is_optional and item.status in {"active", "compatibility"}:
@@ -772,7 +872,7 @@ def resolve_benefit_cards(
     for item in sorted(available_selected, key=lambda row: (int(row.sort_order or 0), str(row.selection_key))):
         if item.concept_id and (str(item.concept_id) in active_concepts or str(item.concept_id) in removed_concepts or str(item.concept_id) in disabled_concept_ids):
             continue
-        if item.item_kind == "custom":
+        if getattr(item, "item_kind", None) == "custom":
             concept = concepts_by_id.get(str(item.concept_id))
             concept = concept or type("CustomConcept", (), {
                 "id": item.concept_id or f"custom:{item.id}", "concept_key": item.selection_key,

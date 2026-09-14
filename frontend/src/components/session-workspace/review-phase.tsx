@@ -1364,29 +1364,61 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       fields?.product_name?.value,
     ].filter(Boolean).join(" ").toLowerCase();
 
-    const isMotorcycle = /motorcycle|motor\s*cycle|motor|bike|kapcai|scooter/.test(vehicleText);
-    const isCommercial = /lorry|truck|commercial|rigid|trailer|tipper|van|bus|prime mover/.test(vehicleText);
-    const isCar = !isMotorcycle && !isCommercial;
+    const vtypeText = String(formValues?.vehicle_type || fields?.vehicle_type?.value || "").toLowerCase();
+    const evCat = detectEVCategory(
+      fields?.car_brand?.value,
+      fields?.car_model?.value,
+      fields?.engine_cc?.value,
+    );
+    const engineCcText = (fields?.engine_cc?.value || "").toLowerCase();
+    const fuelText = (fields?.fuel_type?.value || "").toLowerCase();
+    const engineTypeText = (fields?.engine_type?.value || "").toLowerCase();
+    const isEv = !!evCat ||
+      vtypeText.startsWith("ev") ||
+      engineCcText.includes("kw") ||
+      fuelText.includes("elect") ||
+      fuelText.includes("ev") ||
+      engineTypeText === "ev";
 
-    if (isCar) {
-      const filtered = raw.filter((p) => {
-        if (p.id === workspace?.pinned.product_id) return true;
+    const isLorry = /lorry|truck|rigid|trailer|tipper|prime mover|haulage|hino|fuso|canter|isuzu npr|c permit|a permit/.test(vehicleText);
+    const isMotorcycle = !isLorry && /motorcycle|motor\s*cycle|motor|bike|kapcai|scooter/.test(vehicleText);
+    const isCar = !isLorry && !isMotorcycle;
+
+    let vehicleFiltered = raw;
+    if (isLorry) {
+      vehicleFiltered = raw.filter((p) => {
         const name = (p.name || "").toLowerCase();
-        if (/motorcycle|motor\s*cycle|bike|lorry|commercial\s*vehicle/.test(name)) return false;
-        return true;
+        if (/motorcycle|motor\s*cycle|bike|private\s*car|saloon/.test(name)) return false;
+        return /lorry|haulage|truck|commercial\s*vehicle/.test(name);
       });
-      return filtered.length > 0 ? filtered : raw;
-    }
-    if (isMotorcycle) {
-      const filtered = raw.filter((p) => {
-        if (p.id === workspace?.pinned.product_id) return true;
+      if (!vehicleText.includes("a permit") && !vehicleText.includes("a-permit") && !vehicleText.includes("general haulage")) {
+        const cPermitProds = vehicleFiltered.filter((p) => !p.name.toLowerCase().includes("a permit") && !p.name.toLowerCase().includes("general haulage"));
+        if (cPermitProds.length > 0) {
+          vehicleFiltered = cPermitProds;
+        }
+      }
+    } else if (isMotorcycle) {
+      vehicleFiltered = raw.filter((p) => {
         const name = (p.name || "").toLowerCase();
+        if (/lorry|truck|car\s*policy|private\s*car|saloon/.test(name)) return false;
         return /motorcycle|motor\s*cycle|bike|motor/.test(name);
       });
-      return filtered.length > 0 ? filtered : raw;
+    } else if (isCar) {
+      vehicleFiltered = raw.filter((p) => {
+        const name = (p.name || "").toLowerCase();
+        if (/motorcycle|motor\s*cycle|bike|lorry|truck|haulage/.test(name)) return false;
+        return true;
+      });
     }
-    return raw;
-  }, [companyWorkspace, workspace?.fields, workspace?.pinned.product_id]);
+
+    // Filter by Engine Type (EV vs ICE)
+    const evFiltered = vehicleFiltered.filter((p) => {
+      const isEvProduct = /\(ev\)|(\bev\b)|electric/i.test(p.name || "");
+      return isEv ? isEvProduct : !isEvProduct;
+    });
+
+    return evFiltered.length > 0 ? evFiltered : (vehicleFiltered.length > 0 ? vehicleFiltered : raw);
+  }, [companyWorkspace, workspace?.fields, formValues?.vehicle_type]);
 
   const tierOptions = useMemo(
     () => (companyWorkspace?.tiers || []).filter((tier) => tier.product_id === workspace?.pinned.product_id),
@@ -2519,7 +2551,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                         {productOptions.map((product) => {
                           const rawName = product.name || "";
                           let label = rawName;
-                          if (!/\((Comprehensive|TPFT|TPO|Third Party)\)/i.test(rawName)) {
+                          if (!/\b(Comprehensive|TPFT|TPO|Third Party)\b/i.test(rawName)) {
                             const lowerName = rawName.toLowerCase();
                             let covLabel = "Comprehensive";
                             if (lowerName.includes("tpft") || (lowerName.includes("third party") && lowerName.includes("fire"))) {
@@ -2719,10 +2751,28 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                           const newVtype = currentVal === "NonSaloonCar" ? "EVNonSaloonCar" : (currentVal.toLowerCase().includes("motor") ? "EVMotorcycle" : "EVSaloonCar");
                                           setFormValues((v) => ({ ...v, [field.name]: newVtype }));
                                           commitFieldDirectly(field.name, newVtype);
+                                          const companyProds = companyWorkspace?.products || [];
+                                          const matchingEv = companyProds.find((p) => {
+                                            const nm = (p.name || "").toLowerCase();
+                                            if (!/\(ev\)|(\bev\b)|electric/i.test(nm)) return false;
+                                            return newVtype.includes("Motor") ? /motor/i.test(nm) : !/motor/i.test(nm);
+                                          });
+                                          if (matchingEv && workspace?.pinned.company_id) {
+                                            pinCatalog(workspace.pinned.company_id as string, matchingEv.id);
+                                          }
                                         } else if (eng === "ICE" && isCurrentEV) {
                                           const newVtype = currentVal === "EVNonSaloonCar" ? "NonSaloonCar" : (currentVal === "EVMotorcycle" ? "Motorcycle" : "Car");
                                           setFormValues((v) => ({ ...v, [field.name]: newVtype }));
                                           commitFieldDirectly(field.name, newVtype);
+                                          const companyProds = companyWorkspace?.products || [];
+                                          const matchingIce = companyProds.find((p) => {
+                                            const nm = (p.name || "").toLowerCase();
+                                            if (/\(ev\)|(\bev\b)|electric/i.test(nm)) return false;
+                                            return newVtype.includes("Motor") ? /motor/i.test(nm) : !/motor/i.test(nm);
+                                          });
+                                          if (matchingIce && workspace?.pinned.company_id) {
+                                            pinCatalog(workspace.pinned.company_id as string, matchingIce.id);
+                                          }
                                         }
                                       }}
                                       className={`flex-1 py-1 text-center font-bold text-[11px] rounded-[3px] transition-all ${

@@ -591,24 +591,29 @@ def _dynamic_benefit_grid(
             badge_border = escape("#7F1D1D" if is_dark else ("#FECACA" if not element.get("costBgColor") else badge_bg))
 
             if p_val is not None and str(p_val).strip() and str(p_val).strip() not in {"0", "0.00", "0.0"}:
-                try:
-                    p_num = float(re.sub(r"[^0-9.]", "", str(p_val)))
-                    p_str = f"Cost : MYR {p_num:,.2f}"
-                except Exception:
-                    clean_pval = str(p_val).replace("RM ", "").replace("RM", "").strip()
-                    p_str = f"Cost : MYR {clean_pval}"
-                price_badge = (
-                    f'<div style="margin-top:2px"><span style="display:inline-block;padding:1px 5px;border-radius:4px;'
-                    f'font-size:{cost_fs}px;font-weight:700;line-height:1.2;white-space:nowrap;'
-                    f'background:{badge_bg};color:{badge_fg};border:1px solid {badge_border}">{p_str}</span></div>'
-                )
-            elif kind == "available_addons":
-                price_badge = (
-                    f'<div style="margin-top:2px"><span style="display:inline-block;padding:1px 5px;border-radius:4px;'
-                    f'font-size:{cost_fs}px;font-weight:700;line-height:1.2;white-space:nowrap;'
-                    f'background:{badge_bg};color:{badge_fg};'
-                    f'border:1px solid {badge_border}">Cost : As quoted</span></div>'
-                )
+                s_val = str(p_val).strip()
+                if "%" in s_val or "sum covered" in s_val.lower() or "sum insured" in s_val.lower() or "tariff" in s_val.lower():
+                    p_str = ""
+                else:
+                    try:
+                        clean_num = re.sub(r"[^0-9.]", "", s_val)
+                        if clean_num and float(clean_num) > 0:
+                            p_num = float(clean_num)
+                            p_str = f"Cost : MYR {p_num:,.2f}"
+                        else:
+                            p_str = ""
+                    except Exception:
+                        clean_pval = s_val.replace("RM ", "").replace("RM", "").strip()
+                        if clean_pval and clean_pval.lower() not in {"0", "0.00", "null", "none", "quoted"}:
+                            p_str = f"Cost : MYR {clean_pval}"
+                        else:
+                            p_str = ""
+                if p_str:
+                    price_badge = (
+                        f'<div style="margin-top:2px"><span style="display:inline-block;padding:1px 5px;border-radius:4px;'
+                        f'font-size:{cost_fs}px;font-weight:700;line-height:1.2;white-space:nowrap;'
+                        f'background:{badge_bg};color:{badge_fg};border:1px solid {badge_border}">{p_str}</span></div>'
+                    )
 
         # Title font: shrink for long labels
         title_fs = lbl_fs - 1.0 if len(label_str) > 30 else (lbl_fs - 0.5 if len(label_str) > 18 else float(lbl_fs))

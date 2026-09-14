@@ -297,7 +297,7 @@ def test_profile_lifecycle_crud_and_atomic_activation(db_session: Session):
 
     # Check that previous baseline is deactivated and archived
     db_session.refresh(base_prof)
-    assert base_prof.is_active is False
+    assert not base_prof.is_active
     assert base_prof.status == "archived"
 
     # Check that get_active_benefit_profile now returns v2
@@ -547,4 +547,98 @@ def test_catalog_mutation_schemas_extra_fields_and_kinds():
         client_timestamp="2026-09-14",
     )
     assert cat_req.engine_type == "ev"
+
+
+def test_company_benefit_config_baseline_cost_and_fallback(db_session: Session):
+    user = make_user("admin")
+    test_company = InsuranceCompany(
+        id=str(uuid4()),
+        name="Test Insurer",
+        status="active",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    db_session.add(test_company)
+    db_session.commit()
+
+    # 1. Create test concepts
+    c1 = BenefitConcept(
+        id=str(uuid4()),
+        concept_key="test_addon_cart",
+        label="CART",
+        description="Compensation for Assessed Repair Time",
+        status="active",
+        sort_order=1,
+    )
+    c2 = BenefitConcept(
+        id=str(uuid4()),
+        concept_key="test_windscreen",
+        label="Windscreen",
+        description="Windscreen damage",
+        status="active",
+        sort_order=2,
+    )
+    c3 = BenefitConcept(
+        id=str(uuid4()),
+        concept_key="test_dirty_price",
+        label="Dirty Price Concept",
+        description="Checks placeholder sanitization",
+        status="active",
+        sort_order=3,
+    )
+    db_session.add_all([c1, c2, c3])
+    db_session.commit()
+
+    active_prof = get_active_benefit_profile(db_session)
+
+    # 2. Update configs with costs: fixed amount, formula, and placeholder to sanitize
+    update_company_benefit_configs(db_session, user, test_company.id, [
+        {"concept_id": c1.id, "is_enabled": True, "baseline_cost": "RM 58.30"},
+        {"concept_id": c2.id, "is_enabled": True, "baseline_cost": "15% of Sum Covered"},
+        {"concept_id": c3.id, "is_enabled": True, "baseline_cost": "RM quoted"},  # should sanitize to None
+    ], profile_id=active_prof.id)
+
+    configs = get_company_benefit_configs(db_session, user, test_company.id, profile_id=active_prof.id)
+    cfg_map = {c["concept_id"]: c for c in configs}
+
+    assert cfg_map[c1.id]["baseline_cost"] == "RM 58.30"
+    assert cfg_map[c2.id]["baseline_cost"] == "15% of Sum Covered"
+    assert cfg_map[c3.id]["baseline_cost"] is None
+
+    # 3. Test cloning carries baseline_cost forward
+    cloned = clone_benefit_profile(db_session, user, active_prof.id, {"name": "Profile Clone With Costs"})
+    cloned_configs = get_company_benefit_configs(db_session, user, test_company.id, profile_id=cloned["id"])
+    cloned_map = {c["concept_id"]: c for c in cloned_configs}
+
+    assert cloned_map[c1.id]["baseline_cost"] == "RM 58.30"
+    assert cloned_map[c2.id]["baseline_cost"] == "15% of Sum Covered"
+
+    # 4. Test render_context resolution falls back to baseline_cost
+    company_configs = [
+        SimpleNamespace(concept_id=c1.id, is_enabled=True, baseline_description=None, baseline_cost="RM 58.30"),
+        SimpleNamespace(concept_id=c2.id, is_enabled=True, baseline_description=None, baseline_cost="15% of Sum Covered"),
+    ]
+    conc1 = SimpleNamespace(id=c1.id, concept_key="test_addon_cart", label="CART", description="CART desc", default_asset_id=None, display_overrides={})
+    conc2 = SimpleNamespace(id=c2.id, concept_key="test_windscreen", label="Windscreen", description="WS desc", default_asset_id=None, display_overrides={})
+    off1 = SimpleNamespace(id="off-1", concept_id=c1.id, status="active", offering_kind="optional", optional_price=None, role="addon_option", presentation_facet_ids=[], display_value=None, label_override=None, description_override=None, typed_value={"type": "string", "display_text": "7 Days"}, sort_order=1, offering_key="cart_off")
+    off2 = SimpleNamespace(id="off-2", concept_id=c2.id, status="active", offering_kind="optional", optional_price=None, role="addon_option", presentation_facet_ids=[], display_value=None, label_override=None, description_override=None, typed_value={"type": "money", "value": 1000}, sort_order=2, offering_key="ws_off")
+    sel1 = SimpleNamespace(id="sel-1", catalog_offering_id="off-1", concept_id=c1.id, state="available_addon", price=None, cost_status=None, evidence_snapshot={}, is_purchased_extra=False, typed_value_override=None, sort_order=1, selection_key="sel-1", item_kind="standard")
+    sel2 = SimpleNamespace(id="sel-2", catalog_offering_id="off-2", concept_id=c2.id, state="available_addon", price=None, cost_status=None, evidence_snapshot={}, is_purchased_extra=False, typed_value_override=None, sort_order=2, selection_key="sel-2", item_kind="standard")
+
+    res = resolve_benefit_cards(
+        selections=[sel1, sel2],
+        offerings=[off1, off2],
+        concepts=[conc1, conc2],
+        relations=[],
+        facets=[],
+        company_configs=company_configs,
+        eval_context={"windscreen_sum_covered": 1000},
+    )
+
+    addon_cards = {c["concept_key"]: c for c in res["available_addons"]}
+    # CART inherited baseline_cost 58.30
+    assert addon_cards["test_addon_cart"]["price"]["value"] == 58.30
+    # Windscreen evaluated 15% of 1,000 = 150.00
+    assert addon_cards["test_windscreen"]["price"]["value"] == 150.00
+
 

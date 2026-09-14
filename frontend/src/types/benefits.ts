@@ -111,7 +111,7 @@ export type OfferingSummary = {
   description_override?: string | null;
   display_value?: string | null;
   typed_value?: { type?: string; display_text?: string; [key: string]: unknown } | null;
-  optional_price?: { type?: string; value?: number; amount?: string | number; currency?: string } | null;
+  optional_price?: { type?: string; value?: number; amount?: string | number; currency?: string; display_text?: string; formula?: string; [key: string]: unknown } | null;
   source_document_id?: string | null;
   source_citation: Record<string, unknown>;
   source_aliases: string[];
@@ -154,6 +154,7 @@ export type CompanyBenefitConfig = {
   concept_id: string;
   is_enabled: boolean;
   baseline_description?: string | null;
+  baseline_cost?: string | null;
   concept?: ConceptSummary | null;
 };
 

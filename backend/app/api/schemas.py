@@ -331,6 +331,7 @@ class CompanyBenefitConfigItem(StrictRequest):
     concept_id: str
     is_enabled: bool = True
     baseline_description: str | None = Field(default=None, max_length=1000)
+    baseline_cost: str | None = Field(default=None, max_length=255)
 
 
 class CompanyBenefitConfigsUpdateRequest(StrictRequest):

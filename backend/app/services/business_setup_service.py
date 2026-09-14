@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import delete, func, or_, select, text, update
 
@@ -274,6 +275,11 @@ def _catalog(db, item: BenefitCatalog) -> dict:
         "vehicle_category_id": item.vehicle_category_id,
         "vehicle_subcategory_id": item.vehicle_subcategory_id,
         "coverage_type_id": item.coverage_type_id,
+        "coverage_type_key": (
+            "comprehensive" if str(item.coverage_type_id or "") == "d1111111-0000-4000-8000-000000000001"
+            else ("tpft" if str(item.coverage_type_id or "") == "d1111111-0000-4000-8000-000000000002"
+            else ("third_party" if str(item.coverage_type_id or "") == "d1111111-0000-4000-8000-000000000003" else None))
+        ),
         "engine_type": getattr(item, "engine_type", None) or "ice",
         "name": item.name,
         "revision": item.revision,
@@ -1069,6 +1075,16 @@ def _validate_assignment_context(db, catalog: BenefitCatalog, revision: BenefitC
     elif applies_type == "package" and applies_id is None:
         applies_id = catalog.package_id or (rev_packages[0].id if rev_packages else None)
 
+    # Database constraint catalog_offerings_applies_check requires:
+    # (applies_to_type IS NULL AND applies_to_id IS NULL) OR (applies_to_type IS NOT NULL AND applies_to_id IS NOT NULL)
+    if applies_type is not None and applies_id is None:
+        if applies_type == "product" and catalog.product_id:
+            applies_id = catalog.product_id
+        elif applies_type == "package" and (catalog.package_id or rev_packages):
+            applies_id = catalog.package_id or rev_packages[0].id
+        else:
+            applies_type = None
+
     if applies_type is not None and applies_type not in {"product", "package", "bundle"}:
         raise AppError("Assignment target type must be product, package, or bundle.", 422)
     if role is not None and role not in {"included", "addon_option", "bundle_component"}:
@@ -1076,8 +1092,9 @@ def _validate_assignment_context(db, catalog: BenefitCatalog, revision: BenefitC
     if applies_type is not None:
         if applies_type == "package":
             if not rev_packages and catalog.package_id is None:
-                raise AppError("This catalog has no package; assignments must be product-level.", 422)
-            if applies_id is None:
+                applies_type = "product"
+                applies_id = catalog.product_id
+            elif applies_id is None:
                 applies_id = catalog.package_id or (rev_packages[0].id if rev_packages else None)
             else:
                 package = db.get(BenefitPackage, applies_id)
@@ -1092,15 +1109,17 @@ def _validate_assignment_context(db, catalog: BenefitCatalog, revision: BenefitC
                         package = matched_pkg
                         applies_id = matched_pkg.id
                 if package is None or package.catalog_revision_id != revision.id or package.package_kind not in {"comprehensive", "tpft", "tpo"}:
-                    raise AppError("Choose a comprehensive package from this catalog's draft revision.", 422)
+                    raise AppError("Package assignment is invalid.", 422)
         elif applies_type == "bundle":
-            if catalog.package_id is None and not rev_packages:
-                raise AppError("Add-on bundles require a packaged catalog.", 422)
             bundle = db.get(BenefitPackage, applies_id) if applies_id else None
             if bundle is None or bundle.catalog_revision_id != revision.id or bundle.package_kind != "addon_bundle":
-                raise AppError("Choose an add-on bundle from this catalog's draft revision.", 422)
-        elif applies_type == "product" and is_catalog_packaged:
+                raise AppError("Bundle assignment is invalid.", 422)
+        elif applies_type == "product" and catalog.package_id is not None:
             raise AppError("This catalog is packaged; assign benefits to the package instead.", 422)
+
+    # Final safety invariant for catalog_offerings_applies_check
+    if applies_type is not None and applies_id is None:
+        applies_type = None
     optional_price = payload.get("optional_price")
     if optional_price is not None:
         if isinstance(optional_price, (int, float, str)):
@@ -1785,6 +1804,7 @@ def clone_benefit_profile(db, user, profile_id: str, payload: dict) -> dict:
                 concept_id=cfg.concept_id,
                 is_enabled=cfg.is_enabled,
                 baseline_description=cfg.baseline_description,
+                baseline_cost=cfg.baseline_cost,
                 created_at=utcnow(),
                 updated_at=utcnow(),
             )
@@ -1904,7 +1924,11 @@ def activate_benefit_profile(db, user, profile_id: str) -> dict:
     db.execute(
         update(BenefitProfile)
         .where(BenefitProfile.is_active.is_(True))
-        .values(is_active=False, status="archived", updated_at=utcnow())
+        .values({
+            BenefitProfile.is_active: False,
+            BenefitProfile.status: "archived",
+            BenefitProfile.updated_at: utcnow(),
+        })
     )
 
     target.is_active = True
@@ -1992,11 +2016,27 @@ def get_company_benefit_configs(db, user, company_id: str, profile_id: str | Non
             "concept_id": c.concept_id,
             "is_enabled": c.is_enabled,
             "baseline_description": c.baseline_description,
+            "baseline_cost": c.baseline_cost,
             "created_at": c.created_at.isoformat() if c.created_at else None,
             "updated_at": c.updated_at.isoformat() if c.updated_at else None,
         }
         for c in configs
     ]
+
+
+def _clean_baseline_cost(val: Any) -> str | None:
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s:
+        return None
+    lower = s.lower()
+    norm = re.sub(r"^(rm|myr)\s*", "", lower).strip()
+    if norm in {"", "0", "00", "0.0", "0.00", "null", "none", "quoted", "as quoted", "foc", "included"}:
+        return None
+    if lower in {"null", "none", "rm", "rm0", "rm00", "rm 0", "rm 0.0", "rm 0.00", "rm0.00", "rm quoted", "as quoted", "foc", "included"}:
+        return None
+    return s
 
 
 def update_company_benefit_configs(db, user, company_id: str, items: list[dict], profile_id: str | None = None) -> list[dict]:
@@ -2034,10 +2074,12 @@ def update_company_benefit_configs(db, user, company_id: str, items: list[dict],
         is_enabled = bool(item.get("is_enabled", True))
         desc_raw = item.get("baseline_description")
         desc = desc_raw.strip() if isinstance(desc_raw, str) and desc_raw.strip() else None
+        cost = _clean_baseline_cost(item.get("baseline_cost"))
 
         if cfg is not None:
             cfg.is_enabled = is_enabled
             cfg.baseline_description = desc
+            cfg.baseline_cost = cost
             cfg.updated_at = utcnow()
         else:
             cfg = CompanyBenefitConfig(
@@ -2047,6 +2089,7 @@ def update_company_benefit_configs(db, user, company_id: str, items: list[dict],
                 concept_id=concept_id,
                 is_enabled=is_enabled,
                 baseline_description=desc,
+                baseline_cost=cost,
                 created_at=utcnow(),
                 updated_at=utcnow(),
             )
@@ -2070,6 +2113,7 @@ def update_company_benefit_configs(db, user, company_id: str, items: list[dict],
             "concept_id": c.concept_id,
             "is_enabled": c.is_enabled,
             "baseline_description": c.baseline_description,
+            "baseline_cost": c.baseline_cost,
         }
         for c in results
     ]

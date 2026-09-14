@@ -73,7 +73,24 @@ def _resolve_vehicle_category(db, text_val: str, draft_fields: dict | None = Non
     normalized = _norm(all_text)
     categories = _rows(db, VehicleCategory)
 
-    # 1. Passenger Car (including popular models, body types, and brands)
+    # 1. Commercial Vehicle / Lorry (highest priority to prevent brand names like Mitsubishi/Hino/Volvo/Toyota from triggering car)
+    lorry_words = (
+        "lorry", "truck", "commercial", "rigid", "trailer", "tipper", "van", "bus", "prime mover",
+        "c permit", "a permit", "general haulage", "own goods", "isuzu npr", "isuzu nqr", "isuzu elf",
+        "hino", "fuso", "canter", "ud trucks", "scania", "sinotruk", "daihatsu delta", "toyota dyna"
+    )
+    if any(w in normalized for w in lorry_words):
+        for cat in categories:
+            if cat.category_key in {"commercial_vehicle", "lorry"}:
+                return cat.id
+
+    # 2. Motorcycle (explicit keywords only)
+    if any(w in normalized for w in ("motorcycle", "motor cycle", "motosikal", "moped", "kapcai", "scooter", "superbike", "yamaha", "honda ex5", "honda wave", "modenas", "sym", "vespa", "kawasaki")):
+        for cat in categories:
+            if cat.category_key == "motorcycle":
+                return cat.id
+
+    # 3. Passenger Car (including popular models, body types, and brands)
     car_words = (
         "car", "private car", "saloon", "sedan", "suv", "mpv", "hatchback", "coupe", "wagon", "passenger",
         "vellfire", "alphard", "myvi", "axia", "bezza", "alza", "ativa", "aruz", "vios", "city", "civic",
@@ -86,18 +103,6 @@ def _resolve_vehicle_category(db, text_val: str, draft_fields: dict | None = Non
     if any(w in normalized for w in car_words):
         for cat in categories:
             if cat.category_key in {"car", "private_car"}:
-                return cat.id
-
-    # 2. Motorcycle (explicit keywords only)
-    if any(w in normalized for w in ("motorcycle", "motor cycle", "motosikal", "moped", "kapcai", "scooter", "superbike", "yamaha", "honda ex5", "honda wave", "modenas", "sym", "vespa", "kawasaki")):
-        for cat in categories:
-            if cat.category_key == "motorcycle":
-                return cat.id
-
-    # 3. Commercial Vehicle / Lorry
-    if any(w in normalized for w in ("lorry", "truck", "commercial", "rigid", "trailer", "tipper", "van", "bus", "prime mover", "c permit", "a permit", "general haulage", "own goods", "isuzu npr", "hino", "fuso")):
-        for cat in categories:
-            if cat.category_key == "commercial_vehicle":
                 return cat.id
 
     for cat in categories:
@@ -190,7 +195,7 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
     from app.extraction.entity_classifier import classify_vehicle_ev_status
     cbrand = _field_value(draft.fields or {}, "vehicle_make", "make", "brand", "car_make")
     cmodel = _field_value(draft.fields or {}, "vehicle_model", "model", "car_model", "vehicle_description", "make_model")
-    cc_val = _field_value(draft.fields or {}, "engine_capacity", "cubic_capacity", "cc", "capacity")
+    cc_val = _field_value(draft.fields or {}, "engine_cc", "engine_capacity", "cubic_capacity", "cc", "capacity")
     is_ev, _ = classify_vehicle_ev_status(cbrand or "", cmodel or raw_vehicle or "", cc_val or "")
 
     # 2. Resolve product
@@ -234,18 +239,18 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
             if matching_v:
                 candidate_products = matching_v
         if not resolved_vehicle_cat_id or len(candidate_products) > 1:
-            if any(w in raw_v_text for w in ("car", "saloon", "vellfire", "toyota", "proton", "perodua", "honda", "sedan", "suv", "mpv", "private")):
-                car_prods = [p for p in candidate_products if ("car" in p.name.lower() or "auto365" in p.name.lower() or "private" in p.name.lower()) and "motorcycle" not in p.name.lower() and "lorry" not in p.name.lower()]
-                if car_prods:
-                    candidate_products = car_prods
-            elif any(w in raw_v_text for w in ("motorcycle", "bike", "yamaha", "honda ex5")):
+            if any(w in raw_v_text for w in ("lorry", "truck", "commercial", "rigid", "trailer", "tipper", "prime mover", "c permit", "a permit", "haulage", "isuzu npr", "hino", "fuso", "canter", "ud trucks")):
+                lorry_prods = [p for p in candidate_products if "lorry" in p.name.lower() or "haulage" in p.name.lower() or "commercial vehicle" in p.name.lower()]
+                if lorry_prods:
+                    candidate_products = lorry_prods
+            elif any(w in raw_v_text for w in ("motorcycle", "bike", "yamaha", "honda ex5", "motosikal")):
                 bike_prods = [p for p in candidate_products if "motorcycle" in p.name.lower() or "bike" in p.name.lower()]
                 if bike_prods:
                     candidate_products = bike_prods
-            elif any(w in raw_v_text for w in ("lorry", "truck", "isuzu", "hino", "haulage")):
-                lorry_prods = [p for p in candidate_products if "lorry" in p.name.lower() or "haulage" in p.name.lower()]
-                if lorry_prods:
-                    candidate_products = lorry_prods
+            elif any(w in raw_v_text for w in ("car", "saloon", "vellfire", "toyota", "proton", "perodua", "honda", "sedan", "suv", "mpv", "private")):
+                car_prods = [p for p in candidate_products if ("car" in p.name.lower() or "auto365" in p.name.lower() or "private" in p.name.lower()) and "motorcycle" not in p.name.lower() and "lorry" not in p.name.lower()]
+                if car_prods:
+                    candidate_products = car_prods
 
         raw_cov_text = (raw_coverage or "").lower()
         if "tpft" in raw_cov_text or "fire" in raw_cov_text:
@@ -811,12 +816,47 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
             if matched is not None:
                 selection_id = new_id()
                 price_dict = None
+                has_pos_cost = False
                 if premium_cost:
                     clean_p = str(premium_cost).upper().replace("RM", "").replace(",", "").strip()
-                    val_num = float(clean_p) if any(c.isdigit() for c in clean_p) else clean_p
-                    price_dict = {"type": "money", "value": val_num, "amount": val_num, "currency": "MYR"}
-                elif matched.optional_price:
-                    price_dict = deepcopy(matched.optional_price)
+                    try:
+                        val_num = float(clean_p)
+                        if val_num > 0:
+                            has_pos_cost = True
+                            price_dict = {"type": "money", "value": val_num, "amount": val_num, "currency": "MYR"}
+                    except ValueError:
+                        pass
+                
+                is_explicitly_included = False
+                ev_candidates = [
+                    cov_limit,
+                    line.evidence.get("evidence") if isinstance(line.evidence, dict) else None,
+                    line.evidence.get("text") if isinstance(line.evidence, dict) else None,
+                ]
+                for m in list(line.candidate_mappings or []):
+                    if isinstance(m, dict) and m.get("evidence"):
+                        ev_candidates.append(m.get("evidence"))
+                for ev_val in ev_candidates:
+                    if ev_val and str(ev_val).strip().lower() in {"included", "foc", "free", "standard", "complimentary", "base"}:
+                        is_explicitly_included = True
+                        break
+
+                is_line_optional = getattr(line, "is_optional_cover", None)
+                if is_line_optional is None and isinstance(line, dict):
+                    is_line_optional = line.get("is_optional_cover")
+
+                if has_pos_cost:
+                    cost_status = "paid"
+                elif is_explicitly_included:
+                    cost_status = "included"
+                elif matched and (matched.offering_kind == "base" or matched.role == "included"):
+                    cost_status = "included"
+                elif matched and (matched.offering_kind in {"optional", "upgrade"} or matched.role in {"addon_option", "bundle_component"}):
+                    cost_status = "paid"
+                    if not price_dict and matched.optional_price:
+                        price_dict = deepcopy(matched.optional_price)
+                else:
+                    cost_status = "included"
 
                 new_selection = DraftBenefitSelection(
                     id=selection_id,
@@ -826,7 +866,7 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     concept_id=target_concept_id,
                     item_kind="catalog",
                     state="current",
-                    cost_status="paid",
+                    cost_status=cost_status,
                     label_override=matched.label_override if (matched and matched.label_override) else None,
                     typed_value_override=typed_val if (typed_val and not _value_matches(matched.typed_value, typed_val)) else None,
                     evidence_snapshot={"source_line_id": line.id, "source": "extracted_addon", "is_detected": True, "extracted_label": line.raw_label, "coverage_limit": cov_limit, "premium_cost": premium_cost},
@@ -851,9 +891,20 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
 
                 selection_id = new_id()
                 price_dict = None
+                has_pos_cost = False
                 if has_cost:
                     clean_p = str(premium_cost).upper().replace("RM", "").replace(",", "").strip()
-                    price_dict = {"amount": float(clean_p) if any(c.isdigit() for c in clean_p) else clean_p, "currency": "MYR"}
+                    try:
+                        val_num = float(clean_p)
+                        if val_num > 0:
+                            has_pos_cost = True
+                            price_dict = {"amount": val_num, "currency": "MYR"}
+                    except ValueError:
+                        pass
+
+                is_line_optional = getattr(line, "is_optional_cover", None)
+                if is_line_optional is None and isinstance(line, dict):
+                    is_line_optional = line.get("is_optional_cover")
 
                 custom_label = (line.raw_label or "").strip()
                 if not custom_label and target_concept_id and str(target_concept_id) in all_concepts:
@@ -869,7 +920,7 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     concept_id=target_concept_id,
                     item_kind="custom",
                     state="current",
-                    cost_status="paid" if has_cost else "included",
+                    cost_status="paid" if has_pos_cost else "included",
                     label_override=custom_label,
                     typed_value_override=typed_val,
                     evidence_snapshot={"source_line_id": line.id, "source": "extracted_custom", "is_detected": True, "extracted_label": line.raw_label, "coverage_limit": cov_limit, "premium_cost": premium_cost},
@@ -883,6 +934,7 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                 decision.disposition = "mapped"
                 decision.selection_id = selection_id
                 continue
+
         if decision.disposition == "unresolved":
             decision.disposition = "source_only"
 

@@ -1006,6 +1006,8 @@ class BenefitProfile(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="draft")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
     configs: Mapped[list["CompanyBenefitConfig"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
     conditions: Mapped[list["CompanyBenefitCondition"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
@@ -1027,6 +1029,7 @@ class CompanyBenefitConfig(Base, TimestampMixin):
     concept_id: Mapped[str] = mapped_column(ForeignKey("benefit_concepts.id", ondelete="CASCADE"), nullable=False, index=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     baseline_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    baseline_cost: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     company: Mapped["InsuranceCompany"] = relationship()
     profile: Mapped[BenefitProfile | None] = relationship(back_populates="configs")

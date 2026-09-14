@@ -271,8 +271,18 @@ def classify_client_entity(
     # Check EV status first
     is_ev, ev_category = classify_vehicle_ev_status(car_brand, car_model, capacity_str)
     curr_vtype_lower = curr_vtype.lower()
+    combined_vehicle_text = f"{car_brand or ''} {car_model or ''} {curr_vtype_lower}".lower()
 
-    if is_ev and ev_category:
+    is_lorry = any(w in combined_vehicle_text for w in (
+        "lorry", "truck", "hino", "fuso", "canter", "rigid", "trailer", "tipper",
+        "prime mover", "c permit", "a permit", "haulage", "commercial vehicle",
+        "isuzu npr", "isuzu nqr", "isuzu elf", "ud trucks", "scania", "sinotruk",
+        "daihatsu delta", "toyota dyna"
+    ))
+
+    if is_lorry:
+        base_category = "Lorry"
+    elif is_ev and ev_category:
         base_category = ev_category
     elif "evsaloon" in curr_vtype_lower:
         base_category = "EVSaloonCar"
@@ -280,12 +290,10 @@ def classify_client_entity(
         base_category = "EVNonSaloonCar"
     elif "evmotor" in curr_vtype_lower:
         base_category = "EVMotorcycle"
+    elif "motor" in combined_vehicle_text or "bike" in combined_vehicle_text or "motosikal" in combined_vehicle_text:
+        base_category = "Motorcycle"
     elif is_non_saloon_model(car_model) or "nonsaloon" in curr_vtype_lower or "non-saloon" in curr_vtype_lower or "suv" in curr_vtype_lower or "mpv" in curr_vtype_lower:
         base_category = "NonSaloonCar"
-    elif "motor" in curr_vtype_lower or "bike" in curr_vtype_lower:
-        base_category = "Motorcycle"
-    elif "lorry" in curr_vtype_lower or "truck" in curr_vtype_lower or "commercial" in curr_vtype_lower:
-        base_category = "Lorry"
     elif "other" in curr_vtype_lower:
         base_category = "Others"
     else:

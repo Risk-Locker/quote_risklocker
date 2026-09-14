@@ -116,8 +116,8 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
   2. *Workspace Suggestions*: `backend/app/services/workspace_service.py:suggest_workspace_actions` scopes configs to active global profile.
   3. *Available Cards Suppression*: `backend/app/rendering/render_context.py:resolve_benefit_cards` suppresses disabled concepts from available cards/add-ons while strictly preserving customer-purchased extras (`item_kind == 'extra'`, `state == 'current'`).
   4. *PDF Generation*: `backend/app/services/generation_service.py:generate_quotation_pdf` scopes to active global profile.
-- **Frontend Cockpit**: Top Profile Bar in `frontend/src/app/builder/benefits/page.tsx` acts as global version switcher across all 4 cockpit tabs and all insurers, with status badges (`Active Master`, `Draft`, `Archived`), atomic activation button, clone modal dialog, draft deletion, and amber `"Excluded"` badge on Tab 2 offerings.
-- **Hermetic Test Suite**: `tests/test_company_benefit_profiles.py` covering global profile schemas, auto-provisioning, multi-company deep-clone, lifecycle CRUD, atomic activation, archived immutability, review seeding cascade exclusion, and render context suppression.
+- **Frontend Cockpit**: Top Profile Bar in `frontend/src/app/builder/benefits/page.tsx` acts as global version switcher across all 4 cockpit tabs and all insurers, with status badges (`Active Master`, `Draft`, `Archived`), atomic activation button, clone modal dialog, draft deletion, amber `"Excluded"` badge on Tab 2 offerings, and editable `"Default Price / Cost"` column with FOC badges and dynamic formula rate display.
+- **Hermetic Test Suite**: `tests/test_company_benefit_profiles.py` covering global profile schemas, auto-provisioning, multi-company deep-clone, lifecycle CRUD, atomic activation, archived immutability, review seeding cascade exclusion, render context suppression, and baseline cost CRUD/sanitization/fallback.
 
 ## Benefit Configuration Matrix
 
@@ -195,8 +195,13 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 
 - `.github/workflows/deploy.yml` — on push to `main`: backend pytest + frontend `tsc --noEmit` + `next build` on GitHub, then rsync to the VPS, install deps, run migrations, `pm2 startOrReload`.
 - `ecosystem.config.cjs` — PM2 apps `rl-quote-api`, `rl-quote-worker`, `rl-quote-frontend`; paths from `RL_DEPLOY_PATH`.
-- `deploy/nginx-quote-risklocker.conf` — nginx reverse proxy template for `quote.risklocker.com` (certbot adds TLS).
 - `deploy/setup-vps.sh` — idempotent one-time VPS bootstrap (system packages, venv, Chromium, build, migrations, nginx, certbot, PM2 startup).
+
+## Benefit Profiles v2 & Dedicated EV Catalogs Additions
+
+- Migration `migrations/046_add_baseline_cost_to_company_benefit_configs.sql`: adds `baseline_cost JSONB` to `company_benefit_configs` for baseline rider pricing.
+- Seeding & Maintenance: `commands/seed-company-benefit-costs.py` (baseline pricing), `commands/seed-profile-v2-from-current-benefits.py` (active profile v2 sync), `commands/seed-ev-catalogs-and-dedup-sompo.py` (comprehensive EV coverage for all 7 insurers + Sompo product deduplication), and `commands/repair-ev-and-sompo-sessions.py` (session repair and complimentary benefit cost_status fix).
+- EV Review Filtering: `frontend/src/components/session-workspace/review-phase.tsx` dynamically filters EV vs ICE products based on session fuel type, engine capacity (kW), and model, preventing product duplication.
 
 ## Navigation
 

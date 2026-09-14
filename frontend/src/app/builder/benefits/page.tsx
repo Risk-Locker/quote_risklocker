@@ -303,6 +303,7 @@ function BenefitsPageContent() {
   const [configsSaving, setConfigsSaving] = useState(false);
   const [configsSearch, setConfigsSearch] = useState("");
   const [configsCategoryFilter, setConfigsCategoryFilter] = useState<"all" | "default" | "addon">("all");
+  const [customizingCostIds, setCustomizingCostIds] = useState<Set<string>>(new Set());
 
   // Tab 3: Company Conditions state
   const [companyConditions, setCompanyConditions] = useState<CompanyBenefitCondition[]>([]);
@@ -415,11 +416,20 @@ function BenefitsPageContent() {
       const url = selectedProfileId
         ? `/business/companies/${selectedCompanyId}/benefit-configs?profile_id=${encodeURIComponent(selectedProfileId)}`
         : `/business/companies/${selectedCompanyId}/benefit-configs`;
-      const payloadItems = companyConfigs.map((c) => ({
-        concept_id: c.concept_id,
-        is_enabled: c.is_enabled,
-        baseline_description: c.baseline_description ?? null,
-      }));
+      const payloadItems = companyConfigs.map((c) => {
+        const rawCost = typeof c.baseline_cost === "string" ? c.baseline_cost.trim() : "";
+        const lower = rawCost.toLowerCase();
+        const norm = lower.replace(/^(rm|myr)\s*/, "").trim();
+        const cleanCost = (!rawCost || ["", "0", "00", "0.0", "0.00", "null", "none", "quoted", "as quoted", "foc", "included"].includes(norm) || ["null", "none", "rm", "rm0", "rm00", "rm 0", "rm 0.0", "rm 0.00", "rm0.00", "rm quoted", "as quoted", "foc", "included"].includes(lower))
+          ? null
+          : rawCost;
+        return {
+          concept_id: c.concept_id,
+          is_enabled: c.is_enabled,
+          baseline_description: c.baseline_description ?? null,
+          baseline_cost: cleanCost,
+        };
+      });
       const res = await api<{ configs: CompanyBenefitConfig[] }>(url, {
         method: "PUT",
         body: JSON.stringify({ items: payloadItems, configs: payloadItems }),
@@ -785,6 +795,28 @@ ${aiMarkdownTable}`;
     return new Set(companyConfigs.filter((c) => c.is_enabled).map((c) => c.concept_id));
   }, [companyConfigs]);
 
+  // Lookup map of company baseline costs for catalog offering price fallbacks
+  const baselineCostMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of companyConfigs || []) {
+      if (c.concept_id && c.baseline_cost && c.baseline_cost.trim()) {
+        map.set(c.concept_id, c.baseline_cost.trim());
+      }
+    }
+    return map;
+  }, [companyConfigs]);
+
+  // Lookup map of company baseline descriptions for catalog offering description fallbacks
+  const baselineDescMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of companyConfigs || []) {
+      if (c.concept_id && c.baseline_description && c.baseline_description.trim()) {
+        map.set(c.concept_id, c.baseline_description.trim());
+      }
+    }
+    return map;
+  }, [companyConfigs]);
+
 
   const toggleConfigEnabled = useCallback((conceptId: string, enabled: boolean) => {
     setCompanyConfigs((prev) => {
@@ -825,6 +857,30 @@ ${aiMarkdownTable}`;
           concept_id: conceptId,
           is_enabled: true,
           baseline_description: text,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ];
+    });
+  }, [selectedCompanyId]);
+
+  const updateConfigBaselineCost = useCallback((conceptId: string, cost: string) => {
+    setCompanyConfigs((prev) => {
+      const idx = prev.findIndex((item) => item.concept_id === conceptId);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = { ...copy[idx], baseline_cost: cost };
+        return copy;
+      }
+      return [
+        ...prev,
+        {
+          id: `temp-${conceptId}`,
+          company_id: selectedCompanyId,
+          concept_id: conceptId,
+          is_enabled: true,
+          baseline_description: null,
+          baseline_cost: cost,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         },
@@ -887,6 +943,7 @@ ${aiMarkdownTable}`;
           config: cfg,
           isEnabled: cfg ? cfg.is_enabled : true,
           baselineDescription: cfg?.baseline_description ?? null,
+          baselineCost: cfg?.baseline_cost ?? null,
         };
       })
       .sort((a, b) => {
@@ -898,10 +955,33 @@ ${aiMarkdownTable}`;
   }, [concepts, companyConfigs, configsCategoryFilter, configsSearch]);
 
   const productConfigs = useMemo(() => {
+    const matchesCoverage = (cat: any, filter: "comprehensive" | "tpft" | "tpo") => {
+      const covId = String(cat.coverage_type_id || "").toLowerCase();
+      const covKey = String(cat.coverage_type_key || "").toLowerCase();
+      const catName = String(cat.name || "").toLowerCase();
+      const pkgKind = String(cat.package?.package_kind || "").toLowerCase();
+
+      if (filter === "comprehensive") {
+        if (covId === "d1111111-0000-4000-8000-000000000001" || covKey === "comprehensive" || pkgKind === "comprehensive") return true;
+        if (covId === "d1111111-0000-4000-8000-000000000002" || covId === "d1111111-0000-4000-8000-000000000003") return false;
+        if (catName.includes("tpft") || catName.includes("third party")) return false;
+        return true;
+      }
+      if (filter === "tpft") {
+        if (covId === "d1111111-0000-4000-8000-000000000002" || covKey === "tpft" || pkgKind === "tpft") return true;
+        return catName.includes("tpft") || catName.includes("third party fire") || catName.includes("third party, fire");
+      }
+      if (filter === "tpo") {
+        if (covId === "d1111111-0000-4000-8000-000000000003" || covKey === "third_party" || pkgKind === "tpo" || pkgKind === "third_party") return true;
+        return catName.includes("third party") && !catName.includes("fire") && !catName.includes("theft");
+      }
+      return true;
+    };
+
     const items = (companyWorkspace?.catalogs || []).filter(
       (item) => !item.tier_id && 
       (!selectedProductId || !item.product_id || item.product_id === selectedProductId) &&
-      (!item.package || item.package.package_kind === builderCoverageFilter) &&
+      matchesCoverage(item, builderCoverageFilter) &&
       ((item.engine_type || "ice") === selectedEngineType)
     );
     return items.sort((a, b) => {
@@ -1384,14 +1464,20 @@ ${aiMarkdownTable}`;
 
   // ── Inline Price / Cost Editor (Optimistic UI, Zero Reload) ───────────
   async function updateOfferingPriceInline(offering: Offering, newPriceStr: string) {
-
-    enqueueTask(async () => {    if (!selectedCatalog || !catalogWorkspace) return;
-    setSaving(true);
-    setError("");
-    const prevOfferings = catalogWorkspace.offerings;
-    const cleanStr = newPriceStr.replace(/RM/i, "").replace(/,/g, "").trim();
-    const num = cleanStr ? parseFloat(cleanStr) : null;
-    const priceObj = num !== null && !isNaN(num) && num > 0 ? { type: "money", value: num, currency: "MYR" } : null;
+    enqueueTask(async () => {
+      if (!selectedCatalog || !catalogWorkspace) return;
+      setSaving(true);
+      setError("");
+      const prevOfferings = catalogWorkspace.offerings;
+    const trimmed = newPriceStr.trim();
+    let priceObj: any = null;
+    if (trimmed.includes("%")) {
+      priceObj = { type: "formula", formula: trimmed, display_text: trimmed };
+    } else {
+      const cleanStr = trimmed.replace(/RM/i, "").replace(/,/g, "").trim();
+      const num = cleanStr ? parseFloat(cleanStr) : null;
+      priceObj = num !== null && !isNaN(num) && num > 0 ? { type: "money", value: num, currency: "MYR" } : null;
+    }
 
     setCatalogWorkspace((prev) => {
       if (!prev) return prev;
@@ -2412,22 +2498,25 @@ ${aiMarkdownTable}`;
                         <th className="w-12 px-4 py-3 text-center text-[11px] font-bold uppercase tracking-wider">
                           Active
                         </th>
-                        <th className="w-[30%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                        <th className="w-[24%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
                           Global Benefit Concept
                         </th>
-                        <th className="w-[45%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                        <th className="w-[34%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
                           Insurer Baseline Short Description (Used in Quotation Cards)
                         </th>
-                        <th className="w-[15%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
-                          Global Default Fallback
+                        <th className="w-[22%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                          Default Price / Cost (Catalog Baseline)
                         </th>
-                        <th className="w-[10%] px-4 py-3 text-center text-[11px] font-bold uppercase tracking-wider">
+                        <th className="w-[12%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                          Global Fallback
+                        </th>
+                        <th className="w-16 px-4 py-3 text-center text-[11px] font-bold uppercase tracking-wider">
                           Status
                         </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[var(--rl-border)]/70 bg-[var(--rl-surface)]">
-                      {filteredCompanyBenefitRows.map(({ concept: c, isEnabled, baselineDescription }) => {
+                      {filteredCompanyBenefitRows.map(({ concept: c, isEnabled, baselineDescription, baselineCost }) => {
                         const isDefault = c.category === "default" || (c.sort_order !== undefined && c.sort_order <= 11);
                         const hasCustom = Boolean(baselineDescription && baselineDescription.trim() && baselineDescription.trim() !== (c.description || "").trim());
 
@@ -2493,6 +2582,79 @@ ${aiMarkdownTable}`;
                                     </button>
                                   )}
                                 </div>
+                              </div>
+                            </td>
+
+                            {/* Default Price / Cost */}
+                            <td className="px-4 py-3 align-top">
+                              <div className="space-y-1">
+                                {isDefault && !baselineCost && !customizingCostIds.has(c.id) ? (
+                                  <div className="flex items-center gap-2 pt-1">
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                      Included (FOC)
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setCustomizingCostIds((prev) => new Set(prev).add(c.id))}
+                                      className="text-[10px] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] underline"
+                                      title="Click to enter a custom cost override"
+                                    >
+                                      Customize
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <Input
+                                      value={baselineCost ?? ""}
+                                      onChange={(e) => updateConfigBaselineCost(c.id, e.target.value)}
+                                      onBlur={() => {
+                                        if (!baselineCost || !baselineCost.trim()) {
+                                          setCustomizingCostIds((prev) => {
+                                            const next = new Set(prev);
+                                            next.delete(c.id);
+                                            return next;
+                                          });
+                                        }
+                                      }}
+                                      placeholder={
+                                        isDefault
+                                          ? "e.g. RM 50.00"
+                                          : c.concept_key === "windscreen"
+                                          ? "15% of Sum Covered"
+                                          : "e.g. RM 20.00 or 15% of Sum Covered"
+                                      }
+                                      disabled={!isEnabled}
+                                      className="text-xs h-8 bg-[var(--rl-bg)] focus:bg-[var(--rl-surface)] border-[var(--rl-border)] font-medium font-mono"
+                                    />
+                                    <div className="flex items-center justify-between text-[10px] text-[var(--rl-text-muted)]">
+                                      <span>
+                                        {c.concept_key === "windscreen"
+                                          ? "Formula: 15% of Sum Covered"
+                                          : baselineCost?.includes("%")
+                                          ? "Tariff formula (% rate)"
+                                          : isDefault
+                                          ? "Free default (leave blank for FOC)"
+                                          : "Base add-on cost"}
+                                      </span>
+                                      {(baselineCost || customizingCostIds.has(c.id)) && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            updateConfigBaselineCost(c.id, "");
+                                            setCustomizingCostIds((prev) => {
+                                              const next = new Set(prev);
+                                              next.delete(c.id);
+                                              return next;
+                                            });
+                                          }}
+                                          className="text-red-600 hover:underline font-semibold"
+                                        >
+                                          Clear
+                                        </button>
+                                      )}
+                                    </div>
+                                  </>
+                                )}
                               </div>
                             </td>
 
@@ -3320,14 +3482,22 @@ ${aiMarkdownTable}`;
                             />
                             <input
                               type="text"
-                              defaultValue={offering?.optional_price?.value ? `RM ${Number(offering.optional_price.value).toFixed(2)}` : (offering?.optional_price?.amount ? `RM ${offering.optional_price.amount}` : "")}
+                              defaultValue={
+                                offering?.optional_price?.type === "formula"
+                                  ? (offering.optional_price.display_text || offering.optional_price.formula || "")
+                                  : (offering?.optional_price?.value
+                                    ? `RM ${Number(offering.optional_price.value).toFixed(2)}`
+                                    : (offering?.optional_price?.amount ? `RM ${offering.optional_price.amount}` : ""))
+                              }
                               onClick={(e) => e.stopPropagation()}
                               onBlur={(e) => {
                                 if (offering) updateOfferingPriceInline(offering, e.target.value);
                               }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-red)] w-16 text-right shrink-0"
-                              placeholder="RM 0"
-                              title="Cost / Price (empty if free)"
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-red)] w-20 text-right shrink-0"
+                              placeholder={
+                                (offering?.concept_id ? baselineCostMap.get(offering.concept_id) : null) || "Free"
+                              }
+                              title="Cost / Price (empty for catalog baseline)"
                             />
                           </>
                         ) : (
@@ -3336,14 +3506,21 @@ ${aiMarkdownTable}`;
                         <span className="text-[10px] font-semibold text-[var(--rl-text-muted)] shrink-0">Default</span>
                       </div>
 
-                      {isActive ? (
+                      {isActive ? (() => {
+                        const companyBaselineDesc = offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null;
+                        const activeDesc = companyBaselineDesc || offering?.description_override || concept.description || "";
+                        return (
                         <div className="mt-2 pt-1.5 border-t border-[var(--rl-border)]/50 space-y-1" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-between text-[10px]">
                             <span className="text-[var(--rl-text-muted)] font-medium">Description:</span>
-                            {offering?.description_override ? (
+                            {companyBaselineDesc ? (
+                              <span className="rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-1 py-0.2 text-[9.5px] font-semibold" title="Inherited from Tab 1 Company Baseline">
+                                Company Baseline
+                              </span>
+                            ) : offering?.description_override ? (
                               <div className="flex items-center gap-1">
-                                <span className="rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-1 py-0.2 text-[9.5px] font-semibold">
-                                  Custom (Company)
+                                <span className="rounded bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 px-1 py-0.2 text-[9.5px] font-semibold">
+                                  Catalog Custom
                                 </span>
                                 <button
                                   type="button"
@@ -3364,8 +3541,8 @@ ${aiMarkdownTable}`;
                           </div>
                           <input
                             type="text"
-                            defaultValue={offering?.description_override ?? concept.description ?? ""}
-                            key={`${offering?.id}-${offering?.description_override || "default"}`}
+                            defaultValue={activeDesc}
+                            key={`${offering?.id}-${activeDesc}`}
                             onBlur={(e) => {
                               if (offering) {
                                 const val = e.target.value.trim();
@@ -3376,16 +3553,20 @@ ${aiMarkdownTable}`;
                               }
                             }}
                             className="w-full rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[10.5px] text-[var(--rl-text-strong)] placeholder:text-[var(--rl-text-muted)] placeholder:italic focus:outline-none focus:ring-1 focus:ring-[var(--rl-black)]"
-                            placeholder={concept.description || "Enter short description..."}
+                            placeholder={companyBaselineDesc || concept.description || "Enter short description..."}
                             title="Short benefit description shown on quote cards"
                           />
                         </div>
-                      ) : (
-                        concept.description ? (
-                          <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] truncate" title={concept.description}>
-                            {concept.description}
-                          </div>
-                        ) : null
+                        );
+                      })() : (
+                        (() => {
+                          const fallbackDesc = (offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null) || concept.description;
+                          return fallbackDesc ? (
+                            <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] truncate" title={fallbackDesc}>
+                              {fallbackDesc}
+                            </div>
+                          ) : null;
+                        })()
                       )}
                     </div>
                   );
@@ -3509,14 +3690,22 @@ ${aiMarkdownTable}`;
                             />
                             <input
                               type="text"
-                              defaultValue={offering?.optional_price?.value ? `RM ${Number(offering.optional_price.value).toFixed(2)}` : (offering?.optional_price?.amount ? `RM ${offering.optional_price.amount}` : "")}
+                              defaultValue={
+                                offering?.optional_price?.type === "formula"
+                                  ? (offering.optional_price.display_text || offering.optional_price.formula || "")
+                                  : (offering?.optional_price?.value
+                                    ? `RM ${Number(offering.optional_price.value).toFixed(2)}`
+                                    : (offering?.optional_price?.amount ? `RM ${offering.optional_price.amount}` : ""))
+                              }
                               onClick={(e) => e.stopPropagation()}
                               onBlur={(e) => {
                                 if (offering) updateOfferingPriceInline(offering, e.target.value);
                               }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-red)] w-16 text-right shrink-0"
-                              placeholder="RM 0"
-                              title="Cost / Price (empty if free)"
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-red)] w-20 text-right shrink-0"
+                              placeholder={
+                                (offering?.concept_id ? baselineCostMap.get(offering.concept_id) : null) || "Optional"
+                              }
+                              title="Cost / Price (empty for catalog baseline)"
                             />
                           </>
                         ) : (
@@ -3525,14 +3714,21 @@ ${aiMarkdownTable}`;
                         <span className="text-[10px] font-semibold text-[var(--rl-text-muted)] shrink-0">Add-on</span>
                       </div>
 
-                      {isActive ? (
+                      {isActive ? (() => {
+                        const companyBaselineDesc = offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null;
+                        const activeDesc = companyBaselineDesc || offering?.description_override || concept.description || "";
+                        return (
                         <div className="mt-2 pt-1.5 border-t border-[var(--rl-border)]/50 space-y-1" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-between text-[10px]">
                             <span className="text-[var(--rl-text-muted)] font-medium">Description:</span>
-                            {offering?.description_override ? (
+                            {companyBaselineDesc ? (
+                              <span className="rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-1 py-0.2 text-[9.5px] font-semibold" title="Inherited from Tab 1 Company Baseline">
+                                Company Baseline
+                              </span>
+                            ) : offering?.description_override ? (
                               <div className="flex items-center gap-1">
-                                <span className="rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-1 py-0.2 text-[9.5px] font-semibold">
-                                  Custom (Company)
+                                <span className="rounded bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 px-1 py-0.2 text-[9.5px] font-semibold">
+                                  Catalog Custom
                                 </span>
                                 <button
                                   type="button"
@@ -3553,8 +3749,8 @@ ${aiMarkdownTable}`;
                           </div>
                           <input
                             type="text"
-                            defaultValue={offering?.description_override ?? concept.description ?? ""}
-                            key={`${offering?.id}-${offering?.description_override || "default"}`}
+                            defaultValue={activeDesc}
+                            key={`${offering?.id}-${activeDesc}`}
                             onBlur={(e) => {
                               if (offering) {
                                 const val = e.target.value.trim();
@@ -3565,16 +3761,20 @@ ${aiMarkdownTable}`;
                               }
                             }}
                             className="w-full rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[10.5px] text-[var(--rl-text-strong)] placeholder:text-[var(--rl-text-muted)] placeholder:italic focus:outline-none focus:ring-1 focus:ring-[var(--rl-black)]"
-                            placeholder={concept.description || "Enter short description..."}
+                            placeholder={companyBaselineDesc || concept.description || "Enter short description..."}
                             title="Short benefit description shown on quote cards"
                           />
                         </div>
-                      ) : (
-                        concept.description ? (
-                          <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] truncate" title={concept.description}>
-                            {concept.description}
-                          </div>
-                        ) : null
+                        );
+                      })() : (
+                        (() => {
+                          const fallbackDesc = (offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null) || concept.description;
+                          return fallbackDesc ? (
+                            <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] truncate" title={fallbackDesc}>
+                              {fallbackDesc}
+                            </div>
+                          ) : null;
+                        })()
                       )}
                     </div>
                   );
@@ -3749,14 +3949,22 @@ ${aiMarkdownTable}`;
                             />
                             <input
                               type="text"
-                              defaultValue={offering?.optional_price?.value ? `RM ${Number(offering.optional_price.value).toFixed(2)}` : (offering?.optional_price?.amount ? `RM ${offering.optional_price.amount}` : "")}
+                              defaultValue={
+                                offering?.optional_price?.type === "formula"
+                                  ? (offering.optional_price.display_text || offering.optional_price.formula || "")
+                                  : (offering?.optional_price?.value
+                                    ? `RM ${Number(offering.optional_price.value).toFixed(2)}`
+                                    : (offering?.optional_price?.amount ? `RM ${offering.optional_price.amount}` : ""))
+                              }
                               onClick={(e) => e.stopPropagation()}
                               onBlur={(e) => {
                                 if (offering) updateOfferingPriceInline(offering, e.target.value);
                               }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-red)] w-16 text-right shrink-0"
-                              placeholder="RM 0"
-                              title="Cost / Price (empty if free)"
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-red)] w-20 text-right shrink-0"
+                              placeholder={
+                                (offering?.concept_id ? baselineCostMap.get(offering.concept_id) : null) || "Free"
+                              }
+                              title="Cost / Price (empty for catalog baseline)"
                             />
                           </>
                         ) : (
@@ -3886,14 +4094,22 @@ ${aiMarkdownTable}`;
                             />
                             <input
                               type="text"
-                              defaultValue={offering?.optional_price?.value ? `RM ${Number(offering.optional_price.value).toFixed(2)}` : (offering?.optional_price?.amount ? `RM ${offering.optional_price.amount}` : "")}
+                              defaultValue={
+                                offering?.optional_price?.type === "formula"
+                                  ? (offering.optional_price.display_text || offering.optional_price.formula || "")
+                                  : (offering?.optional_price?.value
+                                    ? `RM ${Number(offering.optional_price.value).toFixed(2)}`
+                                    : (offering?.optional_price?.amount ? `RM ${offering.optional_price.amount}` : ""))
+                              }
                               onClick={(e) => e.stopPropagation()}
                               onBlur={(e) => {
                                 if (offering) updateOfferingPriceInline(offering, e.target.value);
                               }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-red)] w-16 text-right shrink-0"
-                              placeholder="RM 0"
-                              title="Cost / Price (empty if free)"
+                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-red)] w-20 text-right shrink-0"
+                              placeholder={
+                                (offering?.concept_id ? baselineCostMap.get(offering.concept_id) : null) || "Optional"
+                              }
+                              title="Cost / Price (empty for catalog baseline)"
                             />
                           </>
                         ) : (

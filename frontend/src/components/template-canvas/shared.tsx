@@ -734,20 +734,26 @@ export function CanvasElementView({
                     const p = item.price ?? item.optional_price;
                     if (p !== null && p !== undefined) {
                       if (typeof p === "object") {
+                        if (p.type === "formula") return null;
                         const amt = p.amount ?? p.value;
                         if (amt !== null && amt !== undefined && amt !== "") {
+                          const s = String(amt);
+                          if (s.includes("%") || /sum\s*insured|sum\s*covered|tariff/i.test(s)) return null;
                           const n = typeof amt === "string" ? parseFloat(amt.replace(/,/g, "")) : Number(amt);
                           if (Number.isFinite(n) && n > 0) return n;
                         }
                       } else if (typeof p === "number" && Number.isFinite(p) && p > 0) {
                         return p;
                       } else if (typeof p === "string") {
+                        if (p.includes("%") || /sum\s*insured|sum\s*covered|tariff/i.test(p)) return null;
                         const n = parseFloat(p.replace(/[^0-9.]/g, ""));
                         if (Number.isFinite(n) && n > 0) return n;
                       }
                     }
                     if (item.detected_cost) {
-                      const n = parseFloat(String(item.detected_cost).replace(/[^0-9.]/g, ""));
+                      const s = String(item.detected_cost);
+                      if (s.includes("%") || /sum\s*insured|sum\s*covered|tariff/i.test(s)) return null;
+                      const n = parseFloat(s.replace(/[^0-9.]/g, ""));
                       if (Number.isFinite(n) && n > 0) return n;
                     }
                     return null;
@@ -755,7 +761,7 @@ export function CanvasElementView({
                   const costNum = extractCost(b) ?? (extraMatch ? extractCost(extraMatch) : null);
                   const costBadge = costNum !== null
                     ? `Cost : MYR ${costNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                    : (isAddonCard && !b?.is_pure_default ? "Cost : As quoted" : null);
+                    : null;
 
                   const rawLimit = b?.detected_limit || b?.coverage_limit;
                   if (rawLimit && typeof rawLimit === "string" && rawLimit.trim()) {
@@ -998,20 +1004,26 @@ export function CanvasElementView({
                               const p = item.price ?? item.optional_price;
                               if (p !== null && p !== undefined) {
                                 if (typeof p === "object") {
+                                  if (p.type === "formula") return null;
                                   const amt = p.amount ?? p.value;
                                   if (amt !== null && amt !== undefined && amt !== "") {
+                                    const s = String(amt);
+                                    if (s.includes("%") || /sum\s*insured|sum\s*covered|tariff/i.test(s)) return null;
                                     const n = typeof amt === "string" ? parseFloat(amt.replace(/,/g, "")) : Number(amt);
                                     if (Number.isFinite(n) && n > 0) return n;
                                   }
                                 } else if (typeof p === "number" && Number.isFinite(p) && p > 0) {
                                   return p;
                                 } else if (typeof p === "string") {
+                                  if (p.includes("%") || /sum\s*insured|sum\s*covered|tariff/i.test(p)) return null;
                                   const n = parseFloat(p.replace(/[^0-9.]/g, ""));
                                   if (Number.isFinite(n) && n > 0) return n;
                                 }
                               }
                               if (item.detected_cost) {
-                                const n = parseFloat(String(item.detected_cost).replace(/[^0-9.]/g, ""));
+                                const s = String(item.detected_cost);
+                                if (s.includes("%") || /sum\s*insured|sum\s*covered|tariff/i.test(s)) return null;
+                                const n = parseFloat(s.replace(/[^0-9.]/g, ""));
                                 if (Number.isFinite(n) && n > 0) return n;
                               }
                               return null;
@@ -1019,7 +1031,7 @@ export function CanvasElementView({
                             const costNum = extractCost(b) ?? (extraMatch ? extractCost(extraMatch) : null);
                             const costBadge = costNum !== null
                               ? `Cost : MYR ${costNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                              : (isAddonCard && !b?.is_pure_default && !b?.typed_value?.hide_price ? "Cost : As quoted" : null);
+                              : null;
 
                             let rawLimit = b?.detected_limit || b?.coverage_limit;
                             if (b?.typed_value?.hide_limit) {

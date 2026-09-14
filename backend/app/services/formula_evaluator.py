@@ -68,6 +68,11 @@ def _safe_eval(node, context):
     else:
         raise ValueError(f"Unsupported AST node type: {type(node)}")
 
+def _field_val(val: Any) -> Any:
+    if isinstance(val, dict):
+        return val.get("value")
+    return val
+
 def extract_evaluation_context(draft: Dict[str, Any], extras_list: list | None = None) -> Dict[str, float]:
     """
     Extract relevant variables for mathematical evaluation from a draft/quotation dictionary.
@@ -82,39 +87,47 @@ def extract_evaluation_context(draft: Dict[str, Any], extras_list: list | None =
     vsi = 0.0
     for key in sum_insured_keys:
         if key in draft and draft[key] is not None:
-            try:
-                value_str = draft[key]
-                if not isinstance(value_str, str):
-                    value_str = str(value_str)
-                clean_str = value_str.replace(",", "").replace("RM", "").strip()
-                vsi = float(clean_str)
-                break
-            except ValueError:
-                continue
+            raw_val = _field_val(draft[key])
+            if raw_val is not None:
+                try:
+                    value_str = str(raw_val).replace(",", "").replace("RM", "").strip()
+                    parsed_vsi = float(value_str)
+                    if parsed_vsi > 0:
+                        vsi = parsed_vsi
+                        break
+                except ValueError:
+                    continue
     context["vehicle_sum_insured"] = vsi
+    context["sum_insured"] = vsi
     
     # 2. total_seats
-    seats = draft.get("total_seats") or draft.get("seating_capacity")
-    if seats is not None:
+    raw_seats = _field_val(draft.get("total_seats") or draft.get("seating_capacity"))
+    if raw_seats is not None:
         try:
-            context["total_seats"] = float(seats)
+            context["total_seats"] = float(raw_seats)
         except ValueError:
             context["total_seats"] = 5.0
     else:
         context["total_seats"] = 5.0 # default for private car
         
     # 3. base_tp_premium
-    base_tp = draft.get("base_tp_premium") or draft.get("basic_premium")
-    if base_tp is not None:
+    raw_base_tp = _field_val(draft.get("base_tp_premium") or draft.get("basic_premium"))
+    if raw_base_tp is not None:
         try:
-            context["base_tp_premium"] = float(str(base_tp).replace(",", "").replace("RM", "").strip())
+            context["base_tp_premium"] = float(str(raw_base_tp).replace(",", "").replace("RM", "").strip())
         except ValueError:
             context["base_tp_premium"] = 150.0
     else:
         context["base_tp_premium"] = 150.0
         
     # 4. windscreen_sum_insured
-    wsi = draft.get("windscreen_sum_insured")
+    raw_wsi = _field_val(draft.get("windscreen_sum_insured"))
+    wsi = None
+    if raw_wsi is not None:
+        try:
+            wsi = float(str(raw_wsi).replace(",", "").replace("RM", "").strip())
+        except ValueError:
+            wsi = None
     
     if wsi is None and extras_list:
         for ex in extras_list:
@@ -126,26 +139,27 @@ def extract_evaluation_context(draft: Dict[str, Any], extras_list: list | None =
                 break
                 
     if wsi is not None:
-        try:
-            context["windscreen_sum_insured"] = float(str(wsi).replace(",", "").replace("RM", "").strip())
-        except ValueError:
-            context["windscreen_sum_insured"] = 1000.0
+        context["windscreen_sum_insured"] = wsi
+        context["windscreen_sum_covered"] = wsi
     else:
         # Fallback to scraping if vehicle model is present
-        car_model = draft.get("vehicle_model") or draft.get("make_model") or draft.get("vehicle_make_model")
+        car_model = _field_val(draft.get("vehicle_model") or draft.get("make_model") or draft.get("vehicle_make_model") or draft.get("car_model"))
         if car_model and isinstance(car_model, str):
             scraper = WindscreenScraper()
             result = scraper.get_windscreen_pricing(car_model)
             if result and 'sum_insured' in result:
                 context["windscreen_sum_insured"] = result['sum_insured']
+                context["windscreen_sum_covered"] = result['sum_insured']
             else:
                 context["windscreen_sum_insured"] = 1000.0
+                context["windscreen_sum_covered"] = 1000.0
         else:
             context["windscreen_sum_insured"] = 1000.0
+            context["windscreen_sum_covered"] = 1000.0
         
     # 5. accessories_sum_insured, boom_sum_insured, vehicle_age, period_months
     for key in ["accessories_sum_insured", "boom_sum_insured", "vehicle_age"]:
-        val = draft.get(key)
+        val = _field_val(draft.get(key))
         if val is not None:
             try:
                 context[key] = float(str(val).replace(",", "").replace("RM", "").strip())
@@ -154,7 +168,7 @@ def extract_evaluation_context(draft: Dict[str, Any], extras_list: list | None =
         else:
             context[key] = 0.0
             
-    pm = draft.get("period_months")
+    pm = _field_val(draft.get("period_months"))
     if pm is not None:
         try:
             context["period_months"] = float(pm)
