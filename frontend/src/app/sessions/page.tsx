@@ -3,15 +3,18 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
+  ArrowsClockwise,
   ArrowSquareOut,
   CaretDown,
   CaretUp,
   Check,
   Clock,
   Copy,
+  FilePdf,
   MagnifyingGlass,
   NotePencil,
   PencilSimpleLine,
+  Sparkle,
   Trash,
   User,
   X,
@@ -23,6 +26,7 @@ import { PageLoading } from "@/components/ui/page-loading";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Dialog } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import { useToast } from "@/components/ui/toast";
 
@@ -163,10 +167,53 @@ export default function SessionsPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Session | null>(null);
   const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
+  const [pendingRescan, setPendingRescan] = useState<Session | null>(null);
+  const [rescanning, setRescanning] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [expandedVehicles, setExpandedVehicles] = useState<Set<string>>(new Set());
   const { toast } = useToast();
+
+  async function handleRescanConfirm(
+    targetSession: Session,
+    mode: "in_place" | "new_session",
+    engine: "auto" | "native" | "ai"
+  ) {
+    setRescanning(targetSession.id);
+    try {
+      const res = await api<{
+        success: boolean;
+        session_id: string;
+        quotation_ref: string;
+        mode: string;
+        engine_used: string;
+        detected_company?: string;
+        message: string;
+      }>(`/sessions/${targetSession.id}/rescan`, {
+        method: "POST",
+        body: JSON.stringify({ mode, engine }),
+      });
+
+      toast(
+        mode === "new_session"
+          ? (res.message || `New session created (${res.quotation_ref}).`)
+          : (res.message || `Quotation ${res.quotation_ref} renewed successfully.`),
+        "success"
+      );
+
+      setPendingRescan(null);
+
+      if (mode === "new_session" && res.session_id) {
+        window.open(`/sessions/${res.session_id}`, "_blank");
+      }
+
+      await load(true);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not rescan session.", "error");
+    } finally {
+      setRescanning(null);
+    }
+  }
 
   async function load(
     reset: boolean,
@@ -658,8 +705,10 @@ export default function SessionsPage() {
                         session={s}
                         isSelected={selected.has(s.id)}
                         isDeleting={deleting === s.id}
+                        isRescanning={rescanning === s.id}
                         onToggleSelect={() => toggleSelect(s.id)}
                         onDeleteClick={() => setPendingDelete(s)}
+                        onRescanClick={() => setPendingRescan(s)}
                         onCopyRef={(ref) => copyText(ref, `ref_${s.id}`)}
                         isRefCopied={copiedKey === `ref_${s.id}`}
                       />
@@ -713,8 +762,10 @@ export default function SessionsPage() {
                     session={s}
                     isSelected={selected.has(s.id)}
                     isDeleting={deleting === s.id}
+                    isRescanning={rescanning === s.id}
                     onToggleSelect={() => toggleSelect(s.id)}
                     onDeleteClick={() => setPendingDelete(s)}
+                    onRescanClick={() => setPendingRescan(s)}
                     onCopyRef={(ref) => copyText(ref, `ref_${s.id}`)}
                     isRefCopied={copiedKey === `ref_${s.id}`}
                   />
@@ -733,8 +784,10 @@ export default function SessionsPage() {
                 session={s}
                 isSelected={selected.has(s.id)}
                 isDeleting={deleting === s.id}
+                isRescanning={rescanning === s.id}
                 onToggleSelect={() => toggleSelect(s.id)}
                 onDeleteClick={() => setPendingDelete(s)}
+                onRescanClick={() => setPendingRescan(s)}
                 onCopyRef={(ref) => copyText(ref, `ref_${s.id}`)}
                 isRefCopied={copiedKey === `ref_${s.id}`}
               />
@@ -779,6 +832,17 @@ export default function SessionsPage() {
           onConfirm={removeSelected}
         />
       ) : null}
+
+      {/* Rescan Quotation Session Modal */}
+      <RescanSessionModal
+        session={pendingRescan}
+        open={Boolean(pendingRescan)}
+        onOpenChange={(open) => {
+          if (!open) setPendingRescan(null);
+        }}
+        loading={Boolean(rescanning)}
+        onConfirm={handleRescanConfirm}
+      />
     </AppShell>
   );
 }
@@ -788,16 +852,20 @@ function QuotationRow({
   session: s,
   isSelected,
   isDeleting,
+  isRescanning,
   onToggleSelect,
   onDeleteClick,
+  onRescanClick,
   onCopyRef,
   isRefCopied,
 }: {
   session: Session;
   isSelected: boolean;
   isDeleting: boolean;
+  isRescanning?: boolean;
   onToggleSelect: () => void;
   onDeleteClick: () => void;
+  onRescanClick: () => void;
   onCopyRef: (ref: string) => void;
   isRefCopied: boolean;
 }) {
@@ -914,6 +982,18 @@ function QuotationRow({
         </Link>
 
         <Button
+          variant="secondary"
+          size="sm"
+          loading={isRescanning}
+          icon={<ArrowsClockwise aria-hidden="true" size={13} weight="bold" className={isRescanning ? "animate-spin" : ""} />}
+          onClick={onRescanClick}
+          className="inline-flex h-8 items-center justify-center gap-1 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-2.5 text-[12px] font-semibold text-[var(--rl-text-strong)] shadow-xs transition-all hover:bg-[var(--rl-bg)] hover:border-[var(--rl-border-strong)] active:scale-95"
+          title="Rescan quotation from source PDF"
+        >
+          Rescan
+        </Button>
+
+        <Button
           variant="ghost"
           size="sm"
           loading={isDeleting}
@@ -932,16 +1012,20 @@ function QuotationCard({
   session: s,
   isSelected,
   isDeleting,
+  isRescanning,
   onToggleSelect,
   onDeleteClick,
+  onRescanClick,
   onCopyRef,
   isRefCopied,
 }: {
   session: Session;
   isSelected: boolean;
   isDeleting: boolean;
+  isRescanning?: boolean;
   onToggleSelect: () => void;
   onDeleteClick: () => void;
+  onRescanClick: () => void;
   onCopyRef: (ref: string) => void;
   isRefCopied: boolean;
 }) {
@@ -1083,6 +1167,18 @@ function QuotationCard({
           </Link>
 
           <Button
+            variant="secondary"
+            size="sm"
+            loading={isRescanning}
+            icon={<ArrowsClockwise aria-hidden="true" size={14} weight="bold" className={isRescanning ? "animate-spin" : ""} />}
+            onClick={onRescanClick}
+            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-3 text-[13px] font-semibold text-[var(--rl-text-strong)] shadow-xs transition-all hover:bg-[var(--rl-bg)] hover:border-[var(--rl-border-strong)] active:scale-95"
+            title="Rescan quotation from source PDF"
+          >
+            Rescan
+          </Button>
+
+          <Button
             variant="ghost"
             size="sm"
             loading={isDeleting}
@@ -1096,3 +1192,158 @@ function QuotationCard({
     </Card>
   );
 }
+
+// Subcomponent: Rescan Quotation Session Modal
+function RescanSessionModal({
+  session,
+  open,
+  onOpenChange,
+  loading,
+  onConfirm,
+}: {
+  session: Session | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  loading: boolean;
+  onConfirm: (session: Session, mode: "in_place" | "new_session", engine: "auto" | "native" | "ai") => void;
+}) {
+  const [mode, setMode] = useState<"in_place" | "new_session">("in_place");
+  const [useAi, setUseAi] = useState(false);
+
+  if (!session) return null;
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!loading) onOpenChange(v);
+      }}
+      title="Rescan Quotation Session"
+      description={`Re-evaluate and extract values from the original source PDF for ${
+        session.vehicle_plate ? `[${session.vehicle_plate}]` : session.insured_name || session.filename
+      }.`}
+    >
+      <div className="space-y-4 pt-1">
+        {/* Session Reference Dossier */}
+        <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-md bg-[var(--rl-bg)] border border-[var(--rl-border)] text-[13px]">
+          <div className="flex items-center gap-2 min-w-0">
+            <FilePdf size={18} className="text-red-600 shrink-0" weight="fill" />
+            <span className="font-semibold text-[var(--rl-text-strong)] truncate max-w-[220px]" title={session.filename}>
+              {session.filename}
+            </span>
+          </div>
+          {session.quotation_ref && (
+            <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-[var(--rl-surface)] border border-[var(--rl-border-strong)] text-[var(--rl-text-muted)] shrink-0">
+              {session.quotation_ref}
+            </span>
+          )}
+        </div>
+
+        {/* Mode Selector Cards */}
+        <div className="grid gap-2.5">
+          <label
+            onClick={() => setMode("in_place")}
+            className={`flex items-start gap-3 p-3.5 rounded-lg border cursor-pointer transition-all ${
+              mode === "in_place"
+                ? "border-[var(--rl-red)] bg-red-50/20 ring-1 ring-[var(--rl-red)]/40"
+                : "border-[var(--rl-border)] hover:bg-[var(--rl-bg)]/50"
+            }`}
+          >
+            <input
+              type="radio"
+              name="rescan_mode"
+              checked={mode === "in_place"}
+              onChange={() => setMode("in_place")}
+              className="mt-1 h-4 w-4 accent-[var(--rl-red)] cursor-pointer"
+            />
+            <div className="grid gap-0.5 min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[13px] font-bold text-[var(--rl-text-strong)] flex items-center gap-1.5">
+                  <ArrowsClockwise size={15} weight="bold" className="text-[var(--rl-red)]" />
+                  Renew this Session (In-Place)
+                </span>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                  Recommended
+                </span>
+              </div>
+              <p className="text-[12px] text-[var(--rl-text-muted)] leading-relaxed">
+                Clears old/empty extraction data and re-runs catalog mapping. Retains the internal quotation reference ({session.quotation_ref || "RL..."}).
+              </p>
+            </div>
+          </label>
+
+          <label
+            onClick={() => setMode("new_session")}
+            className={`flex items-start gap-3 p-3.5 rounded-lg border cursor-pointer transition-all ${
+              mode === "new_session"
+                ? "border-[var(--rl-red)] bg-red-50/20 ring-1 ring-[var(--rl-red)]/40"
+                : "border-[var(--rl-border)] hover:bg-[var(--rl-bg)]/50"
+            }`}
+          >
+            <input
+              type="radio"
+              name="rescan_mode"
+              checked={mode === "new_session"}
+              onChange={() => setMode("new_session")}
+              className="mt-1 h-4 w-4 accent-[var(--rl-red)] cursor-pointer"
+            />
+            <div className="grid gap-0.5 min-w-0 flex-1">
+              <span className="text-[13px] font-bold text-[var(--rl-text-strong)] flex items-center gap-1.5">
+                <ArrowSquareOut size={15} weight="bold" className="text-blue-600" />
+                Rescan as New Session (Open in New Tab)
+              </span>
+              <p className="text-[12px] text-[var(--rl-text-muted)] leading-relaxed">
+                Preserves this session untouched, assigns a brand new quotation reference sequence, and opens the new session in a new tab.
+              </p>
+            </div>
+          </label>
+        </div>
+
+        {/* AI Reading Toggle */}
+        <div className="pt-1">
+          <label className="flex items-start gap-2.5 p-3 rounded-lg border border-[var(--rl-border)] bg-[var(--rl-bg)]/40 cursor-pointer hover:bg-[var(--rl-bg)] transition-colors">
+            <input
+              type="checkbox"
+              checked={useAi}
+              onChange={(e) => setUseAi(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded accent-[var(--rl-red)] cursor-pointer"
+            />
+            <div className="grid gap-0.5 text-[12px]">
+              <span className="font-bold text-[var(--rl-text-strong)] flex items-center gap-1.5">
+                <Sparkle size={14} weight="fill" className="text-amber-500" />
+                Deep AI Reading (Google Gemini)
+              </span>
+              <span className="text-[var(--rl-text-muted)]">
+                Recommended if the PDF was previously blank or difficult for native OCR to parse.
+              </span>
+            </div>
+          </label>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="mt-5 flex gap-2 justify-end pt-2 border-t border-[var(--rl-border)]/70">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={loading}
+            onClick={() => onOpenChange(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            loading={loading}
+            icon={<ArrowsClockwise size={14} weight="bold" className={loading ? "animate-spin" : ""} />}
+            onClick={() => onConfirm(session, mode, useAi ? "ai" : "auto")}
+          >
+            {loading ? "Rescanning..." : mode === "new_session" ? "Rescan & Open New Tab" : "Start Rescan"}
+          </Button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+

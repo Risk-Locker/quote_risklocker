@@ -77,6 +77,7 @@ from app.api.schemas import (
     VehicleSubcategorySaveRequest,
     WorkspacePatchRequest,
     VersionGenerationRequest,
+    SessionRescanRequest,
 )
 from app.auth.cookies import clear_auth_cookies, set_auth_cookies
 from app.auth.rbac import can_view_owner_record, require_role
@@ -1026,6 +1027,28 @@ def session_extract_gemini(
         },
         "gemini_result": gemini_res,
     }
+
+
+@router.post("/sessions/{session_id}/rescan")
+def session_rescan_endpoint(
+    session_id: str,
+    payload: SessionRescanRequest | None = None,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.services.session_rescan_service import rescan_session
+
+    mode = payload.mode if payload else "in_place"
+    engine = payload.engine if payload else "auto"
+    return rescan_session(
+        db,
+        session_id,
+        user,
+        settings,
+        mode=mode,
+        engine=engine,
+    )
 
 
 @router.patch("/drafts/{draft_id}/workspace")

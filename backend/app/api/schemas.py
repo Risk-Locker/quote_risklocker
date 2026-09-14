@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.benefits import BenefitValue
@@ -521,4 +521,11 @@ class RoadTaxCalculateRequest(BaseModel):
 
 class CompanyMatrixDiffRequest(BaseModel):
     scenarios: list[dict] = Field(default_factory=list)
+
+
+class SessionRescanRequest(StrictRequest):
+    model_config = ConfigDict(extra="ignore")
+    mode: Literal["in_place", "new_session"] = "in_place"
+    engine: Literal["auto", "native", "ai"] = "auto"
+
 

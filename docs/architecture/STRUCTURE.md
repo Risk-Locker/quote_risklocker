@@ -203,6 +203,15 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Seeding & Maintenance: `commands/seed-company-benefit-costs.py` (baseline pricing), `commands/seed-profile-v2-from-current-benefits.py` (active profile v2 sync), `commands/seed-ev-catalogs-and-dedup-sompo.py` (comprehensive EV coverage for all 7 insurers + Sompo product deduplication), and `commands/repair-ev-and-sompo-sessions.py` (session repair and complimentary benefit cost_status fix).
 - EV Review Filtering: `frontend/src/components/session-workspace/review-phase.tsx` dynamically filters EV vs ICE products based on session fuel type, engine capacity (kW), and model, preventing product duplication.
 
+## Session Rescan & In-Place Renewal Architecture
+
+- **Backend Rescan Service**: `backend/app/services/session_rescan_service.py` provides `rescan_session()` supporting two operational modes:
+  1. `in_place` (renewal): Cleanses stale/empty draft artifacts (`DraftBenefitSelection`, `DraftSourceLineDecision`, `ExtractionBenefitLine`), re-evaluates source PDF with auto or Gemini fallback, re-extracts vehicle/client fields, pins matching catalog, re-seeds baseline benefits, auto-applies detected benefits, and recalculates road tax while strictly preserving the internal quotation sequence reference (`RL...`).
+  2. `new_session`: Clones the original source PDF into an entirely new session with a new unique quotation reference, runs the full extraction pipeline, and opens it directly in a new browser tab.
+- **Rescan Route & Schema**: `POST /api/sessions/{session_id}/rescan` with `SessionRescanRequest` (`mode`: `in_place` | `new_session`, `engine`: `auto` | `native` | `ai`) in `backend/app/api/routes.py` and `backend/app/api/schemas.py`.
+- **Frontend Sessions Cockpit**: Rescan modal dialog and 1-click rescan buttons in `frontend/src/app/sessions/page.tsx` (`QuotationRow`, `QuotationCard`) with visual mode selection, optional Deep AI reading checkbox, and live status spinners.
+- **Hermetic Tests**: `tests/test_session_rescan.py` (hermetic in-memory SQLite coverage for in-place renewal, new-session creation, draft cleansing, and RBAC authorization).
+
 ## Navigation
 
 - Start every repository task at [START-HERE.md](START-HERE.md).

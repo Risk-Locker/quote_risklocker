@@ -25,6 +25,7 @@
 | `POST /api/business/templates/{id}/publish` | optimistic publish of a validated immutable revision; identical content is idempotent | WP7 |
 | remaining impact-preview/apply endpoints | company/product/tier/package/catalog changes require explicit confirmation | WP5-WP6 |
 | `POST /api/sessions/{id}/preview-render` | saves/uses exact revision and returns cached result or render job | WP8 |
+| `POST /api/sessions/{id}/rescan` | re-extract and renewal in-place or fresh session clone from source PDF (`mode`, `engine`) | Rescan |
 | `POST /api/sessions/{id}/versions` | exact saved revision plus idempotency key; at most one immutable version | WP8 |
 | `GET /api/versions/{id}/pdf` | stream existing authorized PDF; never generate | WP8 |
 | `/api/business/*` | paginated business setup, draft/publish/revision/import/reference-aware retirement | WP6-WP7 |
