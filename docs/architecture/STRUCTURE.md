@@ -102,7 +102,9 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - **Dynamic Precedence Hierarchy**: `backend/app/rendering/render_context.py` evaluates 7-tier description precedence: selection override -> dynamic conditional upgrade -> catalog offering override -> company baseline description -> matrix fallback -> concept default -> fallback.
 - **Engine Type Architecture**: Decoupled monolithic vehicle type selector into Engine Type toggle (`ICE` | `EV`) + filtered vehicle type dropdown in `frontend/src/components/session-workspace/review-phase.tsx` and scenario bar in `builder/benefits`.
 - **Migrations**: `migrations/041_catalog_offering_description_override.sql`, `migrations/042_company_benefit_conditions_and_engine_type.sql`, and `migrations/043_add_tuition_purpose_concept.sql`.
-- **Tests**: `tests/test_catalog_offering_description_override.py` and `tests/test_company_benefit_conditions.py`.
+- **Benefit Artworks, Canonical Catalogs & Short Descriptions**: 11 new benefit artworks ingested into Supabase (`assets/benefits/new/` via `commands/ingest-new-benefit-artwork.py`), 63 active canonical benefits calibrated (<80 chars) across 7 insurers seeded into company configs and catalog overrides (`commands/seed-canonical-79-benefits.py`, `commands/seed-company-benefit-descriptions.py`, `docs/benefits/concise/`, `docs/benefits/expanded/`).
+- **Template Row Height Calibrations**: `_balance_benefit_grid_elements` calibrated to 74px/84px in `backend/app/rendering/template_renderer.py` and `frontend/src/components/template-canvas/shared.tsx`, eliminating multi-row card overlap and footer clipping.
+- **Tests**: `tests/test_catalog_offering_description_override.py`, `tests/test_company_benefit_conditions.py`, and `tests/test_template_renderer.py`.
 
 ## Benefit Configuration Matrix
 

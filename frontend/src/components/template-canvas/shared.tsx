@@ -1551,10 +1551,14 @@ export function balanceBenefitGridElements(
 
   const defaultRowHeight = isMinimal
     ? 36
-    : Math.max(cols === 2 ? 56 : 52, 40 + dynamicIconExtra + (showDesc ? 12 : 0));
+    : showDesc
+    ? Math.max(cols === 2 ? 78 : 74, 44 + dynamicIconExtra + (showDesc ? 22 : 0) + (showCov ? 8 : 0))
+    : Math.max(50, 38 + dynamicIconExtra + (showCov ? 8 : 0));
   const addonRowHeight = isMinimal
     ? 36
-    : Math.max(cols === 2 ? 72 : 68, 40 + dynamicIconExtra + (showCov ? 8 : 0) + (showDesc ? 10 : 0) + 14);
+    : showDesc
+    ? Math.max(cols === 2 ? 88 : 84, 46 + dynamicIconExtra + (showCov ? 8 : 0) + (showDesc ? 16 : 0) + 14)
+    : Math.max(64, 44 + dynamicIconExtra + 14);
   const cardGap = 5;
 
   const hasExplicitExtrasGrid = elements.some((e) => e.gridKind === "extras" || e.gridKind === "purchased_extras");

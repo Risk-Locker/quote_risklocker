@@ -185,6 +185,13 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
     resolved_coverage_id = _resolve_coverage_type(db, raw_coverage)
     resolved_segment_id = _resolve_segment(db, draft.fields or {})
 
+    # Powertrain classification (EV vs ICE)
+    from app.extraction.entity_classifier import classify_vehicle_ev_status
+    cbrand = _field_value(draft.fields or {}, "vehicle_make", "make", "brand", "car_make")
+    cmodel = _field_value(draft.fields or {}, "vehicle_model", "model", "car_model", "vehicle_description", "make_model")
+    cc_val = _field_value(draft.fields or {}, "engine_capacity", "cubic_capacity", "cc", "capacity")
+    is_ev, _ = classify_vehicle_ev_status(cbrand or "", cmodel or raw_vehicle or "", cc_val or "")
+
     # 2. Resolve product
     products = [item for item in _rows(db, InsuranceProduct) if item.company_id == draft.company_id and item.status == "active"]
     if draft.product_id and all(item.id != draft.product_id for item in products):
@@ -199,10 +206,23 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
                 exact = fuzzy_matches[0]
             elif len(fuzzy_matches) > 1 and resolved_coverage_id:
                 cov_matches = [p for p in fuzzy_matches if any(w in _norm(p.name) for w in ("comprehensive", "tpft", "third party") if (resolved_coverage_id and w in p.name.lower()))]
+                if is_ev:
+                    ev_cov = [p for p in cov_matches if "(ev)" in p.name.lower() or " ev" in p.name.lower()]
+                    if ev_cov:
+                        cov_matches = ev_cov
+                else:
+                    ice_cov = [p for p in cov_matches if "(ev)" not in p.name.lower() and " ev" not in p.name.lower()]
+                    if ice_cov:
+                        cov_matches = ice_cov
                 if cov_matches:
                     exact = cov_matches[0]
                 else:
-                    exact = fuzzy_matches[0]
+                    if is_ev:
+                        ev_f = [p for p in fuzzy_matches if "(ev)" in p.name.lower() or " ev" in p.name.lower()]
+                        exact = ev_f[0] if ev_f else fuzzy_matches[0]
+                    else:
+                        ice_f = [p for p in fuzzy_matches if "(ev)" not in p.name.lower() and " ev" not in p.name.lower()]
+                        exact = ice_f[0] if ice_f else fuzzy_matches[0]
         if exact:
             draft.product_id = exact.id
     if not draft.product_id:
@@ -244,6 +264,16 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
             matching_s = [p for p in candidate_products if getattr(p, "segment_id", None) == resolved_segment_id]
             if matching_s:
                 candidate_products = matching_s
+
+        if len(candidate_products) > 1:
+            if is_ev:
+                ev_prods = [p for p in candidate_products if "(ev)" in p.name.lower() or " ev" in p.name.lower()]
+                if ev_prods:
+                    candidate_products = ev_prods
+            else:
+                ice_prods = [p for p in candidate_products if "(ev)" not in p.name.lower() and " ev" not in p.name.lower()]
+                if ice_prods:
+                    candidate_products = ice_prods
 
         if len(candidate_products) > 1:
             tier_val = _field_value(draft.fields or {}, "tier_name", "product_tier", "plan_name")
@@ -307,6 +337,15 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
         matching_c = [item for item in catalogs if item.coverage_type_id == resolved_coverage_id]
         if matching_c:
             catalogs = matching_c
+
+    # Filter candidate catalogs by engine type (EV vs ICE)
+    if len(catalogs) > 1:
+        target_engine = "ev" if is_ev else "ice"
+        matching_e = [item for item in catalogs if (item.engine_type or "ice") == target_engine]
+        if matching_e:
+            catalogs = matching_e
+        elif not is_ev:
+            catalogs = [item for item in catalogs if (item.engine_type or "ice") != "ev"]
 
     # If still multiple catalogs (e.g. multi-tier ladder catalogs for the same vehicle/coverage):
     # Default to the lowest tier / base catalog

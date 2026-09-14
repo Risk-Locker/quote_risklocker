@@ -543,10 +543,10 @@ def test_benefit_card_description_allows_three_lines_without_truncation():
     # Check layout calculations
     balanced = _balance_benefit_grid_elements(elements, render_context)
     by_id = {e["id"]: e for e in balanced}
-    # With 1 card in grid1 (3 columns) -> tightly calibrated row height ~52px (not inflated 90px)
-    assert 50.0 <= float(by_id["grid1"]["h"]) <= 60.0
-    # With 1 card in grid2 (3 columns) -> tightly calibrated row height ~72px (not inflated 126px)
-    assert 68.0 <= float(by_id["grid2"]["h"]) <= 80.0
+    # With 1 card in grid1 (3 columns) -> calibrated row height ~74px (accommodates title + desc without overlapping)
+    assert 70.0 <= float(by_id["grid1"]["h"]) <= 85.0
+    # With 1 card in grid2 (3 columns) -> calibrated row height ~84px (accommodates title + cov + desc + badge)
+    assert 80.0 <= float(by_id["grid2"]["h"]) <= 95.0
 
     html = render_quotation_html(
         {},
@@ -622,6 +622,97 @@ def test_excess_and_compulsory_excess_rendering():
     }
     html2 = render_quotation_html(fields2, template_config=config)
     assert "RM 400.00" in html2
+
+
+def test_multi_row_specials_and_extras_no_overlap():
+    from app.rendering.template_renderer import _balance_benefit_grid_elements, render_quotation_html
+
+    raw_elements = [
+        {"id": "specials_header_bg", "type": "rectangle", "x": 40, "y": 414, "w": 714, "h": 26},
+        {"id": "specials_header_txt", "type": "text", "x": 52, "y": 419, "w": 690, "h": 16},
+        {
+            "id": "current_benefits_grid",
+            "type": "benefit-grid",
+            "gridKind": "current_benefits",
+            "x": 40,
+            "y": 444,
+            "w": 714,
+            "h": 80,
+            "columns": 3,
+            "showDescription": True,
+        },
+        {"id": "addons_header_bg", "type": "rectangle", "x": 40, "y": 550, "w": 714, "h": 26},
+        {"id": "addons_header_txt", "type": "text", "x": 52, "y": 555, "w": 690, "h": 16},
+        {
+            "id": "available_addons_grid",
+            "type": "benefit-grid",
+            "gridKind": "available_addons",
+            "x": 40,
+            "y": 580,
+            "w": 714,
+            "h": 200,
+            "columns": 3,
+            "showDescription": True,
+        },
+    ]
+    # 4 FOC cards (wrap to 2 rows), 2 paid extras cards, 13 available add-on cards (wrap to 5 rows)
+    render_context = {
+        "current_benefits": [
+            {"label": "Emergency Towing Assistance", "coverage_limit": "200 km", "description": "24/7 accident towing to nearest approved repairer", "cost_status": "included"},
+            {"label": "All Drivers Excess Waiver", "description": "No compulsory excess for unnamed authorized drivers", "cost_status": "included"},
+            {"label": "Legal Defense Costs", "coverage_limit": "RM 2,000", "description": "Reimburses court legal representation and defense fees", "cost_status": "included"},
+            {"label": "Drive-Less Save-More", "description": "Etiqa Cashback by Driving Less opt-in reward up to 30%", "cost_status": "included"},
+            {"label": "Legal Liability to Passengers", "price": {"amount": 56.70}, "description": "Protects driver from lawsuits for passenger injury", "cost_status": "paid"},
+            {"label": "Legal Liability of Passengers", "price": {"amount": 7.50}, "description": "Protects against third-party claims from passenger negligence", "cost_status": "paid"},
+        ],
+        "extras": [
+            {"label": "Legal Liability to Passengers", "price": {"amount": 56.70}},
+            {"label": "Legal Liability of Passengers", "price": {"amount": 7.50}},
+        ],
+        "available_addons": [
+            {"label": f"Addon {i}", "coverage_limit": f"RM {i*1000}", "description": f"Description for addon {i}", "price": {"amount": 50.0 + i * 10}}
+            for i in range(1, 14)
+        ],
+    }
+
+    balanced = _balance_benefit_grid_elements(raw_elements, render_context)
+    by_id = {e["id"]: e for e in balanced}
+
+    # Verify grid1 has height for 2 full rows (>= 145px)
+    grid1 = by_id["current_benefits_grid"]
+    assert float(grid1["h"]) >= 148.0, f"Expected grid1.h >= 148, got {grid1['h']}"
+
+    # Verify extras header is placed strictly BELOW grid1 with at least 8px gap
+    extras_hdr = by_id["extras_header_bg"]
+    assert float(extras_hdr["y"]) >= float(grid1["y"]) + float(grid1["h"]) + 8.0, (
+        f"extras_header_bg overlaps grid1! y={extras_hdr['y']}, grid1 bottom={float(grid1['y']) + float(grid1['h'])}"
+    )
+
+    # Verify extras grid is placed below extras header
+    extras_grid = by_id["extras_grid"]
+    assert float(extras_grid["y"]) >= float(extras_hdr["y"]) + float(extras_hdr["h"])
+
+    # Verify addons header is placed strictly below extras grid
+    addons_hdr = by_id["addons_header_bg"]
+    assert float(addons_hdr["y"]) >= float(extras_grid["y"]) + float(extras_grid["h"]) + 8.0
+
+    # Verify addons grid has height for 5 full rows (>= 400px)
+    addons_grid = by_id["available_addons_grid"]
+    assert float(addons_grid["h"]) >= 400.0, f"Expected addons_grid.h >= 400, got {addons_grid['h']}"
+
+    # Verify render_quotation_html auto-expands page height beyond 1123px to accommodate 19 cards
+    html = render_quotation_html(
+        {},
+        template_config={"canvas": {"width": 794, "height": 1123, "elements": raw_elements}},
+        render_context=render_context,
+    )
+    # Check that @page size height is expanded beyond 1123px
+    import re
+    page_match = re.search(r"@page\s*\{\s*size:\s*794px\s*(\d+)px", html)
+    assert page_match is not None, "Could not find @page size in html"
+    expanded_height = int(page_match.group(1))
+    assert expanded_height > 1123, f"Expected page height to auto-expand > 1123px, got {expanded_height}px"
+
 
 
 

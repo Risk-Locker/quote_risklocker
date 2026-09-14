@@ -722,8 +722,9 @@ ${aiMarkdownTable}`;
   const enabledConfigsCount = useMemo(() => {
     const configMap = new Map(companyConfigs.map((c) => [c.concept_id, c]));
     return concepts.filter((c) => {
+      if (c.status === "retired") return false;
       const cfg = configMap.get(c.id);
-      return cfg ? cfg.is_enabled : true;
+      return cfg ? cfg.is_enabled : false;
     }).length;
   }, [concepts, companyConfigs]);
 
@@ -731,6 +732,7 @@ ${aiMarkdownTable}`;
     const configMap = new Map(companyConfigs.map((c) => [c.concept_id, c]));
     return concepts
       .filter((c) => {
+        if (c.status === "retired") return false;
         const cfg = configMap.get(c.id);
         const isDefault = c.value_schema?.category === "default" || c.category === "default" || (c.sort_order !== undefined && c.sort_order <= 11);
         if (configsCategoryFilter === "default" && !isDefault) return false;

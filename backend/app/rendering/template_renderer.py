@@ -911,11 +911,19 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
 
     default_row_height = (
         36.0 if is_minimal
-        else max(56.0 if cols == 2 else 52.0, 40.0 + dynamic_icon_extra + (12.0 if has_desc else 0.0))
+        else (
+            max(78.0 if cols == 2 else 74.0, 44.0 + dynamic_icon_extra + (22.0 if has_desc else 0.0) + (8.0 if has_cov else 0.0))
+            if has_desc
+            else max(50.0, 38.0 + dynamic_icon_extra + (8.0 if has_cov else 0.0))
+        )
     )
     addon_row_height = (
         36.0 if is_minimal
-        else max(72.0 if cols == 2 else 68.0, 40.0 + dynamic_icon_extra + (8.0 if has_cov else 0.0) + (10.0 if has_desc else 0.0) + 14.0)
+        else (
+            max(88.0 if cols == 2 else 84.0, 46.0 + dynamic_icon_extra + (8.0 if has_cov else 0.0) + (16.0 if has_desc else 0.0) + 14.0)
+            if has_desc
+            else max(64.0, 44.0 + dynamic_icon_extra + 14.0)
+        )
     )
     card_gap = 5.0
 
