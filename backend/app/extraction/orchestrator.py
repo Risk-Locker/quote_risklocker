@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 
 from app.extraction.candidate_finder import find_candidates
-from app.extraction.benefit_lines import extract_benefit_lines
+from app.extraction.benefit_lines import extract_benefit_lines, is_spurious_benefit_line
 from app.extraction.draft_mapper import build_draft
 from app.extraction.layout import detect_layout
 from app.extraction.native_pdf import extract_native
@@ -134,6 +134,8 @@ class ExtractionOrchestrator:
                         continue
 
                     if b_label:
+                        if is_spurious_benefit_line(b_label) or is_spurious_benefit_line(b_raw):
+                            continue
                         # Find matching concept robustly across id/concept_id, key/concept_key, name/label
                         matched_concept = None
                         b_norm = b_label.lower().replace(" ", "-").replace("_", "-")

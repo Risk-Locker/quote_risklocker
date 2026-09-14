@@ -169,6 +169,7 @@ NON_BENEFIT_PREFIXES = (
     "one touch",
     "branch & workshop",
     "s.o.s emergency",
+    "s.o.s emergency",
     "instant claim notification",
 )
 NARRATIVE_PREFIXES = ("example:", "example ", "note:", "important:", "disclaimer :", "disclaimer:")
@@ -188,7 +189,97 @@ NARRATIVE_INDICATORS = (
     "current policy has already",
     "compulsory excess",
 )
-MONEY_RE = re.compile(r"(?:RM\s*)?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?", re.IGNORECASE)
+
+PHONE_RE = re.compile(r"(?:\+?6?0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{3,4}|\b\d{2,4}[-\s]\d{6,8}\b|\b03[-\s]?\d{4}[-\s]?\d{4}\b)")
+EMAIL_RE = re.compile(r"\b[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+\b")
+URL_RE = re.compile(r"\b(?:https?://|www\.)\S+\b|\b\S+\.com(?:\.my)?\b", re.IGNORECASE)
+FORM_CODE_RE = re.compile(r"\b(?:\d+/PRN/PDS|PDS/|v-\d+\.\d+|\bver\b|version\s*\d+)\b", re.IGNORECASE)
+
+ACCOUNTING_ROW_RE = re.compile(
+    r"^(?:[\(\[\{]?[\+\-\*•~]?[\)\]\}]?\s*)?"
+    r"(?:\d+(?:\.\d+)?%\s*(?:or\s*(?:rm|myr)?\s*[\d,]+(?:\.\d{2})?)?\s*)?"
+    r"(?:basic\s+premium|premium\s+asas|gross\s+premium|premium\s+kasar|total\s+premium|jumlah\s+premium|"
+    r"total\s+payable|jumlah\s+kena\s+bayar|takaful\s+contribution|caruman\s+takaful|gross\s+contribution|"
+    r"basic\s+contribution|total\s+contribution|service\s+tax|cukai\s+perkhidmatan|sst|stamp\s+duty|duti\s+setem|"
+    r"ncd(?:\s+entitlement)?|no\s+claim\s+discount|no\s+claim\s+bonus|commission|komisen|rebate|diskaun|discount|"
+    r"policy\s+excess|compulsory\s+excess|excess\s+amount|excess\s+all\s+claims|excess)\b",
+    re.IGNORECASE,
+)
+
+VEHICLE_SPEC_ROW_RE = re.compile(
+    r"^(?:class\s+of\s+vehicle|vehicle\s+class|kelas\s+kenderaan|sum\s+insured(?:\s*\/\s*cover\s+type)?|"
+    r"jumlah\s+diinsuranskan|agreed\s+value|market\s+value|manufacturing\s+year|year\s+of\s+manufacture|"
+    r"tahun\s+dibuat|vehicle\s+make|make\s*&\s*model|engine\s+no|chassis\s+no|tonnage|seating\s+capacity|"
+    r"cubic\s+capacity|capacity)\b|"
+    r"^(?:rm\s*)?[\d,]+(?:\.\d{2})?\s*\/\s*(?:comprehensive|third\s+party|tpft|tpo)\b",
+    re.IGNORECASE,
+)
+
+DISCLAIMER_AND_DISCLOSURE_RE = re.compile(
+    r"^(?:as\s+an\s+illustration|for\s+this\s+motor\s+insurance\s+policy|disclaimer\b|disclaimer\s*:|"
+    r"note\b|note\s*:|can\s+i\s+cancel|customer[’'\s]*s?\s*acknowledg|ensure\s+you\s+are\s+filling|"
+    r"i\s+acknowledge\s+that|i\s+have\s+read\s+and\s+understood|other\s+customers\s+have\s+read|"
+    r"what\s+is\s+commercial\s+vehicle|what\s+is\s+private\s+car|what\s+is\s+motorcycle|"
+    r"important\s+information\s+you\s+should\s+know|name\s*:\s*date|"
+    r"fire,\s*theft\s+or\s+accident|"
+    r"your\s+liability\s+or\s+your\s+authorised\s+driver|"
+    r"parties\s+for:\s*bodily\s+injury|"
+    r"your\s+own\s+death\s+or\s+bodily\s+injury|"
+    r"your\s+liability\s+against\s+claims\s+from\s+passengers)",
+    re.IGNORECASE,
+)
+
+PURE_PERCENTAGE_OR_FEE_RE = re.compile(
+    r"^\s*(?:[\+\-\*]?\s*)?\d+(?:\.\d+)?%\s*(?:or\s*(?:rm|myr)?\s*[\d,]+(?:\.\d{2})?)?\s*$",
+    re.IGNORECASE,
+)
+
+
+def is_spurious_benefit_line(raw: str) -> bool:
+    """Strictly identify and reject non-benefit noise (contacts, taxes, disclaimers, vehicle specs)."""
+    if not raw or not raw.strip():
+        return True
+    s = raw.strip()
+    norm = re.sub(r"\s+", " ", s).lower()
+    norm = re.sub(r"[’‘`´\u2018\u2019\u201b\ufffd]", "'", norm)
+    if PHONE_RE.search(s):
+        return True
+    if EMAIL_RE.search(s):
+        return True
+    if URL_RE.search(s):
+        return True
+    if FORM_CODE_RE.search(s):
+        return True
+    if PURE_PERCENTAGE_OR_FEE_RE.match(s):
+        return True
+    if ACCOUNTING_ROW_RE.search(norm):
+        return True
+    if VEHICLE_SPEC_ROW_RE.search(norm):
+        return True
+    if DISCLAIMER_AND_DISCLOSURE_RE.search(norm):
+        return True
+    if "?" in s:
+        return True
+    return False
+
+
+def is_pds_text(text: str) -> bool:
+    """Check if document text or page belongs to a Product Disclosure Sheet (PDS) or Policy Wording."""
+    lower = text.lower()
+    return any(marker in lower for marker in (
+        "product disclosure sheet",
+        "lembaran maklumat produk",
+        "policy wording",
+        "terms and conditions",
+        "/prn/pds",
+        "pds/vc",
+    ))
+
+
+MONEY_RE = re.compile(
+    r"(?:(?:RM|MYR)\s*(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?|(?<!\d)(\d{1,3}(?:,\d{3})*\.\d{2})(?!\d))",
+    re.IGNORECASE,
+)
 PURE_AMOUNT_RE = re.compile(r"^[:\-•*+~]?\s*(?:RM|MYR)?\s*[\d,]+(?:\.\d{1,2})?\s*%?\s*$", re.IGNORECASE)
 BENEFIT_KEYWORDS = (
     "cover", "benefit", "liability", "damage", "perils", "waiver", "towing", "rider",
@@ -238,6 +329,8 @@ def _format_display_money(amount_str: str) -> str:
 
 
 def _typed_value(raw: str, normalized: str) -> dict | None:
+    if is_spurious_benefit_line(raw):
+        return None
     # 1. Distance
     distance = re.search(r"\b(\d[\d,]*(?:\.\d+)?)\s*(km|kilometres?)\b", raw, re.IGNORECASE)
     if distance:
@@ -259,12 +352,21 @@ def _typed_value(raw: str, normalized: str) -> dict | None:
         return {"type": "per_day", "value": amount, "currency": "MYR", "unit": "day"}
 
     # 4. Money / Insured Limit & Cost
-    amounts = list(MONEY_RE.finditer(raw))
+    # Strip percentage tokens so that 8% or 10% isn't captured as an amount
+    clean_raw = re.sub(r"\b\d+(?:\.\d+)?%", "", raw)
+    amounts: list[str] = []
+    for m in MONEY_RE.finditer(clean_raw):
+        if m.group(1):
+            whole = m.group(1)
+            cents = m.group(2) or "00"
+            amounts.append(_money(f"{whole}.{cents}"))
+        elif m.group(3):
+            amounts.append(_money(m.group(3)))
+
     if not amounts:
         return None
     if len(amounts) >= 2:
-        a1 = _money(f"{amounts[0].group(1)}.{amounts[0].group(2) or '00'}")
-        a2 = _money(f"{amounts[1].group(1)}.{amounts[1].group(2) or '00'}")
+        a1, a2 = amounts[0], amounts[1]
         try:
             d1, d2 = Decimal(a1), Decimal(a2)
             limit_val, cost_val = (a1, a2) if d1 >= d2 else (a2, a1)
@@ -278,10 +380,9 @@ def _typed_value(raw: str, normalized: str) -> dict | None:
             "premium": {"amount": cost_val, "currency": "MYR"},
         }
 
-    premium_match = re.search(r"premium\s*RM?\s*(\d[\d,]*(?:\.\d+)?)", raw, re.IGNORECASE)
-    first = amounts[0]
-    amount = _money(f"{first.group(1)}.{first.group(2) or '00'}")
-    is_table_cost = bool(re.search(r"[:\-]\s*(?:RM|MYR)?\s*[\d,]+", raw, re.IGNORECASE))
+    premium_match = re.search(r"premium\s*RM?\s*(\d[\d,]*(?:\.\d+)?)", clean_raw, re.IGNORECASE)
+    amount = amounts[0]
+    is_table_cost = bool(re.search(r"[:\-]\s*(?:RM|MYR)?\s*[\d,]+(?:\.\d{2})?", clean_raw, re.IGNORECASE))
     is_liability_driver = any(token in normalized for token in ("passenger", "driver", "all drivers", "lltp", "llop", "pillion"))
 
     if premium_match:
@@ -447,10 +548,14 @@ def _heading_scope(line: str) -> tuple[str, str] | None:
 
 
 def _looks_like_benefit(raw: str, concepts: list[dict], in_section: bool) -> bool:
+    if is_spurious_benefit_line(raw):
+        return False
     if PURE_AMOUNT_RE.match(raw.strip()):
         return False
     normalized = _normalized(raw)
     if not normalized or normalized.startswith(NON_BENEFIT_PREFIXES):
+        return False
+    if is_spurious_benefit_line(normalized):
         return False
     if PURE_AMOUNT_RE.match(normalized):
         return False
@@ -535,22 +640,45 @@ def extract_benefit_lines(
     section_state = "unknown"
     section_label: str | None = None
     ordinal = 0
+    in_pds_doc = False
+
     for page in sorted(page_text, key=lambda item: int(item.get("page", 0))):
         page_number = int(page.get("page") or 1)
-        stitched_lines = _stitch_lines(str(page.get("text") or "").splitlines())
+        raw_page_text = str(page.get("text") or "")
+        page_is_pds = is_pds_text(raw_page_text)
+        if page_is_pds:
+            in_pds_doc = True
+        else:
+            if "quotation" in raw_page_text.lower() and not is_pds_text(raw_page_text):
+                in_pds_doc = False
+
+        stitched_lines = _stitch_lines(raw_page_text.splitlines())
         for raw in stitched_lines:
             heading = _heading_scope(raw)
             if heading:
-                scope, section_state = heading
+                h_scope, h_state = heading
+                if in_pds_doc or h_scope == "pds":
+                    in_pds_doc = True
+                    scope, section_state = "pds", "unknown"
+                else:
+                    scope, section_state = h_scope, h_state
                 section_label = raw[:255]
                 continue
+
+            # If inside a PDS document, skip all lines from becoming quotation benefit candidates
+            if in_pds_doc:
+                continue
+
+            if is_spurious_benefit_line(raw):
+                continue
+
             lower = raw.lower()
             narrative = scope == "pds" or lower.startswith(NARRATIVE_PREFIXES) or " may cover " in f" {lower} " or " could " in f" {lower} " or "not included" in lower
             in_section = scope not in {"outside", "pds", "stop"}
             if not _looks_like_benefit(raw, concept_rows, in_section) and not narrative:
                 continue
             normalized = _normalized(raw)
-            if not normalized or normalized.startswith(NON_BENEFIT_PREFIXES):
+            if not normalized or normalized.startswith(NON_BENEFIT_PREFIXES) or is_spurious_benefit_line(normalized):
                 continue
             ordinal += 1
             typed_val = _typed_value(raw, normalized)

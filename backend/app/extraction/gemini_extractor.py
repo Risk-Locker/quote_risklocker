@@ -403,11 +403,13 @@ Extract accurate, grounded JSON data matching the provided schema from the quota
    - In `detected_benefits`, read the extras table with extreme precision.
    - **Coverage Limit (`coverage_limit`)**: Sum covered or insured limit explicitly stated (e.g. `Windscreen (Sum Insured: RM 2,650) ... RM 397.50` -> `coverage_limit: "2,650"`, `premium_cost: "397.50"`; `Key Replacement (Coverage: RM 1,000) ... RM 45.00` -> `coverage_limit: "1,000"`, `premium_cost: "45.00"`).
    - **No Coverage Limit**: If the benefit is a legal liability endorsement or service rider without an explicit sum insured (e.g. `Legal Liability to Passengers ... RM 41.85`, `Legal Liability of Passengers ... RM 7.50`, `All Drivers ... RM 20.00`, `24-hr Towing`), `coverage_limit` MUST BE EMPTY `""` or null. NEVER put the premium cost or price into `coverage_limit`.
-11. **STRICT BENEFIT FILTERING**:
+11. **STRICT BENEFIT FILTERING & PRODUCT DISCLOSURE SHEET (PDS) EXCLUSION**:
+   - If the document contains a Product Disclosure Sheet (PDS) or sample illustration table (e.g. 'As an illustration, for RM2,619.93...'), DO NOT extract benefits, vehicle data, or premiums from the PDS. Extract ONLY from the official quotation schedule or pricing slip.
+   - NEVER extract contact phone numbers (e.g. '03-2262 8666'), email addresses, document revision codes (e.g. '26/PRN/PDS/...'), basic premium, NCD deduction, Service Tax (SST), stamp duty, or sales commission as benefits.
    - NEVER extract generic policy definitions, standard terms and conditions, legal clauses, or claim procedures as benefits.
    - ONLY extract concrete coverages, riders, or add-ons that are explicitly listed in the quotation's pricing schedule, benefits table, or endorsements summary.
    - NEVER extract the core coverage type or vehicle use class (e.g. 'Comprehensive', 'Third Party', 'Third Party Fire & Theft', 'TPFT', 'Private Car - Private Use', 'Motorcycle') as a benefit. These belong in the main vehicle/policy fields.
-   - If a PDF contains 30 pages of generic policy wording, IGNORE the generic text completely.
+   - If a PDF contains pages of generic policy wording or PDS, IGNORE the generic text completely.
 12. **QUOTATION REFERENCE**:
    - DO NOT extract underwriter reference numbers, quote numbers, or ref numbers from the document. Quotation reference is strictly an internal Risklocker system sequence.
 13. **ROAD TAX**:

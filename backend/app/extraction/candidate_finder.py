@@ -491,6 +491,19 @@ def _add_contribution_rows(text: str, page_text: list[dict], results: dict[str, 
 
 
 def _add_optional_covers(text: str, page_text: list[dict], results: dict[str, list[CandidateValue]]) -> None:
+    from app.extraction.benefit_lines import is_pds_text
+
+    # Exclude PDS pages from regex scanning for quotation riders
+    if page_text:
+        valid_pages_text = [
+            str(p.get("text") or "")
+            for p in page_text
+            if not is_pds_text(str(p.get("text") or ""))
+        ]
+        target_text = "\n".join(valid_pages_text) if valid_pages_text else text
+    else:
+        target_text = text
+
     labels = [
         "Windscreen",
         "Legal Liability to Passenger",
@@ -503,7 +516,7 @@ def _add_optional_covers(text: str, page_text: list[dict], results: dict[str, li
         "Drive Less Save More",
     ]
     found: list[str] = []
-    lower = text.lower()
+    lower = target_text.lower()
     for label in labels:
         if label.lower() in lower and label not in found:
             found.append(label)

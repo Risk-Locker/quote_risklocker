@@ -60,6 +60,7 @@ from app.rendering.render_context import (
 )
 from app.services.catalog_review_service import _resolve_vehicle_category, auto_apply_extracted_benefits, initialize_catalog_review, pin_catalog_context, seed_base_benefits
 from app.extraction.validators import normalize_date, normalize_money, normalize_valuation_type
+from app.extraction.benefit_lines import is_spurious_benefit_line
 
 
 SCALAR_DECISIONS = frozenset({"confirm", "edit", "clear", "keep_check_needed"})
@@ -688,7 +689,9 @@ def _workspace_extracted_benefits_section(
             continue
         if re.search(r"[:=\-]?\s*(?:no|tidak|false)\b", norm_label, re.IGNORECASE):
             continue
-        if line.get("line_kind") == "narrative":
+        if line.get("line_kind") in {"narrative", "pds_narrative"} or line.get("source_scope") == "pds":
+            continue
+        if is_spurious_benefit_line(norm_label):
             continue
 
         seen_labels.add(norm_label.lower())

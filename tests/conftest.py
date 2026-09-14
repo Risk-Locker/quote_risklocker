@@ -7,7 +7,13 @@ any tmp_path fixture resolves. Creating it here, at conftest import time,
 guarantees every test can run on a fresh machine and a clean CI runner.
 """
 
+import sys
 from pathlib import Path
 
-_QCTMP_PYTEST = Path(__file__).resolve().parents[1] / ".qc-tmp" / "pytest"
+_ROOT = Path(__file__).resolve().parents[1]
+_BACKEND = _ROOT / "backend"
+if str(_BACKEND) not in sys.path:
+    sys.path.insert(0, str(_BACKEND))
+
+_QCTMP_PYTEST = _ROOT / ".qc-tmp" / "pytest"
 _QCTMP_PYTEST.mkdir(parents=True, exist_ok=True)
