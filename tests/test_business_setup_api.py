@@ -39,7 +39,7 @@ def test_paginated_company_list_and_company_workspace(monkeypatch):
     monkeypatch.setattr(
         routes,
         "get_business_company_workspace",
-        lambda _db, _user, company_id: {"company": {"id": company_id}, "products": [], "tiers": [], "catalogs": []},
+        lambda _db, _user, company_id, **kwargs: {"company": {"id": company_id}, "products": [], "tiers": [], "catalogs": []},
     )
 
     response = client().get("/api/business/companies?search=qbe&page=2&page_size=20")

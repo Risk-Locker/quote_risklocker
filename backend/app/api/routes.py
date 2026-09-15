@@ -1508,9 +1508,12 @@ def business_company_delete(
 @router.get("/business/companies/{company_id}/workspace")
 def business_company_workspace(
     company_id: str,
+    include_archived: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
+    if include_archived:
+        return {"workspace": get_business_company_workspace(db, user, company_id, include_archived=True)}
     return {"workspace": get_business_company_workspace(db, user, company_id)}
 
 

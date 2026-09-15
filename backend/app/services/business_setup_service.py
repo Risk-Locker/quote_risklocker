@@ -297,12 +297,15 @@ def _catalog(db, item: BenefitCatalog) -> dict:
     }
 
 
-def get_business_company_workspace(db, user, company_id: str) -> dict:
+def get_business_company_workspace(db, user, company_id: str, include_archived: bool = False) -> dict:
     _require_business(user)
     company = db.get(InsuranceCompany, company_id)
     if company is None:
         raise AppError("Company not found.", 404)
-    products = list(db.scalars(select(InsuranceProduct).where(InsuranceProduct.company_id == company_id)).all())
+    prod_stmt = select(InsuranceProduct).where(InsuranceProduct.company_id == company_id)
+    if not include_archived:
+        prod_stmt = prod_stmt.where(InsuranceProduct.status != "archived", InsuranceProduct.status != "retired")
+    products = list(db.scalars(prod_stmt).all())
     product_ids = [item.id for item in products]
     tiers = list(
         db.scalars(
@@ -311,9 +314,10 @@ def get_business_company_workspace(db, user, company_id: str) -> dict:
             .order_by(InsuranceProductTier.sort_order, InsuranceProductTier.name)
         ).all()
     ) if product_ids else []
-    catalogs = list(
-        db.scalars(select(BenefitCatalog).where(BenefitCatalog.company_id == company_id).order_by(BenefitCatalog.name)).all()
-    )
+    cat_stmt = select(BenefitCatalog).where(BenefitCatalog.company_id == company_id).order_by(BenefitCatalog.name)
+    if not include_archived:
+        cat_stmt = cat_stmt.where(BenefitCatalog.status != "archived", BenefitCatalog.status != "retired")
+    catalogs = list(db.scalars(cat_stmt).all())
     return {
         "company": serialize_company(db, company),
         "products": [_product(item) for item in products],

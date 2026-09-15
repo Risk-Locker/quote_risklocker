@@ -687,3 +687,37 @@ def test_select_catalog_offering_with_removed_state():
     assert sel.state == "removed"
 
 
+def test_build_workspace_snapshot_preserves_existing_draft_and_never_wipes():
+    """Verify build_workspace_snapshot is an idempotent read that never wipes saved selections or catalog revisions."""
+    from backend.app.services.workspace_service import build_workspace_snapshot
+    values = list(objects())
+    draft = next(item for item in values if isinstance(item, QuotationDraft))
+    draft.catalog_revision_id = "catalog-revision-1"
+    draft.product_id = "product-1"
+    draft.tier_id = "tier-1"
+    # Even if draft fields mention lorry or commercial terms
+    draft.fields = {"car_model": {"value": "Hino 500 Lorry Truck", "status": "ready"}}
+    selection = DraftBenefitSelection(
+        id="sel-preserve-1",
+        draft_id=draft.id,
+        selection_key="catalog:custom-saved-benefit",
+        item_kind="catalog",
+        state="current",
+        cost_status="included",
+        evidence_snapshot={},
+        sort_order=0,
+    )
+    values.append(selection)
+    db = FakeDb(values)
+
+    snapshot = build_workspace_snapshot(db, user(), "session-1")
+    assert snapshot is not None
+    assert draft.catalog_revision_id == "catalog-revision-1"
+    assert draft.product_id == "product-1"
+    assert draft.tier_id == "tier-1"
+    # Ensure selection was preserved and not wiped
+    remaining = [item for item in db.values.values() if isinstance(item, DraftBenefitSelection) and item.draft_id == draft.id]
+    assert len(remaining) >= 1
+    assert any(s.id == "sel-preserve-1" for s in remaining)
+
+

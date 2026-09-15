@@ -122,9 +122,14 @@ const GLOBAL_BENEFIT_KEYS = new Set([
 type CompanyOption = { id: string; name: string };
 type CompanyWorkspace = {
   company: { id: string; name: string };
-  products: Array<{ id: string; name: string }>;
+  products: Array<{ id: string; name: string; status?: string }>;
   tiers: Array<{ id: string; product_id: string; name: string }>;
-  catalogs?: Array<{ id: string; offerings?: Array<{ id: string; concept_key?: string; concept_id?: string; concept?: { id?: string; concept_key?: string } }> }>;
+  catalogs?: Array<{
+    id: string;
+    product_id?: string;
+    status?: string;
+    offerings?: Array<{ id: string; concept_key?: string; concept_id?: string; concept?: { id?: string; concept_key?: string } }>;
+  }>;
 };
 
 type PublishedTemplateOption = {
@@ -240,7 +245,7 @@ function computeMalaysianRoadTax(cc: number, vehicleType: string = "Car", ownerT
 
   // 1. Electric Vehicle (ZEV 2026 Guidelines - Identical for Private & Company)
   const isEVMotorcycle = normType.includes("evmotor") || (normType.includes("ev") && (normType.includes("bike") || normType.includes("motor")));
-  const isEVNonSaloon = normType.includes("evnonsaloon") || (normType.includes("ev") && (normType.includes("suv") || normType.includes("mpv") || normType.includes("non")));
+  const isEVNonSaloon = normType.includes("evnonsaloon") || normType.includes("evcommercial") || (normType.includes("ev") && (normType.includes("suv") || normType.includes("mpv") || normType.includes("non") || normType.includes("commercial") || normType.includes("lorry")));
   const isEVSaloon = normType.includes("evsaloon") || (normType.includes("ev") && !isEVMotorcycle && !isEVNonSaloon);
 
   if (isEVMotorcycle || isEVNonSaloon || isEVSaloon) {
@@ -803,9 +808,44 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [benefitsCollapsed, setBenefitsCollapsed] = useState(false);
 
-  // Benefit Pack (bundle plan) manager state
   const [packPlanSelections, setPackPlanSelections] = useState<Record<string, string>>({});
   const [customPrice, setCustomPrice] = useState("");
+
+  // Two-way synchronization highlight state showing what changed and the previous value
+  const [syncHighlight, setSyncHighlight] = useState<{
+    field: "vehicle_type" | "product_package";
+    prev: string;
+    next: string;
+    timestamp: number;
+  } | null>(null);
+
+  const currentVehicleCategory = useMemo(() => {
+    const raw = String(formValues?.vehicle_type || workspace?.fields?.vehicle_type?.value || "").toLowerCase();
+    if (raw.includes("motor") || raw.includes("bike")) return "Motorcycle";
+    if (raw.includes("lorry") || raw.includes("commercial") || raw.includes("truck") || raw.includes("haulage")) return "Lorry";
+    return "Car";
+  }, [formValues?.vehicle_type, workspace?.fields?.vehicle_type]);
+
+  const isExcludedForVehicle = useCallback(
+    (item: { label?: string; title?: string; concept_key?: string } | null | undefined) => {
+      if (!item) return false;
+      const text = `${item.label || ""} ${item.title || ""} ${item.concept_key || ""}`.toLowerCase();
+      if (currentVehicleCategory === "Motorcycle" && text.includes("windscreen")) return true;
+      if (currentVehicleCategory === "Lorry" && (text.includes("towing") || text.includes("breakdown"))) return true;
+      return false;
+    },
+    [currentVehicleCategory]
+  );
+
+  const currentCards = useMemo(() => {
+    if (!workspace?.benefit_cards?.current_benefits) return [];
+    return workspace.benefit_cards.current_benefits.filter((card) => !isExcludedForVehicle(card));
+  }, [workspace?.benefit_cards?.current_benefits, isExcludedForVehicle]);
+
+  const addonCards = useMemo(() => {
+    if (!workspace?.benefit_cards?.available_addons) return [];
+    return workspace.benefit_cards.available_addons.filter((card) => !isExcludedForVehicle(card));
+  }, [workspace?.benefit_cards?.available_addons, isExcludedForVehicle]);
 
   // Quick Action Export States (PNG / PDF)
   const debouncedSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1083,10 +1123,12 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     });
     return balanceBenefitGridElements(rawElements, {
       ...workspace?.benefit_cards,
+      current_benefits: currentCards,
+      available_addons: addonCards,
       extras: workspace?.extras,
       displayOptions,
     } as any);
-  }, [previewTemplate, workspace?.benefit_cards, workspace?.extras, selectedBenefitPreset, displayOptions, allBenefitPresets]);
+  }, [previewTemplate, workspace?.benefit_cards, workspace?.extras, selectedBenefitPreset, displayOptions, allBenefitPresets, currentCards, addonCards]);
 
   const canvasH = useMemo(() => {
     const baseHeight = previewTemplate?.config?.canvas?.height || 1123;
@@ -1353,72 +1395,87 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     save().catch(() => undefined);
   }
 
+  function getProductVehicleCategory(productName: string): "Car" | "Motorcycle" | "Lorry" {
+    const lower = (productName || "").toLowerCase();
+    if (/motorcycle|motor\s*cycle|motosikal|bike/i.test(lower)) {
+      return "Motorcycle";
+    }
+    if (/lorry|truck|rigid|trailer|tipper|prime mover|haulage|commercial\s*vehicle|c\s*permit|a\s*permit/i.test(lower)) {
+      return "Lorry";
+    }
+    return "Car";
+  }
+
+  function formatProductLabel(rawName: string): string {
+    let label = rawName;
+    if (!/\b(Comprehensive|TPFT|TPO|Third Party)\b/i.test(rawName)) {
+      const lowerName = rawName.toLowerCase();
+      let covLabel = "Comprehensive";
+      if (lowerName.includes("tpft") || (lowerName.includes("third party") && lowerName.includes("fire"))) {
+        covLabel = "TPFT";
+      } else if (lowerName.includes("third") || lowerName.includes("tpo") || lowerName.includes("party")) {
+        covLabel = "TPO";
+      }
+      label = `${rawName} (${covLabel})`;
+    }
+    return label;
+  }
+
+  const isCurrentEV = useMemo(() => {
+    const vtype = String(formValues?.vehicle_type || workspace?.fields?.vehicle_type?.value || "").toUpperCase();
+    return vtype.startsWith("EV");
+  }, [formValues?.vehicle_type, workspace?.fields?.vehicle_type]);
+
   const productOptions = useMemo(() => {
     const raw = companyWorkspace?.products || [];
-    const fields = workspace?.fields;
-    const vehicleText = [
-      fields?.vehicle_type?.value,
-      fields?.vehicle_category?.value,
-      fields?.car_model?.value,
-      fields?.vehicle_description?.value,
-      fields?.product_name?.value,
-    ].filter(Boolean).join(" ").toLowerCase();
-
-    const vtypeText = String(formValues?.vehicle_type || fields?.vehicle_type?.value || "").toLowerCase();
-    const evCat = detectEVCategory(
-      fields?.car_brand?.value,
-      fields?.car_model?.value,
-      fields?.engine_cc?.value,
+    const catalogs = companyWorkspace?.catalogs || [];
+    const validProductIds = new Set(
+      catalogs
+        .filter((cat) => cat.status !== "archived" && cat.status !== "retired")
+        .map((cat) => cat.product_id)
+        .filter(Boolean)
     );
-    const engineCcText = (fields?.engine_cc?.value || "").toLowerCase();
-    const fuelText = (fields?.fuel_type?.value || "").toLowerCase();
-    const engineTypeText = (fields?.engine_type?.value || "").toLowerCase();
-    const isEv = !!evCat ||
-      vtypeText.startsWith("ev") ||
-      engineCcText.includes("kw") ||
-      fuelText.includes("elect") ||
-      fuelText.includes("ev") ||
-      engineTypeText === "ev";
 
-    const isLorry = /lorry|truck|rigid|trailer|tipper|prime mover|haulage|hino|fuso|canter|isuzu npr|c permit|a permit/.test(vehicleText);
-    const isMotorcycle = !isLorry && /motorcycle|motor\s*cycle|motor|bike|kapcai|scooter/.test(vehicleText);
-    const isCar = !isLorry && !isMotorcycle;
-
-    let vehicleFiltered = raw;
-    if (isLorry) {
-      vehicleFiltered = raw.filter((p) => {
-        const name = (p.name || "").toLowerCase();
-        if (/motorcycle|motor\s*cycle|bike|private\s*car|saloon/.test(name)) return false;
-        return /lorry|haulage|truck|commercial\s*vehicle/.test(name);
-      });
-      if (!vehicleText.includes("a permit") && !vehicleText.includes("a-permit") && !vehicleText.includes("general haulage")) {
-        const cPermitProds = vehicleFiltered.filter((p) => !p.name.toLowerCase().includes("a permit") && !p.name.toLowerCase().includes("general haulage"));
-        if (cPermitProds.length > 0) {
-          vehicleFiltered = cPermitProds;
-        }
-      }
-    } else if (isMotorcycle) {
-      vehicleFiltered = raw.filter((p) => {
-        const name = (p.name || "").toLowerCase();
-        if (/lorry|truck|car\s*policy|private\s*car|saloon/.test(name)) return false;
-        return /motorcycle|motor\s*cycle|bike|motor/.test(name);
-      });
-    } else if (isCar) {
-      vehicleFiltered = raw.filter((p) => {
-        const name = (p.name || "").toLowerCase();
-        if (/motorcycle|motor\s*cycle|bike|lorry|truck|haulage/.test(name)) return false;
-        return true;
-      });
-    }
-
-    // Filter by Engine Type (EV vs ICE)
-    const evFiltered = vehicleFiltered.filter((p) => {
+    // Filter by:
+    // 1. Not archived or retired
+    // 2. Has at least one non-archived catalog in this company (if catalogs exist)
+    // 3. Not a junk mock product (e.g. Product-...)
+    // 4. Matches active powertrain (EV vs ICE)
+    const validProducts = raw.filter((p) => {
+      if (p.status === "archived" || p.status === "retired") return false;
+      if (p.name && /^product-/i.test(p.name)) return false;
+      if (validProductIds.size > 0 && !validProductIds.has(p.id)) return false;
       const isEvProduct = /\(ev\)|(\bev\b)|electric/i.test(p.name || "");
-      return isEv ? isEvProduct : !isEvProduct;
+      return isCurrentEV ? isEvProduct : !isEvProduct;
     });
 
-    return evFiltered.length > 0 ? evFiltered : (vehicleFiltered.length > 0 ? vehicleFiltered : raw);
-  }, [companyWorkspace, workspace?.fields, formValues?.vehicle_type]);
+    // Deduplicate by clean name
+    const seen = new Set<string>();
+    return validProducts.filter((p) => {
+      const key = (p.name || "").trim().toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [companyWorkspace, isCurrentEV]);
+
+  const categorizedProducts = useMemo(() => {
+    const cars: typeof productOptions = [];
+    const motorcycles: typeof productOptions = [];
+    const lorries: typeof productOptions = [];
+
+    for (const prod of productOptions) {
+      const cat = getProductVehicleCategory(prod.name || "");
+      if (cat === "Motorcycle") {
+        motorcycles.push(prod);
+      } else if (cat === "Lorry") {
+        lorries.push(prod);
+      } else {
+        cars.push(prod);
+      }
+    }
+    return { cars, motorcycles, lorries };
+  }, [productOptions]);
 
   const tierOptions = useMemo(
     () => (companyWorkspace?.tiers || []).filter((tier) => tier.product_id === workspace?.pinned.product_id),
@@ -1461,6 +1518,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
   const filteredConcepts = useMemo(() => {
     return globalConcepts.filter((c) => {
+      if (isExcludedForVehicle(c)) return false;
       if (modalFilter === "insurer" && !insurerConceptKeys.has(c.concept_key) && !insurerConceptKeys.has(c.id)) return false;
       if (modalFilter === "global" && !GLOBAL_BENEFIT_KEYS.has(c.concept_key)) return false;
       if (modalFilter === "addons" && GLOBAL_BENEFIT_KEYS.has(c.concept_key)) return false;
@@ -1468,7 +1526,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       const term = globalSearch.toLowerCase();
       return c.label.toLowerCase().includes(term) || c.concept_key.toLowerCase().includes(term);
     });
-  }, [globalConcepts, modalFilter, globalSearch, insurerConceptKeys]);
+  }, [globalConcepts, modalFilter, globalSearch, insurerConceptKeys, isExcludedForVehicle]);
 
   const conceptAssets = useMemo(() => {
     const map: Record<string, string> = {};
@@ -1765,6 +1823,112 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       setPinLoading(false);
     }
   }
+
+  function handlePackageSelect(productId: string) {
+    if (!productId || !workspace?.pinned.company_id) {
+      if (workspace?.pinned.company_id) {
+        pinCatalog(workspace.pinned.company_id as string, null);
+      }
+      return;
+    }
+    const selectedProd = productOptions.find((p) => p.id === productId);
+    if (selectedProd) {
+      const targetCat = getProductVehicleCategory(selectedProd.name || "");
+      const currentVtype = String(formValues.vehicle_type || "");
+      const isEv = currentVtype.startsWith("EV");
+      const currentCat = currentVtype.includes("Motor")
+        ? "Motorcycle"
+        : (currentVtype.toLowerCase().includes("lorry") || currentVtype.toLowerCase().includes("other") ? "Lorry" : "Car");
+
+      if (targetCat !== currentCat) {
+        let newVtype = "Car";
+        if (isEv) {
+          newVtype = targetCat === "Motorcycle" ? "EVMotorcycle" : (targetCat === "Lorry" ? "EVCommercial" : "EVSaloonCar");
+        } else {
+          newVtype = targetCat === "Motorcycle" ? "Motorcycle" : (targetCat === "Lorry" ? "Lorry" : "Car");
+        }
+
+        const prevLabel = currentCat === "Motorcycle" ? "Motorcycle" : (currentCat === "Lorry" ? "Lorry / Commercial" : "Car");
+        const nextLabel = targetCat === "Motorcycle" ? "Motorcycle" : (targetCat === "Lorry" ? "Lorry / Commercial" : "Car");
+
+        setSyncHighlight({
+          field: "vehicle_type",
+          prev: prevLabel,
+          next: nextLabel,
+          timestamp: Date.now(),
+        });
+
+        setFormValues((v) => ({ ...v, vehicle_type: newVtype }));
+        commitFieldDirectly("vehicle_type", newVtype);
+
+        const currentCCStr = formValues["engine_cc"] || (workspace.fields["engine_cc"] as WorkspaceField | undefined)?.value;
+        const isEVType = newVtype.startsWith("EV");
+        const rawParsed = currentCCStr ? parseFloat(String(currentCCStr).replace(/[^0-9.]/g, "")) : (isEVType ? null : inferCCFromCarModel(formValues["car_model"] || (workspace.fields["car_model"] as WorkspaceField | undefined)?.value));
+        if (rawParsed && rawParsed > 0) {
+          if (isEVType) {
+            const computedRT = computeMalaysianRoadTax(rawParsed, newVtype, "Individual");
+            if (computedRT > 0) {
+              const rtFormatted = computedRT.toFixed(2);
+              setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
+              commitFieldDirectly("roadtax", rtFormatted);
+            }
+          } else if (rawParsed <= 7000) {
+            const parsedCC = Math.round(rawParsed);
+            const baseType = newVtype === "NonSaloonCar" ? "NonSaloonCar" : newVtype.toLowerCase().includes("motor") ? "Motorcycle" : (newVtype.toLowerCase().includes("lorry") || newVtype.toLowerCase().includes("other")) ? "Lorry" : "Car";
+            const computedRT = computeMalaysianRoadTax(parsedCC, baseType, "Individual");
+            if (computedRT > 0) {
+              const rtFormatted = computedRT.toFixed(2);
+              setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
+              commitFieldDirectly("roadtax", rtFormatted);
+            }
+          }
+        }
+      }
+    }
+
+    pinCatalog(workspace.pinned.company_id as string, productId);
+  }
+
+  // Auto-select canonical package when company is pinned but product is unselected
+  const autoSelectedCompanyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const compId = workspace?.pinned.company_id;
+    if (!compId || !companyWorkspace || !productOptions.length || pinLoading) return;
+
+    // If product is already selected and exists in valid options, do nothing
+    if (workspace?.pinned.product_id && productOptions.some((p) => p.id === workspace.pinned.product_id)) {
+      return;
+    }
+
+    // Avoid multiple auto-select triggers for the same company if already pinned
+    if (autoSelectedCompanyRef.current === compId && workspace?.pinned.product_id) {
+      return;
+    }
+
+    const pool = currentVehicleCategory === "Motorcycle"
+      ? categorizedProducts.motorcycles
+      : (currentVehicleCategory === "Lorry" ? categorizedProducts.lorries : categorizedProducts.cars);
+
+    const candidates = pool.length > 0 ? pool : productOptions;
+    if (!candidates.length) return;
+
+    const canonical = candidates.find((p) =>
+      /private car protector|auto365.*lite|sompo motor|private car secure|comprehensive private car|takaful mymotor|tune protect motor easy|commercial lorry.*own goods.*c permit|c permit|own goods|motorcycle policy \(private\)/i.test(p.name)
+    ) || candidates.find((p) => /comprehensive/i.test(p.name)) || candidates[0];
+
+    if (canonical && canonical.id !== workspace?.pinned.product_id) {
+      autoSelectedCompanyRef.current = compId;
+      pinCatalog(compId, canonical.id);
+    }
+  }, [
+    workspace?.pinned.company_id,
+    workspace?.pinned.product_id,
+    companyWorkspace,
+    productOptions,
+    categorizedProducts,
+    currentVehicleCategory,
+    pinLoading,
+  ]);
 
   // Pin a specific package tier (package-system insurers) by its package_id.
   async function pinPackageTier(packageId: string) {
@@ -2188,8 +2352,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     );
   }
 
-  const currentCards = workspace.benefit_cards.current_benefits;
-  const addonCards = workspace.benefit_cards.available_addons;
+
 
   return (
     <>
@@ -2541,32 +2704,55 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                     </label>
 
                     <label className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
-                      Product / Package
+                      <span className="flex items-center justify-between">
+                        <span>Product / Package</span>
+                        {syncHighlight && syncHighlight.field === "product_package" && Date.now() - syncHighlight.timestamp < 6000 ? (
+                          <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 border border-emerald-300 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 shadow-xs animate-pulse">
+                            <span className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider">Auto-selected</span>
+                            <span className="line-through text-slate-400 font-normal truncate max-w-[110px]" title={syncHighlight.prev}>{syncHighlight.prev}</span>
+                            <span className="text-emerald-500 font-bold">→</span>
+                            <span className="bg-emerald-100 text-emerald-900 px-1 rounded font-bold truncate max-w-[140px]" title={syncHighlight.next}>{syncHighlight.next}</span>
+                          </span>
+                        ) : null}
+                      </span>
                       <Select
                         value={workspace.pinned.product_id || ""}
                         disabled={pinLoading || !productOptions.length}
-                        onChange={(event) => pinCatalog(workspace.pinned.company_id as string, event.target.value)}
+                        onChange={(event) => handlePackageSelect(event.target.value)}
+                        className={`transition-all duration-300 ${
+                          syncHighlight && syncHighlight.field === "product_package" && Date.now() - syncHighlight.timestamp < 6000
+                            ? "border-emerald-500 ring-2 ring-emerald-300 bg-emerald-50/20"
+                            : ""
+                        }`}
                       >
                         <option value="">{productOptions.length ? "Choose package" : "Standard Motor"}</option>
-                        {productOptions.map((product) => {
-                          const rawName = product.name || "";
-                          let label = rawName;
-                          if (!/\b(Comprehensive|TPFT|TPO|Third Party)\b/i.test(rawName)) {
-                            const lowerName = rawName.toLowerCase();
-                            let covLabel = "Comprehensive";
-                            if (lowerName.includes("tpft") || (lowerName.includes("third party") && lowerName.includes("fire"))) {
-                              covLabel = "TPFT";
-                            } else if (lowerName.includes("third") || lowerName.includes("tpo") || lowerName.includes("party")) {
-                              covLabel = "TPO";
-                            }
-                            label = `${rawName} (${covLabel})`;
-                          }
-                          return (
-                            <option key={product.id} value={product.id}>
-                              {label}
-                            </option>
-                          );
-                        })}
+                        {categorizedProducts.cars.length > 0 ? (
+                          <optgroup label="🚗 Cars (Saloon / Sedan / SUV / MPV / Company)">
+                            {categorizedProducts.cars.map((product) => (
+                              <option key={product.id} value={product.id}>
+                                {formatProductLabel(product.name || "")}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ) : null}
+                        {categorizedProducts.motorcycles.length > 0 ? (
+                          <optgroup label="🏍️ Motorcycles / Bikes">
+                            {categorizedProducts.motorcycles.map((product) => (
+                              <option key={product.id} value={product.id}>
+                                {formatProductLabel(product.name || "")}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ) : null}
+                        {categorizedProducts.lorries.length > 0 ? (
+                          <optgroup label="🚛 Commercial Vehicles / Lorries">
+                            {categorizedProducts.lorries.map((product) => (
+                              <option key={product.id} value={product.id}>
+                                {formatProductLabel(product.name || "")}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ) : null}
                       </Select>
                     </label>
                   </div>
@@ -2731,14 +2917,22 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                       return (
                         <label key={field.name} className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
                           <span className="flex items-center justify-between">
-                            {fieldLabel}
+                            <span>{fieldLabel}</span>
                             {needsCheck ? <span className="text-[10px] text-amber-700 font-bold">Check value</span> : null}
+                            {field.kind === "vehicle_type" && syncHighlight && syncHighlight.field === "vehicle_type" && Date.now() - syncHighlight.timestamp < 6000 ? (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 border border-emerald-300 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 shadow-xs animate-pulse">
+                                <span className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider">Auto-synced</span>
+                                <span className="line-through text-slate-400 font-normal">{syncHighlight.prev}</span>
+                                <span className="text-emerald-500 font-bold">→</span>
+                                <span className="bg-emerald-100 text-emerald-900 px-1 rounded font-bold">{syncHighlight.next}</span>
+                              </span>
+                            ) : null}
                           </span>
                           {field.kind === "vehicle_type" ? (
                             <div className="grid gap-1.5">
                               {/* Engine Type Segmented Toggle */}
                               <div className="flex items-center gap-1 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-0.5 text-xs">
-                                {(["ICE", "EV"] as const).map((eng) => {
+                                {([ "ICE", "EV" ] as const).map((eng) => {
                                   const currentVal = String(formValues[field.name] || "");
                                   const isCurrentEV = currentVal.startsWith("EV");
                                   const active = eng === "EV" ? isCurrentEV : !isCurrentEV;
@@ -2748,30 +2942,58 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                       type="button"
                                       onClick={() => {
                                         if (eng === "EV" && !isCurrentEV) {
-                                          const newVtype = currentVal === "NonSaloonCar" ? "EVNonSaloonCar" : (currentVal.toLowerCase().includes("motor") ? "EVMotorcycle" : "EVSaloonCar");
+                                          const newVtype = currentVal === "NonSaloonCar"
+                                            ? "EVNonSaloonCar"
+                                            : (currentVal.toLowerCase().includes("motor")
+                                                ? "EVMotorcycle"
+                                                : (currentVal.toLowerCase().includes("lorry") || currentVal.toLowerCase().includes("other") ? "EVCommercial" : "EVSaloonCar"));
                                           setFormValues((v) => ({ ...v, [field.name]: newVtype }));
                                           commitFieldDirectly(field.name, newVtype);
+
+                                          const currentProd = (companyWorkspace?.products || []).find((p) => p.id === workspace?.pinned?.product_id);
                                           const companyProds = companyWorkspace?.products || [];
                                           const matchingEv = companyProds.find((p) => {
                                             const nm = (p.name || "").toLowerCase();
                                             if (!/\(ev\)|(\bev\b)|electric/i.test(nm)) return false;
-                                            return newVtype.includes("Motor") ? /motor/i.test(nm) : !/motor/i.test(nm);
+                                            if (newVtype.includes("Motor")) return /motor/i.test(nm);
+                                            if (newVtype.includes("Commercial") || newVtype.toLowerCase().includes("lorry")) return /lorry|commercial/i.test(nm);
+                                            return !/motor|lorry|commercial/i.test(nm);
                                           });
                                           if (matchingEv && workspace?.pinned.company_id) {
                                             pinCatalog(workspace.pinned.company_id as string, matchingEv.id);
+                                            setSyncHighlight({
+                                              field: "product_package",
+                                              prev: currentProd ? formatProductLabel(currentProd.name) : "ICE Package",
+                                              next: formatProductLabel(matchingEv.name),
+                                              timestamp: Date.now(),
+                                            });
                                           }
                                         } else if (eng === "ICE" && isCurrentEV) {
-                                          const newVtype = currentVal === "EVNonSaloonCar" ? "NonSaloonCar" : (currentVal === "EVMotorcycle" ? "Motorcycle" : "Car");
+                                          const newVtype = currentVal === "EVNonSaloonCar"
+                                            ? "NonSaloonCar"
+                                            : (currentVal === "EVMotorcycle"
+                                                ? "Motorcycle"
+                                                : (currentVal === "EVCommercial" ? "Lorry" : "Car"));
                                           setFormValues((v) => ({ ...v, [field.name]: newVtype }));
                                           commitFieldDirectly(field.name, newVtype);
+
+                                          const currentProd = (companyWorkspace?.products || []).find((p) => p.id === workspace?.pinned?.product_id);
                                           const companyProds = companyWorkspace?.products || [];
                                           const matchingIce = companyProds.find((p) => {
                                             const nm = (p.name || "").toLowerCase();
                                             if (/\(ev\)|(\bev\b)|electric/i.test(nm)) return false;
-                                            return newVtype.includes("Motor") ? /motor/i.test(nm) : !/motor/i.test(nm);
+                                            if (newVtype.includes("Motor")) return /motor/i.test(nm);
+                                            if (newVtype.includes("Commercial") || newVtype.toLowerCase().includes("lorry")) return /lorry|commercial/i.test(nm);
+                                            return !/motor|lorry|commercial/i.test(nm);
                                           });
                                           if (matchingIce && workspace?.pinned.company_id) {
                                             pinCatalog(workspace.pinned.company_id as string, matchingIce.id);
+                                            setSyncHighlight({
+                                              field: "product_package",
+                                              prev: currentProd ? formatProductLabel(currentProd.name) : "EV Package",
+                                              next: formatProductLabel(matchingIce.name),
+                                              timestamp: Date.now(),
+                                            });
                                           }
                                         }
                                       }}
@@ -2802,6 +3024,35 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                   if (isCompany) {
                                     commitFieldDirectly("client_type", "Company");
                                   }
+
+                                  // Two-way synchronization: Auto-sync matching package if vehicle category changed
+                                  const currentProd = (companyWorkspace?.products || []).find((p) => p.id === workspace?.pinned?.product_id);
+                                  const currentProdCat = currentProd ? getProductVehicleCategory(currentProd.name || "") : null;
+                                  const targetCat: "Car" | "Motorcycle" | "Lorry" = newVtype.toLowerCase().includes("motor")
+                                    ? "Motorcycle"
+                                    : (newVtype.toLowerCase().includes("lorry") || newVtype.toLowerCase().includes("other") || newVtype.toLowerCase().includes("commercial") ? "Lorry" : "Car");
+
+                                  if ((!currentProd || currentProdCat !== targetCat) && workspace?.pinned.company_id) {
+                                    const targetPool = targetCat === "Motorcycle"
+                                      ? categorizedProducts.motorcycles
+                                      : (targetCat === "Lorry" ? categorizedProducts.lorries : categorizedProducts.cars);
+
+                                    // Prefer Comprehensive coverage or canonical package if available
+                                    const bestMatching = targetPool.find((p) =>
+                                      /private car protector|auto365.*lite|sompo motor|private car secure|comprehensive private car|takaful mymotor|tune protect motor easy|commercial lorry.*own goods.*c permit|c permit|own goods|motorcycle policy \(private\)/i.test(p.name)
+                                    ) || targetPool.find((p) => /comprehensive/i.test(p.name || "")) || targetPool[0];
+
+                                    if (bestMatching) {
+                                      pinCatalog(workspace.pinned.company_id as string, bestMatching.id);
+                                      setSyncHighlight({
+                                        field: "product_package",
+                                        prev: currentProd ? formatProductLabel(currentProd.name || "") : "Previous Package",
+                                        next: formatProductLabel(bestMatching.name || ""),
+                                        timestamp: Date.now(),
+                                      });
+                                    }
+                                  }
+
                                   const currentCCStr = formValues["engine_cc"] || (workspace.fields["engine_cc"] as WorkspaceField | undefined)?.value;
                                   const isEVType = newVtype.startsWith("EV");
                                   const rawParsed = currentCCStr ? parseFloat(String(currentCCStr).replace(/[^0-9.]/g, "")) : (isEVType ? null : inferCCFromCarModel(formValues["car_model"] || (workspace.fields["car_model"] as WorkspaceField | undefined)?.value));
@@ -2825,13 +3076,18 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                     }
                                   }
                                 }}
-                                className="text-xs font-medium"
+                                className={`text-xs font-medium transition-all duration-300 ${
+                                  syncHighlight && syncHighlight.field === "vehicle_type" && Date.now() - syncHighlight.timestamp < 6000
+                                    ? "border-emerald-500 ring-2 ring-emerald-300 bg-emerald-50/20"
+                                    : ""
+                                }`}
                               >
                                 {String(formValues[field.name] || "").startsWith("EV") ? (
                                   <>
                                     <option value="EVSaloonCar">EV Saloon (Sedan / Coupe - Private & Company)</option>
                                     <option value="EVNonSaloonCar">EV Non-Saloon (SUV / MPV / Crossover / Pickup)</option>
                                     <option value="EVMotorcycle">Electric Motorcycle (Private & Company)</option>
+                                    <option value="EVCommercial">EV Commercial (Van / Lorry / Fleet)</option>
                                   </>
                                 ) : (
                                   <>
@@ -3292,7 +3548,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                               onPointerDown={() => { }}
                               config={previewTemplate.config}
                               variableValues={previewFields}
-                              benefitData={{ ...workspace.benefit_cards, extras: workspace.extras, displayOptions }}
+                              benefitData={{ ...workspace.benefit_cards, current_benefits: currentCards, available_addons: addonCards, extras: workspace.extras, displayOptions }}
                               conceptAssets={conceptAssets}
                               assets={previewTemplateAssets}
                             />
@@ -3802,28 +4058,28 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                   onClick={() => setModalFilter("insurer")}
                   className={`rounded-md px-2.5 py-1 text-xs font-bold transition-all ${modalFilter === "insurer" ? "bg-[var(--rl-black)] text-white" : "bg-white border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"}`}
                 >
-                  🏢 {companyName ? `${companyName}` : "This Insurer"} ({globalConcepts.filter((c) => insurerConceptKeys.has(c.concept_key) || insurerConceptKeys.has(c.id)).length})
+                  🏢 {companyName ? `${companyName}` : "This Insurer"} ({globalConcepts.filter((c) => !isExcludedForVehicle(c) && (insurerConceptKeys.has(c.concept_key) || insurerConceptKeys.has(c.id))).length})
                 </button>
                 <button
                   type="button"
                   onClick={() => setModalFilter("all")}
                   className={`rounded-md px-2.5 py-1 text-xs font-bold transition-all ${modalFilter === "all" ? "bg-[var(--rl-black)] text-white" : "bg-white border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"}`}
                 >
-                  All ({globalConcepts.length})
+                  All ({globalConcepts.filter((c) => !isExcludedForVehicle(c)).length})
                 </button>
                 <button
                   type="button"
                   onClick={() => setModalFilter("global")}
                   className={`rounded-md px-2.5 py-1 text-xs font-bold transition-all ${modalFilter === "global" ? "bg-[var(--rl-black)] text-white" : "bg-white border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"}`}
                 >
-                  Table 1: Global (14)
+                  Table 1: Global ({globalConcepts.filter((c) => !isExcludedForVehicle(c) && GLOBAL_BENEFIT_KEYS.has(c.concept_key)).length})
                 </button>
                 <button
                   type="button"
                   onClick={() => setModalFilter("addons")}
                   className={`rounded-md px-2.5 py-1 text-xs font-bold transition-all ${modalFilter === "addons" ? "bg-[var(--rl-black)] text-white" : "bg-white border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"}`}
                 >
-                  Table 2: Add-ons (18)
+                  Table 2: Add-ons ({globalConcepts.filter((c) => !isExcludedForVehicle(c) && !GLOBAL_BENEFIT_KEYS.has(c.concept_key)).length})
                 </button>
               </div>
             </div>

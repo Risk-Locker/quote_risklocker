@@ -296,6 +296,29 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
                 lite_p = next((p for p in candidate_products if "lite" in p.name.lower()), None)
                 if lite_p:
                     draft.product_id = lite_p.id
+
+            if not draft.product_id:
+                # Primary canonical fallbacks per category:
+                primary_names = [
+                    "private car protector",
+                    "private car secure",
+                    "sompo motor (private car)",
+                    "comprehensive private car",
+                    "takaful mymotor",
+                    "tune protect motor easy",
+                    "auto365 comprehensive lite",
+                    "auto365 comprehensive plus",
+                    "commercial lorry (own goods - c permit)",
+                    "commercial vehicle protector",
+                    "motorcycle policy (private)",
+                    "motorcycle365",
+                    "sompo motorcycle (private motorcycle)",
+                ]
+                for p_name in primary_names:
+                    found = next((p for p in candidate_products if p_name in p.name.lower()), None)
+                    if found:
+                        draft.product_id = found.id
+                        break
         elif len(candidate_products) == 1:
             draft.product_id = candidate_products[0].id
 
@@ -467,6 +490,14 @@ def seed_base_benefits(db, draft: QuotationDraft, revision: BenefitCatalogRevisi
         ).all()
     )
 
+    # Re-link existing selections to new offering IDs if catalog was revised
+    off_by_concept = {str(o.concept_id): o for o in all_offerings if o.concept_id}
+    for item in existing:
+        if item.item_kind == "catalog" and str(item.concept_id or "") in off_by_concept:
+            matched_off = off_by_concept[str(item.concept_id)]
+            if item.catalog_offering_id != matched_off.id:
+                item.catalog_offering_id = matched_off.id
+
     base_offerings = []
     disabled_concept_ids: set[str] = set()
     if getattr(draft, "company_id", None):
@@ -486,9 +517,29 @@ def seed_base_benefits(db, draft: QuotationDraft, revision: BenefitCatalogRevisi
         except Exception:
             disabled_concept_ids = set()
 
+    vtype = _field_value(draft.fields or {}, "vehicle_type")
+    cmodel = _field_value(draft.fields or {}, "car_model")
+    raw_v = (vtype + " " + cmodel).lower()
+    is_lorry = any(k in raw_v for k in ["lorry", "truck", "rigid", "trailer", "haulage", "c permit", "a permit", "commercial vehicle", "commercial lorry"])
+    is_bike = any(k in raw_v for k in ["motorcycle", "bike", "motosikal"])
+
+    # Map concept details for invariant checks
+    concept_map = {str(c.id): c for c in db.scalars(select(BenefitConcept)).all()}
+
     for item in all_offerings:
         if str(item.concept_id) in disabled_concept_ids:
             continue
+        c_obj = concept_map.get(str(item.concept_id))
+        ckey = (c_obj.concept_key if c_obj else "").lower()
+        clabel = (c_obj.label if c_obj else "").lower()
+
+        # Invariant 1: Lorries CANNOT have towing
+        if is_lorry and any(k in (ckey + " " + clabel) for k in ["towing", "roadside assistance", "battery depletion"]):
+            continue
+        # Invariant 2: Motorcycles CANNOT have windscreen
+        if is_bike and "windscreen" in (ckey + " " + clabel):
+            continue
+
         is_included = item.role == "included" or (item.offering_kind == "base" and item.role is None)
         if not is_included:
             continue
@@ -989,7 +1040,7 @@ def _apply_detected_packs(
         for sel in [s for s in selections if s.package_plan_id and s.package_plan_id in sibling_ids]:
             _drop_plan_selection(selections, sel)
 
-        for item in sorted(items_by_plan.get(plan.id, []), key=lambda row: (int(row.sort_order or 0), str(row.id))):
+        for item in sorted(items_by_plan.get(plan.id, []), key=lambda row: (row.sort_order or 0, str(row.id))):
             offering = offering_by_id.get(item.offering_id)
             if offering is None or offering.status not in {"active", "compatibility"}:
                 continue

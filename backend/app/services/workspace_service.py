@@ -371,7 +371,7 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
         retired_concept_ids = {str(item.id) for item in concepts if getattr(item, "status", "active") == "retired"}
         valid_selections = [
             s for s in selections
-            if s.item_kind != "catalog" and str(s.concept_id or "") not in retired_concept_ids
+            if s.item_kind != "catalog" and (s.concept_id or "") not in retired_concept_ids
         ]
     else:
         offerings = list(
@@ -415,11 +415,21 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
             else []
         )
         retired_concept_ids = {str(item.id) for item in concepts if getattr(item, "status", "active") == "retired"}
-        valid_selections = [
-            s for s in selections
-            if (s.item_kind != "catalog" or s.catalog_offering_id in offering_ids)
-            and str(s.concept_id or "") not in retired_concept_ids
-        ]
+        offerings_by_concept = {str(item.concept_id): item for item in offerings if item.concept_id}
+        valid_selections = []
+        for s in selections:
+            if (s.concept_id or "") in retired_concept_ids:
+                continue
+            if s.item_kind == "catalog":
+                if s.catalog_offering_id not in offering_ids:
+                    matched_off = offerings_by_concept.get(s.concept_id or "")
+                    if matched_off:
+                        s.catalog_offering_id = matched_off.id
+                        valid_selections.append(s)
+                else:
+                    valid_selections.append(s)
+            else:
+                valid_selections.append(s)
     from app.services.formula_evaluator import extract_evaluation_context
     from app.services.benefit_catalog_matrix import get_catalog_for_product
     
@@ -470,23 +480,8 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
     current_selections = [s for s in selections if s.state == "current"]
     catalog_rev = db.get(BenefitCatalogRevision, draft.catalog_revision_id) if draft.catalog_revision_id else None
     catalog = db.get(BenefitCatalog, catalog_rev.catalog_id) if catalog_rev else None
-    veh_cat_id = _resolve_vehicle_category(db, "", draft.fields or {})
-    mismatched = False
-    if catalog and veh_cat_id and catalog.vehicle_category_id and catalog.vehicle_category_id != veh_cat_id:
-        mismatched = True
-
-    if mismatched or (not draft.catalog_revision_id and not selections and (draft.company_id or session.detected_company)):
+    if not draft.catalog_revision_id and not selections and (draft.company_id or session.detected_company):
         try:
-            if mismatched:
-                draft.product_id = None
-                draft.tier_id = None
-                draft.package_id = None
-                draft.catalog_revision_id = None
-                for s in selections:
-                    db.delete(s)
-                for d in _rows_for_draft(db, DraftSourceLineDecision, draft.id):
-                    db.delete(d)
-                db.flush()
             revision = pin_catalog_context(db, draft)
             if revision:
                 seed_base_benefits(db, draft, revision)
