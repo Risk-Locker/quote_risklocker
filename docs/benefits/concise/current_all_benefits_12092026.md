@@ -195,27 +195,36 @@
 
 ## 7. AmAssurance / Liberty Insurance (`amassurance`)
 
-### Defaults (Included at RM 0 / Base Cover — Comprehensive):
-1. **Betterment Scale (`betterment-protection`)** — Tariff cost-sharing scale applied when repairing with new original parts.
-2. **Emergency Towing Assistance (`towing`)** — Built-in 24/7 emergency accident towing assistance up to policy limit.
-3. **Legal Defense Costs (`legal-costs-defense`)** — Reimburses court legal representation and defense fees up to RM2,000.
-4. **Panel Repair Workmanship Warranty (`repair-warranty`)** — Guaranteed warranty covering repair workmanship and replacement parts.
+### Policy Tiers & Inherent Defaults (Comprehensive):
+AmAssurance operates primarily on a 3-tier subscription model for Private Car Comprehensive, with distinct built-in emergency towing limits:
+- **auto365 Comprehensive Lite**: Includes 24/7 Emergency Towing Assistance up to **50 km**.
+- **auto365 Comprehensive Plus**: Includes 24/7 Emergency Towing Assistance up to **100 km**.
+- **auto365 Comprehensive Premier**: Includes 24/7 Emergency Towing Assistance up to **365 km**.
+*(Other comprehensive variations: EV Car up to 100 km, Motorcycle up to RM 50 / RM 100, Commercial Lorry up to policy limit).*
+
+### Common Defaults (Included at RM 0 / Base Cover — Comprehensive):
+1. **Emergency Towing Assistance (`towing`)** — Built-in 24/7 accident/breakdown towing (50 km for Lite, 100 km for Plus, 365 km for Premier).
+2. **Legal Defense Costs (`legal-costs-defense`)** — Reimburses court legal representation and defense fees up to RM2,000.
+3. **Panel Repair Workmanship Warranty (`repair-warranty`)** — Guaranteed 3-year warranty covering repair workmanship and replacement parts.
+4. **Betterment Waiver (`betterment-protection`)** — Tariff cost-sharing scale applied when repairing with new original parts.
 
 ### Add-ons (Optional Riders):
-1. **E-Hailing (`e-hailing`)** — Permits comprehensive motor insurance coverage during commercial ride-hailing.
-2. **Compensation for Assessed Repair Time (`repair-allowance`)** — Daily cash payout for workshop repair period assessed by claims adjuster.
-3. **NCD Relief (`ncd-relief`)** — Preserves the value of forfeited No Claim Discount after an own-damage claim.
-4. **Special Perils (`special-perils`)** — Full cover for flood, storm, landslide, earthquake and natural disasters.
-5. **Legal Liability of Passengers (`legal-liability-of-passengers`)** — Protects against third-party claims caused by passenger negligence.
-6. **Legal Liability to Passengers (`legal-liability-to-passengers`)** — Protects driver from lawsuits for injury or death to passengers.
-7. **Gas Conversion Kit and Tank (`gas-conversion`)** — Dedicated damage cover for installed NGV gas conversion tanks and kits.
-8. **Strike, Riot & Civil Commotion (`strike-riot-civil-commotion`)** — Covers physical loss or damage caused by strikes, riots or civil unrest.
-9. **Betterment Waiver (`betterment-protection`)** — Waives betterment contribution on new original parts for vehicles 5+ years old.
-10. **Windscreen Coverage (`windscreen`)** — Repair and replacement of windscreen and glass without affecting NCD.
-11. **Solar Tint Film Coverage (`windscreen-tint`)** — Repair and replacement of solar tint film inclusive of labour cost.
-12. **Driver & Passenger Personal Accident (`personal-accident`)** — Multi-plan personal accident protection for driver and passengers.
-13. **EV Wall Charger Cover (`ev-wall-charger`)** — Covers accidental damage, fire or theft of home EV wallbox charger.
-14. **EV Battery Towing (`ev-battery-depletion-towing`)** — Emergency flatbed towing to nearest public EV charging station.
-15. **EV Charger Liability (`ev-home-charger-liability`)** — Third-party injury and property liability from home EV charger.
+1. **Unlimited Towing Upgrade (`auto-assistance`)** — 24/7 unlimited distance emergency towing assistance nationwide.  
+   *(Dynamic Condition: Adding Unlimited Towing activates the `hide_target` condition rule, automatically hiding/disappearing the base Emergency Towing Assistance benefit card).*
+2. **E-Hailing (`e-hailing`)** — Permits comprehensive motor insurance coverage during commercial ride-hailing.
+3. **Compensation for Assessed Repair Time (`repair-allowance`)** — Daily cash payout for workshop repair period assessed by claims adjuster.
+4. **NCD Relief (`ncd-relief`)** — Preserves the value of forfeited No Claim Discount after an own-damage claim.
+5. **Special Perils (`special-perils`)** — Full cover for flood, storm, landslide, earthquake and natural disasters.
+6. **Legal Liability of Passengers (`legal-liability-of-passengers`)** — Protects against third-party claims caused by passenger negligence.
+7. **Legal Liability to Passengers (`legal-liability-to-passengers`)** — Protects driver from lawsuits for injury or death to passengers.
+8. **Gas Conversion Kit and Tank (`gas-conversion`)** — Dedicated damage cover for installed NGV gas conversion tanks and kits.
+9. **Strike, Riot & Civil Commotion (`strike-riot-civil-commotion`)** — Covers physical loss or damage caused by strikes, riots or civil unrest.
+10. **Betterment Waiver (`betterment-protection`)** — Waives betterment contribution on new original parts for vehicles 5+ years old.
+11. **Windscreen Coverage (`windscreen`)** — Repair and replacement of windscreen and glass without affecting NCD.
+12. **Solar Tint Film Coverage (`windscreen-tint`)** — Repair and replacement of solar tint film inclusive of labour cost.
+13. **Driver & Passenger Personal Accident (`personal-accident`)** — Multi-plan personal accident protection for driver and passengers.
+14. **EV Wall Charger Cover (`ev-wall-charger`)** — Covers accidental damage, fire or theft of home EV wallbox charger.
+15. **EV Battery Towing (`ev-battery-depletion-towing`)** — Emergency flatbed towing to nearest public EV charging station.
+16. **EV Charger Liability (`ev-home-charger-liability`)** — Third-party injury and property liability from home EV charger.
 
 ---

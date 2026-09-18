@@ -9,7 +9,7 @@ from decimal import Decimal
 from pathlib import Path
 from threading import Lock
 
-from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, Response as FastAPIResponse, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, Form, Header, Query, Request, Response as FastAPIResponse, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -78,6 +78,13 @@ from app.api.schemas import (
     WorkspacePatchRequest,
     VersionGenerationRequest,
     SessionRescanRequest,
+    BenefitCardPresetSaveRequest,
+    BenefitCardPresetCreateRequest,
+    BusinessAssetUpdateRequest,
+    BusinessAssetBulkDeleteRequest,
+    BusinessAssetBulkMoveRequest,
+    BusinessAssetFolderRenameRequest,
+    BusinessAssetFolderDeleteRequest,
 )
 from app.auth.cookies import clear_auth_cookies, set_auth_cookies
 from app.auth.rbac import can_view_owner_record, require_role
@@ -91,6 +98,7 @@ from app.models.tables import (
     CompanyAlias,
     FieldAlias,
     BusinessAsset,
+    BenefitCardPreset,
     DraftBenefitSelection,
     DraftSourceLineDecision,
     ExtractionBenefitLine,
@@ -250,6 +258,14 @@ from app.services.business_setup_service import (
     get_company_benefit_configs,
     list_benefit_concepts,
     list_business_assets,
+    list_business_asset_categories,
+    batch_upload_business_assets,
+    update_business_asset,
+    bulk_move_business_assets,
+    delete_business_asset,
+    bulk_delete_business_assets,
+    rename_business_asset_folder,
+    delete_business_asset_folder,
     list_business_companies,
     list_company_aliases,
     list_company_conditions,
@@ -299,6 +315,25 @@ from app.services.benefit_setup_service import (
     save_segment,
     save_vehicle_category,
     save_vehicle_subcategory,
+)
+from app.services.global_benefit_profile_service import (
+    activate_global_benefit_profile,
+    auto_assign_category_assets,
+    clone_global_benefit_profile,
+    create_global_benefit_profile,
+    delete_global_benefit_profile,
+    get_global_benefit_profile_detail,
+    list_global_benefit_profiles,
+    save_global_benefit_profile_assets,
+)
+from app.services.benefit_template_preset_service import (
+    create_custom_benefit_card_preset,
+    delete_custom_benefit_card_preset,
+    get_benefit_card_preset,
+    list_benefit_card_presets,
+    reset_benefit_card_preset,
+    save_benefit_card_preset,
+    set_default_benefit_card_preset,
 )
 
 
@@ -1804,6 +1839,7 @@ def business_tier_delete(
 @router.get("/business/benefit-concepts")
 def business_benefit_concepts(
     search: str = Query(default="", max_length=200),
+    visual_profile_id: str | None = Query(default=None, max_length=60),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -1816,6 +1852,7 @@ def business_benefit_concepts(
             search=search,
             page=page,
             page_size=page_size,
+            visual_profile_id=visual_profile_id,
         )
     }
 
@@ -2019,6 +2056,7 @@ def business_benefit_alias_retire(
 def business_assets(
     search: str = Query(default="", max_length=200),
     kind: str | None = Query(default=None, max_length=40),
+    category: str | None = Query(default=None, max_length=120),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -2030,10 +2068,19 @@ def business_assets(
             user,
             search=search,
             kind=kind,
+            category=category,
             page=page,
             page_size=page_size,
         )
     }
+
+
+@router.get("/business/assets/categories")
+def business_asset_categories(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"categories": list_business_asset_categories(db, user)}
 
 
 _ASSET_CACHE_DIR = Path(__file__).resolve().parents[3] / ".qc-tmp" / "asset-cache"
@@ -2121,6 +2168,8 @@ async def business_asset_upload(
     file: UploadFile = File(...),
     label: str = Form(...),
     kind: str = Form(...),
+    category: str = Form(default="General"),
+    on_duplicate: str = Form(default="rename"),
     db: Session = Depends(get_db),
     settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
@@ -2135,10 +2184,273 @@ async def business_asset_upload(
             label=label,
             kind=kind,
             data=data,
+            category=category,
+            on_duplicate=on_duplicate,
         )
     except StorageError as exc:
         raise AppError("Asset storage is unavailable. Retry without changing the file.", 503) from exc
     return {"asset": asset}
+
+
+@router.post("/business/assets/batch")
+async def business_asset_batch_upload(
+    files: list[UploadFile] = File(...),
+    kind: str = Form(default="benefit_art"),
+    category: str = Form(default="General"),
+    on_duplicate: str = Form(default="rename"),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    file_payloads = []
+    for f in files:
+        data = await f.read()
+        file_payloads.append((f.filename or "asset.png", Path(f.filename or "asset").stem, data))
+    return batch_upload_business_assets(
+        db,
+        settings,
+        user,
+        files=file_payloads,
+        kind=kind,
+        category=category,
+        on_duplicate=on_duplicate,
+    )
+
+
+@router.post("/business/assets/bulk-delete")
+def business_asset_bulk_delete(
+    payload: BusinessAssetBulkDeleteRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    return bulk_delete_business_assets(db, settings, user, payload.asset_ids)
+
+
+@router.post("/business/assets/bulk-move")
+def business_asset_bulk_move(
+    payload: BusinessAssetBulkMoveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return bulk_move_business_assets(db, user, payload.asset_ids, payload.target_category)
+
+
+@router.patch("/business/assets/folders")
+def business_asset_folder_rename(
+    payload: BusinessAssetFolderRenameRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return rename_business_asset_folder(db, user, payload.old_name, payload.new_name)
+
+
+@router.delete("/business/assets/folders")
+def business_asset_folder_delete(
+    payload: BusinessAssetFolderDeleteRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    return delete_business_asset_folder(db, settings, user, payload.category, action=payload.action)
+
+
+@router.patch("/business/assets/{asset_id}")
+def business_asset_update(
+    asset_id: str,
+    payload: BusinessAssetUpdateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {
+        "asset": update_business_asset(
+            db,
+            user,
+            asset_id,
+            label=payload.label,
+            category=payload.category,
+            kind=payload.kind,
+        )
+    }
+
+
+@router.delete("/business/assets/{asset_id}")
+def business_asset_delete(
+    asset_id: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    return delete_business_asset(db, settings, user, asset_id)
+
+
+# --- Global Benefit Visual Profiles ---
+
+
+@router.get("/business/global-benefit-profiles")
+def business_list_global_benefit_profiles(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return {"profiles": list_global_benefit_profiles(db, user)}
+
+
+@router.post("/business/global-benefit-profiles")
+def business_create_global_benefit_profile(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return create_global_benefit_profile(db, user, payload)
+
+
+@router.get("/business/global-benefit-profiles/{profile_id}")
+def business_get_global_benefit_profile(
+    profile_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return get_global_benefit_profile_detail(db, user, profile_id)
+
+
+@router.post("/business/global-benefit-profiles/{profile_id}/clone")
+def business_clone_global_benefit_profile(
+    profile_id: str,
+    payload: dict = Body(default={}),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return clone_global_benefit_profile(db, user, profile_id, payload)
+
+
+@router.post("/business/global-benefit-profiles/{profile_id}/activate")
+def business_activate_global_benefit_profile(
+    profile_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return activate_global_benefit_profile(db, user, profile_id)
+
+
+@router.delete("/business/global-benefit-profiles/{profile_id}")
+def business_delete_global_benefit_profile(
+    profile_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> Response:
+    delete_global_benefit_profile(db, user, profile_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/business/global-benefit-profiles/{profile_id}/auto-assign")
+def business_auto_assign_global_benefit_profile(
+    profile_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return auto_assign_category_assets(db, user, profile_id)
+
+
+@router.put("/business/global-benefit-profiles/{profile_id}/assets")
+def business_save_global_benefit_profile_assets(
+    profile_id: str,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    items = payload.get("items") or []
+    return save_global_benefit_profile_assets(db, user, profile_id, items)
+
+
+# --- Benefit Card Presets (Template Presets) ---
+
+
+def _preset_to_dict(p: BenefitCardPreset) -> dict[str, Any]:
+    cfg = dict(p.config or {})
+    return {
+        "id": p.id,
+        "name": p.name,
+        "shortName": p.short_name,
+        "short_name": p.short_name,
+        "description": p.description,
+        "is_default": p.is_default,
+        "is_custom": p.is_custom,
+        **cfg,
+        "config": cfg,
+        "created_at": p.created_at.isoformat() if p.created_at else None,
+        "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+    }
+
+
+@router.get("/business/benefit-card-presets")
+def business_benefit_card_presets_list(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    presets = list_benefit_card_presets(db)
+    return {"presets": [_preset_to_dict(p) for p in presets]}
+
+
+@router.get("/business/benefit-card-presets/{preset_id}")
+def business_benefit_card_preset_get(
+    preset_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    preset = get_benefit_card_preset(db, preset_id)
+    return {"preset": _preset_to_dict(preset)}
+
+
+@router.put("/business/benefit-card-presets/{preset_id}")
+def business_benefit_card_preset_update(
+    preset_id: str,
+    payload: BenefitCardPresetSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    preset = save_benefit_card_preset(db, preset_id, payload.model_dump(exclude_unset=True))
+    return {"preset": _preset_to_dict(preset)}
+
+
+@router.post("/business/benefit-card-presets")
+def business_benefit_card_preset_create(
+    payload: BenefitCardPresetCreateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    preset = create_custom_benefit_card_preset(db, payload.model_dump(exclude_unset=True))
+    return {"preset": _preset_to_dict(preset)}
+
+
+@router.post("/business/benefit-card-presets/{preset_id}/set-default")
+def business_benefit_card_preset_set_default(
+    preset_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    preset = set_default_benefit_card_preset(db, preset_id)
+    return {"preset": _preset_to_dict(preset)}
+
+
+@router.post("/business/benefit-card-presets/{preset_id}/reset")
+def business_benefit_card_preset_reset(
+    preset_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    preset = reset_benefit_card_preset(db, preset_id)
+    return {"preset": _preset_to_dict(preset)}
+
+
+@router.delete("/business/benefit-card-presets/{preset_id}", status_code=status.HTTP_204_NO_CONTENT)
+def business_benefit_card_preset_delete(
+    preset_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> Response:
+    delete_custom_benefit_card_preset(db, preset_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
 
 
 @router.post("/business/catalogs")

@@ -62,11 +62,11 @@ type BenefitSectionKey = "default" | "addedAddons" | "optionalAddons";
 export default function BenefitCardTemplatesPage() {
   const { toast } = useToast();
 
-  // Presets state
+  // Presets state - default to Masonry Flow
   const [allPresets, setAllPresets] = useState<BenefitCardStyle[]>([]);
-  const [selectedPresetId, setSelectedPresetId] = useState<string>("signature-2col");
+  const [selectedPresetId, setSelectedPresetId] = useState<string>("masonry-flow");
   const [customStyle, setCustomStyle] = useState<BenefitCardStyle>(() => {
-    const initial = SYSTEM_BENEFIT_PRESETS.find((p) => p.id === "signature-2col") || SYSTEM_BENEFIT_PRESETS[0];
+    const initial = SYSTEM_BENEFIT_PRESETS.find((p) => p.is_default) || SYSTEM_BENEFIT_PRESETS[0];
     return {
       ...initial,
       sectionVisibility: normalizeSectionVisibility(initial.sectionVisibility, initial),
@@ -81,12 +81,39 @@ export default function BenefitCardTemplatesPage() {
   const [globalBenefits, setGlobalBenefits] = useState<GlobalBenefit[]>([]);
   const [, setLoadingBenefits] = useState(false);
 
-  // Load all presets (System + Overrides + Custom)
-  const refreshPresets = useCallback((targetId?: string) => {
+  // Load all presets from Database with fallback to LocalStorage
+  const refreshPresets = useCallback(async (targetId?: string) => {
+    try {
+      const res = await api<{ presets: BenefitCardStyle[] }>("/business/benefit-card-presets");
+      if (res.presets && Array.isArray(res.presets) && res.presets.length > 0) {
+        const list = res.presets.map((p) => ({
+          ...p,
+          sectionVisibility: normalizeSectionVisibility(p.sectionVisibility, p),
+        }));
+        setAllPresets(list);
+        try {
+          localStorage.setItem("risklocker_cached_benefit_presets", JSON.stringify(list));
+        } catch {}
+
+        const target = targetId || selectedPresetId;
+        const found = targetId
+          ? list.find((p) => p.id === target) || list.find((p) => p.is_default) || list[0]
+          : list.find((p) => p.id === target) || list.find((p) => p.is_default) || list[0];
+
+        if (found) {
+          setSelectedPresetId(found.id);
+          setCustomStyle(found);
+        }
+        return;
+      }
+    } catch {
+      // Backend not reached, use local fallback
+    }
+
     const presets = getAllBenefitPresets();
     setAllPresets(presets);
     const target = targetId || selectedPresetId;
-    const found = presets.find((p) => p.id === target) || presets[0];
+    const found = presets.find((p) => p.id === target) || presets.find((p) => p.is_default) || presets[0];
     if (found) {
       setSelectedPresetId(found.id);
       setCustomStyle({
@@ -97,7 +124,7 @@ export default function BenefitCardTemplatesPage() {
   }, [selectedPresetId]);
 
   useEffect(() => {
-    refreshPresets();
+    void refreshPresets();
   }, [refreshPresets]);
 
   const systemPresets = useMemo(() => {
@@ -132,22 +159,41 @@ export default function BenefitCardTemplatesPage() {
     });
   }
 
-  // Save changes to current preset
-  function saveCurrentPreset() {
-    savePresetOverride(customStyle.id, customStyle);
-    refreshPresets(customStyle.id);
-    toast(`Saved changes to "${customStyle.name}".`, "success");
+  // Save changes to current preset permanently in DB
+  async function saveCurrentPreset() {
+    try {
+      await api(`/business/benefit-card-presets/${customStyle.id}`, {
+        method: "PUT",
+        body: JSON.stringify(customStyle),
+      });
+      savePresetOverride(customStyle.id, customStyle);
+      await refreshPresets(customStyle.id);
+      toast(`Saved changes to "${customStyle.name}" in database.`, "success");
+    } catch {
+      savePresetOverride(customStyle.id, customStyle);
+      await refreshPresets(customStyle.id);
+      toast(`Saved changes to "${customStyle.name}".`, "info");
+    }
   }
 
-  // Reset current system preset to default
-  function resetCurrentPreset() {
-    resetPresetToDefault(customStyle.id);
-    refreshPresets(customStyle.id);
-    toast(`"${customStyle.name}" reset to factory system defaults.`, "info");
+  // Reset current system preset to factory default
+  async function resetCurrentPreset() {
+    try {
+      await api(`/business/benefit-card-presets/${customStyle.id}/reset`, {
+        method: "POST",
+      });
+      resetPresetToDefault(customStyle.id);
+      await refreshPresets(customStyle.id);
+      toast(`"${customStyle.name}" reset to factory system defaults.`, "info");
+    } catch {
+      resetPresetToDefault(customStyle.id);
+      await refreshPresets(customStyle.id);
+      toast(`"${customStyle.name}" reset to factory defaults.`, "info");
+    }
   }
 
-  // Save as new custom preset
-  function saveAsNewBenefitPreset() {
+  // Save as new custom preset in DB
+  async function saveAsNewBenefitPreset() {
     const name = window.prompt("Enter a name for this custom benefit card preset:", `${customStyle.name} (Copy)`);
     if (!name?.trim()) return;
     const newId = `custom-${Date.now()}`;
@@ -161,35 +207,72 @@ export default function BenefitCardTemplatesPage() {
       is_system_modified: false,
       sectionVisibility: normalizeSectionVisibility(customStyle.sectionVisibility, customStyle),
     };
-    const saved = localStorage.getItem("risklocker_benefit_card_presets");
-    const list: BenefitCardStyle[] = saved ? JSON.parse(saved) : [];
-    list.push(newPreset);
+
     try {
-      localStorage.setItem("risklocker_benefit_card_presets", JSON.stringify(list));
-    } catch {}
-    refreshPresets(newId);
-    toast(`Preset "${newPreset.name}" created successfully.`, "success");
+      await api("/business/benefit-card-presets", {
+        method: "POST",
+        body: JSON.stringify(newPreset),
+      });
+      await refreshPresets(newId);
+      toast(`Preset "${newPreset.name}" created in database.`, "success");
+    } catch {
+      const saved = localStorage.getItem("risklocker_benefit_card_presets");
+      const list: BenefitCardStyle[] = saved ? JSON.parse(saved) : [];
+      list.push(newPreset);
+      try {
+        localStorage.setItem("risklocker_benefit_card_presets", JSON.stringify(list));
+      } catch {}
+      await refreshPresets(newId);
+      toast(`Preset "${newPreset.name}" created locally.`, "success");
+    }
   }
 
-  // Set preset as global default
-  function setAsDefaultBenefitPreset() {
+  // Set preset as global default in DB
+  async function setAsDefaultBenefitPreset() {
     try {
-      localStorage.setItem("risklocker_default_benefit_preset", customStyle.id);
-    } catch {}
-    toast(`"${customStyle.name}" set as default benefit style for quotations and builder.`, "success");
+      await api(`/business/benefit-card-presets/${customStyle.id}/set-default`, {
+        method: "POST",
+      });
+      try {
+        localStorage.setItem("risklocker_default_benefit_preset", customStyle.id);
+      } catch {}
+      await refreshPresets(customStyle.id);
+      toast(`"${customStyle.name}" set as default benefit style for quotations and builder.`, "success");
+    } catch {
+      try {
+        localStorage.setItem("risklocker_default_benefit_preset", customStyle.id);
+      } catch {}
+      await refreshPresets(customStyle.id);
+      toast(`"${customStyle.name}" set as default style.`, "info");
+    }
   }
 
-  // Delete custom preset
-  function deleteCustomPreset(preset: BenefitCardStyle) {
-    const saved = localStorage.getItem("risklocker_benefit_card_presets");
-    const list: BenefitCardStyle[] = saved ? JSON.parse(saved) : [];
-    const updated = list.filter((p) => p.id !== preset.id);
+  // Delete custom preset from DB
+  async function deleteCustomPreset(preset: BenefitCardStyle) {
     try {
-      localStorage.setItem("risklocker_benefit_card_presets", JSON.stringify(updated));
-    } catch {}
-    refreshPresets(systemPresets[0]?.id || "masonry-flow");
-    setPendingDeletePreset(null);
-    toast(`Preset "${preset.name}" removed.`, "success");
+      await api(`/business/benefit-card-presets/${preset.id}`, {
+        method: "DELETE",
+      });
+      const saved = localStorage.getItem("risklocker_benefit_card_presets");
+      const list: BenefitCardStyle[] = saved ? JSON.parse(saved) : [];
+      const updated = list.filter((p) => p.id !== preset.id);
+      try {
+        localStorage.setItem("risklocker_benefit_card_presets", JSON.stringify(updated));
+      } catch {}
+      await refreshPresets();
+      setPendingDeletePreset(null);
+      toast(`Preset "${preset.name}" removed from database.`, "success");
+    } catch {
+      const saved = localStorage.getItem("risklocker_benefit_card_presets");
+      const list: BenefitCardStyle[] = saved ? JSON.parse(saved) : [];
+      const updated = list.filter((p) => p.id !== preset.id);
+      try {
+        localStorage.setItem("risklocker_benefit_card_presets", JSON.stringify(updated));
+      } catch {}
+      await refreshPresets(systemPresets[0]?.id || "masonry-flow");
+      setPendingDeletePreset(null);
+      toast(`Preset "${preset.name}" removed locally.`, "success");
+    }
   }
 
   // Toggle single component for a given section

@@ -372,21 +372,16 @@ def _card(
     active_conditional_descriptions: dict[str, str] | None = None,
     company_baseline_descriptions: dict[str, str] | None = None,
     company_baseline_costs: dict[str, str] | None = None,
+    visual_profile_assets: dict[str, str] | None = None,
 ) -> dict:
     price = getattr(selection, "price", None) or getattr(offering, "optional_price", None)
-    if not _is_valid_price(price):
-        price = None
+    cost_status = getattr(selection, "cost_status", None) or getattr(offering, "cost_status", "foc")
+    if not cost_status:
+        cost_status = "foc"
 
-    cost_status = getattr(selection, "cost_status", None)
-    is_detected = bool(
-        (getattr(selection, "evidence_snapshot", None) or {}).get("is_detected")
-        or (getattr(selection, "evidence_snapshot", None) or {}).get("source") in {"extracted_addon", "gemini_multimodal", "extracted_upgrade"}
-    )
-    is_purchased_extra = cost_status == "paid" or getattr(selection, "is_purchased_extra", False)
-    
-    concept_id_key = str(getattr(concept, "id", None) or "")
-    if not price and company_baseline_costs and concept_id_key in company_baseline_costs:
-        raw_b_cost = company_baseline_costs[concept_id_key]
+    # Dynamic company baseline cost calculation
+    if company_baseline_costs and concept and getattr(concept, "id", None):
+        raw_b_cost = company_baseline_costs.get(str(concept.id))
         if raw_b_cost and raw_b_cost.strip():
             s_cost = raw_b_cost.strip()
             if "%" in s_cost:
@@ -438,20 +433,25 @@ def _card(
     if catalog_def and eval_context:
         from app.services.formula_evaluator import evaluate_formula
         if catalog_def.get("coverage_formula"):
-            cov_res = evaluate_formula(catalog_def["coverage_formula"], eval_context)
-            if isinstance(cov_res, float):
-                typed_value = {"type": "money", "value": cov_res, "currency": "MYR"}
-            elif isinstance(cov_res, str):
-                typed_value = {"type": "string", "display_text": cov_res, "value": cov_res}
+            try:
+                calc_val = evaluate_formula(catalog_def["coverage_formula"], eval_context)
+                if calc_val is not None:
+                    typed_value = {"type": "string", "display_text": str(calc_val)}
+            except Exception:
+                pass
                 
-        if catalog_def.get("cost_formula") and not is_detected and not is_purchased_extra:
-            cost_res = evaluate_formula(catalog_def["cost_formula"], eval_context)
-            if isinstance(cost_res, float):
-                price = {"amount": cost_res, "currency": "MYR"}
-                if cost_res == 0.0:
-                    cost_status = "foc"
-                else:
-                    cost_status = "paid"
+        if catalog_def.get("cost_formula"):
+            try:
+                cost_res = evaluate_formula(catalog_def["cost_formula"], eval_context)
+                if cost_res is not None:
+                    cost_res = round(float(cost_res), 2)
+                    price = {"amount": cost_res, "currency": "MYR"}
+                    if cost_res == 0.0:
+                        cost_status = "foc"
+                    else:
+                        cost_status = "paid"
+            except Exception:
+                pass
 
     # Disambiguate coverage amount (typed_value / card_val) from price / cost
     opt_p = getattr(offering, "optional_price", None) or price
@@ -478,7 +478,7 @@ def _card(
         if isinstance(typed_value, dict):
             card_val = str(typed_value.get("display_text") or typed_value.get("value") or "")
         else:
-            card_val = str(typed_value or "")
+            card_val = ""
 
     # Strict check: card_val must contain digits or be 'unlimited'
     if card_val:
@@ -505,6 +505,8 @@ def _card(
             else:
                 card_val = ""
 
+    is_detected = getattr(selection, "source_kind", None) == "extracted" or getattr(selection, "evidence_snapshot", None) is not None
+    is_purchased_extra = (cost_status == "paid" and price is not None) or is_detected
     is_pure_default = catalog_def.get("category") == "default" and not is_detected and not is_purchased_extra if catalog_def else False
     is_addon = bool(
         getattr(selection, "state", None) == "available_addon"
@@ -523,7 +525,7 @@ def _card(
     # 7. Fallback ("")
     concept_id_key = str(getattr(concept, "id", None) or "")
     sel_typed = getattr(selection, "typed_value_override", None)
-    sel_desc = sel_typed.get("description") if isinstance(sel_typed, dict) else None
+    sel_desc = sel_typed.get("description") if isinstance(sel_typed, dict) and sel_typed.get("description") else getattr(selection, "description_override", None)
     cond_desc = (active_conditional_descriptions or {}).get(concept_id_key)
     offering_desc = getattr(offering, "description_override", None)
     comp_base_desc = (company_baseline_descriptions or {}).get(concept_id_key)
@@ -539,7 +541,7 @@ def _card(
     elif offering_desc and str(offering_desc).strip():
         final_desc = str(offering_desc).strip()
     elif cat_desc and str(cat_desc).strip():
-        final_desc = str(cat_desc).strip()
+        final_desc = cat_desc.strip()
     elif concept_desc and str(concept_desc).strip():
         final_desc = str(concept_desc).strip()
     else:
@@ -551,6 +553,8 @@ def _card(
         or (offering_desc and str(offering_desc).strip())
         or (comp_base_desc and comp_base_desc.strip())
     )
+
+    effective_asset_id = (visual_profile_assets.get(str(concept.id)) if visual_profile_assets and concept else None) or asset_id or getattr(concept, "default_asset_id", None)
 
     return {
         "card_key": f"{getattr(selection, 'id', 'offer')}:{offering.id}:{facet_id or 'parent'}",
@@ -574,7 +578,7 @@ def _card(
         "initial_price": getattr(offering, "optional_price", None),
         "detected_cost": (getattr(selection, "evidence_snapshot", None) or {}).get("premium_cost"),
         "detected_limit": (getattr(selection, "evidence_snapshot", None) or {}).get("coverage_limit"),
-        "asset_id": asset_id or concept.default_asset_id,
+        "asset_id": effective_asset_id,
         "cost_status": cost_status,
         "sort_order": int(getattr(offering, "sort_order", 0) or 0),
         "is_detected": is_detected,
@@ -596,6 +600,7 @@ def _expanded_cards(
     active_conditional_descriptions: dict[str, str] | None = None,
     company_baseline_descriptions: dict[str, str] | None = None,
     company_baseline_costs: dict[str, str] | None = None,
+    visual_profile_assets: dict[str, str] | None = None,
 ) -> list[dict]:
     typed_value = getattr(selection, "typed_value_override", None) or offering.typed_value
     facet_ids = list(offering.presentation_facet_ids or [])
@@ -610,6 +615,7 @@ def _expanded_cards(
             active_conditional_descriptions=active_conditional_descriptions,
             company_baseline_descriptions=company_baseline_descriptions,
             company_baseline_costs=company_baseline_costs,
+            visual_profile_assets=visual_profile_assets,
         )]
     cards: list[dict] = []
     for facet_id in facet_ids:
@@ -629,6 +635,7 @@ def _expanded_cards(
             active_conditional_descriptions=active_conditional_descriptions,
             company_baseline_descriptions=company_baseline_descriptions,
             company_baseline_costs=company_baseline_costs,
+            visual_profile_assets=visual_profile_assets,
         ))
     return cards
 
@@ -645,6 +652,7 @@ def resolve_benefit_cards(
     insurer_catalog: list[dict] | None = None,
     company_conditions: list[Any] | None = None,
     company_configs: list[Any] | None = None,
+    visual_profile_assets: dict[str, str] | None = None,
 ) -> dict[str, list[dict]]:
     """Resolve current and available cards solely from pinned rows and decisions."""
     _global_card = globals().get("_card")
@@ -657,6 +665,7 @@ def resolve_benefit_cards(
     # Dynamic conditional upgrades from company rules
     active_concept_ids = {str(item.concept_id) for item in current if item.concept_id}
     active_conditional_descriptions: dict[str, str] = {}
+    hidden_concept_ids: set[str] = set()
     for cond in (company_conditions or []):
         if not getattr(cond, "is_active", True):
             continue
@@ -680,7 +689,11 @@ def resolve_benefit_cards(
                         matched = True
                         break
             if matched:
-                active_conditional_descriptions[str(cond.target_concept_id)] = cond.replacement_description
+                action = getattr(cond, "action_type", "replace_description") or "replace_description"
+                if action == "hide_target" or getattr(cond, "replacement_description", "") == "__HIDE__":
+                    hidden_concept_ids.add(str(cond.target_concept_id))
+                else:
+                    active_conditional_descriptions[str(cond.target_concept_id)] = cond.replacement_description
 
     company_baseline_descriptions: dict[str, str] = {
         str(cfg.concept_id): cfg.baseline_description
@@ -706,10 +719,12 @@ def resolve_benefit_cards(
         kwargs["active_conditional_descriptions"] = active_conditional_descriptions
         kwargs["company_baseline_descriptions"] = company_baseline_descriptions
         kwargs["company_baseline_costs"] = company_baseline_costs
+        if "visual_profile_assets" not in kwargs:
+            kwargs["visual_profile_assets"] = visual_profile_assets
         assert _global_card is not None
         return _global_card(**kwargs)
 
-    def _expanded_cards(selection, offering, concept, facets_by_id):
+    def _expanded_cards(selection, offering, concept, facets_by_id, visual_profile_assets=visual_profile_assets):
         assert _global_expanded_cards is not None
         return _global_expanded_cards(
             selection,
@@ -721,6 +736,7 @@ def resolve_benefit_cards(
             active_conditional_descriptions=active_conditional_descriptions,
             company_baseline_descriptions=company_baseline_descriptions,
             company_baseline_costs=company_baseline_costs,
+            visual_profile_assets=visual_profile_assets,
         )
 
     offerings_by_id = _index(offerings)
@@ -764,7 +780,7 @@ def resolve_benefit_cards(
                 "optional_price": item.price,
                 "presentation_facet_ids": [],
             })()
-            current_cards.append(_card(selection=item, offering=pseudo, concept=concept, typed_value=item.typed_value_override))
+            current_cards.append(_card(selection=item, offering=pseudo, concept=concept, typed_value=item.typed_value_override, visual_profile_assets=visual_profile_assets))
             continue
         offering = offerings_by_id.get(str(item.catalog_offering_id))
         if not offering or offering.status not in {"active", "compatibility"}:
@@ -779,12 +795,12 @@ def resolve_benefit_cards(
                 "optional_price": item.price,
                 "presentation_facet_ids": [],
             })()
-            current_cards.append(_card(selection=item, offering=pseudo, concept=concept, typed_value=item.typed_value_override))
+            current_cards.append(_card(selection=item, offering=pseudo, concept=concept, typed_value=item.typed_value_override, visual_profile_assets=visual_profile_assets))
             continue
         concept = concepts_by_id.get(str(offering.concept_id))
         if not concept:
             continue
-        current_cards.extend(_expanded_cards(item, offering, concept, facets_by_id))
+        current_cards.extend(_expanded_cards(item, offering, concept, facets_by_id, visual_profile_assets=visual_profile_assets))
 
     outgoing: dict[str, list[Any]] = {}
     for item in relations:
@@ -815,6 +831,7 @@ def resolve_benefit_cards(
                 concept=concept,
                 typed_value=(matching_sel.typed_value_override if matching_sel else None) or target.typed_value,
                 branch_key=edge.branch_key,
+                visual_profile_assets=visual_profile_assets,
             ))
             offered_ids.add(target.id)
 
@@ -842,6 +859,7 @@ def resolve_benefit_cards(
                         concept=concept,
                         typed_value=(matching_sel.typed_value_override if matching_sel else None) or off.typed_value,
                         branch_key=getattr(off, "branch_key", None),
+                        visual_profile_assets=visual_profile_assets,
                     ))
                     offered_ids.add(off.id)
 
@@ -866,6 +884,7 @@ def resolve_benefit_cards(
                 offering=first,
                 concept=concept,
                 typed_value=(matching_sel.typed_value_override if matching_sel else None) or first.typed_value,
+                visual_profile_assets=visual_profile_assets,
             ))
             offered_ids.add(first.id)
 
@@ -884,15 +903,20 @@ def resolve_benefit_cards(
                 "optional_price": item.price,
                 "presentation_facet_ids": [],
             })()
-            available_cards.append(_card(selection=item, offering=pseudo, concept=concept, typed_value=item.typed_value_override))
+            available_cards.append(_card(selection=item, offering=pseudo, concept=concept, typed_value=item.typed_value_override, visual_profile_assets=visual_profile_assets))
             continue
         offering = offerings_by_id.get(str(item.catalog_offering_id))
         if not offering or offering.id in offered_ids or str(offering.concept_id) in disabled_concept_ids:
             continue
         concept = concepts_by_id.get(str(offering.concept_id))
         if concept:
-            available_cards.append(_card(selection=item, offering=offering, concept=concept, typed_value=item.typed_value_override or offering.typed_value))
+            available_cards.append(_card(selection=item, offering=offering, concept=concept, typed_value=item.typed_value_override or offering.typed_value, visual_profile_assets=visual_profile_assets))
             offered_ids.add(offering.id)
+
+
+    if hidden_concept_ids:
+        current_cards = [card for card in current_cards if str(card.get("concept_id") or "") not in hidden_concept_ids]
+        available_cards = [card for card in available_cards if str(card.get("concept_id") or "") not in hidden_concept_ids]
 
     order = lambda card: (card["sort_order"], card["label"].casefold(), card["card_key"])
     current_sorted = sorted(current_cards, key=order)

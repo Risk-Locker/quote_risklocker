@@ -488,3 +488,114 @@ def test_complete_7_tier_precedence():
         company_configs=[company_config],
     )
     assert res_t7["current_benefits"][0]["description"] == ""
+
+
+def test_hide_target_condition_suppresses_target_card():
+    """Verify action_type='hide_target' completely removes the target benefit card when trigger is active."""
+    conc_target = row(id="c-towing", concept_key="towing", label="Emergency Towing Assistance", default_asset_id=None, description="24/7 Towing up to 50 km")
+    conc_trigger = row(id="c-unlimited", concept_key="auto-assistance", label="Unlimited Towing Upgrade", default_asset_id=None, description="Unlimited Towing")
+
+    off_target = row(
+        id="off-towing",
+        offering_key="off_towing",
+        concept_id="c-towing",
+        offering_kind="base",
+        role="included",
+        label_override="Emergency Towing Assistance",
+        description_override="24/7 Towing up to 50 km",
+        display_value="50 km",
+        typed_value=None,
+        optional_price=None,
+        sort_order=1,
+        status="active",
+        presentation_facet_ids=[],
+    )
+    off_trigger = row(
+        id="off-unlimited",
+        offering_key="off_unlimited",
+        concept_id="c-unlimited",
+        offering_kind="optional",
+        role="addon_option",
+        label_override="Unlimited Towing Upgrade",
+        description_override="Unlimited Towing Nationwide",
+        display_value="Unlimited",
+        typed_value=None,
+        optional_price={"amount": 50},
+        sort_order=2,
+        status="active",
+        presentation_facet_ids=[],
+    )
+
+    sel_target = row(
+        id="sel-towing",
+        catalog_offering_id="off-towing",
+        concept_id="c-towing",
+        state="current",
+        selection_key="sel_towing",
+        item_kind="catalog",
+        label_override=None,
+        description_override=None,
+        typed_value_override=None,
+        price=None,
+        sort_order=1,
+        evidence_snapshot=None,
+        package_plan_id=None,
+    )
+    sel_trigger = row(
+        id="sel-unlimited",
+        catalog_offering_id="off-unlimited",
+        concept_id="c-unlimited",
+        state="current",
+        selection_key="sel_unlimited",
+        item_kind="catalog",
+        label_override=None,
+        description_override=None,
+        typed_value_override=None,
+        price={"amount": 50},
+        sort_order=2,
+        evidence_snapshot=None,
+        package_plan_id=None,
+    )
+
+    # Condition: Unlimited Towing -> Hides Default Towing
+    hide_condition = row(
+        id="cond-hide-towing",
+        name="AmAssurance: Unlimited Towing Hides Default Towing",
+        company_id="comp-am",
+        profile_id="prof-2",
+        trigger_concept_id="c-unlimited",
+        trigger_plan_filter=None,
+        target_concept_id="c-towing",
+        action_type="hide_target",
+        replacement_description="[Hidden by condition rule]",
+        is_active=True,
+    )
+
+    # 1. When trigger is NOT in selections: target card is present
+    res_inactive = resolve_benefit_cards(
+        selections=[sel_target],
+        offerings=[off_target, off_trigger],
+        concepts=[conc_target, conc_trigger],
+        relations=[],
+        facets=[],
+        company_conditions=[hide_condition],
+    )
+    card_keys_inactive = [c["concept_key"] for c in res_inactive["current_benefits"]]
+    assert "towing" in card_keys_inactive
+    assert len(res_inactive["current_benefits"]) == 1
+
+    # 2. When trigger IS selected: target card 'towing' is completely suppressed / hidden!
+    res_active = resolve_benefit_cards(
+        selections=[sel_target, sel_trigger],
+        offerings=[off_target, off_trigger],
+        concepts=[conc_target, conc_trigger],
+        relations=[],
+        facets=[],
+        company_conditions=[hide_condition],
+    )
+    card_keys_active = [c["concept_key"] for c in res_active["current_benefits"]]
+    assert "towing" not in card_keys_active
+    assert "auto-assistance" in card_keys_active
+    assert len(res_active["current_benefits"]) == 1
+    assert res_active["current_benefits"][0]["label"] == "Unlimited Towing Upgrade"
+

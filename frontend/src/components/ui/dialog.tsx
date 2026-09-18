@@ -15,6 +15,20 @@ type DialogProps = {
   confirmLabel?: string;
   confirmVariant?: "primary" | "danger";
   loading?: boolean;
+  maxWidth?: "sm" | "md" | "lg" | "xl" | "2xl" | "3xl" | "4xl" | "5xl" | "full";
+  className?: string;
+};
+
+const maxWidthMap: Record<string, string> = {
+  sm: "max-w-sm",
+  md: "max-w-md",
+  lg: "max-w-lg",
+  xl: "max-w-xl",
+  "2xl": "max-w-2xl",
+  "3xl": "max-w-3xl",
+  "4xl": "max-w-4xl",
+  "5xl": "max-w-5xl",
+  full: "max-w-6xl",
 };
 
 export function Dialog({
@@ -27,13 +41,15 @@ export function Dialog({
   confirmLabel = "Confirm",
   confirmVariant = "primary",
   loading = false,
+  maxWidth = "md",
+  className = "",
 }: DialogProps) {
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/40 animate-fade-in" />
         <DialogPrimitive.Content
-          className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-6 shadow-lift animate-fade-in overflow-hidden"
+          className={`fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] ${maxWidthMap[maxWidth] || "max-w-md"} -translate-x-1/2 -translate-y-1/2 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-6 shadow-lift animate-fade-in overflow-hidden ${className}`}
         >
           <DialogPrimitive.Close asChild>
             <button

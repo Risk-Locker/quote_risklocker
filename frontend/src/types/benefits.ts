@@ -166,6 +166,7 @@ export type CompanyBenefitCondition = {
   trigger_concept_id: string;
   trigger_plan_filter?: string | null;
   target_concept_id: string;
+  action_type?: "replace_description" | "hide_target";
   replacement_description: string;
   is_active: boolean;
   sort_order?: number;

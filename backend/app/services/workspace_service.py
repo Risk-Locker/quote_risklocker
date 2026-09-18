@@ -467,10 +467,18 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
         except Exception:
             pass
 
+    visual_profile_assets = None
+    try:
+        from app.services.global_benefit_profile_service import get_active_visual_profile_asset_map
+        visual_profile_assets = get_active_visual_profile_asset_map(db)
+    except Exception:
+        pass
+
     return resolve_benefit_cards(
         selections=valid_selections, offerings=offerings, concepts=concepts, relations=relations, facets=facets,
         plans=plans, eval_context=eval_context, insurer_catalog=insurer_catalog,
         company_conditions=company_conditions, company_configs=company_configs,
+        visual_profile_assets=visual_profile_assets,
     )
 
 
@@ -905,6 +913,85 @@ def _workspace_package_tiers(db, draft: QuotationDraft) -> list[dict]:
                     current_pkg_id = catalog.package_id
                 else:
                     current_pkg_id = packages[0].id
+
+                # If this catalog revision has only 1 package, check if the insurer has sibling package catalogs
+                # under the same vehicle category and engine type (e.g. AmAssurance Auto365 tiers: Lite, Plus, Premier, All-Inclusive)
+                if len(packages) == 1 and catalog and catalog.company_id:
+                    sibling_catalogs = [
+                        item for item in db.scalars(
+                            select(BenefitCatalog).where(
+                                BenefitCatalog.company_id == catalog.company_id,
+                                BenefitCatalog.status != "archived",
+                                BenefitCatalog.id != catalog.id,
+                            )
+                        ).all()
+                        if item.company_id == catalog.company_id
+                        and item.status != "archived"
+                        and item.package_id is not None
+                        and (not catalog.vehicle_category_id or item.vehicle_category_id == catalog.vehicle_category_id)
+                        and (item.engine_type or "ice") == (catalog.engine_type or "ice")
+                        and (not catalog.coverage_type_id or item.coverage_type_id == catalog.coverage_type_id)
+                    ]
+                    if sibling_catalogs:
+                        all_sibling_cats = [catalog] + sibling_catalogs
+                        all_package_tiers: list[dict] = []
+                        target_active_pkg_id = draft.package_id or catalog.package_id or packages[0].id
+                        for sc in all_sibling_cats:
+                            sc_rev = revision if sc.id == catalog.id else db.scalar(
+                                select(BenefitCatalogRevision).where(
+                                    BenefitCatalogRevision.catalog_id == sc.id,
+                                    BenefitCatalogRevision.state == "published",
+                                ).order_by(BenefitCatalogRevision.revision_number.desc())
+                            )
+                            if not sc_rev and sc.id != catalog.id:
+                                sc_rev = db.scalar(
+                                    select(BenefitCatalogRevision).where(
+                                        BenefitCatalogRevision.catalog_id == sc.id,
+                                        BenefitCatalogRevision.state != "archived",
+                                    ).order_by(BenefitCatalogRevision.revision_number.desc())
+                                )
+                            if not sc_rev:
+                                continue
+                            sc_pkgs = [
+                                p for p in db.scalars(
+                                    select(BenefitPackage).where(
+                                        BenefitPackage.catalog_revision_id == sc_rev.id,
+                                        BenefitPackage.package_kind == "comprehensive",
+                                        BenefitPackage.status == "active",
+                                    )
+                                ).all()
+                                if p.catalog_revision_id == sc_rev.id
+                                and p.package_kind == "comprehensive"
+                                and p.status == "active"
+                            ]
+                            sc_offerings = [
+                                o for o in db.scalars(
+                                    select(CatalogOffering).where(
+                                        CatalogOffering.catalog_revision_id == sc_rev.id,
+                                        CatalogOffering.status.in_(["active", "compatibility"]),
+                                    )
+                                ).all()
+                                if o.catalog_revision_id == sc_rev.id
+                                and o.status in {"active", "compatibility"}
+                            ]
+                            for p in sc_pkgs:
+                                p_offs = [o for o in sc_offerings if o.applies_to_type != "package" or o.applies_to_id == p.id]
+                                def_count = sum(1 for o in p_offs if o.role == "included" or (o.role is None and o.offering_kind == "base"))
+                                add_count = sum(1 for o in p_offs if o.role in {"addon_option", "bundle_component"})
+                                all_package_tiers.append({
+                                    "package_id": p.id,
+                                    "package_key": p.package_key,
+                                    "name": p.name,
+                                    "sort_order": int(p.sort_order or 0),
+                                    "catalog_id": sc.id,
+                                    "catalog_revision_id": sc_rev.id,
+                                    "defaults_count": def_count,
+                                    "addons_count": add_count,
+                                    "is_current": p.id == target_active_pkg_id or draft.catalog_revision_id == sc_rev.id,
+                                })
+                        if len(all_package_tiers) > 1:
+                            all_package_tiers.sort(key=lambda item: (item["sort_order"], item["name"].casefold()))
+                            return all_package_tiers
 
                 offerings = [
                     item for item in db.scalars(
@@ -1382,13 +1469,21 @@ def _apply_select_package_tier(db, draft: QuotationDraft, user, operation: dict)
     if not package_id:
         raise AppError("Choose a package tier to select.", 422)
     package = db.get(BenefitPackage, package_id)
-    if (
-        package is None
-        or package.catalog_revision_id != draft.catalog_revision_id
-        or package.package_kind != "comprehensive"
-        or package.status != "active"
-    ):
-        raise AppError("That package tier does not belong to the pinned catalog revision.", 422)
+    if package is None or package.package_kind != "comprehensive" or package.status != "active":
+        raise AppError("That package tier does not exist or is inactive.", 422)
+
+    # Check if package belongs to currently pinned revision or to a published revision of a sibling catalog
+    if package.catalog_revision_id != draft.catalog_revision_id:
+        target_rev = db.get(BenefitCatalogRevision, package.catalog_revision_id)
+        if target_rev is None or target_rev.state != "published":
+            raise AppError("That package tier does not belong to a published catalog revision.", 422)
+        target_cat = db.get(BenefitCatalog, target_rev.catalog_id)
+        if target_cat is None or target_cat.company_id != draft.company_id:
+            raise AppError("That package tier does not belong to the draft's insurer.", 422)
+        # Repin to the sibling catalog revision
+        draft.catalog_revision_id = target_rev.id
+        if target_cat.product_id:
+            draft.product_id = target_cat.product_id
 
     if draft.package_id == package.id:
         return "package_tier"

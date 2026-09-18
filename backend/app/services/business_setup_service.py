@@ -29,6 +29,8 @@ from app.models.tables import (
     CompanyBenefitConfig,
     BenefitProfile,
     CompanyBenefitProfile,
+    GlobalBenefitProfile,
+    GlobalBenefitProfileAsset,
     InsuranceCompany,
     InsuranceProduct,
     InsuranceProductTier,
@@ -74,7 +76,10 @@ def _asset_summary(asset: BusinessAsset | None) -> dict | None:
         "id": asset.id,
         "asset_key": asset.asset_key,
         "asset_kind": asset.asset_kind,
+        "category": getattr(asset, "category", "General") or "General",
         "label": asset.label,
+        "original_filename": getattr(asset, "original_filename", ""),
+        "size_bytes": getattr(asset, "size_bytes", 0),
         "width_px": asset.width_px,
         "height_px": asset.height_px,
         "status": asset.status,
@@ -276,9 +281,9 @@ def _catalog(db, item: BenefitCatalog) -> dict:
         "vehicle_subcategory_id": item.vehicle_subcategory_id,
         "coverage_type_id": item.coverage_type_id,
         "coverage_type_key": (
-            "comprehensive" if str(item.coverage_type_id or "") == "d1111111-0000-4000-8000-000000000001"
-            else ("tpft" if str(item.coverage_type_id or "") == "d1111111-0000-4000-8000-000000000002"
-            else ("third_party" if str(item.coverage_type_id or "") == "d1111111-0000-4000-8000-000000000003" else None))
+            "comprehensive" if item.coverage_type_id == "d1111111-0000-4000-8000-000000000001"
+            else ("tpft" if item.coverage_type_id == "d1111111-0000-4000-8000-000000000002"
+            else ("third_party" if item.coverage_type_id == "d1111111-0000-4000-8000-000000000003" else None))
         ),
         "engine_type": getattr(item, "engine_type", None) or "ice",
         "name": item.name,
@@ -649,8 +654,12 @@ def serialize_concept(db, item: BenefitConcept, preloaded_assets: dict | None = 
     }
 
 
-def list_benefit_concepts(db, user, *, search: str, page: int, page_size: int) -> dict:
+def list_benefit_concepts(
+    db, user, *, search: str, page: int, page_size: int, visual_profile_id: str | None = None
+) -> dict:
     _require_business(user)
+    from app.models.tables import GlobalBenefitProfile, GlobalBenefitProfileAsset
+
     query = select(BenefitConcept)
     count_query = select(func.count()).select_from(BenefitConcept)
     if search.strip():
@@ -660,13 +669,50 @@ def list_benefit_concepts(db, user, *, search: str, page: int, page_size: int) -
         count_query = count_query.where(predicate)
     total = int(db.scalar(count_query) or 0)
     rows = db.scalars(query.order_by(BenefitConcept.sort_order.asc(), BenefitConcept.label.asc()).limit(page_size).offset((page - 1) * page_size)).all()
-    asset_ids = {row.default_asset_id for row in rows if row.default_asset_id}
-    preloaded_assets = {}
+
+    target_profile_id = visual_profile_id
+    if not target_profile_id:
+        active_prof = db.scalar(
+            select(GlobalBenefitProfile).where(GlobalBenefitProfile.is_active.is_(True))
+        )
+        if active_prof:
+            target_profile_id = active_prof.id
+
+    profile_asset_map: dict[str, str] = {}
+    if target_profile_id:
+        p_items = db.scalars(
+            select(GlobalBenefitProfileAsset).where(
+                GlobalBenefitProfileAsset.profile_id == target_profile_id
+            )
+        ).all()
+        profile_asset_map = {str(item.concept_id): str(item.asset_id) for item in p_items}
+
+    asset_ids: set[str] = set()
+    for row in rows:
+        aid = profile_asset_map.get(str(row.id)) or row.default_asset_id
+        if aid:
+            asset_ids.add(aid)
+        if row.default_asset_id:
+            asset_ids.add(row.default_asset_id)
+
+    preloaded_assets: dict[str, BusinessAsset] = {}
     if asset_ids:
         assets = db.scalars(select(BusinessAsset).where(BusinessAsset.id.in_(asset_ids))).all()
         preloaded_assets = {a.id: a for a in assets}
 
-    return {"items": [serialize_concept(db, row, preloaded_assets=preloaded_assets) for row in rows], "total": total, "page": page, "page_size": page_size}
+    items = []
+    for row in rows:
+        target_asset_id = profile_asset_map.get(str(row.id)) or row.default_asset_id
+        asset_obj = preloaded_assets.get(target_asset_id) if target_asset_id else None
+        if (not asset_obj or asset_obj.status not in ["active", "unassigned"]) and row.default_asset_id:
+            asset_obj = preloaded_assets.get(row.default_asset_id)
+
+        serialized = serialize_concept(db, row, preloaded_assets=preloaded_assets)
+        if asset_obj:
+            serialized["default_asset"] = _asset_summary(asset_obj)
+        items.append(serialized)
+
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 def save_benefit_concept(db, user, payload: dict) -> dict:
@@ -771,7 +817,9 @@ def restore_benefit_concept(db, user, concept_id: str) -> dict:
     return serialize_concept(db, concept)
 
 
-def list_business_assets(db, user, *, search: str, kind: str | None, page: int, page_size: int) -> dict:
+def list_business_assets(
+    db, user, *, search: str, kind: str | None, category: str | None = None, page: int, page_size: int
+) -> dict:
     _require_business(user)
     query = select(BusinessAsset)
     count_query = select(func.count()).select_from(BusinessAsset)
@@ -781,6 +829,8 @@ def list_business_assets(db, user, *, search: str, kind: str | None, page: int, 
         predicates.append(or_(BusinessAsset.label.ilike(pattern), BusinessAsset.original_filename.ilike(pattern)))
     if kind:
         predicates.append(BusinessAsset.asset_kind == kind)
+    if category and category.strip():
+        predicates.append(BusinessAsset.category == category.strip())
     for predicate in predicates:
         query = query.where(predicate)
         count_query = count_query.where(predicate)
@@ -789,10 +839,90 @@ def list_business_assets(db, user, *, search: str, kind: str | None, page: int, 
     return {"items": [_asset_summary(row) for row in rows], "total": total, "page": page, "page_size": page_size}
 
 
-def upload_business_asset(db, settings, user, *, filename: str, label: str, kind: str, data: bytes) -> dict:
+def list_business_asset_categories(db, user) -> list[dict]:
+    _require_business(user)
+    rows = db.execute(
+        select(BusinessAsset.category, func.count(BusinessAsset.id))
+        .where(BusinessAsset.status.in_(["active", "unassigned"]))
+        .group_by(BusinessAsset.category)
+        .order_by(BusinessAsset.category)
+    ).all()
+    return [
+        {
+            "category": str(cat or "General"),
+            "name": str(cat or "General"),
+            "count": int(count),
+        }
+        for cat, count in rows
+    ]
+
+
+def _find_collision_in_category(db, category: str, label: str, filename: str) -> BusinessAsset | None:
+    norm_label = label.strip().lower()
+    norm_fn = filename.strip().lower()
+    return db.scalar(
+        select(BusinessAsset).where(
+            BusinessAsset.category == category,
+            BusinessAsset.status.in_(["active", "unassigned"]),
+            or_(
+                func.lower(BusinessAsset.label) == norm_label,
+                func.lower(BusinessAsset.original_filename) == norm_fn,
+            ),
+        )
+    )
+
+
+def _generate_unique_label_and_filename(db, category: str, base_label: str, filename: str) -> tuple[str, str]:
+    existing_labels = set(
+        db.scalars(
+            select(func.lower(BusinessAsset.label)).where(
+                BusinessAsset.category == category,
+                BusinessAsset.status.in_(["active", "unassigned"]),
+            )
+        ).all()
+    )
+    existing_filenames = set(
+        db.scalars(
+            select(func.lower(BusinessAsset.original_filename)).where(
+                BusinessAsset.category == category,
+                BusinessAsset.status.in_(["active", "unassigned"]),
+            )
+        ).all()
+    )
+    norm_base = base_label.strip()
+    p = Path(filename)
+    stem = p.stem
+    suffix = p.suffix
+
+    if norm_base.lower() not in existing_labels and filename.lower() not in existing_filenames:
+        return norm_base, filename
+
+    counter = 1
+    while True:
+        candidate_label = f"{norm_base} ({counter})"
+        candidate_fn = f"{stem} ({counter}){suffix}"
+        if candidate_label.lower() not in existing_labels and candidate_fn.lower() not in existing_filenames:
+            return candidate_label, candidate_fn
+        counter += 1
+
+
+def upload_business_asset(
+    db,
+    settings,
+    user,
+    *,
+    filename: str,
+    label: str,
+    kind: str,
+    data: bytes,
+    category: str = "General",
+    on_duplicate: str = "rename",
+) -> dict:
     _require_business(user)
     if kind not in {"benefit_art", "company_logo", "template_background", "decorative"}:
         raise AppError("Asset kind is invalid.", 422)
+    clean_category = category.strip() or "General"
+    clean_label = label.strip() or Path(filename).stem
     try:
         technical = validate_image_bytes(
             data,
@@ -802,14 +932,84 @@ def upload_business_asset(db, settings, user, *, filename: str, label: str, kind
         )
     except ValueError as exc:
         raise AppError(str(exc), 422) from exc
-    existing = db.scalar(select(BusinessAsset).where(BusinessAsset.content_hash == technical["content_hash"]))
-    if existing:
-        return _asset_summary(existing) or {}
 
     def extension(content_type: str) -> str:
         return {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[content_type]
 
     content_hash = technical["content_hash"]
+    collision = _find_collision_in_category(db, clean_category, clean_label, filename)
+
+    if collision and on_duplicate == "replace":
+        storage = SupabaseStorage(settings)
+        uploaded: list[str] = []
+        try:
+            original_path = f"assets/original/{content_hash[:2]}/{content_hash}.{extension(technical['content_type'])}"
+            storage.upload_asset(original_path, data, technical["content_type"])
+            uploaded.append(original_path)
+
+            derivatives = {
+                "ui": create_derivative(data, max_width=512, max_height=512, quality=85),
+                "pdf": create_derivative(data, max_width=1_600, max_height=1_600, quality=92),
+            }
+            derivative_manifest = {}
+            for profile, derivative in derivatives.items():
+                derivative_path = f"assets/derivative/{profile}/{derivative.content_hash[:2]}/{derivative.content_hash}.{extension(derivative.content_type)}"
+                storage.upload_asset(derivative_path, derivative.data, derivative.content_type)
+                uploaded.append(derivative_path)
+                derivative_manifest[profile] = {
+                    "storage_path": derivative_path,
+                    "content_type": derivative.content_type,
+                    "content_hash": derivative.content_hash,
+                    "width_px": derivative.width_px,
+                    "height_px": derivative.height_px,
+                }
+
+            old_storage_paths = [collision.storage_path]
+            for deriv in (collision.derivative_manifest or {}).values():
+                if isinstance(deriv, dict) and deriv.get("storage_path"):
+                    old_storage_paths.append(deriv["storage_path"])
+
+            collision.original_filename = filename
+            collision.label = clean_label
+            collision.content_type = technical["content_type"]
+            collision.content_hash = content_hash
+            collision.storage_path = original_path
+            collision.size_bytes = technical["size_bytes"]
+            collision.width_px = technical["width_px"]
+            collision.height_px = technical["height_px"]
+            collision.has_transparency = technical["has_transparency"]
+            collision.derivative_manifest = derivative_manifest
+            collision.revision += 1
+
+            db.commit()
+            db.refresh(collision)
+
+            for old_path in old_storage_paths:
+                if old_path not in uploaded:
+                    try:
+                        storage.delete_pdf(old_path)
+                    except Exception:
+                        pass
+
+            _audit(db, user, "business.asset.replace", "business_asset", collision.id, {"category": clean_category, "content_hash": content_hash})
+            return _asset_summary(collision) or {}
+        except Exception:
+            db.rollback()
+            for storage_path in reversed(uploaded):
+                try:
+                    storage.delete_pdf(storage_path)
+                except Exception:
+                    pass
+            raise
+
+    # on_duplicate == "rename" or no collision:
+    final_label, final_filename = _generate_unique_label_and_filename(db, clean_category, clean_label, filename)
+
+    # If identical content and identical label already exist in this category, return existing
+    existing = db.scalar(select(BusinessAsset).where(BusinessAsset.content_hash == content_hash))
+    if existing and existing.category == clean_category and existing.label == final_label:
+        return _asset_summary(existing) or {}
+
     original_path = f"assets/original/{content_hash[:2]}/{content_hash}.{extension(technical['content_type'])}"
     derivatives = {
         "ui": create_derivative(data, max_width=512, max_height=512, quality=85),
@@ -832,12 +1032,14 @@ def upload_business_asset(db, settings, user, *, filename: str, label: str, kind
                 "width_px": derivative.width_px,
                 "height_px": derivative.height_px,
             }
+        unique_key = f"upload:{kind}:{content_hash}:{new_id()[:8]}"
         asset = BusinessAsset(
             id=new_id(),
-            asset_key=f"upload:{kind}:{content_hash}",
+            asset_key=unique_key,
             asset_kind=kind,
-            label=label.strip() or Path(filename).stem,
-            original_filename=filename,
+            category=clean_category,
+            label=final_label,
+            original_filename=final_filename,
             content_type=technical["content_type"],
             content_hash=content_hash,
             storage_path=original_path,
@@ -850,7 +1052,7 @@ def upload_business_asset(db, settings, user, *, filename: str, label: str, kind
             status="active" if kind != "benefit_art" else "unassigned",
         )
         db.add(asset)
-        _audit(db, user, "business.asset.upload", "business_asset", asset.id, {"kind": kind, "content_hash": content_hash})
+        _audit(db, user, "business.asset.upload", "business_asset", asset.id, {"kind": kind, "category": clean_category, "content_hash": content_hash})
         db.commit()
         db.refresh(asset)
         return _asset_summary(asset) or {}
@@ -862,6 +1064,246 @@ def upload_business_asset(db, settings, user, *, filename: str, label: str, kind
             except Exception:
                 pass
         raise
+
+
+def batch_upload_business_assets(
+    db,
+    settings,
+    user,
+    *,
+    files: list[tuple[str, str, bytes]],
+    kind: str,
+    category: str = "General",
+    on_duplicate: str = "rename",
+) -> dict:
+    _require_business(user)
+    clean_category = category.strip() or "General"
+    uploaded_summaries: list[dict] = []
+    errors: list[dict] = []
+    for filename, label, data in files:
+        clean_label = label.strip() or Path(filename).stem
+        readable_label = re.sub(r"[_\-]+", " ", clean_label).strip().title()
+        try:
+            summary = upload_business_asset(
+                db,
+                settings,
+                user,
+                filename=filename,
+                label=readable_label,
+                kind=kind,
+                data=data,
+                category=clean_category,
+                on_duplicate=on_duplicate,
+            )
+            if summary:
+                uploaded_summaries.append(summary)
+        except Exception as exc:
+            errors.append({"filename": filename, "error": str(exc)})
+    return {
+        "items": uploaded_summaries,
+        "total": len(uploaded_summaries),
+        "errors": errors,
+        "category": clean_category,
+    }
+
+
+def update_business_asset(
+    db,
+    user,
+    asset_id: str,
+    *,
+    label: str | None = None,
+    category: str | None = None,
+    kind: str | None = None,
+) -> dict:
+    _require_business(user)
+    asset = db.get(BusinessAsset, asset_id)
+    if asset is None or asset.status not in {"active", "unassigned"}:
+        raise AppError("Asset not found.", 404)
+    if label is not None and label.strip():
+        asset.label = label.strip()
+    if category is not None:
+        asset.category = category.strip() or "General"
+    if kind is not None and kind.strip():
+        if kind not in {"benefit_art", "company_logo", "template_background", "decorative"}:
+            raise AppError("Asset kind is invalid.", 422)
+        asset.asset_kind = kind.strip()
+    asset.revision += 1
+    _audit(db, user, "business.asset.update", "business_asset", asset.id, {"label": asset.label, "category": asset.category, "kind": asset.asset_kind})
+    db.commit()
+    db.refresh(asset)
+    return _asset_summary(asset) or {}
+
+
+def bulk_move_business_assets(db, user, asset_ids: list[str], target_category: str) -> dict:
+    _require_business(user)
+    clean_category = target_category.strip() or "General"
+    assets = db.scalars(
+        select(BusinessAsset).where(
+            BusinessAsset.id.in_(asset_ids),
+            BusinessAsset.status.in_(["active", "unassigned"]),
+        )
+    ).all()
+    for asset in assets:
+        asset.category = clean_category
+        asset.revision += 1
+    _audit(db, user, "business.asset.bulk_move", "business_asset", "bulk", {"count": len(assets), "target_category": clean_category})
+    db.commit()
+    return {"success": True, "moved_count": len(assets), "category": clean_category}
+
+
+def delete_business_asset(db, settings, user, asset_id: str) -> dict:
+    _require_business(user)
+    asset = db.get(BusinessAsset, asset_id)
+    if asset is None or asset.status not in {"active", "unassigned"}:
+        raise AppError("Asset not found.", 404)
+
+    # 1. Safely unlink foreign key references
+    db.execute(delete(GlobalBenefitProfileAsset).where(GlobalBenefitProfileAsset.asset_id == asset.id))
+    db.execute(update(BenefitConcept).where(BenefitConcept.default_asset_id == asset.id).values(default_asset_id=None))
+    db.execute(update(InsuranceCompany).where(InsuranceCompany.logo_asset_id == asset.id).values(logo_asset_id=None))
+
+    # 2. Collect storage paths to purge
+    storage_paths = [asset.storage_path]
+    for deriv in (asset.derivative_manifest or {}).values():
+        if isinstance(deriv, dict) and deriv.get("storage_path"):
+            storage_paths.append(deriv["storage_path"])
+
+    # 3. Delete from DB
+    _audit(db, user, "business.asset.delete", "business_asset", asset.id, {"label": asset.label, "category": asset.category})
+    db.delete(asset)
+    db.commit()
+
+    # 4. Storage cleanup
+    storage = SupabaseStorage(settings)
+    for path in storage_paths:
+        try:
+            storage.delete_pdf(path)
+        except Exception:
+            pass
+
+    return {"success": True, "id": asset_id}
+
+
+def bulk_delete_business_assets(db, settings, user, asset_ids: list[str]) -> dict:
+    _require_business(user)
+    if not asset_ids:
+        return {"success": True, "deleted_count": 0, "deleted_ids": []}
+
+    assets = db.scalars(
+        select(BusinessAsset).where(
+            BusinessAsset.id.in_(asset_ids),
+            BusinessAsset.status.in_(["active", "unassigned"]),
+        )
+    ).all()
+    if not assets:
+        return {"success": True, "deleted_count": 0, "deleted_ids": []}
+
+    target_ids = [a.id for a in assets]
+    storage_paths = []
+    for asset in assets:
+        storage_paths.append(asset.storage_path)
+        for deriv in (asset.derivative_manifest or {}).values():
+            if isinstance(deriv, dict) and deriv.get("storage_path"):
+                storage_paths.append(deriv["storage_path"])
+
+    # 1. Unlink references
+    db.execute(delete(GlobalBenefitProfileAsset).where(GlobalBenefitProfileAsset.asset_id.in_(target_ids)))
+    db.execute(update(BenefitConcept).where(BenefitConcept.default_asset_id.in_(target_ids)).values(default_asset_id=None))
+    db.execute(update(InsuranceCompany).where(InsuranceCompany.logo_asset_id.in_(target_ids)).values(logo_asset_id=None))
+
+    # 2. Delete rows
+    for asset in assets:
+        db.delete(asset)
+
+    _audit(db, user, "business.asset.bulk_delete", "business_asset", "bulk", {"count": len(target_ids)})
+    db.commit()
+
+    # 3. Storage cleanup
+    storage = SupabaseStorage(settings)
+    for path in storage_paths:
+        try:
+            storage.delete_pdf(path)
+        except Exception:
+            pass
+
+    return {"success": True, "deleted_count": len(target_ids), "deleted_ids": target_ids}
+
+
+def rename_business_asset_folder(db, user, old_category: str, new_category: str) -> dict:
+    _require_business(user)
+    old_clean = old_category.strip()
+    new_clean = new_category.strip()
+    if not old_clean or not new_clean:
+        raise AppError("Folder name cannot be empty.", 422)
+    if old_clean.lower() == new_clean.lower():
+        return {"success": True, "old_category": old_clean, "new_category": new_clean, "updated_assets": 0}
+
+    res = db.execute(
+        update(BusinessAsset)
+        .where(
+            BusinessAsset.category == old_clean,
+            BusinessAsset.status.in_(["active", "unassigned"]),
+        )
+        .values(category=new_clean, revision=BusinessAsset.revision + 1)
+    )
+    db.execute(
+        update(GlobalBenefitProfile)
+        .where(GlobalBenefitProfile.asset_category == old_clean)
+        .values(asset_category=new_clean)
+    )
+    _audit(db, user, "business.asset.folder_rename", "folder", old_clean, {"new_category": new_clean})
+    db.commit()
+    return {"success": True, "old_category": old_clean, "new_category": new_clean, "updated_assets": res.rowcount}
+
+
+def delete_business_asset_folder(db, settings, user, category: str, *, action: str = "move_to_general") -> dict:
+    _require_business(user)
+    clean_category = category.strip()
+    if clean_category.lower() == "general":
+        raise AppError("Cannot delete the default General folder.", 422)
+
+    if action == "move_to_general":
+        db.execute(
+            update(BusinessAsset)
+            .where(
+                BusinessAsset.category == clean_category,
+                BusinessAsset.status.in_(["active", "unassigned"]),
+            )
+            .values(category="General", revision=BusinessAsset.revision + 1)
+        )
+        db.execute(
+            update(GlobalBenefitProfile)
+            .where(GlobalBenefitProfile.asset_category == clean_category)
+            .values(asset_category="General")
+        )
+        _audit(db, user, "business.asset.folder_delete", "folder", clean_category, {"action": "move_to_general"})
+        db.commit()
+        return {"success": True, "category": clean_category, "action": "move_to_general"}
+
+    elif action == "delete_all":
+        asset_ids = list(
+            db.scalars(
+                select(BusinessAsset.id).where(
+                    BusinessAsset.category == clean_category,
+                    BusinessAsset.status.in_(["active", "unassigned"]),
+                )
+            ).all()
+        )
+        if asset_ids:
+            bulk_delete_business_assets(db, settings, user, asset_ids)
+        db.execute(
+            update(GlobalBenefitProfile)
+            .where(GlobalBenefitProfile.asset_category == clean_category)
+            .values(asset_category="General")
+        )
+        _audit(db, user, "business.asset.folder_delete", "folder", clean_category, {"action": "delete_all"})
+        db.commit()
+        return {"success": True, "category": clean_category, "action": "delete_all", "deleted_assets": len(asset_ids)}
+    else:
+        raise AppError("Invalid folder delete action. Must be 'move_to_general' or 'delete_all'.", 422)
+
+
 
 
 def create_benefit_catalog(db, user, payload: dict) -> dict:
@@ -1826,6 +2268,7 @@ def clone_benefit_profile(db, user, profile_id: str, payload: dict) -> dict:
                 trigger_concept_id=cond.trigger_concept_id,
                 trigger_plan_filter=cond.trigger_plan_filter,
                 target_concept_id=cond.target_concept_id,
+                action_type=getattr(cond, "action_type", "replace_description") or "replace_description",
                 replacement_description=cond.replacement_description,
                 is_active=cond.is_active,
                 created_at=utcnow(),
@@ -2411,6 +2854,7 @@ def list_company_conditions(db, user, company_id: str, profile_id: str | None = 
             "trigger_concept_id": c.trigger_concept_id,
             "trigger_plan_filter": c.trigger_plan_filter,
             "target_concept_id": c.target_concept_id,
+            "action_type": getattr(c, "action_type", "replace_description") or "replace_description",
             "replacement_description": c.replacement_description,
             "is_active": c.is_active,
             "created_at": c.created_at.isoformat() if c.created_at else None,
@@ -2448,8 +2892,14 @@ def save_company_condition(db, user, company_id: str, payload: dict, profile_id:
     if not target_concept_id or db.get(BenefitConcept, target_concept_id) is None:
         raise AppError("Target benefit concept is invalid.", 422)
 
+    action_type = str(payload.get("action_type") or "replace_description").strip()
+    if action_type not in {"replace_description", "hide_target"}:
+        action_type = "replace_description"
+
     replacement_desc = str(payload.get("replacement_description") or "").strip()
-    if not replacement_desc:
+    if action_type == "hide_target":
+        replacement_desc = replacement_desc or "[Hidden by condition rule]"
+    elif not replacement_desc:
         raise AppError("Replacement description is required.", 422)
 
     trigger_plan_filter = payload.get("trigger_plan_filter")
@@ -2475,6 +2925,7 @@ def save_company_condition(db, user, company_id: str, payload: dict, profile_id:
         cond.trigger_concept_id = trigger_concept_id
         cond.trigger_plan_filter = trigger_plan_filter
         cond.target_concept_id = target_concept_id
+        cond.action_type = action_type
         cond.replacement_description = replacement_desc
         cond.is_active = is_active
         cond.updated_at = utcnow()
@@ -2487,6 +2938,7 @@ def save_company_condition(db, user, company_id: str, payload: dict, profile_id:
             trigger_concept_id=trigger_concept_id,
             trigger_plan_filter=trigger_plan_filter,
             target_concept_id=target_concept_id,
+            action_type=action_type,
             replacement_description=replacement_desc,
             is_active=is_active,
             created_at=utcnow(),
@@ -2505,6 +2957,7 @@ def save_company_condition(db, user, company_id: str, payload: dict, profile_id:
         "trigger_concept_id": cond.trigger_concept_id,
         "trigger_plan_filter": cond.trigger_plan_filter,
         "target_concept_id": cond.target_concept_id,
+        "action_type": cond.action_type,
         "replacement_description": cond.replacement_description,
         "is_active": cond.is_active,
     }

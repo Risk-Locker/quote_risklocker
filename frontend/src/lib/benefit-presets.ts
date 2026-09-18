@@ -110,9 +110,9 @@ export const SYSTEM_BENEFIT_PRESETS: BenefitCardStyle[] = [
     layout: "masonry",
     borderWidth: 1,
     borderStyle: "solid",
-    elevation: "shadow",
+    elevation: "lift",
     uniformHeight: 0,
-    iconSize: 20,
+    iconSize: 44,
     imageFit: "contain",
     iconPadShape: "box",
     titleSize: 10.5,
@@ -390,8 +390,25 @@ export function getAllBenefitPresets(): BenefitCardStyle[] {
     }));
   }
   try {
+    // Check cached DB presets first
+    const cachedDbRaw = localStorage.getItem("risklocker_cached_benefit_presets");
+    if (cachedDbRaw) {
+      try {
+        const cachedList: BenefitCardStyle[] = JSON.parse(cachedDbRaw);
+        if (Array.isArray(cachedList) && cachedList.length > 0) {
+          const defId = localStorage.getItem("risklocker_default_benefit_preset");
+          return cachedList.map((c) => ({
+            ...c,
+            is_default: defId ? c.id === defId : c.is_default,
+            sectionVisibility: normalizeSectionVisibility(c.sectionVisibility, c),
+          }));
+        }
+      } catch {}
+    }
+
     const overridesRaw = localStorage.getItem("risklocker_benefit_preset_overrides");
     const overrides: Record<string, Partial<BenefitCardStyle>> = overridesRaw ? JSON.parse(overridesRaw) : {};
+    const defaultOverrideId = localStorage.getItem("risklocker_default_benefit_preset");
 
     const mergedSystem = SYSTEM_BENEFIT_PRESETS.map((sys) => {
       if (overrides[sys.id]) {
@@ -402,11 +419,13 @@ export function getAllBenefitPresets(): BenefitCardStyle[] {
         };
         return {
           ...merged,
+          is_default: defaultOverrideId ? merged.id === defaultOverrideId : merged.is_default,
           sectionVisibility: normalizeSectionVisibility(merged.sectionVisibility, merged),
         };
       }
       return {
         ...sys,
+        is_default: defaultOverrideId ? sys.id === defaultOverrideId : sys.is_default,
         sectionVisibility: normalizeSectionVisibility(sys.sectionVisibility, sys),
       };
     });
@@ -415,6 +434,7 @@ export function getAllBenefitPresets(): BenefitCardStyle[] {
     const customList: BenefitCardStyle[] = customRaw ? JSON.parse(customRaw) : [];
     const normalizedCustom = customList.map((c) => ({
       ...c,
+      is_default: defaultOverrideId ? c.id === defaultOverrideId : c.is_default,
       sectionVisibility: normalizeSectionVisibility(c.sectionVisibility, c),
     }));
 

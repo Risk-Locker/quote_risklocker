@@ -356,7 +356,8 @@ class CompanyBenefitConditionSaveRequest(StrictRequest):
     trigger_concept_id: str
     trigger_plan_filter: str | None = Field(default=None, max_length=255)
     target_concept_id: str
-    replacement_description: str = Field(min_length=1, max_length=1000)
+    action_type: str = Field(default="replace_description", max_length=50)
+    replacement_description: str | None = Field(default=None, max_length=1000)
     is_active: bool = True
 
 
@@ -527,5 +528,57 @@ class SessionRescanRequest(StrictRequest):
     model_config = ConfigDict(extra="ignore")
     mode: Literal["in_place", "new_session"] = "in_place"
     engine: Literal["auto", "native", "ai"] = "auto"
+
+
+# --- Business: Benefit Card Presets ---
+
+class BenefitCardPresetSaveRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    name: str | None = None
+    short_name: str | None = None
+    description: str | None = None
+    config: dict[str, Any] | None = None
+
+
+class BenefitCardPresetCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str | None = None
+    name: str = Field(min_length=1, max_length=255)
+    short_name: str | None = None
+    shortName: str | None = None
+    description: str = ""
+    config: dict[str, Any] | None = None
+
+
+# --- Business: Asset Management & Folders ---
+
+class BusinessAssetUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    label: str | None = None
+    category: str | None = None
+    kind: str | None = None
+
+
+class BusinessAssetBulkDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    asset_ids: list[str] = Field(min_length=1)
+
+
+class BusinessAssetBulkMoveRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    asset_ids: list[str] = Field(min_length=1)
+    target_category: str = Field(min_length=1, max_length=120)
+
+
+class BusinessAssetFolderRenameRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    old_name: str = Field(min_length=1, max_length=120)
+    new_name: str = Field(min_length=1, max_length=120)
+
+
+class BusinessAssetFolderDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    category: str = Field(min_length=1, max_length=120)
+    action: Literal["move_to_general", "delete_all"] = "move_to_general"
 
 

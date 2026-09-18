@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Generator
 
 from pathlib import Path
@@ -25,13 +26,17 @@ def _sqlalchemy_url(database_url: str) -> str:
     return database_url
 
 
+_db_pool_size = int(os.getenv("DB_POOL_SIZE", "10"))
+_db_max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "10"))
+_db_pool_recycle = int(os.getenv("DB_POOL_RECYCLE", "300"))
+
 engine = create_engine(
     _sqlalchemy_url(settings.database_url),
     poolclass=QueuePool,
-    pool_size=2,
-    max_overflow=2,
+    pool_size=_db_pool_size,
+    max_overflow=_db_max_overflow,
     pool_timeout=25,
-    pool_recycle=60,
+    pool_recycle=_db_pool_recycle,
     pool_pre_ping=True,
     connect_args={
         "keepalives": 1,

@@ -838,6 +838,7 @@ class BusinessAsset(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
     asset_key: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
     asset_kind: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(120), nullable=False, default="General", index=True)
     label: Mapped[str] = mapped_column(String(255), nullable=False)
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     content_type: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -1049,10 +1050,73 @@ class CompanyBenefitCondition(Base, TimestampMixin):
     trigger_concept_id: Mapped[str] = mapped_column(ForeignKey("benefit_concepts.id", ondelete="CASCADE"), nullable=False, index=True)
     trigger_plan_filter: Mapped[str | None] = mapped_column(String(255), nullable=True)
     target_concept_id: Mapped[str] = mapped_column(ForeignKey("benefit_concepts.id", ondelete="CASCADE"), nullable=False, index=True)
-    replacement_description: Mapped[str] = mapped_column(Text, nullable=False)
+    action_type: Mapped[str] = mapped_column(String(50), nullable=False, default="replace_description")
+    replacement_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     company: Mapped["InsuranceCompany"] = relationship()
     profile: Mapped[BenefitProfile | None] = relationship(back_populates="conditions")
     trigger_concept: Mapped["BenefitConcept"] = relationship(foreign_keys=[trigger_concept_id])
     target_concept: Mapped["BenefitConcept"] = relationship(foreign_keys=[target_concept_id])
+
+
+class GlobalBenefitProfile(Base, TimestampMixin):
+    __tablename__ = "global_benefit_profiles"
+    __table_args__ = (
+        Index("uq_single_active_global_benefit_profile", "is_active", unique=True, postgresql_where=text("is_active = true"), sqlite_where=text("is_active = 1")),
+        Index("idx_global_benefit_profiles_status", "status"),
+        Index("idx_global_benefit_profiles_asset_category", "asset_category"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    slug: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    asset_category: Mapped[str] = mapped_column(String(120), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="draft")
+    cloned_from_id: Mapped[str | None] = mapped_column(ForeignKey("global_benefit_profiles.id", ondelete="SET NULL"), nullable=True)
+
+    items: Mapped[list["GlobalBenefitProfileAsset"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
+
+
+class GlobalBenefitProfileAsset(Base, TimestampMixin):
+    __tablename__ = "global_benefit_profile_assets"
+    __table_args__ = (
+        UniqueConstraint("profile_id", "concept_id", name="uq_global_benefit_profile_concept_asset"),
+        Index("idx_gbpa_profile", "profile_id"),
+        Index("idx_gbpa_concept", "concept_id"),
+        Index("idx_gbpa_asset", "asset_id"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("global_benefit_profiles.id", ondelete="CASCADE"), nullable=False)
+    concept_id: Mapped[str] = mapped_column(ForeignKey("benefit_concepts.id", ondelete="CASCADE"), nullable=False)
+    asset_id: Mapped[str] = mapped_column(ForeignKey("business_assets.id", ondelete="RESTRICT"), nullable=False)
+
+    profile: Mapped["GlobalBenefitProfile"] = relationship(back_populates="items")
+    concept: Mapped["BenefitConcept"] = relationship()
+    asset: Mapped["BusinessAsset"] = relationship()
+
+
+class BenefitCardPreset(Base, TimestampMixin):
+    __tablename__ = "benefit_card_presets"
+    __table_args__ = (
+        Index(
+            "uq_single_default_benefit_card_preset",
+            "is_default",
+            unique=True,
+            postgresql_where=text("is_default = true"),
+            sqlite_where=text("is_default = 1"),
+        ),
+        Index("idx_benefit_card_presets_custom", "is_custom"),
+    )
+
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    short_name: Mapped[str] = mapped_column(String(60), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_custom: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    config: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+

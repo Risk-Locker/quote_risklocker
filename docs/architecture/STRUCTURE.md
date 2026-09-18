@@ -50,9 +50,12 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Data repair command: `commands/repin-amassurance-sessions.py` (idempotent, dry-run default, `--apply`) — re-pins drafts with stale revisions or missing `package_id` to the latest published revision (e.g. rev 3) and re-seeds tier defaults.
 - Template update commands: `commands/update-template-header-customer.py` and `commands/update-template-header-quotation-ref.py` (idempotent, dry-run default, `--apply`) — updates existing template revisions with separated header variables and publishes clean revisions.
 
-## Benefit Presets (v10) Additions
+## Benefit Presets (v10) & Database Persistence (v21) Additions
 
-- Centralized Presets: `frontend/src/lib/benefit-presets.ts` (`SYSTEM_BENEFIT_PRESETS`, `getBenefitPreset`, `applyPresetToCanvasElement`). 6 presets: Masonry Flow, Compact Minimalist, Signature 2-Col, Elevated 3D, Grid Tile, Dark Luxury.
+- Centralized Presets: `frontend/src/lib/benefit-presets.ts` (`SYSTEM_BENEFIT_PRESETS`, `getBenefitPreset`, `applyPresetToCanvasElement`). 7 presets: Masonry Flow, Compact Minimalist, Signature 2-Col, Elevated 3D, Grid Tile, Dark Luxury, Dynamic Masonry.
+- Database Persistence: Migration `migrations/048_benefit_card_presets.sql` + model `BenefitCardPreset` (`backend/app/models/tables.py`) with single-default partial unique index `uq_single_default_benefit_card_preset`.
+- Backend Service & API: `backend/app/services/benefit_template_preset_service.py` provides CRUD, atomic default selection, and factory resets; REST API at `/business/benefit-card-presets`; tests in `tests/test_benefit_template_presets.py`.
+- Template Designer: `frontend/src/app/builder/templates/benefit-templates/page.tsx` loads directly from DB, defaults immediately to Masonry Flow (44px icon, subtle 3D lift, auto uniform height), and writes updates permanently to PostgreSQL.
 - Template Builder: Preset selector in `frontend/src/app/builder/templates/[id]/builder/page.tsx` (`Dynamic benefit grid` inspector), Quotation Templates manager at `frontend/src/app/builder/templates/quotation-templates/page.tsx`, and dedicated Benefit Templates designer at `frontend/src/app/builder/templates/benefit-templates/page.tsx` (with automatic sub-tab routing and redirects at `/builder/templates` and `/builder/templates/benefits`).
 - Review Workspace: Interactive Benefit Template Switcher in `frontend/src/components/session-workspace/review-phase.tsx` (sidebar + canvas toolbar) with live preview updates.
 - Rendering: Double RM fix in `shared.tsx:765`, dynamic row height allocation (~66px standard, 40px minimal) and dynamic footer shifting (`footer_shift`) in `shared.tsx` and `template_renderer.py`. PDF generator applies preset in `generation_service.py:_template_config`.
@@ -118,6 +121,16 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
   4. *PDF Generation*: `backend/app/services/generation_service.py:generate_quotation_pdf` scopes to active global profile.
 - **Frontend Cockpit**: Top Profile Bar in `frontend/src/app/builder/benefits/page.tsx` acts as global version switcher across all 4 cockpit tabs and all insurers, with status badges (`Active Master`, `Draft`, `Archived`), atomic activation button, clone modal dialog, draft deletion, amber `"Excluded"` badge on Tab 2 offerings, and editable `"Default Price / Cost"` column with FOC badges and dynamic formula rate display.
 - **Hermetic Test Suite**: `tests/test_company_benefit_profiles.py` covering global profile schemas, auto-provisioning, multi-company deep-clone, lifecycle CRUD, atomic activation, archived immutability, review seeding cascade exclusion, render context suppression, and baseline cost CRUD/sanitization/fallback.
+
+## Global Benefit Visual Profile & Asset Category System (v21) Additions
+
+- **Category-Bound Visual Themes**: Migration `migrations/047_global_benefit_visual_profiles.sql` introduces `global_benefit_profiles` and `global_benefit_profile_assets` tables along with `category` column on `business_assets`.
+- **Folder / Category Management**: `frontend/src/app/builder/assets/page.tsx` organizes assets into computer-style folders with direct multi-file batch upload (up to 75 files; no ZIP required) via `POST /business/assets/batch` and folder counts via `GET /business/assets/categories`.
+- **Category Exclusivity Invariant**: Each `GlobalBenefitProfile` is strictly bound to one asset folder/category. Both frontend asset selector and backend service (`backend/app/services/global_benefit_profile_service.py:save_global_benefit_profile_assets`) enforce that all mapped icons belong to the assigned category.
+- **Missing Asset Health Monitoring**: Non-destructive missing asset detection in `global_benefit_profile_service.py` flags missing/deleted images with `⚠️ Missing Image` warnings without breaking drafts, quotations, or review workflows.
+- **Smart Self-Assigning & Review Screen**: Fuzzy name matcher in `global_benefit_profile_service.py:auto_assign_category_assets` matches filenames to the 63 global benefits, presenting the interactive **Assigned Situation Review Screen** modal in `frontend/src/app/builder/global-benefits/page.tsx` for manual fine-tuning and one-click saving.
+- **Quotation Render Overlay**: `backend/app/rendering/render_context.py:resolve_benefit_cards` overlays active visual profile assets onto quotation cards and PDF generation.
+- **Tests**: `tests/test_global_benefit_profiles.py` covering profile CRUD, deep-cloning, atomic activation, category exclusivity enforcement, missing image health monitoring, and fuzzy auto-matching.
 
 ## Benefit Configuration Matrix
 

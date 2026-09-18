@@ -27,11 +27,19 @@ Set-Content -Path (Join-Path $tmpDir "backend-port.txt") -Value $port -Encoding 
 
 Write-Host "Starting Risklocker backend on http://127.0.0.1:$port ..."
 
-$env:PYTHONPATH = "backend"
+$backendDir = Join-Path $root "backend"
+$env:PYTHONPATH = ".;$backendDir"
 $env:PYTHONDONTWRITEBYTECODE = "1"
 $env:PYTHONUNBUFFERED = "1"
 
 $pythonExe = Join-Path $root ".venv\Scripts\python.exe"
+
+Write-Host "Verifying database migrations..." -ForegroundColor Cyan
+& $pythonExe -m app.db.migrations --allow-local
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Database migration verification/application failed." -ForegroundColor Red
+    exit $LASTEXITCODE
+}
 
 if ($env:BACKEND_RELOAD -eq "1" -or $env:BACKEND_RELOAD -eq "true") {
     Write-Host "Backend reload mode is enabled. If a port is left open, run: npm run stop"

@@ -373,6 +373,13 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
         except Exception:
             pass
 
+    visual_profile_assets = None
+    try:
+        from app.services.global_benefit_profile_service import get_active_visual_profile_asset_map
+        visual_profile_assets = get_active_visual_profile_asset_map(db)
+    except Exception:
+        pass
+
     try:
         cards = resolve_benefit_cards(
             selections=selections,
@@ -385,6 +392,7 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
             insurer_catalog=insurer_catalog,
             company_conditions=company_conditions,
             company_configs=company_configs,
+            visual_profile_assets=visual_profile_assets,
         )
     except RenderContextError as exc:
         raise AppError(str(exc), 409) from exc

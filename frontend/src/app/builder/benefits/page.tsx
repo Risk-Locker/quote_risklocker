@@ -314,6 +314,7 @@ function BenefitsPageContent() {
   const [condTriggerId, setCondTriggerId] = useState("");
   const [condPlanFilter, setCondPlanFilter] = useState("");
   const [condTargetId, setCondTargetId] = useState("");
+  const [condActionType, setCondActionType] = useState<"replace_description" | "hide_target">("replace_description");
   const [condReplacement, setCondReplacement] = useState("");
 
   // Tab 4: Matrix and AI sync states
@@ -464,7 +465,8 @@ function BenefitsPageContent() {
           trigger_concept_id: condTriggerId,
           trigger_plan_filter: condPlanFilter.trim() || null,
           target_concept_id: condTargetId,
-          replacement_description: condReplacement.trim(),
+          action_type: condActionType,
+          replacement_description: condActionType === "hide_target" ? (condReplacement.trim() || "[Hidden by condition rule]") : condReplacement.trim(),
           is_active: true,
         }),
       });
@@ -473,6 +475,7 @@ function BenefitsPageContent() {
       setCondTriggerId("");
       setCondPlanFilter("");
       setCondTargetId("");
+      setCondActionType("replace_description");
       setCondReplacement("");
       await loadCompanyConditions(selectedCompanyId, selectedProfileId);
       const profRes = await api<{ profiles: BenefitProfile[] }>("/business/benefit-profiles");
@@ -482,7 +485,7 @@ function BenefitsPageContent() {
     } finally {
       if (mountedRef.current) setConditionSaving(false);
     }
-  }, [selectedCompanyId, selectedProfileId, condFormName, condTriggerId, condPlanFilter, condTargetId, condReplacement, loadCompanyConditions]);
+  }, [selectedCompanyId, selectedProfileId, condFormName, condTriggerId, condPlanFilter, condTargetId, condActionType, condReplacement, loadCompanyConditions]);
 
   const deleteCompanyCondition = useCallback(async (conditionId: string) => {
     if (!selectedCompanyId) return;
@@ -633,6 +636,29 @@ function BenefitsPageContent() {
     return activeCompanies;
   }, []);
 
+  const matchesCoverage = useCallback((cat: any, filter: "comprehensive" | "tpft" | "tpo") => {
+    const covId = String(cat.coverage_type_id || "").toLowerCase();
+    const covKey = String(cat.coverage_type_key || "").toLowerCase();
+    const catName = String(cat.name || "").toLowerCase();
+    const pkgKind = String(cat.package?.package_kind || "").toLowerCase();
+
+    if (filter === "comprehensive") {
+      if (covId === "d1111111-0000-4000-8000-000000000001" || covKey === "comprehensive" || pkgKind === "comprehensive") return true;
+      if (covId === "d1111111-0000-4000-8000-000000000002" || covId === "d1111111-0000-4000-8000-000000000003") return false;
+      if (catName.includes("tpft") || catName.includes("third party")) return false;
+      return true;
+    }
+    if (filter === "tpft") {
+      if (covId === "d1111111-0000-4000-8000-000000000002" || covKey === "tpft" || pkgKind === "tpft") return true;
+      return catName.includes("tpft") || catName.includes("third party fire") || catName.includes("third party, fire");
+    }
+    if (filter === "tpo") {
+      if (covId === "d1111111-0000-4000-8000-000000000003" || covKey === "third_party" || pkgKind === "tpo" || pkgKind === "third_party") return true;
+      return catName.includes("third party") && !catName.includes("fire") && !catName.includes("theft");
+    }
+    return true;
+  }, []);
+
   const loadCatalog = useCallback(
     async (catalogId: string, silent = false) => {
       if (!catalogId) {
@@ -646,14 +672,16 @@ function BenefitsPageContent() {
         if (!mountedRef.current) return;
         setCatalogWorkspace(result.workspace);
         setSelectedCatalogId(catalogId);
-        syncUrl(selectedCompanyId, selectedProductId, catalogId);
+        const prodId = result.workspace.catalog?.product_id || "";
+        setSelectedProductId(prodId);
+        syncUrl(selectedCompanyId, prodId, catalogId);
       } catch (err) {
         if (mountedRef.current) setError(apiErrorMessage(err));
       } finally {
         if (!silent && mountedRef.current) setWorkspaceLoading(false);
       }
     },
-    [selectedCompanyId, selectedProductId, syncUrl]
+    [selectedCompanyId, syncUrl]
   );
 
   const loadCompany = useCallback(
@@ -666,19 +694,33 @@ function BenefitsPageContent() {
         if (!mountedRef.current) return;
         setCompanyWorkspace(result.workspace);
         setSelectedCompanyId(companyId);
-        const product =
-          result.workspace.products.find((item) => item.id === preferredProduct) ||
-          result.workspace.products.find((item) => (item.name || "").toLowerCase().includes("car") && !(item.name || "").toLowerCase().includes("commercial") && !(item.name || "").toLowerCase().includes("tpft") && !(item.name || "").toLowerCase().includes("third party")) ||
-          result.workspace.products.find((item) => (item.name || "").toLowerCase().includes("car")) ||
-          result.workspace.products[0];
-        setSelectedProductId(product?.id || "");
-        const catalogs = result.workspace.catalogs.filter((item) => !product || !item.product_id || item.product_id === product.id);
+
+        const carVehId = "b1111111-0000-4000-8000-000000000001";
+        const targetVehicleId = selectedVehicleId || carVehId;
+        const targetEngine = selectedEngineType || "ice";
+
+        // Filter catalogs matching current vehicle, engine, segment, and coverage preferences
+        const matchingCatalogs = (result.workspace.catalogs || []).filter((item) =>
+          (!selectedSegmentId || !item.segment_id || item.segment_id === selectedSegmentId) &&
+          (!targetVehicleId || item.vehicle_category_id === targetVehicleId) &&
+          ((item.engine_type || "ice") === targetEngine) &&
+          matchesCoverage(item, builderCoverageFilter)
+        );
+
         const catalog =
-          catalogs.find((item) => item.id === preferredCatalog) ||
-          catalogs.find((item) => (item.engine_type || "ice") === "ice" && !(item.name || "").toLowerCase().includes("tpft") && !(item.name || "").toLowerCase().includes("third party")) ||
-          catalogs[0];
-        syncUrl(companyId, product?.id || "", catalog?.id || "");
-        await loadCatalog(catalog?.id || "");
+          (preferredCatalog && matchingCatalogs.find((item) => item.id === preferredCatalog)) ||
+          matchingCatalogs[0] ||
+          result.workspace.catalogs.find((item) => (item.engine_type || "ice") === targetEngine && (!targetVehicleId || item.vehicle_category_id === targetVehicleId)) ||
+          result.workspace.catalogs.find((item) => (item.engine_type || "ice") === targetEngine) ||
+          result.workspace.catalogs[0];
+
+        const prodId = catalog?.product_id || preferredProduct || "";
+        setSelectedProductId(prodId);
+        if (catalog?.id) {
+          setSelectedCatalogId(catalog.id);
+          syncUrl(companyId, prodId, catalog.id);
+          await loadCatalog(catalog.id);
+        }
       } catch (err) {
         if (mountedRef.current) setError(apiErrorMessage(err));
       } finally {
@@ -686,7 +728,7 @@ function BenefitsPageContent() {
         setWorkspaceLoading(false);
       }
     },
-    [loadCatalog, selectedCatalogId, selectedProductId, syncUrl]
+    [builderCoverageFilter, loadCatalog, matchesCoverage, selectedCatalogId, selectedEngineType, selectedProductId, selectedSegmentId, selectedVehicleId, syncUrl]
   );
 
   useEffect(() => {
@@ -955,34 +997,14 @@ ${aiMarkdownTable}`;
   }, [concepts, companyConfigs, configsCategoryFilter, configsSearch]);
 
   const productConfigs = useMemo(() => {
-    const matchesCoverage = (cat: any, filter: "comprehensive" | "tpft" | "tpo") => {
-      const covId = String(cat.coverage_type_id || "").toLowerCase();
-      const covKey = String(cat.coverage_type_key || "").toLowerCase();
-      const catName = String(cat.name || "").toLowerCase();
-      const pkgKind = String(cat.package?.package_kind || "").toLowerCase();
-
-      if (filter === "comprehensive") {
-        if (covId === "d1111111-0000-4000-8000-000000000001" || covKey === "comprehensive" || pkgKind === "comprehensive") return true;
-        if (covId === "d1111111-0000-4000-8000-000000000002" || covId === "d1111111-0000-4000-8000-000000000003") return false;
-        if (catName.includes("tpft") || catName.includes("third party")) return false;
-        return true;
-      }
-      if (filter === "tpft") {
-        if (covId === "d1111111-0000-4000-8000-000000000002" || covKey === "tpft" || pkgKind === "tpft") return true;
-        return catName.includes("tpft") || catName.includes("third party fire") || catName.includes("third party, fire");
-      }
-      if (filter === "tpo") {
-        if (covId === "d1111111-0000-4000-8000-000000000003" || covKey === "third_party" || pkgKind === "tpo" || pkgKind === "third_party") return true;
-        return catName.includes("third party") && !catName.includes("fire") && !catName.includes("theft");
-      }
-      return true;
-    };
-
+    const carVehId = "b1111111-0000-4000-8000-000000000001";
+    const targetVehicleId = selectedVehicleId || carVehId;
     const items = (companyWorkspace?.catalogs || []).filter(
-      (item) => !item.tier_id && 
-      (!selectedProductId || !item.product_id || item.product_id === selectedProductId) &&
-      matchesCoverage(item, builderCoverageFilter) &&
-      ((item.engine_type || "ice") === selectedEngineType)
+      (item) =>
+        (!selectedSegmentId || !item.segment_id || item.segment_id === selectedSegmentId) &&
+        (!targetVehicleId || !item.vehicle_category_id || item.vehicle_category_id === targetVehicleId) &&
+        ((item.engine_type || "ice") === selectedEngineType) &&
+        matchesCoverage(item, builderCoverageFilter)
     );
     return items.sort((a, b) => {
       const aOrder = a.package?.sort_order ?? 0;
@@ -991,10 +1013,13 @@ ${aiMarkdownTable}`;
       const bName = b.package?.name || b.name || "";
       return aOrder - bOrder || aName.localeCompare(bName);
     });
-  }, [companyWorkspace, selectedProductId, builderCoverageFilter, selectedEngineType]);
+  }, [companyWorkspace, selectedSegmentId, selectedVehicleId, selectedEngineType, builderCoverageFilter, matchesCoverage]);
 
   useEffect(() => {
-    if (!productConfigs || productConfigs.length === 0) return;
+    if (!productConfigs || productConfigs.length === 0) {
+      setCatalogWorkspace(null);
+      return;
+    }
     const exists = productConfigs.some((c) => c.id === selectedCatalogId);
     if (!exists && productConfigs[0]) {
       loadCatalog(productConfigs[0].id);
@@ -1009,10 +1034,29 @@ ${aiMarkdownTable}`;
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
   }, [catalogWorkspace]);
 
-  const isPackaged = Boolean(selectedCatalog?.package_id || comprehensivePackages.length > 0);
+  const siblingPackageConfigs = useMemo(() => {
+    if (!selectedCatalog || !selectedCatalog.package_id) return [];
+    return (companyWorkspace?.catalogs || [])
+      .filter((c) =>
+        c.package &&
+        c.package.package_kind === "comprehensive" &&
+        (!selectedCatalog.vehicle_category_id || c.vehicle_category_id === selectedCatalog.vehicle_category_id) &&
+        ((c.engine_type || "ice") === (selectedCatalog.engine_type || "ice")) &&
+        (c.coverage_type_id === selectedCatalog.coverage_type_id || !c.coverage_type_id || !selectedCatalog.coverage_type_id)
+      )
+      .sort((a, b) => (a.package?.sort_order ?? 0) - (b.package?.sort_order ?? 0));
+  }, [companyWorkspace, selectedCatalog]);
+
+  const hasMultiCatalogPackages = comprehensivePackages.length <= 1 && siblingPackageConfigs.length > 1;
+
+  const isPackaged = Boolean(selectedCatalog?.package_id || comprehensivePackages.length > 0 || siblingPackageConfigs.length > 0);
 
   const activePackage = useMemo(() => {
     if (!isPackaged) return null;
+    if (hasMultiCatalogPackages) {
+      const match = siblingPackageConfigs.find((c) => c.id === selectedCatalog?.id);
+      if (match?.package) return match.package;
+    }
     const found = comprehensivePackages.find(
       (p) =>
         (selectedPackageId && p.id === selectedPackageId) ||
@@ -1021,7 +1065,7 @@ ${aiMarkdownTable}`;
     if (found) return found;
     const byCatalog = comprehensivePackages.find((p) => p.id === selectedCatalog?.package_id);
     return byCatalog || comprehensivePackages[0] || null;
-  }, [comprehensivePackages, isPackaged, selectedPackageId, selectedPackageKey, selectedCatalog?.package_id]);
+  }, [comprehensivePackages, isPackaged, selectedPackageId, selectedPackageKey, selectedCatalog, hasMultiCatalogPackages, siblingPackageConfigs]);
 
   useEffect(() => {
     if (activePackage) {
@@ -1851,7 +1895,7 @@ ${aiMarkdownTable}`;
     }
   }
 
-  async function renamePackage(pkg: Package) {
+  async function renamePackage(pkg: Package | PackageSummary) {
     if (!selectedCatalog) return;
     const next = window.prompt("Rename bundle / package", pkg.name);
     if (!next || !next.trim() || next.trim() === pkg.name) return;
@@ -2549,8 +2593,8 @@ ${aiMarkdownTable}`;
                                   </span>
                                 </div>
                                 <div className="flex items-center gap-2 pt-0.5">
-                                  <Badge variant={isDefault ? "success" : "default"}>
-                                    {isDefault ? "Core Default" : "Optional Add-on"}
+                                  <Badge variant={isEnabled ? "success" : "default"}>
+                                    {isEnabled ? "Active in Pool" : "Disabled in Pool"}
                                   </Badge>
                                   {hasCustom && (
                                     <span className="rounded bg-blue-100 text-blue-800 border border-blue-200 px-1.5 py-0.2 text-[9px] font-bold uppercase">
@@ -2760,19 +2804,22 @@ ${aiMarkdownTable}`;
                   <table className="w-full min-w-[760px] text-xs">
                     <thead>
                       <tr className="border-b border-[var(--rl-border)] bg-[#1F2937] text-white">
-                        <th className="w-[25%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                        <th className="w-[24%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
                           Rule Name
                         </th>
-                        <th className="w-[25%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                        <th className="w-[22%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
                           Trigger Condition (When Active)
                         </th>
-                        <th className="w-[20%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
-                          Target Benefit Modified
+                        <th className="w-[18%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                          Target Benefit
                         </th>
-                        <th className="w-[22%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
-                          Upgraded Description
+                        <th className="w-[14%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                          Action
                         </th>
-                        <th className="w-[8%] px-4 py-3 text-center text-[11px] font-bold uppercase tracking-wider">
+                        <th className="w-[16%] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider">
+                          Behavior / Description
+                        </th>
+                        <th className="w-[6%] px-4 py-3 text-center text-[11px] font-bold uppercase tracking-wider">
                           Actions
                         </th>
                       </tr>
@@ -2817,9 +2864,29 @@ ${aiMarkdownTable}`;
                             </td>
 
                             <td className="px-4 py-3.5 align-top">
-                              <div className="rounded border border-blue-200 bg-blue-50/70 p-2 text-blue-950 font-medium text-[11px] leading-snug">
-                                &quot;{cond.replacement_description}&quot;
-                              </div>
+                              {cond.action_type === "hide_target" ? (
+                                <span className="inline-flex items-center gap-1 rounded bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 text-[10px] font-bold">
+                                  <EyeSlash size={12} weight="bold" />
+                                  Hide Target
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 rounded bg-blue-100 text-blue-900 border border-blue-300 px-2 py-0.5 text-[10px] font-bold">
+                                  <PencilSimple size={12} weight="bold" />
+                                  Replace Desc
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="px-4 py-3.5 align-top">
+                              {cond.action_type === "hide_target" ? (
+                                <div className="rounded border border-amber-200 bg-amber-50/80 p-2 text-amber-950 font-medium text-[11px] leading-snug">
+                                  Automatically hides target benefit from quotation cards
+                                </div>
+                              ) : (
+                                <div className="rounded border border-blue-200 bg-blue-50/70 p-2 text-blue-950 font-medium text-[11px] leading-snug">
+                                  &quot;{cond.replacement_description}&quot;
+                                </div>
+                              )}
                             </td>
 
                             <td className="px-4 py-3.5 align-middle text-center">
@@ -3247,12 +3314,12 @@ ${aiMarkdownTable}`;
             </div>
 
             {/* ── Package Tier Ladder (For Package System) ────────────────── */}
-            {isPackaged && comprehensivePackages.length > 0 && (
+            {isPackaged && (comprehensivePackages.length > 0 || hasMultiCatalogPackages) && (
               <div className="rl-tour-ladder rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-strong)]">
-                      Package Tier Ladder ({comprehensivePackages.length} Tiers)
+                      Package Tier Ladder ({hasMultiCatalogPackages ? siblingPackageConfigs.length : comprehensivePackages.length} Tiers)
                     </h3>
                     <p className="text-[11px] text-[var(--rl-text-muted)]">
                       Click any tier below to instantly switch package view. Tier 1 has minimal defaults, progressing to Top Tier with all defaults.
@@ -3264,47 +3331,95 @@ ${aiMarkdownTable}`;
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  {comprehensivePackages.map((pkg, idx) => {
-                    const isCurrent = pkg.id === (activePackage?.id || selectedPackageId);
-                    const pkgOfferings = allOfferings.filter((o) => o.status !== "retired" && o.applies_to_id === pkg.id);
-                    const defCount = pkgOfferings.filter((o) => effectiveRole(o) === "included").length;
-                    const addCount = pkgOfferings.filter((o) => effectiveRole(o) === "addon_option").length;
-                    const isTopTier = idx === comprehensivePackages.length - 1;
+                  {hasMultiCatalogPackages
+                    ? siblingPackageConfigs.map((cfg, idx) => {
+                        const isCurrent = cfg.id === selectedCatalogId;
+                        const isTopTier = idx === siblingPackageConfigs.length - 1;
+                        const pkgName = cfg.package?.name || cfg.name;
+                        const defCount = isCurrent ? defaultOfferings.length : null;
+                        const addCount = isCurrent ? addonOfferings.length : null;
 
-                    return (
-                      <button
-                        key={pkg.id}
-                        onClick={() => {
-                          setSelectedPackageId(pkg.id);
-                          setSelectedPackageKey(pkg.package_key || pkg.name);
-                        }}
-                        className={`flex flex-col justify-between rounded-[var(--rl-radius-sm)] border p-3.5 text-left transition-all ${isCurrent
-                          ? "border-[var(--rl-black)] bg-[var(--rl-bg)] shadow-md ring-2 ring-[var(--rl-black)]"
-                          : "border-[var(--rl-border)] bg-[var(--rl-surface)] opacity-80 hover:opacity-100 hover:border-[var(--rl-text-muted)]"
-                          }`}
-                      >
-                        <div>
-                          <div className="flex items-center justify-between">
-                            <span className="rounded-[4px] bg-[var(--rl-surface)] border border-[var(--rl-border)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--rl-text-muted)]">
-                              Tier {idx + 1} {isTopTier ? "· Top Tier" : idx === 0 ? "· Base Tier" : ""}
-                            </span>
-                            {isCurrent && (
-                              <span className="flex items-center gap-1 text-[11px] font-bold text-[var(--rl-black)]">
-                                <Check size={12} weight="bold" /> Active
+                        return (
+                          <button
+                            key={cfg.id}
+                            onClick={() => loadCatalog(cfg.id)}
+                            className={`flex flex-col justify-between rounded-[var(--rl-radius-sm)] border p-3.5 text-left transition-all ${
+                              isCurrent
+                                ? "border-[var(--rl-black)] bg-[var(--rl-bg)] shadow-md ring-2 ring-[var(--rl-black)]"
+                                : "border-[var(--rl-border)] bg-[var(--rl-surface)] opacity-80 hover:opacity-100 hover:border-[var(--rl-text-muted)]"
+                            }`}
+                          >
+                            <div>
+                              <div className="flex items-center justify-between">
+                                <span className="rounded-[4px] bg-[var(--rl-surface)] border border-[var(--rl-border)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--rl-text-muted)]">
+                                  Tier {idx + 1} {isTopTier ? "· Top Tier" : idx === 0 ? "· Base Tier" : ""}
+                                </span>
+                                {isCurrent && (
+                                  <span className="flex items-center gap-1 text-[11px] font-bold text-[var(--rl-black)]">
+                                    <Check size={12} weight="bold" /> Active
+                                  </span>
+                                )}
+                              </div>
+                              <h4 className="mt-2 font-bold text-xs text-[var(--rl-text-strong)]">{pkgName}</h4>
+                            </div>
+                            <div className="mt-3 pt-2 border-t border-[var(--rl-border)] flex items-center justify-between text-[11px]">
+                              {isCurrent ? (
+                                <>
+                                  <span className="font-semibold text-emerald-700">{defCount} Defaults</span>
+                                  <span className={`font-semibold ${addCount === 0 ? "text-[var(--rl-text-muted)] italic" : "text-blue-700"}`}>
+                                    {addCount === 0 ? "0 Add-ons" : `${addCount} Add-ons`}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="text-[10px] text-[var(--rl-text-muted)] italic">
+                                  Click to view tier benefits
+                                </span>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })
+                    : comprehensivePackages.map((pkg, idx) => {
+                        const isCurrent = pkg.id === (activePackage?.id || selectedPackageId);
+                        const pkgOfferings = allOfferings.filter((o) => o.status !== "retired" && o.applies_to_id === pkg.id);
+                        const defCount = pkgOfferings.filter((o) => effectiveRole(o) === "included").length;
+                        const addCount = pkgOfferings.filter((o) => effectiveRole(o) === "addon_option").length;
+                        const isTopTier = idx === comprehensivePackages.length - 1;
+
+                        return (
+                          <button
+                            key={pkg.id}
+                            onClick={() => {
+                              setSelectedPackageId(pkg.id);
+                              setSelectedPackageKey(pkg.package_key || pkg.name);
+                            }}
+                            className={`flex flex-col justify-between rounded-[var(--rl-radius-sm)] border p-3.5 text-left transition-all ${isCurrent
+                              ? "border-[var(--rl-black)] bg-[var(--rl-bg)] shadow-md ring-2 ring-[var(--rl-black)]"
+                              : "border-[var(--rl-border)] bg-[var(--rl-surface)] opacity-80 hover:opacity-100 hover:border-[var(--rl-text-muted)]"
+                              }`}
+                          >
+                            <div>
+                              <div className="flex items-center justify-between">
+                                <span className="rounded-[4px] bg-[var(--rl-surface)] border border-[var(--rl-border)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--rl-text-muted)]">
+                                  Tier {idx + 1} {isTopTier ? "· Top Tier" : idx === 0 ? "· Base Tier" : ""}
+                                </span>
+                                {isCurrent && (
+                                  <span className="flex items-center gap-1 text-[11px] font-bold text-[var(--rl-black)]">
+                                    <Check size={12} weight="bold" /> Active
+                                  </span>
+                                )}
+                              </div>
+                              <h4 className="mt-2 font-bold text-xs text-[var(--rl-text-strong)]">{pkg.name}</h4>
+                            </div>
+                            <div className="mt-3 pt-2 border-t border-[var(--rl-border)] flex items-center justify-between text-[11px]">
+                              <span className="font-semibold text-emerald-700">{defCount} Defaults</span>
+                              <span className={`font-semibold ${addCount === 0 ? "text-[var(--rl-text-muted)] italic" : "text-blue-700"}`}>
+                                {addCount === 0 ? "0 Add-ons" : `${addCount} Add-ons`}
                               </span>
-                            )}
-                          </div>
-                          <h4 className="mt-2 font-bold text-xs text-[var(--rl-text-strong)]">{pkg.name}</h4>
-                        </div>
-                        <div className="mt-3 pt-2 border-t border-[var(--rl-border)] flex items-center justify-between text-[11px]">
-                          <span className="font-semibold text-emerald-700">{defCount} Defaults</span>
-                          <span className={`font-semibold ${addCount === 0 ? "text-[var(--rl-text-muted)] italic" : "text-blue-700"}`}>
-                            {addCount === 0 ? "0 Add-ons" : `${addCount} Add-ons`}
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
+                            </div>
+                          </button>
+                        );
+                      })}
                 </div>
               </div>
             )}
@@ -4702,16 +4817,58 @@ ${aiMarkdownTable}`;
 
               <div>
                 <label className="block font-semibold text-[var(--rl-text-strong)] mb-1">
-                  Upgraded / Replacement Description *
+                  Rule Action Type *
                 </label>
-                <textarea
-                  value={condReplacement}
-                  onChange={(e) => setCondReplacement(e.target.value)}
-                  placeholder="e.g. Unlimited towing distance within Malaysia"
-                  rows={3}
-                  className="w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-2.5 text-xs text-[var(--rl-text-strong)] focus:outline-none resize-none font-medium"
-                />
+                <div className="inline-flex items-center gap-1 p-1 bg-[var(--rl-bg)] border border-[var(--rl-border)] rounded-[4px]">
+                  <button
+                    type="button"
+                    onClick={() => setCondActionType("replace_description")}
+                    className={`flex items-center gap-1.5 rounded-[3px] px-3 py-1.5 transition-all text-xs ${
+                      condActionType === "replace_description"
+                        ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] font-semibold shadow-xs"
+                        : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                    }`}
+                  >
+                    <PencilSimple size={13} weight="bold" />
+                    Replace Description
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCondActionType("hide_target")}
+                    className={`flex items-center gap-1.5 rounded-[3px] px-3 py-1.5 transition-all text-xs ${
+                      condActionType === "hide_target"
+                        ? "bg-amber-100 text-amber-950 font-semibold shadow-xs border border-amber-300 dark:bg-amber-950 dark:text-amber-300"
+                        : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                    }`}
+                  >
+                    <EyeSlash size={13} weight="bold" />
+                    Hide / Disappear Benefit
+                  </button>
+                </div>
               </div>
+
+              {condActionType === "replace_description" ? (
+                <div>
+                  <label className="block font-semibold text-[var(--rl-text-strong)] mb-1">
+                    Upgraded / Replacement Description *
+                  </label>
+                  <textarea
+                    value={condReplacement}
+                    onChange={(e) => setCondReplacement(e.target.value)}
+                    placeholder="e.g. Unlimited towing distance within Malaysia"
+                    rows={3}
+                    className="w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-2.5 text-xs text-[var(--rl-text-strong)] focus:outline-none resize-none font-medium"
+                  />
+                </div>
+              ) : (
+                <div className="rounded-[var(--rl-radius-sm)] border border-amber-200 bg-amber-50/80 p-3 text-amber-950 text-xs flex items-start gap-2.5">
+                  <Info size={18} className="text-amber-600 shrink-0 mt-0.5" weight="fill" />
+                  <div>
+                    <strong className="block font-bold mb-0.5">Automatic Target Benefit Suppression</strong>
+                    <span>When the trigger benefit is added or active in a quotation, the target benefit will automatically be hidden and disappeared from quotation cards and review tables.</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-2 pt-3 border-t border-[var(--rl-border)]">
@@ -4725,7 +4882,13 @@ ${aiMarkdownTable}`;
               <Button
                 size="sm"
                 onClick={saveCompanyCondition}
-                disabled={conditionSaving || !condFormName.trim() || !condTriggerId || !condTargetId || !condReplacement.trim()}
+                disabled={
+                  conditionSaving ||
+                  !condFormName.trim() ||
+                  !condTriggerId ||
+                  !condTargetId ||
+                  (condActionType === "replace_description" && !condReplacement.trim())
+                }
                 className="bg-[var(--rl-black)] text-white shadow-sm font-semibold"
               >
                 {conditionSaving ? "Saving Rule..." : "Create Condition Rule"}
