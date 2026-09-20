@@ -23,13 +23,13 @@ import { api } from "@/lib/api";
 import { useAuth, clearAuthCache } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
+import { GlobalAiCopilot } from "@/components/global-ai-copilot";
 
 const nav: Array<{ href: Route; label: string; icon: typeof Upload }> = [
   { href: "/upload", label: "Upload", icon: Upload },
   { href: "/sessions", label: "Sessions", icon: SquaresFour },
   { href: "/builder/templates/quotation-templates" as Route, label: "Builder", icon: Wrench },
   { href: "/extraction/company-detection" as Route, label: "Extraction & Aliases", icon: FunnelSimple },
-  { href: "/ai-context" as Route, label: "AI & Memory", icon: Brain },
   { href: "/settings/system-checks", label: "Settings", icon: Gear },
   { href: "/client-records", label: "Records", icon: Users },
   { href: "/inbox", label: "Inbox", icon: Bell },
@@ -315,6 +315,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {/* Main Content Area */}
         <main className="min-w-0 w-full animate-fade-in">{children}</main>
       </div>
+
+      {/* Global AI Copilot Floating Drawer */}
+      <GlobalAiCopilot />
     </div>
   );
 }

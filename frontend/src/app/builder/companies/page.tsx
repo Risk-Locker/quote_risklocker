@@ -9,7 +9,10 @@ import {
   MagnifyingGlass,
   PencilSimple,
   Plus,
+  Spinner,
   Trash,
+  UploadSimple,
+  Image as ImageIcon,
   X,
 } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
@@ -72,6 +75,41 @@ export default function CompaniesPage() {
   const [formLogoAssetId, setFormLogoAssetId] = useState("");
   const [formInitialAliases, setFormInitialAliases] = useState("");
   const [modalError, setModalError] = useState("");
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [isDraggingLogo, setIsDraggingLogo] = useState(false);
+
+  async function handleLogoUpload(file: File) {
+    if (!file) return;
+    setLogoUploading(true);
+    setModalError("");
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      body.append("label", file.name.replace(/\.[^/.]+$/, "") || "company_logo");
+      body.append("kind", "company_logo");
+      body.append("category", "Logos");
+      body.append("on_duplicate", "rename");
+      const res = await api<{ asset?: Asset; id?: string; url?: string; label?: string }>("/business/assets", {
+        method: "POST",
+        body,
+      });
+      const newAsset: Asset = {
+        id: res.asset?.id || res.id || "",
+        label: res.asset?.label || res.label || file.name,
+        asset_kind: "company_logo",
+        status: "active",
+        url: res.asset?.url || res.url || (res.id ? `/business/assets/${res.id}/content?profile=ui` : ""),
+      };
+      if (newAsset.id) {
+        setLogos((prev) => [newAsset, ...prev.filter((l) => l.id !== newAsset.id)]);
+        setFormLogoAssetId(newAsset.id);
+      }
+    } catch (err) {
+      setModalError(apiErrorMessage(err));
+    } finally {
+      setLogoUploading(false);
+    }
+  }
 
   // Alias inline add
   const [addingAliasForCompany, setAddingAliasForCompany] = useState<string | null>(null);
@@ -721,32 +759,125 @@ export default function CompaniesPage() {
               />
             </label>
 
-            <div className="grid grid-cols-2 gap-3">
-              <label className="grid gap-1.5 text-xs font-semibold text-[var(--rl-text-strong)]">
-                Status
-                <Select
-                  value={formStatus}
-                  onChange={(e) => setFormStatus(e.target.value as "active" | "inactive")}
-                >
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive / Draft</option>
-                </Select>
-              </label>
+            <label className="grid gap-1.5 text-xs font-semibold text-[var(--rl-text-strong)]">
+              Status
+              <Select
+                value={formStatus}
+                onChange={(e) => setFormStatus(e.target.value as "active" | "inactive")}
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive / Draft</option>
+              </Select>
+            </label>
 
-              <label className="grid gap-1.5 text-xs font-semibold text-[var(--rl-text-strong)]">
-                Company Logo
+            {/* Logo Section with Direct Upload & Thumbnail Preview */}
+            <div className="grid gap-2 border-t border-[var(--rl-border)] pt-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-[var(--rl-text-strong)]">
+                  Company Logo
+                </label>
+                {formLogoAssetId ? (
+                  <button
+                    type="button"
+                    onClick={() => setFormLogoAssetId("")}
+                    className="text-[11px] text-[var(--rl-red)] hover:underline flex items-center gap-1 font-medium"
+                  >
+                    <X size={12} weight="bold" /> Remove logo
+                  </button>
+                ) : null}
+              </div>
+
+              {/* Selected Logo Live Preview */}
+              {(() => {
+                const selectedLogo = logos.find((l) => l.id === formLogoAssetId);
+                if (selectedLogo) {
+                  return (
+                    <div className="flex items-center gap-3 rounded-[var(--rl-radius-sm)] border border-emerald-200 bg-emerald-50/40 p-2.5">
+                      <div className="h-12 w-20 flex-shrink-0 rounded bg-white p-1 border border-emerald-100 flex items-center justify-center shadow-2xs">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={fileUrl(selectedLogo.url)}
+                          alt={selectedLogo.label}
+                          className="max-h-full max-w-full object-contain"
+                        />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-bold text-[var(--rl-text-strong)]">
+                          {selectedLogo.label}
+                        </p>
+                        <p className="text-[11px] text-emerald-700 font-medium flex items-center gap-1">
+                          <CheckCircle size={12} weight="fill" /> Ready for quotation prints
+                        </p>
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+
+              {/* Drag & Drop Upload Zone */}
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDraggingLogo(true);
+                }}
+                onDragLeave={() => setIsDraggingLogo(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDraggingLogo(false);
+                  const file = e.dataTransfer.files?.[0];
+                  if (file) void handleLogoUpload(file);
+                }}
+                className={`relative flex flex-col items-center justify-center rounded-[var(--rl-radius-sm)] border-2 border-dashed p-3.5 text-center transition-colors ${
+                  isDraggingLogo
+                    ? "border-[var(--rl-red)] bg-[var(--rl-red-light)]"
+                    : "border-[var(--rl-border)] bg-gray-50/50 hover:bg-gray-50 hover:border-gray-400"
+                }`}
+              >
+                <input
+                  type="file"
+                  accept="image/png,image/svg+xml,image/jpeg,image/webp"
+                  className="absolute inset-0 cursor-pointer opacity-0"
+                  disabled={logoUploading}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void handleLogoUpload(file);
+                    e.target.value = "";
+                  }}
+                  aria-label="Upload company logo file"
+                />
+                {logoUploading ? (
+                  <div className="flex items-center gap-2 text-xs font-semibold text-[var(--rl-red)] py-1">
+                    <Spinner size={16} className="animate-spin" />
+                    <span>Uploading & processing logo...</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <UploadSimple size={16} weight="bold" className="text-[var(--rl-text-muted)]" />
+                    <span className="text-xs text-[var(--rl-text-muted)]">
+                      <strong className="text-[var(--rl-text-strong)]">Drag & drop new logo</strong> or click to browse
+                    </span>
+                    <span className="text-[10px] text-gray-400 font-mono">PNG / SVG / WebP</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Existing Logo Selector */}
+              <div className="grid gap-1 pt-1">
+                <span className="text-[11px] text-[var(--rl-text-muted)]">Or select from existing library:</span>
                 <Select
                   value={formLogoAssetId}
                   onChange={(e) => setFormLogoAssetId(e.target.value)}
+                  className="text-xs"
                 >
-                  <option value="">No logo</option>
+                  <option value="">-- No logo selected --</option>
                   {logos.map((logo) => (
                     <option key={logo.id} value={logo.id}>
                       {logo.label}
                     </option>
                   ))}
                 </Select>
-              </label>
+              </div>
             </div>
 
             {modalMode === "create" ? (

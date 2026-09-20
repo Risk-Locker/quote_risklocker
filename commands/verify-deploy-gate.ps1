@@ -55,7 +55,7 @@ $backend = Join-Path $root "backend"
 $origPythonPath = $env:PYTHONPATH
 $env:PYTHONPATH = $backend
 try {
-    & .\.venv\Scripts\python.exe -c "import sys; from pathlib import Path; sys.path.insert(0, str(Path(r'$backend'))); from app.db.session import verify_schema_version; verify_schema_version(); print('schema OK')"
+    & .\.venv\Scripts\python.exe -c 'from app.db.session import verify_schema_version; verify_schema_version()'
     if ($LASTEXITCODE -ne 0) { throw "Schema version check failed!" }
     Write-Host "[PASS] Database schema matches application version." -ForegroundColor Green
 } finally {

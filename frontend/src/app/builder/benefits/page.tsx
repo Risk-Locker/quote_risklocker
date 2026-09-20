@@ -328,6 +328,59 @@ function BenefitsPageContent() {
   const [aiDiffResult, setAiDiffResult] = useState<any>(null);
   const [aiDiffLoading, setAiDiffLoading] = useState(false);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const [editingMatrixItem, setEditingMatrixItem] = useState<{
+    catalog_id: string;
+    offering_id: string;
+    field: "display_value" | "description";
+    value: string;
+  } | null>(null);
+
+  async function saveMatrixInlineEdit() {
+    if (!editingMatrixItem) return;
+    const { catalog_id, offering_id, field, value } = editingMatrixItem;
+    const cleanVal = value.trim();
+
+    setMatrixData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        scenarios: prev.scenarios.map((s) => {
+          if (s.catalog_id !== catalog_id) return s;
+          const updateOffering = (o: MatrixOffering) => {
+            if (o.offering_id !== offering_id) return o;
+            if (field === "display_value") {
+              return { ...o, display_value: cleanVal };
+            } else {
+              return { ...o, description: cleanVal, is_custom_description: Boolean(cleanVal) };
+            }
+          };
+          return {
+            ...s,
+            defaults: s.defaults.map(updateOffering),
+            addons: s.addons.map(updateOffering),
+          };
+        }),
+      };
+    });
+
+    setEditingMatrixItem(null);
+
+    try {
+      const payload: Record<string, unknown> = {
+        id: offering_id,
+        [field === "display_value" ? "display_value" : "description_override"]: cleanVal || null,
+      };
+      await api(`/business/catalogs/${catalog_id}/offerings`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    } catch (err) {
+      setError(apiErrorMessage(err));
+      if (selectedCompanyId) {
+        void loadMatrix(selectedCompanyId);
+      }
+    }
+  }
 
   // Derived profile status
   const selectedProfile = useMemo(() => {
@@ -524,7 +577,7 @@ function BenefitsPageContent() {
 
   const handleDeleteDraftProfile = useCallback(async (profileId: string) => {
     if (!profileId) return;
-    if (!window.confirm("Are you sure you want to delete this draft profile? This cannot be undone.")) return;
+    if (!window.confirm("Are you sure you want to delete this benefit profile? This cannot be undone.")) return;
     setProfileActionLoading(true);
     setError("");
     try {
@@ -734,6 +787,17 @@ function BenefitsPageContent() {
   useEffect(() => {
     loadBenefitProfiles();
   }, [loadBenefitProfiles]);
+
+  useEffect(() => {
+    const handleProfileUpdated = () => {
+      loadBenefitProfiles();
+      if (selectedCompanyId) {
+        loadCompany(selectedCompanyId);
+      }
+    };
+    window.addEventListener("risklocker:profile-updated", handleProfileUpdated);
+    return () => window.removeEventListener("risklocker:profile-updated", handleProfileUpdated);
+  }, [loadBenefitProfiles, loadCompany, selectedCompanyId]);
 
   useEffect(() => {
     if (selectedCompanyId && selectedProfileId) {
@@ -1001,12 +1065,30 @@ ${aiMarkdownTable}`;
     const targetVehicleId = selectedVehicleId || carVehId;
     const items = (companyWorkspace?.catalogs || []).filter(
       (item) =>
+        item.status !== "archived" &&
+        item.status !== "retired" &&
         (!selectedSegmentId || !item.segment_id || item.segment_id === selectedSegmentId) &&
         (!targetVehicleId || !item.vehicle_category_id || item.vehicle_category_id === targetVehicleId) &&
         ((item.engine_type || "ice") === selectedEngineType) &&
         matchesCoverage(item, builderCoverageFilter)
     );
-    return items.sort((a, b) => {
+
+    // If packaged catalogs exist for this company scenario, deduplicate and prioritize packaged catalogs
+    const hasPackages = items.some((item) => Boolean(item.package));
+    const finalItems = hasPackages ? items.filter((item) => Boolean(item.package)) : items;
+
+    // Deduplicate by package ID or package name
+    const seenPackages = new Set<string>();
+    const deduplicated = finalItems.filter((item) => {
+      if (item.package) {
+        const key = item.package.id || item.package.name;
+        if (seenPackages.has(key)) return false;
+        seenPackages.add(key);
+      }
+      return true;
+    });
+
+    return deduplicated.sort((a, b) => {
       const aOrder = a.package?.sort_order ?? 0;
       const bOrder = b.package?.sort_order ?? 0;
       const aName = a.package?.name || a.name || "";
@@ -2187,18 +2269,20 @@ ${aiMarkdownTable}`;
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              {selectedProfile && selectedProfile.status === "draft" && (
+              {selectedProfile && !selectedProfile.is_active && (
                 <>
-                  <Button
-                    size="sm"
-                    onClick={() => handleActivateProfile(selectedProfile.id)}
-                    disabled={profileActionLoading}
-                    className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm text-xs font-semibold h-7 px-2.5"
-                    title="Make this draft profile the live active configuration"
-                  >
-                    <CheckCircle size={13} weight="bold" />
-                    <span>Activate Profile</span>
-                  </Button>
+                  {selectedProfile.status === "draft" && (
+                    <Button
+                      size="sm"
+                      onClick={() => handleActivateProfile(selectedProfile.id)}
+                      disabled={profileActionLoading}
+                      className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm text-xs font-semibold h-7 px-2.5"
+                      title="Make this draft profile the live active configuration"
+                    >
+                      <CheckCircle size={13} weight="bold" />
+                      <span>Activate Profile</span>
+                    </Button>
+                  )}
 
                   <Button
                     variant="secondary"
@@ -2206,10 +2290,10 @@ ${aiMarkdownTable}`;
                     onClick={() => handleDeleteDraftProfile(selectedProfile.id)}
                     disabled={profileActionLoading}
                     className="gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 text-xs h-7 px-2"
-                    title="Delete this draft profile"
+                    title={`Delete this ${selectedProfile.status} profile`}
                   >
                     <Trash size={13} />
-                    <span>Delete Draft</span>
+                    <span>Delete Profile</span>
                   </Button>
                 </>
               )}
@@ -2947,11 +3031,11 @@ ${aiMarkdownTable}`;
                 </Button>
                 <Button
                   size="sm"
-                  onClick={() => setShowAiModal(true)}
-                  icon={<Sparkle size={15} weight="fill" className="text-amber-300" />}
-                  className="bg-[var(--rl-black)] text-white hover:opacity-90"
+                  onClick={() => document.getElementById("global-ai-copilot-trigger")?.click()}
+                  icon={<Sparkle size={15} weight="fill" className="text-amber-300 animate-pulse" />}
+                  className="bg-gradient-to-r from-amber-600 via-rose-600 to-purple-600 text-white hover:opacity-90 font-bold text-xs"
                 >
-                  AI Seed & Sync Spec
+                  AI Catalog Copilot
                 </Button>
               </div>
             </div>
@@ -3082,34 +3166,136 @@ ${aiMarkdownTable}`;
                                     <span>{s.defaults.length} Included Benefits</span>
                                   </div>
                                   <div className="grid grid-cols-1 gap-1.5">
-                                    {s.defaults.map((d) => (
-                                      <div
-                                        key={d.offering_id}
-                                        className="rounded border border-emerald-200/80 bg-emerald-50/50 p-2 text-emerald-950"
-                                      >
-                                        <div className="flex items-center justify-between gap-1">
-                                          <span className="font-bold text-[12px] text-emerald-950 leading-tight">
-                                            {d.label}
-                                          </span>
-                                          <span className="shrink-0 rounded bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">
-                                            0 RM
-                                          </span>
-                                        </div>
-                                        {d.display_value && (
-                                          <div className="mt-0.5 font-semibold text-[11px] text-emerald-900">
-                                            Limit: {d.display_value}
-                                          </div>
-                                        )}
-                                        <div className="mt-0.5 text-[10.5px] text-emerald-800/90 leading-tight flex items-start gap-1">
-                                          <span className="flex-1">{d.description || "Included in base policy"}</span>
-                                          {d.is_custom_description && (
-                                            <span className="shrink-0 rounded bg-emerald-200 text-emerald-900 px-1 py-0.2 text-[8.5px] font-bold uppercase">
-                                              Custom
+                                    {s.defaults.map((d) => {
+                                      const isEditingLimit =
+                                        editingMatrixItem?.catalog_id === s.catalog_id &&
+                                        editingMatrixItem?.offering_id === d.offering_id &&
+                                        editingMatrixItem?.field === "display_value";
+                                      const isEditingDesc =
+                                        editingMatrixItem?.catalog_id === s.catalog_id &&
+                                        editingMatrixItem?.offering_id === d.offering_id &&
+                                        editingMatrixItem?.field === "description";
+
+                                      return (
+                                        <div
+                                          key={d.offering_id}
+                                          className="rounded border border-emerald-200/80 bg-emerald-50/50 p-2 text-emerald-950 transition-colors"
+                                        >
+                                          <div className="flex items-center justify-between gap-1">
+                                            <span className="font-bold text-[12px] text-emerald-950 leading-tight">
+                                              {d.label}
                                             </span>
+                                            <span className="shrink-0 rounded bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">
+                                              0 RM
+                                            </span>
+                                          </div>
+
+                                          {/* Limit Display / Inline Edit */}
+                                          {isEditingLimit ? (
+                                            <div className="mt-1 flex items-center gap-1">
+                                              <Input
+                                                autoFocus
+                                                value={editingMatrixItem.value}
+                                                onChange={(e) => setEditingMatrixItem({ ...editingMatrixItem, value: e.target.value })}
+                                                onKeyDown={(e) => {
+                                                  if (e.key === "Enter") void saveMatrixInlineEdit();
+                                                  if (e.key === "Escape") setEditingMatrixItem(null);
+                                                }}
+                                                className="h-6 text-[11px] px-1.5 py-0 bg-white font-semibold text-emerald-900 border-emerald-300"
+                                                placeholder="e.g. 200 km"
+                                              />
+                                              <button
+                                                type="button"
+                                                onClick={() => void saveMatrixInlineEdit()}
+                                                className="p-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 text-[10px]"
+                                                title="Save (Enter)"
+                                              >
+                                                <Check size={11} weight="bold" />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => setEditingMatrixItem(null)}
+                                                className="p-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 text-[10px]"
+                                                title="Cancel (Esc)"
+                                              >
+                                                <X size={11} />
+                                              </button>
+                                            </div>
+                                          ) : (
+                                            <div
+                                              onClick={() =>
+                                                setEditingMatrixItem({
+                                                  catalog_id: s.catalog_id,
+                                                  offering_id: d.offering_id,
+                                                  field: "display_value",
+                                                  value: d.display_value || "",
+                                                })
+                                              }
+                                              className="group/limit mt-0.5 font-semibold text-[11px] text-emerald-900 flex items-center gap-1 cursor-pointer hover:underline"
+                                              title="Click to edit limit"
+                                            >
+                                              <span>Limit: {d.display_value || "None (Click to set)"}</span>
+                                              <PencilSimple size={11} className="opacity-0 group-hover/limit:opacity-100 text-emerald-700" />
+                                            </div>
+                                          )}
+
+                                          {/* Description Display / Inline Edit */}
+                                          {isEditingDesc ? (
+                                            <div className="mt-1 space-y-1">
+                                              <textarea
+                                                autoFocus
+                                                rows={2}
+                                                value={editingMatrixItem.value}
+                                                onChange={(e) => setEditingMatrixItem({ ...editingMatrixItem, value: e.target.value })}
+                                                onKeyDown={(e) => {
+                                                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) void saveMatrixInlineEdit();
+                                                  if (e.key === "Escape") setEditingMatrixItem(null);
+                                                }}
+                                                className="w-full text-[10.5px] p-1.5 bg-white rounded border border-emerald-300 text-emerald-950 resize-none font-sans"
+                                                placeholder="Override description for this catalog..."
+                                              />
+                                              <div className="flex justify-end gap-1">
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setEditingMatrixItem(null)}
+                                                  className="px-2 py-0.5 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 text-[10px]"
+                                                >
+                                                  Cancel
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => void saveMatrixInlineEdit()}
+                                                  className="px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 text-[10px] font-bold"
+                                                >
+                                                  Save
+                                                </button>
+                                              </div>
+                                            </div>
+                                          ) : (
+                                            <div
+                                              onClick={() =>
+                                                setEditingMatrixItem({
+                                                  catalog_id: s.catalog_id,
+                                                  offering_id: d.offering_id,
+                                                  field: "description",
+                                                  value: d.description || "",
+                                                })
+                                              }
+                                              className="group/desc mt-0.5 text-[10.5px] text-emerald-800/90 leading-tight flex items-start gap-1 cursor-pointer hover:bg-emerald-100/50 rounded px-1 py-0.5 transition-colors"
+                                              title="Click to edit description"
+                                            >
+                                              <span className="flex-1">{d.description || "Included in base policy"}</span>
+                                              <PencilSimple size={11} className="opacity-0 group-hover/desc:opacity-100 text-emerald-700 shrink-0 mt-0.5" />
+                                              {d.is_custom_description && (
+                                                <span className="shrink-0 rounded bg-emerald-200 text-emerald-900 px-1 py-0.2 text-[8.5px] font-bold uppercase">
+                                                  Custom
+                                                </span>
+                                              )}
+                                            </div>
                                           )}
                                         </div>
-                                      </div>
-                                    ))}
+                                      );
+                                    })}
                                   </div>
                                 </div>
                               )}
@@ -3128,34 +3314,136 @@ ${aiMarkdownTable}`;
                                     <span>{s.addons.length} Optional Riders</span>
                                   </div>
                                   <div className="grid grid-cols-1 gap-1.5">
-                                    {s.addons.map((a) => (
-                                      <div
-                                        key={a.offering_id}
-                                        className="rounded border border-blue-200/80 bg-blue-50/50 p-2 text-blue-950"
-                                      >
-                                        <div className="flex items-center justify-between gap-1">
-                                          <span className="font-bold text-[12px] text-blue-950 leading-tight">
-                                            {a.label}
-                                          </span>
-                                          <span className="shrink-0 rounded bg-blue-600 px-1.5 py-0.5 text-[9px] font-bold text-white">
-                                            {a.price_text}
-                                          </span>
-                                        </div>
-                                        {a.display_value && (
-                                          <div className="mt-0.5 font-semibold text-[11px] text-blue-900">
-                                            Limit: {a.display_value}
-                                          </div>
-                                        )}
-                                        <div className="mt-0.5 text-[10.5px] text-blue-800/90 leading-tight flex items-start gap-1">
-                                          <span className="flex-1">{a.description || "Optional payable endorsement"}</span>
-                                          {a.is_custom_description && (
-                                            <span className="shrink-0 rounded bg-blue-200 text-blue-900 px-1 py-0.2 text-[8.5px] font-bold uppercase">
-                                              Custom
+                                    {s.addons.map((a) => {
+                                      const isEditingLimit =
+                                        editingMatrixItem?.catalog_id === s.catalog_id &&
+                                        editingMatrixItem?.offering_id === a.offering_id &&
+                                        editingMatrixItem?.field === "display_value";
+                                      const isEditingDesc =
+                                        editingMatrixItem?.catalog_id === s.catalog_id &&
+                                        editingMatrixItem?.offering_id === a.offering_id &&
+                                        editingMatrixItem?.field === "description";
+
+                                      return (
+                                        <div
+                                          key={a.offering_id}
+                                          className="rounded border border-blue-200/80 bg-blue-50/50 p-2 text-blue-950 transition-colors"
+                                        >
+                                          <div className="flex items-center justify-between gap-1">
+                                            <span className="font-bold text-[12px] text-blue-950 leading-tight">
+                                              {a.label}
                                             </span>
+                                            <span className="shrink-0 rounded bg-blue-600 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                                              {a.price_text}
+                                            </span>
+                                          </div>
+
+                                          {/* Limit Display / Inline Edit */}
+                                          {isEditingLimit ? (
+                                            <div className="mt-1 flex items-center gap-1">
+                                              <Input
+                                                autoFocus
+                                                value={editingMatrixItem.value}
+                                                onChange={(e) => setEditingMatrixItem({ ...editingMatrixItem, value: e.target.value })}
+                                                onKeyDown={(e) => {
+                                                  if (e.key === "Enter") void saveMatrixInlineEdit();
+                                                  if (e.key === "Escape") setEditingMatrixItem(null);
+                                                }}
+                                                className="h-6 text-[11px] px-1.5 py-0 bg-white font-semibold text-blue-900 border-blue-300"
+                                                placeholder="e.g. RM 500"
+                                              />
+                                              <button
+                                                type="button"
+                                                onClick={() => void saveMatrixInlineEdit()}
+                                                className="p-1 rounded bg-blue-600 text-white hover:bg-blue-700 text-[10px]"
+                                                title="Save (Enter)"
+                                              >
+                                                <Check size={11} weight="bold" />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => setEditingMatrixItem(null)}
+                                                className="p-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 text-[10px]"
+                                                title="Cancel (Esc)"
+                                              >
+                                                <X size={11} />
+                                              </button>
+                                            </div>
+                                          ) : (
+                                            <div
+                                              onClick={() =>
+                                                setEditingMatrixItem({
+                                                  catalog_id: s.catalog_id,
+                                                  offering_id: a.offering_id,
+                                                  field: "display_value",
+                                                  value: a.display_value || "",
+                                                })
+                                              }
+                                              className="group/limit mt-0.5 font-semibold text-[11px] text-blue-900 flex items-center gap-1 cursor-pointer hover:underline"
+                                              title="Click to edit limit"
+                                            >
+                                              <span>Limit: {a.display_value || "None (Click to set)"}</span>
+                                              <PencilSimple size={11} className="opacity-0 group-hover/limit:opacity-100 text-blue-700" />
+                                            </div>
+                                          )}
+
+                                          {/* Description Display / Inline Edit */}
+                                          {isEditingDesc ? (
+                                            <div className="mt-1 space-y-1">
+                                              <textarea
+                                                autoFocus
+                                                rows={2}
+                                                value={editingMatrixItem.value}
+                                                onChange={(e) => setEditingMatrixItem({ ...editingMatrixItem, value: e.target.value })}
+                                                onKeyDown={(e) => {
+                                                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) void saveMatrixInlineEdit();
+                                                  if (e.key === "Escape") setEditingMatrixItem(null);
+                                                }}
+                                                className="w-full text-[10.5px] p-1.5 bg-white rounded border border-blue-300 text-blue-950 resize-none font-sans"
+                                                placeholder="Override description for this catalog..."
+                                              />
+                                              <div className="flex justify-end gap-1">
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setEditingMatrixItem(null)}
+                                                  className="px-2 py-0.5 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 text-[10px]"
+                                                >
+                                                  Cancel
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => void saveMatrixInlineEdit()}
+                                                  className="px-2 py-0.5 rounded bg-blue-600 text-white hover:bg-blue-700 text-[10px] font-bold"
+                                                >
+                                                  Save
+                                                </button>
+                                              </div>
+                                            </div>
+                                          ) : (
+                                            <div
+                                              onClick={() =>
+                                                setEditingMatrixItem({
+                                                  catalog_id: s.catalog_id,
+                                                  offering_id: a.offering_id,
+                                                  field: "description",
+                                                  value: a.description || "",
+                                                })
+                                              }
+                                              className="group/desc mt-0.5 text-[10.5px] text-blue-800/90 leading-tight flex items-start gap-1 cursor-pointer hover:bg-blue-100/50 rounded px-1 py-0.5 transition-colors"
+                                              title="Click to edit description"
+                                            >
+                                              <span className="flex-1">{a.description || "Optional payable endorsement"}</span>
+                                              <PencilSimple size={11} className="opacity-0 group-hover/desc:opacity-100 text-blue-700 shrink-0 mt-0.5" />
+                                              {a.is_custom_description && (
+                                                <span className="shrink-0 rounded bg-blue-200 text-blue-900 px-1 py-0.2 text-[8.5px] font-bold uppercase">
+                                                  Custom
+                                                </span>
+                                              )}
+                                            </div>
                                           )}
                                         </div>
-                                      </div>
-                                    ))}
+                                      );
+                                    })}
                                   </div>
                                 </div>
                               )}

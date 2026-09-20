@@ -47,9 +47,19 @@ _CONSTRAINT_MESSAGES: list[tuple[str, str]] = [
     ("uq_vehicle_category_key", "A vehicle category with this key already exists."),
     ("vehicle_categories_category_key", "A vehicle category with this key already exists."),
     ("uq_vehicle_subcategory_key", "A vehicle subcategory with this key already exists for this category."),
+    ("catalog_offerings_applies_check", "Benefit offering requires both assignment target and ID, or neither."),
+    ("catalog_offerings_offering_kind_check", "Benefit offering kind is invalid."),
+    ("uq_company_profile_concept_config", "A benefit configuration already exists for this company in this profile."),
+    ("uq_benefit_package_plan_item", "This benefit offering is already assigned to this plan."),
+    ("uq_benefit_package_plan_key", "A plan with this key already exists in this package."),
+    ("benefit_catalogs_package_context_uq", "A catalog already exists for this company, product, and package."),
+    ("uq_single_active_benefit_profile", "Another benefit profile is already active."),
+    ("uq_catalog_context", "A catalog already exists for this company, product, and tier."),
+    ("uq_global_benefit_profile_concept_asset", "An artwork assignment already exists for this concept in this profile."),
 ]
 
 _UNIQUE_RE = re.compile(r"unique constraint [\"']?([a-z0-9_]+)[\"']?", re.IGNORECASE)
+_CHECK_RE = re.compile(r"check constraint [\"']?([a-z0-9_]+)[\"']?", re.IGNORECASE)
 
 
 def _integrity_message(exc: IntegrityError) -> tuple[str, int]:
@@ -61,13 +71,38 @@ def _integrity_message(exc: IntegrityError) -> tuple[str, int]:
     if "not-null" in orig_text or "null value" in orig_text:
         return "A required field is missing.", status.HTTP_422_UNPROCESSABLE_ENTITY
 
-    match = _UNIQUE_RE.search(orig_text)
-    constraint = match.group(1) if match else orig_text
+    diag = getattr(exc.orig, "diag", None) if hasattr(exc, "orig") else None
+    constraint_name = getattr(diag, "constraint_name", None) if diag else None
+
+    if not constraint_name:
+        match_u = _UNIQUE_RE.search(orig_text)
+        match_c = _CHECK_RE.search(orig_text)
+        if match_u:
+            constraint_name = match_u.group(1)
+        elif match_c:
+            constraint_name = match_c.group(1)
+
+    target_haystack = (constraint_name or orig_text).lower()
     for fragment, message in _CONSTRAINT_MESSAGES:
-        if fragment in constraint:
+        if fragment.lower() in target_haystack:
             return message, status.HTTP_409_CONFLICT
+
     if "unique" in orig_text:
         return "A record with this value already exists.", status.HTTP_409_CONFLICT
+
+    # Transparent fallback with diagnostic details if available
+    detail = getattr(diag, "message_detail", None) or getattr(diag, "message_primary", None) if diag else None
+    table = getattr(diag, "table_name", None) if diag else None
+    if table or detail or constraint_name:
+        parts = []
+        if table:
+            parts.append(f"table: {table}")
+        if constraint_name:
+            parts.append(f"constraint: {constraint_name}")
+        if detail:
+            parts.append(detail)
+        return f"Database constraint violation ({'; '.join(parts)}).", status.HTTP_409_CONFLICT
+
     return "Database constraint violation.", status.HTTP_409_CONFLICT
 
 

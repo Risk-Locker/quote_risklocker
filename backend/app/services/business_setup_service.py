@@ -355,8 +355,10 @@ def save_business_company(db, user, payload: dict) -> dict:
     asset_id = payload.get("logo_asset_id")
     if asset_id:
         asset = db.get(BusinessAsset, asset_id)
-        if asset is None or asset.asset_kind != "company_logo":
+        if asset is None:
             raise AppError("Select a valid company logo asset.", 422)
+        if asset.asset_kind != "company_logo":
+            asset.asset_kind = "company_logo"
     previous = company.revision
     company.name = payload["name"].strip()
     company.slug = slug
@@ -1681,16 +1683,32 @@ def save_catalog_offering(db, user, catalog_id: str, payload: dict) -> dict:
     payload = _validate_assignment_context(db, catalog, revision, payload)
     offering = None
     if payload.get("id"):
-        offering = db.get(CatalogOffering, payload["id"])
-        if offering is None or offering.catalog_revision_id != revision.id:
-            # If from previous revision, find matching offering in draft revision by unique offering_key
-            if payload.get("offering_key"):
+        target_off = db.get(CatalogOffering, payload["id"])
+        if target_off is not None:
+            if target_off.catalog_revision_id == revision.id:
+                offering = target_off
+            else:
+                target_key = payload.get("offering_key") or target_off.offering_key
                 offering = db.scalar(
                     select(CatalogOffering).where(
                         CatalogOffering.catalog_revision_id == revision.id,
-                        CatalogOffering.offering_key == payload["offering_key"],
+                        CatalogOffering.offering_key == target_key,
                     )
                 )
+                if offering is None and target_off.concept_id:
+                    offering = db.scalar(
+                        select(CatalogOffering).where(
+                            CatalogOffering.catalog_revision_id == revision.id,
+                            CatalogOffering.concept_id == target_off.concept_id,
+                        )
+                    )
+    if offering is None and payload.get("offering_key"):
+        offering = db.scalar(
+            select(CatalogOffering).where(
+                CatalogOffering.catalog_revision_id == revision.id,
+                CatalogOffering.offering_key == payload["offering_key"],
+            )
+        )
     if offering is None:
         offering = CatalogOffering(
             id=new_id(),
@@ -1717,6 +1735,10 @@ def save_catalog_offering(db, user, catalog_id: str, payload: dict) -> dict:
                 elif v_str.lower() in {"included", "optional", "foc", "as quoted", "selected", "standard"}:
                     val = None
             setattr(offering, key, val)
+    if offering.applies_to_id is None:
+        offering.applies_to_type = None
+    elif offering.applies_to_type is None:
+        offering.applies_to_id = None
     db.flush()
     revision.content_hash = canonical_context_hash(_revision_content_payload(db, revision))
     revision.source_document_ids = sorted({row.source_document_id for row in db.scalars(
@@ -1872,11 +1894,34 @@ def create_new_draft_revision(db, user, catalog_id: str, *, base_revision: int) 
         db.add(copy)
         package_map[package.id] = copy.id
     db.flush()
+
+    plan_map: dict[str, str] = {}
+    if package_map:
+        for plan in db.scalars(
+            select(BenefitPackagePlan)
+            .where(BenefitPackagePlan.package_id.in_(list(package_map.keys())))
+            .order_by(BenefitPackagePlan.sort_order, BenefitPackagePlan.name)
+        ).all():
+            new_plan = BenefitPackagePlan(
+                id=new_id(),
+                package_id=package_map[plan.package_id],
+                plan_key=plan.plan_key,
+                name=plan.name,
+                sort_order=plan.sort_order,
+                status=plan.status,
+            )
+            db.add(new_plan)
+            plan_map[plan.id] = new_plan.id
+        db.flush()
+
+    offering_map: dict[str, str] = {}
     for offering in db.scalars(
         select(CatalogOffering).where(CatalogOffering.catalog_revision_id == source.id).order_by(CatalogOffering.sort_order, CatalogOffering.offering_key)
     ).all():
+        new_off_id = new_id()
+        offering_map[offering.id] = new_off_id
         db.add(CatalogOffering(
-            id=new_id(), catalog_revision_id=draft.id, offering_key=offering.offering_key,
+            id=new_off_id, catalog_revision_id=draft.id, offering_key=offering.offering_key,
             concept_id=offering.concept_id, offering_kind=offering.offering_kind,
             applies_to_type=offering.applies_to_type,
             applies_to_id=package_map.get(str(offering.applies_to_id)) if offering.applies_to_id else None,
@@ -1889,6 +1934,24 @@ def create_new_draft_revision(db, user, catalog_id: str, *, base_revision: int) 
             presentation_facet_ids=list(offering.presentation_facet_ids or []),
             sort_order=offering.sort_order, status=offering.status,
         ))
+    db.flush()
+
+    if plan_map:
+        for p_item in db.scalars(
+            select(BenefitPackagePlanItem)
+            .where(BenefitPackagePlanItem.plan_id.in_(list(plan_map.keys())))
+        ).all():
+            if p_item.offering_id in offering_map:
+                db.add(
+                    BenefitPackagePlanItem(
+                        id=new_id(),
+                        plan_id=plan_map[p_item.plan_id],
+                        offering_id=offering_map[p_item.offering_id],
+                        typed_value_override=p_item.typed_value_override,
+                        sort_order=p_item.sort_order,
+                    )
+                )
+        db.flush()
     if catalog.package_id and str(catalog.package_id) in package_map:
         catalog.package_id = package_map[str(catalog.package_id)]
     from app.models.tables import BenefitAlias
@@ -2422,9 +2485,8 @@ def delete_benefit_profile(db, user, profile_id: str) -> None:
     if profile.is_active:
         raise AppError("Cannot delete an active profile. Switch to another active profile first.", 400)
 
-    if profile.status == "archived":
-        raise AppError("Cannot delete an archived profile. Archived profiles are historical records.", 400)
-
+    db.execute(delete(CompanyBenefitCondition).where(CompanyBenefitCondition.profile_id == profile_id))
+    db.execute(delete(CompanyBenefitConfig).where(CompanyBenefitConfig.profile_id == profile_id))
     db.delete(profile)
     _audit(db, user, "business.benefit_profile.delete", "benefit_profile", profile_id, {"name": profile.name})
     db.commit()

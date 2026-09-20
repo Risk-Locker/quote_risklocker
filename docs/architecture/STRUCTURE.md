@@ -225,6 +225,15 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - **Frontend Sessions Cockpit**: Rescan modal dialog and 1-click rescan buttons in `frontend/src/app/sessions/page.tsx` (`QuotationRow`, `QuotationCard`) with visual mode selection, optional Deep AI reading checkbox, and live status spinners.
 - **Hermetic Tests**: `tests/test_session_rescan.py` (hermetic in-memory SQLite coverage for in-place renewal, new-session creation, draft cleansing, and RBAC authorization).
 
+## Conversational AI Copilot, Status Checks & Session Deduplication (v22) Additions
+
+- **Conversational Intelligence Service**: `backend/app/services/copilot_chat_service.py` provides `chat_with_copilot()` with intent-scoped fact gathering (`get_catalog_status_facts`, `get_session_hygiene_facts`), guarded mutation parsing (`parse_catalog_intent`), and conversational synthesis with Gemini 2.5 Flash ($0 cost key pool) and deterministic offline fallbacks.
+- **Deduplication Engine**: Evaluates SHA-256 file hashes, registration plates, vehicle models, gross premiums, and road tax amounts; separates exact duplicate uploads from legitimate edited quotes (e.g., modified road tax or custom add-ons); soft-deletes redundant copies via `execute_session_cleanup()` (`move_to_trash()`).
+- **REST Endpoints & Schemas**: `POST /api/copilot/chat`, `POST /api/copilot/sessions/cleanup-duplicates`, and `POST /api/copilot/profiles/cleanup-dummy` in `backend/app/api/routes.py`; models `CopilotChatRequest`, `CopilotChatResponse`, `SessionCleanupRequest`, and `ProfileCleanupRequest` in `backend/app/api/schemas.py`.
+- **Global AI Copilot UI**: `frontend/src/components/global-ai-copilot.tsx` provides an expandable Apple-style monochromatic conversational drawer with auto-scrolling message thread, scope anchors (`⚡ EV Scope`, `🚗 ICE Scope`, `🔍 Check Duplicates`), and interactive in-chat action cards (session duplicate review card with 1-click clean, catalog mutation diff preview with checkboxes, and profile cleanup).
+- **Navigation Cleanup**: Obsolete "AI & Memory" sidebar item removed from `frontend/src/components/app-shell.tsx`.
+- **Hermetic Tests**: `tests/test_copilot_conversational.py` (hermetic SQLite tests for catalog fact loading, session duplicate separation vs unique edits, and chat conversation).
+
 ## Navigation
 
 - Start every repository task at [START-HERE.md](START-HERE.md).

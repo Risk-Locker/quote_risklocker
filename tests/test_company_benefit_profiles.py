@@ -337,20 +337,23 @@ def test_archived_profile_immutability(db_session: Session):
         update_company_profile(db_session, user, company.id, base_prof.id, {"name": "Hacked"})
     assert "Cannot modify an archived profile" in str(exc.value)
 
-    # 2. Deleting archived profile raises AppError 400
-    with pytest.raises(AppError) as exc:
-        delete_company_profile(db_session, user, company.id, base_prof.id)
-    assert "Cannot delete an archived profile" in str(exc.value)
-
-    # 3. Updating configs in archived profile raises AppError 400
+    # 2. Updating configs in archived profile raises AppError 400
     with pytest.raises(AppError) as exc:
         update_company_benefit_configs(db_session, user, company.id, items=[{"concept_id": "towing", "is_enabled": False}], profile_id=base_prof.id)
     assert "Cannot modify an archived profile" in str(exc.value)
 
-    # 4. Adding condition to archived profile raises AppError 400
+    # 3. Adding condition to archived profile raises AppError 400
     with pytest.raises(AppError) as exc:
         save_company_condition(db_session, user, company.id, payload={"name": "Rule", "trigger_concept_id": "a", "target_concept_id": "b", "replacement_description": "c"}, profile_id=base_prof.id)
     assert "Cannot modify an archived profile" in str(exc.value)
+
+    # 4. Deleting active profile raises AppError 400, while inactive profile can be deleted
+    with pytest.raises(AppError) as exc:
+        delete_company_profile(db_session, user, company.id, cloned["id"])
+    assert "Cannot delete an active profile" in str(exc.value)
+    # Deleting the inactive archived profile succeeds cleanly
+    delete_company_profile(db_session, user, company.id, base_prof.id)
+    assert db_session.get(BenefitProfile, base_prof.id) is None
 
 
 def test_seed_base_benefits_cascade_exclusion(db_session: Session):

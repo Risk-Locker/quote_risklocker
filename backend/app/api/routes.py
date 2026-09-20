@@ -8,6 +8,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from threading import Lock
+from typing import Any
 
 from fastapi import APIRouter, Body, Depends, File, Form, Header, Query, Request, Response as FastAPIResponse, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -85,6 +86,12 @@ from app.api.schemas import (
     BusinessAssetBulkMoveRequest,
     BusinessAssetFolderRenameRequest,
     BusinessAssetFolderDeleteRequest,
+    CatalogOperationsPreviewRequest,
+    CatalogOperationsApplyRequest,
+    CopilotChatRequest,
+    CopilotChatResponse,
+    SessionCleanupRequest,
+    ProfileCleanupRequest,
 )
 from app.auth.cookies import clear_auth_cookies, set_auth_cookies
 from app.auth.rbac import can_view_owner_record, require_role
@@ -226,6 +233,11 @@ from app.services.matrix_service import (
     generate_company_matrix_docx,
     generate_company_matrix_xlsx,
     diff_company_matrix,
+)
+from app.services.catalog_operations_service import (
+    parse_catalog_intent,
+    preview_catalog_operations,
+    apply_catalog_operations,
 )
 from app.services.road_tax_service import (
     calculate_breakdown,
@@ -1772,6 +1784,79 @@ def business_company_matrix_diff(
     existing = get_company_matrix_data(db, company_id)
     diff = diff_company_matrix(existing, payload.model_dump())
     return {"diff": diff}
+
+
+@router.post("/business/companies/{company_id}/catalog-operations/preview")
+def business_catalog_operations_preview(
+    company_id: str,
+    payload: CatalogOperationsPreviewRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    operations = parse_catalog_intent(db, payload.query, company_id, payload.profile_id)
+    preview = preview_catalog_operations(db, company_id, operations, payload.profile_id)
+    return {
+        "preview": preview,
+        "operations": operations,
+        "parsed_intent": {"operations": operations},
+        **preview,
+    }
+
+
+@router.post("/business/companies/{company_id}/catalog-operations/apply")
+def business_catalog_operations_apply(
+    company_id: str,
+    payload: CatalogOperationsApplyRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    result = apply_catalog_operations(db, user, company_id, payload.model_dump())
+    return result
+
+
+# --- Conversational AI Copilot Endpoints ---
+
+@router.post("/copilot/chat", response_model=CopilotChatResponse)
+def copilot_chat_route(
+    payload: CopilotChatRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.services.copilot_chat_service import chat_with_copilot
+
+    history_dicts = [h.model_dump() for h in payload.history]
+    result = chat_with_copilot(
+        db=db,
+        user=user,
+        message=payload.message,
+        company_id=payload.company_id,
+        history=history_dicts,
+        scope=payload.scope,
+    )
+    return result
+
+
+@router.post("/copilot/sessions/cleanup-duplicates")
+def copilot_sessions_cleanup_route(
+    payload: SessionCleanupRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.services.copilot_chat_service import execute_session_cleanup
+
+    return execute_session_cleanup(db, settings, user, payload.session_ids)
+
+
+@router.post("/copilot/profiles/cleanup-dummy")
+def copilot_profiles_cleanup_route(
+    payload: ProfileCleanupRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.services.copilot_chat_service import execute_profile_cleanup
+
+    return execute_profile_cleanup(db, user, payload.profile_ids)
 
 
 @router.post("/business/products")

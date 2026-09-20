@@ -79,8 +79,11 @@ class SupabaseStorage:
         return {"apikey": key, "Authorization": f"Bearer {key}"}
 
     def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
+        headers = dict(self.headers)
+        if "headers" in kwargs:
+            headers.update(kwargs.pop("headers"))
         try:
-            response = self._client.request(method, f"{self.settings.supabase_url}{path}", headers=self.headers, **kwargs)
+            response = self._client.request(method, f"{self.settings.supabase_url}{path}", headers=headers, **kwargs)
         except httpx.HTTPError as exc:
             raise StorageError("Supabase Storage could not be reached.") from exc
         return response
@@ -196,12 +199,22 @@ class SupabaseStorage:
         response = self._request(
             "POST",
             f"/storage/v1/object/{quote(self.bucket, safe='')}/{encoded_key}",
+            headers={"x-upsert": "true"},
             files={"file": (PurePosixPath(key).name, data, content_type)},
         )
         if response.status_code not in {200, 201}:
+            err_msg = self._error_message(response)
+            if response.status_code in {400, 409} and ("already exists" in err_msg.lower() or "duplicate" in err_msg.lower()):
+                return StoredPdf(
+                    object_key=key,
+                    bucket=self.bucket,
+                    size_bytes=len(data),
+                    sha256=sha256(data).hexdigest(),
+                    etag=response.headers.get("etag"),
+                )
             if response.status_code == 409:
                 raise StorageError("An asset already exists at the generated object key.")
-            raise StorageError(f"Supabase asset upload failed ({response.status_code}): {self._error_message(response)}")
+            raise StorageError(f"Supabase asset upload failed ({response.status_code}): {err_msg}")
         return StoredPdf(
             object_key=key,
             bucket=self.bucket,

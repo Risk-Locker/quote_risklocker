@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.benefits import BenefitValue
@@ -364,7 +364,7 @@ class CompanyBenefitConditionSaveRequest(StrictRequest):
 class CatalogOfferingSaveRequest(StrictRequest):
     model_config = ConfigDict(extra="ignore")
     id: str | None = None
-    base_revision: int = Field(ge=1)
+    base_revision: int | None = Field(default=None, ge=1)
     offering_key: str | None = Field(default=None, max_length=160)
     concept_id: str | None = None
     offering_kind: str | None = None
@@ -382,6 +382,12 @@ class CatalogOfferingSaveRequest(StrictRequest):
     presentation_facet_ids: list[str] = Field(default_factory=list, max_length=100)
     sort_order: int = Field(default=0, ge=0)
     status: str = "active"
+
+    @model_validator(mode="after")
+    def validate_base_revision_if_new(self) -> Self:
+        if self.id is None and self.base_revision is None:
+            raise ValueError("base_revision is required when creating a catalog offering.")
+        return self
 
 
 class PackageSaveRequest(StrictRequest):
@@ -580,5 +586,58 @@ class BusinessAssetFolderDeleteRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
     category: str = Field(min_length=1, max_length=120)
     action: Literal["move_to_general", "delete_all"] = "move_to_general"
+
+
+# --- Business: AI Catalog Operations ---
+
+class CatalogOperationsPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    query: str = Field(min_length=1)
+    profile_id: str | None = None
+
+
+class CatalogOperationsApplyRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    mutations: list[dict[str, Any]] = Field(default_factory=list)
+    operations: list[dict[str, Any]] | None = None
+    target_profile_action: Literal["clone_new", "use_current", "in_place"] = "in_place"
+    new_profile_name: str | None = None
+    new_version_name: str | None = None
+    create_new_profile_version: bool = False
+    activate_profile: bool = True
+    profile_id: str | None = None
+
+
+# --- Conversational Copilot & Session Hygiene ---
+
+class CopilotChatMessage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    role: Literal["user", "assistant", "model"]
+    content: str
+
+
+class CopilotChatRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    message: str = Field(min_length=1)
+    company_id: str | None = None
+    history: list[CopilotChatMessage] = Field(default_factory=list)
+    scope: Literal["all", "catalogs", "sessions"] = "all"
+
+
+class CopilotChatResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    reply: str
+    actions: list[dict[str, Any]] = Field(default_factory=list)
+    facts_summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class SessionCleanupRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    session_ids: list[str] = Field(min_length=1)
+
+
+class ProfileCleanupRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    profile_ids: list[str] = Field(min_length=1)
 
 
