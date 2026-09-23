@@ -130,6 +130,11 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
     setActionError(null);
 
     try {
+      const conflict = await api<{ has_conflict: boolean; resolved: boolean }>(`/sessions/${id}/ownership-conflict`).catch(() => null);
+      if (conflict?.has_conflict && !conflict?.resolved) {
+        throw new Error("Action Required: Vehicle ownership conflict detected. Please resolve it on the Review step before generating the PDF.");
+      }
+
       const saved = await save();
       const nonFatalBlockers = saved.generation_blockers.filter(
         (b) => b.code !== "scalar_check_needed" && b.code !== "missing_catalog"

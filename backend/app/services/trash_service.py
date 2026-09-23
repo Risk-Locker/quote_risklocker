@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.orm import Session, defer
 
 from app.core.config import Settings
@@ -233,15 +233,17 @@ def list_trash_categorized(db: Session, user, retention_days: int) -> dict:
         }
         for s in list_trash_specials(db)
     ]
-    variants = [
-        {
-            "id": v.id,
-            "label": v.label,
-            "special_label": (db.get(OurSpecial, v.special_id).label if v.special_id and db.get(OurSpecial, v.special_id) else "—"),
-            "deleted_at": v.deleted_at.isoformat() if v.deleted_at else None,
-        }
-        for v in list_trash_variants(db)
-    ]
+    variants = []
+    for v in list_trash_variants(db):
+        sp = db.get(OurSpecial, v.special_id) if v.special_id else None
+        variants.append(
+            {
+                "id": v.id,
+                "label": v.label,
+                "special_label": sp.label if sp else "—",
+                "deleted_at": v.deleted_at.isoformat() if v.deleted_at else None,
+            }
+        )
     records = [
         {"id": r.id, "insurer_no": r.insurer_no, "customer_name": r.customer_name, "vehicle_no": r.vehicle_no,
          "deleted_at": r.deleted_at.isoformat() if r.deleted_at else None}
@@ -298,13 +300,51 @@ def permanent_delete_session(db: Session, user, uploaded_file_id: str, storage) 
             except Exception as exc:
                 logger.warning("Could not delete generated PDF %s during trash clear: %s", version.storage_path, exc)
     # Some FKs lack ON DELETE CASCADE, so remove dependent rows explicitly before the parent.
-    from app.models.tables import CorrectionMemory, ExtractionRecord, QuotationDraft, Session as SessionModel
+    from app.models.tables import (
+        CorrectionMemory,
+        DraftBenefitSelection,
+        DraftSourceLineDecision,
+        ExtractionRecord,
+        Job,
+        QuotationActivity,
+        QuotationDraft,
+        RenderSnapshot,
+        Session as SessionModel,
+        VehicleOwnership,
+    )
 
     client_ids = [
         r.id for r in db.scalars(select(ClientRecord).where(ClientRecord.uploaded_file_id == uploaded.id)).all()
     ]
     if client_ids:
         _remove_trash_entries(db, "client_record", client_ids)
+
+    session_ids = list(
+        db.scalars(select(SessionModel.id).where(SessionModel.uploaded_file_id == uploaded.id)).all()
+    )
+    draft_ids = list(
+        db.scalars(select(QuotationDraft.id).where(QuotationDraft.uploaded_file_id == uploaded.id)).all()
+    )
+
+    # 1. Clean up draft-dependent child records (RenderSnapshot, decisions, selections)
+    if draft_ids:
+        db.execute(delete(RenderSnapshot).where(RenderSnapshot.draft_id.in_(draft_ids)))
+        db.execute(delete(DraftSourceLineDecision).where(DraftSourceLineDecision.draft_id.in_(draft_ids)))
+        selection_ids_to_delete = select(DraftBenefitSelection.id).where(DraftBenefitSelection.draft_id.in_(draft_ids))
+        db.execute(delete(DraftSourceLineDecision).where(DraftSourceLineDecision.selection_id.in_(selection_ids_to_delete)))
+        db.execute(delete(DraftBenefitSelection).where(DraftBenefitSelection.draft_id.in_(draft_ids)))
+
+    # 2. Clean up session-dependent child records (Activities, Jobs, Ownership references)
+    if session_ids:
+        db.execute(delete(QuotationActivity).where(QuotationActivity.session_id.in_(session_ids)))
+        db.execute(delete(Job).where(Job.session_id.in_(session_ids)))
+        db.execute(
+            update(VehicleOwnership)
+            .where(VehicleOwnership.source_session_id.in_(session_ids))
+            .values(source_session_id=None)
+        )
+
+    db.execute(delete(Job).where(Job.uploaded_file_id == uploaded.id))
     db.execute(delete(ClientRecord).where(ClientRecord.uploaded_file_id == uploaded.id))
     db.execute(delete(SessionModel).where(SessionModel.uploaded_file_id == uploaded.id))
     db.execute(delete(CorrectionMemory).where(CorrectionMemory.uploaded_file_id == uploaded.id))
@@ -414,7 +454,8 @@ def empty_all_trash(db: Session, user, storage) -> dict:
         permanent_delete_special(db, user, special.id)
         counts["our_specials"] += 1
     for variant in list_trash_variants(db):
-        if not (variant.special_id and db.get(OurSpecial, variant.special_id) and not db.get(OurSpecial, variant.special_id).deleted_at):
+        parent_special = db.get(OurSpecial, variant.special_id) if variant.special_id else None
+        if not parent_special or parent_special.deleted_at:
             continue
         permanent_delete_special_variant(db, user, variant.id)
         counts["our_special_variants"] += 1

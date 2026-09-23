@@ -43,6 +43,7 @@ class FieldSelection:
         evidence = self.candidates[0].evidence if self.candidates else ""
         return {
             "value": self.value,
+            "detected_value": self.value,
             "status": self.status,
             "message": "Please check this value." if self.status != "ready" else "",
             "warnings": self.warnings,

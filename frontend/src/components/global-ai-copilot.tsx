@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   X,
   Lightning,
@@ -22,6 +22,8 @@ import {
   ChatCircleText,
   MagnifyingGlass,
   ArrowCounterClockwise,
+  Robot,
+  StopCircle,
 } from "@phosphor-icons/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -79,6 +81,7 @@ type DuplicateGroup = {
   total_instances: number;
   keep_session: {
     session_id: string;
+    quotation_ref?: string;
     filename: string;
     created_at: string;
     roadtax: string;
@@ -86,8 +89,14 @@ type DuplicateGroup = {
   };
   trash_sessions: Array<{
     session_id: string;
+    quotation_ref?: string;
     filename: string;
     created_at: string;
+    plate?: string;
+    company?: string;
+    roadtax?: string;
+    gross_premium?: string;
+    sha?: string;
   }>;
 };
 
@@ -127,6 +136,22 @@ type Company = {
 
 const QUICK_PROMPTS = [
   {
+    label: "Engine CC Breakdown",
+    prompt: "What is the list of CCs of types of cars you found across all quotations?",
+  },
+  {
+    label: "Insurer Quote Ranking",
+    prompt: "Which insurance companies had more quotes and what is their market share?",
+  },
+  {
+    label: "Cars & Models Mostly Found",
+    prompt: "What types of cars, makes, and models are mostly found?",
+  },
+  {
+    label: "Most Popular Benefits",
+    prompt: "What benefits and optional covers are mostly used?",
+  },
+  {
     label: "AmAssurance Status & Towing",
     prompt: "Check if AmAssurance got how many catalogs and whats the situation",
   },
@@ -134,25 +159,14 @@ const QUICK_PROMPTS = [
     label: "Check Session Duplicates",
     prompt: "Check if there are duplicate sessions in the database and show cleanable uploads",
   },
-  {
-    label: "Towing Condition Advice",
-    prompt: "Does AmAssurance all use the same description for towing or different, and are conditions missing?",
-  },
-  {
-    label: "EV Scope Anchor",
-    prompt: "For AmAssurance all EV catalogs: ",
-  },
-  {
-    label: "Clean Dummy Profiles",
-    prompt: "Which profiles have dummy or useless items? Show cleanup suggestions",
-  },
 ];
 
 export function GlobalAiCopilot() {
   const [isOpen, setIsOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [drawerSize, setDrawerSize] = useState<"normal" | "wide" | "maximized">("normal");
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("all");
   const [scope, setScope] = useState<"all" | "catalogs" | "sessions">("all");
   const [inputQuery, setInputQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -161,6 +175,44 @@ export function GlobalAiCopilot() {
   // Chat message thread
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const lastSentQueryRef = useRef<string>("");
+
+  function handleSelectPrompt(promptText: string) {
+    setInputQuery(promptText);
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 50);
+  }
+
+  function handleAbortRequest() {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setLoading(false);
+    if (lastSentQueryRef.current) {
+      setInputQuery(lastSentQueryRef.current);
+    }
+    setMessages((prev) => {
+      if (!prev.length) return prev;
+      const last = prev[prev.length - 1];
+      if (last.role === "user") {
+        return [
+          ...prev.slice(0, -1),
+          { ...last, content: `${last.content} (stopped)` },
+          {
+            id: Math.random().toString(36).substring(2, 9),
+            role: "assistant",
+            content: "⏹ Request stopped. Your query has been restored to the input box so you can adjust and send again.",
+            timestamp: new Date(),
+          },
+        ];
+      }
+      return prev;
+    });
+  }
 
   // Catalog mutation state
   const [selectedMutationIndices, setSelectedMutationIndices] = useState<Record<string, Set<number>>>({});
@@ -172,9 +224,47 @@ export function GlobalAiCopilot() {
   const [cleaningDuplicates, setCleaningDuplicates] = useState(false);
   const [sessionCleanupMsg, setSessionCleanupMsg] = useState<string | null>(null);
 
+  // Interactive Duplicate Audit State
+  const [inspectingDuplicateGroups, setInspectingDuplicateGroups] = useState<DuplicateGroup[] | null>(null);
+  const [selectedTrashSessionIds, setSelectedTrashSessionIds] = useState<Set<string>>(new Set());
+  const [duplicateSearchQuery, setDuplicateSearchQuery] = useState("");
+
+  const filteredDuplicateGroups = useMemo(() => {
+    if (!inspectingDuplicateGroups) return [];
+    if (!duplicateSearchQuery.trim()) return inspectingDuplicateGroups;
+    const q = duplicateSearchQuery.toLowerCase();
+    return inspectingDuplicateGroups.filter((grp) => {
+      const matchPlate = (grp.car_plate || "").toLowerCase().includes(q);
+      const matchCompany = (grp.company || "").toLowerCase().includes(q);
+      const matchFile = (grp.filename || "").toLowerCase().includes(q);
+      const matchRef = (grp.keep_session?.quotation_ref || "").toLowerCase().includes(q);
+      const matchTrash = grp.trash_sessions.some(
+        (t) => (t.quotation_ref || "").toLowerCase().includes(q) || (t.filename || "").toLowerCase().includes(q)
+      );
+      return matchPlate || matchCompany || matchFile || matchRef || matchTrash;
+    });
+  }, [inspectingDuplicateGroups, duplicateSearchQuery]);
+
   // Profile cleanup action state
   const [cleaningProfiles, setCleaningProfiles] = useState(false);
   const [profileCleanupMsg, setProfileCleanupMsg] = useState<string | null>(null);
+
+  // Action card dismissal state (Cancel button on proposals)
+  const [dismissedActions, setDismissedActions] = useState<Record<string, boolean>>({});
+
+  function handleDismissAction(actionKey: string) {
+    setDismissedActions((prev) => ({ ...prev, [actionKey]: true }));
+  }
+
+  function handleResetChat() {
+    setMessages([]);
+    setSelectedMutationIndices({});
+    setDismissedActions({});
+    setCatalogSuccessMsg(null);
+    setSessionCleanupMsg(null);
+    setProfileCleanupMsg(null);
+    setError(null);
+  }
 
   // Load companies on mount
   useEffect(() => {
@@ -186,16 +276,13 @@ export function GlobalAiCopilot() {
         const list = res?.companies?.items || [];
         if (list.length) {
           setCompanies(list);
-          if (!selectedCompanyId) {
-            setSelectedCompanyId(list[0].id);
-          }
         }
       } catch {
         // Fallback
       }
     }
     fetchCompanies();
-  }, [selectedCompanyId]);
+  }, []);
 
   // Auto-scroll to bottom of chat
   useEffect(() => {
@@ -231,11 +318,48 @@ export function GlobalAiCopilot() {
     setMessages((prev) => [...prev, userMsg]);
     setLoading(true);
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    lastSentQueryRef.current = textToSend;
+
     try {
-      const historyPayload = messages.slice(-6).map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
+      const historyPayload = messages.slice(-8).map((m) => {
+        let content = m.content;
+        if (m.role === "assistant" && m.actions && m.actions.length > 0) {
+          const actionSummaries = m.actions
+            .map((act) => {
+              if (act.type === "catalog_diff" && act.preview?.operations_preview) {
+                const ops = act.preview.operations_preview
+                  .map(
+                    (op, idx) =>
+                      `[Item ${idx + 1}] ${op.action}: ${op.concept_label || op.concept_key} -> ${op.new_value || op.new_description || "updated"}`
+                  )
+                  .join("; ");
+                return `[Active Proposed Changes for ${act.company_id || "selected company"}: ${ops}]`;
+              }
+              if (act.type === "session_cleanup") {
+                return `[Active Proposed Session Cleanup: ${act.redundant_count} duplicate sessions ready to clean]`;
+              }
+              if (act.type === "profile_cleanup") {
+                return `[Active Proposed Profile Cleanup: ${act.profiles?.length || 0} unused profiles]`;
+              }
+              return "";
+            })
+            .filter(Boolean)
+            .join("\n");
+          if (actionSummaries) {
+            content += `\n\n${actionSummaries}`;
+          }
+        }
+        return {
+          role: m.role,
+          content,
+        };
+      });
+
+      const companyParam = mentionedCompany
+        ? mentionedCompany.id
+        : (selectedCompanyId === "all" ? undefined : selectedCompanyId);
 
       const res = await api<{
         reply: string;
@@ -243,9 +367,10 @@ export function GlobalAiCopilot() {
         facts_summary: Record<string, unknown>;
       }>("/copilot/chat", {
         method: "POST",
+        signal: controller.signal,
         body: JSON.stringify({
           message: textToSend,
-          company_id: (mentionedCompany ? mentionedCompany.id : selectedCompanyId) || undefined,
+          company_id: companyParam,
           history: historyPayload,
           scope,
         }),
@@ -272,7 +397,10 @@ export function GlobalAiCopilot() {
       }
 
       setMessages((prev) => [...prev, assistantMsg]);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        return; // User intentionally stopped the request
+      }
       setError(apiErrorMessage(err));
       const errorMsg: ChatMessage = {
         id: Math.random().toString(36).substring(2, 9),
@@ -283,6 +411,7 @@ export function GlobalAiCopilot() {
       setMessages((prev) => [...prev, errorMsg]);
     } finally {
       setLoading(false);
+      abortControllerRef.current = null;
     }
   }
 
@@ -376,15 +505,14 @@ export function GlobalAiCopilot() {
         <button
           type="button"
           onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 z-40 flex items-center gap-2.5 px-3.5 h-11 bg-[var(--rl-black)] hover:bg-[var(--rl-text-strong)] text-white shadow-xl transition-all duration-200 border border-black/20 hover:scale-[1.02] active:scale-[0.98] rounded-[var(--rl-radius-md)]"
+          className="group fixed bottom-6 right-6 z-40 flex items-center h-14 w-14 hover:w-36 rounded-full bg-[var(--rl-black)] hover:bg-[#111111] text-white shadow-2xl transition-all duration-300 ease-out border border-white/10 hover:shadow-[0_8px_32px_rgba(0,0,0,0.35)] overflow-hidden cursor-pointer justify-center hover:justify-start hover:px-3.5"
           aria-label="Open AI Copilot"
         >
-          <div className="w-6 h-6 rounded-[var(--rl-radius-sm)] bg-white/15 flex items-center justify-center text-white">
-            <NeuralCubeIcon size={16} accentCore={true} />
+          <div className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center text-white shrink-0 group-hover:scale-105 transition-transform duration-200">
+            <Robot size={20} weight="fill" />
           </div>
-          <span className="text-xs font-semibold tracking-wide">AI Copilot</span>
-          <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-[var(--rl-radius-sm)] bg-white/20 text-white">
-            LIVE
+          <span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 ease-out whitespace-nowrap text-xs font-bold tracking-wide pl-0 group-hover:pl-2.5 opacity-0 group-hover:opacity-100 text-white">
+            Start Chat
           </span>
         </button>
       )}
@@ -394,36 +522,81 @@ export function GlobalAiCopilot() {
         <aside
           aria-label="RiskLocker AI Copilot Drawer"
           className={`fixed top-0 right-0 z-50 h-screen bg-white text-[var(--rl-text-strong)] shadow-2xl border-l border-[var(--rl-border)] flex flex-col transition-all duration-300 ease-in-out ${
-            isExpanded ? "w-[720px]" : "w-[480px]"
+            drawerSize === "maximized"
+              ? "w-[96vw] max-w-[1550px]"
+              : drawerSize === "wide" || isExpanded
+              ? "w-[840px] max-w-[95vw]"
+              : "w-[480px] max-w-[95vw]"
           }`}
         >
           {/* Header */}
           <div className="p-4 border-b border-[var(--rl-border)] bg-white flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-[var(--rl-radius-sm)] bg-[var(--rl-black)] flex items-center justify-center text-white shrink-0">
-                <NeuralCubeIcon size={18} accentCore={true} />
+              <div className="w-8 h-8 rounded-full bg-[var(--rl-black)] flex items-center justify-center text-white shrink-0">
+                <Robot size={18} weight="fill" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">AI Copilot</h3>
                   <Badge variant="default" className="text-[10px] px-1.5 py-0 font-medium">
-                    Assistant & Operator
+                    Intelligence & Operator
                   </Badge>
                 </div>
                 <p className="text-[11px] text-[var(--rl-text-muted)]">
-                  Live DB status checks, towing audits & duplicate hygiene
+                  Dataset analytics, towing audits & duplicate hygiene
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => setIsExpanded(!isExpanded)}
+                onClick={handleResetChat}
                 className="p-1.5 rounded-[var(--rl-radius-sm)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] hover:bg-[var(--rl-surface-muted)] transition-colors"
-                title={isExpanded ? "Narrow drawer" : "Expand drawer"}
+                title="Reset conversation"
               >
-                {isExpanded ? <ArrowsInSimple size={16} /> : <ArrowsOutSimple size={16} />}
+                <ArrowCounterClockwise size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDrawerSize((prev) => {
+                    const next = prev === "normal" ? "wide" : prev === "wide" ? "maximized" : "normal";
+                    setIsExpanded(next !== "normal");
+                    return next;
+                  });
+                }}
+                className={`px-2 py-1 rounded-[var(--rl-radius-sm)] transition-colors flex items-center gap-1 cursor-pointer ${
+                  drawerSize === "maximized"
+                    ? "bg-[var(--rl-black)] text-white font-semibold shadow-xs"
+                    : drawerSize === "wide"
+                    ? "bg-blue-100 text-blue-900 font-semibold border border-blue-300"
+                    : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] hover:bg-[var(--rl-surface-muted)] border border-transparent"
+                }`}
+                title={
+                  drawerSize === "normal"
+                    ? "Widen drawer to 840px"
+                    : drawerSize === "wide"
+                    ? "Maximize drawer (Fullscreen)"
+                    : "Restore standard width (480px)"
+                }
+              >
+                {drawerSize === "maximized" ? (
+                  <>
+                    <ArrowsInSimple size={14} weight="bold" />
+                    <span className="text-[11px]">Standard</span>
+                  </>
+                ) : drawerSize === "wide" ? (
+                  <>
+                    <ArrowsOutSimple size={14} weight="bold" />
+                    <span className="text-[11px]">Maximize</span>
+                  </>
+                ) : (
+                  <>
+                    <ArrowsOutSimple size={14} />
+                    <span className="text-[11px]">Expand</span>
+                  </>
+                )}
               </button>
               <button
                 type="button"
@@ -445,6 +618,7 @@ export function GlobalAiCopilot() {
                 onChange={(e) => setSelectedCompanyId(e.target.value)}
                 className="text-xs h-7 py-0 bg-white"
               >
+                <option value="all">All Companies (Comparative)</option>
                 {companies.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
@@ -491,12 +665,16 @@ export function GlobalAiCopilot() {
                       <button
                         key={i}
                         type="button"
-                        onClick={() => handleSendMessage(qp.prompt)}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleSelectPrompt(qp.prompt);
+                        }}
                         className="w-full text-left p-2 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white hover:bg-[var(--rl-surface-muted)] text-[11px] transition-colors flex items-center justify-between group"
                       >
                         <span className="font-medium text-[var(--rl-text-strong)]">{qp.label}</span>
                         <span className="text-[10px] text-[var(--rl-text-muted)] group-hover:text-[var(--rl-text-strong)]">
-                          Ask →
+                          Use ↵
                         </span>
                       </button>
                     ))}
@@ -527,6 +705,23 @@ export function GlobalAiCopilot() {
                   <div className="w-full mt-3 space-y-3">
                     {m.actions.map((act, actIdx) => {
                       const actionKey = `${m.id}_${actIdx}`;
+
+                      if (dismissedActions[actionKey]) {
+                        return (
+                          <div
+                            key={actIdx}
+                            className="p-2.5 rounded-[var(--rl-radius-sm)] border border-dashed border-[var(--rl-border)] bg-[var(--rl-surface-muted)] text-[11px] text-[var(--rl-text-muted)] flex items-center justify-between"
+                          >
+                            <div className="flex items-center gap-2">
+                              <X size={12} className="text-neutral-400" />
+                              <span className="italic">Proposal dismissed by user</span>
+                            </div>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-200 text-neutral-600 font-medium">
+                              Dismissed
+                            </span>
+                          </div>
+                        );
+                      }
 
                       // 1. Session Cleanup Action Card
                       if (act.type === "session_cleanup") {
@@ -593,24 +788,51 @@ export function GlobalAiCopilot() {
                                 <span>{sessionCleanupMsg}</span>
                               </div>
                             ) : (
-                              <Button
-                                size="sm"
-                                onClick={() => handleCleanDuplicates(act.session_ids_to_trash)}
-                                disabled={cleaningDuplicates}
-                                className="w-full h-8 text-xs bg-[var(--rl-black)] hover:bg-[var(--rl-text-strong)] text-white gap-2 font-medium"
-                              >
-                                {cleaningDuplicates ? (
-                                  <>
-                                    <ArrowsClockwise size={13} className="animate-spin" />
-                                    Moving duplicates to Trash...
-                                  </>
-                                ) : (
-                                  <>
-                                    <Trash size={13} />
-                                    Confirm & Clean {act.redundant_count} Redundant Duplicates
-                                  </>
-                                )}
-                              </Button>
+                              <div className="flex flex-col gap-2">
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() => {
+                                    setInspectingDuplicateGroups(act.groups);
+                                    setSelectedTrashSessionIds(new Set(act.session_ids_to_trash));
+                                  }}
+                                  className="w-full h-8 text-xs px-3 border border-[var(--rl-border)] bg-white text-[var(--rl-text-strong)] hover:bg-neutral-50 flex items-center justify-center gap-1.5 font-semibold cursor-pointer shadow-2xs"
+                                >
+                                  <MagnifyingGlass size={14} weight="bold" />
+                                  <span>Inspect & Audit Duplicates ({act.groups.length} Sets)</span>
+                                </Button>
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => handleDismissAction(actionKey)}
+                                    disabled={cleaningDuplicates}
+                                    className="h-8 text-xs px-3 text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] border border-[var(--rl-border)] bg-white cursor-pointer"
+                                  >
+                                    Cancel
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleCleanDuplicates(act.session_ids_to_trash)}
+                                    disabled={cleaningDuplicates}
+                                    className="flex-1 h-8 text-xs bg-[var(--rl-black)] hover:bg-[var(--rl-text-strong)] text-white gap-2 font-medium cursor-pointer"
+                                  >
+                                    {cleaningDuplicates ? (
+                                      <>
+                                        <ArrowsClockwise size={13} className="animate-spin" />
+                                        Moving duplicates to Trash...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Trash size={13} />
+                                        Confirm & Clean {act.redundant_count} Redundant Duplicates
+                                      </>
+                                    )}
+                                  </Button>
+                                </div>
+                              </div>
                             )}
                           </Card>
                         );
@@ -722,30 +944,42 @@ export function GlobalAiCopilot() {
                                 <span>{catalogSuccessMsg}</span>
                               </div>
                             ) : (
-                              <Button
-                                size="sm"
-                                onClick={() =>
-                                  handleApplyCatalogMutations(
-                                    act.preview,
-                                    act.company_id || selectedCompanyId,
-                                    actionKey
-                                  )
-                                }
-                                disabled={applyingCatalog || selectedIndices.size === 0}
-                                className="w-full h-8 text-xs bg-[var(--rl-black)] hover:bg-[var(--rl-text-strong)] text-white gap-2 font-medium"
-                              >
-                                {applyingCatalog ? (
-                                  <>
-                                    <ArrowsClockwise size={13} className="animate-spin" />
-                                    Applying Changes...
-                                  </>
-                                ) : (
-                                  <>
-                                    <Check size={13} />
-                                    Confirm & Apply {selectedIndices.size} Changes
-                                  </>
-                                )}
-                              </Button>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() => handleDismissAction(actionKey)}
+                                  disabled={applyingCatalog}
+                                  className="h-8 text-xs px-3 text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] border border-[var(--rl-border)] bg-white"
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={() =>
+                                    handleApplyCatalogMutations(
+                                      act.preview,
+                                      act.company_id || selectedCompanyId,
+                                      actionKey
+                                    )
+                                  }
+                                  disabled={applyingCatalog || selectedIndices.size === 0}
+                                  className="flex-1 h-8 text-xs bg-[var(--rl-black)] hover:bg-[var(--rl-text-strong)] text-white gap-2 font-medium"
+                                >
+                                  {applyingCatalog ? (
+                                    <>
+                                      <ArrowsClockwise size={13} className="animate-spin" />
+                                      Applying Changes...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Check size={13} />
+                                      Confirm & Apply {selectedIndices.size} Changes
+                                    </>
+                                  )}
+                                </Button>
+                              </div>
                             )}
                           </Card>
                         );
@@ -782,15 +1016,27 @@ export function GlobalAiCopilot() {
                                 {profileCleanupMsg}
                               </div>
                             ) : (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                onClick={() => handleCleanProfiles(act.profiles.map((p) => p.id))}
-                                disabled={cleaningProfiles}
-                                className="w-full h-7 text-xs"
-                              >
-                                {cleaningProfiles ? "Cleaning..." : "Deactivate Unused Profiles"}
-                              </Button>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() => handleDismissAction(actionKey)}
+                                  disabled={cleaningProfiles}
+                                  className="h-7 text-xs px-3 text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] border border-[var(--rl-border)] bg-white"
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => handleCleanProfiles(act.profiles.map((p) => p.id))}
+                                  disabled={cleaningProfiles}
+                                  className="flex-1 h-7 text-xs bg-white hover:bg-neutral-100"
+                                >
+                                  {cleaningProfiles ? "Cleaning..." : "Deactivate Unused Profiles"}
+                                </Button>
+                              </div>
                             )}
                           </Card>
                         );
@@ -804,9 +1050,19 @@ export function GlobalAiCopilot() {
             ))}
 
             {loading && (
-              <div className="flex items-center gap-2 text-xs text-[var(--rl-text-muted)] p-2">
-                <ArrowsClockwise size={14} className="animate-spin" />
-                <span>Thinking & querying live database...</span>
+              <div className="flex items-center justify-between p-2.5 rounded-[var(--rl-radius-sm)] bg-[var(--rl-surface-muted)] border border-[var(--rl-border)] text-xs text-[var(--rl-text-muted)] animate-pulse">
+                <div className="flex items-center gap-2">
+                  <ArrowsClockwise size={14} className="animate-spin text-[var(--rl-black)] shrink-0" />
+                  <span className="font-medium text-[var(--rl-text-strong)]">Thinking & querying live database...</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAbortRequest}
+                  className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-[var(--rl-red)] bg-white hover:bg-[var(--rl-red-light)] border border-[var(--rl-red)]/30 rounded-[var(--rl-radius-sm)] transition-colors shadow-xs"
+                >
+                  <StopCircle size={14} weight="bold" />
+                  <span>Cancel / Stop</span>
+                </button>
               </div>
             )}
 
@@ -820,21 +1076,21 @@ export function GlobalAiCopilot() {
               <span className="text-[10px] text-[var(--rl-text-muted)] font-medium shrink-0">Anchors:</span>
               <button
                 type="button"
-                onClick={() => setInputQuery(`For ${activeCompany?.name || "AmAssurance"} all EV catalogs: `)}
+                onClick={() => handleSelectPrompt(`For ${activeCompany?.name || "AmAssurance"} all EV catalogs: `)}
                 className="px-2 py-0.5 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface-muted)] hover:bg-white text-[10px] whitespace-nowrap"
               >
                 ⚡ EV Scope
               </button>
               <button
                 type="button"
-                onClick={() => setInputQuery(`For ${activeCompany?.name || "AmAssurance"} Private Car ICE: `)}
+                onClick={() => handleSelectPrompt(`For ${activeCompany?.name || "AmAssurance"} Private Car ICE: `)}
                 className="px-2 py-0.5 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface-muted)] hover:bg-white text-[10px] whitespace-nowrap"
               >
                 🚗 ICE Scope
               </button>
               <button
                 type="button"
-                onClick={() => handleSendMessage("Check if there are duplicate sessions in the database")}
+                onClick={() => handleSelectPrompt("Check if there are duplicate sessions in the database")}
                 className="px-2 py-0.5 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface-muted)] hover:bg-white text-[10px] whitespace-nowrap"
               >
                 🔍 Check Duplicates
@@ -850,22 +1106,295 @@ export function GlobalAiCopilot() {
               className="flex items-center gap-2"
             >
               <Input
+                ref={inputRef}
                 value={inputQuery}
                 onChange={(e) => setInputQuery(e.target.value)}
                 placeholder={`Ask Copilot or instruct changes (e.g. 'How many catalogs for ${activeCompany?.name || "AmAssurance"}?', 'Check duplicate sessions')...`}
                 className="text-xs h-9 bg-white border-[var(--rl-border)] rounded-[var(--rl-radius-sm)]"
                 disabled={loading}
               />
-              <Button
-                type="submit"
-                disabled={!inputQuery.trim() || loading}
-                className="h-9 px-3 bg-[var(--rl-black)] hover:bg-[var(--rl-text-strong)] text-white shrink-0 rounded-[var(--rl-radius-sm)]"
-              >
-                <PaperPlaneRight size={15} weight="bold" />
-              </Button>
+              {loading ? (
+                <Button
+                  type="button"
+                  onClick={handleAbortRequest}
+                  className="h-9 px-3 bg-[var(--rl-red)] hover:bg-[var(--rl-red)]/90 text-white shrink-0 rounded-[var(--rl-radius-sm)] flex items-center gap-1.5"
+                  title="Stop query"
+                >
+                  <StopCircle size={15} weight="bold" />
+                  <span className="text-xs font-semibold">Stop</span>
+                </Button>
+              ) : (
+                <Button
+                  type="submit"
+                  disabled={!inputQuery.trim()}
+                  className="h-9 px-3 bg-[var(--rl-black)] hover:bg-[var(--rl-text-strong)] text-white shrink-0 rounded-[var(--rl-radius-sm)]"
+                >
+                  <PaperPlaneRight size={15} weight="bold" />
+                </Button>
+              )}
             </form>
           </div>
         </aside>
+      )}
+
+      {/* Interactive Duplicate Audit & Inspection Modal */}
+      {inspectingDuplicateGroups && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+          <Card className="w-full max-w-6xl bg-white shadow-2xl rounded-[var(--rl-radius-lg)] border border-[var(--rl-border)] overflow-hidden flex flex-col max-h-[92vh]">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-[var(--rl-border)] bg-[var(--rl-surface-muted)] flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-[var(--rl-black)] text-white flex items-center justify-center shrink-0">
+                  <ShieldCheck size={20} weight="fill" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-[var(--rl-text-strong)]">
+                      Duplicate Sessions Audit & Inspection
+                    </h3>
+                    <Badge variant="default" className="text-xs">
+                      {inspectingDuplicateGroups.length} Duplicate Sets
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-[var(--rl-text-muted)]">
+                    Review duplicate uploads, verify exact timestamps and quotation references, and choose sessions to clean.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setInspectingDuplicateGroups(null)}
+                className="text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] p-1.5 rounded cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Filter and Bulk Action Controls */}
+            <div className="p-3 border-b border-[var(--rl-border)] bg-gray-50 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2 flex-1 min-w-[240px] max-w-md">
+                <MagnifyingGlass size={14} className="text-[var(--rl-text-muted)]" />
+                <Input
+                  type="text"
+                  placeholder="Filter by plate, insurer, filename, or ref..."
+                  value={duplicateSearchQuery}
+                  onChange={(e) => setDuplicateSearchQuery(e.target.value)}
+                  className="h-8 text-xs bg-white"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    const allTrash = new Set<string>();
+                    for (const grp of inspectingDuplicateGroups) {
+                      for (const s of grp.trash_sessions) allTrash.add(s.session_id);
+                    }
+                    setSelectedTrashSessionIds(allTrash);
+                  }}
+                  className="h-7 text-[11px] px-2.5 bg-white border border-[var(--rl-border)] cursor-pointer"
+                >
+                  Select All Duplicates
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setSelectedTrashSessionIds(new Set())}
+                  className="h-7 text-[11px] px-2.5 bg-white border border-[var(--rl-border)] cursor-pointer"
+                >
+                  Deselect All
+                </Button>
+                <span className="text-xs font-semibold px-2.5 py-1 rounded bg-amber-100 text-amber-900 border border-amber-200">
+                  {selectedTrashSessionIds.size} selected for Trash
+                </span>
+              </div>
+            </div>
+
+            {/* Detailed Table */}
+            <div className="flex-1 overflow-y-auto p-4">
+              <div className="border border-[var(--rl-border)] rounded-[var(--rl-radius-md)] overflow-hidden">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-neutral-100 border-b border-[var(--rl-border)] text-[var(--rl-text-strong)] font-semibold text-[11px]">
+                      <th className="p-2.5 w-12 text-center">Trash?</th>
+                      <th className="p-2.5">Vehicle Plate & Insurer</th>
+                      <th className="p-2.5">Quotation Ref & ID</th>
+                      <th className="p-2.5">Upload Timestamp</th>
+                      <th className="p-2.5">File Name & Hash</th>
+                      <th className="p-2.5">Extracted Roadtax / Gross</th>
+                      <th className="p-2.5">Survivorship Status</th>
+                      <th className="p-2.5 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--rl-border)]">
+                    {filteredDuplicateGroups.map((grp, grpIdx) => {
+                      const allInGroup = [
+                        { ...grp.keep_session, is_keep: true, plate: grp.car_plate, company: grp.company, sha: grp.sha },
+                        ...grp.trash_sessions.map((t) => ({ ...t, is_keep: false, plate: grp.car_plate, company: grp.company, sha: grp.sha })),
+                      ];
+
+                      return allInGroup.map((item) => {
+                        const isTrash = !item.is_keep;
+                        const isChecked = selectedTrashSessionIds.has(item.session_id);
+                        const formattedDate = item.created_at
+                          ? new Date(item.created_at).toLocaleString("en-MY", {
+                              year: "numeric",
+                              month: "short",
+                              day: "2-digit",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              second: "2-digit",
+                            })
+                          : "Unknown Date";
+
+                        return (
+                          <tr
+                            key={`${grpIdx}_${item.session_id}`}
+                            className={`transition-colors ${
+                              item.is_keep
+                                ? "bg-emerald-50/50 hover:bg-emerald-50"
+                                : isChecked
+                                ? "bg-rose-50/40 hover:bg-rose-50/70"
+                                : "bg-white hover:bg-neutral-50"
+                            }`}
+                          >
+                            <td className="p-2.5 text-center">
+                              {isTrash ? (
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {
+                                    const next = new Set(selectedTrashSessionIds);
+                                    if (next.has(item.session_id)) next.delete(item.session_id);
+                                    else next.add(item.session_id);
+                                    setSelectedTrashSessionIds(next);
+                                  }}
+                                  className="rounded text-[var(--rl-black)] focus:ring-0 cursor-pointer"
+                                />
+                              ) : (
+                                <span className="text-xs text-emerald-700 font-bold" title="Keep this quotation">
+                                  ✓
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-2.5 font-medium">
+                              <span className="font-mono font-bold text-[var(--rl-text-strong)] mr-2">
+                                {grp.car_plate || "UNREGISTERED"}
+                              </span>
+                              <Badge variant="default" className="text-[10px] py-0 px-1.5 font-normal">
+                                {grp.company}
+                              </Badge>
+                            </td>
+                            <td className="p-2.5 font-mono text-[11px]">
+                              <span className="font-semibold text-[var(--rl-text-strong)]">
+                                {item.quotation_ref || `RL-${item.session_id.substring(0, 8).toUpperCase()}`}
+                              </span>
+                              <div className="text-[10px] text-[var(--rl-text-muted)] font-mono">
+                                #{item.session_id.substring(0, 8)}
+                              </div>
+                            </td>
+                            <td className="p-2.5 font-mono text-[11px] text-[var(--rl-text-strong)] whitespace-nowrap">
+                              {formattedDate}
+                            </td>
+                            <td className="p-2.5 max-w-[200px]">
+                              <div className="truncate font-medium text-[var(--rl-text-strong)] text-[11px]" title={item.filename}>
+                                {item.filename}
+                              </div>
+                              <div className="text-[10px] font-mono text-[var(--rl-text-muted)] truncate" title={item.sha}>
+                                SHA: {item.sha ? item.sha.substring(0, 10) : "N/A"}
+                              </div>
+                            </td>
+                            <td className="p-2.5 text-[11px]">
+                              {grp.roadtax && (
+                                <div className="text-[var(--rl-text-muted)]">
+                                  RT: <span className="font-semibold text-[var(--rl-text-strong)]">RM {grp.roadtax}</span>
+                                </div>
+                              )}
+                              {grp.gross_premium && (
+                                <div className="text-[var(--rl-text-muted)]">
+                                  Gross: <span className="font-semibold text-[var(--rl-text-strong)]">RM {grp.gross_premium}</span>
+                                </div>
+                              )}
+                              {!grp.roadtax && !grp.gross_premium && <span className="text-[var(--rl-text-muted)]">-</span>}
+                            </td>
+                            <td className="p-2.5">
+                              {item.is_keep ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300">
+                                  <CheckCircle size={12} weight="fill" />
+                                  KEEP (Survivor)
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-900 border border-rose-300">
+                                  <Trash size={11} />
+                                  DUPLICATE
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-2.5 text-right whitespace-nowrap">
+                              <a
+                                href={`/sessions/${item.session_id}/review`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:text-blue-800 hover:underline"
+                              >
+                                View Quote ↗
+                              </a>
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-[var(--rl-border)] bg-[var(--rl-surface-muted)] flex items-center justify-between">
+              <span className="text-xs text-[var(--rl-text-muted)]">
+                Soft-delete: sessions moved to Trash can be restored anytime from the Sessions list.
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setInspectingDuplicateGroups(null)}
+                  disabled={cleaningDuplicates}
+                >
+                  Close
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={async () => {
+                    await handleCleanDuplicates(Array.from(selectedTrashSessionIds));
+                    setInspectingDuplicateGroups(null);
+                  }}
+                  disabled={cleaningDuplicates || selectedTrashSessionIds.size === 0}
+                  className="bg-rose-600 hover:bg-rose-700 text-white font-semibold flex items-center gap-1.5 cursor-pointer"
+                >
+                  {cleaningDuplicates ? (
+                    <>
+                      <ArrowsClockwise size={14} className="animate-spin" />
+                      Moving to Trash...
+                    </>
+                  ) : (
+                    <>
+                      <Trash size={14} weight="bold" />
+                      Clean {selectedTrashSessionIds.size} Selected Duplicates
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
       )}
     </>
   );

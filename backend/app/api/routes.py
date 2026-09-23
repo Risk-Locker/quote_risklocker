@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from threading import Lock
@@ -68,6 +68,8 @@ from app.api.schemas import (
     TemplateUpdateRequest,
     TrashDeleteForeverRequest,
     BulkDeleteRequest,
+    BulkDownloadZipRequest,
+    BulkQuotationStatusRequest,
     UserCreateRequest,
     UserPasswordChangeRequest,
     UserUpdateRequest,
@@ -92,6 +94,10 @@ from app.api.schemas import (
     CopilotChatResponse,
     SessionCleanupRequest,
     ProfileCleanupRequest,
+    QuotationActivityCreateRequest,
+    QuotationStatusUpdateRequest,
+    BackfillConfirmRequest,
+    VehicleOwnershipResolutionRequest,
 )
 from app.auth.cookies import clear_auth_cookies, set_auth_cookies
 from app.auth.rbac import can_view_owner_record, require_role
@@ -139,6 +145,7 @@ from app.services.admin_service import (
     save_strategy_settings,
     serialize_special,
     serialize_template,
+    serialize_templates_batch,
     set_bulk_upload_limit,
     set_runner_fee_default,
     update_template,
@@ -205,6 +212,20 @@ from app.services.session_service import (
     get_session_filter_options,
     list_sessions,
     serialize_session,
+)
+from app.services.quotation_activity_service import (
+    backfill_existing_sessions,
+    get_calendar_activities,
+    get_insights_analytics,
+    log_quotation_activity,
+    preview_backfill_sessions,
+    update_quotation_status,
+)
+from app.services.client_dossier_service import (
+    get_client_dossiers,
+)
+from app.services.vehicle_tracking_service import (
+    get_vehicle_history,
 )
 from app.services.workspace_service import apply_workspace_patch, build_workspace_snapshot, template_selection_impact
 from app.services.workspace_service import workspace_capabilities
@@ -273,6 +294,7 @@ from app.services.business_setup_service import (
     list_business_asset_categories,
     batch_upload_business_assets,
     update_business_asset,
+    replace_business_asset_file,
     bulk_move_business_assets,
     delete_business_asset,
     bulk_delete_business_assets,
@@ -535,6 +557,7 @@ async def upload_batch(
 async def upload_one(
     file: UploadFile = File(...),
     enhanced_reading: bool = Form(False),
+    is_test: bool = Form(False),
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
     db: Session = Depends(get_db),
     settings: Settings = Depends(settings_dep),
@@ -547,6 +570,7 @@ async def upload_one(
         upload=file,
         idempotency_key=idempotency_key,
         enhanced_reading=enhanced_reading,
+        is_test=is_test,
     )
     return {
         "session_id": queued.session.id,
@@ -630,6 +654,7 @@ def sessions_list(
     user_id: str | None = None,
     status: str | None = None,
     sort_by: str = "vehicle",
+    type_filter: str | None = None,
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_db),
@@ -644,6 +669,7 @@ def sessions_list(
         staff_id=effective_user_id,
         status=status,
         sort_by=sort_by,
+        type_filter=type_filter,
         limit=min(max(limit, 1), 100),
         offset=max(offset, 0),
     )
@@ -667,6 +693,110 @@ def sessions_bulk_delete(payload: BulkDeleteRequest, db: Session = Depends(get_d
         except Exception:
             pass # Skip if not found or already deleted
     return {"deleted": True}
+
+
+@router.post("/sessions/bulk-status")
+def sessions_bulk_status(
+    payload: BulkQuotationStatusRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.services.quotation_activity_service import bulk_update_quotation_status
+
+    return bulk_update_quotation_status(
+        db=db,
+        session_ids=payload.session_ids,
+        status=payload.status,
+        miss_reason=payload.miss_reason,
+        won_premium=payload.won_premium,
+        notes=payload.notes,
+        user_id=user.id,
+        coverage_start_date=payload.coverage_start_date,
+        coverage_end_date=payload.coverage_end_date,
+    )
+
+
+@router.post("/sessions/bulk-download-zip")
+def sessions_bulk_download_zip(
+    payload: BulkDownloadZipRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> Response:
+    import io
+    import re
+    import zipfile
+    from app.models.tables import GeneratedPdfVersion, Session as SessionModel, UploadedFile
+
+    if not payload.session_ids:
+        raise AppError("No sessions provided for bulk download.", 400)
+
+    buf = io.BytesIO()
+    file_count = 0
+    used_filenames: set[str] = set()
+
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for sid in payload.session_ids:
+            sess = db.get(SessionModel, sid)
+            if not sess or sess.status == "trash":
+                continue
+
+            pdf_bytes: bytes | None = None
+            gen_version = None
+            if sess.draft_id:
+                gen_version = db.scalar(
+                    select(GeneratedPdfVersion)
+                    .where(GeneratedPdfVersion.draft_id == sess.draft_id)
+                    .order_by(GeneratedPdfVersion.version_number.desc())
+                )
+
+            if gen_version:
+                try:
+                    pdf_bytes = load_pdf_bytes(gen_version, settings)
+                except Exception:
+                    pdf_bytes = None
+
+            if not pdf_bytes and sess.uploaded_file_id:
+                up_file = db.get(UploadedFile, sess.uploaded_file_id)
+                if up_file:
+                    try:
+                        pdf_bytes = load_pdf_bytes(up_file, settings)
+                    except Exception:
+                        pdf_bytes = None
+
+            if not pdf_bytes:
+                continue
+
+            fields = sess.draft.fields if sess.draft and sess.draft.fields else {}
+            plate = (fields.get("vehicle_no", {}).get("value") or "NOVIN").strip().upper().replace(" ", "")
+            company = (sess.detected_company or fields.get("insurance_company", {}).get("value") or "Underwriter").strip().replace(" ", "_")
+            qref = (sess.quotation_ref or fields.get("quotation_no", {}).get("value") or sess.id[:8]).strip()
+
+            clean_name = re.sub(r"[^A-Za-z0-9_\-]", "_", f"{plate}_{company}_{qref}")[:60]
+            filename = f"{clean_name}.pdf"
+
+            idx = 2
+            while filename in used_filenames:
+                filename = f"{clean_name}_{idx}.pdf"
+                idx += 1
+            used_filenames.add(filename)
+
+            zf.writestr(filename, pdf_bytes)
+            file_count += 1
+
+    if file_count == 0:
+        raise AppError("None of the selected sessions have accessible PDF documents.", 404)
+
+    buf.seek(0)
+    zip_bytes = buf.getvalue()
+    timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    download_name = f"Risklocker_Quotations_{timestamp_str}.zip"
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{download_name}"',
+        "Content-Length": str(len(zip_bytes)),
+    }
+    return Response(content=zip_bytes, media_type="application/zip", headers=headers)
 
 
 @router.get("/sessions/{session_id}")
@@ -696,9 +826,44 @@ def session_delete(
             pass
 
     if session.uploaded_file_id:
-        move_to_trash(db, settings, user, session.uploaded_file_id)
+        try:
+            move_to_trash(db, settings, user, session.uploaded_file_id)
+        except Exception:
+            pass
+
+    session.status = "trash"
+    db.commit()
     return {"deleted": True, "session_id": session_id}
 
+
+@router.get("/sessions/{session_id}/pdf")
+def session_pdf(
+    session_id: str,
+    download: bool = Query(default=False),
+    range_header: str | None = Header(default=None, alias="Range"),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> Response:
+    sess = get_session(db, session_id)
+    if not can_view_owner_record(db, user, sess.owner_id):
+        raise AppError("Session not found.", 404)
+
+    if sess.draft_id:
+        gen_version = db.scalar(
+            select(GeneratedPdfVersion)
+            .where(GeneratedPdfVersion.draft_id == sess.draft_id)
+            .order_by(GeneratedPdfVersion.version_number.desc())
+        )
+        if gen_version:
+            return _pdf_response(load_pdf_bytes(gen_version, settings), gen_version.filename, range_header, download)
+
+    if sess.uploaded_file_id:
+        uploaded = db.get(UploadedFile, sess.uploaded_file_id)
+        if uploaded:
+            return _pdf_response(load_pdf_bytes(uploaded, settings), uploaded.original_filename, range_header, download)
+
+    raise AppError("No PDF document available for this session.", 404)
 
 
 @router.get("/sessions/{session_id}/workspace")
@@ -2359,6 +2524,29 @@ def business_asset_update(
     }
 
 
+@router.post("/business/assets/{asset_id}/replace-file")
+async def business_asset_replace_file(
+    asset_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    data = await file.read()
+    try:
+        updated = replace_business_asset_file(
+            db,
+            settings,
+            user,
+            asset_id,
+            filename=file.filename or "replacement.png",
+            data=data,
+        )
+    except StorageError as exc:
+        raise AppError("Asset storage is unavailable. Retry without changing the file.", 503) from exc
+    return {"asset": updated}
+
+
 @router.delete("/business/assets/{asset_id}")
 def business_asset_delete(
     asset_id: str,
@@ -2759,12 +2947,12 @@ def business_publish_template(
 @router.get("/admin/templates")
 def admin_templates(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
-    templates = [
-        serialize_template(item, db)
-        for item in db.scalars(
+    items = list(
+        db.scalars(
             select(OutputTemplateConfig).where(OutputTemplateConfig.deleted_at.is_(None))
         ).all()
-    ]
+    )
+    templates = serialize_templates_batch(db, items)
     templates.sort(key=lambda item: (not item.get("is_default", False), item.get("name", "").casefold()))
     return {"templates": templates}
 
@@ -3527,3 +3715,211 @@ def preview_html(
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+# --- Insights & Analytics & Hit/Miss Endpoints ---
+
+@router.get("/insights/calendar")
+def insights_calendar(
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    search: str | None = Query(None),
+    status: str | None = Query(None),
+    sent_only: bool = Query(False),
+    vehicle_no: str | None = Query(None),
+    limit: int = Query(500, ge=1, le=2000),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return get_calendar_activities(
+        db=db,
+        date_from=date_from,
+        date_to=date_to,
+        search=search,
+        status=status,
+        sent_only=sent_only,
+        vehicle_no=vehicle_no,
+        limit=limit,
+    )
+
+
+@router.post("/insights/sessions/{session_id}/activity")
+def create_session_activity(
+    session_id: str,
+    payload: QuotationActivityCreateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    session = get_session(db, session_id)
+    if getattr(session, "is_test", False):
+        return {
+            "id": "test",
+            "session_id": session.id,
+            "action_type": payload.action_type,
+            "sent_to_client": payload.sent_to_client,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    activity = log_quotation_activity(
+        db=db,
+        session_id=session.id,
+        action_type=payload.action_type,
+        user_id=user.id,
+        sent_to_client=payload.sent_to_client,
+        summary=payload.summary or "",
+        addons_snapshot=payload.addons_snapshot,
+        version_number=payload.version_number,
+        status=payload.status or session.quotation_status or "pending",
+        won_premium=payload.won_premium,
+        miss_reason=payload.miss_reason,
+        notes=payload.notes,
+    )
+    db.commit()
+    if not activity:
+        return {
+            "id": "test",
+            "session_id": session.id,
+            "action_type": payload.action_type,
+            "sent_to_client": payload.sent_to_client,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    return {
+        "id": activity.id,
+        "session_id": activity.session_id,
+        "action_type": activity.action_type,
+        "sent_to_client": activity.sent_to_client,
+        "timestamp": activity.timestamp.isoformat() if activity.timestamp else None,
+    }
+
+
+@router.post("/insights/sessions/{session_id}/status")
+def update_session_status(
+    session_id: str,
+    payload: QuotationStatusUpdateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    get_session(db, session_id)
+    result = update_quotation_status(
+        db=db,
+        session_id=session_id,
+        status=payload.status,
+        miss_reason=payload.miss_reason,
+        won_premium=payload.won_premium,
+        notes=payload.notes,
+        user_id=user.id,
+        coverage_start_date=payload.coverage_start_date,
+        coverage_end_date=payload.coverage_end_date,
+    )
+    db.commit()
+    return result
+
+
+@router.get("/insights/analytics")
+def insights_analytics(
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return get_insights_analytics(db=db, date_from=date_from, date_to=date_to)
+
+
+@router.get("/insights/vehicles/{vehicle_no}/history")
+def vehicle_history(
+    vehicle_no: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return get_vehicle_history(db=db, vehicle_no=vehicle_no)
+
+
+@router.get("/insights/renewals")
+def upcoming_renewals(
+    days_ahead: int = Query(90, ge=1, le=365),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.services.vehicle_tracking_service import get_upcoming_renewals
+    renewals = get_upcoming_renewals(db=db, days_ahead=days_ahead)
+    return {"renewals": renewals, "total": len(renewals)}
+
+
+@router.get("/sessions/{session_id}/ownership-conflict")
+def get_session_ownership_conflict(
+    session_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.services.vehicle_tracking_service import check_vehicle_ownership_conflict
+    return check_vehicle_ownership_conflict(db=db, session_id=session_id)
+
+
+@router.post("/sessions/{session_id}/resolve-ownership")
+def post_resolve_session_ownership(
+    session_id: str,
+    payload: VehicleOwnershipResolutionRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.services.vehicle_tracking_service import resolve_vehicle_ownership
+    return resolve_vehicle_ownership(
+        db=db,
+        session_id=session_id,
+        resolution_type=payload.resolution_type,
+        user_id=user.id,
+        notes=payload.notes,
+    )
+
+
+@router.post("/insights/backfill")
+def run_insights_backfill(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    res = backfill_existing_sessions(db)
+    db.commit()
+    return res
+
+
+@router.get("/insights/backfill/preview")
+def preview_insights_backfill(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return preview_backfill_sessions(db=db)
+
+
+@router.post("/insights/backfill/confirm")
+def confirm_insights_backfill(
+    payload: BackfillConfirmRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    res = backfill_existing_sessions(
+        db=db,
+        session_ids=payload.session_ids if payload.session_ids else None,
+        manual_overrides=payload.manual_overrides,
+    )
+    db.commit()
+    return res
+
+
+@router.get("/insights/clients")
+def insights_clients(
+    search: str | None = Query(None),
+    status: str | None = Query(None),
+    client_type: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    return get_client_dossiers(
+        db=db,
+        search=search,
+        status=status,
+        client_type=client_type,
+        page=page,
+        page_size=page_size,
+    )
+

@@ -303,10 +303,22 @@ def _catalog_overview(db, draft: QuotationDraft) -> dict:
 
 def _field_summary(draft: QuotationDraft, session_ref: str | None = None) -> dict[str, dict]:
     output: dict[str, dict] = {}
+    rec_candidates: dict = {}
+    if draft.uploaded_file and getattr(draft.uploaded_file, "extraction_record", None):
+        rec_candidates = getattr(draft.uploaded_file.extraction_record, "candidates", {}) or {}
+
     for name, value in (draft.fields or {}).items():
         field = value if isinstance(value, dict) else {"value": value}
+        det_val = field.get("detected_value")
+        if det_val is None:
+            cands = rec_candidates.get(name) or []
+            if cands and isinstance(cands, list) and isinstance(cands[0], dict):
+                det_val = cands[0].get("value")
+            if det_val is None:
+                det_val = field.get("value")
         output[name] = {
             "value": field.get("value"),
+            "detected_value": det_val,
             "status": field.get("status", "check_needed"),
             "message": field.get("message", ""),
             "decision": (draft.scalar_decisions or {}).get(name),
@@ -315,6 +327,7 @@ def _field_summary(draft: QuotationDraft, session_ref: str | None = None) -> dic
     if (not current_qref or not str(current_qref).startswith("RL")) and session_ref and session_ref.startswith("RL"):
         output["quotation_reference"] = {
             "value": session_ref,
+            "detected_value": session_ref,
             "status": "ready",
             "message": "",
             "decision": None,
@@ -546,7 +559,8 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
         else []
     )
     extras = build_extras(selections, concepts, offerings)
-    adjusted_total = adjusted_total_text(draft.fields or {}, extras)
+    round_tot = bool((draft.display_options or {}).get("round_total", False))
+    adjusted_total = adjusted_total_text(draft.fields or {}, extras, round_total=round_tot)
     
     # Extract car model string safely
     raw_car_model = (draft.fields or {}).get("car_model")
@@ -571,6 +585,7 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
         "uploaded_file_id": draft.uploaded_file_id,
         "revision": draft.revision,
         "status": draft.status,
+        "is_test": bool(getattr(session, "is_test", False)),
         "display_options": draft.display_options or {},
         "quotation_ref": session.quotation_ref,
         "fields": _field_summary(draft, session.quotation_ref),
@@ -629,7 +644,15 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
         ],
         "extracted_benefits_section": _workspace_extracted_benefits_section(db, draft, decisions, selections),
         "capabilities": workspace_capabilities(user),
+        "quotation_tracking": {
+            "status": session.quotation_status or "pending",
+            "closed_at": session.closed_at.isoformat() if session.closed_at else None,
+            "miss_reason": session.miss_reason,
+            "vehicle_no": session.tracked_vehicle.vehicle_no if getattr(session, "tracked_vehicle", None) else None,
+            "owner_change_alert": (draft.display_options or {}).get("owner_change_alert"),
+        },
     }
+
 
 
 def _workspace_extracted_benefits_section(
@@ -788,6 +811,23 @@ def _workspace_extracted_benefits_section(
             "show_coverage": show_cov,
             "source": "gemini_vision" if "gemini" in str(line.get("line_id", "")) else "native_pdf",
         })
+
+    calc_extras_sum = 0.0
+    for e in extras_list:
+        c_str = re.sub(r"[^0-9.]", "", str(e.get("cost") or ""))
+        if c_str:
+            try:
+                calc_extras_sum += float(c_str)
+            except ValueError:
+                pass
+
+    if calc_extras_sum > 0:
+        try:
+            cur_tot = float(re.sub(r"[^0-9.]", "", total_opt_cover)) if total_opt_cover else 0.0
+            if cur_tot == 0.0 or cur_tot > (calc_extras_sum * 5.0):
+                total_opt_cover = f"{calc_extras_sum:,.2f}"
+        except Exception:
+            total_opt_cover = f"{calc_extras_sum:,.2f}"
 
     return {
         "detected_package": {
@@ -1214,6 +1254,8 @@ def _apply_scalar_decision(db, draft: QuotationDraft, user, operation: dict) -> 
     fields = draft.fields
     field = deepcopy(fields[field_name] if isinstance(fields[field_name], dict) else {"value": fields[field_name]})
     original = field.get("value")
+    if "detected_value" not in field or field.get("detected_value") is None:
+        field["detected_value"] = original
     if decision == "edit":
         if "value" not in operation:
             raise AppError("Edited fields require a value.", 422)
@@ -1246,7 +1288,7 @@ def _apply_scalar_decision(db, draft: QuotationDraft, user, operation: dict) -> 
     if decision == "edit" and field_name in PIN_SENSITIVE_FIELDS:
         _reconcile_catalog_pin(db, draft, changed_field=field_name)
     if field_name in TOTAL_SOURCES:
-        _recompute_total(fields, decisions, user)
+        _recompute_total(fields, decisions, user, draft=draft)
     return f"fields.{field_name}"
 
 
@@ -1273,7 +1315,7 @@ def _normalize_edited_value(field_name: str, raw) -> str | None:
     return str(raw)
 
 
-def _recompute_total(fields: dict, decisions: dict, user) -> None:
+def _recompute_total(fields: dict, decisions: dict, user, draft: QuotationDraft | None = None) -> None:
     sources = (
         ("premium", "coverage_premium", "basic_premium_vehicle"),
         ("roadtax", "road_tax_amount"),
@@ -1305,6 +1347,9 @@ def _recompute_total(fields: dict, decisions: dict, user) -> None:
             return
         amounts.append(found_val)
     total = sum(amounts, Decimal("0"))
+    round_tot = bool((getattr(draft, "display_options", None) or {}).get("round_total", False)) if draft else False
+    if round_tot:
+        total = Decimal(int(total.quantize(Decimal("1"), rounding="ROUND_HALF_UP")))
     fields["total_amount"] = {"value": f"{total:.2f}", "status": "ready", "message": ""}
     decisions["total_amount"] = {
         "decision": "edit",
@@ -1713,7 +1758,9 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
             raise AppError("The quotation-specific benefit value is invalid.", 422) from exc
 
     price = operation.get("price")
-    if price is None and offering.optional_price:
+    if "price" in operation and price is None:
+        price = None
+    elif price is None and offering.optional_price:
         price = deepcopy(offering.optional_price)
     elif price is not None:
         try:
@@ -1736,6 +1783,19 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
     selected.cost_status = cost_status
     selected.typed_value_override = typed_override
     selected.price = price
+    if "label" in operation or "label_override" in operation:
+        raw_lbl = operation.get("label") if "label" in operation else operation.get("label_override")
+        if raw_lbl:
+            selected.label_override = str(raw_lbl).strip()
+    if "description" in operation or "description_override" in operation:
+        raw_desc = operation.get("description") if "description" in operation else operation.get("description_override")
+        if raw_desc:
+            clean_desc = str(raw_desc).strip()
+            curr_typed = dict(selected.typed_value_override or {})
+            curr_typed["description"] = clean_desc
+            if "type" not in curr_typed:
+                curr_typed["type"] = "custom"
+            selected.typed_value_override = curr_typed
     selected.selected_by = user.id
     if desired_state == ReviewedBenefitState.CURRENT.value and current and current[0].id != selected.id:
         current[0].state = ReviewedBenefitState.SUPERSEDED.value
@@ -1784,13 +1844,34 @@ def _apply_benefit_update(db, draft: QuotationDraft, user, operation: dict) -> s
                 selection.price = MoneyAmount.model_validate(raw_price).model_dump(mode="json", exclude_none=True)
             except Exception:
                 selection.price = raw_price if isinstance(raw_price, dict) else None
-    if "typed_value" in operation:
-        raw = operation.get("typed_value")
+    if "label" in operation or "label_override" in operation:
+        raw_label = operation.get("label") if "label" in operation else operation.get("label_override")
+        clean_lbl = str(raw_label or "").strip()
+        selection.label_override = clean_lbl or None
+    if "description" in operation or "description_override" in operation:
+        raw_desc = operation.get("description") if "description" in operation else operation.get("description_override")
+        clean_desc = str(raw_desc or "").strip()
+        curr_typed = dict(selection.typed_value_override or {})
+        if clean_desc:
+            curr_typed["description"] = clean_desc
+            if "type" not in curr_typed:
+                curr_typed["type"] = "custom"
+        else:
+            curr_typed.pop("description", None)
+        selection.typed_value_override = curr_typed or None
+    if "typed_value" in operation or "typed_value_override" in operation:
+        raw = operation.get("typed_value") if "typed_value" in operation else operation.get("typed_value_override")
         if raw is None:
-            selection.typed_value_override = None
+            if selection.typed_value_override and "description" in selection.typed_value_override:
+                selection.typed_value_override = {"type": "custom", "description": selection.typed_value_override["description"]}
+            else:
+                selection.typed_value_override = None
         else:
             try:
-                selection.typed_value_override = BenefitValue.model_validate(raw).model_dump(mode="json", exclude_none=True)
+                validated = BenefitValue.model_validate(raw).model_dump(mode="json", exclude_none=True)
+                if selection.typed_value_override and "description" in selection.typed_value_override and "description" not in validated:
+                    validated["description"] = selection.typed_value_override["description"]
+                selection.typed_value_override = validated
             except ValidationError as exc:
                 raise AppError("The quotation-specific benefit value is invalid.", 422) from exc
     selection.selected_by = user.id
@@ -2089,6 +2170,9 @@ def apply_workspace_patch(
                 if isinstance(options, dict):
                     draft.display_options = {**(draft.display_options or {}), **options}
                     changed_paths.append("display_options")
+                    if "round_total" in options:
+                        _recompute_total(draft.fields or {}, draft.scalar_decisions or {}, user, draft=draft)
+                        changed_paths.append("fields.total_amount")
             elif operation_name == "source_disposition":
                 changed_paths.append(_apply_source_disposition(db, draft, user, operation))
             elif operation_name == "select_catalog_offering":
@@ -2152,6 +2236,44 @@ def apply_workspace_patch(
         if session:
             session.last_edited_by_id = user.id
             session.last_edited_at = _utcnow()
+            if not getattr(session, "is_test", False):
+                from app.services.quotation_activity_service import log_quotation_activity
+                modified_topics = []
+                for path in changed_paths:
+                    if path.startswith("fields."):
+                        field_name = path.replace("fields.", "")
+                        if field_name in ("vehicle_no", "car_brand", "car_model"):
+                            modified_topics.append("vehicle details")
+                        elif field_name in ("customer_name", "ic_or_brn"):
+                            modified_topics.append("client info")
+                        elif field_name in ("total_amount", "premium", "gross_premium", "ncd_percent", "roadtax"):
+                            modified_topics.append("pricing/premium")
+                        elif field_name in ("insurance_company", "coverage_type"):
+                            modified_topics.append("insurer/coverage")
+                        else:
+                            modified_topics.append("policy fields")
+                    elif path.startswith("benefits"):
+                        modified_topics.append("benefits & add-ons")
+                    elif "options" in path:
+                        modified_topics.append("display options")
+                    elif "layout" in path or "template" in path:
+                        modified_topics.append("template layout")
+
+                unique_topics = list(dict.fromkeys(modified_topics))
+                if unique_topics:
+                    save_desc = f"Saved changes: {', '.join(unique_topics[:3])}"
+                else:
+                    save_desc = "Saved quotation draft updates"
+
+                log_quotation_activity(
+                    db=db,
+                    session_id=session.id,
+                    action_type="draft_saved",
+                    user_id=user.id,
+                    sent_to_client=False,
+                    summary=save_desc,
+                    status=session.quotation_status or "pending",
+                )
         db.commit()
         db.refresh(draft)
     except AppError:

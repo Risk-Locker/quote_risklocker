@@ -83,3 +83,26 @@ def test_canvas_renderer_uses_fields():
 
     assert "ABC1234" in html
     assert "Comprehensive" in html
+
+
+def test_sum_insured_rejects_loading_trailer_and_small_values():
+    # AmAssurance multi-column line where Agreed Value is next to trailer/loading amount 446.85
+    text = "Agreed Value RM 446.85 : Basic Premium (Trailer) NCD 25.00% : Loading Basic Premium (Vehicle)"
+    candidates = find_candidates(text, [{"page": 1, "text": text}])
+    # Should not produce sum_insured or agreed_value candidate from trailer loading
+    sum_cands = candidates.get("sum_insured", [])
+    assert not any("446.85" in str(c.value) for c in sum_cands)
+
+
+def test_draft_mapper_sets_detected_value_and_prefers_realistic_sum_insured():
+    from app.extraction.types import CandidateValue
+
+    cands = {
+        "coverage_amount": [CandidateValue(field="coverage_amount", value="71,000.00", score=0.99, source_method="gemini_multimodal")],
+        "sum_insured": [CandidateValue(field="sum_insured", value="446.85", score=0.78, source_method="label_nearby")],
+    }
+    fields, _, _ = build_draft(cands)
+    # Realistic 71,000.00 should win over 446.85
+    assert fields["sum_insured"]["value"] == "71,000.00"
+    # detected_value must be set
+    assert fields["sum_insured"]["detected_value"] == "71,000.00"

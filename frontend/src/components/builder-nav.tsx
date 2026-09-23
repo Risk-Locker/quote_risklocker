@@ -16,7 +16,7 @@ const items: Array<{ href: Route; label: string }> = [
 export function BuilderNav() {
   const pathname = usePathname();
   return (
-    <nav className="flex max-w-full gap-6 overflow-x-auto border-b border-[var(--rl-border)]" aria-label="Builder sections">
+    <nav className="flex max-w-full gap-6 overflow-x-auto border-b border-[var(--rl-border)] min-h-[41px] shrink-0" aria-label="Builder sections">
       {items.map((item) => {
         const isTemplateItem = item.href.startsWith("/builder/templates");
         const active = isTemplateItem

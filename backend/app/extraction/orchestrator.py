@@ -84,18 +84,22 @@ class ExtractionOrchestrator:
                     if key in {"detected_benefits", "detected_package_name"} or val is None or str(val).strip() == "":
                         continue
                     clean_val = str(val).strip()
-                    gemini_candidate = CandidateValue(
-                        field=key,
-                        value=clean_val,
-                        source_method="gemini_vision",
-                        score=0.99,
-                        page=1,
-                        evidence=f"Gemini multimodal extraction: {clean_val}",
-                    )
-                    if key in candidates:
-                        candidates[key].insert(0, gemini_candidate)
-                    else:
-                        candidates[key] = [gemini_candidate]
+                    keys_to_populate = [key]
+                    if key in {"coverage_amount", "sum_insured"}:
+                        keys_to_populate = ["coverage_amount", "sum_insured", "market_value", "agreed_value"]
+                    for target_key in keys_to_populate:
+                        gemini_candidate = CandidateValue(
+                            field=target_key,
+                            value=clean_val,
+                            source_method="gemini_vision",
+                            score=0.99,
+                            page=1,
+                            evidence=f"Gemini multimodal extraction: {clean_val}",
+                        )
+                        if target_key in candidates:
+                            candidates[target_key].insert(0, gemini_candidate)
+                        else:
+                            candidates[target_key] = [gemini_candidate]
 
                 # If package detected, record as candidate
                 pkg_name = str(gemini_res.get("detected_package_name") or "").strip()

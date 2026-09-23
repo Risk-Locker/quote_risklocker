@@ -721,3 +721,61 @@ def test_build_workspace_snapshot_preserves_existing_draft_and_never_wipes():
     assert any(s.id == "sel-preserve-1" for s in remaining)
 
 
+def test_benefit_update_supports_label_description_and_null_price():
+    """Verify benefit_update operation persists label_override, custom description, and explicit null price."""
+    values = list(objects())
+    draft = next(item for item in values if isinstance(item, QuotationDraft))
+    selection = DraftBenefitSelection(
+        id="sel-edit-test-1",
+        draft_id=draft.id,
+        selection_key="catalog:test-offering-1",
+        item_kind="catalog",
+        state="available_addon",
+        cost_status="paid",
+        price={"amount": 20.0, "currency": "MYR"},
+        evidence_snapshot={},
+        sort_order=0,
+    )
+    values.append(selection)
+    db = FakeDb(values)
+
+    # 1. Update title and description
+    patch_res = apply_workspace_patch(
+        db,
+        user(),
+        draft.id,
+        base_revision=draft.revision,
+        operations=[
+            {
+                "op": "benefit_update",
+                "selection_id": "sel-edit-test-1",
+                "label": "Custom LLP Protection",
+                "description": "Custom protection for all vehicle passengers.",
+            }
+        ],
+    )
+    assert patch_res["revision"] == draft.revision
+    assert selection.label_override == "Custom LLP Protection"
+    assert selection.typed_value_override is not None
+    assert selection.typed_value_override.get("description") == "Custom protection for all vehicle passengers."
+
+    # 2. Update price to null (FOC)
+    patch_res2 = apply_workspace_patch(
+        db,
+        user(),
+        draft.id,
+        base_revision=draft.revision,
+        operations=[
+            {
+                "op": "benefit_update",
+                "selection_id": "sel-edit-test-1",
+                "price": None,
+                "cost_status": "foc",
+            }
+        ],
+    )
+    assert patch_res2["revision"] == draft.revision
+    assert selection.price is None
+    assert selection.cost_status == "foc"
+
+

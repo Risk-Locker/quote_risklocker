@@ -192,20 +192,41 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
     fields["cover_period"]["status"] = "ready" if (start_dmy and end_dmy and date_ok) else ("check_needed" if not date_ok else "ready")
 
     # Sync Sum Insured / Coverage Amount / Market Value / Agreed Value aliases
-    coverage_val = (
-        fields.get("coverage_amount", {}).get("value")
-        or fields.get("sum_insured", {}).get("value")
-        or fields.get("market_value", {}).get("value")
-        or fields.get("agreed_value", {}).get("value")
-    )
-    if coverage_val:
+    coverage_candidates: list[str] = []
+    for alias in ("coverage_amount", "sum_insured", "market_value", "agreed_value"):
+        val = fields.get(alias, {}).get("value")
+        if val and str(val).strip():
+            coverage_candidates.append(str(val).strip())
+
+    def _parse_money_flt(v: str) -> float:
+        clean = re.sub(r"[^\d.]", "", str(v))
+        try:
+            return float(clean) if clean else 0.0
+        except ValueError:
+            return 0.0
+
+    best_coverage_val: str | None = None
+    if coverage_candidates:
+        # Prioritize realistic vehicle sum insured (>= 1,000 RM) over stray small amounts (< 1,000 RM)
+        realistic = [v for v in coverage_candidates if _parse_money_flt(v) >= 1000.0]
+        if realistic:
+            best_coverage_val = realistic[0]
+        else:
+            best_coverage_val = coverage_candidates[0]
+
+    if best_coverage_val:
         for alias in ("coverage_amount", "sum_insured", "market_value", "agreed_value"):
             if alias in fields:
-                if not fields[alias].get("value"):
-                    fields[alias]["value"] = str(coverage_val)
+                existing = fields[alias].get("value")
+                # Overwrite if empty or if existing is unrealistically small (< 1000) while best is realistic (>= 1000)
+                if not existing or (_parse_money_flt(str(existing)) < 1000.0 and _parse_money_flt(best_coverage_val) >= 1000.0):
+                    fields[alias]["value"] = str(best_coverage_val)
+                    fields[alias]["detected_value"] = str(best_coverage_val)
                     fields[alias]["status"] = "ready"
                     fields[alias]["warnings"] = []
                     fields[alias]["message"] = ""
+                if "detected_value" not in fields[alias] or not fields[alias]["detected_value"]:
+                    fields[alias]["detected_value"] = fields[alias].get("value")
 
     # Ensure excess_amount defaults to 0.00 if missing or empty
     if "excess_amount" not in fields or not str(fields.get("excess_amount", {}).get("value") or "").strip():
@@ -487,6 +508,10 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
                 pass
     except Exception:
         pass
+
+    for f_name, f_data in fields.items():
+        if isinstance(f_data, dict) and ("detected_value" not in f_data or f_data.get("detected_value") is None):
+            f_data["detected_value"] = f_data.get("value")
 
     check_count = sum(1 for field in fields.values() if field.get("status") == "check_needed")
     if check_count:

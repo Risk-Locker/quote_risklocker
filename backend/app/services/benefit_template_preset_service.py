@@ -6,6 +6,7 @@ import time
 from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.errors import AppError
 from app.models.tables import BenefitCardPreset, utcnow
@@ -358,9 +359,11 @@ def save_benefit_card_preset(
     if "description" in payload and payload["description"] is not None:
         preset.description = str(payload["description"]).strip()
 
-    # Merge config: allow payload to pass config dict directly or flat styling fields
+    # Merge config: start with existing preset config, apply nested payload['config'] if present,
+    # and then allow top-level payload styling fields to take highest precedence.
     current_config = dict(preset.config or {})
-    incoming_config = payload.get("config") if isinstance(payload.get("config"), dict) else payload
+    if isinstance(payload.get("config"), dict):
+        current_config.update(payload["config"])
 
     # Extract all styling fields into config
     style_keys = [
@@ -402,10 +405,11 @@ def save_benefit_card_preset(
     ]
 
     for key in style_keys:
-        if key in incoming_config:
-            current_config[key] = incoming_config[key]
+        if key in payload:
+            current_config[key] = payload[key]
 
     preset.config = current_config
+    flag_modified(preset, "config")
     preset.updated_at = utcnow()
     db.commit()
     db.refresh(preset)
@@ -428,9 +432,11 @@ def create_custom_benefit_card_preset(
     short_name = str(payload.get("shortName") or payload.get("short_name") or name[:16]).strip()
     description = str(payload.get("description", "")).strip()
 
-    # Extract styling into config
+    # Extract styling into config: nested config first, then top-level fields
     config: dict[str, Any] = {}
-    incoming = payload.get("config") if isinstance(payload.get("config"), dict) else payload
+    if isinstance(payload.get("config"), dict):
+        config.update(payload["config"])
+
     style_keys = [
         "shape", "layout", "borderWidth", "borderStyle", "elevation", "uniformHeight",
         "iconSize", "imageFit", "iconPadShape", "titleSize", "titleWeight", "titleColor",
@@ -441,8 +447,8 @@ def create_custom_benefit_card_preset(
         "cardStyle", "rowHeight", "sectionVisibility",
     ]
     for key in style_keys:
-        if key in incoming:
-            config[key] = incoming[key]
+        if key in payload:
+            config[key] = payload[key]
 
     preset = BenefitCardPreset(
         id=preset_id,
@@ -466,8 +472,8 @@ def set_default_benefit_card_preset(db: Session, preset_id: str) -> BenefitCardP
     # Invalidate all existing defaults
     db.execute(
         update(BenefitCardPreset)
-        .where(BenefitCardPreset.is_default == True)  # noqa: E712
-        .values(is_default=False, updated_at=utcnow())
+        .where(BenefitCardPreset.is_default.is_(True))
+        .values(is_default=False)
     )
 
     target.is_default = True
@@ -491,6 +497,7 @@ def reset_benefit_card_preset(db: Session, preset_id: str) -> BenefitCardPreset:
     preset.short_name = factory["short_name"]
     preset.description = factory["description"]
     preset.config = dict(factory["config"])
+    flag_modified(preset, "config")
     preset.updated_at = utcnow()
     db.commit()
     db.refresh(preset)

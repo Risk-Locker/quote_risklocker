@@ -8,16 +8,21 @@ import {
   CaretDown,
   CaretUp,
   Check,
+  CheckCircle,
   Clock,
   Copy,
+  DownloadSimple,
   FilePdf,
   MagnifyingGlass,
   NotePencil,
   PencilSimpleLine,
   Sparkle,
+  Table,
+  Target,
   Trash,
   User,
   X,
+  XCircle,
 } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
 import { Card } from "@/components/ui/card";
@@ -27,7 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog } from "@/components/ui/dialog";
-import { api } from "@/lib/api";
+import { api, apiRaw } from "@/lib/api";
 import { useToast } from "@/components/ui/toast";
 
 const PAGE_SIZE = 50;
@@ -45,6 +50,10 @@ type Session = {
   vehicle_model?: string | null;
   total_premium?: string | null;
   quotation_ref?: string | null;
+  quotation_status?: string | null;
+  miss_reason?: string | null;
+  coverage_start_date?: string | null;
+  coverage_end_date?: string | null;
   created_at: string;
   updated_at: string;
   created_by?: string;
@@ -53,6 +62,7 @@ type Session = {
   last_edited_by_email?: string | null;
   last_edited_at?: string | null;
   is_edited?: boolean;
+  is_test?: boolean;
 };
 
 type UserOption = {
@@ -158,6 +168,7 @@ export default function SessionsPage() {
   const [company, setCompany] = useState("");
   const [userId, setUserId] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
   const [sortBy, setSortBy] = useState("date_desc");
 
   // States
@@ -173,6 +184,19 @@ export default function SessionsPage() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [expandedVehicles, setExpandedVehicles] = useState<Set<string>>(new Set());
   const { toast } = useToast();
+
+  // Fleet & Bulk Action States
+  const [downloadingZip, setDownloadingZip] = useState(false);
+  const [batchStatusOpen, setBatchStatusOpen] = useState(false);
+  const [batchStatusTarget, setBatchStatusTarget] = useState<"hit" | "miss">("hit");
+  const [batchCoverageStart, setBatchCoverageStart] = useState(() => new Date().toISOString().slice(0, 10));
+  const [batchCoverageEnd, setBatchCoverageEnd] = useState(() => {
+    const nextYear = new Date();
+    nextYear.setFullYear(nextYear.getFullYear() + 1);
+    return nextYear.toISOString().slice(0, 10);
+  });
+  const [batchMissReason, setBatchMissReason] = useState("Competitor cheaper rate");
+  const [batchUpdating, setBatchUpdating] = useState(false);
 
   async function handleRescanConfirm(
     targetSession: Session,
@@ -222,6 +246,7 @@ export default function SessionsPage() {
       companyFilter?: string;
       userFilter?: string;
       statusVal?: string;
+      typeVal?: string;
       sortVal?: string;
     }
   ) {
@@ -245,6 +270,9 @@ export default function SessionsPage() {
 
       const stat = overrides?.statusVal !== undefined ? overrides.statusVal : statusFilter;
       if (stat) params.set("status", stat);
+
+      const t = overrides?.typeVal !== undefined ? overrides.typeVal : typeFilter;
+      if (t) params.set("type_filter", t);
 
       const srt = overrides?.sortVal !== undefined ? overrides.sortVal : sortBy;
       if (srt) params.set("sort_by", srt);
@@ -306,6 +334,12 @@ export default function SessionsPage() {
     load(true, { statusVal: val });
   }
 
+  function handleTypeChange(val: string) {
+    setTypeFilter(val);
+    setSelected(new Set());
+    load(true, { typeVal: val });
+  }
+
   function handleSortChange(val: string) {
     setSortBy(val);
     setSelected(new Set());
@@ -318,6 +352,7 @@ export default function SessionsPage() {
     setCompany("");
     setUserId("");
     setStatusFilter("");
+    setTypeFilter("");
     setSortBy("date_desc");
     setSelected(new Set());
     load(true, {
@@ -325,6 +360,7 @@ export default function SessionsPage() {
       companyFilter: "",
       userFilter: "",
       statusVal: "",
+      typeVal: "",
       sortVal: "date_desc",
     });
   }
@@ -394,6 +430,117 @@ export default function SessionsPage() {
     }
   }
 
+  // Fleet & Bulk Action Handlers
+  function copySelectedPdfLinks() {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const links = Array.from(selected).map((id) => `${origin}/api/sessions/${id}/pdf`);
+    navigator.clipboard.writeText(links.join("\n"));
+    toast(`Copied ${links.length} PDF link${links.length > 1 ? "s" : ""} to clipboard.`, "success");
+  }
+
+  function copySelectedFleetSummary() {
+    const selectedSessions = sessions.filter((s) => selected.has(s.id));
+    if (!selectedSessions.length) return;
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+
+    const headers = [
+      "Vehicle Plate",
+      "Customer / Fleet",
+      "Vehicle Model",
+      "Insurer",
+      "Premium (RM)",
+      "Quotation Status",
+      "Quotation Ref",
+      "PDF Direct Link",
+    ];
+    const rows = selectedSessions.map((s) => [
+      s.vehicle_plate || "—",
+      s.insured_name || "—",
+      s.vehicle_model || "—",
+      s.detected_company || "—",
+      s.total_premium || "—",
+      (s.quotation_status || s.status || "pending").toUpperCase(),
+      s.quotation_ref || "—",
+      `${origin}/api/sessions/${s.id}/pdf`,
+    ]);
+
+    const tsvText = [headers.join("\t"), ...rows.map((r) => r.join("\t"))].join("\n");
+    navigator.clipboard.writeText(tsvText);
+    toast(
+      `Copied summary table for ${selectedSessions.length} quotation(s) (ready for Excel/Sheets or WhatsApp).`,
+      "success"
+    );
+  }
+
+  async function downloadSelectedZip() {
+    if (selected.size === 0) return;
+    setDownloadingZip(true);
+    try {
+      toast(`Preparing ZIP archive for ${selected.size} quotation(s)...`, "info");
+      const res = await apiRaw("/sessions/bulk-download-zip", {
+        method: "POST",
+        body: JSON.stringify({ session_ids: Array.from(selected) }),
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson?.error?.message || errJson?.detail || "Failed to generate ZIP archive.");
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const disposition = res.headers.get("Content-Disposition");
+      let filename = `Risklocker_Quotations_${new Date().toISOString().slice(0, 10)}.zip`;
+      if (disposition && disposition.includes("filename=")) {
+        const match = disposition.match(/filename="?([^"]+)"?/);
+        if (match && match[1]) filename = match[1];
+      }
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast(`Downloaded ${filename} successfully!`, "success");
+    } catch (err: any) {
+      toast(err?.message || "Failed to download ZIP archive.", "error");
+    } finally {
+      setDownloadingZip(false);
+    }
+  }
+
+  async function handleBatchStatusSubmit() {
+    if (selected.size === 0) return;
+    setBatchUpdating(true);
+    try {
+      const res = await api<{ updated_count: number; error_count: number; errors: string[] }>(
+        "/sessions/bulk-status",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            session_ids: Array.from(selected),
+            status: batchStatusTarget,
+            coverage_start_date: batchStatusTarget === "hit" ? batchCoverageStart : undefined,
+            coverage_end_date: batchStatusTarget === "hit" ? batchCoverageEnd : undefined,
+            miss_reason: batchStatusTarget === "miss" ? batchMissReason : undefined,
+          }),
+        }
+      );
+      toast(
+        `Successfully updated ${res.updated_count} quotation(s) to ${batchStatusTarget.toUpperCase()}.${
+          batchStatusTarget === "hit" ? " Competitor quotes automatically marked as superseded." : ""
+        }`,
+        "success"
+      );
+      setBatchStatusOpen(false);
+      setSelected(new Set());
+      await load(true);
+    } catch (err: any) {
+      toast(err?.message || "Failed to update batch quotation status.", "error");
+    } finally {
+      setBatchUpdating(false);
+    }
+  }
+
   useEffect(() => {
     load(true).catch((err) => setError(err instanceof Error ? err.message : "Could not load sessions."));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -414,7 +561,7 @@ export default function SessionsPage() {
   }
 
   const hasActiveFilters = Boolean(
-    appliedSearch || company || userId || statusFilter || sortBy !== "date_desc"
+    appliedSearch || company || userId || statusFilter || typeFilter || sortBy !== "date_desc"
   );
   const allSelected = sessions.length > 0 && selected.size === sessions.length;
 
@@ -432,17 +579,66 @@ export default function SessionsPage() {
             </p>
           </div>
           {selected.size > 0 ? (
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
-                Deselect all
+            <div className="flex flex-wrap items-center gap-2 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-2 shadow-sm animate-in fade-in">
+              <span className="text-[12px] font-bold text-[var(--rl-text-strong)] px-2.5 py-1 rounded bg-[var(--rl-bg)] border border-[var(--rl-border)]">
+                {selected.size} selected
+              </span>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Copy size={15} weight="bold" />}
+                onClick={copySelectedPdfLinks}
+                title="Copy newline-separated PDF links to clipboard"
+              >
+                Copy PDF Links
               </Button>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Table size={15} weight="bold" />}
+                onClick={copySelectedFleetSummary}
+                title="Copy structured fleet summary table for Excel, Sheets, or WhatsApp"
+              >
+                Copy Fleet Table
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                loading={downloadingZip}
+                icon={<DownloadSimple size={15} weight="bold" />}
+                onClick={downloadSelectedZip}
+                title="Download all selected quotation PDFs in a single ZIP archive"
+              >
+                Download ZIP
+              </Button>
+
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<Target size={15} weight="bold" />}
+                onClick={() => setBatchStatusOpen(true)}
+                className="font-medium text-emerald-700 dark:text-emerald-300"
+              >
+                Batch Status
+              </Button>
+
+              <div className="h-4 w-px bg-[var(--rl-border)] mx-1" />
+
               <Button
                 variant="danger"
+                size="sm"
                 loading={deleting === "bulk"}
-                icon={<Trash aria-hidden="true" size={16} weight="bold" />}
+                icon={<Trash aria-hidden="true" size={15} weight="bold" />}
                 onClick={() => setPendingBulkDelete(true)}
               >
-                Delete selected ({selected.size})
+                Delete ({selected.size})
+              </Button>
+
+              <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+                Deselect all
               </Button>
             </div>
           ) : null}
@@ -518,6 +714,18 @@ export default function SessionsPage() {
               <option value="Check Needed">Check Needed</option>
               <option value="Generated">Generated</option>
               <option value="Preparing">Preparing</option>
+            </select>
+
+            {/* Type Dropdown: All Uploads, Live Only, Test Only */}
+            <select
+              aria-label="Filter by Upload Type"
+              value={typeFilter}
+              onChange={(e) => handleTypeChange(e.target.value)}
+              className="h-9 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-2.5 text-[13px] font-medium text-[var(--rl-text-strong)] transition-colors hover:border-[var(--rl-text-muted)] focus:border-[var(--rl-black)] focus:outline-none"
+            >
+              <option value="">All Uploads</option>
+              <option value="live">Live Only</option>
+              <option value="test">Test Uploads Only</option>
             </select>
 
             {/* View / Sort Dropdown */}
@@ -833,6 +1041,102 @@ export default function SessionsPage() {
         />
       ) : null}
 
+      {/* Batch Status Update Modal */}
+      <Dialog
+        open={batchStatusOpen}
+        onOpenChange={setBatchStatusOpen}
+        title={`Batch Update Status (${selected.size} Quotations)`}
+        description="Update hit/miss policy outcomes for the selected quotations. For corporate fleets with multiple quotes for the same vehicle, winning one will automatically mark competing underwriter quotes as superseded."
+      >
+        <div className="space-y-4 pt-2">
+          {/* Target Status Toggle */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setBatchStatusTarget("hit")}
+              className={`flex items-center justify-center gap-2 rounded-[var(--rl-radius-sm)] border p-3 text-sm font-semibold transition-all ${
+                batchStatusTarget === "hit"
+                  ? "border-emerald-500 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
+                  : "border-[var(--rl-border)] bg-[var(--rl-surface)] text-[var(--rl-text-muted)] hover:bg-[var(--rl-surface-sunken)]"
+              }`}
+            >
+              <CheckCircle size={18} weight="bold" className={batchStatusTarget === "hit" ? "text-emerald-600" : ""} />
+              <span>Mark Won (HIT)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setBatchStatusTarget("miss")}
+              className={`flex items-center justify-center gap-2 rounded-[var(--rl-radius-sm)] border p-3 text-sm font-semibold transition-all ${
+                batchStatusTarget === "miss"
+                  ? "border-rose-500 bg-rose-50 text-rose-900 dark:bg-rose-950/40 dark:text-rose-200"
+                  : "border-[var(--rl-border)] bg-[var(--rl-surface)] text-[var(--rl-text-muted)] hover:bg-[var(--rl-surface-sunken)]"
+              }`}
+            >
+              <XCircle size={18} weight="bold" className={batchStatusTarget === "miss" ? "text-rose-600" : ""} />
+              <span>Mark Lost (MISS)</span>
+            </button>
+          </div>
+
+          {batchStatusTarget === "hit" ? (
+            <div className="space-y-3 rounded-[var(--rl-radius-sm)] border border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-900 dark:bg-emerald-950/20">
+              <p className="text-xs text-emerald-800 dark:text-emerald-300">
+                <strong>Multi-Quote Auto Resolution:</strong> Any alternative quotes for the same vehicles in this deal cycle will be automatically marked as <strong>superseded</strong>, preventing false active policy conflicts.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--rl-text-strong)] mb-1">Coverage Start Date</label>
+                  <Input
+                    type="date"
+                    value={batchCoverageStart}
+                    onChange={(e) => setBatchCoverageStart(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--rl-text-strong)] mb-1">Coverage End Date</label>
+                  <Input
+                    type="date"
+                    value={batchCoverageEnd}
+                    onChange={(e) => setBatchCoverageEnd(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2 rounded-[var(--rl-radius-sm)] border border-rose-200 bg-rose-50/50 p-3 dark:border-rose-900 dark:bg-rose-950/20">
+              <label className="block text-xs font-semibold text-[var(--rl-text-strong)]">Reason for Miss / Lost Deal</label>
+              <select
+                value={batchMissReason}
+                onChange={(e) => setBatchMissReason(e.target.value)}
+                className="w-full h-9 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-2 text-xs font-medium text-[var(--rl-text-strong)]"
+              >
+                <option value="Competitor cheaper rate">Competitor cheaper rate</option>
+                <option value="Client renewed directly with insurer">Client renewed directly with insurer</option>
+                <option value="Vehicle sold / disposed">Vehicle sold / disposed</option>
+                <option value="Client uncontactable / ghosted">Client uncontactable / ghosted</option>
+                <option value="Excessive loading / insurer rejected">Excessive loading / insurer rejected</option>
+                <option value="Other">Other reason</option>
+              </select>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-[var(--rl-border)]">
+            <Button variant="ghost" size="sm" onClick={() => setBatchStatusOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant={batchStatusTarget === "hit" ? "primary" : "danger"}
+              size="sm"
+              loading={batchUpdating}
+              onClick={handleBatchStatusSubmit}
+            >
+              Apply to {selected.size} Quotes
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
       {/* Rescan Quotation Session Modal */}
       <RescanSessionModal
         session={pendingRescan}
@@ -887,6 +1191,16 @@ function QuotationRow({
         <div className="grid gap-1 min-w-0">
           {/* Insurer, Premium, Ref, and Real Status Line */}
           <div className="flex flex-wrap items-center gap-2">
+            {s.is_test ? (
+              <span
+                className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-900 dark:text-amber-300 border border-amber-500/30"
+                title="Test upload: isolated from customer records and hit & miss tracking"
+              >
+                <Sparkle size={11} weight="fill" className="text-amber-600" />
+                Test Upload
+              </span>
+            ) : null}
+
             {s.detected_company ? (
               <span
                 className="inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-[var(--rl-radius-sm)] bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 shadow-2xs tracking-wide"
@@ -918,6 +1232,24 @@ function QuotationRow({
 
             {/* Real Status Badge from database */}
             <StatusBadge status={s.draft_status || s.status} />
+
+            {/* Hit / Miss / Superseded Outcome Badge */}
+            {s.quotation_status && s.quotation_status !== "pending" ? (
+              <span
+                className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                  s.quotation_status === "hit"
+                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800"
+                    : s.quotation_status === "miss"
+                    ? "bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border border-rose-300 dark:border-rose-800"
+                    : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-300 dark:border-slate-700"
+                }`}
+                title={s.miss_reason ? `Reason: ${s.miss_reason}` : undefined}
+              >
+                {s.quotation_status === "hit" && <CheckCircle size={12} weight="bold" />}
+                {s.quotation_status === "miss" && <XCircle size={12} weight="bold" />}
+                {s.quotation_status}
+              </span>
+            ) : null}
           </div>
 
           {/* Attribution & Exact Second Timestamp */}
@@ -962,6 +1294,17 @@ function QuotationRow({
 
       {/* Action Buttons Column */}
       <div className="flex items-center gap-2 pt-1 sm:pt-0 sm:self-center pl-7 sm:pl-0">
+        <a
+          href={`/api/sessions/${s.id}/pdf`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="View / Download Quotation PDF"
+          aria-label="View / Download Quotation PDF"
+          className="inline-flex size-8.5 sm:size-9 items-center justify-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] text-red-600 transition-all hover:bg-red-50 hover:border-red-300 active:scale-95 shadow-xs"
+        >
+          <FilePdf aria-hidden="true" size={17} weight="bold" />
+        </a>
+
         <a
           href={`/sessions/${s.id}`}
           target="_blank"
@@ -1050,6 +1393,16 @@ function QuotationCard({
 
         <div className="grid gap-1.5 min-w-0">
           <div className="flex flex-wrap items-center gap-2">
+            {s.is_test ? (
+              <span
+                className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-900 dark:text-amber-300 border border-amber-500/30"
+                title="Test upload: isolated from customer records and hit & miss tracking"
+              >
+                <Sparkle size={11} weight="fill" className="text-amber-600" />
+                Test Upload
+              </span>
+            ) : null}
+
             <span
               className="inline-flex items-center font-mono text-[13px] font-bold tracking-wider px-2 py-0.5 rounded bg-[var(--rl-black)]/[0.05] text-[var(--rl-text-strong)] border border-[var(--rl-border-strong)]"
               title="Vehicle Registration Number"
@@ -1081,6 +1434,24 @@ function QuotationCard({
             ) : null}
 
             <StatusBadge status={s.draft_status || s.status} />
+
+            {/* Hit / Miss / Superseded Outcome Badge */}
+            {s.quotation_status && s.quotation_status !== "pending" ? (
+              <span
+                className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                  s.quotation_status === "hit"
+                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800"
+                    : s.quotation_status === "miss"
+                    ? "bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border border-rose-300 dark:border-rose-800"
+                    : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-300 dark:border-slate-700"
+                }`}
+                title={s.miss_reason ? `Reason: ${s.miss_reason}` : undefined}
+              >
+                {s.quotation_status === "hit" && <CheckCircle size={12} weight="bold" />}
+                {s.quotation_status === "miss" && <XCircle size={12} weight="bold" />}
+                {s.quotation_status}
+              </span>
+            ) : null}
           </div>
 
           <div className="flex flex-wrap items-baseline gap-2">
@@ -1147,6 +1518,17 @@ function QuotationCard({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 pt-2 sm:pt-0 sm:justify-end">
+          <a
+            href={`/api/sessions/${s.id}/pdf`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="View / Download Quotation PDF"
+            aria-label="View / Download Quotation PDF"
+            className="inline-flex size-9 items-center justify-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] text-red-600 transition-all hover:bg-red-50 hover:border-red-300 active:scale-95 shadow-xs"
+          >
+            <FilePdf aria-hidden="true" size={18} weight="bold" />
+          </a>
+
           <a
             href={`/sessions/${s.id}`}
             target="_blank"

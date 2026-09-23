@@ -27,17 +27,22 @@ os.environ.update(
 )
 
 from app.core.errors import AppError  # noqa: E402
+from typing import Any
 from app.models.tables import OurSpecial, OurSpecialVariant, OutputTemplateConfig  # noqa: E402
 from app.services import trash_service  # noqa: E402
 from app.services.template_config import default_template_config  # noqa: E402
 
 
-def _settings():
+def _settings() -> Any:
     return SimpleNamespace(trash_retention_days=14)
 
 
-def _user():
+def _user() -> Any:
     return SimpleNamespace(id=str(uuid4()), role="admin")
+
+
+def _fake_db() -> Any:
+    return FakeDb()
 
 
 class FakeDb:
@@ -125,7 +130,7 @@ def _variant(special_id: str, label="V1") -> OurSpecialVariant:
 
 
 def test_delete_template_rejects_locked_default():
-    db = FakeDb()
+    db = _fake_db()
     template = _template(locked=True)
     db.seed(template)
 
@@ -134,7 +139,7 @@ def test_delete_template_rejects_locked_default():
 
 
 def test_delete_template_soft_deletes_editable_copy():
-    db = FakeDb()
+    db = _fake_db()
     template = _template()
     db.seed(template)
 
@@ -148,7 +153,7 @@ def test_delete_template_soft_deletes_editable_copy():
 
 
 def test_restore_template_clears_deleted_at():
-    db = FakeDb()
+    db = _fake_db()
     template = _template()
     db.seed(template)
     trash_service.delete_template(db, _settings(), _user(), template.id)
@@ -161,7 +166,7 @@ def test_restore_template_clears_deleted_at():
 
 
 def test_delete_special_soft_deletes_variants_too():
-    db = FakeDb()
+    db = _fake_db()
     special = _special()
     variant = _variant(special.id)
     special.variants = [variant]
@@ -174,7 +179,7 @@ def test_delete_special_soft_deletes_variants_too():
 
 
 def test_restore_special_restores_variants():
-    db = FakeDb()
+    db = _fake_db()
     special = _special()
     variant = _variant(special.id)
     special.variants = [variant]
@@ -192,7 +197,7 @@ def test_restore_special_restores_variants():
 def test_delete_client_record_soft_deletes():
     from app.models.tables import ClientRecord
 
-    db = FakeDb()
+    db = _fake_db()
     record = ClientRecord(
         id=str(uuid4()),
         insurer_no="NO-001",
@@ -209,7 +214,7 @@ def test_delete_client_record_soft_deletes():
 
 
 def test_trash_list_categorized_shape():
-    db = FakeDb()
+    db = _fake_db()
     template = _template()
     special = _special()
     db.seed(template, special)
@@ -227,7 +232,7 @@ def test_trash_list_categorized_shape():
 
 
 def test_permanent_delete_template_removes_row():
-    db = FakeDb()
+    db = _fake_db()
     template = _template()
     db.seed(template)
     trash_service.delete_template(db, _settings(), _user(), template.id)
@@ -238,7 +243,7 @@ def test_permanent_delete_template_removes_row():
 
 
 def test_permanent_delete_special_removes_variants():
-    db = FakeDb()
+    db = _fake_db()
     special = _special()
     variant = _variant(special.id)
     special.variants = [variant]
@@ -254,7 +259,7 @@ def test_permanent_delete_special_removes_variants():
 def test_empty_all_trash_deletes_everything():
     from types import SimpleNamespace as _NS
 
-    db = FakeDb()
+    db = _fake_db()
     template = _template()
     special = _special()
     variant = _variant(special.id)
@@ -270,3 +275,156 @@ def test_empty_all_trash_deletes_everything():
     assert counts["our_specials"] == 1
     assert db.get(type(template), template.id) is None
     assert db.get(type(special), special.id) is None
+
+
+def test_permanent_delete_session_cleans_render_snapshots_and_draft_dependencies():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.models.tables import (
+        Base,
+        Batch,
+        UploadedFile,
+        QuotationDraft,
+        Session as SessionModel,
+        RenderSnapshot,
+        QuotationActivity,
+        User,
+        new_id,
+    )
+    from types import SimpleNamespace as _NS
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    user = User(id=new_id(), email="admin@example.com", password_hash="hash", name="Admin", role="admin")
+    db.add(user)
+    db.flush()
+
+    batch = Batch(id=new_id(), owner_id=user.id, name="Sample Batch")
+    db.add(batch)
+    db.flush()
+
+    uploaded = UploadedFile(
+        id=new_id(),
+        batch_id=batch.id,
+        owner_id=user.id,
+        original_filename="sample.pdf",
+        content_type="application/pdf",
+        size_bytes=1000,
+        storage_provider="local_ephemeral",
+        storage_path="sample.pdf",
+        deleted_at=datetime.now(timezone.utc),
+    )
+    db.add(uploaded)
+    db.flush()
+
+    draft = QuotationDraft(
+        id=new_id(),
+        owner_id=user.id,
+        uploaded_file_id=uploaded.id,
+        fields={"vehicle_no": {"value": "W 1234 A"}},
+    )
+    db.add(draft)
+    db.flush()
+
+    session = SessionModel(
+        id=new_id(),
+        owner_id=user.id,
+        uploaded_file_id=uploaded.id,
+        draft_id=draft.id,
+        quotation_status="pending",
+    )
+    db.add(session)
+    db.flush()
+
+    # Add child dependent rows: RenderSnapshot, ExtractionRecord, ExtractionBenefitLine, DraftBenefitSelection, DraftSourceLineDecision, QuotationActivity
+    from app.models.tables import (
+        ExtractionRecord,
+        ExtractionBenefitLine,
+        DraftBenefitSelection,
+        DraftSourceLineDecision,
+    )
+
+    snapshot = RenderSnapshot(
+        id=new_id(),
+        draft_id=draft.id,
+        draft_revision=1,
+        template_revision_id=new_id(),
+        context_hash="hash123",
+        context={},
+        asset_hashes={},
+        renderer_version="v7",
+    )
+    db.add(snapshot)
+
+    ext_rec = ExtractionRecord(
+        id=new_id(),
+        uploaded_file_id=uploaded.id,
+        raw_text="sample",
+    )
+    db.add(ext_rec)
+    db.flush()
+
+    line = ExtractionBenefitLine(
+        id=new_id(),
+        extraction_record_id=ext_rec.id,
+        line_id="line1",
+        raw_label="Towing",
+        normalized_label="Towing",
+    )
+    db.add(line)
+    db.flush()
+
+    selection = DraftBenefitSelection(
+        id=new_id(),
+        draft_id=draft.id,
+        selection_key="tow",
+        item_kind="catalog",
+        catalog_offering_id=new_id(),
+    )
+    db.add(selection)
+    db.flush()
+
+    decision = DraftSourceLineDecision(
+        id=new_id(),
+        draft_id=draft.id,
+        source_line_id=line.id,
+        disposition="mapped",
+        selection_id=selection.id,
+    )
+    db.add(decision)
+
+    activity = QuotationActivity(
+        id=new_id(),
+        session_id=session.id,
+        vehicle_no="W 1234 A",
+        customer_name="John Doe",
+        action_type="quote_generated",
+    )
+    db.add(activity)
+    db.commit()
+
+    # Verify rows exist before deletion
+    assert db.get(RenderSnapshot, snapshot.id) is not None
+    assert db.get(DraftBenefitSelection, selection.id) is not None
+    assert db.get(DraftSourceLineDecision, decision.id) is not None
+    assert db.get(QuotationActivity, activity.id) is not None
+    assert db.get(QuotationDraft, draft.id) is not None
+    assert db.get(SessionModel, session.id) is not None
+
+    # Perform permanent delete
+    storage_mock = _NS(delete_pdf=lambda _path: None)
+    trash_service.permanent_delete_session(db, user, uploaded.id, storage_mock)
+
+    # Verify all dependent rows and parents are completely removed
+    assert db.get(RenderSnapshot, snapshot.id) is None
+    assert db.get(DraftBenefitSelection, selection.id) is None
+    assert db.get(DraftSourceLineDecision, decision.id) is None
+    assert db.get(QuotationActivity, activity.id) is None
+    assert db.get(QuotationDraft, draft.id) is None
+    assert db.get(SessionModel, session.id) is None
+    assert db.get(UploadedFile, uploaded.id) is None
+    db.close()
+

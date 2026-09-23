@@ -201,6 +201,16 @@ function effectiveRole(offering: Offering): string {
   return offering.role || ROLE_FALLBACK[offering.offering_kind] || "included";
 }
 
+let cachedReferenceData: {
+  companies: Company[];
+  segments: HierarchyItem[];
+  vehicles: HierarchyItem[];
+  concepts: Concept[];
+  sources: Source[];
+  templates: TemplateRecord[];
+  timestamp: number;
+} | null = null;
+
 function BenefitsPageContent() {
   const params = useSearchParams();
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -397,8 +407,14 @@ function BenefitsPageContent() {
     );
   }, [companyConfigs]);
 
-  // ── 0. Queue for sequential API calls ──────────────────────────────────
+  // ── 0. Queue & In-Flight Guards for fast reliable API calls ──────────
   const queueRef = useRef<Promise<void>>(Promise.resolve());
+  const inFlightRef = useRef<Set<string>>(new Set());
+  const companyCacheRef = useRef<Map<string, { workspace: CompanyWorkspace; ts: number }>>(new Map());
+  const catalogCacheRef = useRef<Map<string, { workspace: CatalogWorkspace; ts: number }>>(new Map());
+  const catalogWorkspaceRef = useRef<CatalogWorkspace | null>(null);
+  catalogWorkspaceRef.current = catalogWorkspace;
+
   const enqueueTask = useCallback((task: () => Promise<void>) => {
     queueRef.current = queueRef.current.then(async () => {
       try {
@@ -650,7 +666,27 @@ function BenefitsPageContent() {
     window.history.replaceState(null, "", `/builder/benefits${next.size ? `?${next}` : ""}`);
   }, []);
 
-  const loadReferenceData = useCallback(async () => {
+  const loadReferenceData = useCallback(async (force = false) => {
+    if (!force && cachedReferenceData && Date.now() - cachedReferenceData.timestamp < 120000) {
+      setCompanies(cachedReferenceData.companies);
+      setSegments(cachedReferenceData.segments);
+      setVehicles(cachedReferenceData.vehicles);
+      setConcepts(cachedReferenceData.concepts);
+      setSources(cachedReferenceData.sources);
+      setTemplates(cachedReferenceData.templates);
+
+      const preferredTpl =
+        cachedReferenceData.templates.find((t) => (t.name || "").toLowerCase().includes("motor") || (t.name || "").toLowerCase().includes("copy of standard a4") || t.is_default) ||
+        cachedReferenceData.templates[0] ||
+        null;
+      if (preferredTpl) setSelectedTemplateId(preferredTpl.id);
+
+      setSelectedSegmentId((current) => current || cachedReferenceData!.segments.find((item) => item.key === "private")?.id || cachedReferenceData!.segments[0]?.id || "");
+      setSelectedVehicleId((current) => current || cachedReferenceData!.vehicles.find((item) => item.key === "car")?.id || cachedReferenceData!.vehicles[0]?.id || "");
+
+      return cachedReferenceData.companies;
+    }
+
     const [companyResult, segmentResult, vehicleResult, conceptResult, sourceResult, templateResult] = await Promise.all([
       api<{ companies: { items: Company[] } }>("/business/companies?page=1&page_size=100"),
       api<{ segments: { items: HierarchyItem[] } }>("/business/segments?page=1&page_size=100"),
@@ -665,16 +701,28 @@ function BenefitsPageContent() {
     const activeCompanies = companyResult.companies.items;
     const activeSegments = segmentResult.segments.items.filter((item) => item.status === "active");
     const activeVehicles = vehicleResult.vehicle_categories.items.filter((item) => item.status === "active");
+    const filteredConcepts = conceptResult.benefit_concepts.items.filter((item) => item.status !== "retired");
+    const allSources = sourceResult.sources.items;
     const rawTemplates = (templateResult as { templates?: TemplateRecord[] | { items?: TemplateRecord[] } })?.templates;
     const allTemplates: TemplateRecord[] = Array.isArray(rawTemplates)
       ? rawTemplates
       : (rawTemplates?.items || []);
 
+    cachedReferenceData = {
+      companies: activeCompanies,
+      segments: activeSegments,
+      vehicles: activeVehicles,
+      concepts: filteredConcepts,
+      sources: allSources,
+      templates: allTemplates,
+      timestamp: Date.now(),
+    };
+
     setCompanies(activeCompanies);
     setSegments(activeSegments);
     setVehicles(activeVehicles);
-    setConcepts(conceptResult.benefit_concepts.items.filter((item) => item.status !== "retired"));
-    setSources(sourceResult.sources.items);
+    setConcepts(filteredConcepts);
+    setSources(allSources);
     setTemplates(allTemplates);
 
     const preferredTpl =
@@ -716,14 +764,31 @@ function BenefitsPageContent() {
     async (catalogId: string, silent = false) => {
       if (!catalogId) {
         setCatalogWorkspace(null);
+        catalogWorkspaceRef.current = null;
         return;
       }
-      if (!silent) setWorkspaceLoading(true);
+      const cached = catalogCacheRef.current.get(catalogId);
+      const isFresh = cached && Date.now() - cached.ts < 30000;
+      if (cached) {
+        setCatalogWorkspace(cached.workspace);
+        catalogWorkspaceRef.current = cached.workspace;
+        setSelectedCatalogId(catalogId);
+        const prodId = cached.workspace.catalog?.product_id || "";
+        setSelectedProductId(prodId);
+        syncUrl(selectedCompanyId, prodId, catalogId);
+        if (isFresh || silent) {
+          if (isFresh) return;
+        }
+      } else if (!silent) {
+        setWorkspaceLoading(true);
+      }
       setError("");
       try {
         const result = await api<{ workspace: CatalogWorkspace }>(`/business/catalogs/${catalogId}/workspace`);
         if (!mountedRef.current) return;
+        catalogCacheRef.current.set(catalogId, { workspace: result.workspace, ts: Date.now() });
         setCatalogWorkspace(result.workspace);
+        catalogWorkspaceRef.current = result.workspace;
         setSelectedCatalogId(catalogId);
         const prodId = result.workspace.catalog?.product_id || "";
         setSelectedProductId(prodId);
@@ -740,11 +805,51 @@ function BenefitsPageContent() {
   const loadCompany = useCallback(
     async (companyId: string, preferredProduct = selectedProductId, preferredCatalog = selectedCatalogId) => {
       if (!companyId) return;
-      setWorkspaceLoading(true);
+      const cached = companyCacheRef.current.get(companyId);
+      const isFresh = cached && Date.now() - cached.ts < 60000;
+
+      if (cached) {
+        setCompanyWorkspace(cached.workspace);
+        setSelectedCompanyId(companyId);
+
+        const carVehId = "b1111111-0000-4000-8000-000000000001";
+        const targetVehicleId = selectedVehicleId || carVehId;
+        const targetEngine = selectedEngineType || "ice";
+
+        const matchingCatalogs = (cached.workspace.catalogs || []).filter((item) =>
+          (!selectedSegmentId || !item.segment_id || item.segment_id === selectedSegmentId) &&
+          (!targetVehicleId || item.vehicle_category_id === targetVehicleId) &&
+          ((item.engine_type || "ice") === targetEngine) &&
+          matchesCoverage(item, builderCoverageFilter)
+        );
+
+        const catalog =
+          (preferredCatalog && matchingCatalogs.find((item) => item.id === preferredCatalog)) ||
+          matchingCatalogs[0] ||
+          cached.workspace.catalogs.find((item) => (item.engine_type || "ice") === targetEngine && (!targetVehicleId || item.vehicle_category_id === targetVehicleId)) ||
+          cached.workspace.catalogs.find((item) => (item.engine_type || "ice") === targetEngine) ||
+          cached.workspace.catalogs[0];
+
+        const prodId = catalog?.product_id || preferredProduct || "";
+        setSelectedProductId(prodId);
+        if (catalog?.id) {
+          setSelectedCatalogId(catalog.id);
+          syncUrl(companyId, prodId, catalog.id);
+          void loadCatalog(catalog.id, true);
+        }
+
+        if (isFresh) {
+          return;
+        }
+      } else {
+        setWorkspaceLoading(true);
+      }
+
       setError("");
       try {
         const result = await api<{ workspace: CompanyWorkspace }>(`/business/companies/${companyId}/workspace`);
         if (!mountedRef.current) return;
+        companyCacheRef.current.set(companyId, { workspace: result.workspace, ts: Date.now() });
         setCompanyWorkspace(result.workspace);
         setSelectedCompanyId(companyId);
 
@@ -1379,154 +1484,176 @@ ${aiMarkdownTable}`;
 
   // ── 1-Click Fast Toggle Sticker Handler (Optimistic UI, Zero Reload) ───
   async function toggleConceptFast(concept: Concept, targetRole: "included" | "addon_option") {
-
-    enqueueTask(async () => {    if (!selectedCatalog || !catalogWorkspace) return;
-    const existing = activeConceptIdSet.get(concept.id);
-    const target = offeringTarget();
-    const targetPkgId = target.applies_to_id;
-
-    setSaving(true);
-    setError("");
-
-    if (existing) {
-      // 1. Optimistic Delete (0ms delay)
-      const prevOfferings = catalogWorkspace.offerings;
-      setCatalogWorkspace((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          offerings: prev.offerings.filter((o) => o.id !== existing.id),
-        };
-      });
-
-      try {
-        await api(`/business/catalogs/${selectedCatalog.id}/offerings/${existing.id}?base_revision=${selectedCatalog.revision}`, {
-          method: "DELETE",
-        });
-        await loadCatalog(selectedCatalog.id, true);
-      } catch (err) {
-        // Rollback on error
-        setCatalogWorkspace((prev) => (prev ? { ...prev, offerings: prevOfferings } : prev));
-        setError(apiErrorMessage(err));
-      } finally {
-        setSaving(false);
-      }
-    } else {
-      // 2. Optimistic Add (0ms delay)
-      const tempId = `temp-${Date.now()}`;
-      const variantStr = concept.variants && concept.variants.length > 0 ? concept.variants[0] : "";
-      const labelOverride = variantStr ? `${concept.label} (${variantStr})` : null;
-
-      const optimisticOffering: Offering = {
-        id: tempId,
-        catalog_revision_id: catalogWorkspace.active_revision.id,
-        offering_key: `${concept.concept_key}-${Date.now()}`,
-        concept_id: concept.id,
-        offering_kind: targetRole === "included" ? "base" : "optional",
-        applies_to_type: target.applies_to_type,
-        applies_to_id: targetPkgId,
-        role: targetRole,
-        label_override: labelOverride,
-        display_value: null,
-        sort_order: currentPackageOfferings.length + 1,
-        status: "active",
-        source_aliases: [],
-        source_citation: {},
-        presentation_facet_ids: [],
-        concept: concept,
-      };
-
-      const prevOfferings = catalogWorkspace.offerings;
-      setCatalogWorkspace((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          offerings: [...prev.offerings, optimisticOffering],
-        };
-      });
-
-      const payload: Record<string, unknown> = {
-        base_revision: selectedCatalog.revision,
-        offering_key: optimisticOffering.offering_key,
-        concept_id: concept.id,
-        offering_kind: targetRole === "included" ? "base" : "optional",
-        applies_to_type: target.applies_to_type,
-        applies_to_id: targetPkgId,
-        role: targetRole,
-        label_override: labelOverride,
-        display_value: null,
-        sort_order: currentPackageOfferings.length + 1,
-        status: "active",
-      };
-
-      try {
-        const res = await api<{ offering: Offering }>(`/business/catalogs/${selectedCatalog.id}/offerings`, {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        setCatalogWorkspace((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            offerings: prev.offerings.map((o) => (o.id === tempId ? { ...res.offering, concept } : o)),
-          };
-        });
-        await loadCatalog(selectedCatalog.id, true);
-      } catch (err) {
-        // Rollback on error
-        setCatalogWorkspace((prev) => (prev ? { ...prev, offerings: prevOfferings } : prev));
-        setError(apiErrorMessage(err));
-      } finally {
-        setSaving(false);
-      }
+    if (inFlightRef.current.has(concept.id)) {
+      return;
     }
+    inFlightRef.current.add(concept.id);
 
+    enqueueTask(async () => {
+      try {
+        const currentWorkspace = catalogWorkspaceRef.current || catalogWorkspace;
+        const currentCatalog = currentWorkspace?.catalog || selectedCatalog;
+        if (!currentCatalog || !currentWorkspace) return;
+
+        const target = offeringTarget();
+        const targetPkgId = target.applies_to_id;
+        const currentOfferings = currentWorkspace.offerings || [];
+        const existing = currentOfferings.find((o) => {
+          if (o.concept_id !== concept.id) return false;
+          if (isPackaged && targetPkgId) return o.applies_to_id === targetPkgId;
+          return !o.applies_to_id || o.applies_to_id === currentCatalog.product_id || o.applies_to_type === "product";
+        });
+
+        setSaving(true);
+        setError("");
+
+        if (existing) {
+          // 1. Optimistic Delete (0ms delay)
+          const prevWorkspace = currentWorkspace;
+          const nextRevision = (currentCatalog.revision || 1) + 1;
+          const updatedWorkspace: CatalogWorkspace = {
+            ...currentWorkspace,
+            catalog: { ...currentCatalog, revision: nextRevision },
+            offerings: currentOfferings.filter((o) => o.id !== existing.id),
+          };
+          setCatalogWorkspace(updatedWorkspace);
+          catalogWorkspaceRef.current = updatedWorkspace;
+          catalogCacheRef.current.set(currentCatalog.id, { workspace: updatedWorkspace, ts: Date.now() });
+
+          try {
+            await api(`/business/catalogs/${currentCatalog.id}/offerings/${existing.id}?base_revision=${currentCatalog.revision}`, {
+              method: "DELETE",
+            });
+          } catch (err) {
+            // Rollback on error
+            setCatalogWorkspace(prevWorkspace);
+            catalogWorkspaceRef.current = prevWorkspace;
+            catalogCacheRef.current.set(currentCatalog.id, { workspace: prevWorkspace, ts: Date.now() });
+            setError(apiErrorMessage(err));
+          }
+        } else {
+          // 2. Optimistic Add (0ms delay)
+          const tempId = `temp-${Date.now()}`;
+          const variantStr = concept.variants && concept.variants.length > 0 ? concept.variants[0] : "";
+          const labelOverride = variantStr ? `${concept.label} (${variantStr})` : null;
+
+          const optimisticOffering: Offering = {
+            id: tempId,
+            catalog_revision_id: currentWorkspace.active_revision.id,
+            offering_key: `${concept.concept_key}-${Date.now()}`,
+            concept_id: concept.id,
+            offering_kind: targetRole === "included" ? "base" : "optional",
+            applies_to_type: target.applies_to_type,
+            applies_to_id: targetPkgId,
+            role: targetRole,
+            label_override: labelOverride,
+            display_value: null,
+            sort_order: currentPackageOfferings.length + 1,
+            status: "active",
+            source_aliases: [],
+            source_citation: {},
+            presentation_facet_ids: [],
+            concept: concept,
+          };
+
+          const prevWorkspace = currentWorkspace;
+          const nextRevision = (currentCatalog.revision || 1) + 1;
+          const updatedWorkspace: CatalogWorkspace = {
+            ...currentWorkspace,
+            catalog: { ...currentCatalog, revision: nextRevision },
+            offerings: [...currentOfferings, optimisticOffering],
+          };
+          setCatalogWorkspace(updatedWorkspace);
+          catalogWorkspaceRef.current = updatedWorkspace;
+          catalogCacheRef.current.set(currentCatalog.id, { workspace: updatedWorkspace, ts: Date.now() });
+
+          const payload: Record<string, unknown> = {
+            base_revision: currentCatalog.revision,
+            offering_key: optimisticOffering.offering_key,
+            concept_id: concept.id,
+            offering_kind: targetRole === "included" ? "base" : "optional",
+            applies_to_type: target.applies_to_type,
+            applies_to_id: targetPkgId,
+            role: targetRole,
+            label_override: labelOverride,
+            display_value: null,
+            sort_order: currentPackageOfferings.length + 1,
+            status: "active",
+          };
+
+          try {
+            const res = await api<{ offering: Offering }>(`/business/catalogs/${currentCatalog.id}/offerings`, {
+              method: "POST",
+              body: JSON.stringify(payload),
+            });
+            const finalWorkspace: CatalogWorkspace = {
+              ...updatedWorkspace,
+              offerings: updatedWorkspace.offerings.map((o) => (o.id === tempId ? { ...res.offering, concept } : o)),
+            };
+            setCatalogWorkspace(finalWorkspace);
+            catalogWorkspaceRef.current = finalWorkspace;
+            catalogCacheRef.current.set(currentCatalog.id, { workspace: finalWorkspace, ts: Date.now() });
+          } catch (err) {
+            // Rollback on error
+            setCatalogWorkspace(prevWorkspace);
+            catalogWorkspaceRef.current = prevWorkspace;
+            catalogCacheRef.current.set(currentCatalog.id, { workspace: prevWorkspace, ts: Date.now() });
+            setError(apiErrorMessage(err));
+          }
+        }
+      } finally {
+        inFlightRef.current.delete(concept.id);
+        setSaving(false);
+      }
     });
   }
 
   // ── Plan Variant Switcher (Optimistic UI, Zero Reload) ─────────────────
   async function updatePlanVariantInline(offering: Offering, variant: string) {
+    enqueueTask(async () => {
+      const currentWorkspace = catalogWorkspaceRef.current || catalogWorkspace;
+      const currentCatalog = currentWorkspace?.catalog || selectedCatalog;
+      if (!currentCatalog || !currentWorkspace) return;
+      setSaving(true);
+      setError("");
+      const concept = concepts.find((c) => c.id === offering.concept_id);
+      const label = `${concept?.label || offering.offering_key} (${variant})`;
+      const prevWorkspace = currentWorkspace;
+      const nextRevision = (currentCatalog.revision || 1) + 1;
 
-    enqueueTask(async () => {    if (!selectedCatalog || !catalogWorkspace) return;
-    setSaving(true);
-    setError("");
-    const concept = concepts.find((c) => c.id === offering.concept_id);
-    const label = `${concept?.label || offering.offering_key} (${variant})`;
-    const prevOfferings = catalogWorkspace.offerings;
-
-    // Optimistic label update
-    setCatalogWorkspace((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        offerings: prev.offerings.map((o) => (o.id === offering.id ? { ...o, label_override: label } : o)),
+      const updatedWorkspace: CatalogWorkspace = {
+        ...currentWorkspace,
+        catalog: { ...currentCatalog, revision: nextRevision },
+        offerings: currentWorkspace.offerings.map((o) => (o.id === offering.id ? { ...o, label_override: label } : o)),
       };
-    });
+      setCatalogWorkspace(updatedWorkspace);
+      catalogWorkspaceRef.current = updatedWorkspace;
+      catalogCacheRef.current.set(currentCatalog.id, { workspace: updatedWorkspace, ts: Date.now() });
 
-    try {
-      const payload = {
-        id: offering.id,
-        offering_key: offering.offering_key,
-        offering_kind: offering.offering_kind,
-        concept_id: offering.concept_id,
-        applies_to_type: offering.applies_to_type,
-        applies_to_id: offering.applies_to_id,
-        role: offering.role,
-        base_revision: selectedCatalog.revision,
-        label_override: label,
-      };
-      await api(`/business/catalogs/${selectedCatalog.id}/offerings`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      await loadCatalog(selectedCatalog.id, true);
-    } catch (err) {
-      setCatalogWorkspace((prev) => (prev ? { ...prev, offerings: prevOfferings } : prev));
-      setError(apiErrorMessage(err));
-    } finally {
-      setSaving(false);
-    }
-
+      try {
+        const payload = {
+          id: offering.id,
+          offering_key: offering.offering_key,
+          offering_kind: offering.offering_kind,
+          concept_id: offering.concept_id,
+          applies_to_type: offering.applies_to_type,
+          applies_to_id: offering.applies_to_id,
+          role: offering.role,
+          base_revision: currentCatalog.revision,
+          label_override: label,
+        };
+        await api(`/business/catalogs/${currentCatalog.id}/offerings`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      } catch (err) {
+        setCatalogWorkspace(prevWorkspace);
+        catalogWorkspaceRef.current = prevWorkspace;
+        catalogCacheRef.current.set(currentCatalog.id, { workspace: prevWorkspace, ts: Date.now() });
+        setError(apiErrorMessage(err));
+      } finally {
+        setSaving(false);
+      }
     });
   }
 
@@ -1542,122 +1669,26 @@ ${aiMarkdownTable}`;
 
   // ── Inline Display Value Editor (Optimistic UI, Zero Reload) ──────────
   async function updateOfferingValueInline(offering: Offering, newValue: string) {
-
-    enqueueTask(async () => {    if (!selectedCatalog || !catalogWorkspace) return;
-    setSaving(true);
-    setError("");
-    const prevOfferings = catalogWorkspace.offerings;
-    const trimmed = newValue.trim();
-    const isValid = Boolean(trimmed && (/\d/.test(trimmed) || /^unlimited$/i.test(trimmed)) && !/^(?:included|optional|foc|as quoted|selected|standard)$/i.test(trimmed));
-    const cleanVal = isValid ? trimmed : null;
-
-    // Optimistic value update
-    setCatalogWorkspace((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        offerings: prev.offerings.map((o) => (o.id === offering.id ? { ...o, display_value: cleanVal } : o)),
-      };
-    });
-
-    try {
-      const payload = {
-        id: offering.id,
-        offering_key: offering.offering_key,
-        offering_kind: offering.offering_kind,
-        concept_id: offering.concept_id,
-        applies_to_type: offering.applies_to_type,
-        applies_to_id: offering.applies_to_id,
-        role: offering.role,
-        base_revision: selectedCatalog.revision,
-        display_value: cleanVal,
-        typed_value: cleanVal ? { type: "custom", display_text: cleanVal } : null,
-      };
-      await api(`/business/catalogs/${selectedCatalog.id}/offerings`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      await loadCatalog(selectedCatalog.id, true);
-    } catch (err) {
-      setCatalogWorkspace((prev) => (prev ? { ...prev, offerings: prevOfferings } : prev));
-      setError(apiErrorMessage(err));
-    } finally {
-      setSaving(false);
-    }
-
-    });
-  }
-
-  // ── Inline Price / Cost Editor (Optimistic UI, Zero Reload) ───────────
-  async function updateOfferingPriceInline(offering: Offering, newPriceStr: string) {
     enqueueTask(async () => {
-      if (!selectedCatalog || !catalogWorkspace) return;
+      const currentWorkspace = catalogWorkspaceRef.current || catalogWorkspace;
+      const currentCatalog = currentWorkspace?.catalog || selectedCatalog;
+      if (!currentCatalog || !currentWorkspace) return;
       setSaving(true);
       setError("");
-      const prevOfferings = catalogWorkspace.offerings;
-    const trimmed = newPriceStr.trim();
-    let priceObj: any = null;
-    if (trimmed.includes("%")) {
-      priceObj = { type: "formula", formula: trimmed, display_text: trimmed };
-    } else {
-      const cleanStr = trimmed.replace(/RM/i, "").replace(/,/g, "").trim();
-      const num = cleanStr ? parseFloat(cleanStr) : null;
-      priceObj = num !== null && !isNaN(num) && num > 0 ? { type: "money", value: num, currency: "MYR" } : null;
-    }
+      const prevWorkspace = currentWorkspace;
+      const trimmed = newValue.trim();
+      const isValid = Boolean(trimmed && (/\d/.test(trimmed) || /^unlimited$/i.test(trimmed)) && !/^(?:included|optional|foc|as quoted|selected|standard)$/i.test(trimmed));
+      const cleanVal = isValid ? trimmed : null;
+      const nextRevision = (currentCatalog.revision || 1) + 1;
 
-    setCatalogWorkspace((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        offerings: prev.offerings.map((o) => (o.id === offering.id ? { ...o, optional_price: priceObj } : o)),
+      const updatedWorkspace: CatalogWorkspace = {
+        ...currentWorkspace,
+        catalog: { ...currentCatalog, revision: nextRevision },
+        offerings: currentWorkspace.offerings.map((o) => (o.id === offering.id ? { ...o, display_value: cleanVal } : o)),
       };
-    });
-
-    try {
-      const payload = {
-        id: offering.id,
-        offering_key: offering.offering_key,
-        offering_kind: offering.offering_kind,
-        concept_id: offering.concept_id,
-        applies_to_type: offering.applies_to_type,
-        applies_to_id: offering.applies_to_id,
-        role: offering.role,
-        base_revision: selectedCatalog.revision,
-        display_value: offering.display_value || undefined,
-        typed_value: offering.typed_value || undefined,
-        optional_price: priceObj,
-      };
-      await api(`/business/catalogs/${selectedCatalog.id}/offerings`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      await loadCatalog(selectedCatalog.id, true);
-    } catch (err) {
-      setCatalogWorkspace((prev) => (prev ? { ...prev, offerings: prevOfferings } : prev));
-      setError(apiErrorMessage(err));
-    } finally {
-      setSaving(false);
-    }
-
-    });
-  }
-
-  // ── Inline Short Description Editor (Optimistic UI, Zero Reload) ───────────
-  async function updateOfferingDescriptionInline(offering: Offering, newDesc: string) {
-    enqueueTask(async () => {
-      if (!selectedCatalog || !catalogWorkspace) return;
-      setSaving(true);
-      setError("");
-      const prevOfferings = catalogWorkspace.offerings;
-      const cleanDesc = newDesc && newDesc.trim().length > 0 ? newDesc.trim() : null;
-
-      setCatalogWorkspace((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          offerings: prev.offerings.map((o) => (o.id === offering.id ? { ...o, description_override: cleanDesc } : o)),
-        };
-      });
+      setCatalogWorkspace(updatedWorkspace);
+      catalogWorkspaceRef.current = updatedWorkspace;
+      catalogCacheRef.current.set(currentCatalog.id, { workspace: updatedWorkspace, ts: Date.now() });
 
       try {
         const payload = {
@@ -1668,19 +1699,127 @@ ${aiMarkdownTable}`;
           applies_to_type: offering.applies_to_type,
           applies_to_id: offering.applies_to_id,
           role: offering.role,
-          base_revision: selectedCatalog.revision,
+          base_revision: currentCatalog.revision,
+          display_value: cleanVal,
+          typed_value: cleanVal ? { type: "custom", display_text: cleanVal } : null,
+        };
+        await api(`/business/catalogs/${currentCatalog.id}/offerings`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      } catch (err) {
+        setCatalogWorkspace(prevWorkspace);
+        catalogWorkspaceRef.current = prevWorkspace;
+        catalogCacheRef.current.set(currentCatalog.id, { workspace: prevWorkspace, ts: Date.now() });
+        setError(apiErrorMessage(err));
+      } finally {
+        setSaving(false);
+      }
+    });
+  }
+
+  // ── Inline Price / Cost Editor (Optimistic UI, Zero Reload) ───────────
+  async function updateOfferingPriceInline(offering: Offering, newPriceStr: string) {
+    enqueueTask(async () => {
+      const currentWorkspace = catalogWorkspaceRef.current || catalogWorkspace;
+      const currentCatalog = currentWorkspace?.catalog || selectedCatalog;
+      if (!currentCatalog || !currentWorkspace) return;
+      setSaving(true);
+      setError("");
+      const prevWorkspace = currentWorkspace;
+      const trimmed = newPriceStr.trim();
+      let priceObj: any = null;
+      if (trimmed.includes("%")) {
+        priceObj = { type: "formula", formula: trimmed, display_text: trimmed };
+      } else {
+        const cleanStr = trimmed.replace(/RM/i, "").replace(/,/g, "").trim();
+        const num = cleanStr ? parseFloat(cleanStr) : null;
+        priceObj = num !== null && !isNaN(num) && num > 0 ? { type: "money", value: num, currency: "MYR" } : null;
+      }
+      const nextRevision = (currentCatalog.revision || 1) + 1;
+
+      const updatedWorkspace: CatalogWorkspace = {
+        ...currentWorkspace,
+        catalog: { ...currentCatalog, revision: nextRevision },
+        offerings: currentWorkspace.offerings.map((o) => (o.id === offering.id ? { ...o, optional_price: priceObj } : o)),
+      };
+      setCatalogWorkspace(updatedWorkspace);
+      catalogWorkspaceRef.current = updatedWorkspace;
+      catalogCacheRef.current.set(currentCatalog.id, { workspace: updatedWorkspace, ts: Date.now() });
+
+      try {
+        const payload = {
+          id: offering.id,
+          offering_key: offering.offering_key,
+          offering_kind: offering.offering_kind,
+          concept_id: offering.concept_id,
+          applies_to_type: offering.applies_to_type,
+          applies_to_id: offering.applies_to_id,
+          role: offering.role,
+          base_revision: currentCatalog.revision,
+          display_value: offering.display_value || undefined,
+          typed_value: offering.typed_value || undefined,
+          optional_price: priceObj,
+        };
+        await api(`/business/catalogs/${currentCatalog.id}/offerings`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      } catch (err) {
+        setCatalogWorkspace(prevWorkspace);
+        catalogWorkspaceRef.current = prevWorkspace;
+        catalogCacheRef.current.set(currentCatalog.id, { workspace: prevWorkspace, ts: Date.now() });
+        setError(apiErrorMessage(err));
+      } finally {
+        setSaving(false);
+      }
+    });
+  }
+
+  // ── Inline Short Description Editor (Optimistic UI, Zero Reload) ───────────
+  async function updateOfferingDescriptionInline(offering: Offering, newDesc: string) {
+    enqueueTask(async () => {
+      const currentWorkspace = catalogWorkspaceRef.current || catalogWorkspace;
+      const currentCatalog = currentWorkspace?.catalog || selectedCatalog;
+      if (!currentCatalog || !currentWorkspace) return;
+      setSaving(true);
+      setError("");
+      const prevWorkspace = currentWorkspace;
+      const cleanDesc = newDesc && newDesc.trim().length > 0 ? newDesc.trim() : null;
+      const nextRevision = (currentCatalog.revision || 1) + 1;
+
+      const updatedWorkspace: CatalogWorkspace = {
+        ...currentWorkspace,
+        catalog: { ...currentCatalog, revision: nextRevision },
+        offerings: currentWorkspace.offerings.map((o) => (o.id === offering.id ? { ...o, description_override: cleanDesc } : o)),
+      };
+      setCatalogWorkspace(updatedWorkspace);
+      catalogWorkspaceRef.current = updatedWorkspace;
+      catalogCacheRef.current.set(currentCatalog.id, { workspace: updatedWorkspace, ts: Date.now() });
+
+      try {
+        const payload = {
+          id: offering.id,
+          offering_key: offering.offering_key,
+          offering_kind: offering.offering_kind,
+          concept_id: offering.concept_id,
+          applies_to_type: offering.applies_to_type,
+          applies_to_id: offering.applies_to_id,
+          role: offering.role,
+          base_revision: currentCatalog.revision,
           display_value: offering.display_value || undefined,
           typed_value: offering.typed_value || undefined,
           optional_price: offering.optional_price || undefined,
           description_override: cleanDesc,
         };
-        await api(`/business/catalogs/${selectedCatalog.id}/offerings`, {
+        await api(`/business/catalogs/${currentCatalog.id}/offerings`, {
           method: "POST",
           body: JSON.stringify(payload),
         });
-        await loadCatalog(selectedCatalog.id, true);
       } catch (err) {
-        setCatalogWorkspace((prev) => (prev ? { ...prev, offerings: prevOfferings } : prev));
+        setCatalogWorkspace(prevWorkspace);
+        catalogWorkspaceRef.current = prevWorkspace;
+        catalogCacheRef.current.set(currentCatalog.id, { workspace: prevWorkspace, ts: Date.now() });
         setError(apiErrorMessage(err));
       } finally {
         setSaving(false);
@@ -2061,7 +2200,9 @@ ${aiMarkdownTable}`;
     return (
       <AppShell>
         <BuilderNav />
-        <PageLoading />
+        <div className="flex min-h-[calc(100vh-120px)] items-center justify-center">
+          <PageLoading />
+        </div>
       </AppShell>
     );
   }
@@ -3032,8 +3173,8 @@ ${aiMarkdownTable}`;
                 <Button
                   size="sm"
                   onClick={() => document.getElementById("global-ai-copilot-trigger")?.click()}
-                  icon={<Sparkle size={15} weight="fill" className="text-amber-300 animate-pulse" />}
-                  className="bg-gradient-to-r from-amber-600 via-rose-600 to-purple-600 text-white hover:opacity-90 font-bold text-xs"
+                  icon={<Sparkle size={15} weight="fill" className="text-amber-500" />}
+                  className="bg-[var(--rl-black)] text-white hover:bg-[#2d2d2d] text-xs font-semibold"
                 >
                   AI Catalog Copilot
                 </Button>

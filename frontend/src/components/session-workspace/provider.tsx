@@ -252,8 +252,13 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
       ? offer.selection_id
       : `pending:catalog:${offer.offering_key}`;
 
-    const priceVal = (operation.price as Record<string, unknown> | undefined) || offer.price || offer.optional_price;
-    const costStatus = String(operation.cost_status || (isAddon ? "paid" : (priceVal ? "paid" : "included")));
+    const priceVal = ("price" in operation ? (operation.price as Record<string, unknown> | null | undefined) : undefined) !== undefined
+      ? (operation.price as Record<string, unknown> | null)
+      : (offer.price || offer.optional_price);
+    const costStatus = String(operation.cost_status || (isAddon ? (priceVal ? "paid" : "included") : (priceVal ? "paid" : "included")));
+
+    const labelVal = (operation as any).label || (operation as any).label_override;
+    const descVal = (operation as any).description || (operation as any).description_override;
 
     const updatedCard: BenefitCardSummary = {
       ...offer,
@@ -261,6 +266,8 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
       selection_id: selectionId,
       cost_status: costStatus,
       price: priceVal as any,
+      ...(labelVal ? { label: labelVal } : {}),
+      ...(descVal !== undefined ? { description: descVal } : {}),
     };
 
     let nextCurrent = snapshot.benefit_cards.current_benefits;
@@ -284,7 +291,7 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
         ...nextCurrent.filter((item) => item.concept_id !== offer.concept_id && item.selection_id !== selectionId),
         updatedCard,
       ];
-      if (priceVal && costStatus !== "included") {
+      if (priceVal && costStatus !== "included" && costStatus !== "foc") {
         nextExtras = [
           ...nextExtras.filter((ex) => ex.selection_id !== selectionId),
           {
@@ -330,16 +337,22 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
     const state = operation.state ? String(operation.state) : null;
     const costStatus = operation.cost_status ? String(operation.cost_status) : null;
     const typed = operation.typed_value as Record<string, unknown> | null | undefined;
+    const hasPrice = "price" in operation;
+    const priceVal = (operation as any).price;
+    const labelVal = (operation as any).label || (operation as any).label_override;
+    const descVal = (operation as any).description || (operation as any).description_override;
+
     const nextBenefits = snapshot.benefits.map((item) => item.id === selectionId ? {
       ...item,
       ...(state ? { state } : {}),
       ...(costStatus ? { cost_status: costStatus } : {}),
       ...(operation.typed_value !== undefined ? { typed_value: typed } : {}),
+      ...(labelVal ? { label_override: labelVal } : {}),
     } : item);
 
     // Find the target card in either current_benefits or available_addons
-    const inCurrent = snapshot.benefit_cards.current_benefits.find((item) => item.selection_id === selectionId);
-    const inAddon = snapshot.benefit_cards.available_addons.find((item) => item.selection_id === selectionId);
+    const inCurrent = snapshot.benefit_cards.current_benefits.find((item) => item.selection_id === selectionId || item.card_key === selectionId);
+    const inAddon = snapshot.benefit_cards.available_addons.find((item) => item.selection_id === selectionId || item.card_key === selectionId);
     const targetCard = inCurrent || inAddon;
 
     let nextCurrent = snapshot.benefit_cards.current_benefits;
@@ -352,40 +365,69 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
       nextExtras = nextExtras.filter((item) => item.selection_id !== selectionId);
     } else if (state === "available_addon" && inCurrent) {
       // Move from current to addon
-      nextCurrent = nextCurrent.filter((item) => item.selection_id !== selectionId);
+      nextCurrent = nextCurrent.filter((item) => item.selection_id !== selectionId && item.card_key !== selectionId);
       nextAddons = [...nextAddons, {
         ...inCurrent,
         ...(costStatus ? { cost_status: costStatus } : {}),
+        ...(labelVal ? { label: labelVal } : {}),
+        ...(descVal !== undefined ? { description: descVal } : {}),
+        ...(hasPrice ? { price: priceVal as any } : {}),
       }];
     } else if (state === "current" && inAddon) {
       // Move from addon to current
-      nextAddons = nextAddons.filter((item) => item.selection_id !== selectionId);
+      nextAddons = nextAddons.filter((item) => item.selection_id !== selectionId && item.card_key !== selectionId);
       const movedCard = {
         ...inAddon,
         ...(costStatus ? { cost_status: costStatus } : {}),
+        ...(labelVal ? { label: labelVal } : {}),
+        ...(descVal !== undefined ? { description: descVal } : {}),
+        ...(hasPrice ? { price: priceVal as any } : {}),
       };
       nextCurrent = [...nextCurrent, movedCard];
-      const priceVal = (operation.price as Record<string, unknown> | undefined) || movedCard.price || movedCard.optional_price;
-      if (priceVal && costStatus !== "included") {
+      const effPrice = hasPrice ? priceVal : (movedCard.price || movedCard.optional_price);
+      if (effPrice && costStatus !== "included" && costStatus !== "foc") {
         nextExtras = [...nextExtras.filter((ex) => ex.selection_id !== selectionId), {
           selection_id: selectionId,
-          label: movedCard.label,
-          price: priceVal,
+          label: labelVal || movedCard.label,
+          price: effPrice as any,
           sort_order: movedCard.sort_order || 0,
         }];
       }
     } else {
       // Update in-place
-      nextCurrent = nextCurrent.map((item) => item.selection_id === selectionId ? {
-        ...item,
-        ...(costStatus ? { cost_status: costStatus } : {}),
-        ...(typed ? { value: String(typed.display_text ?? typed.value ?? item.value) } : {}),
-      } : item);
-      nextAddons = nextAddons.map((item) => item.selection_id === selectionId ? {
-        ...item,
-        ...(costStatus ? { cost_status: costStatus } : {}),
-        ...(typed ? { value: String(typed.display_text ?? typed.value ?? item.value) } : {}),
-      } : item);
+      const updateCard = (item: BenefitCardSummary): BenefitCardSummary => {
+        if (item.selection_id !== selectionId && item.card_key !== selectionId) return item;
+        return {
+          ...item,
+          ...(costStatus ? { cost_status: costStatus } : {}),
+          ...(labelVal ? { label: labelVal } : {}),
+          ...(descVal !== undefined ? { description: descVal } : {}),
+          ...(typed ? { value: String(typed.display_text ?? typed.value ?? item.value) } : {}),
+          ...(hasPrice ? { price: priceVal as any } : {}),
+        };
+      };
+      nextCurrent = nextCurrent.map(updateCard);
+      nextAddons = nextAddons.map(updateCard);
+      if (labelVal) {
+        nextExtras = nextExtras.map((ex) => ex.selection_id === selectionId ? { ...ex, label: labelVal } : ex);
+      }
+      if (hasPrice) {
+        if (priceVal && costStatus !== "included" && costStatus !== "foc") {
+          const found = nextExtras.some((ex) => ex.selection_id === selectionId);
+          if (found) {
+            nextExtras = nextExtras.map((ex) => ex.selection_id === selectionId ? { ...ex, price: priceVal as any } : ex);
+          } else if (inCurrent) {
+            nextExtras = [...nextExtras, {
+              selection_id: selectionId,
+              label: labelVal || targetCard?.label || "Add-on",
+              price: priceVal as any,
+              sort_order: targetCard?.sort_order || 0,
+            }];
+          }
+        } else {
+          nextExtras = nextExtras.filter((ex) => ex.selection_id !== selectionId);
+        }
+      }
     }
 
     // Remove from extras if a priced benefit was removed or moved to add-on

@@ -70,6 +70,7 @@ def _persist_upload(
     stored,
     scan: dict,
     result: dict,
+    is_test: bool = False,
 ) -> None:
     full = result["full_record"]
     draft_data = result["draft_record"]
@@ -91,6 +92,7 @@ def _persist_upload(
         size_bytes=stored.size_bytes,
         status=draft_data["status"],
         enhanced_reading=enhanced_reading,
+        is_test=is_test,
         simple_issue=(
             "Please check this value."
             if draft_data["status"] == RecordStatus.CHECK_NEEDED.value
@@ -128,7 +130,7 @@ def _persist_upload(
     detected = (draft_data.get("fields") or {}).get("insurance_company", {}).get("value")
     draft = db.scalar(select(QuotationDraft).where(QuotationDraft.uploaded_file_id == uploaded.id))
     if draft:
-        session = create_session(db, owner_id, uploaded.id, draft.id, detected)
+        session = create_session(db, owner_id, uploaded.id, draft.id, detected, is_test=is_test)
         company_id = (full.get("company_resolution") or {}).get("company_id")
         if company_id:
             draft.company_id = company_id
@@ -173,6 +175,51 @@ def _persist_upload(
             seed_base_benefits(db, draft, revision)
         auto_apply_extracted_benefits(db, draft)
 
+        if not is_test:
+            # Unique vehicle tracking & sequential ownership history
+            from app.services.vehicle_tracking_service import get_or_create_vehicle_tracking, normalize_plate
+            from app.services.quotation_activity_service import log_quotation_activity
+
+            fields_dict = draft_data.get("fields") or {}
+            raw_plate = fields_dict.get("vehicle_no", {}).get("value") or fields_dict.get("vehicle_number", {}).get("value")
+            norm_plate = normalize_plate(raw_plate)
+            customer = (fields_dict.get("customer_name", {}).get("value") or "").strip()
+            valid_until = (
+                fields_dict.get("valid_until", {}).get("value")
+                or fields_dict.get("cover_end_date", {}).get("value")
+                or fields_dict.get("issue_date", {}).get("value")
+            )
+            model = fields_dict.get("car_model", {}).get("value")
+            brand = fields_dict.get("car_brand", {}).get("value")
+
+            if norm_plate:
+                veh, owner_alert = get_or_create_vehicle_tracking(
+                    db=db,
+                    vehicle_no=norm_plate,
+                    customer_name=customer,
+                    validity_date=valid_until,
+                    session_id=session.id,
+                    brand=brand,
+                    model=model,
+                )
+                if veh:
+                    session.tracked_vehicle_id = veh.id
+                if owner_alert:
+                    curr_opts = draft.display_options or {}
+                    curr_opts["owner_change_alert"] = owner_alert
+                    draft.display_options = curr_opts
+
+            # Log initial upload scan activity
+            log_quotation_activity(
+                db=db,
+                session_id=session.id,
+                action_type="upload_scan",
+                user_id=owner_id,
+                sent_to_client=False,
+                summary=f"Scanned quotation for {norm_plate or 'vehicle'}" + (f" ({customer})" if customer else ""),
+                status="pending",
+            )
+
 
 async def create_batch_from_uploads(
     db: Session,
@@ -180,6 +227,7 @@ async def create_batch_from_uploads(
     owner_id: str,
     files: list[UploadFile],
     enhanced_reading: bool = False,
+    is_test: bool = False,
 ) -> Batch:
     if not files:
         raise AppError("Choose at least one file to upload.")
@@ -192,6 +240,7 @@ async def create_batch_from_uploads(
         name=f"Upload batch ({len(files)} files)",
         status=RecordStatus.PREPARING.value,
         enhanced_reading_requested=enhanced_reading,
+        is_test=is_test,
     )
     db.add(batch)
     db.flush()
@@ -273,6 +322,7 @@ async def create_batch_from_uploads(
                     stored=stored,
                     scan=scan,
                     result=result,
+                    is_test=is_test,
                 )
         except (ValueError, StorageError) as exc:
             if stored_key:

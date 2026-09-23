@@ -105,6 +105,20 @@ class BulkDeleteRequest(BaseModel):
     item_ids: list[str]
 
 
+class BulkQuotationStatusRequest(StrictRequest):
+    session_ids: list[str] = Field(min_length=1, max_length=500)
+    status: str = Field(pattern=r"^(pending|hit|miss|superseded)$")
+    miss_reason: str | None = None
+    won_premium: float | None = None
+    notes: str | None = None
+    coverage_start_date: str | None = None
+    coverage_end_date: str | None = None
+
+
+class BulkDownloadZipRequest(StrictRequest):
+    session_ids: list[str] = Field(min_length=1, max_length=500)
+
+
 # --- Client Records ---
 
 class ClientRecordUpdateRequest(BaseModel):
@@ -639,5 +653,43 @@ class SessionCleanupRequest(BaseModel):
 class ProfileCleanupRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
     profile_ids: list[str] = Field(min_length=1)
+
+
+# --- Quotation Insights & Hit and Miss Tracking ---
+
+class QuotationActivityCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    action_type: str = Field(min_length=1, max_length=50)
+    sent_to_client: bool = False
+    summary: str | None = None
+    version_number: int = 1
+    addons_snapshot: list[dict[str, Any]] | None = None
+    status: str | None = None
+    won_premium: float | None = None
+    miss_reason: str | None = None
+    notes: str | None = None
+
+
+class QuotationStatusUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    status: str = Field(pattern=r"^(pending|hit|miss|superseded)$")
+    miss_reason: str | None = None
+    won_premium: float | None = None
+    notes: str | None = None
+    coverage_start_date: str | None = None
+    coverage_end_date: str | None = None
+
+
+class BackfillConfirmRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    session_ids: list[str] = Field(default_factory=list)
+    manual_overrides: dict[str, dict[str, Any]] | None = None
+
+
+class VehicleOwnershipResolutionRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    resolution_type: str = Field(pattern=r"^(car_sold_new_owner|old_quote_mistake|pending_verification)$")
+    notes: str | None = None
+
 
 

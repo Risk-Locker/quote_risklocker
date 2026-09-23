@@ -200,6 +200,8 @@ def update_draft_fields(
     for field_name, new_value in field_updates.items():
         current = fields.get(field_name, {"value": None, "status": "ready", "message": ""})
         original_value = current.get("value")
+        if "detected_value" not in current or current.get("detected_value") is None:
+            current["detected_value"] = original_value
         current["value"] = new_value
         current["status"] = "ready"
         current["message"] = ""

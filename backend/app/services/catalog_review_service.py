@@ -809,9 +809,16 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                 current.state = "superseded"
                 current.superseded_by_id = selection_id
                 price_dict = None
+                has_pos_cost = False
                 if premium_cost:
                     clean_p = str(premium_cost).upper().replace("RM", "").replace(",", "").strip()
-                    price_dict = {"amount": float(clean_p) if any(c.isdigit() for c in clean_p) else clean_p, "currency": "MYR"}
+                    try:
+                        val_num = float(clean_p)
+                        if val_num > 0:
+                            has_pos_cost = True
+                            price_dict = {"amount": val_num, "value": val_num, "currency": "MYR"}
+                    except ValueError:
+                        price_dict = {"amount": clean_p, "currency": "MYR"}
                 elif matched.optional_price:
                     price_dict = deepcopy(matched.optional_price)
 
@@ -823,7 +830,7 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     concept_id=target_concept_id,
                     item_kind="catalog",
                     state="current",
-                    cost_status=current.cost_status or "included",
+                    cost_status="paid" if has_pos_cost else (current.cost_status or "included"),
                     label_override=matched.label_override if (matched and matched.label_override) else None,
                     typed_value_override=extracted if not _value_matches(matched.typed_value, extracted) else None,
                     evidence_snapshot={"source_line_id": line.id, "source": "extracted_upgrade", "is_detected": True, "extracted_label": line.raw_label},
@@ -838,6 +845,15 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                 decision.selection_id = selection_id
             else:
                 current.typed_value_override = extracted
+                if premium_cost:
+                    clean_p = str(premium_cost).upper().replace("RM", "").replace(",", "").strip()
+                    try:
+                        val_num = float(clean_p)
+                        if val_num > 0:
+                            current.cost_status = "paid"
+                            current.price = {"amount": val_num, "value": val_num, "currency": "MYR"}
+                    except ValueError:
+                        pass
                 applied += 1
                 decision.disposition = "mapped"
                 decision.selection_id = current.id

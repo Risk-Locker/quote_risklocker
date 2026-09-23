@@ -60,7 +60,12 @@ def upsert_from_draft(
     session_id: str | None = None,
     draft_id: str | None = None,
     uploaded_file_id: str | None = None,
-) -> ClientRecord:
+) -> ClientRecord | None:
+    if session_id:
+        from app.models.tables import Session as SessionModel
+        sess = db.get(SessionModel, session_id)
+        if sess and getattr(sess, "is_test", False):
+            return None
     company = _field(draft_fields, "insurance_company") or ""
     vehicle = _field(draft_fields, "vehicle_no") or ""
     insurer_no = _insurer_no(db, company, vehicle)

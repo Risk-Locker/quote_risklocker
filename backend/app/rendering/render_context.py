@@ -178,7 +178,7 @@ def build_extras(selections: Iterable[Any], concepts: Iterable[Any], offerings: 
     return extras
 
 
-def adjusted_total_text(fields: dict, extras: list[dict]) -> str:
+def adjusted_total_text(fields: dict, extras: list[dict], round_total: bool = False) -> str:
     """Total premium including staff-added extras; deterministic from extracted values."""
     extras_total = Decimal("0")
     for extra in extras:
@@ -270,6 +270,10 @@ def adjusted_total_text(fields: dict, extras: list[dict]) -> str:
             return ""
         if total == 0:
             return ""
+
+    if round_total:
+        total = Decimal(int(total.quantize(Decimal("1"), rounding="ROUND_HALF_UP")))
+        return f"{total:,.2f}"
 
     if total == total.to_integral_value():
         return f"{int(total):,}"
@@ -379,46 +383,51 @@ def _card(
     if not cost_status:
         cost_status = "foc"
 
-    # Dynamic company baseline cost calculation
-    if company_baseline_costs and concept and getattr(concept, "id", None):
-        raw_b_cost = company_baseline_costs.get(str(concept.id))
-        if raw_b_cost and raw_b_cost.strip():
-            s_cost = raw_b_cost.strip()
-            if "%" in s_cost:
-                # Formula rate, e.g. "15% of Sum Covered" or "0.30% of Sum Insured"
-                try:
-                    windscreen_val = (eval_context or {}).get("windscreen_sum_covered") or (eval_context or {}).get("windscreen") or (eval_context or {}).get("windscreen_sum_insured")
-                    if windscreen_val and ("15%" in s_cost or "windscreen" in s_cost.lower()):
-                        clean_w = re.sub(r"[^0-9.]", "", str(windscreen_val))
-                        if clean_w and float(clean_w) > 0:
-                            calc_val = round(float(clean_w) * 0.15, 2)
-                            price = {"type": "money", "amount": calc_val, "value": calc_val, "currency": "MYR"}
-                        else:
-                            price = None
-                    else:
-                        pct_match = re.search(r"([0-9.]+)\s*%", s_cost)
-                        vsi_val = (eval_context or {}).get("vehicle_sum_insured") or (eval_context or {}).get("sum_insured")
-                        if pct_match and vsi_val and float(vsi_val) > 0:
-                            rate = float(pct_match.group(1))
-                            calc_val = round(float(vsi_val) * (rate / 100.0), 2)
-                            if calc_val > 0:
+    has_selection_price = selection is not None and hasattr(selection, "price") and selection.price is not None
+    is_selection_explicit_foc = selection is not None and getattr(selection, "cost_status", None) in {"foc", "included"} and getattr(selection, "price", None) is None
+    has_selection_typed = selection is not None and bool(getattr(selection, "typed_value_override", None))
+
+    # Dynamic company baseline cost calculation (only if user hasn't explicitly set price or FOC)
+    if not has_selection_price and not is_selection_explicit_foc:
+        if company_baseline_costs and concept and getattr(concept, "id", None):
+            raw_b_cost = company_baseline_costs.get(str(concept.id))
+            if raw_b_cost and raw_b_cost.strip():
+                s_cost = raw_b_cost.strip()
+                if "%" in s_cost:
+                    # Formula rate, e.g. "15% of Sum Covered" or "0.30% of Sum Insured"
+                    try:
+                        windscreen_val = (eval_context or {}).get("windscreen_sum_covered") or (eval_context or {}).get("windscreen") or (eval_context or {}).get("windscreen_sum_insured")
+                        if windscreen_val and ("15%" in s_cost or "windscreen" in s_cost.lower()):
+                            clean_w = re.sub(r"[^0-9.]", "", str(windscreen_val))
+                            if clean_w and float(clean_w) > 0:
+                                calc_val = round(float(clean_w) * 0.15, 2)
                                 price = {"type": "money", "amount": calc_val, "value": calc_val, "currency": "MYR"}
                             else:
                                 price = None
                         else:
-                            # Cannot reliably calculate cost: suppress price badge to avoid wrong numbers (e.g. MYR 0.30)
-                            price = None
-                except Exception:
-                    price = None
-            else:
-                try:
-                    num_val = float(re.sub(r"[^0-9.]", "", s_cost))
-                    if num_val > 0:
-                        price = {"type": "money", "amount": num_val, "value": num_val, "currency": "MYR"}
-                    else:
+                            pct_match = re.search(r"([0-9.]+)\s*%", s_cost)
+                            vsi_val = (eval_context or {}).get("vehicle_sum_insured") or (eval_context or {}).get("sum_insured")
+                            if pct_match and vsi_val and float(vsi_val) > 0:
+                                rate = float(pct_match.group(1))
+                                calc_val = round(float(vsi_val) * (rate / 100.0), 2)
+                                if calc_val > 0:
+                                    price = {"type": "money", "amount": calc_val, "value": calc_val, "currency": "MYR"}
+                                else:
+                                    price = None
+                            else:
+                                # Cannot reliably calculate cost: suppress price badge to avoid wrong numbers (e.g. MYR 0.30)
+                                price = None
+                    except Exception:
                         price = None
-                except Exception:
-                    price = None
+                else:
+                    try:
+                        num_val = float(re.sub(r"[^0-9.]", "", s_cost))
+                        if num_val > 0:
+                            price = {"type": "money", "amount": num_val, "value": num_val, "currency": "MYR"}
+                        else:
+                            price = None
+                    except Exception:
+                        price = None
 
     if not _is_valid_price(price):
         price = None
@@ -432,7 +441,7 @@ def _card(
 
     if catalog_def and eval_context:
         from app.services.formula_evaluator import evaluate_formula
-        if catalog_def.get("coverage_formula"):
+        if catalog_def.get("coverage_formula") and not has_selection_typed:
             try:
                 calc_val = evaluate_formula(catalog_def["coverage_formula"], eval_context)
                 if calc_val is not None:
@@ -440,7 +449,7 @@ def _card(
             except Exception:
                 pass
                 
-        if catalog_def.get("cost_formula"):
+        if catalog_def.get("cost_formula") and not has_selection_price and not is_selection_explicit_foc:
             try:
                 cost_res = evaluate_formula(catalog_def["cost_formula"], eval_context)
                 if cost_res is not None:
@@ -566,7 +575,7 @@ def _card(
         "concept_key": concept.concept_key,
         "facet_id": facet_id,
         "branch_key": branch_key,
-        "label": label or getattr(offering, "label_override", None) or concept.label,
+        "label": getattr(selection, "label_override", None) or label or getattr(offering, "label_override", None) or concept.label,
         "description": final_desc,
         "is_custom_description": is_custom_desc,
         "description_override": offering_desc,
@@ -584,6 +593,7 @@ def _card(
         "is_detected": is_detected,
         "is_pure_default": is_pure_default,
         "is_addon": is_addon,
+        "is_extra": bool(cost_status == "paid" or getattr(selection, "item_kind", None) == "extra" or (isinstance(price, dict) and float(price.get("amount") or price.get("value") or 0) > 0)),
         "group_id": getattr(selection, "package_plan_id", None),
         "display_overrides": getattr(concept, "display_overrides", {}) or {},
     }

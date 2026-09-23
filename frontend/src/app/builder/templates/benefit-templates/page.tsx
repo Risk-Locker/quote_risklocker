@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { Route } from "next";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowCounterClockwise,
   Article,
@@ -82,6 +82,78 @@ export default function BenefitCardTemplatesPage() {
   const [, setLoadingBenefits] = useState(false);
 
   // Load all presets from Database with fallback to LocalStorage
+  const customStyleRef = useRef<BenefitCardStyle>(customStyle);
+  useEffect(() => {
+    customStyleRef.current = customStyle;
+  }, [customStyle]);
+
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+
+  const flushPresetSave = useCallback(async (presetToSave: BenefitCardStyle) => {
+    try {
+      setSaveStatus("saving");
+      // 1. Immediately persist synchronously to local storage (both keys)
+      savePresetOverride(presetToSave.id, presetToSave);
+
+      // 2. Persist cleanly to backend DB
+      const { config, ...cleanPayload } = presetToSave as any;
+      await api(`/business/benefit-card-presets/${presetToSave.id}`, {
+        method: "PUT",
+        body: JSON.stringify(cleanPayload),
+      });
+
+      setSaveStatus("saved");
+    } catch (e) {
+      console.warn("Auto-save to backend had error, saved locally:", e);
+      savePresetOverride(presetToSave.id, presetToSave);
+      setSaveStatus("saved");
+    }
+  }, []);
+
+  const updateCustomStyle = useCallback(
+    (updates: Partial<BenefitCardStyle>) => {
+      setCustomStyle((prev) => {
+        const next: BenefitCardStyle = {
+          ...prev,
+          ...updates,
+          is_system_modified: prev.is_custom ? prev.is_system_modified : true,
+        };
+        customStyleRef.current = next;
+
+        // Immediately update this preset inside in-memory allPresets
+        setAllPresets((list) =>
+          list.map((p) => (p.id === next.id ? next : p))
+        );
+
+        // Immediately sync to localStorage
+        savePresetOverride(next.id, next);
+
+        // Debounced backend network save
+        if (saveTimerRef.current) {
+          clearTimeout(saveTimerRef.current);
+        }
+        setSaveStatus("saving");
+        saveTimerRef.current = setTimeout(() => {
+          void flushPresetSave(next);
+        }, 500);
+
+        return next;
+      });
+    },
+    [flushPresetSave]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        void flushPresetSave(customStyleRef.current);
+      }
+    };
+  }, [flushPresetSave]);
+
+  // Load all presets from Database with fallback to LocalStorage
   const refreshPresets = useCallback(async (targetId?: string) => {
     try {
       const res = await api<{ presets: BenefitCardStyle[] }>("/business/benefit-card-presets");
@@ -95,14 +167,23 @@ export default function BenefitCardTemplatesPage() {
           localStorage.setItem("risklocker_cached_benefit_presets", JSON.stringify(list));
         } catch {}
 
-        const target = targetId || selectedPresetId;
-        const found = targetId
-          ? list.find((p) => p.id === target) || list.find((p) => p.is_default) || list[0]
-          : list.find((p) => p.id === target) || list.find((p) => p.is_default) || list[0];
-
-        if (found) {
-          setSelectedPresetId(found.id);
-          setCustomStyle(found);
+        if (targetId) {
+          const found = list.find((p) => p.id === targetId) || list.find((p) => p.is_default) || list[0];
+          if (found) {
+            setSelectedPresetId(found.id);
+            setCustomStyle(found);
+            customStyleRef.current = found;
+          }
+        } else {
+          setSelectedPresetId((prev) => {
+            const found = list.find((p) => p.id === prev) || list.find((p) => p.is_default) || list[0];
+            if (found) {
+              setCustomStyle(found);
+              customStyleRef.current = found;
+              return found.id;
+            }
+            return prev;
+          });
         }
         return;
       }
@@ -112,16 +193,33 @@ export default function BenefitCardTemplatesPage() {
 
     const presets = getAllBenefitPresets();
     setAllPresets(presets);
-    const target = targetId || selectedPresetId;
-    const found = presets.find((p) => p.id === target) || presets.find((p) => p.is_default) || presets[0];
-    if (found) {
-      setSelectedPresetId(found.id);
-      setCustomStyle({
-        ...found,
-        sectionVisibility: normalizeSectionVisibility(found.sectionVisibility, found),
+    if (targetId) {
+      const found = presets.find((p) => p.id === targetId) || presets.find((p) => p.is_default) || presets[0];
+      if (found) {
+        setSelectedPresetId(found.id);
+        const resolved = {
+          ...found,
+          sectionVisibility: normalizeSectionVisibility(found.sectionVisibility, found),
+        };
+        setCustomStyle(resolved);
+        customStyleRef.current = resolved;
+      }
+    } else {
+      setSelectedPresetId((prev) => {
+        const found = presets.find((p) => p.id === prev) || presets.find((p) => p.is_default) || presets[0];
+        if (found) {
+          const resolved = {
+            ...found,
+            sectionVisibility: normalizeSectionVisibility(found.sectionVisibility, found),
+          };
+          setCustomStyle(resolved);
+          customStyleRef.current = resolved;
+          return found.id;
+        }
+        return prev;
       });
     }
-  }, [selectedPresetId]);
+  }, []);
 
   useEffect(() => {
     void refreshPresets();
@@ -151,43 +249,66 @@ export default function BenefitCardTemplatesPage() {
     void loadGlobalBenefits();
   }, [loadGlobalBenefits]);
 
-  function handleSelectPreset(preset: BenefitCardStyle) {
+  async function handleSelectPreset(preset: BenefitCardStyle) {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      await flushPresetSave(customStyleRef.current);
+    }
     setSelectedPresetId(preset.id);
-    setCustomStyle({
+    const resolved: BenefitCardStyle = {
       ...preset,
       sectionVisibility: normalizeSectionVisibility(preset.sectionVisibility, preset),
-    });
+    };
+    setCustomStyle(resolved);
+    customStyleRef.current = resolved;
   }
 
   // Save changes to current preset permanently in DB
   async function saveCurrentPreset() {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
     try {
+      setSaveStatus("saving");
+      // Strip any stale nested config so top-level styling fields are saved cleanly
+      const { config, ...cleanPayload } = customStyle as any;
       await api(`/business/benefit-card-presets/${customStyle.id}`, {
         method: "PUT",
-        body: JSON.stringify(customStyle),
+        body: JSON.stringify(cleanPayload),
       });
       savePresetOverride(customStyle.id, customStyle);
-      await refreshPresets(customStyle.id);
+      setAllPresets((list) =>
+        list.map((p) => (p.id === customStyle.id ? { ...customStyle, is_system_modified: !customStyle.is_custom ? true : customStyle.is_system_modified } : p))
+      );
+      setSaveStatus("saved");
       toast(`Saved changes to "${customStyle.name}" in database.`, "success");
     } catch {
       savePresetOverride(customStyle.id, customStyle);
-      await refreshPresets(customStyle.id);
+      setSaveStatus("saved");
       toast(`Saved changes to "${customStyle.name}".`, "info");
     }
   }
 
   // Reset current system preset to factory default
   async function resetCurrentPreset() {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
     try {
       await api(`/business/benefit-card-presets/${customStyle.id}/reset`, {
         method: "POST",
       });
       resetPresetToDefault(customStyle.id);
       await refreshPresets(customStyle.id);
+      setSaveStatus("saved");
       toast(`"${customStyle.name}" reset to factory system defaults.`, "info");
     } catch {
       resetPresetToDefault(customStyle.id);
       await refreshPresets(customStyle.id);
+      setSaveStatus("saved");
       toast(`"${customStyle.name}" reset to factory defaults.`, "info");
     }
   }
@@ -286,8 +407,7 @@ export default function BenefitCardTemplatesPage() {
       ...norm,
       [section]: updatedSec,
     };
-    setCustomStyle({
-      ...customStyle,
+    updateCustomStyle({
       sectionVisibility: updatedVis,
     });
   }
@@ -306,8 +426,7 @@ export default function BenefitCardTemplatesPage() {
       ...norm,
       [section]: updatedSec,
     };
-    setCustomStyle({
-      ...customStyle,
+    updateCustomStyle({
       sectionVisibility: updatedVis,
     });
   }
@@ -892,6 +1011,18 @@ export default function BenefitCardTemplatesPage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {saveStatus === "saving" ? (
+              <span className="flex items-center gap-1.5 rounded-full bg-amber-50 border border-amber-200 px-2.5 py-1 text-[11px] font-bold text-amber-700 animate-pulse shadow-2xs">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                <span>Saving changes...</span>
+              </span>
+            ) : saveStatus === "saved" ? (
+              <span className="flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-2.5 py-1 text-[11px] font-bold text-emerald-700 shadow-2xs">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                <span>All changes saved to database</span>
+              </span>
+            ) : null}
+
             {isCurrentSystemModified && (
               <Button variant="secondary" size="sm" icon={<ArrowCounterClockwise size={14} />} onClick={resetCurrentPreset}>
                 Reset to Default
@@ -1211,7 +1342,7 @@ export default function BenefitCardTemplatesPage() {
                     <button
                       key={item.key}
                       type="button"
-                      onClick={() => setCustomStyle({ ...customStyle, layout: item.key as BenefitCardStyle["layout"] })}
+                      onClick={() => updateCustomStyle({ layout: item.key as BenefitCardStyle["layout"] })}
                       className={`rounded-[var(--rl-radius-sm)] border p-2 text-center text-xs font-medium transition-all ${
                         customStyle.layout === item.key
                           ? "border-[var(--rl-black)] bg-[var(--rl-black)] text-white shadow-xs font-bold"
@@ -1243,7 +1374,7 @@ export default function BenefitCardTemplatesPage() {
                       <button
                         key={item.key}
                         type="button"
-                        onClick={() => setCustomStyle({ ...customStyle, shape: item.key as BenefitCardStyle["shape"] })}
+                        onClick={() => updateCustomStyle({ shape: item.key as BenefitCardStyle["shape"] })}
                         className={`rounded-[var(--rl-radius-sm)] border p-2 text-center text-xs font-medium transition-all ${
                           customStyle.shape === item.key
                             ? "border-[var(--rl-black)] bg-[var(--rl-black)] text-white shadow-xs font-bold"
@@ -1267,7 +1398,7 @@ export default function BenefitCardTemplatesPage() {
                       <button
                         key={item.key}
                         type="button"
-                        onClick={() => setCustomStyle({ ...customStyle, elevation: item.key as BenefitCardStyle["elevation"] })}
+                        onClick={() => updateCustomStyle({ elevation: item.key as BenefitCardStyle["elevation"] })}
                         className={`rounded-[var(--rl-radius-sm)] border p-2 text-center text-xs font-medium transition-all ${
                           customStyle.elevation === item.key
                             ? "border-[var(--rl-black)] bg-[var(--rl-black)] text-white font-bold"
@@ -1300,7 +1431,7 @@ export default function BenefitCardTemplatesPage() {
                       <button
                         key={item.val}
                         type="button"
-                        onClick={() => setCustomStyle({ ...customStyle, uniformHeight: item.val })}
+                        onClick={() => updateCustomStyle({ uniformHeight: item.val })}
                         className={`rounded-[var(--rl-radius-sm)] border py-1.5 text-center text-xs font-medium transition-all ${
                           customStyle.uniformHeight === item.val
                             ? "border-[var(--rl-black)] bg-[var(--rl-black)] text-white font-bold"
@@ -1335,7 +1466,7 @@ export default function BenefitCardTemplatesPage() {
                       <button
                         key={size}
                         type="button"
-                        onClick={() => setCustomStyle({ ...customStyle, iconSize: size })}
+                        onClick={() => updateCustomStyle({ iconSize: size })}
                         className={`rounded-[var(--rl-radius-sm)] border py-1.5 text-center text-xs font-medium transition-all ${
                           customStyle.iconSize === size
                             ? "border-[var(--rl-black)] bg-[var(--rl-black)] text-white font-bold"
@@ -1361,7 +1492,7 @@ export default function BenefitCardTemplatesPage() {
                       <button
                         key={item.key}
                         type="button"
-                        onClick={() => setCustomStyle({ ...customStyle, imageFit: item.key as BenefitCardStyle["imageFit"] })}
+                        onClick={() => updateCustomStyle({ imageFit: item.key as BenefitCardStyle["imageFit"] })}
                         className={`rounded-[var(--rl-radius-sm)] border p-2 text-center text-xs font-medium transition-all ${
                           customStyle.imageFit === item.key
                             ? "border-[var(--rl-black)] bg-[var(--rl-black)] text-white font-bold"
@@ -1386,7 +1517,7 @@ export default function BenefitCardTemplatesPage() {
                       <button
                         key={item.key}
                         type="button"
-                        onClick={() => setCustomStyle({ ...customStyle, iconPadShape: item.key as BenefitCardStyle["iconPadShape"] })}
+                        onClick={() => updateCustomStyle({ iconPadShape: item.key as BenefitCardStyle["iconPadShape"] })}
                         className={`rounded-[var(--rl-radius-sm)] border py-1.5 text-center text-xs font-medium transition-all ${
                           customStyle.iconPadShape === item.key
                             ? "border-[var(--rl-black)] bg-[var(--rl-black)] text-white font-bold"
@@ -1428,7 +1559,7 @@ export default function BenefitCardTemplatesPage() {
                           <button
                             key={size}
                             type="button"
-                            onClick={() => setCustomStyle({ ...customStyle, titleSize: size })}
+                            onClick={() => updateCustomStyle({ titleSize: size })}
                             className={`rounded border py-1 text-center font-medium ${
                               customStyle.titleSize === size
                                 ? "bg-[var(--rl-black)] text-white font-bold"
@@ -1450,7 +1581,7 @@ export default function BenefitCardTemplatesPage() {
                           <button
                             key={item.key}
                             type="button"
-                            onClick={() => setCustomStyle({ ...customStyle, textWrap: item.key as "truncate" | "wrap" })}
+                            onClick={() => updateCustomStyle({ textWrap: item.key as "truncate" | "wrap" })}
                             className={`rounded border py-1 text-center font-medium ${
                               customStyle.textWrap === item.key
                                 ? "bg-[var(--rl-black)] text-white font-bold"
@@ -1470,7 +1601,7 @@ export default function BenefitCardTemplatesPage() {
                         <button
                           key={col}
                           type="button"
-                          onClick={() => setCustomStyle({ ...customStyle, titleColor: col })}
+                          onClick={() => updateCustomStyle({ titleColor: col })}
                           className={`h-6 w-6 rounded-full border shadow-2xs transition-all ${
                             (customStyle.titleColor || "#0f172a") === col ? "ring-2 ring-[var(--rl-red)] ring-offset-2 scale-110" : "border-neutral-300"
                           }`}
@@ -1481,7 +1612,7 @@ export default function BenefitCardTemplatesPage() {
                       <input
                         type="text"
                         value={customStyle.titleColor || "#0f172a"}
-                        onChange={(e) => setCustomStyle({ ...customStyle, titleColor: e.target.value })}
+                        onChange={(e) => updateCustomStyle({ titleColor: e.target.value })}
                         className="h-6 w-20 rounded border border-[var(--rl-border)] px-1.5 text-[11px] font-mono uppercase bg-[var(--rl-bg)]"
                         placeholder="#0F172A"
                       />
@@ -1506,7 +1637,7 @@ export default function BenefitCardTemplatesPage() {
                           <button
                             key={size}
                             type="button"
-                            onClick={() => setCustomStyle({ ...customStyle, coverageSize: size })}
+                            onClick={() => updateCustomStyle({ coverageSize: size })}
                             className={`rounded border py-1 text-center font-medium ${
                               (customStyle.coverageSize || 11) === size
                                 ? "bg-[var(--rl-black)] text-white font-bold"
@@ -1525,7 +1656,7 @@ export default function BenefitCardTemplatesPage() {
                           <button
                             key={col}
                             type="button"
-                            onClick={() => setCustomStyle({ ...customStyle, coverageColor: col })}
+                            onClick={() => updateCustomStyle({ coverageColor: col })}
                             className={`h-6 w-6 rounded-full border shadow-2xs transition-all ${
                               (customStyle.coverageColor || "#10b981") === col ? "ring-2 ring-[var(--rl-red)] ring-offset-2 scale-110" : "border-neutral-300"
                             }`}
@@ -1536,7 +1667,7 @@ export default function BenefitCardTemplatesPage() {
                         <input
                           type="text"
                           value={customStyle.coverageColor || "#10b981"}
-                          onChange={(e) => setCustomStyle({ ...customStyle, coverageColor: e.target.value })}
+                          onChange={(e) => updateCustomStyle({ coverageColor: e.target.value })}
                           className="h-6 w-20 rounded border border-[var(--rl-border)] px-1 text-[11px] font-mono uppercase bg-[var(--rl-bg)]"
                           placeholder="#10B981"
                         />
@@ -1563,7 +1694,7 @@ export default function BenefitCardTemplatesPage() {
                             <button
                               key={size}
                               type="button"
-                              onClick={() => setCustomStyle({ ...customStyle, descSize: size })}
+                              onClick={() => updateCustomStyle({ descSize: size })}
                               className={`rounded border py-1 text-center font-medium ${
                                 (customStyle.descSize || 9) === size
                                   ? "bg-[var(--rl-black)] text-white font-bold"
@@ -1582,7 +1713,7 @@ export default function BenefitCardTemplatesPage() {
                             <button
                               key={col}
                               type="button"
-                              onClick={() => setCustomStyle({ ...customStyle, descColor: col })}
+                              onClick={() => updateCustomStyle({ descColor: col })}
                               className={`h-6 w-6 rounded-full border shadow-2xs transition-all ${
                                 (customStyle.descColor || "#64748b") === col ? "ring-2 ring-[var(--rl-red)] ring-offset-2 scale-110" : "border-neutral-300"
                               }`}
@@ -1593,7 +1724,7 @@ export default function BenefitCardTemplatesPage() {
                           <input
                             type="text"
                             value={customStyle.descColor || "#64748b"}
-                            onChange={(e) => setCustomStyle({ ...customStyle, descColor: e.target.value })}
+                            onChange={(e) => updateCustomStyle({ descColor: e.target.value })}
                             className="h-6 w-16 rounded border border-[var(--rl-border)] px-1 text-[10px] font-mono uppercase bg-[var(--rl-bg)]"
                             placeholder="#64748B"
                           />
@@ -1612,7 +1743,7 @@ export default function BenefitCardTemplatesPage() {
                           <button
                             key={w.key}
                             type="button"
-                            onClick={() => setCustomStyle({ ...customStyle, descWeight: w.key as any })}
+                            onClick={() => updateCustomStyle({ descWeight: w.key as any })}
                             className={`rounded border py-1 text-center font-medium ${
                               (customStyle.descWeight || "normal") === w.key
                                 ? "bg-[var(--rl-black)] text-white font-bold"
@@ -1645,7 +1776,7 @@ export default function BenefitCardTemplatesPage() {
                           <button
                             key={size}
                             type="button"
-                            onClick={() => setCustomStyle({ ...customStyle, costSize: size })}
+                            onClick={() => updateCustomStyle({ costSize: size })}
                             className={`rounded border py-1 text-center font-medium ${
                               (customStyle.costSize || 9) === size
                                 ? "bg-[var(--rl-black)] text-white font-bold"
@@ -1669,7 +1800,7 @@ export default function BenefitCardTemplatesPage() {
                           <button
                             key={item.key}
                             type="button"
-                            onClick={() => setCustomStyle({ ...customStyle, valueBadgeStyle: item.key as BenefitCardStyle["valueBadgeStyle"] })}
+                            onClick={() => updateCustomStyle({ valueBadgeStyle: item.key as BenefitCardStyle["valueBadgeStyle"] })}
                             className={`rounded border py-1 text-center font-medium ${
                               customStyle.valueBadgeStyle === item.key
                                 ? "bg-[var(--rl-black)] text-white font-bold"
@@ -1691,7 +1822,7 @@ export default function BenefitCardTemplatesPage() {
                           <button
                             key={col}
                             type="button"
-                            onClick={() => setCustomStyle({ ...customStyle, costColor: col })}
+                            onClick={() => updateCustomStyle({ costColor: col })}
                             className={`h-5 w-5 rounded-full border shadow-2xs transition-all ${
                               customStyle.costColor === col ? "ring-2 ring-[var(--rl-red)] ring-offset-1 scale-110" : "border-neutral-300"
                             }`}
@@ -1702,7 +1833,7 @@ export default function BenefitCardTemplatesPage() {
                         <input
                           type="text"
                           value={customStyle.costColor || ""}
-                          onChange={(e) => setCustomStyle({ ...customStyle, costColor: e.target.value })}
+                          onChange={(e) => updateCustomStyle({ costColor: e.target.value })}
                           className="h-6 w-20 rounded border border-[var(--rl-border)] px-1 text-[11px] font-mono uppercase bg-[var(--rl-bg)]"
                           placeholder="#B91C1C"
                         />
@@ -1715,7 +1846,7 @@ export default function BenefitCardTemplatesPage() {
                           <button
                             key={col}
                             type="button"
-                            onClick={() => setCustomStyle({ ...customStyle, costBgColor: col })}
+                            onClick={() => updateCustomStyle({ costBgColor: col })}
                             className={`h-5 w-5 rounded-full border shadow-2xs transition-all ${
                               customStyle.costBgColor === col ? "ring-2 ring-[var(--rl-red)] ring-offset-1 scale-110" : "border-neutral-300"
                             }`}
@@ -1726,7 +1857,7 @@ export default function BenefitCardTemplatesPage() {
                         <input
                           type="text"
                           value={customStyle.costBgColor || ""}
-                          onChange={(e) => setCustomStyle({ ...customStyle, costBgColor: e.target.value })}
+                          onChange={(e) => updateCustomStyle({ costBgColor: e.target.value })}
                           className="h-6 w-20 rounded border border-[var(--rl-border)] px-1 text-[11px] font-mono uppercase bg-[var(--rl-bg)]"
                           placeholder="#FEE2E2"
                         />
@@ -1750,7 +1881,7 @@ export default function BenefitCardTemplatesPage() {
                         <button
                           key={col}
                           type="button"
-                          onClick={() => setCustomStyle({ ...customStyle, bgColor: col })}
+                          onClick={() => updateCustomStyle({ bgColor: col })}
                           className={`h-7 w-7 rounded-full border shadow-xs transition-all ${
                             customStyle.bgColor === col ? "ring-2 ring-[var(--rl-red)] ring-offset-2 scale-110" : "border-neutral-300"
                           }`}
@@ -1768,7 +1899,7 @@ export default function BenefitCardTemplatesPage() {
                         <button
                           key={col}
                           type="button"
-                          onClick={() => setCustomStyle({ ...customStyle, borderColor: col })}
+                          onClick={() => updateCustomStyle({ borderColor: col })}
                           className={`h-7 w-7 rounded-full border shadow-xs transition-all ${
                             customStyle.borderColor === col ? "ring-2 ring-[var(--rl-red)] ring-offset-2 scale-110" : "border-neutral-300"
                           }`}

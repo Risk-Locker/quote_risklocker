@@ -204,6 +204,7 @@ class Batch(Base, TimestampMixin, SoftDeleteMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default=RecordStatus.UPLOADED.value, index=True)
     enhanced_reading_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
 
     owner: Mapped[User] = relationship(back_populates="batches")
     files: Mapped[list["UploadedFile"]] = relationship(back_populates="batch", cascade="all, delete-orphan")
@@ -222,11 +223,91 @@ class Session(Base, TimestampMixin):
     quotation_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_edited_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     last_edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    quotation_status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", index=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    miss_reason: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    tracked_vehicle_id: Mapped[str | None] = mapped_column(ForeignKey("tracked_vehicles.id", ondelete="SET NULL"), nullable=True, index=True)
+    deal_cycle_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    coverage_start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    coverage_end_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"), index=True)
 
     owner: Mapped[User] = relationship(foreign_keys=[owner_id])
     last_edited_by: Mapped[User | None] = relationship(foreign_keys=[last_edited_by_id])
     uploaded_file: Mapped[UploadedFile] = relationship()
     draft: Mapped[QuotationDraft] = relationship()
+    tracked_vehicle: Mapped["TrackedVehicle | None"] = relationship(back_populates="sessions")
+    activities: Mapped[list["QuotationActivity"]] = relationship(back_populates="session", cascade="all, delete-orphan")
+
+
+class TrackedVehicle(Base, TimestampMixin):
+    __tablename__ = "tracked_vehicles"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    vehicle_no: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
+    car_brand: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    car_model: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    engine_cc: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    ownerships: Mapped[list["VehicleOwnership"]] = relationship(
+        back_populates="vehicle", cascade="all, delete-orphan", order_by="VehicleOwnership.sequence_order.asc()"
+    )
+    sessions: Mapped[list["Session"]] = relationship(back_populates="tracked_vehicle")
+
+    @property
+    def current_owner(self) -> VehicleOwnership | None:
+        for o in self.ownerships:
+            if o.is_current:
+                return o
+        return self.ownerships[-1] if self.ownerships else None
+
+    @property
+    def current_owner_name(self) -> str | None:
+        owner = self.current_owner
+        return owner.customer_name if owner else None
+
+
+
+class VehicleOwnership(Base, TimestampMixin):
+    __tablename__ = "vehicle_ownerships"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    vehicle_id: Mapped[str] = mapped_column(ForeignKey("tracked_vehicles.id", ondelete="CASCADE"), nullable=False, index=True)
+    customer_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    valid_from: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    valid_until: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    sequence_order: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    source_session_id: Mapped[str | None] = mapped_column(ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True)
+    coverage_start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    coverage_end_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    renewal_alert_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    policy_status: Mapped[str] = mapped_column(String(50), nullable=False, default="active")
+
+    vehicle: Mapped[TrackedVehicle] = relationship(back_populates="ownerships")
+
+
+class QuotationActivity(Base, TimestampMixin):
+    __tablename__ = "quotation_activities"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    session_id: Mapped[str] = mapped_column(ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    vehicle_no: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    customer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    action_type: Mapped[str] = mapped_column(String(50), nullable=False, default="quote_generated")
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    sent_to_client: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    addons_snapshot: Mapped[list[dict]] = mapped_column(JSON, default=list, nullable=False)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", index=True)
+    miss_reason: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    won_premium: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    session: Mapped[Session] = relationship(back_populates="activities")
+    user: Mapped[User | None] = relationship(foreign_keys=[user_id])
 
 
 class ClientRecord(Base, TimestampMixin, SoftDeleteMixin):
@@ -359,6 +440,7 @@ class UploadedFile(Base, TimestampMixin, SoftDeleteMixin):
     status: Mapped[str] = mapped_column(String(50), nullable=False, default=RecordStatus.UPLOADED.value, index=True)
     enhanced_reading: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     simple_issue: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
 
     batch: Mapped[Batch] = relationship(back_populates="files")
     extraction_record: Mapped["ExtractionRecord"] = relationship(back_populates="uploaded_file", uselist=False)
@@ -880,7 +962,7 @@ class DraftSourceLineDecision(Base, TimestampMixin):
     draft_id: Mapped[str] = mapped_column(ForeignKey("quotation_drafts.id", ondelete="CASCADE"), nullable=False, index=True)
     source_line_id: Mapped[str] = mapped_column(ForeignKey("extraction_benefit_lines.id", ondelete="CASCADE"), nullable=False, index=True)
     disposition: Mapped[str] = mapped_column(String(40), nullable=False, default="unresolved", index=True)
-    selection_id: Mapped[str | None] = mapped_column(ForeignKey("draft_benefit_selections.id", ondelete="SET NULL"), nullable=True)
+    selection_id: Mapped[str | None] = mapped_column(ForeignKey("draft_benefit_selections.id", ondelete="CASCADE"), nullable=True)
     decided_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -983,7 +1065,7 @@ class RenderSnapshot(Base, TimestampMixin):
     __tablename__ = "render_snapshots"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
-    draft_id: Mapped[str] = mapped_column(ForeignKey("quotation_drafts.id", ondelete="RESTRICT"), nullable=False, index=True)
+    draft_id: Mapped[str] = mapped_column(ForeignKey("quotation_drafts.id", ondelete="CASCADE"), nullable=False, index=True)
     draft_revision: Mapped[int] = mapped_column(Integer, nullable=False)
     catalog_revision_id: Mapped[str | None] = mapped_column(ForeignKey("benefit_catalog_revisions.id", ondelete="RESTRICT"), nullable=True)
     template_revision_id: Mapped[str] = mapped_column(ForeignKey("template_revisions.id", ondelete="RESTRICT"), nullable=False)

@@ -9,6 +9,7 @@ import {
   ClockCountdown,
   Files,
   FileText,
+  Flask,
   Sparkle,
   Trash,
   Upload,
@@ -97,6 +98,7 @@ export default function UploadPage() {
   // Single upload state (100% original workflow preserved)
   const [file, setFile] = useState<File | null>(null);
   const [enhanced, setEnhanced] = useState(true);
+  const [isTestUpload, setIsTestUpload] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [limits, setLimits] = useState<UploadLimits | null>(null);
@@ -116,7 +118,7 @@ export default function UploadPage() {
   const [bulkNotice, setBulkNotice] = useState("");
 
   const maximum = limits?.max_source_pdf_bytes || limits?.max_upload_bytes || 20 * 1024 * 1024;
-  const maxBulkLimit = limits?.max_bulk_upload_files || 5;
+  const maxBulkLimit = limits?.max_bulk_upload_files || 10;
   const gemini = limits?.gemini;
 
   useEffect(() => {
@@ -238,6 +240,7 @@ export default function UploadPage() {
     const form = new FormData();
     form.append("file", file);
     form.append("enhanced_reading", String(enhanced));
+    form.append("is_test", String(isTestUpload));
     try {
       const result = await api<UploadResult>("/uploads", {
         method: "POST",
@@ -407,6 +410,7 @@ export default function UploadPage() {
           const form = new FormData();
           form.append("file", item.file);
           form.append("enhanced_reading", String(enhanced));
+          form.append("is_test", String(isTestUpload));
 
           const result = await api<UploadResult>("/uploads", {
             method: "POST",
@@ -727,6 +731,36 @@ export default function UploadPage() {
                 <GeminiQuotaInfoButton quota={limits?.gemini} />
               </div>
 
+              {/* Test Upload Option */}
+              <div className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white p-3.5 flex items-center justify-between gap-3">
+                <label className="flex items-center gap-3 cursor-pointer flex-1 min-w-0">
+                  <input
+                    className="h-4 w-4 accent-amber-600 rounded shrink-0"
+                    type="checkbox"
+                    checked={isTestUpload}
+                    disabled={loading}
+                    onChange={(event) => setIsTestUpload(event.target.checked)}
+                  />
+                  <div>
+                    <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--rl-text-strong)]">
+                      <Flask
+                        aria-hidden="true"
+                        size={15}
+                        weight="bold"
+                        className="text-amber-600"
+                      />
+                      Test Upload Mode (Sandbox / No Client Records)
+                    </span>
+                    <p className="text-xs text-[var(--rl-text-muted)]">
+                      Saves session for preview and quotation editing, but will never record to Hit & Miss analytics or Customer Records.
+                    </p>
+                  </div>
+                </label>
+                <span className="rounded bg-amber-100 text-amber-900 text-[11px] font-bold px-2 py-0.5 border border-amber-300 shrink-0 uppercase tracking-wider">
+                  Test / Sandbox
+                </span>
+              </div>
+
               {loading ? (
                 <div
                   role="status"
@@ -911,6 +945,31 @@ export default function UploadPage() {
                       </Button>
                     </div>
                   )}
+                </div>
+
+                {/* Bulk Test Upload Option */}
+                <div className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)]/50 p-3 flex items-center justify-between gap-3">
+                  <label className="flex items-center gap-3 cursor-pointer flex-1 min-w-0">
+                    <input
+                      className="h-4 w-4 accent-amber-600 rounded shrink-0"
+                      type="checkbox"
+                      checked={isTestUpload}
+                      disabled={bulkProcessing}
+                      onChange={(event) => setIsTestUpload(event.target.checked)}
+                    />
+                    <div>
+                      <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[var(--rl-text-strong)]">
+                        <Flask size={14} weight="bold" className="text-amber-600" />
+                        Test Upload Batch (Sandbox / No Client Records)
+                      </span>
+                      <p className="text-[11px] text-[var(--rl-text-muted)]">
+                        Batch items will be saved as test sessions, completely isolated from customer records and hit & miss.
+                      </p>
+                    </div>
+                  </label>
+                  <span className="rounded bg-amber-100 text-amber-900 text-[10px] font-bold px-2 py-0.5 border border-amber-300 shrink-0 uppercase tracking-wider">
+                    Sandbox Mode
+                  </span>
                 </div>
 
                 {/* Checklist Rows */}

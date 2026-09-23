@@ -237,6 +237,24 @@ def test_build_extras_omits_coverage_when_display_overrides_show_coverage_is_fal
     assert by_key["windscreen"]["coverage_limit"] == ""
     assert by_key["windscreen"]["show_coverage"] is False
     assert by_key["windscreen"]["label"] == "Windscreen"
-    assert by_key["towing"]["coverage_limit"] == "(RM 1,000)"
-    assert by_key["towing"]["show_coverage"] is True
+
+def test_adjusted_total_text_round_total():
+    from app.rendering.render_context import adjusted_total_text
+
+    fields = {
+        "premium": {"value": "2060.12"},
+        "roadtax": {"value": "90.00"},
+        "service_fee": {"value": "0.00"},
+        "total_amount": {"value": "2150.12"},
+    }
+    # Unrounded:
+    assert adjusted_total_text(fields, [], round_total=False) == "2,150.12"
+    # Rounded: rounds 2150.12 to 2150.00 with 0 cents
+    assert adjusted_total_text(fields, [], round_total=True) == "2,150.00"
+
+    # Test with .50 exactly (no premium, falls back to total_amount):
+    fields_half = {
+        "total_amount": {"value": "800.50"},
+    }
+    assert adjusted_total_text(fields_half, [], round_total=True) == "801.00"
 

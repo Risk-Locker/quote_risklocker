@@ -1499,6 +1499,35 @@ function EditableText({ initial, onCommit }: { initial: string; onCommit: (text:
   );
 }
 
+export function isPaidExtraBenefitCard(c: any): boolean {
+  if (c?.is_extra || c?.badge || c?.cost_status === "paid") return true;
+  const p = c?.price ?? c?.optional_price;
+  if (p !== null && p !== undefined) {
+    if (typeof p === "object") {
+      const amt = p.amount ?? p.value;
+      const n = typeof amt === "string" ? parseFloat(amt.replace(/,/g, "")) : Number(amt);
+      if (Number.isFinite(n) && n > 0) return true;
+    } else if (typeof p === "number" && Number.isFinite(p) && p > 0) {
+      return true;
+    } else if (typeof p === "string") {
+      const n = parseFloat(p.replace(/[^0-9.]/g, ""));
+      if (Number.isFinite(n) && n > 0) return true;
+    }
+  }
+  const tv = c?.typed_value;
+  if (tv && typeof tv === "object") {
+    if (tv.semantic_role === "premium") {
+      const n = parseFloat(String(tv.value || "").replace(/[^0-9.]/g, ""));
+      if (Number.isFinite(n) && n > 0) return true;
+    }
+  }
+  if (c?.detected_cost) {
+    const n = parseFloat(String(c.detected_cost).replace(/[^0-9.]/g, ""));
+    if (Number.isFinite(n) && n > 0) return true;
+  }
+  return false;
+}
+
 export function balanceBenefitGridElements(
   elements: CanvasElement[],
   benefitData?: {
@@ -1514,23 +1543,7 @@ export function balanceBenefitGridElements(
   const currentCards = benefitData?.current_benefits || [];
   const addonCards = benefitData?.available_addons || [];
 
-  const isPaidExtra = (c: any) => {
-    if (c?.is_extra || c?.badge || c?.cost_status === "paid") return true;
-    const p = c?.price ?? c?.optional_price;
-    if (p !== null && p !== undefined) {
-      if (typeof p === "object") {
-        const amt = p.amount ?? p.value;
-        const n = typeof amt === "string" ? parseFloat(amt.replace(/,/g, "")) : Number(amt);
-        if (Number.isFinite(n) && n > 0) return true;
-      } else if (typeof p === "number" && Number.isFinite(p) && p > 0) {
-        return true;
-      } else if (typeof p === "string") {
-        const n = parseFloat(p.replace(/[^0-9.]/g, ""));
-        if (Number.isFinite(n) && n > 0) return true;
-      }
-    }
-    return false;
-  };
+  const isPaidExtra = isPaidExtraBenefitCard;
 
   // Separate true FOC benefits from purchased extras / priced add-ons
   const extrasCards = currentCards.filter(isPaidExtra);

@@ -18,6 +18,7 @@ import {
   SidebarSimple,
   List,
   X,
+  ChartLineUp,
 } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
 import { useAuth, clearAuthCache } from "@/lib/auth";
@@ -28,10 +29,10 @@ import { GlobalAiCopilot } from "@/components/global-ai-copilot";
 const nav: Array<{ href: Route; label: string; icon: typeof Upload }> = [
   { href: "/upload", label: "Upload", icon: Upload },
   { href: "/sessions", label: "Sessions", icon: SquaresFour },
+  { href: "/insights" as Route, label: "Insights and Analytics", icon: ChartLineUp },
   { href: "/builder/templates/quotation-templates" as Route, label: "Builder", icon: Wrench },
   { href: "/extraction/company-detection" as Route, label: "Extraction & Aliases", icon: FunnelSimple },
   { href: "/settings/system-checks", label: "Settings", icon: Gear },
-  { href: "/client-records", label: "Records", icon: Users },
   { href: "/inbox", label: "Inbox", icon: Bell },
   { href: "/trash", label: "Trash", icon: Trash },
 ];

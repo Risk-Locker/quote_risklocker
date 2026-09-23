@@ -1,14 +1,19 @@
 """Company-first business setup services for the revisioned v7 catalog."""
+# Performance: batch-preload patterns to avoid N+1 DB queries — 2026-09-22
 
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from collections import defaultdict
+
 from sqlalchemy import delete, func, or_, select, text, update
 
+from app.core.cache import _memory_cache, invalidate_cache
 from app.core.errors import AppError
 from app.domain.benefits import BenefitValue
 from app.models.enums import Role
@@ -87,8 +92,11 @@ def _asset_summary(asset: BusinessAsset | None) -> dict | None:
     }
 
 
-def serialize_company(db, company: InsuranceCompany) -> dict:
-    logo = db.get(BusinessAsset, company.logo_asset_id) if company.logo_asset_id else None
+def serialize_company(db, company: InsuranceCompany, preloaded_logos: dict[str, BusinessAsset | None] | None = None) -> dict:
+    if preloaded_logos is not None:
+        logo = preloaded_logos.get(company.logo_asset_id) if company.logo_asset_id else None
+    else:
+        logo = db.get(BusinessAsset, company.logo_asset_id) if company.logo_asset_id else None
     return {
         "id": company.id,
         "slug": company.slug,
@@ -105,25 +113,43 @@ def serialize_company(db, company: InsuranceCompany) -> dict:
 
 def list_business_companies(db, user, *, search: str, page: int, page_size: int) -> dict:
     _require_business(user)
+    term = search.strip()
+    cache_key = f"business:companies:{page}:{page_size}" if not term else None
+    if cache_key:
+        cached = _memory_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
     query = select(InsuranceCompany)
     count_query = select(func.count()).select_from(InsuranceCompany)
-    term = search.strip()
     if term:
         pattern = f"%{term}%"
         predicate = or_(InsuranceCompany.name.ilike(pattern), InsuranceCompany.slug.ilike(pattern))
         query = query.where(predicate)
         count_query = count_query.where(predicate)
     total = int(db.scalar(count_query) or 0)
-    items = db.scalars(
-        query.order_by(InsuranceCompany.name.asc()).limit(page_size).offset((page - 1) * page_size)
-    ).all()
-    return {
-        "items": [serialize_company(db, item) for item in items],
+    items = list(
+        db.scalars(
+            query.order_by(InsuranceCompany.name.asc()).limit(page_size).offset((page - 1) * page_size)
+        ).all()
+    )
+
+    logo_ids = [c.logo_asset_id for c in items if c.logo_asset_id]
+    logos_map: dict[str, BusinessAsset | None] = {}
+    if logo_ids:
+        assets = db.scalars(select(BusinessAsset).where(BusinessAsset.id.in_(logo_ids))).all()
+        logos_map = {a.id: a for a in assets}
+
+    result = {
+        "items": [serialize_company(db, item, logos_map) for item in items],
         "total": total,
         "page": page,
         "page_size": page_size,
         "pages": max(1, (total + page_size - 1) // page_size),
     }
+    if cache_key:
+        _memory_cache.set(cache_key, result, ttl_seconds=60.0)
+    return result
 
 
 def _normalize_alias(value: str) -> str:
@@ -302,6 +328,73 @@ def _catalog(db, item: BenefitCatalog) -> dict:
     }
 
 
+def _catalogs_batch(db, catalogs: list[BenefitCatalog]) -> list[dict]:
+    """Batch-serialize catalogs: 2 queries total instead of 2 per catalog."""
+    if not catalogs:
+        return []
+    catalog_ids = [item.id for item in catalogs]
+    # 1. Batch-load all revisions for all catalogs in 1 query
+    all_revisions = list(db.scalars(
+        select(BenefitCatalogRevision)
+        .where(BenefitCatalogRevision.catalog_id.in_(catalog_ids))
+        .order_by(BenefitCatalogRevision.revision_number.desc())
+    ).all())
+    revisions_by_catalog: dict[str, list] = defaultdict(list)
+    for rev in all_revisions:
+        revisions_by_catalog[str(rev.catalog_id)].append(rev)
+    # 2. Batch-load all referenced packages in 1 query
+    package_ids = {item.package_id for item in catalogs if item.package_id}
+    packages_map: dict[str, BenefitPackage] = {}
+    if package_ids:
+        packages_map = {
+            pkg.id: pkg
+            for pkg in db.scalars(select(BenefitPackage).where(BenefitPackage.id.in_(package_ids))).all()
+        }
+    # 3. Build result dicts using preloaded data
+    result = []
+    for item in catalogs:
+        revisions = revisions_by_catalog.get(item.id, [])
+        package = packages_map.get(item.package_id) if item.package_id else None
+        result.append({
+            "id": item.id,
+            "company_id": item.company_id,
+            "product_id": item.product_id,
+            "tier_id": item.tier_id,
+            "package_id": item.package_id,
+            "package": {
+                "id": package.id,
+                "package_key": package.package_key,
+                "name": package.name,
+                "package_kind": package.package_kind,
+                "sort_order": package.sort_order,
+            } if package else None,
+            "segment_id": item.segment_id,
+            "vehicle_category_id": item.vehicle_category_id,
+            "vehicle_subcategory_id": item.vehicle_subcategory_id,
+            "coverage_type_id": item.coverage_type_id,
+            "coverage_type_key": (
+                "comprehensive" if item.coverage_type_id == "d1111111-0000-4000-8000-000000000001"
+                else ("tpft" if item.coverage_type_id == "d1111111-0000-4000-8000-000000000002"
+                else ("third_party" if item.coverage_type_id == "d1111111-0000-4000-8000-000000000003" else None))
+            ),
+            "engine_type": getattr(item, "engine_type", None) or "ice",
+            "name": item.name,
+            "revision": item.revision,
+            "status": item.status,
+            "revisions": [
+                {
+                    "id": revision.id,
+                    "revision_number": revision.revision_number,
+                    "state": revision.state,
+                    "content_hash": revision.content_hash,
+                    "published_at": revision.published_at.isoformat() if revision.published_at else None,
+                }
+                for revision in revisions
+            ],
+        })
+    return result
+
+
 def get_business_company_workspace(db, user, company_id: str, include_archived: bool = False) -> dict:
     _require_business(user)
     company = db.get(InsuranceCompany, company_id)
@@ -327,7 +420,7 @@ def get_business_company_workspace(db, user, company_id: str, include_archived: 
         "company": serialize_company(db, company),
         "products": [_product(item) for item in products],
         "tiers": [_tier(item) for item in tiers],
-        "catalogs": [_catalog(db, item) for item in catalogs],
+        "catalogs": _catalogs_batch(db, catalogs),
     }
 
 
@@ -372,6 +465,7 @@ def save_business_company(db, user, payload: dict) -> dict:
         company.revision += 1
     _audit(db, user, "business.company.save", "insurance_company", company.id, {"base_revision": previous, "new_revision": company.revision})
     db.commit()
+    invalidate_cache("business:companies")
     db.refresh(company)
     return serialize_company(db, company)
 
@@ -424,6 +518,7 @@ def delete_business_company(db, user, company_id: str) -> None:
     _audit(db, user, "business.company.delete", "insurance_company", company.id, {"company_name": company.name})
     db.delete(company)
     db.commit()
+    invalidate_cache("business:companies")
 
 
 def save_business_product(db, user, payload: dict) -> dict:
@@ -1137,6 +1232,102 @@ def update_business_asset(
     return _asset_summary(asset) or {}
 
 
+def replace_business_asset_file(
+    db,
+    settings,
+    user,
+    asset_id: str,
+    *,
+    filename: str,
+    data: bytes,
+) -> dict:
+    """Replace the underlying binary file and derivatives of an existing business asset."""
+    _require_business(user)
+    asset = db.get(BusinessAsset, asset_id)
+    if asset is None or asset.status not in {"active", "unassigned"}:
+        raise AppError("Asset not found.", 404)
+
+    try:
+        technical = validate_image_bytes(
+            data,
+            filename,
+            max_bytes=settings.max_asset_bytes,
+            max_pixels=settings.max_asset_pixels,
+        )
+    except ValueError as exc:
+        raise AppError(str(exc), 422) from exc
+
+    def extension(content_type: str) -> str:
+        return {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}.get(content_type, "png")
+
+    content_hash = technical["content_hash"]
+    original_path = f"assets/original/{content_hash[:2]}/{content_hash}.{extension(technical['content_type'])}"
+    derivatives = {
+        "ui": create_derivative(data, max_width=512, max_height=512, quality=85),
+        "pdf": create_derivative(data, max_width=1_600, max_height=1_600, quality=92),
+    }
+
+    storage = SupabaseStorage(settings)
+    uploaded: list[str] = []
+    try:
+        storage.upload_asset(original_path, data, technical["content_type"])
+        uploaded.append(original_path)
+
+        derivative_manifest = {}
+        for profile, derivative in derivatives.items():
+            derivative_path = f"assets/derivative/{profile}/{derivative.content_hash[:2]}/{derivative.content_hash}.{extension(derivative.content_type)}"
+            storage.upload_asset(derivative_path, derivative.data, derivative.content_type)
+            uploaded.append(derivative_path)
+            derivative_manifest[profile] = {
+                "storage_path": derivative_path,
+                "content_type": derivative.content_type,
+                "content_hash": derivative.content_hash,
+                "width_px": derivative.width_px,
+                "height_px": derivative.height_px,
+            }
+
+        old_storage_paths = [asset.storage_path]
+        for deriv in (asset.derivative_manifest or {}).values():
+            if isinstance(deriv, dict) and deriv.get("storage_path"):
+                old_storage_paths.append(deriv["storage_path"])
+
+        asset.original_filename = filename
+        asset.content_type = technical["content_type"]
+        asset.content_hash = content_hash
+        asset.storage_path = original_path
+        asset.size_bytes = technical["size_bytes"]
+        asset.width_px = technical["width_px"]
+        asset.height_px = technical["height_px"]
+        asset.has_transparency = technical["has_transparency"]
+        asset.derivative_manifest = derivative_manifest
+        asset.revision += 1
+
+        db.commit()
+        db.refresh(asset)
+
+        for old_path in old_storage_paths:
+            if old_path not in uploaded:
+                try:
+                    storage.delete_pdf(old_path)
+                except Exception:
+                    pass
+
+        _audit(db, user, "business.asset.replace_file", "business_asset", asset.id, {
+            "category": asset.category,
+            "filename": filename,
+            "content_hash": content_hash,
+        })
+        return _asset_summary(asset) or {}
+    except Exception:
+        db.rollback()
+        for storage_path in reversed(uploaded):
+            try:
+                storage.delete_pdf(storage_path)
+            except Exception:
+                pass
+        raise
+
+
 def bulk_move_business_assets(db, user, asset_ids: list[str], target_category: str) -> dict:
     _require_business(user)
     clean_category = target_category.strip() or "General"
@@ -1740,7 +1931,12 @@ def save_catalog_offering(db, user, catalog_id: str, payload: dict) -> dict:
     elif offering.applies_to_type is None:
         offering.applies_to_id = None
     db.flush()
-    revision.content_hash = canonical_context_hash(_revision_content_payload(db, revision))
+    # Lightweight content hash: use offering IDs only instead of full _revision_content_payload
+    # (the full hash is recomputed on publish via publish_catalog_revision)
+    _offering_ids = sorted(str(row.id) for row in db.scalars(
+        select(CatalogOffering.id).where(CatalogOffering.catalog_revision_id == revision.id)
+    ).all())
+    revision.content_hash = hashlib.sha256(",".join(_offering_ids).encode()).hexdigest()
     revision.source_document_ids = sorted({row.source_document_id for row in db.scalars(
         select(CatalogOffering).where(CatalogOffering.catalog_revision_id == revision.id)
     ).all() if row.source_document_id})
@@ -1845,7 +2041,11 @@ def remove_catalog_offering(db, user, catalog_id: str, offering_id: str, *, base
         deleted_id = target_offering.id
         db.delete(target_offering)
         db.flush()
-        revision.content_hash = canonical_context_hash(_revision_content_payload(db, revision))
+        # Lightweight content hash: use offering IDs only (full hash on publish)
+        _offering_ids = sorted(str(row.id) for row in db.scalars(
+            select(CatalogOffering.id).where(CatalogOffering.catalog_revision_id == revision.id)
+        ).all())
+        revision.content_hash = hashlib.sha256(",".join(_offering_ids).encode()).hexdigest()
         catalog.revision += 1
         _audit(db, user, "business.catalog_offering.delete", "catalog_offering", deleted_id, {"catalog_id": catalog.id, "new_revision": catalog.revision})
         db.commit()
@@ -2041,6 +2241,14 @@ def get_catalog_workspace(db, user, catalog_id: str) -> dict:
         ).all()
     )
     concepts = {item.id: item for item in db.scalars(select(BenefitConcept)).all()}
+    # Batch-preload all assets referenced by concepts (eliminates N+1 in serialize_concept)
+    _concept_asset_ids = {c.default_asset_id for c in concepts.values() if c.default_asset_id}
+    _preloaded_assets: dict = {}
+    if _concept_asset_ids:
+        _preloaded_assets = {
+            str(a.id): a
+            for a in db.scalars(select(BusinessAsset).where(BusinessAsset.id.in_(_concept_asset_ids))).all()
+        }
     relations = list(
         db.scalars(
             select(BenefitRelation)
@@ -2078,7 +2286,7 @@ def get_catalog_workspace(db, user, catalog_id: str) -> dict:
         "offerings": [
             {
                 **_offering(item),
-                "concept": serialize_concept(db, concepts[item.concept_id]) if item.concept_id in concepts else None,
+                "concept": serialize_concept(db, concepts[item.concept_id], preloaded_assets=_preloaded_assets) if item.concept_id in concepts else None,
             }
             for item in offerings
             if item.concept_id in concepts
@@ -2192,6 +2400,10 @@ def get_active_company_profile(db, company_id: str | None = None) -> BenefitProf
 
 def list_benefit_profiles(db, user) -> list[dict]:
     _require_business(user)
+    cached = _memory_cache.get("business:benefit_profiles")
+    if cached is not None:
+        return cached
+
     get_active_benefit_profile(db)
 
     profiles = list(
@@ -2200,7 +2412,22 @@ def list_benefit_profiles(db, user) -> list[dict]:
             .order_by(BenefitProfile.is_active.desc(), BenefitProfile.version_number.desc(), BenefitProfile.created_at.desc())
         ).all()
     )
-    return [
+
+    # 2 bulk aggregate count queries instead of N+1 lazy queries
+    configs_counts = dict(
+        db.execute(
+            select(CompanyBenefitConfig.profile_id, func.count(CompanyBenefitConfig.id))
+            .group_by(CompanyBenefitConfig.profile_id)
+        ).all()
+    )
+    conditions_counts = dict(
+        db.execute(
+            select(CompanyBenefitCondition.profile_id, func.count(CompanyBenefitCondition.id))
+            .group_by(CompanyBenefitCondition.profile_id)
+        ).all()
+    )
+
+    result = [
         {
             "id": p.id,
             "name": p.name,
@@ -2208,13 +2435,15 @@ def list_benefit_profiles(db, user) -> list[dict]:
             "is_active": p.is_active,
             "status": p.status,
             "notes": p.notes,
-            "configs_count": len(p.configs),
-            "conditions_count": len(p.conditions),
+            "configs_count": configs_counts.get(p.id, 0),
+            "conditions_count": conditions_counts.get(p.id, 0),
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "updated_at": p.updated_at.isoformat() if p.updated_at else None,
         }
         for p in profiles
     ]
+    _memory_cache.set("business:benefit_profiles", result, ttl_seconds=60.0)
+    return result
 
 
 def list_company_profiles(db, user, company_id: str | None = None) -> list[dict]:
@@ -2249,6 +2478,7 @@ def create_benefit_profile(db, user, payload: dict) -> dict:
     db.add(profile)
     _audit(db, user, "business.benefit_profile.create", "benefit_profile", profile.id, {"name": profile.name})
     db.commit()
+    invalidate_cache("business:benefit_profiles")
     db.refresh(profile)
     return {
         "id": profile.id,
@@ -2346,6 +2576,7 @@ def clone_benefit_profile(db, user, profile_id: str, payload: dict) -> dict:
         "conditions_cloned": len(parent_conditions),
     })
     db.commit()
+    invalidate_cache("business:benefit_profiles")
     db.refresh(new_profile)
     return {
         "id": new_profile.id,
@@ -2391,6 +2622,7 @@ def update_benefit_profile(db, user, profile_id: str, payload: dict) -> dict:
     profile.updated_at = utcnow()
     _audit(db, user, "business.benefit_profile.update", "benefit_profile", profile.id, {"name": profile.name})
     db.commit()
+    invalidate_cache("business:benefit_profiles")
     db.refresh(profile)
     return {
         "id": profile.id,
@@ -2456,6 +2688,7 @@ def activate_benefit_profile(db, user, profile_id: str) -> dict:
         sync_company_catalogs_to_profile(db, comp.id, target.id)
 
     db.commit()
+    invalidate_cache("business:benefit_profiles")
     db.refresh(target)
     return {
         "id": target.id,
@@ -2490,6 +2723,7 @@ def delete_benefit_profile(db, user, profile_id: str) -> None:
     db.delete(profile)
     _audit(db, user, "business.benefit_profile.delete", "benefit_profile", profile_id, {"name": profile.name})
     db.commit()
+    invalidate_cache("business:benefit_profiles")
 
 
 def delete_company_profile(db, user, company_id: str, profile_id: str) -> None:
@@ -2613,6 +2847,7 @@ def update_company_benefit_configs(db, user, company_id: str, items: list[dict],
         "count": len(results),
     })
     db.commit()
+    invalidate_cache("business:benefit_profiles")
 
     return [
         {

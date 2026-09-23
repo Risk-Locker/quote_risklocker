@@ -40,6 +40,7 @@ from app.services.business_setup_service import (
     delete_business_asset,
     delete_business_asset_folder,
     rename_business_asset_folder,
+    replace_business_asset_file,
     update_business_asset,
     upload_business_asset,
 )
@@ -394,4 +395,55 @@ def test_asset_management_api_routes(monkeypatch):
     res = c.request("DELETE", "/api/business/assets/folders", json={"category": "Temp", "action": "move_to_general"})
     assert res.status_code == 200
     assert res.json()["success"] is True
+
+    # 7. POST /api/business/assets/{id}/replace-file
+    monkeypatch.setattr(routes, "replace_business_asset_file", lambda _db, _s, _user, asset_id, **kwargs: {"id": asset_id, "replaced": True})
+    png_bytes = make_png_bytes()
+    res = c.post("/api/business/assets/a1/replace-file", files={"file": ("swap.png", png_bytes, "image/png")})
+    assert res.status_code == 200
+    assert res.json()["asset"]["replaced"] is True
+
+
+def test_replace_business_asset_file(db_session: Session):
+    user = make_user("admin")
+    mock_storage = MockStorage()
+    mock_settings = SimpleNamespace(
+        max_asset_bytes=10_000_000,
+        max_asset_pixels=10_000_000,
+        supabase_storage_bucket="test",
+    )
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("app.services.business_setup_service.SupabaseStorage", lambda s: mock_storage)
+
+        # 1. Create initial asset
+        init_bytes = make_png_bytes(color=(255, 0, 0), size=(64, 64))
+        asset_summary = upload_business_asset(
+            db_session, mock_settings, user,
+            filename="initial.png", label="Towing Original", kind="benefit_art", data=init_bytes, category="General",
+        )
+        asset_id = asset_summary["id"]
+        db_asset_init = db_session.get(BusinessAsset, asset_id)
+        assert db_asset_init is not None
+        old_hash = db_asset_init.content_hash
+
+        # 2. Replace with new green image
+        new_bytes = make_png_bytes(color=(0, 255, 0), size=(128, 128))
+        updated_summary = replace_business_asset_file(
+            db_session, mock_settings, user,
+            asset_id=asset_id, filename="replaced_towing.png", data=new_bytes,
+        )
+
+        assert updated_summary["id"] == asset_id
+        assert updated_summary["original_filename"] == "replaced_towing.png"
+        assert updated_summary["width_px"] == 128
+        assert updated_summary["height_px"] == 128
+
+        # 3. Check DB record
+        db_asset = db_session.get(BusinessAsset, asset_id)
+        assert db_asset is not None
+        assert db_asset.content_hash != old_hash
+        assert db_asset.revision == 2
+
+
 

@@ -136,7 +136,7 @@ def parse_catalog_intent(
                         "value": dist_clean,
                     })
             else:
-                dist_match = re.search(r"towing\s*(?:to|:|=|\s)\s*(\d+\s*(?:km|miles)?|unlimited)", q_lower)
+                dist_match = re.search(r"towing\s*(?:limit\s*)?(?:to|:|=|\s)\s*(\d+\s*(?:km|miles)?|unlimited)", q_lower)
                 if dist_match:
                     dist_clean = dist_match.group(1).strip()
                     dist_clean = re.sub(r"(\d+)\s*(km|miles)", r"\1 \2", dist_clean, flags=re.IGNORECASE)
@@ -172,8 +172,9 @@ def parse_catalog_intent(
         powertrain = "ice" if "ice" in q_lower and "ev" not in q_lower else ("ev" if "ev" in q_lower and "ice" not in q_lower else "all")
         veh_cat = "car" if ("car" in q_lower or "saloon" in q_lower) else ("all" if "all" in q_lower else "car")
 
+        is_add = bool(re.search(r"\badd\b.*?\bwindscreen\b|\bwindscreen\b.*?\badd\b", q_lower)) or "add" in q_lower
         operations.append({
-            "action": "update_offering" if "update" in q_lower or "change" in q_lower else "add_offering",
+            "action": "add_offering" if is_add else ("update_offering" if "update" in q_lower or "change" in q_lower else "add_offering"),
             "concept_key": windscreen_concept.concept_key,
             "vehicle_category": veh_cat,
             "powertrain": powertrain,
@@ -307,7 +308,7 @@ def preview_catalog_operations(
     for op in operations:
         action = op.get("action")
         concept_key = op.get("concept_key")
-        concept = concepts.get(concept_key)
+        concept = concepts.get(concept_key) if isinstance(concept_key, str) else None
         if not concept:
             continue
 
@@ -355,23 +356,23 @@ def preview_catalog_operations(
             if cat.status in ("archived", "retired"):
                 continue
 
-            veh = vehicles.get(cat.vehicle_category_id)
-            cov = coverages.get(cat.coverage_type_id)
-            seg = segments.get(cat.segment_id)
-            veh_name = veh.category_key.lower() if veh else ""
-            cov_name = cov.coverage_key.lower() if cov else ""
+            veh = vehicles.get(cat.vehicle_category_id) if cat.vehicle_category_id else None
+            cov = coverages.get(cat.coverage_type_id) if cat.coverage_type_id else None
+            seg = segments.get(cat.segment_id) if cat.segment_id else None
+            veh_name = veh.category_key.lower() if veh else ("car" if "car" in cat.name.lower() else "")
+            cov_name = cov.coverage_key.lower() if cov else ("comprehensive" if "comprehensive" in cat.name.lower() or "comp" in cat.name.lower() else "")
             seg_name = seg.segment_key.lower() if seg else ""
 
             # Check segment filter
-            if seg_filter != "all" and seg_filter not in seg_name:
+            if seg_filter != "all" and seg_name and seg_filter not in seg_name:
                 continue
 
             # Check vehicle category filter
-            if veh_filter != "all" and veh_filter not in veh_name:
+            if veh_filter != "all" and veh_name and veh_filter not in veh_name:
                 continue
 
             # Check coverage type filter
-            if cov_filter != "all" and cov_filter not in cov_name:
+            if cov_filter != "all" and cov_name and cov_filter not in cov_name:
                 continue
 
             # Check powertrain filter from catalog name or context

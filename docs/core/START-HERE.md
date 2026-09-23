@@ -70,6 +70,7 @@ External chat tools cannot be forced to follow repository instructions. Give the
 | `docs/benefits/concise/all_benefits-v4.md` | Consolidated universal benefits catalog v4 | Benefit reference catalogs change |
 | `docs/benefits/concise/company_all_benefits-v4.md` | Insurer-specific breakdown (Defaults vs Add-ons) across all 7 underwriters | Insurer benefit catalogs change |
 | `docs/benefits/concise/current_all_benefits_12092026.md` | Active insurer benefit profile catalog (11/09/2026 snapshot) without OD/TPPD in Comprehensive | Active insurer profile versions change |
+| `docs/benefits/current_allbenefits_22_09_26/22/26/amgen.md` | AmAssurance / Liberty detailed tier & defaults breakdown reference | Insurer benefit profiles change |
 | `docs/benefits/expanded/` | Full expanded markdown catalogs converted from underwriter DOCX files (AmAssurance.md, BerjayaSompo.md, Etiqa.md, Lonpac.md, QBE.md, STMB.md, TuneProtect.md) | Raw insurer coverage specifications change |
 
 ### History & Generated Tooling

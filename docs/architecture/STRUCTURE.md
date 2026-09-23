@@ -234,7 +234,69 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - **Navigation Cleanup**: Obsolete "AI & Memory" sidebar item removed from `frontend/src/components/app-shell.tsx`.
 - **Hermetic Tests**: `tests/test_copilot_conversational.py` (hermetic SQLite tests for catalog fact loading, session duplicate separation vs unique edits, and chat conversation).
 
-## Navigation
+## Quotation Insights & Analytics, Sequential Vehicle Ownership, and Activity Tracking (v23) Additions
+
+- **Data Models & Migration**: Migration `migrations/050_quotation_insights_and_vehicle_tracking.sql` introduces `tracked_vehicles`, `vehicle_ownerships`, and `quotation_activities` tables; adds `quotation_status`, `closed_at`, `miss_reason`, and `tracked_vehicle_id` columns to `sessions`.
+- **Vehicle Tracking Service**: `backend/app/services/vehicle_tracking_service.py` normalizes Malaysian vehicle plates (splitting letters/numbers with regex `([A-Z]+)(\d+)` to `ABC 1234`), evaluates validity dates (`valid_until` / `issue_date`) to track sequential owners (1st Owner, 2nd Owner, etc.), creates transfer audit records, and builds full ownership timeline history.
+- **Quotation Activity Ledger & Insights Service**: `backend/app/services/quotation_activity_service.py` logs scan/edit/send/status events, groups activities into a calendar view with time breakdown (`get_calendar_activities`), tracks Hit/Miss conversion metrics, and provides automated historical backfill (`backfill_existing_sessions`).
+- **REST Endpoints & Schemas**: `GET /api/insights/calendar`, `POST /api/insights/sessions/{id}/activity`, `POST /api/insights/sessions/{id}/status`, `GET /api/insights/analytics`, `GET /api/insights/vehicles/{no}/history`, `POST /api/insights/backfill`, `GET /api/insights/backfill/preview`, `POST /api/insights/backfill/confirm`, and `GET /api/insights/clients` in `backend/app/api/routes.py`; models `QuotationActivityCreateRequest`, `QuotationStatusUpdateRequest`, and `BackfillConfirmRequest` in `backend/app/api/schemas.py`.
+- **Connected Client Dossier Service**: `backend/app/services/client_dossier_service.py` connects client records to tracked vehicles, sequential ownerships, quotation sessions, and win/loss conversion statistics with pagination and search.
+- **Frontend Insights Cockpit**: `frontend/src/app/insights/page.tsx` introduces the "Insights & Analytics" page with 4 dedicated tabs:
+  1. *Calendar*: Microsoft Teams-style interactive schedule (`teams-calendar-view.tsx`) with Month, Week, and Day hourly zooming (`08:00 AM` to `08:00 PM`) and status/vehicle modals.
+  2. *Hit & Miss Ledger*: Chronological activity feed (`hit-miss-calendar.tsx`) with time labels, status badges, diff view, 1-click Hit/Miss status modal with loss reasons.
+  3. *Client Records*: Connected CRM client dossier (`connected-client-dossier.tsx`) linking clients with sequential vehicle ownerships, past quotations, and win/loss KPIs. Legacy `/client-records` redirects to `/insights?tab=clients`.
+  4. *Analytics & Conversion*: Real-time conversion metrics, month-by-month historical comparison table, and loss reason / insurer breakdown charts (`insights-analytics-view.tsx`).
+- **Interactive Two-Step Session Backfill**: `frontend/src/components/insights/sync-sessions-modal.tsx` inspects detected sessions, categorizes them as ready vs ambiguous with issue reasons, allows inline plate/customer edits, and confirms selected sessions.
+- **Export Interception & Owner Transfer Banner**:
+  - `frontend/src/components/insights/send-to-client-dialog.tsx`: Intercepts "Copy PNG", "Download PNG", and "Download PDF" actions in `review-phase.tsx` prompting *"Are you sending this to client?"* with *"Sent to Client"* vs *"Internal Save Only"*.
+  - `frontend/src/components/session-workspace/review-phase.tsx`: Displays sequential owner change alert banner when a quotation is uploaded for an existing vehicle with a newer validity date and different customer name.
+- **Global AI Copilot Overhaul & Dataset Intelligence**:
+  - `frontend/src/components/global-ai-copilot.tsx`: Circular floating robot trigger button with smooth horizontal hover expand to `"Start Chat"`, expandable drawer width toggle (`w-[480px]` to `w-[780px]`), and `<option value="all">All Companies (Comparative)</option>` in insurer context selector.
+  - `backend/app/services/copilot_chat_service.py`: `get_dataset_analytics_facts()` provides live aggregation of engine CC brackets (`<=1,000 cc`, `1,001–1,500 cc`, `1,501–2,000 cc`, `>2,000 cc`), insurer quotation volume and market share % ranking, vehicle make/model frequency, and top optional add-on benefits with structured markdown reporting.
+- **Database Hygiene**: `commands/clean-legacy-test-data.py` (idempotent, dry-run default, `--apply`) safely purges legacy prototype test records (`client_records`) and deactivates legacy test users without violating foreign key constraints.
+- **Hermetic Tests & A-to-Z Playwright Suite**: `tests/test_copilot_conversational.py` (all 4 tests green), `tests/` total 697 tests passing hermetically in 74s, and full end-to-end browser audit `.qc-tmp/audit_full_system_a_to_z.mjs` verifying authentication, upload, review workspace, insights, builder, and copilot analytics.
+
+## Test Upload Sessions & Isolated Sandbox Mode (v23) Additions
+
+- **Data Models & Migration**: Migration `migrations/052_test_upload_sessions.sql` introduces `is_test BOOLEAN NOT NULL DEFAULT false` column on `sessions`, `uploaded_files`, and `batches`, with an index on `sessions(is_test)`.
+- **Intake & Service Pipeline**: `backend/app/services/upload_intake_service.py` and `backend/app/services/upload_service.py` propagate the `is_test` flag from upload intake through asynchronous worker jobs, `Batch`, `UploadedFile`, and `QuotationSession`.
+- **Strict Isolation Guarantees**:
+  1. *Customer Records (`client_records`)*: `backend/app/services/client_record_service.py:upsert_from_draft` aborts immediately when `session.is_test` is true, ensuring test sessions never taint customer CRM dossiers.
+  2. *Hit & Miss Ledger & Calendar (`quotation_activities`)*: `backend/app/services/quotation_activity_service.py:log_quotation_activity` aborts immediately for test sessions; calendar and insights queries filter out `SessionModel.is_test.is_(False)`.
+  3. *Vehicle Tracking (`tracked_vehicles`, `vehicle_ownerships`)*: `backend/app/services/vehicle_tracking_service.py:get_or_create_vehicle_tracking` returns `(None, None)` for test sessions, preventing simulated plate numbers from registering as real cars or sequential ownership transfers.
+  4. *PDF Export Guard*: `backend/app/services/pdf_service.py` skips client record creation and quotation activity logging during official PDF generation when `session.is_test` is true.
+  5. *Copilot & AI Insights*: `copilot_chat_service.py` and `client_dossier_service.py` filter out test sessions from analytical calculations and client history.
+- **Frontend Toggle & Sessions Filtering**:
+  - `frontend/src/app/upload/page.tsx`: Single and Bulk upload tabs include a distinct "Test Upload Mode" toggle with clear explanation.
+  - `frontend/src/app/sessions/page.tsx`: Type filter dropdown (`All Uploads`, `Live Only`, `Test Uploads Only`), and distinctive amber `Test Upload` badge with Sparkle icon on vehicle groups (`QuotationRow`) and timeline cards (`SessionCard`).
+  - `frontend/src/components/session-workspace/review-phase.tsx`: Top header bar displays amber `Test Upload (Sandbox)` badge; export dialog skips activity recording.
+- **Hermetic Tests**: `tests/test_upload_intake.py` and `tests/test_quotation_activity.py` verifying end-to-end `is_test` propagation, activity suppression, and analytic isolation.
+
+## Corporate Fleet Architecture & Bulk PDF Operations (v23) Additions
+
+- **Corporate Identity & Fleet Resolution**:
+  - `backend/app/services/client_dossier_service.py`: `_resolve_session_client_identity` intelligently detects corporate naming suffixes (`Sdn Bhd`, `Bhd`, `Enterprise`, `PLT`, BRN) to unify corporate accounts even when driver names are absent or variable.
+  - `_categorize_vehicle`: Categorizes fleet vehicles into `lorry`, `motorcycle`, `suv`, `sedan`, `ev` based on vehicle category and model text.
+  - Multi-vehicle simultaneous co-ownership allows single corporate entities (factories, logistics firms) to hold 100+ vehicles simultaneously without triggering false single-owner sequential transfer alerts.
+- **Bulk Quotation Status & Deal Cycle Resolution**:
+  - `backend/app/services/quotation_activity_service.py:bulk_update_quotation_status`: Atomically applies `hit` or `miss` across selected sessions, updates policy dates, and automatically marks alternative underwriter competitor quotes for the same vehicles as `superseded`.
+  - `POST /api/sessions/bulk-status`: Endpoint with `BulkQuotationStatusRequest` validating session IDs and dates.
+- **In-Memory ZIP Streaming & Direct PDF Retrieval**:
+  - `POST /api/sessions/bulk-download-zip`: Streams a dynamically generated in-memory ZIP archive (`io.BytesIO` + `zipfile.ZipFile`, zero disk footprint) containing all selected quotation PDFs named cleanly as `{Plate}_{Insurer}_{QuoteRef}.pdf`.
+  - `GET /api/sessions/{session_id}/pdf`: Canonical permanent direct link to either the latest generated PDF version or the source uploaded file.
+- **Upload Intake Limit Scaled**:
+  - `backend/app/services/admin_service.py:get_bulk_upload_limit`: Default bulk intake raised from 5 to 10 PDFs (configurable up to 25).
+- **Frontend Cockpit & CRM Upgrades**:
+  - `frontend/src/app/sessions/page.tsx`: Enhanced bulk action bar when quotations are selected:
+    1. *Copy PDF Links*: Copies newline-separated direct URLs.
+    2. *Copy Fleet Table*: Copies TSV formatted summary (`Plate | Fleet | Model | Insurer | Premium | Status | Quote Ref | PDF Link`) for direct pasting into Microsoft Excel / Google Sheets or WhatsApp.
+    3. *Download ZIP*: 1-click download of all selected quotation PDFs.
+    4. *Batch Status*: Modal to mark all selected quotes as HIT (Won) or MISS (Lost) with automatic sibling superseding.
+    5. Direct PDF button on every session row.
+  - `frontend/src/components/insights/connected-client-dossier.tsx`: Added Client Type filter toggle (`All Account Types`, `Corporate Fleets`, `Private Individuals`), `Corporate Fleet` badge, vehicle mix chips (`🚚 15 Lorries`, `🏍️ 30 Motorcycles`, `🚙 40 SUVs`, `🚗 20 Sedans`, `⚡ 5 EVs`), and 1-click fleet actions (*Copy All PDF Links*, *Copy Fleet Table*, *Download Fleet ZIP*).
+- **Hermetic Tests**:
+  - `tests/test_corporate_fleet_and_bulk_export.py`: Tests corporate identity resolution, vehicle categorization, bulk status updates with sibling quote superseding, and in-memory zip archive streaming.
+  - `tests/test_upload_limits.py`: Updated default bulk limit assertions to 10.
 
 - Start every repository task at [START-HERE.md](START-HERE.md).
 - Use [PROJECT-DIAGRAM.md](PROJECT-DIAGRAM.md) for the complete visual workflow and system overview.

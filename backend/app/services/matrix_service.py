@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 import io
 from datetime import date, datetime, timezone
 from typing import Any
@@ -94,12 +95,69 @@ def get_company_matrix_data(db: Session, company_id: str) -> dict[str, Any]:
     total_addons_count = 0
     total_bundles_count = 0
 
-    for cat in catalogs:
-        latest_rev = db.scalar(
-            select(BenefitCatalogRevision)
-            .where(BenefitCatalogRevision.catalog_id == cat.id)
-            .order_by(BenefitCatalogRevision.revision_number.desc())
+    cat_ids = [cat.id for cat in catalogs]
+
+    # 1. Batch preload latest revisions for all catalogs in 1 query
+    latest_rev_by_cat: dict[str, BenefitCatalogRevision] = {}
+    if cat_ids:
+        all_revisions = list(
+            db.scalars(
+                select(BenefitCatalogRevision)
+                .where(BenefitCatalogRevision.catalog_id.in_(cat_ids))
+                .order_by(BenefitCatalogRevision.catalog_id, BenefitCatalogRevision.revision_number.desc())
+            ).all()
         )
+        for rev in all_revisions:
+            if rev.catalog_id not in latest_rev_by_cat:
+                latest_rev_by_cat[rev.catalog_id] = rev
+
+    rev_ids = [rev.id for rev in latest_rev_by_cat.values()]
+
+    # 2. Batch preload offerings for all revisions in 1 query
+    offerings_by_rev: dict[str, list[CatalogOffering]] = defaultdict(list)
+    if rev_ids:
+        for off in db.scalars(
+            select(CatalogOffering)
+            .where(CatalogOffering.catalog_revision_id.in_(rev_ids))
+            .order_by(CatalogOffering.sort_order, CatalogOffering.offering_key)
+        ).all():
+            offerings_by_rev[off.catalog_revision_id].append(off)
+
+    # 3. Batch preload packages for all revisions in 1 query
+    packages_by_rev: dict[str, list[BenefitPackage]] = defaultdict(list)
+    all_pkg_ids: list[str] = []
+    if rev_ids:
+        for pkg in db.scalars(
+            select(BenefitPackage)
+            .where(BenefitPackage.catalog_revision_id.in_(rev_ids))
+            .order_by(BenefitPackage.sort_order, BenefitPackage.name)
+        ).all():
+            packages_by_rev[pkg.catalog_revision_id].append(pkg)
+            all_pkg_ids.append(pkg.id)
+
+    # 4. Batch preload plans and plan items in 2 queries total
+    plans_by_pkg: dict[str, list[BenefitPackagePlan]] = defaultdict(list)
+    all_plan_ids: list[str] = []
+    if all_pkg_ids:
+        for pl in db.scalars(
+            select(BenefitPackagePlan)
+            .where(BenefitPackagePlan.package_id.in_(all_pkg_ids))
+            .order_by(BenefitPackagePlan.sort_order, BenefitPackagePlan.name)
+        ).all():
+            plans_by_pkg[pl.package_id].append(pl)
+            all_plan_ids.append(pl.id)
+
+    plan_items_by_plan: dict[str, list[BenefitPackagePlanItem]] = defaultdict(list)
+    if all_plan_ids:
+        for pi in db.scalars(
+            select(BenefitPackagePlanItem)
+            .where(BenefitPackagePlanItem.plan_id.in_(all_plan_ids))
+            .order_by(BenefitPackagePlanItem.sort_order)
+        ).all():
+            plan_items_by_plan[pi.plan_id].append(pi)
+
+    for cat in catalogs:
+        latest_rev = latest_rev_by_cat.get(cat.id)
         if not latest_rev:
             continue
 
@@ -108,70 +166,34 @@ def get_company_matrix_data(db: Session, company_id: str) -> dict[str, Any]:
         veh = vehicles.get(cat.vehicle_category_id) if cat.vehicle_category_id else None
         cov = coverages.get(cat.coverage_type_id) if cat.coverage_type_id else None
 
-        # Offerings for this catalog revision
-        offerings = list(
-            db.scalars(
-                select(CatalogOffering)
-                .where(CatalogOffering.catalog_revision_id == latest_rev.id)
-                .order_by(CatalogOffering.sort_order, CatalogOffering.offering_key)
-            ).all()
-        )
+        # Offerings & packages for this catalog revision (from memory)
+        offerings = offerings_by_rev.get(latest_rev.id, [])
+        packages = packages_by_rev.get(latest_rev.id, [])
 
-        # Packages belonging to this catalog revision
-        packages = list(
-            db.scalars(
-                select(BenefitPackage)
-                .where(BenefitPackage.catalog_revision_id == latest_rev.id)
-                .order_by(BenefitPackage.sort_order, BenefitPackage.name)
-            ).all()
-        )
-
-        pkg_ids = [p.id for p in packages]
-        plans = list(
-            db.scalars(
-                select(BenefitPackagePlan)
-                .where(BenefitPackagePlan.package_id.in_(pkg_ids))
-                .order_by(BenefitPackagePlan.sort_order, BenefitPackagePlan.name)
-            ).all()
-        ) if pkg_ids else []
-
-        plan_ids = [p.id for p in plans]
-        plan_items = list(
-            db.scalars(
-                select(BenefitPackagePlanItem)
-                .where(BenefitPackagePlanItem.plan_id.in_(plan_ids))
-                .order_by(BenefitPackagePlanItem.sort_order)
-            ).all()
-        ) if plan_ids else []
-
-        # Map plan items to plans
-        plan_items_by_plan: dict[str, list[BenefitPackagePlanItem]] = {}
-        for pi in plan_items:
-            plan_items_by_plan.setdefault(pi.plan_id, []).append(pi)
-
-        # Map plans to packages
-        plans_by_pkg: dict[str, list[dict[str, Any]]] = {}
+        # Map plans to packages in memory
+        plans_by_pkg_data: dict[str, list[dict[str, Any]]] = {}
         offering_map = {o.id: o for o in offerings}
-        for plan in plans:
-            p_items = []
-            for item in plan_items_by_plan.get(plan.id, []):
-                off = offering_map.get(item.offering_id)
-                conc = concepts.get(off.concept_id) if off else None
-                p_items.append({
-                    "offering_key": off.offering_key if off else "",
-                    "label": (off.label_override if off else None) or (conc.label if conc else "Benefit"),
-                    "override_value": (
-                        item.typed_value_override.get("display_text")
-                        if item.typed_value_override and isinstance(item.typed_value_override, dict)
-                        else (off.display_value if off else "")
-                    ),
+        for pkg in packages:
+            for plan in plans_by_pkg.get(pkg.id, []):
+                p_items = []
+                for item in plan_items_by_plan.get(plan.id, []):
+                    off = offering_map.get(item.offering_id)
+                    conc = concepts.get(off.concept_id) if off else None
+                    p_items.append({
+                        "offering_key": off.offering_key if off else "",
+                        "label": (off.label_override if off else None) or (conc.label if conc else "Benefit"),
+                        "override_value": (
+                            item.typed_value_override.get("display_text")
+                            if item.typed_value_override and isinstance(item.typed_value_override, dict)
+                            else (off.display_value if off else "")
+                        ),
+                    })
+                plans_by_pkg_data.setdefault(plan.package_id, []).append({
+                    "plan_id": plan.id,
+                    "plan_key": plan.plan_key,
+                    "name": plan.name,
+                    "items": p_items,
                 })
-            plans_by_pkg.setdefault(plan.package_id, []).append({
-                "plan_id": plan.id,
-                "plan_key": plan.plan_key,
-                "name": plan.name,
-                "items": p_items,
-            })
 
         # Process offerings into defaults vs addons
         defaults = []

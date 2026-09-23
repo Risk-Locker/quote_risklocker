@@ -85,6 +85,7 @@ async def create_queued_upload(
     upload: UploadFile,
     idempotency_key: str,
     enhanced_reading: bool = False,
+    is_test: bool = False,
     storage: SupabaseStorage | None = None,
     quarantine: Callable[[bytes, Settings], ContextManager[tuple[Any, dict]]] = quarantined_pdf,
 ) -> QueuedUpload:
@@ -150,6 +151,7 @@ async def create_queued_upload(
             name=f"Upload: {filename}",
             status=RecordStatus.PREPARING.value,
             enhanced_reading_requested=enhanced_reading,
+            is_test=is_test,
         )
         uploaded_file = UploadedFile(
             id=uploaded_file_id,
@@ -169,6 +171,7 @@ async def create_queued_upload(
             size_bytes=len(data),
             status=RecordStatus.PREPARING.value,
             enhanced_reading=enhanced_reading,
+            is_test=is_test,
         )
         draft = QuotationDraft(
             id=draft_id,
@@ -194,6 +197,7 @@ async def create_queued_upload(
             draft_id=draft_id,
             quotation_ref=q_ref,
             status=AccountStatus.ACTIVE.value,
+            is_test=is_test,
         )
         job = Job(
             id=job_id,
@@ -205,6 +209,7 @@ async def create_queued_upload(
             state="queued",
             payload={
                 "enhanced_reading": enhanced_reading,
+                "is_test": is_test,
                 "node_host": socket.gethostname(),
                 "storage_provider": storage_provider,
             },

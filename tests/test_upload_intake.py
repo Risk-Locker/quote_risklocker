@@ -221,3 +221,24 @@ async def test_upload_requires_nonempty_bounded_idempotency_key():
                 cast(Any, FakeDb()), cast(Any, settings()), owner_id="user-1", upload=cast(Any, Upload(b"%PDF")),
                 idempotency_key=key, enhanced_reading=False, storage=cast(Any, Storage()), quarantine=scan,
             )
+
+
+@pytest.mark.anyio
+async def test_upload_intake_supports_is_test_flag():
+    db = FakeDb()
+    upload = Upload(b"%PDF-1.4 sample content")
+    result = await create_queued_upload(
+        cast(Any, db),
+        cast(Any, settings()),
+        owner_id="user-1",
+        upload=cast(Any, upload),
+        idempotency_key="test-key-1",
+        enhanced_reading=False,
+        is_test=True,
+        quarantine=scan,
+    )
+
+    assert result.created is True
+    assert result.session.is_test is True
+    assert result.uploaded_file.is_test is True
+    assert result.job.payload.get("is_test") is True

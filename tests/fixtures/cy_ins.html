@@ -1,0 +1,1367 @@
+<section aria-label="Cyber Insurance Data Risks Johor Bahru" class="rlcy-wrap">
+    <style type="text/css">
+        .rlcy-wrap {
+            --rl-red: #ed1c24;
+            --rl-red-dark: #b51219;
+            --rl-black: #0f172a;
+            --rl-charcoal: #1e293b;
+            --rl-body: #334155;
+            --rl-line: #e2e8f0;
+            --rl-soft: #f8fafc;
+            --rl-white: #ffffff;
+            --rl-focus: #0084ff;
+            --rl-shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.06);
+            --rl-shadow-md: 0 16px 32px -6px rgba(15, 23, 42, 0.12);
+            --rl-shadow-red: rgb(237, 28, 36) 0px 0px 0px 2px inset;
+            max-width: 1240px;
+            margin: 0 auto;
+            padding: 44px 24px 64px;
+            background: var(--rl-white);
+            color: var(--rl-body);
+            font-family: "Be Vietnam Pro", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-size: 16px;
+            line-height: 1.6;
+        }
+
+        .rlcy-wrap *,
+        .rlcy-wrap *::before,
+        .rlcy-wrap *::after {
+            box-sizing: border-box;
+        }
+
+        .rlcy-wrap a:focus-visible {
+            outline: 3px solid var(--rl-focus);
+            outline-offset: 4px;
+        }
+
+        .rlcy-eyebrow,
+        .rlcy-kicker {
+            margin: 0;
+            color: var(--rl-red);
+            font-size: 12.5px;
+            font-weight: 850;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+        }
+
+        /* Hero Section */
+        .rlcy-hero {
+            display: grid;
+            grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+            gap: 38px;
+            align-items: center;
+            padding-bottom: 40px;
+            border-bottom: 1px solid var(--rl-line);
+        }
+
+        .rlcy-title {
+            margin: 12px 0 0;
+            color: var(--rl-black);
+            font-size: clamp(30px, 4vw, 42px);
+            line-height: 1.12;
+            letter-spacing: -0.04em;
+            font-weight: 850;
+        }
+
+        .rlcy-lede {
+            margin: 18px 0 0;
+            color: var(--rl-body);
+            font-size: 16.5px;
+            line-height: 1.62;
+        }
+
+        .rlcy-hero-note {
+            margin-top: 22px;
+            border-left: 4px solid var(--rl-red);
+            background: var(--rl-soft);
+            padding: 18px 22px;
+            color: var(--rl-black);
+            font-size: 15px;
+            line-height: 1.55;
+        }
+
+        .rlcy-hero-note strong {
+            color: var(--rl-black);
+            font-weight: 850;
+        }
+
+        .rlcy-hero-image {
+            display: block;
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            background: var(--rl-white);
+            border: 1px solid var(--rl-line);
+            border-left: 5px solid var(--rl-red);
+            box-shadow: var(--rl-shadow-red);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .rlcy-hero-image img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: center;
+        }
+
+        /* Realization Section */
+        .rlcy-section {
+            padding: 40px 0;
+            border-bottom: 1px solid var(--rl-line);
+        }
+
+        .rlcy-split {
+            display: grid;
+            grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.15fr);
+            gap: 38px;
+            align-items: start;
+        }
+
+        .rlcy-heading {
+            margin: 10px 0 0;
+            color: var(--rl-black);
+            font-size: clamp(24px, 3.2vw, 32px);
+            line-height: 1.2;
+            letter-spacing: -0.035em;
+            font-weight: 850;
+        }
+
+        .rlcy-intro {
+            margin: 14px 0 0;
+            color: var(--rl-body);
+            font-size: 15.5px;
+            line-height: 1.6;
+        }
+
+        .rlcy-definition-panel {
+            background: var(--rl-charcoal);
+            color: var(--rl-white);
+            padding: 24px 26px;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .rlcy-definition-panel h3 {
+            margin: 0;
+            color: var(--rl-white);
+            font-size: 20px;
+            font-weight: 850;
+            letter-spacing: -0.02em;
+        }
+
+        .rlcy-definition-panel p {
+            margin: 10px 0 0;
+            color: #94a3b8;
+            font-size: 14.5px;
+            line-height: 1.55;
+        }
+
+        .rlcy-risk-table {
+            border: 1px solid var(--rl-line);
+            border-top: 0;
+            background: var(--rl-white);
+            border-radius: 0 0 8px 8px;
+        }
+
+        .rlcy-risk-row {
+            display: grid;
+            grid-template-columns: 155px 1fr;
+            gap: 18px;
+            padding: 16px 22px;
+            border-top: 1px solid var(--rl-line);
+            font-size: 14.5px;
+        }
+
+        .rlcy-risk-row strong {
+            color: var(--rl-black);
+            font-weight: 800;
+        }
+
+        .rlcy-risk-row span {
+            color: var(--rl-body);
+            line-height: 1.5;
+        }
+
+        /* 5-TIER HIERARCHY MATRIX SECTION */
+        .rlcy-matrix-section {
+            padding: 48px 0 42px;
+            border-bottom: 1px solid var(--rl-line);
+        }
+
+        .rlcy-matrix-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 28px;
+            gap: 24px;
+        }
+
+        .rlcy-matrix-header h2 {
+            margin: 8px 0 0;
+            color: var(--rl-black);
+            font-size: clamp(26px, 3.4vw, 34px);
+            letter-spacing: -0.035em;
+            font-weight: 850;
+            line-height: 1.15;
+        }
+
+        .rlcy-matrix-header p {
+            margin: 10px 0 0;
+            color: var(--rl-body);
+            font-size: 15.5px;
+            max-width: 760px;
+        }
+
+        /* Interactive Navigation Controls */
+        .rlcy-scroll-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .rlcy-scroll-btn {
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            border: 1px solid var(--rl-line);
+            background: var(--rl-white);
+            color: var(--rl-black);
+            display: grid;
+            place-items: center;
+            cursor: pointer;
+            box-shadow: var(--rl-shadow-sm);
+            transition: all 0.2s ease;
+        }
+
+        .rlcy-scroll-btn:hover {
+            background: var(--rl-black);
+            color: var(--rl-white);
+            border-color: var(--rl-black);
+        }
+
+        .rlcy-scroll-btn:focus-visible {
+            outline: 2px solid var(--rl-red);
+        }
+
+        /* HORIZONTAL SCROLL TRACK */
+        .rlcy-matrix-flow {
+            display: flex;
+            gap: 24px;
+            overflow-x: auto;
+            scroll-behavior: smooth;
+            padding: 8px 4px 28px;
+            scrollbar-width: thin;
+            scrollbar-color: #cbd5e1 #f1f5f9;
+            cursor: grab;
+        }
+
+        .rlcy-matrix-flow:active {
+            cursor: grabbing;
+        }
+
+        .rlcy-matrix-flow::-webkit-scrollbar {
+            height: 8px;
+        }
+
+        .rlcy-matrix-flow::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 6px;
+        }
+
+        .rlcy-matrix-flow::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 6px;
+        }
+
+        /* CARDS: WIDE SO ONLY 2 TO 3 FIT AT ONCE */
+        .rlcy-tier-card {
+            width: 400px;
+            min-width: 400px;
+            flex: 0 0 400px;
+            background: var(--rl-white);
+            border: 1px solid var(--rl-line);
+            border-radius: 10px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: var(--rl-shadow-sm);
+            transition: transform 0.22s ease, box-shadow 0.22s ease;
+        }
+
+        .rlcy-tier-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--rl-shadow-md);
+        }
+
+        /* Tier Top Bar: Escalating Color System */
+        .rlcy-tier-top {
+            padding: 14px 22px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: var(--rl-white);
+        }
+
+        .rlcy-tier-title {
+            font-size: 16px;
+            font-weight: 900;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .rlcy-tier-sub {
+            font-size: 12px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            opacity: 0.95;
+        }
+
+        /* Color Progression: Green -> Blue -> Amber -> Crimson Red -> Deep Maroon */
+        .rlcy-tier-0 .rlcy-tier-top {
+            background: #059669;
+        }
+
+        .rlcy-tier-1 .rlcy-tier-top {
+            background: #0284c7;
+        }
+
+        .rlcy-tier-2 .rlcy-tier-top {
+            background: #d97706;
+        }
+
+        .rlcy-tier-3 .rlcy-tier-top {
+            background: var(--rl-red);
+        }
+
+        .rlcy-tier-4 .rlcy-tier-top {
+            background: #7f1d1d;
+        }
+
+        /* Image Wrapper with Margins */
+        .rlcy-tier-image-wrap {
+            width: calc(100% - 36px);
+            height: 200px;
+            margin: 18px auto 6px;
+            background: var(--rl-soft);
+            border: 1px solid var(--rl-line);
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .rlcy-tier-image-wrap img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: center;
+            display: block;
+        }
+
+        /* Card Content Body */
+        .rlcy-tier-body {
+            padding: 18px 22px 24px;
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+            justify-content: space-between;
+        }
+
+        .rlcy-block-title {
+            font-size: 12px;
+            font-weight: 850;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .rlcy-tier-0 .rlcy-block-title {
+            color: #059669;
+        }
+
+        .rlcy-tier-1 .rlcy-block-title {
+            color: #0284c7;
+        }
+
+        .rlcy-tier-2 .rlcy-block-title {
+            color: #d97706;
+        }
+
+        .rlcy-tier-3 .rlcy-block-title {
+            color: var(--rl-red);
+        }
+
+        .rlcy-tier-4 .rlcy-block-title {
+            color: #7f1d1d;
+        }
+
+        .rlcy-data-list {
+            margin: 0 0 18px;
+            padding: 0;
+            list-style: none;
+        }
+
+        .rlcy-data-list li {
+            position: relative;
+            padding-left: 18px;
+            font-size: 14.5px;
+            color: var(--rl-black);
+            margin-bottom: 5px;
+            line-height: 1.48;
+        }
+
+        .rlcy-data-list li::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 8px;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #94a3b8;
+        }
+
+        .rlcy-risk-box {
+            background: var(--rl-soft);
+            border: 1px solid var(--rl-line);
+            border-radius: 8px;
+            padding: 14px 16px;
+            margin-bottom: 18px;
+        }
+
+        .rlcy-risk-box p {
+            margin: 0;
+            font-size: 14px;
+            color: var(--rl-body);
+            line-height: 1.5;
+        }
+
+        /* Decision Bottom Block */
+        .rlcy-verdict-box {
+            border-top: 2px dashed var(--rl-line);
+            padding-top: 16px;
+            margin-top: 6px;
+        }
+
+        .rlcy-verdict-label {
+            font-size: 11.5px;
+            font-weight: 850;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #64748b;
+            margin-bottom: 6px;
+        }
+
+        .rlcy-status-badge {
+            font-size: 18px;
+            font-weight: 900;
+            letter-spacing: -0.01em;
+            display: block;
+            margin-bottom: 6px;
+        }
+
+        .rlcy-status-no {
+            color: #475569;
+        }
+
+        .rlcy-status-yes {
+            color: var(--rl-red);
+        }
+
+        .rlcy-status-crit {
+            color: #7f1d1d;
+        }
+
+        .rlcy-verdict-desc {
+            font-size: 13.5px;
+            line-height: 1.5;
+            color: #64748b;
+            margin: 0;
+        }
+
+        /* Helper Ribbon */
+        .rlcy-help-strip {
+            margin-top: 24px;
+            padding: 16px 24px;
+            background: var(--rl-soft);
+            border: 1px solid var(--rl-line);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+        }
+
+        .rlcy-help-strip strong {
+            color: var(--rl-black);
+            font-size: 13.5px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            white-space: nowrap;
+        }
+
+        .rlcy-help-tags {
+            display: flex;
+            gap: 18px;
+            flex-wrap: wrap;
+        }
+
+        .rlcy-help-tag {
+            font-size: 13.5px;
+            color: var(--rl-body);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .rlcy-help-tag::before {
+            content: "";
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--rl-red);
+        }
+
+        /* REFINED OPERATIONAL EXPOSURE AUDIT (WITH CLEAN ICONS) */
+        .rlcy-exposure-wrap {
+            padding: 44px 0 28px;
+            border-bottom: 1px solid var(--rl-line);
+        }
+
+        .rlcy-exposure-header {
+            max-width: 860px;
+            margin-bottom: 28px;
+        }
+
+        .rlcy-practical-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+        }
+
+        .rlcy-practical-card {
+            border: 1px solid var(--rl-line);
+            border-top: 3px solid var(--rl-red);
+            padding: 24px 20px 22px;
+            background: var(--rl-white);
+            border-radius: 0 0 8px 8px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: var(--rl-shadow-sm);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .rlcy-practical-card:hover {
+            transform: translateY(-3px);
+            box-shadow: var(--rl-shadow-md);
+        }
+
+        .rlcy-card-icon-header {
+            width: 42px;
+            height: 42px;
+            border-radius: 8px;
+            background: rgba(237, 28, 36, 0.08);
+            color: var(--rl-red);
+            display: grid;
+            place-items: center;
+            margin-bottom: 16px;
+        }
+
+        .rlcy-practical-card h4 {
+            margin: 0 0 10px;
+            color: var(--rl-black);
+            font-size: 16.5px;
+            font-weight: 850;
+            line-height: 1.3;
+        }
+
+        .rlcy-practical-card p {
+            margin: 0;
+            font-size: 14px;
+            line-height: 1.58;
+            color: var(--rl-body);
+        }
+
+        /* REFINED WHO DEFINITELY DOES NOT NEED INSURANCE (WITH ICONS) */
+        .rlcy-exempt-panel {
+            margin: 44px 0;
+            background: var(--rl-soft);
+            border: 1px solid var(--rl-line);
+            border-left: 6px solid #64748b;
+            padding: 34px 34px 36px;
+            border-radius: 8px;
+        }
+
+        .rlcy-exempt-panel h3 {
+            margin: 0 0 8px;
+            color: var(--rl-black);
+            font-size: 22px;
+            font-weight: 850;
+            letter-spacing: -0.02em;
+        }
+
+        .rlcy-exempt-panel p.rlcy-subtext {
+            margin: 0 0 26px;
+            color: var(--rl-body);
+            font-size: 15px;
+            max-width: 820px;
+        }
+
+        .rlcy-exempt-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+        }
+
+        .rlcy-exempt-card {
+            background: var(--rl-white);
+            border: 1px solid var(--rl-line);
+            padding: 22px 20px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .rlcy-exempt-icon-box {
+            width: 38px;
+            height: 38px;
+            border-radius: 6px;
+            background: #f1f5f9;
+            color: #475569;
+            display: grid;
+            place-items: center;
+            margin-bottom: 14px;
+        }
+
+        .rlcy-exempt-badge {
+            font-size: 11px;
+            font-weight: 850;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 6px;
+        }
+
+        .rlcy-exempt-card h4 {
+            margin: 0 0 8px;
+            color: var(--rl-black);
+            font-size: 16px;
+            font-weight: 800;
+        }
+
+        .rlcy-exempt-card p {
+            margin: 0;
+            font-size: 13.5px;
+            color: var(--rl-body);
+            line-height: 1.52;
+        }
+
+        /* REFINED CLOSING & CONSULTATION BLOCK */
+        .rlcy-close {
+            background: var(--rl-charcoal);
+            color: #cbd5e1;
+            display: grid;
+            grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+            gap: 40px;
+            align-items: center;
+            padding: 38px 40px;
+            border-radius: 8px;
+        }
+
+        .rlcy-close h2 {
+            margin: 0 0 12px;
+            color: var(--rl-white);
+            font-size: clamp(25px, 3.2vw, 32px);
+            line-height: 1.18;
+            font-weight: 850;
+            letter-spacing: -0.03em;
+        }
+
+        .rlcy-close p {
+            margin: 0 0 20px;
+            font-size: 15.5px;
+            line-height: 1.62;
+            color: #94a3b8;
+        }
+
+        .rlcy-cta-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--rl-red);
+            color: var(--rl-white);
+            font-weight: 800;
+            font-size: 15px;
+            text-decoration: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            transition: background 0.2s ease, transform 0.2s ease;
+        }
+
+        .rlcy-cta-btn:hover {
+            background: var(--rl-red-dark);
+            transform: translateY(-2px);
+        }
+
+        .rlcy-advisory {
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-left: 4px solid var(--rl-red);
+            padding: 24px;
+            background: rgba(255, 255, 255, 0.03);
+            color: #94a3b8;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .rlcy-advisory h4 {
+            margin: 0 0 14px;
+            color: var(--rl-white);
+            font-size: 13.5px;
+            font-weight: 850;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .rlcy-consult-list {
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .rlcy-consult-list li {
+            position: relative;
+            padding-left: 20px;
+            font-size: 13.5px;
+            color: #cbd5e1;
+            margin-bottom: 10px;
+            line-height: 1.5;
+        }
+
+        .rlcy-consult-list li:last-child {
+            margin-bottom: 0;
+        }
+
+        .rlcy-consult-list li svg {
+            position: absolute;
+            left: 0;
+            top: 3px;
+            color: var(--rl-red);
+        }
+
+        @media (max-width: 1060px) {
+
+            .rlcy-practical-grid,
+            .rlcy-exempt-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 860px) {
+
+            .rlcy-hero,
+            .rlcy-split,
+            .rlcy-close,
+            .rlcy-matrix-header,
+            .rlcy-help-strip {
+                grid-template-columns: 1fr;
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .rlcy-tier-card {
+                width: 320px;
+                min-width: 320px;
+                flex: 0 0 320px;
+            }
+
+            .rlcy-tier-image-wrap {
+                height: 160px;
+            }
+        }
+
+        @media (max-width: 600px) {
+            .rlcy-wrap {
+                padding: 28px 16px 44px;
+            }
+
+            .rlcy-practical-grid,
+            .rlcy-exempt-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .rlcy-risk-row {
+                grid-template-columns: 1fr;
+                gap: 6px;
+            }
+
+            .rlcy-exempt-panel {
+                padding: 24px 18px;
+            }
+
+            .rlcy-close {
+                padding: 26px 20px;
+            }
+        }
+    </style>
+
+    <!-- HERO SECTION -->
+    <div class="rlcy-hero">
+        <div>
+            <p class="rlcy-eyebrow">Cyber Insurance Data Risks Johor Bahru</p>
+            <h1 class="rlcy-title">Not all Datas are same: What You Store Determines What You Must Insure.</h1>
+            <p class="rlcy-lede">Whether your business needs Cyber Insurance does not depend on your revenue or server
+                count. It depends entirely on whether your stored records allow threat actors to execute financial
+                fraud, or merely generate unsolicited cold calls.</p>
+            <div class="rlcy-hero-note">
+                <strong>The 10-Second Assessment:</strong> If you only retain text phone numbers, names, and booking
+                calendars, an attacker cannot breach banking systems, making cyber insurance an unnecessary operational
+                expense. But if you store scanned MyKad files, bank direct-debit mandates, or clinical files, liability
+                is immediate the moment systems are breached.
+            </div>
+        </div>
+        <figure aria-label="Visual representation of the 5 data security tiers" class="rlcy-hero-image">
+            <img alt="Visual representation of the 5 data security tiers"
+                src="/data/cms/images/cyber-insurance-data-risk-hierarchy-visual.png"
+                style="height: 520px; width: 520px;" />
+        </figure>
+    </div>
+
+    <!-- REALIZATION SECTION -->
+    <div class="rlcy-section">
+        <div class="rlcy-split">
+            <div>
+                <p class="rlcy-kicker">Data Risk Realization</p>
+                <h2 class="rlcy-heading">Why some data leaks ruin companies while others carry zero liability.</h2>
+                <p class="rlcy-intro">Under Malaysian statutory laws and PDPA regulatory frameworks, compensatory
+                    damages only occur when stolen data enables direct financial theft, identity impersonation, or
+                    operational paralysis. Formatting dictates real-world threat value.</p>
+            </div>
+            <div>
+                <div class="rlcy-definition-panel">
+                    <h3>The Exploitability Threshold</h3>
+                    <p>Criminal syndicates evaluate stolen databases strictly on bypass capability. If a file cannot
+                        pass electronic verification or substantiate direct blackmail, it cannot generate lawsuits
+                        against your business.</p>
+                </div>
+                <div class="rlcy-risk-table">
+                    <div class="rlcy-risk-row">
+                        <strong>Contact Logs</strong>
+                        <span>First names and phone numbers produce nuisance spam calls. No bank account or loan can be
+                            opened with this alone.</span>
+                    </div>
+                    <div class="rlcy-risk-row">
+                        <strong>Raw Text ICs</strong>
+                        <span>Text-only MyKad numbers fuel Macau Scam phone intimidation. They cannot bypass
+                            multi-factor biometric banking protocols on their own.</span>
+                    </div>
+                    <div class="rlcy-risk-row">
+                        <strong>Document Scans</strong>
+                        <span>Scanned MyKad PDFs and utility bills enable fraudulent e-KYC account opening, burner SIM
+                            registration, and BNPL credit theft.</span>
+                    </div>
+                    <div class="rlcy-risk-row">
+                        <strong>Clinical Files</strong>
+                        <span>Psychiatric histories and diagnostic files trigger direct patient blackmail and immediate
+                            operational suspension by regulatory bodies.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 5-TIER DATA HIERARCHY MATRIX -->
+    <div class="rlcy-matrix-section">
+        <div class="rlcy-matrix-header">
+            <div>
+                <p class="rlcy-kicker">Data Risk Classification</p>
+                <h2>The 5-Tier Data Risk Hierarchy</h2>
+                <p>The more sensitive the data, the bigger the risk. Hover over the section and scroll with your mouse
+                    wheel, or use the navigation buttons to slide through the tiers.</p>
+            </div>
+            <div class="rlcy-scroll-controls">
+                <button type="button" aria-label="Scroll left" class="rlcy-scroll-btn" id="rlcyPrevBtn">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.5">
+                        <path d="M15 18l-6-6 6-6" />
+                    </svg>
+                </button>
+                <button type="button" aria-label="Scroll right" class="rlcy-scroll-btn" id="rlcyNextBtn">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.5">
+                        <path d="M9 18l6-6-6-6" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- HORIZONTAL CARDS TRACK -->
+        <div class="rlcy-matrix-flow" id="rlcyMatrixFlow">
+
+            <!-- TIER 0 -->
+            <div class="rlcy-tier-card rlcy-tier-0">
+                <div class="rlcy-tier-top">
+                    <span class="rlcy-tier-title">Tier 0</span>
+                    <span class="rlcy-tier-sub">Zero Threat</span>
+                </div>
+                <div class="rlcy-tier-image-wrap">
+                    <img alt="Tier 0 data visual showing contact cards, phone numbers and reward points"
+                        src="/data/cms/images/tier-0-zero-threat.png" />
+                </div>
+                <div class="rlcy-tier-body">
+                    <div>
+                        <span class="rlcy-block-title">Data Stored</span>
+                        <ul class="rlcy-data-list">
+                            <li>First / last names</li>
+                            <li>Mobile &amp; parent phone numbers</li>
+                            <li>Personal email addresses</li>
+                            <li>Blood group / age / gender</li>
+                            <li>Booking times / dates</li>
+                            <li>Loyalty point balance</li>
+                        </ul>
+                        <div class="rlcy-risk-box">
+                            <span class="rlcy-block-title">Main Risk</span>
+                            <p>Spam calls only. Worth fractions of a sen. No identity theft or bank fraud is possible
+                                with this alone.</p>
+                        </div>
+                    </div>
+                    <div class="rlcy-verdict-box">
+                        <div class="rlcy-verdict-label">Do You Need Cyber Insurance?</div>
+                        <span class="rlcy-status-badge rlcy-status-no">NO</span>
+                        <p class="rlcy-verdict-desc">Total waste of money. No customer can sue for damages with this
+                            data alone.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TIER 1 -->
+            <div class="rlcy-tier-card rlcy-tier-1">
+                <div class="rlcy-tier-top">
+                    <span class="rlcy-tier-title">Tier 1</span>
+                    <span class="rlcy-tier-sub">Low-to-Moderate (Text-Only)</span>
+                </div>
+                <div class="rlcy-tier-image-wrap">
+                    <img alt="Tier 1 data visual showing text MyKad numbers, passport records and addresses"
+                        src="/data/cms/images/tier-1-low-threat.png" />
+                </div>
+                <div class="rlcy-tier-body">
+                    <div>
+                        <span class="rlcy-block-title">Data Stored</span>
+                        <ul class="rlcy-data-list">
+                            <li>Text NRIC / MyKad number</li>
+                            <li>Text Passport number</li>
+                            <li>Home postal address</li>
+                            <li>Vehicle license plate number</li>
+                            <li>Company name &amp; SSM registration no.</li>
+                        </ul>
+                        <div class="rlcy-risk-box">
+                            <span class="rlcy-block-title">Main Risk</span>
+                            <p>Targeted Macau Scams. Attackers pose as police or LHDN officers over the phone. Cannot
+                                bypass bank security alone.</p>
+                        </div>
+                    </div>
+                    <div class="rlcy-verdict-box">
+                        <div class="rlcy-verdict-label">Do You Need Cyber Insurance?</div>
+                        <span class="rlcy-status-badge rlcy-status-no">NO</span>
+                        <p class="rlcy-verdict-desc">Unnecessary unless storing &gt;20,000 records, where mandatory PDPA
+                            notification costs apply.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TIER 2 -->
+            <div class="rlcy-tier-card rlcy-tier-2">
+                <div class="rlcy-tier-top">
+                    <span class="rlcy-tier-title">Tier 2</span>
+                    <span class="rlcy-tier-sub">High Risk (Visual Verification)</span>
+                </div>
+                <div class="rlcy-tier-image-wrap">
+                    <img alt="Tier 2 data visual showing scanned MyKad copies, signatures and utility bills"
+                        src="/data/cms/images/tier-2-high-risk.png" />
+                </div>
+                <div class="rlcy-tier-body">
+                    <div>
+                        <span class="rlcy-block-title">Data Stored</span>
+                        <ul class="rlcy-data-list">
+                            <li>Scanned image / PDF of MyKad</li>
+                            <li>Scanned Passport photo page</li>
+                            <li>Digital / scanned signatures</li>
+                            <li>Utility bills (proof of address)</li>
+                            <li>Full SSM profile (Form 24/49, Director ICs)</li>
+                        </ul>
+                        <div class="rlcy-risk-box">
+                            <span class="rlcy-block-title">Main Risk</span>
+                            <p>e-KYC Bypass &amp; Fraud. Fraudsters open mule bank accounts, register burner SIMs, and
+                                apply for online micro-loans.</p>
+                        </div>
+                    </div>
+                    <div class="rlcy-verdict-box">
+                        <div class="rlcy-verdict-label">Do You Need Cyber Insurance?</div>
+                        <span class="rlcy-status-badge rlcy-status-yes">YES</span>
+                        <p class="rlcy-verdict-desc">PDRM commercial crime investigations and common law negligence
+                            liabilities will follow a breach.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TIER 3 -->
+            <div class="rlcy-tier-card rlcy-tier-3">
+                <div class="rlcy-tier-top">
+                    <span class="rlcy-tier-title">Tier 3</span>
+                    <span class="rlcy-tier-sub">Critical Financial &amp; Commercial</span>
+                </div>
+                <div class="rlcy-tier-image-wrap">
+                    <img alt="Tier 3 data visual showing credit cards with CVV, salary slips and tender pricing"
+                        src="/data/cms/images/tier-3-critical-financial.png" />
+                </div>
+                <div class="rlcy-tier-body">
+                    <div>
+                        <span class="rlcy-block-title">Data Stored</span>
+                        <ul class="rlcy-data-list">
+                            <li>Credit / debit card numbers with CVV</li>
+                            <li>Direct debit / e-Mandate bank details</li>
+                            <li>Employee salary slips &amp; tax forms</li>
+                            <li>Proprietary pricing, CAD drawings, tender bids</li>
+                        </ul>
+                        <div class="rlcy-risk-box">
+                            <span class="rlcy-block-title">Main Risk</span>
+                            <p>Direct financial theft &amp; trade sabotage. Unauthorized card charging, supplier invoice
+                                redirection, or competitor espionage.</p>
+                        </div>
+                    </div>
+                    <div class="rlcy-verdict-box">
+                        <div class="rlcy-verdict-label">Do You Need Cyber Insurance?</div>
+                        <span class="rlcy-status-badge rlcy-status-yes">YES (Mandatory)</span>
+                        <p class="rlcy-verdict-desc">Client vendor contracts and payment networks (PCI-DSS) legally
+                            force organizations to hold cover.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TIER 4 -->
+            <div class="rlcy-tier-card rlcy-tier-4">
+                <div class="rlcy-tier-top">
+                    <span class="rlcy-tier-title">Tier 4</span>
+                    <span class="rlcy-tier-sub">Catastrophic Extortion</span>
+                </div>
+                <div class="rlcy-tier-image-wrap">
+                    <img alt="Tier 4 data visual showing medical files, biometric scans and prescription records"
+                        src="/data/cms/images/tier-4-catastrophic-extortion.png" />
+                </div>
+                <div class="rlcy-tier-body">
+                    <div>
+                        <span class="rlcy-block-title">Data Stored</span>
+                        <ul class="rlcy-data-list">
+                            <li>Full medical &amp; psychiatric histories</li>
+                            <li>Prescription drug records / STD tests</li>
+                            <li>Biometric data (fingerprint / facial scans)</li>
+                            <li>Criminal background / litigation files</li>
+                        </ul>
+                        <div class="rlcy-risk-box">
+                            <span class="rlcy-block-title">Main Risk</span>
+                            <p>Blackmail &amp; License Revocation. Classified as Sensitive Personal Data under PDPA.
+                                Attackers extort victims directly.</p>
+                        </div>
+                    </div>
+                    <div class="rlcy-verdict-box">
+                        <div class="rlcy-verdict-label">Do You Need Cyber Insurance?</div>
+                        <span class="rlcy-status-badge rlcy-status-crit">CRITICAL</span>
+                        <p class="rlcy-verdict-desc">Immediate target for comprehensive cyber cover. Ministry of Health
+                            (KKM) will suspend operations.</p>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- HELPER FOOTER STRIP -->
+        <div class="rlcy-help-strip">
+            <strong>Cyber Insurance Can Help With:</strong>
+            <div class="rlcy-help-tags">
+                <span class="rlcy-help-tag">Forensic Investigation &amp; Response</span>
+                <span class="rlcy-help-tag">Legal Costs &amp; Regulatory Fines</span>
+                <span class="rlcy-help-tag">Data Breach Notification Expenses</span>
+                <span class="rlcy-help-tag">Business Disruption Recovery</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- JAVASCRIPT: BIDIRECTIONAL WHEEL & BUTTON HORIZONTAL NAVIGATION -->
+    <script type="text/javascript">
+        (function () {
+            const flow = document.getElementById('rlcyMatrixFlow');
+            const prevBtn = document.getElementById('rlcyPrevBtn');
+            const nextBtn = document.getElementById('rlcyNextBtn');
+            if (!flow) return;
+
+            if (prevBtn) {
+                prevBtn.addEventListener('click', function () {
+                    flow.scrollBy({ left: -420, behavior: 'smooth' });
+                });
+            }
+            if (nextBtn) {
+                nextBtn.addEventListener('click', function () {
+                    flow.scrollBy({ left: 420, behavior: 'smooth' });
+                });
+            }
+
+            flow.addEventListener('wheel', function (e) {
+                if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+
+                const maxScroll = flow.scrollWidth - flow.clientWidth;
+                if (maxScroll <= 0) return;
+
+                const atStart = flow.scrollLeft <= 0;
+                const atEnd = Math.ceil(flow.scrollLeft) >= maxScroll - 2;
+
+                if ((e.deltaY > 0 && !atEnd) || (e.deltaY < 0 && !atStart)) {
+                    e.preventDefault();
+                    flow.scrollLeft += e.deltaY * 1.2;
+                }
+            }, { passive: false });
+        })();
+    </script>
+
+    <!-- OPERATIONAL EXPOSURE AUDIT (PROFESSIONALIZED WITH ICONS) -->
+    <div class="rlcy-exposure-wrap">
+        <div class="rlcy-exposure-header">
+            <p class="rlcy-kicker">Operational Risk Assessment</p>
+            <h2 class="rlcy-heading">Evaluating Enterprise Exposure Across Core Repositories</h2>
+            <p class="rlcy-intro">Corporate data liability is fundamentally determined by where and how files are stored
+                across your local network drives, accounting platforms, and communication channels. The introduction of
+                visual verification scans fundamentally alters your legal risk profile.</p>
+        </div>
+
+        <div class="rlcy-practical-grid">
+            <div class="rlcy-practical-card">
+                <div class="rlcy-card-icon-header">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg>
+                </div>
+                <h4>Storage Format Disparity</h4>
+                <p>Structured tabular lists (customer names, phone contacts) carry negligible third-party damages.
+                    Conversely, unencrypted directories holding raw scans of MyKads or utility bills immediately trigger
+                    statutory e-KYC liability.</p>
+            </div>
+
+            <div class="rlcy-practical-card">
+                <div class="rlcy-card-icon-header">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+                    </svg>
+                </div>
+                <h4>Clinical &amp; Healthcare Records</h4>
+                <p>Practices holding consultation logs, aesthetic imagery, or psychiatric files handle Tier 4 statutory
+                    data. Syndicates prioritize personal patient blackmail and regulatory reporting rather than standard
+                    payment card fraud.</p>
+            </div>
+
+            <div class="rlcy-practical-card">
+                <div class="rlcy-card-icon-header">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+                        <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+                    </svg>
+                </div>
+                <h4>Commercial Trade Credit</h4>
+                <p>Wholesalers and distributors maintaining director identity files, audited statements, and bank proofs
+                    for credit facilities represent high-value targets for corporate identity theft and unauthorized
+                    debt facility applications.</p>
+            </div>
+
+            <div class="rlcy-practical-card">
+                <div class="rlcy-card-icon-header">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                        <polyline points="9 11 12 14 22 4"></polyline>
+                    </svg>
+                </div>
+                <h4>Regulatory Defense Shielding</h4>
+                <p>When high-consequence data leaks, an effective cyber insurance structure funds mandatory forensic
+                    investigations, specialized privacy counsel, and statutory notification duties mandated under
+                    Malaysian regulatory frameworks.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- WHO DEFINITELY DOES NOT NEED INSURANCE (PROFESSIONALIZED WITH ICONS) -->
+    <div class="rlcy-exempt-panel">
+        <h3>Low-Risk Operational Profiles (Exempt Categories)</h3>
+        <p class="rlcy-subtext">If your company operations strictly align with the categories below, institutional cyber
+            coverage offers low capital efficiency. Basic data hygiene and access controls provide sufficient protection
+            without insurance premiums:</p>
+
+        <div class="rlcy-exempt-grid">
+            <div class="rlcy-exempt-card">
+                <div class="rlcy-exempt-icon-box">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="9" cy="21" r="1"></circle>
+                        <circle cx="20" cy="21" r="1"></circle>
+                        <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+                    </svg>
+                </div>
+                <div class="rlcy-exempt-badge">Profile 01 &bull; Retail POS</div>
+                <h4>Consumer Storefronts &amp; F&amp;B</h4>
+                <p>Retail shops and cafes that solely capture consumer mobile numbers and birth dates for WhatsApp
+                    marketing campaigns, order receipts, and loyalty points.</p>
+            </div>
+
+            <div class="rlcy-exempt-card">
+                <div class="rlcy-exempt-icon-box">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="16" y1="2" x2="16" y2="6"></line>
+                        <line x1="8" y1="2" x2="8" y2="6"></line>
+                        <line x1="3" y1="10" x2="21" y2="10"></line>
+                    </svg>
+                </div>
+                <div class="rlcy-exempt-badge">Profile 02 &bull; Service Bookings</div>
+                <h4>Appointment Scheduling</h4>
+                <p>Workshops, salons, and repair specialists recording customer contact names, booking dates, vehicle
+                    registrations, and routine operational receipts.</p>
+            </div>
+
+            <div class="rlcy-exempt-card">
+                <div class="rlcy-exempt-icon-box">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
+                        <line x1="1" y1="10" x2="23" y2="10"></line>
+                    </svg>
+                </div>
+                <div class="rlcy-exempt-badge">Profile 03 &bull; Trade Operations</div>
+                <h4>Intermediary B2B Contractors</h4>
+                <p>Sub-contractors and industrial vendors billing through third-party banking portals who never retain
+                    payment card details or client identity copies.</p>
+            </div>
+
+            <div class="rlcy-exempt-card">
+                <div class="rlcy-exempt-icon-box">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                </div>
+                <div class="rlcy-exempt-badge">Profile 04 &bull; Data Sanitation</div>
+                <h4>Zero-Retention Verification</h4>
+                <p>Enterprises that review customer identity credentials face-to-face or via third-party APIs and
+                    immediately delete the visual document copies rather than archiving PDFs.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- REFINED CLOSING & CONSULTATION BLOCK -->
+    <div class="rlcy-close">
+        <div>
+            <h2>Speak with a Cyber Insurance Specialist in Johor Bahru.</h2>
+            <p>Whether you need a comprehensive cyber policy, market limit benchmarking, or simply an objective
+                discussion on your operational data exposure, Risklocker provides tailored cyber insurance solutions for
+                Malaysian businesses. Contact us today for a free consultation and policy review.</p>
+            <a class="rlcy-cta-btn" href="https://www.risklocker.com/cont/contact-us">
+                <span>Request a Free Cyber Insurance Consultation</span>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <path d="M5 12h14M12 5l7 7-7 7" />
+                </svg>
+            </a>
+        </div>
+        <div class="rlcy-advisory">
+            <h4>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                </svg>
+                How Risklocker Assists Your Business
+            </h4>
+            <ul class="rlcy-consult-list">
+                <li>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                    <strong>Objective Exposure Audit:</strong> Evaluating your stored records to verify if cyber
+                    insurance is truly required or an unnecessary expense.
+                </li>
+                <li>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                    <strong>Comparative Market Quotes:</strong> Sourcing structured quotes across leading insurers in
+                    Malaysia to secure optimal premium-to-coverage value.
+                </li>
+                <li>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                    <strong>Regulatory &amp; Claims Structuring:</strong> Ensuring coverage limits, incident response
+                    panels, and business interruption terms match real operational exposure.
+                </li>
+            </ul>
+        </div>
+    </div>
+
+    <!--
+SEO Notes Implemented:
+Primary Keyword: Cyber Insurance Data Risks Hierarchy
+Supporting Keywords:
+- Cyber Insurance Johor Bahru
+- Cyber Insurance Malaysia
+- What data requires cyber insurance
+- Data risk hierarchy Malaysia
+- PDPA sensitive personal data insurance
+- e-KYC data leak liability
+-->
+</section>
+
+<!-- =========================================================================
+IMAGE GENERATION PROMPTS (ESCALATING COLOR SPECTRUM)
+Clean vector/3D UI object illustrations on clean light backdrops. No people, no tableware.
+
+PROMPT 1: HERO IMAGE (Path: /data/cms/images/cyber-insurance-data-risk-hierarchy-visual.png)
+Aspect Ratio: 1:1 (Square, 1024x1024)
+Prompt:
+"A clean 3D isometric technical infographic showing data security classification tiers. Centered are realistic digital documents: an official Malaysian MyKad identity card with microchip, a biometric dark blue passport, a credit card with EMV chip, and an encrypted medical dossier file stamped with a red emblem. The items are arranged in sequence showing progressive threat levels with colored indicators (Green, Sky Blue, Amber Orange, Crimson Red, Deep Maroon). High-end corporate fintech illustration, clean studio lighting, soft off-white background (#f8fafc), subtle crimson red laser accent lines (#ed1c24), ultra-detailed, crisp edges, no humans, no furniture, no glassware."
+
+PROMPT 2: TIER 0 IMAGE (Path: /data/cms/images/tier-0-zero-threat.png)
+Color Theme: Emerald Green (#059669)
+Aspect Ratio: 16:9 (Landscape, 800x450)
+Prompt:
+"A clean graphic illustration representing basic non-sensitive contact data. Shows a smartphone screen displaying a digital address book contact card with name and phone number icons, an appointment booking calendar widget, and a loyalty points reward star badge. Clean vector art style, emerald green color palette (#059669), soft off-white background (#f8fafc), crisp outlines, high resolution, no human faces."
+
+PROMPT 3: TIER 1 IMAGE (Path: /data/cms/images/tier-1-low-threat.png)
+Color Theme: Sky Blue / Slate Blue (#0284c7)
+Aspect Ratio: 16:9 (Landscape, 800x450)
+Prompt:
+"A clean graphic illustration of raw alphanumeric text records. Features a structured database spreadsheet table with text MyKad IC numbers, passport serial strings, vehicle license plates, and a company registration SSM certificate icon. Clean corporate fintech aesthetic, sky blue color palette (#0284c7), light neutral background (#f8fafc), crisp typography, no human subjects."
+
+PROMPT 4: TIER 2 IMAGE (Path: /data/cms/images/tier-2-high-risk.png)
+Color Theme: Amber / Yellow-Orange (#d97706)
+Aspect Ratio: 16:9 (Landscape, 800x450)
+Prompt:
+"A clean technical illustration representing visual identity verification files. Features a high-resolution photocopy scan of a Malaysian MyKad identity card with a subtle 'FOR VERIFICATION ONLY' watermark, an open passport photo page scan, an electricity utility bill envelope, and a digital pen signing an official SSM director profile. Warm amber-orange color accents (#d97706), document scanner aesthetic, clean light background, no people."
+
+PROMPT 5: TIER 3 IMAGE (Path: /data/cms/images/tier-3-critical-financial.png)
+Color Theme: Crimson Red (#ed1c24)
+Aspect Ratio: 16:9 (Landscape, 800x450)
+Prompt:
+"A graphic illustration representing commercial financial records. Features an embossed corporate credit card displaying a highlighted three-digit CVV security code, a bank token showing direct debit e-Mandate transfer arrows, a confidential employee salary payslip, and architectural CAD blueprints. Vibrant crimson red color scheme (#ed1c24), sharp cyber security alert iconography, soft white background, no human figures."
+
+PROMPT 6: TIER 4 IMAGE (Path: /data/cms/images/tier-4-catastrophic-extortion.png)
+Color Theme: Deep Maroon / Blood Red / Dark Burgundy (#7f1d1d)
+Aspect Ratio: 16:9 (Landscape, 800x450)
+Prompt:
+"A high-priority data security illustration representing sensitive clinical records. Features a confidential medical patient folder stamped 'RESTRICTED - SENSITIVE PERSONAL DATA', a prescription medicine bottle chart, and a glowing biometric fingerprint scanner grid. Deep maroon, blood red, and dark burgundy color palette (#7f1d1d), severe security alert aesthetic, clean light grey background, no human faces."
+========================================================================= -->

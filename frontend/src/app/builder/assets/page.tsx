@@ -14,6 +14,7 @@ import {
   Trash,
   UploadSimple,
   WarningCircle,
+  CheckCircle,
   X,
 } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
@@ -102,6 +103,8 @@ export default function AssetLibraryPage() {
   const [editCustomCategory, setEditCustomCategory] = useState("");
   const [editKind, setEditKind] = useState("benefit_art");
   const [editSaving, setEditSaving] = useState(false);
+  const [replacementFile, setReplacementFile] = useState<File | null>(null);
+  const [replacementPreview, setReplacementPreview] = useState<string | null>(null);
 
   // Single Delete Modal
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -280,6 +283,11 @@ export default function AssetLibraryPage() {
     setEditCategory(asset.category || "General");
     setEditCustomCategory("");
     setEditKind(asset.asset_kind || "benefit_art");
+    setReplacementFile(null);
+    if (replacementPreview) {
+      URL.revokeObjectURL(replacementPreview);
+      setReplacementPreview(null);
+    }
     setEditOpen(true);
   }
 
@@ -289,6 +297,18 @@ export default function AssetLibraryPage() {
     setError("");
     try {
       const finalCategory = editCategory === "__new__" ? editCustomCategory.trim() || "General" : editCategory;
+
+      // 1. If replacement image file is selected, upload it first
+      if (replacementFile) {
+        const formData = new FormData();
+        formData.append("file", replacementFile);
+        await api(`/business/assets/${editingAsset.id}/replace-file`, {
+          method: "POST",
+          body: formData,
+        });
+      }
+
+      // 2. Update metadata
       await api(`/business/assets/${editingAsset.id}`, {
         method: "PATCH",
         body: JSON.stringify({
@@ -299,7 +319,12 @@ export default function AssetLibraryPage() {
       });
       setEditOpen(false);
       setEditingAsset(null);
-      showToast(`Updated "${editLabel.trim()}".`);
+      setReplacementFile(null);
+      if (replacementPreview) {
+        URL.revokeObjectURL(replacementPreview);
+        setReplacementPreview(null);
+      }
+      showToast(replacementFile ? `Replaced image and updated "${editLabel.trim()}".` : `Updated "${editLabel.trim()}".`);
       await loadCategories();
       await load(page, appliedSearch, kind, selectedCategory);
     } catch (err) {
@@ -924,6 +949,88 @@ export default function AssetLibraryPage() {
               <option value="decorative">Decorative</option>
             </Select>
           </label>
+
+          {/* Image Replacement Section */}
+          {editingAsset ? (
+            <div className="rounded border border-[var(--rl-border)] p-3 space-y-2.5 bg-[var(--rl-surface-muted)]">
+              <span className="text-[11px] font-semibold text-[var(--rl-text-strong)] uppercase tracking-wider block">
+                Artwork / Image File
+              </span>
+              <div className="flex items-center gap-3">
+                {/* Current or Replaced Preview */}
+                <div className="w-16 h-16 rounded border border-[var(--rl-border)] bg-white flex items-center justify-center p-1.5 overflow-hidden shrink-0 shadow-xs">
+                  {replacementPreview ? (
+                    <img
+                      src={replacementPreview}
+                      alt="Replacement Preview"
+                      className="max-h-full max-w-full object-contain"
+                    />
+                  ) : (
+                    <img
+                      src={fileUrl(editingAsset.url)}
+                      alt={editingAsset.label}
+                      className="max-h-full max-w-full object-contain"
+                    />
+                  )}
+                </div>
+
+                {/* Details & Actions */}
+                <div className="flex-1 min-w-0 space-y-1.5">
+                  {replacementFile ? (
+                    <div>
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+                        <CheckCircle size={14} weight="fill" />
+                        <span>Ready to replace with:</span>
+                      </div>
+                      <p className="text-[11px] font-mono text-[var(--rl-text-strong)] truncate">
+                        {replacementFile.name} ({(replacementFile.size / 1024).toFixed(1)} KB)
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReplacementFile(null);
+                          if (replacementPreview) {
+                            URL.revokeObjectURL(replacementPreview);
+                            setReplacementPreview(null);
+                          }
+                        }}
+                        className="text-[10px] text-[var(--rl-red)] hover:underline mt-0.5"
+                      >
+                        Keep current image
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-xs text-[var(--rl-text)] font-medium">
+                        Current: <span className="font-mono text-[var(--rl-text-muted)]">{editingAsset.original_filename || "current-image"}</span>
+                      </p>
+                      <p className="text-[10px] text-[var(--rl-text-muted)]">
+                        Select a new PNG, JPG, or WebP to swap this image while keeping its ID.
+                      </p>
+                    </div>
+                  )}
+
+                  <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white hover:bg-[var(--rl-bg)] text-xs font-medium text-[var(--rl-text-strong)] cursor-pointer transition-colors shadow-xs">
+                    <UploadSimple size={13} />
+                    <span>{replacementFile ? "Choose Different Image" : "Replace Image File..."}</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setReplacementFile(file);
+                          if (replacementPreview) URL.revokeObjectURL(replacementPreview);
+                          setReplacementPreview(URL.createObjectURL(file));
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           {editingAsset ? (
             <div className="rounded border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3 text-[11px] text-[var(--rl-text-muted)] grid gap-1">

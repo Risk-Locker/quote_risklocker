@@ -34,7 +34,10 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
       credentials: "include",
       cache: "no-store",
     });
-  } catch (err) {
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      throw err;
+    }
     if (process.env.NODE_ENV !== "production") {
       console.error(`[api] network error: ${path}`, err);
     }

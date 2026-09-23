@@ -390,25 +390,28 @@ export function getAllBenefitPresets(): BenefitCardStyle[] {
     }));
   }
   try {
-    // Check cached DB presets first
+    const overridesRaw = localStorage.getItem("risklocker_benefit_preset_overrides");
+    const overrides: Record<string, Partial<BenefitCardStyle>> = overridesRaw ? JSON.parse(overridesRaw) : {};
+    const defaultOverrideId = localStorage.getItem("risklocker_default_benefit_preset");
+
+    // Check cached DB presets first, but ALWAYS merge user overrides on top
     const cachedDbRaw = localStorage.getItem("risklocker_cached_benefit_presets");
     if (cachedDbRaw) {
       try {
         const cachedList: BenefitCardStyle[] = JSON.parse(cachedDbRaw);
         if (Array.isArray(cachedList) && cachedList.length > 0) {
-          const defId = localStorage.getItem("risklocker_default_benefit_preset");
-          return cachedList.map((c) => ({
-            ...c,
-            is_default: defId ? c.id === defId : c.is_default,
-            sectionVisibility: normalizeSectionVisibility(c.sectionVisibility, c),
-          }));
+          return cachedList.map((c) => {
+            const hasOverride = Boolean(overrides[c.id]);
+            const item = hasOverride ? { ...c, ...overrides[c.id], is_system_modified: true } : c;
+            return {
+              ...item,
+              is_default: defaultOverrideId ? item.id === defaultOverrideId : item.is_default,
+              sectionVisibility: normalizeSectionVisibility(item.sectionVisibility, item),
+            };
+          });
         }
       } catch {}
     }
-
-    const overridesRaw = localStorage.getItem("risklocker_benefit_preset_overrides");
-    const overrides: Record<string, Partial<BenefitCardStyle>> = overridesRaw ? JSON.parse(overridesRaw) : {};
-    const defaultOverrideId = localStorage.getItem("risklocker_default_benefit_preset");
 
     const mergedSystem = SYSTEM_BENEFIT_PRESETS.map((sys) => {
       if (overrides[sys.id]) {
@@ -457,9 +460,9 @@ export function getBenefitPreset(presetId: string | null | undefined): BenefitCa
 
 export function savePresetOverride(presetId: string, updates: Partial<BenefitCardStyle>): void {
   if (typeof window === "undefined") return;
-  const isSystem = SYSTEM_BENEFIT_PRESETS.some((p) => p.id === presetId);
-  if (isSystem) {
-    try {
+  try {
+    const isSystem = SYSTEM_BENEFIT_PRESETS.some((p) => p.id === presetId);
+    if (isSystem) {
       const overridesRaw = localStorage.getItem("risklocker_benefit_preset_overrides");
       const overrides: Record<string, Partial<BenefitCardStyle>> = overridesRaw ? JSON.parse(overridesRaw) : {};
       overrides[presetId] = {
@@ -467,18 +470,31 @@ export function savePresetOverride(presetId: string, updates: Partial<BenefitCar
         ...updates,
       };
       localStorage.setItem("risklocker_benefit_preset_overrides", JSON.stringify(overrides));
-    } catch (e) {
-      console.error("Failed to save system preset override:", e);
-    }
-  } else {
-    try {
+    } else {
       const customRaw = localStorage.getItem("risklocker_benefit_card_presets");
       const customList: BenefitCardStyle[] = customRaw ? JSON.parse(customRaw) : [];
       const updated = customList.map((c) => (c.id === presetId ? { ...c, ...updates } : c));
       localStorage.setItem("risklocker_benefit_card_presets", JSON.stringify(updated));
-    } catch (e) {
-      console.error("Failed to update custom preset:", e);
     }
+
+    // Always keep cached DB presets in localStorage in sync so there is zero drift
+    const cachedDbRaw = localStorage.getItem("risklocker_cached_benefit_presets");
+    if (cachedDbRaw) {
+      try {
+        const cachedList: BenefitCardStyle[] = JSON.parse(cachedDbRaw);
+        if (Array.isArray(cachedList)) {
+          const updatedCache = cachedList.map((c) =>
+            c.id === presetId ? { ...c, ...updates, is_system_modified: isSystem ? true : c.is_system_modified } : c
+          );
+          localStorage.setItem("risklocker_cached_benefit_presets", JSON.stringify(updatedCache));
+        }
+      } catch {}
+    }
+
+    // Broadcast across components & tabs
+    window.dispatchEvent(new CustomEvent("risklocker_preset_updated", { detail: { presetId, updates } }));
+  } catch (e) {
+    console.error("Failed to save system preset override:", e);
   }
 }
 
@@ -491,6 +507,25 @@ export function resetPresetToDefault(presetId: string): void {
       delete overrides[presetId];
       localStorage.setItem("risklocker_benefit_preset_overrides", JSON.stringify(overrides));
     }
+
+    // Reset preset in cached DB list back to system default definition
+    const factory = SYSTEM_BENEFIT_PRESETS.find((p) => p.id === presetId);
+    if (factory) {
+      const cachedDbRaw = localStorage.getItem("risklocker_cached_benefit_presets");
+      if (cachedDbRaw) {
+        try {
+          const cachedList: BenefitCardStyle[] = JSON.parse(cachedDbRaw);
+          if (Array.isArray(cachedList)) {
+            const updatedCache = cachedList.map((c) =>
+              c.id === presetId ? { ...factory, is_default: c.is_default, is_system_modified: false } : c
+            );
+            localStorage.setItem("risklocker_cached_benefit_presets", JSON.stringify(updatedCache));
+          }
+        } catch {}
+      }
+    }
+
+    window.dispatchEvent(new CustomEvent("risklocker_preset_updated", { detail: { presetId, reset: true } }));
   } catch (e) {
     console.error("Failed to reset preset:", e);
   }

@@ -30,6 +30,7 @@ import {
   PencilSimple,
   Plus,
   Sparkle,
+  UserSwitch,
   X,
 } from "@phosphor-icons/react";
 import { toBlob, toPng } from "html-to-image";
@@ -38,6 +39,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { GuidedTour } from "@/components/guided-tour";
+import { SendToClientDialog } from "@/components/insights/send-to-client-dialog";
 import { Card } from "@/components/ui/card";
 import { GeminiQuotaInfoButton, type GeminiQuota } from "@/components/gemini-quota-meter";
 import { Input } from "@/components/ui/input";
@@ -46,6 +48,7 @@ import { Select } from "@/components/ui/select";
 import {
   CanvasElementView,
   balanceBenefitGridElements,
+  isPaidExtraBenefitCard,
   type CanvasElement,
 } from "@/components/template-canvas/shared";
 import {
@@ -70,11 +73,15 @@ type FormField = { name: string; label: string; kind: FieldKind };
 
 const FORM_FIELDS: FormField[] = [
   { name: "customer_name", label: "Insured name", kind: "text" },
+  { name: "ic_or_brn", label: "NRIC / Business Reg. No.", kind: "text" },
   { name: "quotation_reference", label: "Quotation ref", kind: "text" },
   { name: "vehicle_no", label: "Vehicle no. / Car plate", kind: "text" },
+  { name: "vehicle_year", label: "Year of make", kind: "text" },
   { name: "vehicle_type", label: "Vehicle type", kind: "vehicle_type" },
   { name: "car_model", label: "Car model", kind: "text" },
   { name: "engine_cc", label: "Engine CC / Capacity", kind: "text" },
+  { name: "chassis_no", label: "Chassis / VIN No.", kind: "text" },
+  { name: "engine_no", label: "Engine No.", kind: "text" },
   { name: "sum_insured", label: "Sum insured / Market value", kind: "money" },
   { name: "insurance_company", label: "Insurance name", kind: "text" },
   { name: "coverage_type", label: "Coverage type", kind: "text" },
@@ -84,6 +91,10 @@ const FORM_FIELDS: FormField[] = [
   { name: "excess_amount", label: "Excess amount", kind: "money" },
   { name: "compulsory_excess", label: "Compulsory excess", kind: "money" },
   { name: "ncd_percent", label: "NCD", kind: "percent" },
+  { name: "loading_amount", label: "Loading amount", kind: "money" },
+  { name: "gross_premium", label: "Gross premium", kind: "money" },
+  { name: "service_tax", label: "Service tax (SST)", kind: "money" },
+  { name: "stamp_duty", label: "Stamp duty", kind: "money" },
   { name: "premium", label: "Insurance Premium After NCD, Excluding Add-Ons", kind: "money" },
   { name: "insurance_premium_total", label: "Insurance premium", kind: "total" },
   { name: "roadtax", label: "Road tax", kind: "money" },
@@ -423,6 +434,130 @@ function IncludedCard({
 
   const isLimitHidden = !!(selection as any)?.typed_value_override?.hide_limit || !!(card as any).typed_value?.hide_limit;
 
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState(card.label);
+  const [isEditingLimit, setIsEditingLimit] = useState(false);
+  const [limitInput, setLimitInput] = useState(card.value || "");
+  const [isEditingDesc, setIsEditingDesc] = useState(false);
+  const [descInput, setDescInput] = useState(card.description || "");
+  const [savedField, setSavedField] = useState<string | null>(null);
+
+  useEffect(() => { setTitleInput(card.label); }, [card.label]);
+  useEffect(() => { setLimitInput(card.value || ""); }, [card.value]);
+  useEffect(() => { setDescInput(card.description || ""); }, [card.description]);
+
+  const flashSaved = (field: string) => {
+    setSavedField(field);
+    setTimeout(() => setSavedField(null), 1400);
+  };
+
+  const handleTitleCommit = (newVal: string) => {
+    setIsEditingTitle(false);
+    const clean = newVal.trim();
+    if (!clean || clean === card.label) return;
+    flashSaved("title");
+    if (selectionId && !pending) {
+      onQueue({ op: "benefit_update", selection_id: selectionId, label: clean }, `benefits.${selectionId}.label`);
+    } else if (card.offering_id) {
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, label: clean }, `benefits.offer.${card.offering_id}`);
+    } else if (selectionId || card.concept_key) {
+      const targetId = selectionId || card.concept_key!;
+      onQueue({ op: "benefit_update", selection_id: targetId, label: clean }, `benefits.${targetId}.label`);
+    }
+  };
+
+  const handleLimitCommit = (newVal: string) => {
+    setIsEditingLimit(false);
+    const clean = newVal.trim();
+    flashSaved("limit");
+    const typed = clean ? { type: "custom", display_text: clean } : null;
+    if (selectionId && !pending) {
+      onQueue({ op: "benefit_update", selection_id: selectionId, typed_value: typed }, `benefits.${selectionId}.limit`);
+    } else if (card.offering_id) {
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, typed_value: typed }, `benefits.offer.${card.offering_id}`);
+    } else if (selectionId || card.concept_key) {
+      const targetId = selectionId || card.concept_key!;
+      onQueue({ op: "benefit_update", selection_id: targetId, typed_value: typed }, `benefits.${targetId}.limit`);
+    }
+  };
+
+  const handleDescCommit = (newVal: string) => {
+    setIsEditingDesc(false);
+    const clean = newVal.trim();
+    flashSaved("desc");
+    if (selectionId && !pending) {
+      onQueue({ op: "benefit_update", selection_id: selectionId, description: clean }, `benefits.${selectionId}.description`);
+    } else if (card.offering_id) {
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, description: clean }, `benefits.offer.${card.offering_id}`);
+    } else if (selectionId || card.concept_key) {
+      const targetId = selectionId || card.concept_key!;
+      onQueue({ op: "benefit_update", selection_id: targetId, description: clean }, `benefits.${targetId}.description`);
+    }
+  };
+
+  const currentPriceObj = card.price || (card as any).optional_price;
+  const currentAmount = currentPriceObj ? (typeof currentPriceObj === "object" ? (currentPriceObj.amount ?? (currentPriceObj as any).value) : currentPriceObj) : null;
+  const currentPriceNum = currentAmount !== null && currentAmount !== "" && !isNaN(Number(currentAmount)) ? Number(currentAmount) : null;
+
+  const initialPriceObj = card.initial_price || (card as any).optional_price;
+  const initialAmount = initialPriceObj ? (typeof initialPriceObj === "object" ? (initialPriceObj.amount ?? (initialPriceObj as any).value) : initialPriceObj) : null;
+  const initialPriceNum = initialAmount !== null && initialAmount !== "" && !isNaN(Number(initialAmount)) ? Number(initialAmount) : null;
+
+  const [isEditingPrice, setIsEditingPrice] = useState(false);
+  const [priceInput, setPriceInput] = useState(currentPriceNum !== null ? String(currentPriceNum) : "");
+
+  useEffect(() => {
+    setPriceInput(currentPriceNum !== null ? String(currentPriceNum) : "");
+  }, [currentPriceNum]);
+
+  const handlePriceCommit = (newValStr: string) => {
+    setIsEditingPrice(false);
+    const trimmed = newValStr.trim();
+    flashSaved("price");
+    if (!trimmed) {
+      if (selectionId && !pending) {
+        onQueue({ op: "benefit_update", selection_id: selectionId, price: null, cost_status: "included" }, `benefits.${selectionId}.price`);
+      } else if (card.offering_id) {
+        onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "included", price: null }, `benefits.offer.${card.offering_id}`);
+      } else if (selectionId || card.concept_key) {
+        const targetId = selectionId || card.concept_key!;
+        onQueue({ op: "benefit_update", selection_id: targetId, price: null, cost_status: "included" }, `benefits.${targetId}.price`);
+      }
+      return;
+    }
+    const cleanNum = parseFloat(trimmed.replace(/[^0-9.]/g, ""));
+    if (isNaN(cleanNum)) return;
+    const newPrice = { amount: cleanNum, currency: "MYR" };
+    const costStatus = cleanNum > 0 ? "paid" : "included";
+    if (selectionId && !pending) {
+      onQueue({ op: "benefit_update", selection_id: selectionId, price: newPrice, cost_status: costStatus }, `benefits.${selectionId}.price`);
+    } else if (card.offering_id) {
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: costStatus, price: newPrice }, `benefits.offer.${card.offering_id}`);
+    } else if (selectionId || card.concept_key) {
+      const targetId = selectionId || card.concept_key!;
+      onQueue({ op: "benefit_update", selection_id: targetId, price: newPrice, cost_status: costStatus }, `benefits.${targetId}.price`);
+    }
+  };
+
+  const handleRevertPrice = () => {
+    setIsEditingPrice(false);
+    if (initialPriceNum !== null) {
+      setPriceInput(String(initialPriceNum));
+      const resetPrice = { amount: initialPriceNum, currency: "MYR" };
+      flashSaved("price");
+      if (selectionId && !pending) {
+        onQueue({ op: "benefit_update", selection_id: selectionId, price: resetPrice, cost_status: "paid" }, `benefits.${selectionId}.price`);
+      } else if (card.offering_id) {
+        onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "paid", price: resetPrice }, `benefits.offer.${card.offering_id}`);
+      } else if (selectionId || card.concept_key) {
+        const targetId = selectionId || card.concept_key!;
+        onQueue({ op: "benefit_update", selection_id: targetId, price: resetPrice, cost_status: "paid" }, `benefits.${targetId}.price`);
+      }
+    }
+  };
+
+  const hasPriceDiff = initialPriceNum !== null && (currentPriceNum === null || Math.abs(initialPriceNum - currentPriceNum) > 0.01);
+
   const toggleLimitVisibility = () => {
     if (!selectionId) return;
     const currentOverride = (selection as any)?.typed_value_override || {};
@@ -482,7 +617,7 @@ function IncludedCard({
   };
 
   return (
-    <article className={`flex items-start justify-between gap-2.5 rounded-[var(--rl-radius-sm)] border p-2.5 shadow-xs transition-all ${card.is_detected
+    <article className={`group flex items-start justify-between gap-2.5 rounded-[var(--rl-radius-sm)] border p-2.5 shadow-xs transition-all ${card.is_detected
       ? "border-amber-300 bg-amber-50/50 ring-1 ring-amber-300/60"
       : "border-[var(--rl-border)] bg-[var(--rl-surface)] hover:border-[var(--rl-border-strong)]"
       }`}>
@@ -500,26 +635,174 @@ function IncludedCard({
           )}
         </div>
       </div>
-      {/* Body: title, detected badge, value, description */}
+      {/* Body: title, detected badge, value, description, price */}
       <div className="flex-1 min-w-0 flex flex-col gap-0.5">
         <div className="flex items-center gap-1.5 flex-wrap">
-          <h3 className="text-xs font-bold text-[var(--rl-text-strong)] leading-tight truncate">{card.label}</h3>
+          {isEditingTitle ? (
+            <input
+              type="text"
+              value={titleInput}
+              autoFocus
+              onChange={(e) => setTitleInput(e.target.value)}
+              onBlur={() => handleTitleCommit(titleInput)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleTitleCommit(titleInput);
+                if (e.key === "Escape") { setIsEditingTitle(false); setTitleInput(card.label); }
+              }}
+              className="h-5 w-full rounded border border-[var(--rl-black)] px-1.5 font-bold text-xs text-[var(--rl-text-strong)] focus:outline-none"
+            />
+          ) : (
+            <div className="group/title flex items-center gap-1 max-w-full">
+              <h3 className="text-xs font-bold text-[var(--rl-text-strong)] leading-tight truncate">{card.label}</h3>
+              <button
+                type="button"
+                onClick={() => setIsEditingTitle(true)}
+                className="opacity-0 group-hover/title:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity cursor-pointer"
+                title="Edit title"
+              >
+                <PencilSimple size={10} />
+              </button>
+            </div>
+          )}
           {card.is_detected ? (
             <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-800 ring-1 ring-amber-400/50 shrink-0">★ Detected</span>
           ) : null}
+          {savedField ? (
+            <span className="text-[9px] font-bold text-emerald-600 flex items-center gap-0.5">
+              <Check size={10} weight="bold" /> Saved
+            </span>
+          ) : null}
         </div>
-        {card.value && !["", "Included standard cover", "Included", "FOC", "As quoted", "Optional"].includes(card.value) && (/\d/.test(card.value) || /unlimited/i.test(card.value)) && (
-          <div className="flex items-center gap-1.5 mt-0.5">
+
+        {/* Coverage Limit */}
+        {isEditingLimit ? (
+          <input
+            type="text"
+            placeholder="Coverage (e.g. RM 1,000, 50 km)"
+            value={limitInput}
+            autoFocus
+            onChange={(e) => setLimitInput(e.target.value)}
+            onBlur={() => handleLimitCommit(limitInput)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleLimitCommit(limitInput);
+              if (e.key === "Escape") { setIsEditingLimit(false); setLimitInput(card.value || ""); }
+            }}
+            className="h-5 w-44 rounded border border-[var(--rl-black)] px-1 font-mono text-[11px] font-bold text-[var(--rl-text-strong)] focus:outline-none mt-0.5"
+          />
+        ) : card.value && !["", "Included standard cover", "Included", "FOC", "As quoted", "Optional"].includes(card.value) && (/\d/.test(card.value) || /unlimited/i.test(card.value)) ? (
+          <div className="group/limit flex items-center gap-1 mt-0.5">
             <p className={`text-[11px] font-bold leading-tight truncate transition-colors ${isLimitHidden ? "text-[var(--rl-text-muted)] line-through" : "text-[var(--rl-text-strong)]"}`}>
               {card.value}
             </p>
-
+            <button
+              type="button"
+              onClick={() => setIsEditingLimit(true)}
+              className="opacity-0 group-hover/limit:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity cursor-pointer"
+              title="Edit coverage limit"
+            >
+              <PencilSimple size={10} />
+            </button>
+          </div>
+        ) : (
+          <div className="group/limit flex items-center gap-1 mt-0.5">
+            <button
+              type="button"
+              onClick={() => setIsEditingLimit(true)}
+              className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-[10px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-opacity cursor-pointer"
+              title="Set coverage limit"
+            >
+              <PencilSimple size={9} />
+              <span>+ Limit</span>
+            </button>
           </div>
         )}
-        {card.description && (
-          <p className="text-[10px] text-[var(--rl-text-muted)] leading-snug line-clamp-2">
-            {card.description}
-          </p>
+
+        {/* Description */}
+        {isEditingDesc ? (
+          <textarea
+            rows={2}
+            value={descInput}
+            autoFocus
+            onChange={(e) => setDescInput(e.target.value)}
+            onBlur={() => handleDescCommit(descInput)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleDescCommit(descInput); }
+              if (e.key === "Escape") { setIsEditingDesc(false); setDescInput(card.description || ""); }
+            }}
+            className="w-full rounded border border-[var(--rl-black)] p-1 text-[10px] text-[var(--rl-text-strong)] leading-snug focus:outline-none mt-0.5"
+          />
+        ) : card.description ? (
+          <div className="group/desc flex items-start gap-1 mt-0.5">
+            <p className="text-[10px] text-[var(--rl-text-muted)] leading-snug line-clamp-2 flex-1">
+              {card.description}
+            </p>
+            <button
+              type="button"
+              onClick={() => setIsEditingDesc(true)}
+              className="opacity-0 group-hover/desc:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity shrink-0 mt-0.5 cursor-pointer"
+              title="Edit description"
+            >
+              <PencilSimple size={10} />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setIsEditingDesc(true)}
+            className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-[9px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-opacity mt-0.5 cursor-pointer"
+            title="Add description"
+          >
+            <PencilSimple size={9} />
+            <span>+ Description</span>
+          </button>
+        )}
+
+        {/* Price Tag & Revert Controls for Included/Purchased Add-ons */}
+        {(currentPriceNum !== null || Boolean((card as any).is_extra) || card.cost_status === "paid") && (
+          <div className="flex items-center gap-1.5 mt-1">
+            {isEditingPrice ? (
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] font-bold text-[var(--rl-text-muted)]">RM</span>
+                <input
+                  type="number"
+                  step="any"
+                  value={priceInput}
+                  autoFocus
+                  placeholder="0 (FOC)"
+                  onChange={(e) => setPriceInput(e.target.value)}
+                  onBlur={() => handlePriceCommit(priceInput)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handlePriceCommit(priceInput);
+                    if (e.key === "Escape") { setIsEditingPrice(false); setPriceInput(currentPriceNum !== null ? String(currentPriceNum) : ""); }
+                  }}
+                  className="h-5 w-16 rounded border border-[var(--rl-black)] px-1 font-mono text-[11px] font-bold text-[var(--rl-text-strong)] focus:outline-none"
+                />
+              </div>
+            ) : (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setIsEditingPrice(true)}
+                  className={`group/price flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold transition-colors ${currentPriceNum !== null ? "bg-amber-100/80 hover:bg-amber-200 text-amber-900" : "bg-neutral-100 hover:bg-neutral-200 text-neutral-600"}`}
+                  title="Click to edit price (clear or 0 for FOC)"
+                >
+                  <span>{currentPriceNum !== null ? `RM ${currentPriceNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "FOC / Free"}</span>
+                  <PencilSimple size={10} className="text-[var(--rl-text-muted)] group-hover/price:text-[var(--rl-black)]" />
+                </button>
+              </div>
+            )}
+            {hasPriceDiff ? (
+              <button
+                type="button"
+                onClick={handleRevertPrice}
+                className="flex items-center gap-0.5 rounded bg-gray-100 hover:bg-gray-200 px-1.5 py-0.5 text-[9px] font-semibold text-gray-600 transition-colors"
+                title={`Revert to initial catalog price (RM ${initialPriceNum})`}
+              >
+                <ArrowCounterClockwise size={10} weight="bold" />
+                <span>Revert (RM {initialPriceNum})</span>
+              </button>
+            ) : null}
+          </div>
         )}
       </div>
       {/* Actions */}
@@ -561,18 +844,67 @@ function AddonCard({
   const selectionId = card.selection_id;
   const pending = !selectionId || String(selectionId).startsWith("pending:");
 
-  // For AddonCard, selection is not passed directly, but card.typed_value is.
   const isPriceHidden = !!(card as any).typed_value?.hide_price;
 
-  const togglePriceVisibility = () => {
-    if (!selectionId) return;
-    const currentOverride = (card as any).typed_value || {};
-    const newOverride = { ...currentOverride, hide_price: !isPriceHidden };
-    onQueue(
-      { op: "benefit_update", selection_id: selectionId, typed_value_override: newOverride },
-      `benefits.${selectionId}.typed_value_override`,
-      { op: "benefit_update", selection_id: selectionId, typed_value_override: currentOverride }
-    );
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState(card.label);
+  const [isEditingLimit, setIsEditingLimit] = useState(false);
+  const [limitInput, setLimitInput] = useState(card.value || "");
+  const [isEditingDesc, setIsEditingDesc] = useState(false);
+  const [descInput, setDescInput] = useState(card.description || "");
+  const [savedField, setSavedField] = useState<string | null>(null);
+
+  useEffect(() => { setTitleInput(card.label); }, [card.label]);
+  useEffect(() => { setLimitInput(card.value || ""); }, [card.value]);
+  useEffect(() => { setDescInput(card.description || ""); }, [card.description]);
+
+  const flashSaved = (field: string) => {
+    setSavedField(field);
+    setTimeout(() => setSavedField(null), 1400);
+  };
+
+  const handleTitleCommit = (newVal: string) => {
+    setIsEditingTitle(false);
+    const clean = newVal.trim();
+    if (!clean || clean === card.label) return;
+    flashSaved("title");
+    if (selectionId && !pending) {
+      onQueue({ op: "benefit_update", selection_id: selectionId, label: clean }, `benefits.${selectionId}.label`);
+    } else if (card.offering_id) {
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, label: clean }, `benefits.offer.${card.offering_id}`);
+    } else if (selectionId || card.concept_key) {
+      const targetId = selectionId || card.concept_key!;
+      onQueue({ op: "benefit_update", selection_id: targetId, label: clean }, `benefits.${targetId}.label`);
+    }
+  };
+
+  const handleLimitCommit = (newVal: string) => {
+    setIsEditingLimit(false);
+    const clean = newVal.trim();
+    flashSaved("limit");
+    const typed = clean ? { type: "custom", display_text: clean } : null;
+    if (selectionId && !pending) {
+      onQueue({ op: "benefit_update", selection_id: selectionId, typed_value: typed }, `benefits.${selectionId}.limit`);
+    } else if (card.offering_id) {
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, typed_value: typed }, `benefits.offer.${card.offering_id}`);
+    } else if (selectionId || card.concept_key) {
+      const targetId = selectionId || card.concept_key!;
+      onQueue({ op: "benefit_update", selection_id: targetId, typed_value: typed }, `benefits.${targetId}.limit`);
+    }
+  };
+
+  const handleDescCommit = (newVal: string) => {
+    setIsEditingDesc(false);
+    const clean = newVal.trim();
+    flashSaved("desc");
+    if (selectionId && !pending) {
+      onQueue({ op: "benefit_update", selection_id: selectionId, description: clean }, `benefits.${selectionId}.description`);
+    } else if (card.offering_id) {
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, description: clean }, `benefits.offer.${card.offering_id}`);
+    } else if (selectionId || card.concept_key) {
+      const targetId = selectionId || card.concept_key!;
+      onQueue({ op: "benefit_update", selection_id: targetId, description: clean }, `benefits.${targetId}.description`);
+    }
   };
 
   const currentPriceObj = card.price || card.optional_price;
@@ -592,16 +924,31 @@ function AddonCard({
 
   const handlePriceCommit = (newValStr: string) => {
     setIsEditingPrice(false);
-    const cleanNum = parseFloat(newValStr.replace(/[^0-9.]/g, ""));
+    const trimmed = newValStr.trim();
+    flashSaved("price");
+    if (!trimmed) {
+      // Cleared to FOC / null
+      if (selectionId && !pending) {
+        onQueue({ op: "benefit_update", selection_id: selectionId, price: null, cost_status: "foc" }, `benefits.${selectionId}.price`);
+      } else if (card.offering_id) {
+        onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "foc", price: null }, `benefits.offer.${card.offering_id}`);
+      } else if (selectionId || card.concept_key) {
+        const targetId = selectionId || card.concept_key!;
+        onQueue({ op: "benefit_update", selection_id: targetId, price: null, cost_status: "foc" }, `benefits.${targetId}.price`);
+      }
+      return;
+    }
+    const cleanNum = parseFloat(trimmed.replace(/[^0-9.]/g, ""));
     if (isNaN(cleanNum)) return;
     const newPrice = { amount: cleanNum, currency: "MYR" };
+    const costStatus = cleanNum > 0 ? "paid" : "foc";
     if (selectionId && !pending) {
-      onQueue({ op: "benefit_update", selection_id: selectionId, price: newPrice, cost_status: "paid" }, `benefits.${selectionId}.price`);
+      onQueue({ op: "benefit_update", selection_id: selectionId, price: newPrice, cost_status: costStatus }, `benefits.${selectionId}.price`);
     } else if (card.offering_id) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid", price: newPrice }, `benefits.offer.${card.offering_id}`);
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: costStatus, price: newPrice }, `benefits.offer.${card.offering_id}`);
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
-      onQueue({ op: "benefit_update", selection_id: targetId, price: newPrice, cost_status: "paid" }, `benefits.${targetId}.price`);
+      onQueue({ op: "benefit_update", selection_id: targetId, price: newPrice, cost_status: costStatus }, `benefits.${targetId}.price`);
     }
   };
 
@@ -610,6 +957,7 @@ function AddonCard({
     if (initialPriceNum !== null) {
       setPriceInput(String(initialPriceNum));
       const resetPrice = { amount: initialPriceNum, currency: "MYR" };
+      flashSaved("price");
       if (selectionId && !pending) {
         onQueue({ op: "benefit_update", selection_id: selectionId, price: resetPrice, cost_status: "paid" }, `benefits.${selectionId}.price`);
       } else if (card.offering_id) {
@@ -621,7 +969,7 @@ function AddonCard({
     }
   };
 
-  const hasPriceDiff = initialPriceNum !== null && currentPriceNum !== null && Math.abs(initialPriceNum - currentPriceNum) > 0.01;
+  const hasPriceDiff = initialPriceNum !== null && (currentPriceNum === null || Math.abs(initialPriceNum - currentPriceNum) > 0.01);
 
   const handleMoveToDefault = () => {
     const priceVal = card.price || card.optional_price || null;
@@ -692,21 +1040,125 @@ function AddonCard({
       {/* Body: title, detected badge, coverage, description, price */}
       <div className="flex-1 min-w-0 flex flex-col gap-0.5">
         <div className="flex items-center gap-1.5 flex-wrap">
-          <h3 className="text-xs font-bold text-[var(--rl-text-strong)] leading-tight truncate">{card.label}</h3>
+          {isEditingTitle ? (
+            <input
+              type="text"
+              value={titleInput}
+              autoFocus
+              onChange={(e) => setTitleInput(e.target.value)}
+              onBlur={() => handleTitleCommit(titleInput)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleTitleCommit(titleInput);
+                if (e.key === "Escape") { setIsEditingTitle(false); setTitleInput(card.label); }
+              }}
+              className="h-5 w-full rounded border border-[var(--rl-black)] px-1.5 font-bold text-xs text-[var(--rl-text-strong)] focus:outline-none"
+            />
+          ) : (
+            <div className="group/title flex items-center gap-1 max-w-full">
+              <h3 className="text-xs font-bold text-[var(--rl-text-strong)] leading-tight truncate">{card.label}</h3>
+              <button
+                type="button"
+                onClick={() => setIsEditingTitle(true)}
+                className="opacity-0 group-hover/title:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity cursor-pointer"
+                title="Edit title"
+              >
+                <PencilSimple size={10} />
+              </button>
+            </div>
+          )}
           {card.is_detected ? (
             <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-800 ring-1 ring-amber-400/50 shrink-0">★ Detected</span>
           ) : null}
+          {savedField ? (
+            <span className="text-[9px] font-bold text-emerald-600 flex items-center gap-0.5">
+              <Check size={10} weight="bold" /> Saved
+            </span>
+          ) : null}
         </div>
-        {card.value && !["", "Optional payable add-on", "Included", "FOC", "As quoted", "Optional"].includes(card.value) && (/\d/.test(card.value) || /unlimited/i.test(card.value)) && (
-          <p className="text-[11px] font-bold text-[var(--rl-text-strong)] leading-tight truncate">
-            {card.value}
-          </p>
+
+        {/* Coverage Limit */}
+        {isEditingLimit ? (
+          <input
+            type="text"
+            placeholder="Coverage (e.g. RM 1,000, 50 km)"
+            value={limitInput}
+            autoFocus
+            onChange={(e) => setLimitInput(e.target.value)}
+            onBlur={() => handleLimitCommit(limitInput)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleLimitCommit(limitInput);
+              if (e.key === "Escape") { setIsEditingLimit(false); setLimitInput(card.value || ""); }
+            }}
+            className="h-5 w-44 rounded border border-[var(--rl-black)] px-1 font-mono text-[11px] font-bold text-[var(--rl-text-strong)] focus:outline-none mt-0.5"
+          />
+        ) : card.value && !["", "Optional payable add-on", "Included", "FOC", "As quoted", "Optional"].includes(card.value) && (/\d/.test(card.value) || /unlimited/i.test(card.value)) ? (
+          <div className="group/limit flex items-center gap-1 mt-0.5">
+            <p className="text-[11px] font-bold text-[var(--rl-text-strong)] leading-tight truncate">
+              {card.value}
+            </p>
+            <button
+              type="button"
+              onClick={() => setIsEditingLimit(true)}
+              className="opacity-0 group-hover/limit:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity cursor-pointer"
+              title="Edit coverage limit"
+            >
+              <PencilSimple size={10} />
+            </button>
+          </div>
+        ) : (
+          <div className="group/limit flex items-center gap-1 mt-0.5">
+            <button
+              type="button"
+              onClick={() => setIsEditingLimit(true)}
+              className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-[10px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-opacity cursor-pointer"
+              title="Set coverage limit"
+            >
+              <PencilSimple size={9} />
+              <span>+ Limit</span>
+            </button>
+          </div>
         )}
-        {card.description && (
-          <p className="text-[10px] text-[var(--rl-text-muted)] leading-snug line-clamp-2">
-            {card.description}
-          </p>
+
+        {/* Description */}
+        {isEditingDesc ? (
+          <textarea
+            rows={2}
+            value={descInput}
+            autoFocus
+            onChange={(e) => setDescInput(e.target.value)}
+            onBlur={() => handleDescCommit(descInput)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleDescCommit(descInput); }
+              if (e.key === "Escape") { setIsEditingDesc(false); setDescInput(card.description || ""); }
+            }}
+            className="w-full rounded border border-[var(--rl-black)] p-1 text-[10px] text-[var(--rl-text-strong)] leading-snug focus:outline-none mt-0.5"
+          />
+        ) : card.description ? (
+          <div className="group/desc flex items-start gap-1 mt-0.5">
+            <p className="text-[10px] text-[var(--rl-text-muted)] leading-snug line-clamp-2 flex-1">
+              {card.description}
+            </p>
+            <button
+              type="button"
+              onClick={() => setIsEditingDesc(true)}
+              className="opacity-0 group-hover/desc:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity shrink-0 mt-0.5 cursor-pointer"
+              title="Edit description"
+            >
+              <PencilSimple size={10} />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setIsEditingDesc(true)}
+            className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-[9px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-opacity mt-0.5 cursor-pointer"
+            title="Add description"
+          >
+            <PencilSimple size={9} />
+            <span>+ Description</span>
+          </button>
         )}
+
         {/* Price Tag & Revert Controls */}
         <div className="flex items-center gap-1.5 mt-1">
           {isEditingPrice ? (
@@ -717,6 +1169,7 @@ function AddonCard({
                 step="any"
                 value={priceInput}
                 autoFocus
+                placeholder="0 (FOC)"
                 onChange={(e) => setPriceInput(e.target.value)}
                 onBlur={() => handlePriceCommit(priceInput)}
                 onKeyDown={(e) => {
@@ -731,10 +1184,10 @@ function AddonCard({
               <button
                 type="button"
                 onClick={() => setIsEditingPrice(true)}
-                className={`group/price flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold transition-colors ${isPriceHidden ? "bg-gray-100 text-gray-500 line-through" : "bg-red-50 hover:bg-red-100/80 text-[var(--rl-red)]"}`}
-                title="Click to edit price"
+                className={`group/price flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold transition-colors ${isPriceHidden ? "bg-gray-100 text-gray-500 line-through" : currentPriceNum !== null ? "bg-red-50 hover:bg-red-100/80 text-[var(--rl-red)]" : "bg-neutral-100 hover:bg-neutral-200 text-neutral-600"}`}
+                title="Click to edit price (clear or 0 for FOC)"
               >
-                <span>{currentPriceNum !== null ? `RM ${currentPriceNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "Set price"}</span>
+                <span>{currentPriceNum !== null ? `RM ${currentPriceNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "FOC / Free"}</span>
                 <PencilSimple size={10} className="text-[var(--rl-text-muted)] group-hover/price:text-[var(--rl-red)]" />
               </button>
             </div>
@@ -776,6 +1229,7 @@ function AddonCard({
     </article>
   );
 }
+
 
 export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) {
   const { workspace, loading, loadError } = useWorkspaceData();
@@ -847,6 +1301,14 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     return workspace.benefit_cards.available_addons.filter((card) => !isExcludedForVehicle(card));
   }, [workspace?.benefit_cards?.available_addons, isExcludedForVehicle]);
 
+  const focCards = useMemo(() => {
+    return currentCards.filter((card) => !isPaidExtraBenefitCard(card));
+  }, [currentCards]);
+
+  const purchasedAddonCards = useMemo(() => {
+    return currentCards.filter((card) => isPaidExtraBenefitCard(card));
+  }, [currentCards]);
+
   // Quick Action Export States (PNG / PDF)
   const debouncedSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -866,6 +1328,53 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     scheduleSave();
   }
 
+  const [roundTotal, setRoundTotal] = useState<boolean>(() =>
+    Boolean((workspace?.display_options as Record<string, unknown> | undefined)?.round_total)
+  );
+
+  useEffect(() => {
+    if (workspace?.display_options && "round_total" in workspace.display_options) {
+      setRoundTotal(Boolean((workspace.display_options as Record<string, unknown>).round_total));
+    }
+  }, [workspace?.display_options]);
+
+  const toggleRoundTotal = useCallback(() => {
+    const nextVal = !roundTotal;
+    setRoundTotal(nextVal);
+    queueOperation(
+      { op: "update_display_options", options: { round_total: nextVal } },
+      "display_options"
+    );
+    scheduleSave();
+  }, [roundTotal, queueOperation, scheduleSave]);
+
+  const previousValuesRef = useRef<Record<string, string>>({});
+
+  const getDetectedValue = useCallback((fieldName: string): string => {
+    if (!workspace?.fields) return "";
+    const f = workspace.fields[fieldName] as (WorkspaceField & { detected_value?: string }) | undefined;
+    let det = f?.detected_value ?? f?.value ?? "";
+    if (fieldName === "sum_insured") {
+      const numDet = parseFloat(String(det || "").replace(/[^0-9.]/g, ""));
+      const covF = workspace.fields["coverage_amount"] as (WorkspaceField & { detected_value?: string }) | undefined;
+      const covDet = covF?.detected_value ?? covF?.value ?? "";
+      const numCov = parseFloat(String(covDet || "").replace(/[^0-9.]/g, ""));
+      if ((!det || numDet < 1000) && numCov >= 1000) {
+        det = covDet;
+      }
+    }
+    const formField = FORM_FIELDS.find((item) => item.name === fieldName);
+    return displayValue(formField?.kind || "text", det);
+  }, [workspace?.fields]);
+
+  const isFieldModified = useCallback((fieldName: string): boolean => {
+    const current = String(formValues[fieldName] ?? "").trim();
+    const detected = String(getDetectedValue(fieldName)).trim();
+    const prev = String(previousValuesRef.current[fieldName] ?? "").trim();
+    if (current === "" && detected === "") return false;
+    return (detected !== "" && current !== detected) || (prev !== "" && current !== prev);
+  }, [formValues, getDetectedValue]);
+
   const [copyingPng, setCopyingPng] = useState(false);
   const [copiedPng, setCopiedPng] = useState(false);
   const [copiedInfo, setCopiedInfo] = useState(false);
@@ -873,6 +1382,69 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [pdfLoading, setPdfLoading] = useState(false);
   const [viewLoading, setViewLoading] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [pendingExportAction, setPendingExportAction] = useState<"copy_png" | "download_png" | "download_pdf" | null>(null);
+
+  // Vehicle Ownership Conflict Gate State
+  const [ownershipConflict, setOwnershipConflict] = useState<{
+    has_conflict: boolean;
+    resolved: boolean;
+    vehicle_no?: string;
+    car_brand?: string;
+    car_model?: string;
+    engine_cc?: string;
+    previous_owner?: string;
+    previous_policy_date?: string;
+    previous_session_id?: string;
+    previous_session_ref?: string;
+    new_customer?: string;
+    new_policy_date?: string;
+    new_session_id?: string;
+    new_session_ref?: string;
+    resolution?: {
+      type: string;
+      resolved_at: string;
+      notes?: string;
+      new_customer?: string;
+    };
+  } | null>(null);
+  const [conflictModalOpen, setConflictModalOpen] = useState(false);
+  const [selectedResolution, setSelectedResolution] = useState<
+    "car_sold_new_owner" | "old_quote_mistake" | "pending_verification"
+  >("car_sold_new_owner");
+  const [resolutionNotes, setResolutionNotes] = useState("");
+  const [resolvingConflict, setResolvingConflict] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    api<{ has_conflict: boolean; resolved: boolean; [key: string]: any }>(`/sessions/${id}/ownership-conflict`)
+      .then((data) => setOwnershipConflict(data))
+      .catch((err) => console.warn("Could not check ownership conflict:", err));
+  }, [id]);
+
+  async function handleResolveConflict() {
+    if (!id) return;
+    setResolvingConflict(true);
+    try {
+      const res = await api<{ success: boolean; resolution: any }>(`/sessions/${id}/resolve-ownership`, {
+        method: "POST",
+        body: JSON.stringify({
+          resolution_type: selectedResolution,
+          notes: resolutionNotes || undefined,
+        }),
+      });
+      setOwnershipConflict({
+        has_conflict: false,
+        resolved: true,
+        resolution: res.resolution,
+      });
+      setConflictModalOpen(false);
+      setToastMessage("Vehicle ownership conflict resolved! PDF generation is unlocked.");
+    } catch (err: unknown) {
+      alert("Failed to resolve conflict: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setResolvingConflict(false);
+    }
+  }
 
   // Gemini AI Extraction & Quota State
   const [geminiExtracting, setGeminiExtracting] = useState(false);
@@ -1142,10 +1714,16 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     const values: Record<string, string> = {};
     for (const field of FORM_FIELDS) {
       let stored = (workspace.fields[field.name] as WorkspaceField | undefined)?.value;
-      if (!stored && field.name === "sum_insured") {
-        stored = (workspace.fields["coverage_amount"] as WorkspaceField | undefined)?.value ||
-                 (workspace.fields["market_value"] as WorkspaceField | undefined)?.value ||
-                 (workspace.fields["agreed_value"] as WorkspaceField | undefined)?.value;
+      if (field.name === "sum_insured") {
+        const numStored = parseFloat(String(stored || "").replace(/[^0-9.]/g, ""));
+        const altCov = (workspace.fields["coverage_amount"] as WorkspaceField | undefined)?.value;
+        const numAlt = parseFloat(String(altCov || "").replace(/[^0-9.]/g, ""));
+        if ((!stored || numStored < 1000) && numAlt >= 1000) {
+          stored = altCov;
+        } else if (!stored) {
+          stored = (workspace.fields["market_value"] as WorkspaceField | undefined)?.value ||
+                   (workspace.fields["agreed_value"] as WorkspaceField | undefined)?.value;
+        }
       }
       if (field.name === "quotation_reference") {
         const qrefCandidate = stored || workspace.quotation_ref;
@@ -1720,9 +2298,20 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     }, 0);
 
     const calculatedTotal = pNum + extrasTotal + rtNum + sfNum;
-    const effTotal = calculatedTotal > 0
-      ? calculatedTotal.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-      : (formValues["total_amount"] || fields["total_amount"] || workspace?.total_premium_adjusted || "");
+    const isRound = roundTotal || Boolean((workspace?.display_options as Record<string, unknown> | undefined)?.round_total);
+    const finalTotalNum = isRound && calculatedTotal > 0 ? Math.round(calculatedTotal) : calculatedTotal;
+    let effTotal = "";
+    if (finalTotalNum > 0) {
+      effTotal = finalTotalNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    } else {
+      const rawTot = formValues["total_amount"] || fields["total_amount"] || workspace?.total_premium_adjusted || "";
+      const rawNum = parseFloat(String(rawTot).replace(/[^0-9.]/g, ""));
+      if (isRound && rawNum > 0) {
+        effTotal = Math.round(rawNum).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      } else {
+        effTotal = rawTot;
+      }
+    }
 
     const calculatedPremium = pNum + extrasTotal;
     fields["insurance_premium_total"] = calculatedPremium > 0
@@ -1739,7 +2328,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     fields["total_amount"] = effTotal;
     fields["total_premium_adjusted"] = effTotal;
     return fields;
-  }, [workspace?.fields, workspace?.total_premium_adjusted, workspace?.extras, workspace?.pinned_names?.company_name, formValues, companyName]);
+  }, [workspace?.fields, workspace?.total_premium_adjusted, workspace?.extras, workspace?.pinned_names?.company_name, workspace?.display_options, formValues, companyName, roundTotal]);
 
   function commitField(field: FormField) {
     const current = formValues[field.name];
@@ -1755,6 +2344,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     if (field.name === "sum_insured") {
       decideField("coverage_amount", "edit", current);
       decideField("market_value", "edit", current);
+      decideField("agreed_value", "edit", current);
     }
 
     if (field.name === "insurance_company") {
@@ -1774,6 +2364,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       if (name === "sum_insured") {
         decideField("coverage_amount", "clear", "");
         decideField("market_value", "clear", "");
+        decideField("agreed_value", "clear", "");
       }
       return;
     }
@@ -1781,6 +2372,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     if (name === "sum_insured") {
       decideField("coverage_amount", "edit", value);
       decideField("market_value", "edit", value);
+      decideField("agreed_value", "edit", value);
     }
     if (name === "insurance_company") {
       const match = companies.find(
@@ -1791,6 +2383,19 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       }
     }
   }
+
+  const handleResetField = useCallback((field: FormField) => {
+    const detVal = getDetectedValue(field.name);
+    const targetVal = detVal !== "" ? detVal : (previousValuesRef.current[field.name] || "");
+    setFormValues((prev) => ({ ...prev, [field.name]: targetVal }));
+    commitFieldDirectly(field.name, targetVal);
+    if (field.name === "sum_insured") {
+      commitFieldDirectly("coverage_amount", targetVal);
+      commitFieldDirectly("market_value", targetVal);
+      commitFieldDirectly("agreed_value", targetVal);
+    }
+    delete previousValuesRef.current[field.name];
+  }, [getDetectedValue]);
 
   async function pinCatalog(companyId: string, productId?: string | null, tierId?: string | null) {
     setPinLoading(true);
@@ -2145,7 +2750,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     }
   }
 
-  async function handleCopyPng() {
+  async function executeCopyPng() {
     await flushActiveInput();
     if (mutation.dirty) {
       try {
@@ -2182,7 +2787,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     }
   }
 
-  async function handleDownloadPng() {
+  async function executeDownloadPng() {
     await flushActiveInput();
     if (mutation.dirty) {
       try {
@@ -2268,7 +2873,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     }
   }, [formValues, previewFields, workspace]);
 
-  async function handleDownloadPdf() {
+  async function executeDownloadPdf() {
     await flushActiveInput();
     if (!workspace) return;
     setPdfLoading(true);
@@ -2341,6 +2946,62 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     }
   }
 
+  async function confirmAndExecuteExport(sentToClient: boolean) {
+    const action = pendingExportAction;
+    setPendingExportAction(null);
+    if (!action) return;
+
+    // Log quotation activity to backend insights ledger (skipped for test uploads)
+    if (!workspace?.is_test) {
+      api(`/insights/sessions/${id}/activity`, {
+        method: "POST",
+        body: JSON.stringify({
+          action_type: action === "download_pdf" ? "pdf_export" : "png_export",
+          sent_to_client: sentToClient,
+          summary: sentToClient
+            ? `Sent quotation to client (${action === "download_pdf" ? "PDF" : "PNG"})`
+            : `Internal save / export (${action === "download_pdf" ? "PDF" : "PNG"})`,
+          version_number: (workspace?.versions?.length || 0) + 1,
+        }),
+      }).catch((err) => console.warn("Could not log export activity:", err));
+    }
+
+    if (action === "copy_png") {
+      await executeCopyPng();
+    } else if (action === "download_png") {
+      await executeDownloadPng();
+    } else if (action === "download_pdf") {
+      await executeDownloadPdf();
+    }
+  }
+
+  function handleCopyPng() {
+    if (ownershipConflict?.has_conflict && !ownershipConflict?.resolved) {
+      setConflictModalOpen(true);
+      setToastMessage("Action Required: Please resolve the vehicle ownership conflict before exporting.");
+      return;
+    }
+    setPendingExportAction("copy_png");
+  }
+
+  function handleDownloadPng() {
+    if (ownershipConflict?.has_conflict && !ownershipConflict?.resolved) {
+      setConflictModalOpen(true);
+      setToastMessage("Action Required: Please resolve the vehicle ownership conflict before exporting.");
+      return;
+    }
+    setPendingExportAction("download_png");
+  }
+
+  function handleDownloadPdf() {
+    if (ownershipConflict?.has_conflict && !ownershipConflict?.resolved) {
+      setConflictModalOpen(true);
+      setToastMessage("Action Required: Please resolve the vehicle ownership conflict before exporting PDF.");
+      return;
+    }
+    setPendingExportAction("download_pdf");
+  }
+
   if (loading) return <PageLoading />;
   if (loadError || !workspace) {
     return (
@@ -2362,6 +3023,15 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-bold text-[var(--rl-text-strong)]">Quotation Workspace</h1>
+              {workspace.is_test ? (
+                <span
+                  className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-amber-900 dark:text-amber-300 border border-amber-500/30"
+                  title="Test upload: isolated from customer records and hit & miss tracking"
+                >
+                  <Sparkle size={12} weight="fill" className="text-amber-600" />
+                  Test Upload (Sandbox)
+                </span>
+              ) : null}
               {companyName ? <Badge variant="default">{companyName}</Badge> : null}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -2466,14 +3136,20 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
             {/* Unified Action 3: Download PDF */}
             <Button
-              variant="primary"
+              variant={ownershipConflict?.has_conflict && !ownershipConflict?.resolved ? "secondary" : "primary"}
               size="sm"
-              icon={<FilePdf weight="bold" />}
+              icon={ownershipConflict?.has_conflict && !ownershipConflict?.resolved ? <Lock weight="bold" className="text-amber-600" /> : <FilePdf weight="bold" />}
               onClick={handleDownloadPdf}
               disabled={pdfLoading}
-              title={mutation.dirty ? "Save changes first to download PDF" : "Open in new tab and download official PDF"}
+              title={
+                ownershipConflict?.has_conflict && !ownershipConflict?.resolved
+                  ? "Action Required: Resolve Vehicle Ownership before exporting PDF"
+                  : mutation.dirty
+                  ? "Save changes first to download PDF"
+                  : "Open in new tab and download official PDF"
+              }
             >
-              {pdfLoading ? "Generating..." : "Download PDF"}
+              {pdfLoading ? "Generating..." : ownershipConflict?.has_conflict && !ownershipConflict?.resolved ? "PDF Locked (Resolve Owner)" : "Download PDF"}
             </Button>
           </div>
         </div>
@@ -2485,6 +3161,93 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
           {actionError || mutation.saveError}
         </div>
       ) : null}
+
+      {/* Vehicle Ownership Conflict Gate Banner */}
+      {ownershipConflict?.has_conflict && !ownershipConflict?.resolved ? (
+        <div
+          role="alert"
+          className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 p-4 bg-amber-50/95 border-2 border-amber-400 text-amber-950 rounded-[var(--rl-radius-md)] shadow-sm animate-in fade-in"
+        >
+          <div className="flex items-start gap-3.5">
+            <div className="w-9 h-9 rounded-full bg-amber-200 text-amber-900 flex items-center justify-center shrink-0 mt-0.5 font-bold shadow-2xs">
+              <Lock size={18} weight="bold" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-amber-950 text-sm">
+                  Action Required: Vehicle Ownership Conflict Gate
+                </span>
+                <span className="text-[10px] font-bold uppercase tracking-wider bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full border border-amber-300">
+                  PDF Export Locked
+                </span>
+              </div>
+              <p className="text-xs text-amber-900/90 leading-relaxed">
+                Vehicle <span className="font-mono font-bold bg-white/80 px-1.5 py-0.5 rounded border border-amber-200 text-amber-950">{ownershipConflict.vehicle_no}</span>
+                {ownershipConflict.car_model ? ` (${ownershipConflict.car_model})` : ""} was previously registered under{" "}
+                <span className="font-bold text-amber-950">{ownershipConflict.previous_owner}</span> (Inception: {ownershipConflict.previous_policy_date}).
+                This quotation is issued for <span className="font-bold text-amber-950">{ownershipConflict.new_customer}</span> (Inception: {ownershipConflict.new_policy_date}).
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            onClick={() => setConflictModalOpen(true)}
+            className="bg-amber-800 hover:bg-amber-900 text-white shrink-0 font-semibold text-xs shadow-xs px-4 py-2 cursor-pointer"
+          >
+            Resolve Ownership Conflict
+          </Button>
+        </div>
+      ) : null}
+
+      {/* Vehicle Ownership Resolution Confirmation Banner */}
+      {ownershipConflict?.resolved && ownershipConflict.resolution ? (
+        <div
+          role="status"
+          className="flex items-center justify-between gap-3 px-3.5 py-2.5 bg-emerald-50 border border-emerald-300 text-emerald-950 rounded-[var(--rl-radius-sm)] shadow-2xs text-xs animate-in fade-in"
+        >
+          <div className="flex items-center gap-2.5">
+            <CheckCircle size={16} weight="fill" className="text-emerald-600 shrink-0" />
+            <span>
+              Ownership verified:{" "}
+              <strong>
+                {ownershipConflict.resolution.type === "car_sold_new_owner"
+                  ? "Car Sold / Ownership Transferred"
+                  : ownershipConflict.resolution.type === "old_quote_mistake"
+                  ? "Corrected (Old Quote Was Mistake)"
+                  : "Pending Geran Verification"}
+              </strong>{" "}
+              ({ownershipConflict.resolution.new_customer || formValues.customer_name})
+            </span>
+          </div>
+          <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded">
+            PDF Unlocked
+          </span>
+        </div>
+      ) : null}
+
+      {/* Sequential Owner Transfer Alert Banner */}
+      {workspace?.display_options && (workspace.display_options as Record<string, any>).owner_change_alert ? (
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-3 p-3.5 bg-amber-50/90 border border-amber-300/80 text-amber-950 rounded-[var(--rl-radius-sm)] shadow-xs animate-in fade-in"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded bg-amber-100 flex items-center justify-center text-amber-800 shrink-0">
+              <UserSwitch size={18} weight="bold" />
+            </div>
+            <div className="text-sm">
+              <span className="font-semibold text-amber-900">Owner Changed: </span>
+              {String((workspace.display_options as Record<string, any>).owner_change_alert.message || "")}
+            </div>
+          </div>
+          <span className="text-xs bg-amber-200/70 text-amber-900 font-semibold px-2.5 py-1 rounded">
+            Ownership Updated
+          </span>
+        </div>
+      ) : null}
+
 
       {learnPrompt ? (
         <Card role="status" className="flex flex-wrap items-center justify-between gap-3 border-amber-300 bg-amber-50 p-3">
@@ -2905,20 +3668,58 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                   <div className="grid gap-3 sm:grid-cols-2">
                     {FORM_FIELDS.map((field) => {
                       let stored = workspace.fields[field.name] as WorkspaceField | undefined;
-                      if (!stored?.value && field.name === "sum_insured") {
-                        stored = (workspace.fields["coverage_amount"] as WorkspaceField | undefined) ||
-                                 (workspace.fields["market_value"] as WorkspaceField | undefined) ||
-                                 (workspace.fields["agreed_value"] as WorkspaceField | undefined);
+                      if (field.name === "sum_insured") {
+                        const numStored = parseFloat(String(stored?.value || "").replace(/[^0-9.]/g, ""));
+                        const altCov = (workspace.fields["coverage_amount"] as WorkspaceField | undefined)?.value;
+                        const numAlt = parseFloat(String(altCov || "").replace(/[^0-9.]/g, ""));
+                        if ((!stored?.value || numStored < 1000) && numAlt >= 1000) {
+                          stored = workspace.fields["coverage_amount"] as WorkspaceField | undefined;
+                        } else if (!stored?.value) {
+                          stored = (workspace.fields["market_value"] as WorkspaceField | undefined) ||
+                                   (workspace.fields["agreed_value"] as WorkspaceField | undefined);
+                        }
                       }
                       const empty = !(stored?.value);
                       const needsCheck = !empty && stored?.status === "check_needed";
                       const isCurrentEV = (formValues["vehicle_type"] || (workspace.fields?.vehicle_type as WorkspaceField | undefined)?.value || "").toLowerCase().includes("ev");
                       const fieldLabel = field.name === "engine_cc" ? (isCurrentEV ? "Motor Output (kW)" : "Engine Capacity (CC)") : field.label;
+                      const fieldModified = isFieldModified(field.name);
                       return (
                         <label key={field.name} className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
-                          <span className="flex items-center justify-between">
-                            <span>{fieldLabel}</span>
-                            {needsCheck ? <span className="text-[10px] text-amber-700 font-bold">Check value</span> : null}
+                          <span className="flex items-center justify-between gap-1">
+                            <span className="truncate">{fieldLabel}</span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {needsCheck ? <span className="text-[10px] text-amber-700 font-bold">Check value</span> : null}
+                              {field.name === "total_amount" ? (
+                                <button
+                                  type="button"
+                                  onClick={toggleRoundTotal}
+                                  className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold transition-all shadow-2xs ${
+                                    roundTotal
+                                      ? "bg-emerald-600 text-white border border-emerald-700"
+                                      : "bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200"
+                                  }`}
+                                  title={roundTotal ? "Round figure active (0 cents). Click to toggle." : "Click to round figure total to whole RM (0 cents)."}
+                                >
+                                  <Check size={11} weight="bold" className={roundTotal ? "opacity-100" : "opacity-0"} />
+                                  <span>Round Figure</span>
+                                </button>
+                              ) : null}
+                              {field.kind !== "total" && fieldModified ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    handleResetField(field);
+                                  }}
+                                  className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-300 hover:bg-amber-100 hover:text-amber-950 transition-colors shadow-2xs"
+                                  title={`Reset to detected: "${getDetectedValue(field.name)}"`}
+                                >
+                                  <ArrowCounterClockwise size={11} weight="bold" />
+                                  <span>Reset</span>
+                                </button>
+                              ) : null}
+                            </div>
                             {field.kind === "vehicle_type" && syncHighlight && syncHighlight.field === "vehicle_type" && Date.now() - syncHighlight.timestamp < 6000 ? (
                               <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 border border-emerald-300 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 shadow-xs animate-pulse">
                                 <span className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider">Auto-synced</span>
@@ -3128,7 +3929,13 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                 placeholder={empty ? "Missing" : (field.name === "engine_cc" ? (isCurrentEV ? "150 kW" : "1498 CC") : "")}
                                 list={field.name === "insurance_company" ? "company-suggestions" : undefined}
                                 className={`${field.kind === "money" || field.kind === "total" ? "pl-8 text-xs font-mono font-medium" : "text-xs font-medium"} ${needsCheck ? "border-amber-400 bg-amber-50/50 ring-1 ring-amber-300" : ""}`}
-                                onChange={(event) => setFormValues((values) => ({ ...values, [field.name]: event.target.value }))}
+                                onChange={(event) => {
+                                  const newVal = event.target.value;
+                                  if (previousValuesRef.current[field.name] === undefined) {
+                                    previousValuesRef.current[field.name] = formValues[field.name] || "";
+                                  }
+                                  setFormValues((values) => ({ ...values, [field.name]: newVal }));
+                                }}
                                 onBlur={() => {
                                   commitField(field);
                                   if (field.name === "engine_cc" || field.name === "car_model" || field.name === "insured_name" || field.name === "customer_name" || field.name === "client_type") {
@@ -3197,6 +4004,56 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                         </label>
                       );
                     })}
+                    {/* Dynamic Additional Extracted Fields */}
+                    {Object.entries(workspace.fields || {})
+                      .filter(([k, v]) => !FORM_FIELDS.some((f) => f.name === k) && !k.startsWith("_") && v && typeof v === "object" && "value" in v && (v as WorkspaceField).value)
+                      .map(([extraKey, extraField]) => {
+                        const wf = extraField as WorkspaceField;
+                        const label = extraKey.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+                        const fieldModified = isFieldModified(extraKey);
+                        return (
+                          <label key={extraKey} className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
+                            <span className="flex items-center justify-between gap-1">
+                              <span className="truncate">{label}</span>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {wf.status === "check_needed" ? <span className="text-[10px] text-amber-700 font-bold">Check value</span> : null}
+                                {fieldModified ? (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      handleResetField({ name: extraKey, label, kind: "text" });
+                                    }}
+                                    className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-300 hover:bg-amber-100 hover:text-amber-950 transition-colors shadow-2xs"
+                                    title={`Reset to detected: "${getDetectedValue(extraKey)}"`}
+                                  >
+                                    <ArrowCounterClockwise size={11} weight="bold" />
+                                    <span>Reset</span>
+                                  </button>
+                                ) : null}
+                              </div>
+                            </span>
+                            <span className="relative">
+                              <Input
+                                value={formValues[extraKey] ?? (wf.value || "")}
+                                placeholder="Missing"
+                                className={`text-xs font-medium ${wf.status === "check_needed" ? "border-amber-400 bg-amber-50/50 ring-1 ring-amber-300" : ""}`}
+                                onChange={(event) => {
+                                  const newVal = event.target.value;
+                                  if (previousValuesRef.current[extraKey] === undefined) {
+                                    previousValuesRef.current[extraKey] = formValues[extraKey] || wf.value || "";
+                                  }
+                                  setFormValues((values) => ({ ...values, [extraKey]: newVal }));
+                                }}
+                                onBlur={() => {
+                                  commitFieldDirectly(extraKey, formValues[extraKey] ?? (wf.value || ""));
+                                }}
+                                onKeyDown={(event) => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }}
+                              />
+                            </span>
+                          </label>
+                        );
+                      })}
                   </div>
                   <datalist id="company-suggestions">
                     {companies.map((c) => (
@@ -3304,9 +4161,15 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                                     {extra.label}
                                   </span>
                                   {extra.is_applied ? (
-                                    <span className="rounded bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">
-                                      ✓ Included in Grid
-                                    </span>
+                                    hasCost ? (
+                                      <span className="rounded bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[9px] font-bold text-amber-800">
+                                        ✓ In Purchased Add-ons
+                                      </span>
+                                    ) : (
+                                      <span className="rounded bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">
+                                        ✓ Included in Grid
+                                      </span>
+                                    )
                                   ) : (
                                     <span className="rounded bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
                                       Detected in PDF
@@ -3636,7 +4499,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
               {benefitsCollapsed ? (
                 <div className="flex flex-wrap items-center justify-between text-xs text-[var(--rl-text-muted)] pt-2 border-t border-[var(--rl-border)]">
-                  <span>Included / FOC: <strong className="text-emerald-700 font-semibold">{currentCards.length} active</strong></span>
+                  <span>Included / FOC: <strong className="text-emerald-700 font-semibold">{focCards.length} active</strong></span>
+                  {purchasedAddonCards.length > 0 ? (
+                    <span>Purchased Add-ons: <strong className="text-amber-700 font-semibold">{purchasedAddonCards.length} active</strong></span>
+                  ) : null}
                   <span>Optional Add-ons: <strong className="text-blue-700 font-semibold">{addonCards.length} configured</strong></span>
                 </div>
               ) : (
@@ -3674,7 +4540,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                         Redo
                       </Button>
                       <span className="text-xs text-[var(--rl-text-muted)]">
-                        {currentCards.length} active standard covers
+                        {focCards.length} standard covers{purchasedAddonCards.length > 0 ? ` + ${purchasedAddonCards.length} purchased add-ons` : ""}
                       </span>
                     </div>
 
@@ -3693,8 +4559,8 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                     </div>
                   </div>
 
-                  {/* Two-Box Interactive Grid Display */}
-                  <div className={`grid gap-4 ${benefitsViewMode === "both" ? "lg:grid-cols-2" : "grid-cols-1"}`}>
+                  {/* Multi-Box Interactive Grid Display */}
+                  <div className={`grid gap-4 ${benefitsViewMode === "both" ? (purchasedAddonCards.length > 0 ? "lg:grid-cols-3" : "lg:grid-cols-2") : "grid-cols-1"}`}>
                     {/* BOX 1: Default / FOC Included Benefits */}
                     {(benefitsViewMode === "defaults" || benefitsViewMode === "both") && (
                       <div className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-gray-50/60 p-3 flex flex-col gap-2.5">
@@ -3707,13 +4573,13 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800">
-                              {currentCards.length} standard covers (constant)
+                              {focCards.length} standard covers (constant)
                             </span>
                           </div>
                         </div>
 
                         <div className="grid gap-2 max-h-[380px] overflow-y-auto pr-1">
-                          {currentCards.length === 0 ? (
+                          {focCards.length === 0 ? (
                             <div className="flex flex-col items-center justify-center p-6 text-center text-xs text-[var(--rl-text-muted)]">
                               <p>No included benefits active.</p>
                               <Button
@@ -3726,7 +4592,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                               </Button>
                             </div>
                           ) : (
-                            currentCards.map((card, idx) => {
+                            focCards.map((card, idx) => {
                               const selection = workspace.benefits.find((item) => item.catalog_offering_id === card.offering_id || item.selection_key === card.card_key);
                               const concept = globalConcepts.find(
                                 (c) => c.concept_key === card.concept_key || c.id === card.concept_id || c.label.toLowerCase() === card.label.toLowerCase()
@@ -3749,6 +4615,50 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                               );
                             })
                           )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* BOX 1.5: Purchased Add-ons (Active on Quote) */}
+                    {(benefitsViewMode === "defaults" || benefitsViewMode === "both" || benefitsViewMode === "addons") && purchasedAddonCards.length > 0 && (
+                      <div className="rounded-[var(--rl-radius-sm)] border border-amber-200 bg-amber-50/40 p-3 flex flex-col gap-2.5">
+                        <div className="flex items-center justify-between border-b border-amber-200/80 pb-2">
+                          <div className="flex items-center gap-1.5">
+                            <Sparkle size={16} weight="fill" className="text-amber-600" />
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-amber-900">
+                              Purchased Add-ons
+                            </h3>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-full bg-amber-100 border border-amber-300 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                              {purchasedAddonCards.length} on quotation
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-2 max-h-[380px] overflow-y-auto pr-1">
+                          {purchasedAddonCards.map((card, idx) => {
+                            const selection = workspace.benefits.find((item) => item.catalog_offering_id === card.offering_id || item.selection_key === card.card_key);
+                            const concept = globalConcepts.find(
+                              (c) => c.concept_key === card.concept_key || c.id === card.concept_id || c.label.toLowerCase() === card.label.toLowerCase()
+                            );
+                            const assetUrl =
+                              concept?.default_asset?.url ||
+                              (concept?.default_asset_id ? `/business/assets/${concept.default_asset_id}/content?profile=ui` : null) ||
+                              (card.asset_id ? `/business/assets/${card.asset_id}/content?profile=ui` : null) ||
+                              (card.label ? conceptAssets[card.label.toLowerCase()] || conceptAssets[card.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] : null);
+                            return (
+                              <IncludedCard
+                                key={card.offering_id || card.card_key || idx}
+                                card={card}
+                                index={idx}
+                                assetUrl={assetUrl}
+                                selection={selection}
+                                canUndo={Boolean(card.branch_key)}
+                                onQueue={onQueue}
+                              />
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -4139,6 +5049,208 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
 
 
+      {/* Vehicle Ownership Conflict Resolution Modal */}
+      {conflictModalOpen && ownershipConflict && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+          <Card className="w-full max-w-xl bg-white shadow-2xl rounded-[var(--rl-radius-lg)] border border-[var(--rl-border)] overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-5 border-b border-[var(--rl-border)] bg-[var(--rl-surface-muted)] flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
+                  <UserSwitch size={18} weight="bold" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[var(--rl-text-strong)]">
+                    Vehicle Ownership Conflict Gate
+                  </h3>
+                  <p className="text-xs text-[var(--rl-text-muted)]">
+                    Vehicle {ownershipConflict.vehicle_no} matches an existing vehicle with a different owner.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConflictModalOpen(false)}
+                className="text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] p-1.5 rounded cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-4">
+              {/* Conflict Comparison Box */}
+              <div className="grid grid-cols-2 gap-3 p-3.5 rounded-[var(--rl-radius-sm)] bg-[var(--rl-surface-muted)] border border-[var(--rl-border)] text-xs">
+                <div className="space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-[var(--rl-text-muted)] tracking-wider">
+                    Existing Record
+                  </span>
+                  <p className="font-bold text-[var(--rl-text-strong)] text-sm truncate">
+                    {ownershipConflict.previous_owner}
+                  </p>
+                  <p className="text-[11px] text-[var(--rl-text-muted)]">
+                    Inception: {ownershipConflict.previous_policy_date}
+                  </p>
+                  {ownershipConflict.previous_session_ref && (
+                    <span className="inline-block text-[10px] font-mono text-[var(--rl-text-muted)] bg-white px-1.5 py-0.5 rounded border border-[var(--rl-border)]">
+                      {ownershipConflict.previous_session_ref}
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-1 pl-3 border-l border-[var(--rl-border)]">
+                  <span className="text-[10px] uppercase font-bold text-amber-700 tracking-wider">
+                    Current Quotation
+                  </span>
+                  <p className="font-bold text-[var(--rl-text-strong)] text-sm truncate">
+                    {ownershipConflict.new_customer}
+                  </p>
+                  <p className="text-[11px] text-[var(--rl-text-muted)]">
+                    Inception: {ownershipConflict.new_policy_date}
+                  </p>
+                  <span className="inline-block text-[10px] font-mono text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                    Active Draft
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-[var(--rl-text-strong)]">
+                  Select Resolution Action
+                </label>
+                <p className="text-[11px] text-[var(--rl-text-muted)]">
+                  Please specify how RiskLocker should manage this vehicle record:
+                </p>
+              </div>
+
+              {/* 3 Resolution Options */}
+              <div className="space-y-2.5">
+                {/* Option 1 */}
+                <label
+                  onClick={() => setSelectedResolution("car_sold_new_owner")}
+                  className={`block p-3 rounded-[var(--rl-radius-sm)] border text-xs cursor-pointer transition-all ${
+                    selectedResolution === "car_sold_new_owner"
+                      ? "border-[var(--rl-black)] bg-neutral-50 shadow-2xs"
+                      : "border-[var(--rl-border)] hover:bg-neutral-50/60"
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="radio"
+                      name="ownership_resolution"
+                      checked={selectedResolution === "car_sold_new_owner"}
+                      onChange={() => setSelectedResolution("car_sold_new_owner")}
+                      className="mt-0.5 text-[var(--rl-black)] focus:ring-0"
+                    />
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-[var(--rl-text-strong)]">
+                          Car Sold / New Owner (Transfer)
+                        </span>
+                        <Badge variant="success" className="text-[10px] py-0 px-1.5">Recommended</Badge>
+                      </div>
+                      <p className="text-[11px] text-[var(--rl-text-muted)] leading-relaxed">
+                        The vehicle was legitimately transferred or sold. Set <strong>{ownershipConflict.new_customer}</strong> as the current owner and archive <strong>{ownershipConflict.previous_owner}</strong> in vehicle history.
+                      </p>
+                    </div>
+                  </div>
+                </label>
+
+                {/* Option 2 */}
+                <label
+                  onClick={() => setSelectedResolution("old_quote_mistake")}
+                  className={`block p-3 rounded-[var(--rl-radius-sm)] border text-xs cursor-pointer transition-all ${
+                    selectedResolution === "old_quote_mistake"
+                      ? "border-[var(--rl-black)] bg-neutral-50 shadow-2xs"
+                      : "border-[var(--rl-border)] hover:bg-neutral-50/60"
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="radio"
+                      name="ownership_resolution"
+                      checked={selectedResolution === "old_quote_mistake"}
+                      onChange={() => setSelectedResolution("old_quote_mistake")}
+                      className="mt-0.5 text-[var(--rl-black)] focus:ring-0"
+                    />
+                    <div className="space-y-0.5">
+                      <span className="font-bold text-[var(--rl-text-strong)]">
+                        Data Correction (Old Quote Was Mistake)
+                      </span>
+                      <p className="text-[11px] text-[var(--rl-text-muted)] leading-relaxed">
+                        The previous quote under <strong>{ownershipConflict.previous_owner}</strong> was entered with an erroneous plate or typo. Establish <strong>{ownershipConflict.new_customer}</strong> as the sole owner and detach old record.
+                      </p>
+                    </div>
+                  </div>
+                </label>
+
+                {/* Option 3 */}
+                <label
+                  onClick={() => setSelectedResolution("pending_verification")}
+                  className={`block p-3 rounded-[var(--rl-radius-sm)] border text-xs cursor-pointer transition-all ${
+                    selectedResolution === "pending_verification"
+                      ? "border-[var(--rl-black)] bg-neutral-50 shadow-2xs"
+                      : "border-[var(--rl-border)] hover:bg-neutral-50/60"
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="radio"
+                      name="ownership_resolution"
+                      checked={selectedResolution === "pending_verification"}
+                      onChange={() => setSelectedResolution("pending_verification")}
+                      className="mt-0.5 text-[var(--rl-black)] focus:ring-0"
+                    />
+                    <div className="space-y-0.5">
+                      <span className="font-bold text-[var(--rl-text-strong)]">
+                        Keep on Pending (Geran Verification Required)
+                      </span>
+                      <p className="text-[11px] text-[var(--rl-text-muted)] leading-relaxed">
+                        Unlock PDF export immediately for the client, but keep ownership record unverified pending vehicle registration grant (geran) review.
+                      </p>
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              {/* Notes Input */}
+              <div className="space-y-1 pt-1">
+                <label className="text-[11px] font-semibold text-[var(--rl-text-muted)]">
+                  Resolution Notes (Optional)
+                </label>
+                <Input
+                  type="text"
+                  placeholder="e.g. Geran verified on 21 Sep; ownership changed in JPJ"
+                  value={resolutionNotes}
+                  onChange={(e) => setResolutionNotes(e.target.value)}
+                  className="text-xs h-8"
+                />
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-[var(--rl-border)] bg-[var(--rl-surface-muted)] flex items-center justify-end gap-2 shrink-0">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setConflictModalOpen(false)}
+                disabled={resolvingConflict}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={handleResolveConflict}
+                disabled={resolvingConflict}
+                className="bg-[var(--rl-black)] hover:bg-neutral-800 text-white font-semibold cursor-pointer"
+              >
+                {resolvingConflict ? "Resolving..." : "Confirm & Unlock PDF Export"}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
       {/* Floating Action Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-[var(--rl-radius-sm)] border border-neutral-800 bg-neutral-900/95 px-4 py-3 text-xs font-semibold text-white shadow-2xl backdrop-blur-md transition-all">
@@ -4146,7 +5258,22 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
           <span>{toastMessage}</span>
         </div>
       )}
+
+      {/* Outbound Quotation Export Prompt (Sent to Client vs Internal Save) */}
+      <SendToClientDialog
+        open={pendingExportAction !== null}
+        onClose={() => setPendingExportAction(null)}
+        onConfirm={confirmAndExecuteExport}
+        actionTitle={
+          pendingExportAction === "download_pdf"
+            ? "Download Quotation PDF"
+            : pendingExportAction === "copy_png"
+            ? "Copy Quotation as PNG"
+            : "Download Quotation PNG"
+        }
+      />
     </section>
     </>
   );
 }
+

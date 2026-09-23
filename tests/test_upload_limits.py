@@ -116,7 +116,7 @@ def _http_client(*, user: User | None = None, db: MemoryDb | None = None):
 
 def test_bulk_upload_limit_default():
     db = MemoryDb()
-    assert get_bulk_upload_limit(db) == 5
+    assert get_bulk_upload_limit(db) == 10
 
 
 def test_bulk_upload_limit_set_and_get():
@@ -141,7 +141,7 @@ def test_get_settings_limits_includes_max_bulk_upload_files():
     assert res.status_code == 200
     data = res.json()
     assert data["max_upload_files"] == 1
-    assert data["max_bulk_upload_files"] == 5
+    assert data["max_bulk_upload_files"] == 10
 
 
 def test_admin_upload_limits_endpoints():
@@ -151,7 +151,7 @@ def test_admin_upload_limits_endpoints():
     # GET default
     res = admin_client.get("/admin/settings/upload-limits")
     assert res.status_code == 200
-    assert res.json()["max_bulk_upload_files"] == 5
+    assert res.json()["max_bulk_upload_files"] == 10
     assert res.json()["min_allowed"] == 3
 
     # POST valid update (e.g. 8)

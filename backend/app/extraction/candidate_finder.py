@@ -758,6 +758,8 @@ def find_candidates(
         for alias in field_aliases:
             pattern = re.compile(rf"(?i)\b{re.escape(alias)}\b\s*[:\-]?\s*(?P<value>[^\n\r]{{1,90}})")
             for match in pattern.finditer(text):
+                value = match.group("value")
+                value = re.split(r"\s{2,}|(?i:\b(vehicle|model|premium|total|road\s*tax|ncd|sum insured|cover)\b)", value)[0]
                 if field == "excess_amount":
                     prefix = text[max(0, match.start() - 20) : match.start()].lower()
                     if any(k in prefix for k in ["compulsory", "wajib", "mandatori"]):
@@ -766,8 +768,17 @@ def find_candidates(
                     prefix = text[max(0, match.start() - 20) : match.start()].lower()
                     if any(k in prefix for k in ["policy", "polisi"]):
                         continue
-                value = match.group("value")
-                value = re.split(r"\s{2,}|(?i:\b(vehicle|model|premium|total|road\s*tax|ncd|sum insured|cover)\b)", value)[0]
+                if field in {"sum_insured", "coverage_amount", "market_value", "agreed_value"}:
+                    surrounding = text[max(0, match.start() - 30) : min(len(text), match.end() + 30)].lower()
+                    if any(k in surrounding for k in ["basic premium", "loading", "trailer", "all riders", "sst", "service tax", "stamp duty"]):
+                        continue
+                    clean_m = re.findall(r"\d+(?:\.\d+)?", value.replace(",", ""))
+                    if clean_m:
+                        try:
+                            if float(clean_m[0]) < 1000.0:
+                                continue
+                        except ValueError:
+                            pass
                 _add(results, field, value, "label_nearby", 0.78, text, match.start(), match.end(), page_text)
 
     # Filename vehicle number extraction hint (e.g., 20250604_JJC9250_Quotation_STMB.pdf -> JJC9250)

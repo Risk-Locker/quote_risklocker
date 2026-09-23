@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from copy import deepcopy
 
 from sqlalchemy import func, select
@@ -186,7 +187,15 @@ def import_vehicles_workbook(db: Session, user, sheets: list[tuple[str, list[dic
     return {"created": created, "updated": updated, "errors": errors}
 
 
-def serialize_template(template: OutputTemplateConfig, db: Session | None = None) -> dict:
+def serialize_template(
+    template: OutputTemplateConfig,
+    db: Session | None = None,
+    *,
+    companies_map: dict[str, InsuranceCompany] | None = None,
+    groups_map: dict[str, TemplateGroup] | None = None,
+    revisions_map: dict[str, list[TemplateRevision]] | None = None,
+    page_profiles_map: dict[str, TemplatePageProfile] | None = None,
+) -> dict:
     config = normalize_template_config(template.fixed_fields, template.name)
     if "assets" not in config or not isinstance(config["assets"], dict) or not config["assets"]:
         config["assets"] = {
@@ -226,17 +235,30 @@ def serialize_template(template: OutputTemplateConfig, db: Session | None = None
                 el["type"] = "image"
                 el["assetSlot"] = "risklocker_logo"
                 el["assetId"] = "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f"
+
     company_name = None
-    if db is not None and template.insurance_company_id:
-        company = db.get(InsuranceCompany, template.insurance_company_id)
-        company_name = company.name if company else None
+    if template.insurance_company_id:
+        if companies_map is not None:
+            comp = companies_map.get(template.insurance_company_id)
+            company_name = comp.name if comp else None
+        elif db is not None:
+            company = db.get(InsuranceCompany, template.insurance_company_id)
+            company_name = company.name if company else None
+
     group_name = None
-    if db is not None and template.group_id:
-        group = db.get(TemplateGroup, template.group_id)
-        group_name = group.name if group else None
+    if template.group_id:
+        if groups_map is not None:
+            grp = groups_map.get(template.group_id)
+            group_name = grp.name if grp else None
+        elif db is not None:
+            group = db.get(TemplateGroup, template.group_id)
+            group_name = group.name if group else None
+
     revision_summaries: list[dict] = []
     latest_published = None
-    if db is not None:
+    if revisions_map is not None:
+        revisions = revisions_map.get(template.id, [])
+    elif db is not None:
         revisions = list(
             db.scalars(
                 select(TemplateRevision)
@@ -245,26 +267,36 @@ def serialize_template(template: OutputTemplateConfig, db: Session | None = None
                 .order_by(TemplateRevision.revision_number.desc())
             ).all()
         )
-        for revision in revisions:
+    else:
+        revisions = []
+
+    for revision in revisions:
+        if page_profiles_map is not None:
+            profile = page_profiles_map.get(revision.page_profile_id) if revision.page_profile_id else None
+        elif db is not None and revision.page_profile_id:
             profile = db.get(TemplatePageProfile, revision.page_profile_id)
-            summary = {
-                "id": revision.id,
-                "revision_number": revision.revision_number,
-                "state": revision.state,
-                "config_hash": revision.config_hash,
-                "published_at": revision.published_at.isoformat() if revision.published_at else None,
-                "page_profile": {
-                    "id": profile.id,
-                    "profile_key": profile.profile_key,
-                    "name": profile.name,
-                    "width": float(str(profile.width)),
-                    "height": float(str(profile.height)),
-                    "unit": profile.unit,
-                } if profile else None,
-            }
-            revision_summaries.append(summary)
-            if latest_published is None and revision.state == "published":
-                latest_published = summary
+        else:
+            profile = None
+
+        summary = {
+            "id": revision.id,
+            "revision_number": revision.revision_number,
+            "state": revision.state,
+            "config_hash": revision.config_hash,
+            "published_at": revision.published_at.isoformat() if revision.published_at else None,
+            "page_profile": {
+                "id": profile.id,
+                "profile_key": profile.profile_key,
+                "name": profile.name,
+                "width": float(str(profile.width)),
+                "height": float(str(profile.height)),
+                "unit": profile.unit,
+            } if profile else None,
+        }
+        revision_summaries.append(summary)
+        if latest_published is None and revision.state == "published":
+            latest_published = summary
+
     return {
         "id": template.id,
         "revision": template.revision,
@@ -285,6 +317,57 @@ def serialize_template(template: OutputTemplateConfig, db: Session | None = None
         "template_revisions": revision_summaries,
         "latest_published_revision": latest_published,
     }
+
+
+def serialize_templates_batch(db: Session, templates: list[OutputTemplateConfig]) -> list[dict]:
+    """Batch-preload companies, groups, revisions and page profiles in 4 bulk queries."""
+    if not templates:
+        return []
+
+    company_ids = {t.insurance_company_id for t in templates if t.insurance_company_id}
+    companies_map: dict[str, InsuranceCompany] = {}
+    if company_ids:
+        companies = db.scalars(select(InsuranceCompany).where(InsuranceCompany.id.in_(company_ids))).all()
+        companies_map = {c.id: c for c in companies}
+
+    group_ids = {t.group_id for t in templates if t.group_id}
+    groups_map: dict[str, TemplateGroup] = {}
+    if group_ids:
+        groups = db.scalars(select(TemplateGroup).where(TemplateGroup.id.in_(group_ids))).all()
+        groups_map = {g.id: g for g in groups}
+
+    template_ids = [t.id for t in templates]
+    all_revisions = list(
+        db.scalars(
+            select(TemplateRevision)
+            .where(TemplateRevision.template_id.in_(template_ids))
+            .options(defer(TemplateRevision.config))
+            .order_by(TemplateRevision.revision_number.desc())
+        ).all()
+    )
+    revisions_by_template: dict[str, list[TemplateRevision]] = defaultdict(list)
+    profile_ids: set[str] = set()
+    for rev in all_revisions:
+        revisions_by_template[rev.template_id].append(rev)
+        if rev.page_profile_id:
+            profile_ids.add(rev.page_profile_id)
+
+    page_profiles_map: dict[str, TemplatePageProfile] = {}
+    if profile_ids:
+        profiles = db.scalars(select(TemplatePageProfile).where(TemplatePageProfile.id.in_(profile_ids))).all()
+        page_profiles_map = {p.id: p for p in profiles}
+
+    return [
+        serialize_template(
+            t,
+            db,
+            companies_map=companies_map,
+            groups_map=groups_map,
+            revisions_map=revisions_by_template,
+            page_profiles_map=page_profiles_map,
+        )
+        for t in templates
+    ]
 
 
 def copy_template(db: Session, user, template_id: str) -> OutputTemplateConfig:
@@ -587,13 +670,13 @@ def set_runner_fee_default(db: Session, user, amount: float) -> float:
 def get_bulk_upload_limit(db: Session) -> int:
     setting = db.get(AppSetting, "bulk_upload_limit")
     if not setting or not isinstance(setting.value, dict):
-        return 5
-    val = setting.value.get("max_files", 5)
+        return 10
+    val = setting.value.get("max_files", 10)
     try:
         val_int = int(val)
         return val_int if val_int >= 3 else 3
     except (ValueError, TypeError):
-        return 5
+        return 10
 
 
 def set_bulk_upload_limit(db: Session, user, limit: int) -> int:

@@ -142,3 +142,24 @@ def test_reset_benefit_card_preset_restores_factory_defaults(db_session: Session
     assert reset.config["iconSize"] == 44
     assert reset.config["elevation"] == "lift"
     assert reset.is_default is True
+
+
+def test_save_benefit_card_preset_top_level_overrides_nested_config(db_session: Session):
+    """Ensure top-level styling fields in payload override any stale values inside payload['config']."""
+    list_benefit_card_presets(db_session)
+
+    payload = {
+        "name": "Masonry Flow",
+        "shape": "square",
+        "borderWidth": 3,
+        # Simulate stale nested config sent from client
+        "config": {
+            "shape": "rounded",
+            "borderWidth": 1,
+            "iconSize": 44,
+        },
+    }
+    updated = save_benefit_card_preset(db_session, "masonry-flow", payload)
+    assert updated.config["shape"] == "square"
+    assert updated.config["borderWidth"] == 3
+    assert updated.config["iconSize"] == 44  # Preserved from nested config if not in top level

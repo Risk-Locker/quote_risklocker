@@ -57,6 +57,7 @@ export type WorkspaceSnapshot = {
   uploaded_file_id: string;
   revision: number;
   status: string;
+  is_test?: boolean;
   fields: Record<string, WorkspaceField>;
   benefits: Array<Record<string, unknown> & { id: string; selection_key: string; label?: string | null; state: string; cost_status: string }>;
   benefit_cards: {

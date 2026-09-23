@@ -4,14 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 from sqlalchemy import func, or_, select, String
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, defer, joinedload
 
+from app.core.cache import _memory_cache, invalidate_cache
 from app.core.errors import AppError
 from app.models.tables import Session as SessionModel, UploadedFile, QuotationDraft, User
 
 
 def get_session_filter_options(db: Session) -> dict[str, Any]:
     """Return distinct available companies and users who created or edited sessions."""
+    cached = _memory_cache.get("sessions:filter_options")
+    if cached is not None:
+        return cached
+
     company_rows = db.scalars(
         select(SessionModel.detected_company)
         .join(UploadedFile, SessionModel.uploaded_file_id == UploadedFile.id)
@@ -42,11 +47,13 @@ def get_session_filter_options(db: Session) -> dict[str, Any]:
             user_list.append({"id": u.id, "name": name, "email": u.email, "role": u.role})
         user_list.sort(key=lambda x: x["name"])
 
-    return {
+    result = {
         "companies": companies,
         "users": user_list,
         "staff": user_list,  # Backward compatibility for existing consumers
     }
+    _memory_cache.set("sessions:filter_options", result, ttl_seconds=60.0)
+    return result
 
 
 def create_session(
@@ -55,15 +62,18 @@ def create_session(
     uploaded_file_id: str,
     draft_id: str,
     detected_company: str | None = None,
+    is_test: bool = False,
 ) -> SessionModel:
     session = SessionModel(
         owner_id=owner_id,
         uploaded_file_id=uploaded_file_id,
         draft_id=draft_id,
         detected_company=detected_company,
+        is_test=is_test,
     )
     db.add(session)
     db.flush()
+    invalidate_cache("sessions:filter_options")
     db.refresh(session)
     return session
 
@@ -78,6 +88,7 @@ def list_sessions(
     sort_by: str = "vehicle",
     limit: int = 50,
     offset: int = 0,
+    type_filter: str | None = None,
 ) -> tuple[list[SessionModel], int]:
     base = (
         select(SessionModel)
@@ -101,6 +112,10 @@ def list_sessions(
         base = base.where(or_(SessionModel.owner_id == staff_id, SessionModel.last_edited_by_id == staff_id))
     if status and status.lower() != "all":
         base = base.where(func.lower(QuotationDraft.status) == status.strip().lower())
+    if type_filter and type_filter.lower() == "live":
+        base = base.where(SessionModel.is_test.is_(False))
+    elif type_filter and type_filter.lower() == "test":
+        base = base.where(SessionModel.is_test.is_(True))
 
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
 
@@ -138,7 +153,11 @@ def list_sessions(
         db.scalars(
             base.options(
                 joinedload(SessionModel.uploaded_file),
-                joinedload(SessionModel.draft).defer(QuotationDraft.scalar_decisions),
+                joinedload(SessionModel.draft)
+                .defer(QuotationDraft.scalar_decisions)
+                .defer(QuotationDraft.warnings)
+                .defer(QuotationDraft.layout_override)
+                .defer(QuotationDraft.display_options),
                 joinedload(SessionModel.owner),
                 joinedload(SessionModel.last_edited_by),
             )
@@ -191,6 +210,7 @@ def serialize_session(
     return {
         "id": session.id,
         "owner_id": session.owner_id,
+        "is_test": bool(getattr(session, "is_test", False)),
         "created_by": created_by_name,
         "created_by_email": created_by_email,
         "last_edited_by": last_edited_by_name,
@@ -208,6 +228,10 @@ def serialize_session(
         "vehicle_plate": vehicle_plate,
         "vehicle_model": vehicle_model,
         "total_premium": total_premium,
+        "quotation_status": session.quotation_status or "pending",
+        "miss_reason": session.miss_reason,
+        "coverage_start_date": session.coverage_start_date.isoformat() if session.coverage_start_date else None,
+        "coverage_end_date": session.coverage_end_date.isoformat() if session.coverage_end_date else None,
         "created_at": session.created_at.isoformat(),
         "updated_at": session.updated_at.isoformat(),
     }

@@ -297,6 +297,19 @@ def _is_paid_extra(card: dict[str, Any]) -> bool:
             return bool(clean and float(clean) > 0)
         except Exception:
             return False
+    tv = card.get("typed_value")
+    if isinstance(tv, dict) and tv.get("semantic_role") == "premium":
+        try:
+            clean = re.sub(r"[^0-9.]", "", str(tv.get("value") or 0))
+            return bool(clean and float(clean) > 0)
+        except Exception:
+            pass
+    if card.get("detected_cost"):
+        try:
+            clean = re.sub(r"[^0-9.]", "", str(card.get("detected_cost") or 0))
+            return bool(clean and float(clean) > 0)
+        except Exception:
+            pass
     return False
 
 
@@ -829,7 +842,9 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
     rows.append(("runner", str(labels.get("runner") or "Runner Fee / 服务费"), "", _format_value(_value(fields, "service_fee"), "RM ")))
     total = (render_context or {}).get("total_premium_adjusted") or _value(fields, "total_premium_adjusted")
     if not total:
-        total = adjusted_total_text(fields, extras) if extras else _value(fields, "total_amount")
+        disp_opts = (render_context or {}).get("display_options") or ((render_context or {}).get("draft") or {}).get("display_options") or {}
+        round_tot = bool(disp_opts.get("round_total", False))
+        total = adjusted_total_text(fields, extras, round_total=round_tot) if extras else _value(fields, "total_amount")
     if not total:
         total = _value(fields, "total_amount")
     rows.append(("total", str(labels.get("total") or "TOTAL PAYABLE"), "", _format_value(total, "RM ")))

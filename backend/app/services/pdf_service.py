@@ -101,13 +101,24 @@ def generate_pdf(db: Session, settings: Settings, user, draft: QuotationDraft, a
     draft.uploaded_file.status = RecordStatus.GENERATED.value
     from app.models.tables import Session as SessionModel
     session = db.scalar(select(SessionModel).where(SessionModel.uploaded_file_id == draft.uploaded_file_id))
-    upsert_from_draft(
-        db,
-        draft.fields,
-        session_id=session.id if session else None,
-        draft_id=draft.id,
-        uploaded_file_id=draft.uploaded_file_id,
-    )
+    if session and not getattr(session, "is_test", False):
+        upsert_from_draft(
+            db,
+            draft.fields,
+            session_id=session.id if session else None,
+            draft_id=draft.id,
+            uploaded_file_id=draft.uploaded_file_id,
+        )
+        from app.services.quotation_activity_service import log_quotation_activity
+        log_quotation_activity(
+            db=db,
+            session_id=session.id,
+            action_type="quote_generated",
+            user_id=user.id,
+            sent_to_client=False,
+            summary=f"Generated PDF version {next_number}",
+            version_number=next_number,
+        )
     try:
         db.commit()
     except Exception as exc:
