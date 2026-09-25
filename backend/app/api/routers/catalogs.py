@@ -320,6 +320,7 @@ from app.services.business_setup_service import (
     save_catalog_offering,
     remove_catalog_offering,
     publish_catalog_revision,
+    delete_benefit_catalog,
     retire_benefit_catalog,
     update_catalog_context,
     upload_business_asset,
@@ -447,16 +448,6 @@ def business_company_alias_retire(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-
-@router.get("/business/companies")
-def business_companies(
-    search: str = Query(default="", max_length=200),
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=50, ge=1, le=100),
-    db: Session = Depends(get_db),
-    user: User = Depends(current_user),
-) -> dict:
-    return {"companies": list_business_companies(db, user, search=search, page=page, page_size=page_size)}
 
 
 

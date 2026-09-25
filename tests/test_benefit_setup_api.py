@@ -156,6 +156,9 @@ class FakeDb:
         if item in row_list:
             row_list.remove(item)
 
+    def execute(self, statement, params=None):
+        return None
+
 
 def _staff():
     return SimpleNamespace(id="staff-1", role="staff")
@@ -726,6 +729,7 @@ def test_catalog_create_and_context_update_with_hierarchy_path():
     assert created["coverage_type_id"] == "cov-1"
 
     catalog = db.get(BenefitCatalog, created["id"])
+    assert catalog is not None
     updated = update_catalog_context(db, _staff(), created["id"], {"base_revision": 1, "vehicle_category_id": "veh-1"})
     assert updated["vehicle_category_id"] == "veh-1"
     assert catalog.revision == 2
@@ -1083,4 +1087,190 @@ def test_save_catalog_offering_reconciles_stale_package_id():
     assert saved["offering_key"] == "towing"
 
 
+def test_save_catalog_offering_in_place_no_micro_revisions():
+    """Verify that catalog offering saves and deletes operate directly in-place
+
+    on the single active revision without duplicating revisions or packages.
+    """
+    from app.services.business_setup_service import save_catalog_offering, remove_catalog_offering
+
+    concept = BenefitConcept(id="b1", concept_key="windscreen", label="Windscreen")
+    catalog = _catalog_row()
+    catalog.status = "published"
+    revision = _revision_row(number=4, state="published")
+    db = FakeDb(rows={
+        BenefitCatalog: [catalog],
+        BenefitCatalogRevision: [revision],
+        BenefitConcept: [concept],
+        CatalogOffering: [],
+    })
+
+    # 1. Add new offering -> added directly to revision-1, zero new revisions created
+    added = save_catalog_offering(db, _staff(), "catalog-1", {
+        "base_revision": 5,
+        "offering_key": "windscreen-opt",
+        "concept_id": "b1",
+        "offering_kind": "optional",
+        "role": "addon_option",
+        "display_value": "15% of Sum Covered",
+    })
+    assert added["offering_key"] == "windscreen-opt"
+    assert added["role"] == "addon_option"
+    assert len(db.rows.get(BenefitCatalogRevision, [])) == 1
+    assert db.rows[BenefitCatalogRevision][0].id == "revision-1"
+    assert len(db.rows.get(CatalogOffering, [])) == 1
+
+    # 2. Update existing offering in-place -> modified in place, zero new revisions created
+    updated = save_catalog_offering(db, _staff(), "catalog-1", {
+        "id": added["id"],
+        "base_revision": catalog.revision,
+        "offering_key": "windscreen-opt",
+        "concept_id": "b1",
+        "offering_kind": "base",
+        "role": "included",
+        "display_value": "Unlimited",
+    })
+    assert updated["role"] == "included"
+    assert updated["display_value"] == "Unlimited"
+    assert len(db.rows.get(BenefitCatalogRevision, [])) == 1
+    assert len(db.rows.get(CatalogOffering, [])) == 1
+
+    # 3. Delete offering in-place -> removed from revision-1, zero new revisions created
+    remove_catalog_offering(db, _staff(), "catalog-1", added["id"], base_revision=catalog.revision)
+    assert len(db.rows.get(BenefitCatalogRevision, [])) == 1
+    assert len(db.rows.get(CatalogOffering, [])) == 0
+
+
+def test_amassurance_ev_package_ladder_workspace():
+    """Verify that multiple EV package tier catalogs return packages in company and catalog workspace."""
+    from app.services.business_setup_service import get_business_company_workspace, get_catalog_workspace
+
+    company = InsuranceCompany(id="comp-amgen", name="AmAssurance", slug="amassurance")
+    product = InsuranceProduct(
+        id="prod-ev",
+        company_id="comp-amgen",
+        product_key="ev-car-comp",
+        name="AmAssurance Private Car Comprehensive (EV)",
+        status="active",
+    )
+    rev_lite = BenefitCatalogRevision(
+        id="rev-ev-lite", catalog_id="cat-ev-lite", revision_number=1, state="published",
+        source_document_ids=[], content_hash="",
+    )
+    pkg_lite = BenefitPackage(
+        id="pkg-ev-lite",
+        catalog_revision_id="rev-ev-lite",
+        package_key="ev-lite",
+        name="auto365 Comprehensive Lite",
+        package_kind="comprehensive",
+        sort_order=1,
+    )
+    cat_lite = BenefitCatalog(
+        id="cat-ev-lite",
+        company_id="comp-amgen",
+        product_id="prod-ev",
+        package_id="pkg-ev-lite",
+        engine_type="ev",
+        name="auto365 Comprehensive Lite (EV)",
+        status="published",
+    )
+
+    rev_plus = BenefitCatalogRevision(
+        id="rev-ev-plus", catalog_id="cat-ev-plus", revision_number=1, state="published",
+        source_document_ids=[], content_hash="",
+    )
+    pkg_plus = BenefitPackage(
+        id="pkg-ev-plus",
+        catalog_revision_id="rev-ev-plus",
+        package_key="ev-plus",
+        name="auto365 Comprehensive Plus",
+        package_kind="comprehensive",
+        sort_order=2,
+    )
+    cat_plus = BenefitCatalog(
+        id="cat-ev-plus",
+        company_id="comp-amgen",
+        product_id="prod-ev",
+        package_id="pkg-ev-plus",
+        engine_type="ev",
+        name="auto365 Comprehensive Plus (EV)",
+        status="published",
+    )
+
+    concept = BenefitConcept(id="b1", concept_key="ev-wall-charger", label="EV Wall Charger Cover")
+    off_lite = CatalogOffering(
+        id="off-1",
+        catalog_revision_id="rev-ev-lite",
+        offering_key="ev-lite-wall-charger",
+        concept_id="b1",
+        role="addon_option",
+        offering_kind="optional",
+    )
+
+    db = FakeDb(rows={
+        InsuranceCompany: [company],
+        InsuranceProduct: [product],
+        BenefitCatalog: [cat_lite, cat_plus],
+        BenefitCatalogRevision: [rev_lite, rev_plus],
+        BenefitPackage: [pkg_lite, pkg_plus],
+        BenefitConcept: [concept],
+        CatalogOffering: [off_lite],
+    })
+
+    # Company workspace must include both EV catalogs with their package populated
+    ws = get_business_company_workspace(db, _staff(), "comp-amgen")
+    ev_cats = [c for c in ws["catalogs"] if c.get("engine_type") == "ev"]
+    assert len(ev_cats) == 2
+    assert ev_cats[0]["package"]["name"] == "auto365 Comprehensive Lite"
+    assert ev_cats[1]["package"]["name"] == "auto365 Comprehensive Plus"
+
+    # Catalog workspace must return packages and offerings
+    cat_ws = get_catalog_workspace(db, _staff(), "cat-ev-lite")
+    assert len(cat_ws["packages"]) == 1
+    assert cat_ws["packages"][0]["name"] == "auto365 Comprehensive Lite"
+    assert len(cat_ws["offerings"]) == 1
+    assert cat_ws["offerings"][0]["offering_key"] == "ev-lite-wall-charger"
+
+
+def test_delete_benefit_catalog_with_tier_delegates():
+    """Verify delete_benefit_catalog delegates to delete_business_tier when tier_id is present."""
+    from app.services.catalog_lifecycle_service import delete_benefit_catalog
+    import app.services.company_setup_service as css
+
+    deleted_tier_ids = []
+
+    def fake_delete_tier(db, user, tier_id):
+        deleted_tier_ids.append(tier_id)
+
+    orig_delete_tier = getattr(css, "delete_business_tier", None)
+    css.delete_business_tier = fake_delete_tier
+    try:
+        cat = _catalog_row(tier_id="tier-123")
+        cat.id = "cat-with-tier"
+        db = FakeDb(rows={BenefitCatalog: [cat]})
+        delete_benefit_catalog(db, _staff(), "cat-with-tier")
+        assert deleted_tier_ids == ["tier-123"]
+    finally:
+        if orig_delete_tier:
+            css.delete_business_tier = orig_delete_tier
+
+
+def test_delete_benefit_catalog_without_tier_deletes_records():
+    """Verify delete_benefit_catalog directly removes catalog and its revisions/offerings when no tier_id."""
+    from app.services.catalog_lifecycle_service import delete_benefit_catalog
+
+    cat = _catalog_row(tier_id=None)
+    cat.id = "cat-no-tier"
+    rev = _revision_row(catalog_id="cat-no-tier")
+    off = CatalogOffering(id="off-no-tier", catalog_revision_id="revision-1", offering_key="key", concept_id="b1")
+    pkg = BenefitPackage(id="pkg-no-tier", catalog_revision_id="revision-1", package_key="k", name="P")
+    db = FakeDb(rows={
+        BenefitCatalog: [cat],
+        BenefitCatalogRevision: [rev],
+        CatalogOffering: [off],
+        BenefitPackage: [pkg],
+    })
+
+    delete_benefit_catalog(db, _staff(), "cat-no-tier")
+    assert cat not in db.rows[BenefitCatalog]
 

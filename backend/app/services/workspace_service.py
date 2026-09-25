@@ -68,6 +68,32 @@ from app.extraction.benefit_lines import is_spurious_benefit_line
 
 
 
+from app.services.workspace_common import (
+    _field_summary,
+    _require_business_user,
+    _resolve_vehicle_category,
+    _rows_for_draft,
+    _session_and_draft,
+    _template_for_draft,
+    _utcnow,
+    generation_blockers,
+)
+from app.services.workspace_snapshot_service import (
+    _catalog_overview,
+    _decision_summary,
+    _selection_summary,
+    _workspace_benefit_cards,
+    _workspace_extracted_benefits_section,
+    _workspace_package_tiers,
+    _workspace_packs,
+    build_workspace_snapshot,
+    template_selection_impact,
+    workspace_capabilities,
+)
+from app.services.workspace_patch_service import (
+    apply_workspace_patch,
+)
+
 from app.services import (
     workspace_common,
     workspace_snapshot_service,
@@ -80,10 +106,10 @@ _all_submodules = [
     workspace_patch_service,
 ]
 
-# Expose all symbols from submodules onto this facade module
+# Expose any remaining symbols dynamically
 for _mod in _all_submodules:
     for _name in getattr(_mod, "__all__", dir(_mod)):
-        if not _name.startswith("__"):
+        if not _name.startswith("__") and _name not in globals():
             globals()[_name] = getattr(_mod, _name)
 
 
@@ -95,4 +121,4 @@ class _WorkspaceModule(sys.modules[__name__].__class__):  # type: ignore[misc]
                 setattr(_mod, name, value)
 
 
-sys.modules[__name__].__class__ = _WorkspaceModule
+sys.modules[__name__].__class__ = _WorkspaceModule  # type: ignore[assignment]

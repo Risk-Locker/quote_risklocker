@@ -324,6 +324,7 @@ from app.services.business_setup_service import (
     save_catalog_offering,
     remove_catalog_offering,
     publish_catalog_revision,
+    delete_benefit_catalog,
     retire_benefit_catalog,
     update_catalog_context,
     upload_business_asset,
@@ -417,4 +418,4 @@ class _RoutesModule(sys.modules[__name__].__class__):  # type: ignore[misc]
                 setattr(_mod, name, value)
 
 
-sys.modules[__name__].__class__ = _RoutesModule
+sys.modules[__name__].__class__ = _RoutesModule  # type: ignore[assignment]

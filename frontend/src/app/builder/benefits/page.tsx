@@ -157,7 +157,7 @@ function BenefitsPageContent() {
   const [selectedPackageId, setSelectedPackageId] = useState<string>("");
   const [selectedPackageKey, setSelectedPackageKey] = useState<string>("");
   const [activeTab, setActiveTab] = useState<"structure" | "bundles">("structure");
-  const [showLiveTemplate, setShowLiveTemplate] = useState(true);
+  const [showLiveTemplate, setShowLiveTemplate] = useState(false);
   const [loading, setLoading] = useState(true);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [error, setError] = useState("");
@@ -2108,19 +2108,26 @@ ${aiMarkdownTable}`;
     }
   }
 
-  async function retireCatalog(catalog: Catalog) {
-    if (!window.confirm(`Retire catalog "${catalog.name}"? It will be archived and hidden from the active builder.`)) return;
+  async function handleDeleteCatalog(catalog: Catalog | null) {
+    if (!catalog) return;
+    if (!window.confirm(`Are you sure you want to delete "${catalog.name}"? This will permanently remove this package configuration and its benefit assignments.`)) return;
     setSaving(true);
     setError("");
     try {
       await api(`/business/catalogs/${catalog.id}`, { method: "DELETE" });
-      await loadCompany(selectedCompanyId, selectedProductId);
+      catalogCacheRef.current.delete(catalog.id);
+      if (selectedCompanyId) {
+        companyCacheRef.current.delete(selectedCompanyId);
+        await loadCompany(selectedCompanyId, selectedProductId);
+      }
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
       setSaving(false);
     }
   }
+
+  const retireCatalog = handleDeleteCatalog;
 
   if (loading) {
     return (
@@ -2359,85 +2366,19 @@ ${aiMarkdownTable}`;
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setShowLiveTemplate(!showLiveTemplate)}
-                  className="gap-1.5 text-xs h-8"
-                >
-                  {showLiveTemplate ? <EyeSlash size={14} weight="bold" /> : <Eye size={14} weight="bold" />}
-                  <span>{showLiveTemplate ? "Hide Template Preview" : "Live Template Preview"}</span>
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={refreshCurrent}
-                  disabled={workspaceLoading || saving}
-                  className="gap-1.5 text-xs h-8"
-                >
-                  <ArrowClockwise size={14} className={workspaceLoading ? "animate-spin" : ""} />
-                  <span>Refresh</span>
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    setFormName("");
-                    setFormPackageName("");
-                    setFormAsPackage(false);
-                    setDialog("config");
-                  }}
-                  className="gap-1.5 text-xs h-8"
-                >
-                  <Plus size={14} weight="bold" />
-                  <span>Add configuration</span>
-                </Button>
-                {isPackaged && activePackage && (
+                {/* RL-DISABLED toolbar actions (Add configuration, Clone package, New bundle, Hide Template Preview, Refresh, GuidedTour, Publish Changes /publish /new-draft, Revisions) — disabled 2026-09-25; restore when multi-action toolbar requested */}
+                {selectedCatalog && (
                   <Button
                     variant="secondary"
                     size="sm"
-                    onClick={() => {
-                      setFormName(`${activePackage.name} Copy`);
-                      setFormPackageKey("");
-                      setDialog("clone");
-                    }}
-                    className="gap-1.5 text-xs h-8"
+                    onClick={() => handleDeleteCatalog(selectedCatalog)}
+                    disabled={workspaceLoading || saving}
+                    className="gap-1.5 text-xs h-8 border border-red-200 text-red-700 bg-red-50 hover:bg-red-100 hover:text-red-800 font-semibold"
+                    title="Delete this package configuration"
                   >
-                    <Copy size={14} />
-                    <span>Clone package</span>
+                    <Trash size={14} weight="bold" />
+                    <span>Delete configuration</span>
                   </Button>
-                )}
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    setFormName("");
-                    setFormPackageKey("");
-                    setDialog("bundle");
-                  }}
-                  className="gap-1.5 text-xs h-8"
-                >
-                  <PackageIcon size={14} />
-                  <span>New bundle</span>
-                </Button>
-                <GuidedTour
-                  storageKey="tour:builder-benefits"
-                  title="Benefits & Add-ons Architecture"
-                  description="Configure which global benefits each insurer product includes by default and offers as add-ons, build package tiers, and create add-on bundles with plan levels."
-                  steps={BENEFITS_TOUR_STEPS}
-                />
-                {selectedCatalog && (
-                  (catalogWorkspace?.active_revision?.state === "published" && selectedCatalog.status === "published") ? (
-                    <Button variant="secondary" size="sm" onClick={openNewDraft} disabled={saving} className="gap-1.5 text-xs h-8">
-                      <PencilSimple size={14} weight="bold" />
-                      <span>New draft</span>
-                    </Button>
-                  ) : (
-                    <Button size="sm" onClick={publishConfig} disabled={saving} className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold text-xs h-8">
-                      <CheckCircle size={14} weight="bold" />
-                      <span>Publish Changes</span>
-                    </Button>
-                  )
                 )}
               </div>
             </div>
@@ -2601,17 +2542,6 @@ ${aiMarkdownTable}`;
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => setShowLiveTemplate(true)}
-                  disabled={showLiveTemplate}
-                  className="gap-1.5"
-                  title="Open the live template preview"
-                >
-                  <Eye size={14} />
-                  {showLiveTemplate ? "Preview open" : "Show preview"}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
                   onClick={resetToDefaultOfferings}
                   disabled={saving}
                   className="gap-1.5 text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
@@ -2622,17 +2552,13 @@ ${aiMarkdownTable}`;
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => retireCatalog(selectedCatalog)}
+                  onClick={() => handleDeleteCatalog(selectedCatalog)}
                   disabled={saving}
                   className="gap-1.5 text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)]"
-                  title="Retire this entire catalog"
+                  title="Delete this configuration"
                 >
                   <Trash size={14} />
-                  Retire Catalog
-                </Button>
-                <Button size="sm" onClick={publishConfig} disabled={saving} className="gap-1.5">
-                  <Check size={14} weight="bold" />
-                  Save & Publish
+                  Delete Configuration
                 </Button>
               </div>
             </div>

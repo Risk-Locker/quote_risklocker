@@ -142,7 +142,7 @@ def _normalize_description_variants(values) -> list[dict]:
 
 def serialize_concept(db, item: BenefitConcept, preloaded_assets: dict | None = None) -> dict:
     value_schema = item.value_schema or {}
-    category = value_schema.get("category") or ("default" if item.sort_order <= 11 else "addon")
+    category = value_schema.get("category") or ("default" if item.sort_order is not None and item.sort_order <= 11 else "addon")
     variants = value_schema.get("variants") or []
     return {
         "id": item.id,

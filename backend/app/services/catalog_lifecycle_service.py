@@ -60,7 +60,7 @@ from app.services.benefit_concept_service import serialize_concept
 from app.services.company_setup_service import _catalog
 
 
-__all__ = ['create_benefit_catalog', 'retire_benefit_catalog', '_validate_catalog_context', 'update_catalog_context', '_offering', '_package', '_revision_content_payload', '_validate_assignment_context', 'save_catalog_offering', 'remove_catalog_offering', 'create_new_draft_revision', 'publish_catalog_revision', 'get_catalog_workspace', 'list_source_documents']
+__all__ = ['create_benefit_catalog', 'delete_benefit_catalog', 'retire_benefit_catalog', '_validate_catalog_context', 'update_catalog_context', '_offering', '_package', '_revision_content_payload', '_validate_assignment_context', 'save_catalog_offering', 'remove_catalog_offering', 'create_new_draft_revision', 'publish_catalog_revision', 'get_catalog_workspace', 'list_source_documents']
 
 
 def create_benefit_catalog(db, user, payload: dict) -> dict:
@@ -85,14 +85,37 @@ def create_benefit_catalog(db, user, payload: dict) -> dict:
 
 
 
-def retire_benefit_catalog(db, user, catalog_id: str) -> None:
+def delete_benefit_catalog(db, user, catalog_id: str) -> None:
     _require_business(user)
     catalog = db.scalar(select(BenefitCatalog).where(BenefitCatalog.id == catalog_id).with_for_update())
     if catalog is None:
         raise AppError("Catalog not found.", 404)
-    catalog.status = "retired"
-    _audit(db, user, "business.catalog.retire", "benefit_catalog", catalog.id, {"name": catalog.name})
+    if catalog.tier_id:
+        from app.services.company_setup_service import delete_business_tier
+        delete_business_tier(db, user, catalog.tier_id)
+        return
+    revisions = db.scalars(select(BenefitCatalogRevision).where(BenefitCatalogRevision.catalog_id == catalog.id)).all()
+    rev_ids = [r.id for r in revisions]
+    if rev_ids:
+        packages = db.scalars(select(BenefitPackage).where(BenefitPackage.catalog_revision_id.in_(rev_ids))).all()
+        pkg_ids = [p.id for p in packages]
+        if pkg_ids:
+            plans = db.scalars(select(BenefitPackagePlan).where(BenefitPackagePlan.package_id.in_(pkg_ids))).all()
+            plan_ids = [pl.id for pl in plans]
+            if plan_ids:
+                db.execute(delete(BenefitPackagePlanItem).where(BenefitPackagePlanItem.plan_id.in_(plan_ids)))
+                db.execute(delete(BenefitPackagePlan).where(BenefitPackagePlan.id.in_(plan_ids)))
+            db.execute(delete(BenefitPackage).where(BenefitPackage.id.in_(pkg_ids)))
+        db.execute(delete(CatalogOffering).where(CatalogOffering.catalog_revision_id.in_(rev_ids)))
+        db.execute(delete(BenefitCatalogRevision).where(BenefitCatalogRevision.id.in_(rev_ids)))
+    _audit(db, user, "business.catalog.delete", "benefit_catalog", catalog.id, {"name": catalog.name})
+    db.delete(catalog)
     db.commit()
+
+
+
+def retire_benefit_catalog(db, user, catalog_id: str) -> None:
+    delete_benefit_catalog(db, user, catalog_id)
 
 
 
@@ -388,76 +411,24 @@ def save_catalog_offering(db, user, catalog_id: str, payload: dict) -> dict:
     catalog = db.scalar(select(BenefitCatalog).where(BenefitCatalog.id == catalog_id).with_for_update())
     if catalog is None:
         raise AppError("Catalog not found.", 404)
-    revision = db.scalar(
-        select(BenefitCatalogRevision)
-        .where(BenefitCatalogRevision.catalog_id == catalog.id, BenefitCatalogRevision.state == "draft")
-        .order_by(BenefitCatalogRevision.revision_number.desc())
+    # Direct in-place editing on the latest revision (zero micro-revision cloning)
+    revisions = list(
+        db.scalars(
+            select(BenefitCatalogRevision)
+            .where(BenefitCatalogRevision.catalog_id == catalog.id)
+            .order_by(BenefitCatalogRevision.revision_number.desc())
+        ).all()
     )
+    revisions = sorted(revisions, key=lambda r: int(getattr(r, "revision_number", 0) or 0), reverse=True)
+    revision = revisions[0] if revisions else None
     if revision is None:
-        revisions = list(
-            db.scalars(
-                select(BenefitCatalogRevision)
-                .where(BenefitCatalogRevision.catalog_id == catalog.id)
-                .order_by(BenefitCatalogRevision.revision_number.desc())
-            ).all()
+        revision = BenefitCatalogRevision(
+            id=new_id(), catalog_id=catalog.id, revision_number=1, state="published",
+            source_document_ids=[], content_hash="",
         )
-        if revisions:
-            source = revisions[0]
-            draft = BenefitCatalogRevision(
-                id=new_id(), catalog_id=catalog.id, revision_number=source.revision_number + 1, state="draft",
-                source_document_ids=[], content_hash=canonical_context_hash(_revision_content_payload(db, source)),
-            )
-            db.add(draft)
-            db.flush()
-            package_map: dict[str, str] = {}
-            for package in db.scalars(
-                select(BenefitPackage).where(BenefitPackage.catalog_revision_id == source.id).order_by(BenefitPackage.sort_order, BenefitPackage.package_key)
-            ).all():
-                copy_pkg = BenefitPackage(
-                    id=new_id(), catalog_revision_id=draft.id, package_key=package.package_key, name=package.name,
-                    package_kind=package.package_kind, sort_order=package.sort_order, status=package.status,
-                )
-                db.add(copy_pkg)
-                package_map[package.id] = copy_pkg.id
-            db.flush()
-            for off in db.scalars(
-                select(CatalogOffering).where(CatalogOffering.catalog_revision_id == source.id).order_by(CatalogOffering.sort_order, CatalogOffering.offering_key)
-            ).all():
-                db.add(CatalogOffering(
-                    id=new_id(), catalog_revision_id=draft.id, offering_key=off.offering_key,
-                    concept_id=off.concept_id, offering_kind=off.offering_kind,
-                    applies_to_type=off.applies_to_type,
-                    applies_to_id=package_map.get(str(off.applies_to_id)) if off.applies_to_id else None,
-                    role=off.role, label_override=off.label_override,
-                    description_override=getattr(off, "description_override", None),
-                    typed_value=off.typed_value,
-                    display_value=off.display_value, optional_price=off.optional_price,
-                    source_document_id=off.source_document_id, source_citation=off.source_citation,
-                    source_aliases=list(off.source_aliases or []),
-                    presentation_facet_ids=list(off.presentation_facet_ids or []),
-                    sort_order=off.sort_order, status=off.status,
-                ))
-            if catalog.package_id and catalog.package_id in package_map:
-                catalog.package_id = package_map[catalog.package_id]
-            elif catalog.package_id and not package_map:
-                catalog.package_id = None
-            if payload.get("applies_to_id") and payload["applies_to_id"] in package_map:
-                payload["applies_to_id"] = package_map[payload["applies_to_id"]]
-            catalog.revision += 1
-            catalog.status = "draft"
-            db.flush()
-            revision = draft
-        else:
-            draft = BenefitCatalogRevision(
-                id=new_id(), catalog_id=catalog.id, revision_number=1, state="draft",
-                source_document_ids=[], content_hash=canonical_context_hash({}),
-            )
-            db.add(draft)
-            db.flush()
-            catalog.revision = 1
-            catalog.status = "draft"
-            db.flush()
-            revision = draft
+        db.add(revision)
+        catalog.revision = 1
+        db.flush()
     if payload.get("offering_kind") and payload["offering_kind"] not in OFFERING_KINDS:
         raise AppError("Offering kind is invalid.", 422)
     if payload.get("concept_id") and db.get(BenefitConcept, payload["concept_id"]) is None:
@@ -493,6 +464,14 @@ def save_catalog_offering(db, user, catalog_id: str, payload: dict) -> dict:
                 CatalogOffering.offering_key == payload["offering_key"],
             )
         )
+    if offering is None and payload.get("concept_id"):
+        stmt = select(CatalogOffering).where(
+            CatalogOffering.catalog_revision_id == revision.id,
+            CatalogOffering.concept_id == payload["concept_id"],
+        )
+        if payload.get("applies_to_id"):
+            stmt = stmt.where(CatalogOffering.applies_to_id == payload["applies_to_id"])
+        offering = db.scalar(stmt)
     if offering is None:
         offering = CatalogOffering(
             id=new_id(),
@@ -550,77 +529,17 @@ def remove_catalog_offering(db, user, catalog_id: str, offering_id: str, *, base
     catalog = db.scalar(select(BenefitCatalog).where(BenefitCatalog.id == catalog_id).with_for_update())
     if catalog is None:
         raise AppError("Catalog not found.", 404)
-    revision = db.scalar(
-        select(BenefitCatalogRevision)
-        .where(BenefitCatalogRevision.catalog_id == catalog.id, BenefitCatalogRevision.state == "draft")
-        .order_by(BenefitCatalogRevision.revision_number.desc())
+    revisions = list(
+        db.scalars(
+            select(BenefitCatalogRevision)
+            .where(BenefitCatalogRevision.catalog_id == catalog.id)
+            .order_by(BenefitCatalogRevision.revision_number.desc())
+        ).all()
     )
+    revisions = sorted(revisions, key=lambda r: int(getattr(r, "revision_number", 0) or 0), reverse=True)
+    revision = revisions[0] if revisions else None
     if revision is None:
-        revisions = list(
-            db.scalars(
-                select(BenefitCatalogRevision)
-                .where(BenefitCatalogRevision.catalog_id == catalog.id)
-                .order_by(BenefitCatalogRevision.revision_number.desc())
-            ).all()
-        )
-        if revisions:
-            source = revisions[0]
-            draft = BenefitCatalogRevision(
-                id=new_id(), catalog_id=catalog.id, revision_number=source.revision_number + 1, state="draft",
-                source_document_ids=[], content_hash=canonical_context_hash(_revision_content_payload(db, source)),
-            )
-            db.add(draft)
-            db.flush()
-            package_map: dict[str, str] = {}
-            for package in db.scalars(
-                select(BenefitPackage).where(BenefitPackage.catalog_revision_id == source.id).order_by(BenefitPackage.sort_order, BenefitPackage.package_key)
-            ).all():
-                copy_pkg = BenefitPackage(
-                    id=new_id(), catalog_revision_id=draft.id, package_key=package.package_key, name=package.name,
-                    package_kind=package.package_kind, sort_order=package.sort_order, status=package.status,
-                )
-                db.add(copy_pkg)
-                package_map[package.id] = copy_pkg.id
-            db.flush()
-            old_offering = db.get(CatalogOffering, offering_id)
-            for off in db.scalars(
-                select(CatalogOffering).where(CatalogOffering.catalog_revision_id == source.id).order_by(CatalogOffering.sort_order, CatalogOffering.offering_key)
-            ).all():
-                if off.id == offering_id or (old_offering and off.concept_id == old_offering.concept_id and off.applies_to_id == old_offering.applies_to_id):
-                    continue
-                db.add(CatalogOffering(
-                    id=new_id(), catalog_revision_id=draft.id, offering_key=off.offering_key,
-                    concept_id=off.concept_id, offering_kind=off.offering_kind,
-                    applies_to_type=off.applies_to_type,
-                    applies_to_id=package_map.get(str(off.applies_to_id)) if off.applies_to_id else None,
-                    role=off.role, label_override=off.label_override,
-                    description_override=getattr(off, "description_override", None),
-                    typed_value=off.typed_value,
-                    display_value=off.display_value, optional_price=off.optional_price,
-                    source_document_id=off.source_document_id, source_citation=off.source_citation,
-                    source_aliases=list(off.source_aliases or []),
-                    presentation_facet_ids=list(off.presentation_facet_ids or []),
-                    sort_order=off.sort_order, status=off.status,
-                ))
-            if catalog.package_id and catalog.package_id in package_map:
-                catalog.package_id = package_map[catalog.package_id]
-            elif catalog.package_id and not package_map:
-                catalog.package_id = None
-            catalog.revision += 1
-            catalog.status = "draft"
-            db.commit()
-            return
-        else:
-            draft = BenefitCatalogRevision(
-                id=new_id(), catalog_id=catalog.id, revision_number=1, state="draft",
-                source_document_ids=[], content_hash=canonical_context_hash({}),
-            )
-            db.add(draft)
-            db.flush()
-            catalog.revision = 1
-            catalog.status = "draft"
-            db.commit()
-            return
+        return
     offering = db.get(CatalogOffering, offering_id)
     target_offering = None
     if offering is not None:
@@ -637,6 +556,13 @@ def remove_catalog_offering(db, user, catalog_id: str, offering_id: str, *, base
                     ),
                 )
             )
+    else:
+        target_offering = db.scalar(
+            select(CatalogOffering).where(
+                CatalogOffering.catalog_revision_id == revision.id,
+                (CatalogOffering.id == offering_id) | (CatalogOffering.offering_key == offering_id),
+            )
+        )
     if target_offering is not None:
         deleted_id = target_offering.id
         db.delete(target_offering)
@@ -676,6 +602,7 @@ def create_new_draft_revision(db, user, catalog_id: str, *, base_revision: int) 
             .order_by(BenefitCatalogRevision.revision_number.desc())
         ).all()
     )
+    revisions = sorted(revisions, key=lambda r: int(getattr(r, "revision_number", 0) or 0), reverse=True)
     if any(item.state == "draft" for item in revisions):
         raise AppError("This catalog already has a draft revision to edit.", 409)
     if not revisions:
@@ -791,6 +718,7 @@ def publish_catalog_revision(db, user, catalog_id: str, *, base_revision: int) -
             .order_by(BenefitCatalogRevision.revision_number.desc())
         ).all()
     )
+    revisions = sorted(revisions, key=lambda r: int(getattr(r, "revision_number", 0) or 0), reverse=True)
     draft = next((item for item in revisions if item.state == "draft"), None)
     if draft is None:
         raise AppError("This catalog has no draft revision to publish.", 409)
@@ -839,7 +767,8 @@ def get_catalog_workspace(db, user, catalog_id: str) -> dict:
             .order_by(BenefitCatalogRevision.revision_number.desc())
         ).all()
     )
-    revision = next((item for item in revisions if item.state == "draft"), revisions[0] if revisions else None)
+    revisions = sorted(revisions, key=lambda r: int(getattr(r, "revision_number", 0) or 0), reverse=True)
+    revision = revisions[0] if revisions else None
     if revision is None:
         raise AppError("Catalog has no revision.", 409)
     offerings = list(
