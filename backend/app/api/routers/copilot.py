@@ -1,10 +1,6 @@
-"""Master API routes aggregator."""
+"""Copilot API router."""
 
 from __future__ import annotations
-
-import sys
-from typing import Any
-from fastapi import APIRouter
 
 import logging
 import re
@@ -373,48 +369,248 @@ from app.services.benefit_template_preset_service import (
     set_default_benefit_card_preset,
 )
 
-from app.api.routers import auth as auth_router_mod
-from app.api.routers import catalogs as catalogs_router_mod
-from app.api.routers import copilot as copilot_router_mod
-from app.api.routers import insights as insights_router_mod
-from app.api.routers import sessions as sessions_router_mod
-from app.api.routers import system as system_router_mod
-from app.api.routers import templates as templates_router_mod
-from app.api.routers.common import _pdf_response
+
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-router.include_router(auth_router_mod.router)
-router.include_router(catalogs_router_mod.router)
-router.include_router(copilot_router_mod.router)
-router.include_router(insights_router_mod.router)
-router.include_router(sessions_router_mod.router)
-router.include_router(system_router_mod.router)
-router.include_router(templates_router_mod.router)
 
-_all_subrouter_modules = [
-    auth_router_mod,
-    catalogs_router_mod,
-    copilot_router_mod,
-    insights_router_mod,
-    sessions_router_mod,
-    system_router_mod,
-    templates_router_mod,
-]
+@router.post("/copilot/chat", response_model=CopilotChatResponse)
+def copilot_chat_route(
+    payload: CopilotChatRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.services.copilot_chat_service import chat_with_copilot
 
-# Expose all endpoint functions on the module namespace for backward compatibility
-for _mod in _all_subrouter_modules:
-    for _route in _mod.router.routes:
-        if hasattr(_route, "endpoint") and hasattr(_route.endpoint, "__name__"):
-            globals()[_route.endpoint.__name__] = _route.endpoint
+    history_dicts = [h.model_dump() for h in payload.history]
+    result = chat_with_copilot(
+        db=db,
+        user=user,
+        message=payload.message,
+        company_id=payload.company_id,
+        history=history_dicts,
+        scope=payload.scope,
+    )
+    return result
 
 
-class _RoutesModule(sys.modules[__name__].__class__):  # type: ignore[misc]
-    def __setattr__(self, name: str, value: Any) -> None:
-        super().__setattr__(name, value)
-        if name != "__class__" and "_all_subrouter_modules" in globals():
-            for _mod in _all_subrouter_modules:
-                setattr(_mod, name, value)
+
+@router.post("/copilot/sessions/cleanup-duplicates")
+def copilot_sessions_cleanup_route(
+    payload: SessionCleanupRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.services.copilot_chat_service import execute_session_cleanup
+
+    return execute_session_cleanup(db, settings, user, payload.session_ids)
 
 
-sys.modules[__name__].__class__ = _RoutesModule
+
+@router.post("/copilot/profiles/cleanup-dummy")
+def copilot_profiles_cleanup_route(
+    payload: ProfileCleanupRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.services.copilot_chat_service import execute_profile_cleanup
+
+    return execute_profile_cleanup(db, user, payload.profile_ids)
+
+
+
+@router.get("/settings/ai-context")
+def settings_ai_context(
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.extraction.gemini_extractor import get_key_pool, build_rag_system_prompt
+    from app.models.tables import InsuranceCompany, BenefitConcept, FieldAlias, ClientRecord, QuotationDraft
+
+    pool = get_key_pool()
+    quota = pool.get_quota_stats()
+
+    companies = [
+        {
+            "id": c.id,
+            "name": c.name,
+            "code": getattr(c, "code", "") or "",
+            "aliases": list(c.detection_phrases or []),
+            "aliases_count": len(c.detection_phrases or []),
+            "has_packages": "amassurance" in c.name.lower(),
+        }
+        for c in db.scalars(select(InsuranceCompany).order_by(InsuranceCompany.name)).all()
+    ]
+
+    concepts = [
+        {
+            "id": b.id,
+            "key": b.concept_key,
+            "name": b.label,
+            "category": getattr(b, "category", "") or "Add-on",
+            "aliases_count": len(b.aliases or []) if hasattr(b, "aliases") and b.aliases else 0,
+        }
+        for b in db.scalars(select(BenefitConcept).order_by(BenefitConcept.label)).all()
+    ]
+
+    field_aliases_db = db.scalars(select(FieldAlias).order_by(FieldAlias.field_name)).all()
+    field_aliases = [
+        {
+            "field_name": fa.field_name,
+            "aliases": list(fa.aliases or []),
+            "count": len(fa.aliases or []),
+        }
+        for fa in field_aliases_db
+    ]
+
+    saved_records_count = db.scalar(select(func.count(ClientRecord.id))) or 0
+    total_sessions_count = db.scalar(select(func.count(QuotationDraft.id))) or 0
+
+    rag_companies = [{"name": c["name"], "aliases": c["aliases"]} for c in companies]
+    rag_concepts = [{"key": c["key"], "name": c["name"]} for c in concepts]
+    live_prompt = build_rag_system_prompt(db_companies=rag_companies, db_benefit_concepts=rag_concepts)
+
+    return {
+        "gemini": {
+            "active": quota["keys_count"] > 0,
+            "model": getattr(settings, "gemini_model", "gemini-3.5-flash") or "gemini-3.5-flash",
+            "key_count": quota["keys_count"],
+            "rpm_limit": quota["rpm_limit"],
+            "rpm_used": quota["rpm_used"],
+            "rpd_limit": quota["rpd_limit"],
+            "rpd_used": quota["rpd_used"],
+            "rpd_remaining": quota["rpd_remaining"],
+            "percent_rpd_remaining": quota["percent_rpd_remaining"],
+        },
+        "summary_stats": {
+            "active_companies_count": len(companies),
+            "benefit_concepts_count": len(concepts),
+            "field_aliases_count": len(field_aliases),
+            "saved_records_count": saved_records_count,
+            "total_sessions_count": total_sessions_count,
+        },
+        "companies": companies,
+        "benefit_concepts": concepts,
+        "field_aliases": field_aliases,
+        "live_system_prompt": live_prompt,
+    }
+
+
+
+@router.post("/settings/ai-grounding-chat")
+def settings_ai_grounding_chat(
+    payload: GroundingChatRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Answer targeted grounding queries with ultra-low token context."""
+    from app.services.grounding_assistant import answer_grounding_query
+    return answer_grounding_query(db, query=payload.query, session_id=payload.session_id)
+
+
+
+@router.get("/settings/ai-memory")
+def settings_ai_memory_get(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Return all AI correction memory items learned from user reviews."""
+    from app.models.tables import CorrectionMemory, InsuranceCompany
+    from sqlalchemy import func, desc
+
+    memories = (
+        db.query(CorrectionMemory, InsuranceCompany.name.label("company_name"))
+        .outerjoin(InsuranceCompany, CorrectionMemory.insurance_company_id == InsuranceCompany.id)
+        .order_by(desc(CorrectionMemory.created_at))
+        .limit(300)
+        .all()
+    )
+
+    items = []
+    for m, cname in memories:
+        items.append({
+            "id": str(m.id),
+            "field_name": m.field_name,
+            "original_value": m.original_value or "—",
+            "corrected_value": m.corrected_value or "—",
+            "insurance_company": cname or "Global / All Insurers",
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        })
+
+    field_counts = (
+        db.query(CorrectionMemory.field_name, func.count(CorrectionMemory.id))
+        .group_by(CorrectionMemory.field_name)
+        .order_by(desc(func.count(CorrectionMemory.id)))
+        .all()
+    )
+    summary_by_field = [{"field": row[0], "count": row[1]} for row in field_counts]
+    total_count = db.query(func.count(CorrectionMemory.id)).scalar() or 0
+
+    return {
+        "total_memories": total_count,
+        "summary_by_field": summary_by_field,
+        "items": items,
+    }
+
+
+
+@router.get("/settings/ai-prompt")
+def settings_ai_prompt_get(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Return the global AI system-prompt override and the effective prompt."""
+    from app.extraction.gemini_extractor import build_rag_system_prompt
+    from app.models.tables import AppSetting, InsuranceCompany, BenefitConcept
+
+    setting = db.get(AppSetting, "ai_system_prompt")
+    override = str((setting.value or {}).get("text") or "") if setting and isinstance(setting.value, dict) else ""
+    companies = [{"name": c.name} for c in db.scalars(select(InsuranceCompany).order_by(InsuranceCompany.name)).all()]
+    concepts = [{"key": c.concept_key, "name": c.label} for c in db.scalars(select(BenefitConcept).order_by(BenefitConcept.label)).all()]
+    effective = build_rag_system_prompt(
+        db_companies=companies,
+        db_benefit_concepts=concepts,
+        prompt_override=override or None,
+    )
+    return {
+        "override": override,
+        "effective_prompt": effective,
+        "is_override_active": bool(override.strip()),
+    }
+
+
+
+@router.put("/settings/ai-prompt")
+def settings_ai_prompt_put(
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Set (or clear) the global AI system-prompt override. Admin/super_admin only."""
+    if user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value}:
+        raise AppError("Only administrators can change the AI system prompt.", 403)
+    from app.models.tables import AppSetting
+
+    text = str(payload.get("text") or "").strip()
+    if len(text) > 12_000:
+        raise AppError("The AI system prompt is too long (max 12,000 characters).", 422)
+    setting = db.get(AppSetting, "ai_system_prompt")
+    if not setting:
+        setting = AppSetting(key="ai_system_prompt", value={"text": text})
+        db.add(setting)
+    else:
+        setting.value = {"text": text}
+    db.add(AuditEvent(
+        actor_id=user.id,
+        action="settings.ai_prompt.update",
+        entity_type="app_settings",
+        entity_id="ai_system_prompt",
+        details={"characters": len(text), "active": bool(text)},
+    ))
+    db.commit()
+    return {"override": text, "is_override_active": bool(text)}
+

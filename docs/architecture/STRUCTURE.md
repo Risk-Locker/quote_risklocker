@@ -298,6 +298,57 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
   - `tests/test_corporate_fleet_and_bulk_export.py`: Tests corporate identity resolution, vehicle categorization, bulk status updates with sibling quote superseding, and in-memory zip archive streaming.
   - `tests/test_upload_limits.py`: Updated default bulk limit assertions to 10.
 
+## Debris Pruning, Command Rationalization & Backend Modularization (v24) Additions
+
+- **Commands Architecture**: Top-level `commands/` cleaned down to 22 active operational scripts (`start-*`, `verify-deploy-gate.ps1`, `test-all.ps1`, `init_db.py`, `create_admin.py`, active seeders, code map & brain verifiers). 40 historical one-off migrations, repairs, and backfill scripts moved to `commands/archive/`.
+- **Legacy Route Retirement**: Retired obsolete v1-v6 frontend routes `frontend/src/app/batches/` and `frontend/src/app/review/` (fully superseded by unified `/sessions/[id]` workspace since v7); removed route matchers from `frontend/src/middleware.ts`; updated static regression contract in `tests/test_frontend_v7_upload_contract.py`.
+- **Workspace & Docs Debris Purge**: Removed 34.7 MB `company_based/` exploratory data, purged 1,160+ scratch files in `/.qc-tmp/`, removed 5.8 MB binary ZIP archive and 7 `.docx` files in `docs/benefits/`, consolidated `amgen.md` into `docs/benefits/concise/amgen.md`, cleaned redundant desktop copy assets (`assets/* - Copy.png`), and removed stray `docs/h.html` & `docs/h.md`.
+- **Backend API Modularization (Phase 4A)**:
+  - Modularized the monolithic ~3,925-line `backend/app/api/routes.py` into 7 domain `APIRouter` modules under `backend/app/api/routers/`:
+    - `routers/auth.py` (8 endpoints): Auth, login, logout, me, user management (`/auth/*`, `/settings/users`).
+    - `routers/catalogs.py` (85 endpoints): Insurers, benefit profiles, packages, offerings, conditions, matrix (`/business/*`).
+    - `routers/copilot.py` (8 endpoints): Conversational Copilot, session deduplication, AI system prompt, grounding chat (`/copilot/*`, `/settings/ai-*`).
+    - `routers/insights.py` (22 endpoints): Hit/Miss calendar, sequential vehicle ownership tracking, client dossier CRM (`/insights/*`, `/client-records/*`).
+    - `routers/sessions.py` (33 endpoints): File uploads, ingestion jobs, sessions, quotation drafts, workspace, bulk operations (`/sessions/*`, `/drafts/*`, `/uploads/*`, `/jobs/*`, `/batches/*`).
+    - `routers/system.py` (51 endpoints): Health, system checks, road tax rule management, trash, notifications (`/health`, `/system/*`, `/trash/*`, `/notifications/*`, `/admin/*`).
+    - `routers/templates.py` (42 endpoints): Quotation templates, benefit card presets, visual asset libraries (`/business/templates/*`, `/business/benefit-card-presets/*`, `/business/assets/*`, `/admin/templates/*`).
+    - `routers/common.py`: Shared byte-range PDF response streamer (`_pdf_response`).
+  - Master `backend/app/api/routes.py`: Maintains 100% backward compatibility via router aggregation, re-exports, and a dynamic monkeypatch propagation proxy ensuring hermetic unit tests patching `app.api.routes` continue to seamlessly intercept target service calls in subrouters.
+- **God Service Modularization (Phase 4B)**:
+  - Decomposed `backend/app/services/business_setup_service.py` (~2,958 lines, 79 functions) into 6 domain services + shared common:
+    - `business_setup_common.py`: Shared constants (`BUSINESS_ROLES`, `OFFERING_KINDS`, `STATUSES`, `ALIAS_KINDS`, `VARIANT_TYPES`) and validation helpers (`_require_business`, `_slug`, `_require_revision`, `_audit`, `_asset_summary`, `_normalize_string_list`).
+    - `company_setup_service.py` (18 functions): Insurer company CRUD, aliases, products, tiers, and workspace.
+    - `benefit_concept_service.py` (7 functions): Master benefit concepts, description variants, and display overrides.
+    - `business_asset_service.py` (13 functions): Asset library, category folders, batch uploads, file replacement, and move/delete operations.
+    - `catalog_lifecycle_service.py` (14 functions): Catalog offerings, package assignments, draft revisions, and publication.
+    - `benefit_profile_service.py` (18 functions): Unified global benefit profiles, company baseline configs, costing formula, deep cloning, and activation.
+    - `company_benefit_condition_service.py` (3 functions): Conditional benefit upgrade rules engine.
+    - `business_setup_service.py`: Preserved as facade with dynamic monkeypatch propagation proxy and complete symbol re-exports.
+  - Decomposed `backend/app/services/workspace_service.py` (~2,253 lines, 49 functions) into read/write services + shared common:
+    - `workspace_common.py`: Shared constants, validation schemas, and core draft loaders (`_utcnow`, `_session_and_draft`, `_rows_for_draft`, `_template_for_draft`, `_field_summary`, `generation_blockers`).
+    - `workspace_snapshot_service.py` (10 functions): Pure read-side snapshot compilation, capability detection, benefit cards, package tiers, and overview matrices.
+    - `workspace_patch_service.py` (32 functions): Pure write-side patch mutation engine, catalog pinning, package plan selections, and totals recomputation.
+    - `workspace_service.py`: Preserved as facade with complete symbol re-exports and monkeypatch propagation proxy.
+- **Frontend Mega-Component Modularization (Phase 4C)**:
+  - Decomposed `frontend/src/app/builder/benefits/page.tsx` (from 5,401 lines down to 3,683 lines, ~32% reduction):
+    - `types.ts`: Extracted shared UI types, `TourStep` definitions, benefit condition operators, and fallback label maps.
+    - `components/benefit-conditions-tab.tsx`: Extracted Tab 3 conditional rules editor, criteria badges, and rule builder.
+    - `components/overview-matrix-tab.tsx`: Extracted Tab 4 cross-insurer underwriting benefit comparison matrix table.
+    - `components/company-benefits-tab.tsx`: Extracted Tab 1 insurer master benefit pool, company selector, and quick search.
+    - `components/benefits-step-navigator.tsx`: Extracted step flow navigator bar with interactive tab transitions.
+    - `components/benefits-dialogs.tsx`: Extracted modal dialogs (Add config, clone package, new bundle, AI spec, condition rules, clone profile).
+  - Decomposed `frontend/src/components/session-workspace/review-phase.tsx` (from 5,280 lines down to 2,702 lines, ~49% reduction):
+    - `review-components/benefit-cards.tsx`: Extracted `IncludedCard` and `AddonCard` components with interactive status toggles and price editing.
+    - `review-components/review-header.tsx`: Extracted top header bar, view switchers, PDF toggle, and PNG/PDF export buttons.
+    - `review-components/review-banners.tsx`: Extracted ownership conflict gate, resolution alert, and sequential transfer banner.
+    - `review-components/review-modals.tsx`: Extracted global benefit library modal, conflict resolution modal, and outbound export prompt.
+    - `review-components/extracted-benefits-card.tsx`: Extracted Card 3 (detected package, optional covers, and raw extraction text view).
+    - `review-components/benefits-manager-panel.tsx`: Extracted Row 2 benefits manager (defaults, active add-ons, optional covers, and package bundles).
+    - `review-components/policy-fields-card.tsx`: Extracted Card 2 policy and vehicle values editor with live CC/kW/EV detection and road tax auto-calculation.
+
+
+
+
 - Start every repository task at [START-HERE.md](START-HERE.md).
 - Use [PROJECT-DIAGRAM.md](PROJECT-DIAGRAM.md) for the complete visual workflow and system overview.
 - Use [generated/CODEBASE-MAP.md](generated/CODEBASE-MAP.md) to locate routes, symbols, migrations, tests, and commands.

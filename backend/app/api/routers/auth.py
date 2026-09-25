@@ -1,10 +1,6 @@
-"""Master API routes aggregator."""
+"""Auth API router."""
 
 from __future__ import annotations
-
-import sys
-from typing import Any
-from fastapi import APIRouter
 
 import logging
 import re
@@ -373,48 +369,108 @@ from app.services.benefit_template_preset_service import (
     set_default_benefit_card_preset,
 )
 
-from app.api.routers import auth as auth_router_mod
-from app.api.routers import catalogs as catalogs_router_mod
-from app.api.routers import copilot as copilot_router_mod
-from app.api.routers import insights as insights_router_mod
-from app.api.routers import sessions as sessions_router_mod
-from app.api.routers import system as system_router_mod
-from app.api.routers import templates as templates_router_mod
-from app.api.routers.common import _pdf_response
+
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-router.include_router(auth_router_mod.router)
-router.include_router(catalogs_router_mod.router)
-router.include_router(copilot_router_mod.router)
-router.include_router(insights_router_mod.router)
-router.include_router(sessions_router_mod.router)
-router.include_router(system_router_mod.router)
-router.include_router(templates_router_mod.router)
 
-_all_subrouter_modules = [
-    auth_router_mod,
-    catalogs_router_mod,
-    copilot_router_mod,
-    insights_router_mod,
-    sessions_router_mod,
-    system_router_mod,
-    templates_router_mod,
-]
-
-# Expose all endpoint functions on the module namespace for backward compatibility
-for _mod in _all_subrouter_modules:
-    for _route in _mod.router.routes:
-        if hasattr(_route, "endpoint") and hasattr(_route.endpoint, "__name__"):
-            globals()[_route.endpoint.__name__] = _route.endpoint
+@router.post("/auth/login")
+def auth_login(
+    payload: LoginRequest,
+    request: Request,
+    response: FastAPIResponse,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    ensure_trusted_origin(request, settings)
+    user, session, raw_token = login_with_password(
+        db,
+        settings,
+        payload.email,
+        payload.password,
+        user_agent=request.headers.get("user-agent"),
+        ip_address=request.client.host if request.client else None,
+    )
+    max_age = int((session.absolute_expires_at - session.last_activity_at).total_seconds())
+    set_auth_cookies(response, settings, raw_token, max_age)
+    return {"user": serialize_user(user)}
 
 
-class _RoutesModule(sys.modules[__name__].__class__):  # type: ignore[misc]
-    def __setattr__(self, name: str, value: Any) -> None:
-        super().__setattr__(name, value)
-        if name != "__class__" and "_all_subrouter_modules" in globals():
-            for _mod in _all_subrouter_modules:
-                setattr(_mod, name, value)
+
+@router.post("/auth/logout")
+def auth_logout(
+    response: FastAPIResponse,
+    auth: AuthContext | None = Depends(current_auth_optional),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    if auth is not None:
+        revoke_session(db, auth.session, auth.user.id)
+    clear_auth_cookies(response, settings)
+    return {"signed_out": True}
 
 
-sys.modules[__name__].__class__ = _RoutesModule
+
+@router.get("/auth/me")
+def me(user: User = Depends(current_user)) -> dict:
+    return {**serialize_user(user), "capabilities": workspace_capabilities(user)}
+
+
+
+@router.post("/users")
+def user_create(payload: UserCreateRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    created = create_user(db, user, payload.email, payload.role, password=payload.password, name=payload.name)
+    return serialize_user(created)
+
+
+
+@router.get("/users")
+def users_list(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    if user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value}:
+        raise AppError("You do not have permission to view users.", 403)
+    query = select(User).order_by(User.created_at.desc())
+    if user.role == Role.ADMIN.value:
+        query = query.where(User.role != Role.SUPER_ADMIN.value)
+    return {"users": [serialize_user(item) for item in db.scalars(query).all()]}
+
+
+
+@router.patch("/users/{user_id}")
+def users_update(user_id: str, payload: UserUpdateRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    target = db.get(User, user_id)
+    if not target:
+        raise AppError("User not found.", 404)
+    updated = update_user(
+        db,
+        user,
+        target,
+        email=payload.email,
+        role=payload.role,
+        status=payload.status,
+        password=payload.password,
+        name=payload.name,
+    )
+    return serialize_user(updated)
+
+
+
+@router.post("/users/{user_id}/sessions/revoke")
+def user_sessions_revoke(user_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    if user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value}:
+        raise AppError("You do not have permission to revoke sessions.", 403)
+    target = db.get(User, user_id)
+    if not target:
+        raise AppError("User not found.", 404)
+    if user.role == Role.ADMIN.value and target.role == Role.SUPER_ADMIN.value:
+        raise AppError("You do not have permission to revoke the super administrator's sessions.", 403)
+    return {"revoked_sessions": revoke_user_sessions(db, target.id, user.id)}
+
+
+
+@router.post("/auth/change-password")
+def auth_change_password(payload: UserPasswordChangeRequest, auth: AuthContext = Depends(current_auth), db: Session = Depends(get_db)) -> dict:
+    updated = change_password(db, auth.user, payload.current_password, payload.new_password)
+    return {"user": serialize_user(updated)}
+

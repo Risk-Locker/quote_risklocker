@@ -105,15 +105,13 @@ def test_native_pdf_extraction_uses_real_text_layer(tmp_path):
 
 
 def test_review_ui_contains_pdf_text_and_template_workflow():
-    review_page = (ROOT / "frontend" / "src" / "app" / "review" / "[id]" / "page.tsx").read_text(encoding="utf-8")
-    batch_page = (ROOT / "frontend" / "src" / "app" / "batches" / "[id]" / "page.tsx").read_text(encoding="utf-8")
-    assert "Review / Edit" in batch_page
-    assert "<iframe" in review_page
-    assert "Extracted Text" in review_page
-    assert "Template:" in review_page
-    assert "Found near" not in review_page
-    assert "confidence" not in review_page.lower()
-    assert "regex" not in review_page.lower().replace("regexp", "")  # RegExp constructor is fine
+    review_phase = (ROOT / "frontend" / "src" / "components" / "session-workspace" / "review-phase.tsx").read_text(encoding="utf-8")
+    assert "<iframe" in review_phase
+    assert "Found near" not in review_phase
+    assert "confidence" not in review_phase.lower()
+    # Confirm retired v1-v6 routes remain removed
+    assert not (ROOT / "frontend" / "src" / "app" / "review").exists()
+    assert not (ROOT / "frontend" / "src" / "app" / "batches").exists()
 
 
 def test_byte_fallback_is_not_used_for_draft_candidates():

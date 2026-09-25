@@ -30,7 +30,8 @@ def test_workspace_save_keeps_operations_added_while_request_is_in_flight():
 
 
 def test_review_is_one_mouse_pass_with_inline_values_and_benefit_boxes():
-    source = REVIEW.read_text(encoding="utf-8")
+    review_files = [REVIEW] + list((ROOT / "frontend/src/components/session-workspace/review-components").glob("*.tsx"))
+    source = "".join(f.read_text(encoding="utf-8") for f in review_files)
     for label in ("Extracted values", "Benefits", "Add-ons", "Hide PDF", "Copy as PNG"):
         assert label in source
     assert "useWorkspaceData" in source

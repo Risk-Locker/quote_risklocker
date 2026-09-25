@@ -16,8 +16,6 @@ def test_upload_page_uses_one_file_durable_job_api():
     assert "/batches/upload" not in source
 
 
-def test_legacy_batch_page_has_no_generate_all_action():
-    source = (ROOT / "frontend/src/app/batches/[id]/page.tsx").read_text(encoding="utf-8")
-    assert "generate-selected" not in source
-    assert "Generate All" not in source
-    assert "Review / Edit" in source
+def test_legacy_batch_and_review_routes_are_retired():
+    assert not (ROOT / "frontend/src/app/batches").exists()
+    assert not (ROOT / "frontend/src/app/review").exists()

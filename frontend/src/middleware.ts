@@ -30,7 +30,6 @@ export const config = {
   matcher: [
     "/upload/:path*",
     "/sessions/:path*",
-    "/batches/:path*",
     "/builder/:path*",
     "/extraction/:path*",
     "/settings/:path*",
@@ -38,6 +37,5 @@ export const config = {
     "/trash/:path*",
     "/client-records/:path*",
     "/inbox/:path*",
-    "/review/:path*",
   ],
 };

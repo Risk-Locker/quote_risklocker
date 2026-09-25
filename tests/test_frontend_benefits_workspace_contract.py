@@ -4,11 +4,15 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PAGE = ROOT / "frontend/src/app/builder/benefits/page.tsx"
+BENEFITS_DIR = ROOT / "frontend/src/app/builder/benefits"
+
+
+def _get_page_source() -> str:
+    return "".join(p.read_text(encoding="utf-8") for p in sorted(BENEFITS_DIR.glob("**/*.[tj]s*")))
 
 
 def test_workspace_navigates_the_database_driven_hierarchy():
-    source = PAGE.read_text(encoding="utf-8")
+    source = _get_page_source()
     for endpoint in (
         "/business/segments?page=1&page_size=100",
         "/business/vehicle-categories?page=1&page_size=100",
@@ -18,7 +22,7 @@ def test_workspace_navigates_the_database_driven_hierarchy():
 
 
 def test_workspace_path_flow_and_segment_tooltip():
-    source = PAGE.read_text(encoding="utf-8")
+    source = _get_page_source()
     assert "Insurance companies" in source
     assert "Segment" in source and "Vehicle type" in source and "Product" in source
     # Segment explains Private vs Company / Commercial and defaults to Private.
@@ -31,7 +35,7 @@ def test_workspace_path_flow_and_segment_tooltip():
 
 
 def test_workspace_has_single_mode_and_package_mode():
-    source = PAGE.read_text(encoding="utf-8")
+    source = _get_page_source()
     assert "Single mode" in source
     assert "Package mode" in source
     assert "package_kind: \"comprehensive\"" in source
@@ -42,7 +46,7 @@ def test_workspace_has_single_mode_and_package_mode():
 
 
 def test_workspace_manages_packages_bundles_clone_and_revisions():
-    source = PAGE.read_text(encoding="utf-8")
+    source = _get_page_source()
     assert "/packages/${sourcePackage.id}/clone" in source
     assert "Clone package" in source
     assert "New bundle" in source
@@ -53,14 +57,14 @@ def test_workspace_manages_packages_bundles_clone_and_revisions():
 
 
 def test_workspace_is_interactive_flow_without_list_toggle():
-    source = PAGE.read_text(encoding="utf-8")
+    source = _get_page_source()
     # R2-1: Delete the list view and view toggle; the Benefits page IS the flow.
     assert "viewMode" not in source
     assert "List view" not in source
 
 
 def test_workspace_never_uses_catalog_language_or_hardcodes_business_data():
-    source = PAGE.read_text(encoding="utf-8")
+    source = _get_page_source()
     # API paths and type names may mention catalogs; user-facing copy must not.
     for label in ("No catalog", "New catalog", "catalog workspace", "catalogs for", "Catalog selected", "This catalog", "Select a catalog"):
         assert label not in source, f"User-facing copy must not say '{label}'"
@@ -73,6 +77,7 @@ def test_workspace_never_uses_catalog_language_or_hardcodes_business_data():
 
 
 def test_workspace_uses_the_shared_api_client_only():
-    source = PAGE.read_text(encoding="utf-8")
+    source = _get_page_source()
     assert "from \"@/lib/api\"" in source
     assert "fetch(" not in source
+

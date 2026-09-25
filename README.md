@@ -93,11 +93,8 @@ In VS Code, run the task **Risklocker: Start Full App** to use two dedicated int
 - Expired generated PDFs can be regenerated as a new version. Expired source PDFs cannot be reconstructed.
 - OS temporary directories are used for quarantine, scanning, extraction, and rendering and are deleted after each operation.
 
-Run one retention cycle manually with:
+- PDF retention and manual deletion are managed reference-aware through the Trash interface (`/trash`) and trash API.
 
-```powershell
-.\.venv\Scripts\python.exe commands/purge-expired-pdfs.py
-```
 
 ## Microsoft 365 Archive
 
