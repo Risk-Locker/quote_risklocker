@@ -1049,3 +1049,38 @@ def test_save_and_remove_catalog_offering_scalar_id_hash():
     assert len(revision.content_hash) == 64
 
 
+def test_save_catalog_offering_reconciles_stale_package_id():
+    from app.services.business_setup_service import save_catalog_offering
+
+    concept = BenefitConcept(id="b1", concept_key="towing", label="Towing")
+    old_pkg = BenefitPackage(
+        id="ghost-package-id",
+        catalog_revision_id="revision-old",
+        package_key="comprehensive",
+        name="Comprehensive",
+        package_kind="comprehensive",
+    )
+    catalog = _catalog_row(package_id="ghost-package-id")
+    revision = _revision_row()
+    # Revision has NO packages (unpackaged catalog state)
+    db = FakeDb(rows={
+        BenefitCatalog: [catalog],
+        BenefitCatalogRevision: [revision],
+        BenefitConcept: [concept],
+        BenefitPackage: [old_pkg],
+    })
+
+    saved = save_catalog_offering(db, _staff(), "catalog-1", {
+        "base_revision": 5,
+        "offering_key": "towing",
+        "concept_id": "b1",
+        "offering_kind": "base",
+        "role": "included",
+    })
+    # Must reconcile stale package_id to None and default to product-level assignment
+    assert catalog.package_id is None
+    assert saved["applies_to_type"] == "product"
+    assert saved["offering_key"] == "towing"
+
+
+

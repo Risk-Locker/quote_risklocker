@@ -275,6 +275,25 @@ def _validate_assignment_context(db, catalog: BenefitCatalog, revision: BenefitC
             applies_id = existing_off.applies_to_id
 
     rev_packages = list(db.scalars(select(BenefitPackage).where(BenefitPackage.catalog_revision_id == revision.id)).all())
+
+    # Ensure catalog.package_id belongs to this revision or reconcile it
+    if catalog.package_id:
+        pkg = db.get(BenefitPackage, catalog.package_id)
+        if pkg is not None and pkg.catalog_revision_id != revision.id:
+            matched = db.scalar(
+                select(BenefitPackage).where(
+                    BenefitPackage.catalog_revision_id == revision.id,
+                    (BenefitPackage.package_key == pkg.package_key) | (BenefitPackage.name == pkg.name),
+                )
+            )
+            if matched:
+                catalog.package_id = matched.id
+            elif rev_packages:
+                comp_pkg = next((p for p in rev_packages if p.package_kind in {"comprehensive", "tpft", "tpo"}), rev_packages[0])
+                catalog.package_id = comp_pkg.id
+            else:
+                catalog.package_id = None
+
     is_catalog_packaged = bool(catalog.package_id) or bool(rev_packages)
 
     if applies_type is None and not legacy:
@@ -420,6 +439,8 @@ def save_catalog_offering(db, user, catalog_id: str, payload: dict) -> dict:
                 ))
             if catalog.package_id and catalog.package_id in package_map:
                 catalog.package_id = package_map[catalog.package_id]
+            elif catalog.package_id and not package_map:
+                catalog.package_id = None
             if payload.get("applies_to_id") and payload["applies_to_id"] in package_map:
                 payload["applies_to_id"] = package_map[payload["applies_to_id"]]
             catalog.revision += 1
@@ -583,6 +604,8 @@ def remove_catalog_offering(db, user, catalog_id: str, offering_id: str, *, base
                 ))
             if catalog.package_id and catalog.package_id in package_map:
                 catalog.package_id = package_map[catalog.package_id]
+            elif catalog.package_id and not package_map:
+                catalog.package_id = None
             catalog.revision += 1
             catalog.status = "draft"
             db.commit()
@@ -736,6 +759,8 @@ def create_new_draft_revision(db, user, catalog_id: str, *, base_revision: int) 
         db.flush()
     if catalog.package_id and str(catalog.package_id) in package_map:
         catalog.package_id = package_map[str(catalog.package_id)]
+    elif catalog.package_id and not package_map:
+        catalog.package_id = None
     from app.models.tables import BenefitAlias
 
     for alias in db.scalars(select(BenefitAlias).where(BenefitAlias.package_id.is_not(None))).all():
