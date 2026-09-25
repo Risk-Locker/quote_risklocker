@@ -505,9 +505,13 @@ def save_catalog_offering(db, user, catalog_id: str, payload: dict) -> dict:
     db.flush()
     # Lightweight content hash: use offering IDs only instead of full _revision_content_payload
     # (the full hash is recomputed on publish via publish_catalog_revision)
-    _offering_ids = sorted(str(row.id) for row in db.scalars(
-        select(CatalogOffering.id).where(CatalogOffering.catalog_revision_id == revision.id)
-    ).all())
+    _offering_ids = sorted(
+        str(getattr(item, "id", item))
+        for item in db.scalars(
+            select(CatalogOffering.id).where(CatalogOffering.catalog_revision_id == revision.id)
+        ).all()
+        if item
+    )
     revision.content_hash = hashlib.sha256(",".join(_offering_ids).encode()).hexdigest()
     revision.source_document_ids = sorted({row.source_document_id for row in db.scalars(
         select(CatalogOffering).where(CatalogOffering.catalog_revision_id == revision.id)
@@ -615,9 +619,13 @@ def remove_catalog_offering(db, user, catalog_id: str, offering_id: str, *, base
         db.delete(target_offering)
         db.flush()
         # Lightweight content hash: use offering IDs only (full hash on publish)
-        _offering_ids = sorted(str(row.id) for row in db.scalars(
-            select(CatalogOffering.id).where(CatalogOffering.catalog_revision_id == revision.id)
-        ).all())
+        _offering_ids = sorted(
+            str(getattr(item, "id", item))
+            for item in db.scalars(
+                select(CatalogOffering.id).where(CatalogOffering.catalog_revision_id == revision.id)
+            ).all()
+            if item
+        )
         revision.content_hash = hashlib.sha256(",".join(_offering_ids).encode()).hexdigest()
         catalog.revision += 1
         _audit(db, user, "business.catalog_offering.delete", "catalog_offering", deleted_id, {"catalog_id": catalog.id, "new_revision": catalog.revision})

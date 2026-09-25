@@ -79,7 +79,8 @@ def _require_revision(record, supplied: int | None, label: str) -> None:
 
 
 def _audit(db, user, action: str, entity_type: str, entity_id: str, details: dict) -> None:
-    db.add(AuditEvent(actor_id=user.id, action=action, entity_type=entity_type, entity_id=entity_id, details=details))
+    actor_id = getattr(user, "id", str(user)) if user is not None else None
+    db.add(AuditEvent(actor_id=actor_id, action=action, entity_type=entity_type, entity_id=entity_id, details=details))
 
 
 

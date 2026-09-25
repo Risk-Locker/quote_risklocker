@@ -103,13 +103,27 @@ class FakeDb:
 
     def scalars(self, statement):
         self.flush()
-        entity = statement.column_descriptions[0].get("entity")
+        col_desc = statement.column_descriptions[0]
+        entity = col_desc.get("entity")
+        attr_name = None
+        if entity is None:
+            expr = col_desc.get("expr")
+            if hasattr(expr, "entity"):
+                entity = getattr(expr.entity, "class_", None)
+                attr_name = getattr(expr, "key", None)
+            elif hasattr(expr, "class_"):
+                entity = getattr(expr, "class_", None)
+                attr_name = getattr(expr, "key", None)
         if entity is None:
             return _ScalarResult([])
         eq_pairs, neq_pairs = self._pairs(statement)
         if not eq_pairs and not neq_pairs:
-            return _ScalarResult(self.rows.get(entity, []))
-        return _ScalarResult([item for item in self.rows.get(entity, []) if self._matches(item, eq_pairs, neq_pairs)])
+            items = self.rows.get(entity, [])
+        else:
+            items = [item for item in self.rows.get(entity, []) if self._matches(item, eq_pairs, neq_pairs)]
+        if attr_name:
+            items = [getattr(item, attr_name) for item in items]
+        return _ScalarResult(items)
 
     def get(self, model, object_id):
         self.flush()
@@ -135,6 +149,12 @@ class FakeDb:
 
     def refresh(self, _item):
         pass
+
+    def delete(self, item):
+        self.flush()
+        row_list = self.rows.get(type(item), [])
+        if item in row_list:
+            row_list.remove(item)
 
 
 def _staff():
@@ -987,4 +1007,45 @@ def test_assignment_context_rejects_package_from_another_revision():
         assert getattr(exc, "status_code", None) == 422
     else:
         raise AssertionError("A package from another revision must be rejected")
+
+
+def test_save_and_remove_catalog_offering_scalar_id_hash():
+    from app.services.business_setup_service import save_catalog_offering, remove_catalog_offering
+
+    concept = BenefitConcept(id="b1", concept_key="towing", label="Towing")
+    catalog = _catalog_row()
+    revision = _revision_row()
+    existing_off = CatalogOffering(
+        id="off-1",
+        catalog_revision_id="revision-1",
+        offering_key="existing",
+        concept_id="b1",
+        offering_kind="base",
+        applies_to_type="product",
+        applies_to_id="product-1",
+        role="included",
+        sort_order=1,
+    )
+    db = FakeDb(rows={
+        BenefitCatalog: [catalog],
+        BenefitCatalogRevision: [revision],
+        BenefitConcept: [concept],
+        CatalogOffering: [existing_off],
+    })
+
+    # Save a second offering -> triggers lightweight hash recomputation with select(CatalogOffering.id)
+    saved = save_catalog_offering(db, _staff(), "catalog-1", {
+        "base_revision": 5,
+        "offering_key": "towing-new",
+        "concept_id": "b1",
+        "offering_kind": "base",
+        "role": "included",
+    })
+    assert saved["offering_key"] == "towing-new"
+    assert len(revision.content_hash) == 64
+
+    # Remove the first offering -> triggers lightweight hash recomputation with select(CatalogOffering.id)
+    remove_catalog_offering(db, _staff(), "catalog-1", "off-1", base_revision=catalog.revision)
+    assert len(revision.content_hash) == 64
+
 
