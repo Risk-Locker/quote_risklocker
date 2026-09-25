@@ -35,6 +35,17 @@ CANONICAL_MISS_REASONS = [
 ]
 
 
+def _safe_field_val(fields: Any, key: str) -> str:
+    if not isinstance(fields, dict):
+        return ""
+    val = fields.get(key)
+    if isinstance(val, dict):
+        return str(val.get("value") or "").strip()
+    if val is not None:
+        return str(val).strip()
+    return ""
+
+
 def log_quotation_activity(
     db: Session,
     session_id: str,
@@ -59,13 +70,13 @@ def log_quotation_activity(
         # Test sessions are isolated from Hit & Miss activities and vehicle tracking
         return None
 
-    draft_fields = session.draft.fields if session.draft and session.draft.fields else {}
-    plate = normalize_plate(draft_fields.get("vehicle_no", {}).get("value") or "")
-    customer = (draft_fields.get("customer_name", {}).get("value") or "").strip()
+    draft_fields = session.draft.fields if session.draft and isinstance(session.draft.fields, dict) else {}
+    plate = normalize_plate(_safe_field_val(draft_fields, "vehicle_no"))
+    customer = _safe_field_val(draft_fields, "customer_name")
 
     # Link tracked vehicle if not already linked
     if not session.tracked_vehicle_id and plate:
-        valid_until = draft_fields.get("valid_until", {}).get("value") or draft_fields.get("cover_end_date", {}).get("value")
+        valid_until = _safe_field_val(draft_fields, "valid_until") or _safe_field_val(draft_fields, "cover_end_date")
         veh, _ = get_or_create_vehicle_tracking(db, plate, customer, valid_until, session.id)
         if veh:
             session.tracked_vehicle_id = veh.id
@@ -167,8 +178,8 @@ def get_calendar_activities(
 
         # Get detected company & premium from session if available
         company = a.session.detected_company if a.session else ""
-        draft_fields = a.session.draft.fields if a.session and a.session.draft else {}
-        total_premium = draft_fields.get("total_amount", {}).get("value") or ""
+        draft_fields = a.session.draft.fields if a.session and a.session.draft and isinstance(a.session.draft.fields, dict) else {}
+        total_premium = _safe_field_val(draft_fields, "total_amount")
 
         grouped[d_str].append(
             {
@@ -227,13 +238,12 @@ def update_quotation_status(
 
     # Completeness Validation Gate: Incomplete sessions cannot be closed as Hit or Miss
     if clean_status in ("hit", "miss"):
-        draft_fields = session.draft.fields if session.draft and session.draft.fields else {}
+        draft_fields = session.draft.fields if session.draft and isinstance(session.draft.fields, dict) else {}
         plate = normalize_plate(
-            draft_fields.get("vehicle_no", {}).get("value")
-            or draft_fields.get("vehicle_registration_no", {}).get("value")
-            or draft_fields.get("plate_number", {}).get("value")
-            or draft_fields.get("car_plate", {}).get("value")
-            or ""
+            _safe_field_val(draft_fields, "vehicle_no")
+            or _safe_field_val(draft_fields, "vehicle_registration_no")
+            or _safe_field_val(draft_fields, "plate_number")
+            or _safe_field_val(draft_fields, "car_plate")
         )
         if not plate or plate.upper() == "UNKNOWN":
             tracked_veh = session.tracked_vehicle or (db.get(TrackedVehicle, session.tracked_vehicle_id) if session.tracked_vehicle_id else None)
@@ -241,12 +251,11 @@ def update_quotation_status(
                 plate = normalize_plate(tracked_veh.vehicle_no)
 
         customer = (
-            draft_fields.get("customer_name", {}).get("value")
-            or draft_fields.get("client_name", {}).get("value")
-            or draft_fields.get("insured_name", {}).get("value")
-            or draft_fields.get("company_name", {}).get("value")
-            or draft_fields.get("name", {}).get("value")
-            or ""
+            _safe_field_val(draft_fields, "customer_name")
+            or _safe_field_val(draft_fields, "client_name")
+            or _safe_field_val(draft_fields, "insured_name")
+            or _safe_field_val(draft_fields, "company_name")
+            or _safe_field_val(draft_fields, "name")
         ).strip()
 
         if not customer or customer.lower() == "unknown":
@@ -275,13 +284,13 @@ def update_quotation_status(
             parsed_prem = won_premium
             if parsed_prem is None:
                 prem_candidates = [
-                    draft_fields.get("won_premium", {}).get("value"),
-                    draft_fields.get("total_amount", {}).get("value"),
-                    draft_fields.get("gross_premium", {}).get("value"),
-                    draft_fields.get("total_premium", {}).get("value"),
-                    draft_fields.get("total_premium_adjusted", {}).get("value"),
-                    draft_fields.get("premium", {}).get("value"),
-                    draft_fields.get("net_premium", {}).get("value"),
+                    _safe_field_val(draft_fields, "won_premium"),
+                    _safe_field_val(draft_fields, "total_amount"),
+                    _safe_field_val(draft_fields, "gross_premium"),
+                    _safe_field_val(draft_fields, "total_premium"),
+                    _safe_field_val(draft_fields, "total_premium_adjusted"),
+                    _safe_field_val(draft_fields, "premium"),
+                    _safe_field_val(draft_fields, "net_premium"),
                 ]
 
                 import re
@@ -333,9 +342,9 @@ def update_quotation_status(
             session.coverage_end_date = parsed_end.replace(tzinfo=timezone.utc)
 
         # Ensure tracked vehicle linkage
-        draft_fields = session.draft.fields if session.draft and session.draft.fields else {}
-        plate = normalize_plate(draft_fields.get("vehicle_no", {}).get("value") or "")
-        customer = (draft_fields.get("customer_name", {}).get("value") or "").strip()
+        draft_fields = session.draft.fields if session.draft and isinstance(session.draft.fields, dict) else {}
+        plate = normalize_plate(_safe_field_val(draft_fields, "vehicle_no"))
+        customer = _safe_field_val(draft_fields, "customer_name")
 
         if not session.tracked_vehicle_id and plate:
             veh, _ = get_or_create_vehicle_tracking(db, plate, customer, None, session.id)
@@ -396,8 +405,8 @@ def update_quotation_status(
                     SessionModel.created_at <= session.created_at + timedelta(days=60),
                 )
             for candidate in db.scalars(unlinked_query).all():
-                c_fields = candidate.draft.fields if candidate.draft and candidate.draft.fields else {}
-                c_plate = normalize_plate(c_fields.get("vehicle_no", {}).get("value") or "")
+                c_fields = candidate.draft.fields if candidate.draft and isinstance(candidate.draft.fields, dict) else {}
+                c_plate = normalize_plate(_safe_field_val(c_fields, "vehicle_no"))
                 if c_plate == plate:
                     if session.tracked_vehicle_id:
                         candidate.tracked_vehicle_id = session.tracked_vehicle_id
@@ -534,12 +543,12 @@ def get_insights_analytics(
             return 0.0
 
     won_premium_total = sum(
-        parse_money((s.draft.fields.get("total_amount", {}).get("value") if s.draft else 0))
+        parse_money(_safe_field_val(s.draft.fields, "total_amount") if s.draft else 0)
         for s in hits
     )
 
     lost_premium_total = sum(
-        parse_money((s.draft.fields.get("total_amount", {}).get("value") if s.draft else 0))
+        parse_money(_safe_field_val(s.draft.fields, "total_amount") if s.draft else 0)
         for s in misses
     )
 
@@ -584,7 +593,7 @@ def get_insights_analytics(
         m_key = ts.strftime("%Y-%m")
         m_label = ts.strftime("%B %Y")
         st = (s.quotation_status or "").lower()
-        amt = parse_money(s.draft.fields.get("total_amount", {}).get("value") if s.draft and s.draft.fields else 0)
+        amt = parse_money(_safe_field_val(s.draft.fields, "total_amount") if s.draft and s.draft.fields else 0)
 
         entry = monthly_map[m_key]
         entry["month_key"] = m_key
@@ -646,14 +655,14 @@ def preview_backfill_sessions(db: Session) -> dict[str, Any]:
     ambiguous_count = 0
 
     for s in sessions:
-        draft_fields = s.draft.fields if s.draft and s.draft.fields else {}
-        raw_plate = draft_fields.get("vehicle_no", {}).get("value")
+        draft_fields = s.draft.fields if s.draft and isinstance(s.draft.fields, dict) else {}
+        raw_plate = _safe_field_val(draft_fields, "vehicle_no")
         norm_plate = normalize_plate(raw_plate)
-        customer = (draft_fields.get("customer_name", {}).get("value") or "").strip()
-        valid_until = draft_fields.get("valid_until", {}).get("value") or draft_fields.get("cover_end_date", {}).get("value")
-        model = draft_fields.get("car_model", {}).get("value")
-        company = s.detected_company or draft_fields.get("insurance_company", {}).get("value") or "Unknown"
-        premium = draft_fields.get("total_amount", {}).get("value") or ""
+        customer = _safe_field_val(draft_fields, "customer_name")
+        valid_until = _safe_field_val(draft_fields, "valid_until") or _safe_field_val(draft_fields, "cover_end_date")
+        model = _safe_field_val(draft_fields, "car_model")
+        company = s.detected_company or _safe_field_val(draft_fields, "insurance_company") or "Unknown"
+        premium = _safe_field_val(draft_fields, "total_amount")
         created_str = s.created_at.strftime("%Y-%m-%d %I:%M %p") if s.created_at else ""
 
         issues: list[str] = []
@@ -680,7 +689,7 @@ def preview_backfill_sessions(db: Session) -> dict[str, Any]:
         items.append(
             {
                 "session_id": s.id,
-                "quotation_number": (s.draft.fields.get("quotation_no", {}).get("value") if s.draft and s.draft.fields else None)
+                "quotation_number": (_safe_field_val(s.draft.fields, "quotation_no") if s.draft and s.draft.fields else None)
                 or f"RL-{s.id[:8].upper()}",
                 "created_at": created_str,
                 "raw_plate": raw_plate or "",
@@ -732,19 +741,19 @@ def backfill_existing_sessions(
 
     for s in sessions:
         processed += 1
-        draft_fields = s.draft.fields if s.draft and s.draft.fields else {}
+        draft_fields = s.draft.fields if s.draft and isinstance(s.draft.fields, dict) else {}
         overrides = manual_overrides.get(s.id, {})
 
-        raw_plate = overrides.get("vehicle_no") or draft_fields.get("vehicle_no", {}).get("value")
+        raw_plate = overrides.get("vehicle_no") or _safe_field_val(draft_fields, "vehicle_no")
         norm_plate = normalize_plate(raw_plate)
-        customer = (overrides.get("customer_name") or draft_fields.get("customer_name", {}).get("value") or "").strip()
+        customer = (overrides.get("customer_name") or _safe_field_val(draft_fields, "customer_name")).strip()
         valid_until = (
             overrides.get("validity_date")
-            or draft_fields.get("valid_until", {}).get("value")
-            or draft_fields.get("cover_end_date", {}).get("value")
+            or _safe_field_val(draft_fields, "valid_until")
+            or _safe_field_val(draft_fields, "cover_end_date")
         )
-        model = draft_fields.get("car_model", {}).get("value")
-        brand = draft_fields.get("car_brand", {}).get("value")
+        model = _safe_field_val(draft_fields, "car_model")
+        brand = _safe_field_val(draft_fields, "car_brand")
 
         if norm_plate:
             veh, _ = get_or_create_vehicle_tracking(

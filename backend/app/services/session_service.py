@@ -175,6 +175,17 @@ def get_session(db: Session, session_id: str) -> SessionModel:
     return session
 
 
+def _safe_field_val(fields: Any, key: str) -> str:
+    if not isinstance(fields, dict):
+        return ""
+    val = fields.get(key)
+    if isinstance(val, dict):
+        return str(val.get("value") or "").strip()
+    if val is not None:
+        return str(val).strip()
+    return ""
+
+
 def serialize_session(
     session: SessionModel,
     *args: Any,
@@ -182,13 +193,13 @@ def serialize_session(
 ) -> dict:
     filename = session.uploaded_file.original_filename if session.uploaded_file else ""
     draft_status = session.draft.status if session.draft else ""
-    fields = session.draft.fields if session.draft and session.draft.fields else {}
+    fields = session.draft.fields if session.draft and isinstance(session.draft.fields, dict) else {}
 
     # Extract identifiers safely
-    insured_name = fields.get("customer_name", {}).get("value")
-    vehicle_plate = fields.get("vehicle_no", {}).get("value")
-    vehicle_model = fields.get("car_model", {}).get("value")
-    total_premium = fields.get("total_amount", {}).get("value")
+    insured_name = _safe_field_val(fields, "customer_name") or _safe_field_val(fields, "insured_name")
+    vehicle_plate = _safe_field_val(fields, "vehicle_no") or _safe_field_val(fields, "vehicle_number")
+    vehicle_model = _safe_field_val(fields, "car_model")
+    total_premium = _safe_field_val(fields, "total_amount")
 
     # Author and edit attribution
     created_by_name = ""
@@ -205,7 +216,7 @@ def serialize_session(
         last_edited_by_name = session.last_edited_by.name or (session.last_edited_by.email.split("@")[0].capitalize() if session.last_edited_by.email else "")
         last_edited_by_email = session.last_edited_by.email
 
-    quotation_ref = session.quotation_ref or fields.get("quotation_reference", {}).get("value")
+    quotation_ref = session.quotation_ref or _safe_field_val(fields, "quotation_reference")
 
     return {
         "id": session.id,

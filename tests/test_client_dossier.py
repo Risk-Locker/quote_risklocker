@@ -196,3 +196,45 @@ def test_client_dossier_and_monthly_analytics(db_session: Session):
     assert cur_month["hits_count"] == 1
     assert cur_month["misses_count"] == 1
     assert cur_month["hit_rate_percent"] == 50.0
+
+
+def test_client_dossier_with_raw_string_fields(db_session: Session):
+    """Regression test: verify get_client_dossiers does not crash when session draft fields contain raw strings."""
+    user_id = new_id()
+    # Legacy session where fields are flat strings instead of nested {"value": "..."} dicts
+    legacy_draft = QuotationDraft(
+        id=new_id(),
+        owner_id=user_id,
+        uploaded_file_id=new_id(),
+        fields={
+            "customer_name": "Legacy Logistics Sdn Bhd",
+            "vehicle_no": "WXY 8888",
+            "vehicle_type": "Lorry",
+            "car_model": "Hino 300",
+            "insurance_company": "AmAssurance",
+            "total_amount": "RM 3,250.00",
+            "quotation_no": "RL-LEGACY-001",
+        },
+    )
+    db_session.add(legacy_draft)
+    db_session.flush()
+
+    legacy_session = SessionModel(
+        id=new_id(),
+        owner_id=user_id,
+        uploaded_file_id=new_id(),
+        draft_id=legacy_draft.id,
+        detected_company="AmAssurance",
+        quotation_status="hit",
+    )
+    db_session.add(legacy_session)
+    db_session.commit()
+
+    # Must succeed without AttributeError: 'str' object has no attribute 'get'
+    res = get_client_dossiers(db=db_session)
+    assert res["summary"]["total_quotations"] >= 1
+    legacy_client = next(c for c in res["clients"] if "Legacy Logistics" in c["customer_name"])
+    assert legacy_client["is_corporate"] is True
+    assert legacy_client["stats"]["hits"] == 1
+    assert legacy_client["stats"]["won_premium_total"] == 3250.0
+

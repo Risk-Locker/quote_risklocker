@@ -24,16 +24,27 @@ def _parse_money(val: Any) -> float:
         return 0.0
 
 
+def _safe_field_val(fields: Any, key: str) -> str:
+    if not isinstance(fields, dict):
+        return ""
+    val = fields.get(key)
+    if isinstance(val, dict):
+        return str(val.get("value") or "").strip()
+    if val is not None:
+        return str(val).strip()
+    return ""
+
+
 def _resolve_session_client_identity(fields: dict) -> tuple[str, bool, str | None]:
     """
     Resolve client name, whether it is a corporate entity, and business registration number.
     Returns:
         (client_name, is_company, brn)
     """
-    cust_name = (fields.get("customer_name", {}).get("value") or "").strip()
-    insured_name = (fields.get("insured_name", {}).get("value") or "").strip()
-    client_type = (fields.get("client_type", {}).get("value") or "").strip()
-    brn = (fields.get("ic_or_brn", {}).get("value") or "").strip()
+    cust_name = _safe_field_val(fields, "customer_name")
+    insured_name = _safe_field_val(fields, "insured_name")
+    client_type = _safe_field_val(fields, "client_type")
+    brn = _safe_field_val(fields, "ic_or_brn")
 
     is_comp = (
         client_type.lower() == "company"
@@ -132,15 +143,15 @@ def get_client_dossiers(
         c_lost_pm = 0.0
 
         for s in sessions:
-            fields = s.draft.fields if s.draft and s.draft.fields else {}
-            raw_plate = fields.get("vehicle_no", {}).get("value")
+            fields = s.draft.fields if s.draft and isinstance(s.draft.fields, dict) else {}
+            raw_plate = _safe_field_val(fields, "vehicle_no") or _safe_field_val(fields, "vehicle_number")
             norm_plate = normalize_plate(raw_plate)
-            model = fields.get("car_model", {}).get("value") or ""
-            vtype = fields.get("vehicle_type", {}).get("value") or ""
+            model = _safe_field_val(fields, "car_model")
+            vtype = _safe_field_val(fields, "vehicle_type")
             cat = _categorize_vehicle(vtype, model)
-            company = s.detected_company or fields.get("insurance_company", {}).get("value") or "Unknown"
-            q_no = fields.get("quotation_no", {}).get("value") or f"RL-{s.id[:8].upper()}"
-            pm_val = fields.get("total_amount", {}).get("value") or ""
+            company = s.detected_company or _safe_field_val(fields, "insurance_company") or "Unknown"
+            q_no = _safe_field_val(fields, "quotation_no") or f"RL-{s.id[:8].upper()}"
+            pm_val = _safe_field_val(fields, "total_amount")
             pm_num = _parse_money(pm_val)
             st = (s.quotation_status or "pending").lower()
 
