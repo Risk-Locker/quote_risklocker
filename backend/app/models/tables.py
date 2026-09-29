@@ -231,13 +231,81 @@ class Session(Base, TimestampMixin):
     coverage_start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     coverage_end_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"), index=True)
+    tenure_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_tenures.id", ondelete="SET NULL"), nullable=True, index=True)
+    tenure_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
+    is_tenure_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
     owner: Mapped[User] = relationship(foreign_keys=[owner_id])
     last_edited_by: Mapped[User | None] = relationship(foreign_keys=[last_edited_by_id])
     uploaded_file: Mapped[UploadedFile] = relationship()
     draft: Mapped[QuotationDraft] = relationship()
     tracked_vehicle: Mapped["TrackedVehicle | None"] = relationship(back_populates="sessions")
+    tenure: Mapped["InsuranceTenure | None"] = relationship(back_populates="sessions")
     activities: Mapped[list["QuotationActivity"]] = relationship(back_populates="session", cascade="all, delete-orphan")
+
+
+class InsuranceTenure(Base, TimestampMixin):
+    __tablename__ = "insurance_tenures"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    tracked_vehicle_id: Mapped[str] = mapped_column(ForeignKey("tracked_vehicles.id", ondelete="CASCADE"), nullable=False, index=True)
+    ownership_id: Mapped[str | None] = mapped_column(ForeignKey("vehicle_ownerships.id", ondelete="SET NULL"), nullable=True)
+    vehicle_no: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    customer_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    coverage_start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    coverage_end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expiry_month: Mapped[str] = mapped_column(String(7), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="draft", index=True)
+    winning_company_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_companies.id", ondelete="SET NULL"), nullable=True)
+    winning_quotation_ref: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    won_premium: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    miss_reason: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    road_tax: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0.00, server_default=text("0.00"))
+    runner_fee: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0.00, server_default=text("0.00"))
+    windscreen_target: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    ncd_percentage: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    recommended_sum_insured_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    tracked_vehicle: Mapped["TrackedVehicle"] = relationship(back_populates="tenures")
+    ownership: Mapped["VehicleOwnership | None"] = relationship()
+    winning_company: Mapped["InsuranceCompany | None"] = relationship()
+    sessions: Mapped[list["Session"]] = relationship(back_populates="tenure")
+    comparison_entries: Mapped[list["TenureComparisonEntry"]] = relationship(back_populates="tenure", cascade="all, delete-orphan")
+
+
+class TenureComparisonEntry(Base, TimestampMixin):
+    __tablename__ = "tenure_comparison_entries"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    tenure_id: Mapped[str] = mapped_column(ForeignKey("insurance_tenures.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_id: Mapped[str | None] = mapped_column(ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True, index=True)
+    company_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    company_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_companies.id", ondelete="SET NULL"), nullable=True)
+    sum_insured: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0.00, server_default=text("0.00"))
+    valuation_type: Mapped[str] = mapped_column(String(20), nullable=False, default="market_value", server_default=text("'market_value'"))
+    motor_premium: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0.00, server_default=text("0.00"))
+    road_tax: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0.00, server_default=text("0.00"))
+    runner_fee: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0.00, server_default=text("0.00"))
+    total_payable: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0.00, server_default=text("0.00"))
+    towing_limit: Mapped[str] = mapped_column(String(100), nullable=False, default="Unlimited", server_default=text("'Unlimited'"))
+    agreed_value: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    waiver_betterment: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    excess: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0.00, server_default=text("0.00"))
+    rate_percentage: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
+    windscreen_sum_insured: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    special_perils: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    llp_llop: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    personal_accident: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    is_recommended: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    is_manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    tenure: Mapped["InsuranceTenure"] = relationship(back_populates="comparison_entries")
+    session: Mapped["Session | None"] = relationship()
+    company: Mapped["InsuranceCompany | None"] = relationship()
 
 
 class TrackedVehicle(Base, TimestampMixin):
@@ -252,7 +320,11 @@ class TrackedVehicle(Base, TimestampMixin):
     ownerships: Mapped[list["VehicleOwnership"]] = relationship(
         back_populates="vehicle", cascade="all, delete-orphan", order_by="VehicleOwnership.sequence_order.asc()"
     )
+    tenures: Mapped[list["InsuranceTenure"]] = relationship(
+        back_populates="tracked_vehicle", cascade="all, delete-orphan", order_by="InsuranceTenure.coverage_start_date.desc()"
+    )
     sessions: Mapped[list["Session"]] = relationship(back_populates="tracked_vehicle")
+
 
     @property
     def current_owner(self) -> VehicleOwnership | None:

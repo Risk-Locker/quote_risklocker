@@ -14,7 +14,7 @@ from app.core.errors import AppError
 from app.extraction.company_resolution import build_companies_payload
 from app.extraction.sandbox import extract_with_limits
 from app.models.enums import AccountStatus, RecordStatus, StorageStatus
-from app.models.tables import AppSetting, Batch, BenefitConcept, CompanyAlias, DraftSourceLineDecision, ExtractionBenefitLine, ExtractionRecord, FieldAlias, InsuranceCompany, QuotationDraft, UploadedFile, VehicleBrand, VehicleModel, new_id
+from app.models.tables import AppSetting, Batch, BenefitConcept, CompanyAlias, DraftSourceLineDecision, ExtractionBenefitLine, ExtractionRecord, FieldAlias, InsuranceCompany, InsuranceTenure, QuotationDraft, UploadedFile, VehicleBrand, VehicleModel, new_id
 from app.services.catalog_review_service import auto_apply_extracted_benefits, initialize_catalog_review, pin_catalog_context, seed_base_benefits
 from app.services.document_security import quarantined_pdf
 from app.services.file_validation import display_filename, validate_upload_bytes
@@ -209,6 +209,64 @@ def _persist_upload(
                     curr_opts["owner_change_alert"] = owner_alert
                     draft.display_options = curr_opts
 
+                # Insurance Tenure Foundation & Zero-Change Deduplication
+                from app.services.insurance_tenure_service import (
+                    compute_quotation_content_hash,
+                    evaluate_tenure_ingestion,
+                    resolve_or_create_tenure,
+                )
+
+                cover_start = fields_dict.get("cover_start_date", {}).get("value") or fields_dict.get("issue_date", {}).get("value")
+                cover_end = fields_dict.get("cover_end_date", {}).get("value") or valid_until
+
+                tenure = None
+                if session.tenure_id:
+                    tenure = db.get(InsuranceTenure, session.tenure_id)
+                if not tenure:
+                    tenure = resolve_or_create_tenure(
+                        db=db,
+                        vehicle_no=norm_plate,
+                        customer_name=customer,
+                        start_date=cover_start,
+                        end_date=cover_end,
+                        tracked_vehicle_id=veh.id if veh else None,
+                    )
+                session.tenure_id = tenure.id
+                session.coverage_start_date = tenure.coverage_start_date
+                session.coverage_end_date = tenure.coverage_end_date
+
+                content_hash = compute_quotation_content_hash(
+                    fields=fields_dict,
+                    benefits=draft_data.get("benefits"),
+                )
+                session.content_hash = content_hash
+
+                action, existing_sess, version = evaluate_tenure_ingestion(
+                    db=db,
+                    tenure_id=tenure.id,
+                    company_name=session.detected_company,
+                    company_id=draft.company_id,
+                    content_hash=content_hash,
+                )
+
+                curr_opts = draft.display_options or {}
+                if action == "SKIP_IDENTICAL" and existing_sess:
+                    # 100% identical quote already recorded in this tenure -> auto-skip duplicate
+                    session.status = "trash"  # soft-delete the redundant session
+                    session.is_tenure_active = False
+                    session.tenure_version = existing_sess.tenure_version
+                    curr_opts["duplicate_skipped"] = True
+                    curr_opts["original_session_id"] = existing_sess.id
+                    curr_opts["skip_message"] = (
+                        f"Identical quote for {session.detected_company or 'this insurer'} already active in this tenure (v{existing_sess.tenure_version})."
+                    )
+                else:
+                    session.tenure_version = version
+                    session.is_tenure_active = True
+                    if version > 1:
+                        curr_opts["tenure_version_notice"] = f"Created revised version v{version} under {session.detected_company or 'insurer'}."
+                draft.display_options = curr_opts
+
             # Log initial upload scan activity
             log_quotation_activity(
                 db=db,
@@ -219,6 +277,7 @@ def _persist_upload(
                 summary=f"Scanned quotation for {norm_plate or 'vehicle'}" + (f" ({customer})" if customer else ""),
                 status="pending",
             )
+
 
 
 async def create_batch_from_uploads(

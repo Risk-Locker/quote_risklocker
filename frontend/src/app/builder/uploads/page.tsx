@@ -64,7 +64,7 @@ export default function BuilderUploadsPage() {
 
   return (
     <AppShell>
-      <section className="grid max-w-4xl gap-6">
+      <section className="grid w-full gap-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="font-[var(--font-manrope)] text-[30px] font-bold text-[var(--rl-text-strong)]">

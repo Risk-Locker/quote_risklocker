@@ -1176,7 +1176,7 @@ def business_catalog_offering_save(
             db,
             user,
             catalog_id,
-            payload.model_dump(mode="json", exclude_none=True),
+            payload.model_dump(mode="json", exclude_unset=True),
         )
     }
 

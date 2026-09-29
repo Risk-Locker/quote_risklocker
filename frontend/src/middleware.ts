@@ -13,6 +13,9 @@ export function middleware(request: NextRequest) {
   }
 
   // Instant redirects for template builder sub-tabs
+  if (pathname === "/builder" || pathname === "/builder/") {
+    return NextResponse.redirect(new URL("/builder/templates/quotation-templates", request.url));
+  }
   if (pathname === "/builder/templates" || pathname === "/builder/templates/") {
     const target = searchParams.get("tab") === "benefits"
       ? "/builder/templates/benefit-templates"

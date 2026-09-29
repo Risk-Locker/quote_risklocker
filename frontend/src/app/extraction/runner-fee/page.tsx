@@ -60,7 +60,7 @@ export default function RunnerFeePage() {
 
   return (
     <AppShell>
-      <section className="grid gap-6 max-w-4xl">
+      <section className="grid gap-6 w-full">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-[30px] font-bold text-[var(--rl-text-strong)] font-[var(--font-manrope)]">

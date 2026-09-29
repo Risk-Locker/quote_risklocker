@@ -790,7 +790,7 @@ export default function GlobalBenefitsPage() {
 
   return (
     <AppShell>
-      <section className="grid gap-5 max-w-6xl mx-auto pb-16">
+      <section className="grid gap-5 w-full pb-16">
         <header>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>

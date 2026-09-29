@@ -338,7 +338,7 @@ export default function CompanyDetectionPage() {
 
   return (
     <AppShell>
-      <section className="grid gap-6 max-w-6xl mx-auto pb-24 relative">
+      <section className="grid gap-6 w-full pb-24 relative">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--rl-red)]">
@@ -416,7 +416,7 @@ export default function CompanyDetectionPage() {
         {loading ? (
           <PageLoading />
         ) : filteredCompanies.length > 0 ? (
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
             {filteredCompanies.map((company) => {
               const companyAliases = aliasesByCompany.get(company.id) || [];
               const isAdding = addingForCompany === company.id;

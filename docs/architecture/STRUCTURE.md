@@ -349,6 +349,27 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 
 
 
+## Insurance Tenure & Timeline Foundation (Phase 1)
+
+- Migration: `migrations/057_insurance_tenures.sql` (`insurance_tenures` table, `sessions.tenure_id`, `sessions.tenure_version`, `sessions.is_tenure_active`, `sessions.content_hash`).
+- Models: `InsuranceTenure` entity and updated `Session` & `TrackedVehicle` in `backend/app/models/tables.py`.
+- Services: `backend/app/services/insurance_tenure_service.py` (tenure resolution, 0-change hash calculation, version progression, timeline compilation, and status updates).
+- API Router: `backend/app/api/routers/tenures.py` (`GET /api/tenures`, `GET /api/tenures/months`, `GET /api/tenures/{id}`, `POST /api/tenures/{id}/generate-quote`, `POST /api/tenures/{id}/status`).
+- Frontend: `frontend/src/components/tenures/tenure-timeline-ledger.tsx` (monthly expiry ledger tabs and filterable table), `frontend/src/components/tenures/tenure-timeline-drawer.tsx` (interactive 5-phase lifecycle drawer).
+- Intake Integration: Wired into `backend/app/services/upload_service.py` and `backend/app/services/workspace_snapshot_service.py`.
+- Cleanup Command: `commands/clean-legacy-sessions-to-tenures.py` (prunes redundant duplicate test sessions, links active sessions to tenures).
+- Tests: `tests/test_insurance_tenure.py` (5 hermetic tests), `tests/test_tenure_api.py` (2 hermetic tests).
+
+## Marketing Comparison & Excel Parity (Phase 2)
+
+- Migration: `migrations/058_marketing_comparison.sql` (`tenure_comparison_entries` table, fixed charges `road_tax`, `runner_fee`, `windscreen_target`, `ncd_percentage`, `recommended_sum_insured_json` on `insurance_tenures`).
+- Models: `TenureComparisonEntry` entity and updated `InsuranceTenure` in `backend/app/models/tables.py`.
+- Services: `backend/app/services/marketing_comparison_service.py` (3-pane comparison compilation, session auto-hydration, fixed costs propagation, rate % calculation, manual quote sourcing, winner handoff, and WhatsApp teaser formatting).
+- API Router: `backend/app/api/routers/comparison.py` (`GET /api/comparison/{id}`, `POST /api/comparison/{id}/fixed-costs`, `POST /api/comparison/{id}/entry`, `DELETE /api/comparison/{id}/entry/{id}`, `POST /api/comparison/{id}/winner`, `GET /api/comparison/{id}/whatsapp-teaser`).
+- Frontend: `frontend/src/app/comparison/page.tsx` (dedicated wide workspace with quick tenure switching), `frontend/src/components/comparison/comparison-matrix.tsx` (3-pane Excel layout with brand banners, financial highlights, feature rows, and previous policy card), `frontend/src/components/comparison/manual-quote-modal.tsx` (manual quote entry modal).
+- Drawer Integration: Added 1-click "Marketing Comparison" button in `tenure-timeline-drawer.tsx`.
+- Tests: `tests/test_marketing_comparison.py` (5 hermetic tests), `tests/test_comparison_api.py` (CRUD & teaser API tests).
+
 - Start every repository task at [START-HERE.md](START-HERE.md).
 - Use [PROJECT-DIAGRAM.md](PROJECT-DIAGRAM.md) for the complete visual workflow and system overview.
 - Use [generated/CODEBASE-MAP.md](generated/CODEBASE-MAP.md) to locate routes, symbols, migrations, tests, and commands.

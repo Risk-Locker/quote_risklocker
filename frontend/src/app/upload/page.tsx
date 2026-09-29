@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import type { Route } from "next";
 import {
   ArrowSquareOut,
   CheckCircle,
   CircleNotch,
   ClockCountdown,
+  Columns,
   Files,
   FileText,
   Flask,
@@ -59,6 +62,7 @@ interface BulkFileItem {
   phase?: string;
   sessionId?: string;
   jobId?: string;
+  tenureId?: string;
   plate?: string;
   insurer?: string;
   premium?: string | number;
@@ -89,11 +93,22 @@ function formatElapsed(seconds: number) {
   return minutes ? `${minutes}m ${remainder.toString().padStart(2, "0")}s` : `${remainder}s`;
 }
 
-export default function UploadPage() {
+function UploadPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialMode = searchParams.get("mode");
 
-  // Mode state: 'single' (default) or 'bulk'
-  const [mode, setMode] = useState<"single" | "bulk">("single");
+  // Mode state: 'single' (default), 'comparison', or 'bulk'
+  const [mode, setMode] = useState<"single" | "comparison" | "bulk">(
+    initialMode === "comparison" ? "comparison" : initialMode === "bulk" ? "bulk" : "single"
+  );
+
+  useEffect(() => {
+    const m = searchParams.get("mode");
+    if (m === "comparison") setMode("comparison");
+    else if (m === "bulk") setMode("bulk");
+    else if (m === "single") setMode("single");
+  }, [searchParams]);
 
   // Single upload state (100% original workflow preserved)
   const [file, setFile] = useState<File | null>(null);
@@ -118,7 +133,7 @@ export default function UploadPage() {
   const [bulkNotice, setBulkNotice] = useState("");
 
   const maximum = limits?.max_source_pdf_bytes || limits?.max_upload_bytes || 20 * 1024 * 1024;
-  const maxBulkLimit = limits?.max_bulk_upload_files || 10;
+  const maxBulkLimit = mode === "comparison" ? 5 : (limits?.max_bulk_upload_files || 10);
   const gemini = limits?.gemini;
 
   useEffect(() => {
@@ -475,6 +490,7 @@ export default function UploadPage() {
                 detected_company?: string;
                 total_premium?: string | number;
                 quotation_ref?: string;
+                tenure_id?: string;
               };
             }>(`/sessions/${sessionId}`);
 
@@ -486,6 +502,7 @@ export default function UploadPage() {
                       status: "completed",
                       progress: 100,
                       plate: sRes.session.vehicle_plate || undefined,
+                      tenureId: sRes.session.tenure_id || undefined,
                       insurer: sRes.session.detected_company || undefined,
                       premium: sRes.session.total_premium || undefined,
                       ref: sRes.session.quotation_ref || undefined,
@@ -557,15 +574,23 @@ export default function UploadPage() {
 
   return (
     <AppShell>
-      <div className="grid max-w-4xl mx-auto gap-6">
+      <div className="grid w-full max-w-6xl xl:max-w-7xl 2xl:max-w-[1600px] mx-auto gap-6">
         <header>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h1 className="font-[var(--font-manrope)] text-[26px] font-bold text-[var(--rl-text-strong)]">
-                Upload Quotation
+                {mode === "comparison"
+                  ? "Marketing Comparison Intake"
+                  : mode === "bulk"
+                  ? "Corporate Fleet Upload"
+                  : "Upload Quotation"}
               </h1>
               <p className="mt-1 text-[14px] text-[var(--rl-text-muted)]">
-                Upload insurer quotation PDFs. Risklocker AI auto-extracts vehicle details, rates, and benefits.
+                {mode === "comparison"
+                  ? "Upload 2 to 5 insurer quotation PDFs for the same vehicle (e.g. Etiqa, Berjaya Sompo, AmAssurance). Risklocker AI compiles your side-by-side comparison matrix."
+                  : mode === "bulk"
+                  ? "Batch intake for up to 10 quotation PDFs across multiple vehicles."
+                  : "Upload an insurer quotation PDF. Risklocker AI auto-extracts vehicle details, rates, and benefits to review and issue a final branded PDF."}
               </p>
             </div>
 
@@ -581,7 +606,22 @@ export default function UploadPage() {
                 }`}
               >
                 <FileText size={15} weight={mode === "single" ? "bold" : "regular"} />
-                Single Upload
+                Single Quote
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("comparison")}
+                className={`flex items-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-semibold transition-all ${
+                  mode === "comparison"
+                    ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
+                    : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                }`}
+              >
+                <Columns size={15} weight={mode === "comparison" ? "bold" : "regular"} />
+                Marketing Comparison
+                <span className="rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-bold text-[var(--rl-text-muted)]">
+                  2–5 Quotes
+                </span>
               </button>
               <button
                 type="button"
@@ -593,9 +633,9 @@ export default function UploadPage() {
                 }`}
               >
                 <Files size={15} weight={mode === "bulk" ? "bold" : "regular"} />
-                Bulk Upload
+                Corporate Fleet
                 <span className="rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-bold text-[var(--rl-text-muted)]">
-                  Up to {maxBulkLimit}
+                  Up to 10
                 </span>
               </button>
             </div>
@@ -857,11 +897,58 @@ export default function UploadPage() {
         )}
 
         {/* ================================================================== */}
-        {/* MODE 2: BULK UPLOAD                                                */}
+        {/* MODE 2: MULTI-QUOTE COMPARISON OR BULK UPLOAD                       */}
         {/* ================================================================== */}
-        {mode === "bulk" && (
+        {(mode === "bulk" || mode === "comparison") && (
           <div className="grid gap-5">
-            {/* Bulk Dropzone (only shown before/during staging if below limit) */}
+            {/* Direct Link to Comparison Workspace if quotes already known */}
+            {mode === "comparison" && (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-3.5 flex items-center justify-between gap-3 text-xs">
+                <span className="text-slate-600 dark:text-slate-300">
+                  Already have portal figures without PDFs? You can enter them manually directly in the matrix.
+                </span>
+                <Link
+                  href={"/comparison" as Route}
+                  className="font-bold text-slate-900 dark:text-white underline hover:no-underline shrink-0"
+                >
+                  Open Comparison Workspace →
+                </Link>
+              </div>
+            )}
+
+            {/* Test Upload Option for Comparison & Bulk */}
+            <div className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white p-3.5 flex items-center justify-between gap-3 shadow-xs">
+              <label className="flex items-center gap-3 cursor-pointer flex-1 min-w-0">
+                <input
+                  className="h-4 w-4 accent-amber-600 rounded shrink-0 cursor-pointer"
+                  type="checkbox"
+                  checked={isTestUpload}
+                  disabled={bulkProcessing}
+                  onChange={(event) => setIsTestUpload(event.target.checked)}
+                />
+                <div>
+                  <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--rl-text-strong)]">
+                    <Flask
+                      aria-hidden="true"
+                      size={15}
+                      weight="bold"
+                      className="text-amber-600"
+                    />
+                    Test Sandbox Mode (Excluded from Customer Records &amp; Analytics)
+                  </span>
+                  <p className="text-xs text-[var(--rl-text-muted)]">
+                    {mode === "comparison"
+                      ? "Uploaded quotes will compile into comparison matrix for testing without contaminating live DB metrics."
+                      : "Saves sessions for preview and batch testing without recording to Hit & Miss analytics or live records."}
+                  </p>
+                </div>
+              </label>
+              <span className="rounded bg-amber-100 text-amber-900 text-[11px] font-bold px-2 py-0.5 border border-amber-300 shrink-0 uppercase tracking-wider">
+                Test / Sandbox
+              </span>
+            </div>
+
+            {/* Bulk / Comparison Dropzone */}
             {!bulkProcessing && bulkFiles.length < maxBulkLimit && (
               <Card className="p-6 border border-[var(--rl-border)] shadow-xs">
                 <label
@@ -877,14 +964,22 @@ export default function UploadPage() {
                 >
                   <span className="grid justify-items-center gap-3 pointer-events-none">
                     <span className="grid size-12 place-items-center rounded-[var(--rl-radius)] bg-[var(--rl-black)]/6 text-[var(--rl-text-strong)]">
-                      <Files aria-hidden="true" size={24} weight="bold" />
+                      {mode === "comparison" ? (
+                        <Columns aria-hidden="true" size={24} weight="bold" />
+                      ) : (
+                        <Files aria-hidden="true" size={24} weight="bold" />
+                      )}
                     </span>
                     <div>
                       <span className="font-[var(--font-manrope)] text-[15px] font-semibold text-[var(--rl-text-strong)] block">
-                        Drag and drop multiple quotation PDFs here
+                        {mode === "comparison"
+                          ? "Drag and drop 2 to 5 quotation PDFs for this vehicle"
+                          : "Drag and drop multiple quotation PDFs here"}
                       </span>
                       <span className="text-[13px] text-[var(--rl-text-muted)] block mt-0.5">
-                        Upload up to {maxBulkLimit} PDFs at once · Up to {formatBytes(maximum)} each
+                        {mode === "comparison"
+                          ? "Upload quotes from different underwriters (Etiqa, Berjaya Sompo, AmAssurance, etc.) · Up to 5 files"
+                          : `Upload up to ${maxBulkLimit} PDFs at once · Up to ${formatBytes(maximum)} each`}
                       </span>
                     </div>
                   </span>
@@ -1145,6 +1240,24 @@ export default function UploadPage() {
                   {/* Post-completion actions */}
                   {isAnyBulkComplete && (
                     <div className="flex flex-wrap items-center gap-2">
+                      {mode === "comparison" && (
+                        <Button
+                          type="button"
+                          onClick={() => {
+                            const tId = bulkFiles.find((f) => f.tenureId)?.tenureId;
+                            if (tId) {
+                              router.push(`/comparison?tenure_id=${tId}` as Route);
+                            } else {
+                              router.push("/comparison" as Route);
+                            }
+                          }}
+                          className="bg-[#1b1717] hover:bg-black text-white font-semibold gap-2 text-xs shadow-xs min-h-[36px] px-4"
+                        >
+                          <Columns size={16} weight="bold" />
+                          Open Marketing Comparison Matrix →
+                        </Button>
+                      )}
+
                       <Button
                         type="button"
                         onClick={openAllInNewTabs}
@@ -1192,5 +1305,19 @@ export default function UploadPage() {
         )}
       </div>
     </AppShell>
+  );
+}
+
+export default function UploadPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-96 items-center justify-center">
+          <CircleNotch className="size-8 animate-spin text-slate-400" />
+        </div>
+      }
+    >
+      <UploadPageContent />
+    </Suspense>
   );
 }

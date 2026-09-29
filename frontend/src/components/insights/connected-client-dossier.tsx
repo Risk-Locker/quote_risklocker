@@ -19,16 +19,27 @@ import {
   DownloadSimple,
   FilePdf,
   Table,
+  IdentificationCard,
+  Phone,
+  EnvelopeSimple,
+  MapPin,
+  Wrench,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { api, apiRaw } from "@/lib/api";
 import { useToast } from "@/components/ui/toast";
+import { decodeMalaysianIC } from "@/lib/mykad";
 
 interface ConnectedVehicle {
   vehicle_no: string;
   model: string;
   is_current?: boolean;
   is_pending_verification?: boolean;
+  engine_cc?: string;
+  engine_no?: string;
+  chassis_no?: string;
+  year_of_manufacture?: string;
+  seating_capacity?: string;
 }
 
 interface ConnectedQuotation {
@@ -42,6 +53,26 @@ interface ConnectedQuotation {
   status: string;
   miss_reason?: string | null;
   closed_at?: string | null;
+  pdf_download_url?: string;
+}
+
+interface ClientTenure {
+  tenure_id?: string | null;
+  vehicle_no: string;
+  car_model?: string;
+  coverage_start_date?: string | null;
+  coverage_end_date?: string | null;
+  coverage_period: string;
+  expiry_month?: string | null;
+  status: string;
+  quotes: ConnectedQuotation[];
+}
+
+interface ClientProfile {
+  ic_or_brn?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
 }
 
 interface FleetBreakdown {
@@ -57,9 +88,12 @@ interface ClientDossier {
   customer_name: string;
   is_corporate?: boolean;
   client_type?: string;
+  brn?: string | null;
+  profile?: ClientProfile;
   fleet_breakdown?: FleetBreakdown;
   connected_vehicles: ConnectedVehicle[];
   quotations: ConnectedQuotation[];
+  tenures?: ClientTenure[];
   stats: {
     total_quotations: number;
     hits: number;
@@ -91,15 +125,19 @@ interface ClientDossierResponse {
 
 export function ConnectedClientDossier({
   onOpenVehicleHistory,
+  fixedClientType,
 }: {
   onOpenVehicleHistory: (vehicleNo: string) => void;
+  fixedClientType?: "Company" | "Individual";
 }) {
   const { toast } = useToast();
   const [data, setData] = useState<ClientDossierResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [clientTypeFilter, setClientTypeFilter] = useState<"all" | "Company" | "Individual">("all");
+  const [clientTypeFilter, setClientTypeFilter] = useState<"all" | "Company" | "Individual">(
+    fixedClientType || "all"
+  );
   const [page, setPage] = useState(1);
   const [expandedClient, setExpandedClient] = useState<string | null>(null);
   const [downloadingClientZip, setDownloadingClientZip] = useState<string | null>(null);
@@ -204,15 +242,33 @@ export function ConnectedClientDossier({
       <div className="bg-white border border-neutral-200/90 rounded-lg p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-sm font-bold text-neutral-900 tracking-tight flex items-center gap-2">
-            <Users size={17} className="text-[#1b1717]" />
-            <span>Connected Client Records &amp; Vehicle Details</span>
+            {fixedClientType === "Company" ? (
+              <>
+                <Buildings size={17} className="text-[#1b1717]" />
+                <span>Corporate Fleet Portfolio &amp; Multi-Quote Ledger</span>
+              </>
+            ) : fixedClientType === "Individual" ? (
+              <>
+                <Users size={17} className="text-[#1b1717]" />
+                <span>Retail Client Records &amp; Policy Tenures</span>
+              </>
+            ) : (
+              <>
+                <Users size={17} className="text-[#1b1717]" />
+                <span>Connected Client Records &amp; Vehicle Details</span>
+              </>
+            )}
           </h2>
           <p className="text-xs text-neutral-500">
-            Intelligent CRM linking clients, sequential vehicle ownerships, past quotations, and hit/miss conversion.
+            {fixedClientType === "Company"
+              ? "Dedicated corporate fleet management for companies with multi-vehicle fleets under a single company PIC."
+              : fixedClientType === "Individual"
+              ? "Individual customer dossiers, personal vehicle tenures, and underwriter comparison history."
+              : "Intelligent CRM linking clients, sequential vehicle ownerships, past quotations, and hit/miss conversion."}
           </p>
         </div>
 
-        <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
+        <form onSubmit={handleSearchSubmit} className="flex items-center gap-2 flex-wrap">
           <div className="relative">
             <MagnifyingGlass size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400" />
             <input
@@ -238,18 +294,20 @@ export function ConnectedClientDossier({
             <option value="pending">Pending Only</option>
           </select>
 
-          <select
-            value={clientTypeFilter}
-            onChange={(e) => {
-              setClientTypeFilter(e.target.value as any);
-              setPage(1);
-            }}
-            className="text-xs h-8 border border-neutral-200 rounded-md px-2 bg-white text-neutral-800 font-medium"
-          >
-            <option value="all">All Account Types</option>
-            <option value="Company">🏢 Corporate Fleets</option>
-            <option value="Individual">👤 Private Individuals</option>
-          </select>
+          {!fixedClientType && (
+            <select
+              value={clientTypeFilter}
+              onChange={(e) => {
+                setClientTypeFilter(e.target.value as any);
+                setPage(1);
+              }}
+              className="text-xs h-8 border border-neutral-200 rounded-md px-2 bg-white text-neutral-800 font-medium"
+            >
+              <option value="all">All Account Types</option>
+              <option value="Company">🏢 Corporate Fleets</option>
+              <option value="Individual">👤 Private Individuals</option>
+            </select>
+          )}
 
           <Button
             type="submit"
@@ -470,13 +528,103 @@ export function ConnectedClientDossier({
                   </div>
                 </div>
 
-                {/* Collapsible Quotations Table */}
+                {/* Collapsible Customer Dossier, Vehicles & Tenures */}
                 {isExpanded && (
-                  <div className="border-t border-neutral-200 bg-neutral-50/50 p-4 space-y-3">
-                    <div className="text-xs font-semibold text-neutral-700 flex flex-wrap items-center justify-between gap-2">
+                  <div className="border-t border-neutral-200 bg-neutral-50/50 p-4 space-y-4">
+                    {/* Customer & Contact Dossier Strip */}
+                    <div className="bg-white border border-[#e5e5ea] rounded-[var(--rl-radius-sm)] p-3 shadow-2xs">
+                      <div className="text-[11px] font-bold text-[#8e8e93] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                        <IdentificationCard size={14} className="text-[#1b1717]" />
+                        <span>Customer Profile &amp; Contact Details</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                        <div>
+                          <div className="text-[10px] text-[#8e8e93] font-medium">Customer Name</div>
+                          <div className="font-semibold text-[#1b1717]">{client.customer_name}</div>
+                        </div>
+
+                        <div>
+                          <div className="text-[10px] text-[#8e8e93] font-medium">IC / BRN No.</div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-mono font-semibold text-[#1b1717]">
+                              {client.profile?.ic_or_brn || client.brn || "—"}
+                            </span>
+                            {(() => {
+                              const icVal = client.profile?.ic_or_brn || client.brn;
+                              const decoded = decodeMalaysianIC(icVal);
+                              if (decoded.isValid && decoded.formattedDob) {
+                                return (
+                                  <span className="inline-flex items-center px-1.5 py-0.2 rounded-[var(--rl-radius-sm)] text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200/70">
+                                    DOB: {decoded.formattedDob} (Age {decoded.age})
+                                  </span>
+                                );
+                              }
+                              return null;
+                            })()}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-[10px] text-[#8e8e93] font-medium">Contact Phone</div>
+                          <div className="font-medium text-[#454545] flex items-center gap-1">
+                            <Phone size={12} className="text-[#8e8e93]" />
+                            <span>{client.profile?.phone || "—"}</span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-[10px] text-[#8e8e93] font-medium">Address / Location</div>
+                          <div className="font-medium text-[#454545] flex items-center gap-1 truncate" title={client.profile?.address || ""}>
+                            <MapPin size={12} className="text-[#8e8e93] shrink-0" />
+                            <span className="truncate">{client.profile?.address || "—"}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Connected Vehicles Mechanical Dossier */}
+                    {client.connected_vehicles.length > 0 && (
+                      <div className="bg-white border border-[#e5e5ea] rounded-[var(--rl-radius-sm)] p-3 shadow-2xs">
+                        <div className="text-[11px] font-bold text-[#8e8e93] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                          <Car size={14} className="text-[#1b1717]" />
+                          <span>Connected Vehicles Mechanical Dossier ({client.connected_vehicles.length})</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                          {client.connected_vehicles.map((v) => (
+                            <div
+                              key={v.vehicle_no}
+                              className="border border-[#e5e5ea] rounded-[var(--rl-radius-sm)] p-2.5 bg-[#f5f5f7]/60 text-xs space-y-1.5"
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-mono font-bold text-[#1b1717] flex items-center gap-1">
+                                  <Car size={13} className="text-[#6e6e73]" />
+                                  {v.vehicle_no}
+                                </span>
+                                <span className="text-[10px] font-semibold text-[#6e6e73] truncate max-w-[130px]">
+                                  {v.model || "—"}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] text-[#6e6e73] pt-1 border-t border-[#e5e5ea]/80">
+                                <div><span className="text-[#8e8e93]">CC:</span> <span className="font-medium text-[#1b1717]">{v.engine_cc ? `${v.engine_cc} cc` : "—"}</span></div>
+                                <div><span className="text-[#8e8e93]">YOM:</span> <span className="font-medium text-[#1b1717]">{v.year_of_manufacture || "—"}</span></div>
+                                <div className="truncate" title={v.engine_no}><span className="text-[#8e8e93]">Engine:</span> <span className="font-medium text-[#1b1717] font-mono text-[10px]">{v.engine_no || "—"}</span></div>
+                                <div className="truncate" title={v.chassis_no}><span className="text-[#8e8e93]">VIN:</span> <span className="font-medium text-[#1b1717] font-mono text-[10px]">{v.chassis_no || "—"}</span></div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Export Controls Bar */}
+                    <div className="text-xs font-semibold text-neutral-700 flex flex-wrap items-center justify-between gap-2 pt-1">
                       <div className="flex items-center gap-2">
-                        <span>Connected Quotations ({client.quotations.length})</span>
-                        <span className="text-[11px] text-neutral-400 font-normal">Click session to open workspace</span>
+                        <span className="font-bold text-[#1b1717]">
+                          Policy Tenures &amp; Sourced Quotes
+                        </span>
+                        <span className="text-[11px] text-neutral-400 font-normal">
+                          Max 7 deduplicated underwriter quotes per tenure (1 per insurer)
+                        </span>
                       </div>
 
                       {/* Quick 1-Click Fleet Export Actions */}
@@ -515,81 +663,229 @@ export function ConnectedClientDossier({
                       </div>
                     </div>
 
-                    <div className="bg-white border border-neutral-200 rounded-md overflow-hidden">
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-neutral-100 text-neutral-600 border-b border-neutral-200 font-semibold text-[11px]">
-                          <tr>
-                            <th className="p-2.5">Quotation Ref</th>
-                            <th className="p-2.5">Date</th>
-                            <th className="p-2.5">Vehicle</th>
-                            <th className="p-2.5">Insurer</th>
-                            <th className="p-2.5">Premium</th>
-                            <th className="p-2.5">Status</th>
-                            <th className="p-2.5 text-right">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-neutral-100">
-                          {client.quotations.map((q) => {
-                            const isHit = q.status === "hit";
-                            const isMiss = q.status === "miss";
+                    {/* Tenures List (Grouped Strictly by Tenure) */}
+                    {client.tenures && client.tenures.length > 0 ? (
+                      <div className="space-y-3">
+                        {client.tenures.map((tenure, tIdx) => {
+                          const isComparing = tenure.status === "comparing";
+                          const isHit = tenure.status === "hit";
+                          const isMiss = tenure.status === "miss";
 
-                            return (
-                              <tr key={q.session_id} className="hover:bg-neutral-50/70 transition-colors">
-                                <td className="p-2.5 font-bold text-neutral-900">{q.quotation_number}</td>
-                                <td className="p-2.5 text-neutral-500">
-                                  {q.created_at ? new Date(q.created_at).toLocaleDateString() : "—"}
-                                </td>
-                                <td className="p-2.5 font-mono text-neutral-800 font-semibold">{q.vehicle_no}</td>
-                                <td className="p-2.5 text-neutral-700">{q.company}</td>
-                                <td className="p-2.5 font-semibold text-neutral-900">{q.gross_premium || "—"}</td>
-                                <td className="p-2.5">
+                          return (
+                            <div
+                              key={tenure.tenure_id || `tenure-${tIdx}`}
+                              className="bg-white border border-[#e5e5ea] rounded-[var(--rl-radius-sm)] overflow-hidden shadow-2xs"
+                            >
+                              {/* Tenure Header */}
+                              <div className="bg-[#f5f5f7]/80 px-3.5 py-2.5 border-b border-[#e5e5ea] flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-mono font-bold text-xs text-[#1b1717] bg-white px-2 py-0.5 rounded border border-[#e5e5ea]">
+                                    {tenure.vehicle_no}
+                                  </span>
+                                  {tenure.car_model && (
+                                    <span className="text-xs text-[#6e6e73] font-medium">{tenure.car_model}</span>
+                                  )}
+                                  <span className="text-xs text-[#1b1717] font-semibold flex items-center gap-1">
+                                    <Clock size={13} className="text-[#8e8e93]" />
+                                    Tenure: {tenure.coverage_period}
+                                  </span>
+                                  {tenure.expiry_month && (
+                                    <span className="text-[10px] font-medium text-[#6e6e73] bg-[#e5e5ea] px-1.5 py-0.2 rounded">
+                                      Exp: {tenure.expiry_month}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center gap-2">
                                   {isHit && (
-                                    <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                      <CheckCircle size={12} weight="bold" />
-                                      HIT
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                      <CheckCircle size={11} weight="bold" /> HIT
                                     </span>
                                   )}
                                   {isMiss && (
-                                    <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200">
-                                      <XCircle size={12} weight="bold" />
-                                      MISS {q.miss_reason ? `(${q.miss_reason})` : ""}
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200">
+                                      <XCircle size={11} weight="bold" /> MISS
                                     </span>
                                   )}
-                                  {!isHit && !isMiss && (
-                                    <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-neutral-100 text-neutral-700">
-                                      Pending
+                                  {isComparing && (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-200">
+                                      COMPARING
                                     </span>
                                   )}
-                                </td>
-                                <td className="p-2.5 text-right">
-                                  <div className="inline-flex items-center gap-1">
+                                  {!isHit && !isMiss && !isComparing && (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-neutral-100 text-neutral-700">
+                                      {tenure.status.toUpperCase()}
+                                    </span>
+                                  )}
+
+                                  {tenure.tenure_id && (
                                     <a
-                                      href={`/api/sessions/${q.session_id}/pdf`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      title="View / Download PDF"
-                                      className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-800 font-medium px-2 py-1 rounded border border-neutral-200 hover:bg-red-50 transition-colors"
+                                      href={`/comparison?tenure_id=${tenure.tenure_id}`}
+                                      className="inline-flex items-center gap-1 text-[11px] font-bold text-[#1b1717] hover:text-[#007aff] px-2 py-0.5 rounded bg-white border border-[#e5e5ea] shadow-2xs hover:bg-[#f5f5f7] transition-colors"
+                                      title="Open side-by-side marketing comparison for this tenure"
                                     >
-                                      <FilePdf size={13} weight="bold" />
-                                      PDF
+                                      <span>Comparison Ledger</span>
+                                      <ArrowSquareOut size={12} />
                                     </a>
-                                    <a
-                                      href={`/sessions/${q.session_id}`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1 text-xs text-neutral-700 hover:text-neutral-950 font-medium px-2 py-1 rounded border border-neutral-200 hover:bg-neutral-100 transition-colors"
-                                    >
-                                      <ArrowSquareOut size={13} />
-                                      Open
-                                    </a>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Quotes Table for this Tenure (Max 7 Insurers) */}
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-left text-xs">
+                                  <thead className="bg-[#f5f5f7]/40 text-[#6e6e73] border-b border-[#e5e5ea] font-semibold text-[11px]">
+                                    <tr>
+                                      <th className="p-2.5">Insurer Company</th>
+                                      <th className="p-2.5">Quotation Ref</th>
+                                      <th className="p-2.5">Gross Premium</th>
+                                      <th className="p-2.5">Status</th>
+                                      <th className="p-2.5 text-right">Action</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-[#f2f2f7]">
+                                    {tenure.quotes.map((q) => {
+                                      const qHit = q.status === "hit";
+                                      const qMiss = q.status === "miss";
+
+                                      return (
+                                        <tr key={q.session_id} className="hover:bg-[#f5f5f7]/50 transition-colors">
+                                          <td className="p-2.5 font-bold text-[#1b1717] flex items-center gap-1.5">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-[#1b1717]" />
+                                            {q.company}
+                                          </td>
+                                          <td className="p-2.5 text-[#454545] font-mono text-[11px]">
+                                            {q.quotation_number}
+                                          </td>
+                                          <td className="p-2.5 font-semibold text-[#1b1717]">
+                                            {q.gross_premium || "—"}
+                                          </td>
+                                          <td className="p-2.5">
+                                            {qHit && (
+                                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                                HIT
+                                              </span>
+                                            )}
+                                            {qMiss && (
+                                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-200">
+                                                MISS
+                                              </span>
+                                            )}
+                                            {!qHit && !qMiss && (
+                                              <span className="inline-flex items-center text-[10px] px-1.5 py-0.2 rounded bg-neutral-100 text-neutral-600">
+                                                Pending
+                                              </span>
+                                            )}
+                                          </td>
+                                          <td className="p-2.5 text-right">
+                                            <div className="inline-flex items-center gap-1">
+                                              <a
+                                                href={`/api/sessions/${q.session_id}/pdf`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                title="View Source Underwriter Quote PDF"
+                                                className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-800 font-medium px-2 py-0.5 rounded border border-[#e5e5ea] hover:bg-red-50 transition-colors cursor-pointer"
+                                              >
+                                                <FilePdf size={12} weight="bold" />
+                                                PDF
+                                              </a>
+                                              <a
+                                                href={`/sessions/${q.session_id}`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex items-center gap-1 text-xs text-[#454545] hover:text-[#1b1717] font-medium px-2 py-0.5 rounded border border-[#e5e5ea] hover:bg-neutral-100 transition-colors cursor-pointer"
+                                              >
+                                                <ArrowSquareOut size={12} />
+                                                Workspace
+                                              </a>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      /* Fallback flat table if no tenures returned */
+                      <div className="bg-white border border-neutral-200 rounded-md overflow-hidden">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-neutral-100 text-neutral-600 border-b border-neutral-200 font-semibold text-[11px]">
+                            <tr>
+                              <th className="p-2.5">Quotation Ref</th>
+                              <th className="p-2.5">Date</th>
+                              <th className="p-2.5">Vehicle</th>
+                              <th className="p-2.5">Insurer</th>
+                              <th className="p-2.5">Premium</th>
+                              <th className="p-2.5">Status</th>
+                              <th className="p-2.5 text-right">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-neutral-100">
+                            {client.quotations.map((q) => {
+                              const isHit = q.status === "hit";
+                              const isMiss = q.status === "miss";
+
+                              return (
+                                <tr key={q.session_id} className="hover:bg-neutral-50/70 transition-colors">
+                                  <td className="p-2.5 font-bold text-neutral-900">{q.quotation_number}</td>
+                                  <td className="p-2.5 text-neutral-500">
+                                    {q.created_at ? new Date(q.created_at).toLocaleDateString() : "—"}
+                                  </td>
+                                  <td className="p-2.5 font-mono text-neutral-800 font-semibold">{q.vehicle_no}</td>
+                                  <td className="p-2.5 text-neutral-700">{q.company}</td>
+                                  <td className="p-2.5 font-semibold text-neutral-900">{q.gross_premium || "—"}</td>
+                                  <td className="p-2.5">
+                                    {isHit && (
+                                      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                        <CheckCircle size={12} weight="bold" /> HIT
+                                      </span>
+                                    )}
+                                    {isMiss && (
+                                      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200">
+                                        <XCircle size={12} weight="bold" /> MISS {q.miss_reason ? `(${q.miss_reason})` : ""}
+                                      </span>
+                                    )}
+                                    {!isHit && !isMiss && (
+                                      <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-neutral-100 text-neutral-700">
+                                        Pending
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="p-2.5 text-right">
+                                    <div className="inline-flex items-center gap-1">
+                                      <a
+                                        href={`/api/sessions/${q.session_id}/pdf`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        title="View / Download PDF"
+                                        className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-800 font-medium px-2 py-1 rounded border border-neutral-200 hover:bg-red-50 transition-colors"
+                                      >
+                                        <FilePdf size={13} weight="bold" />
+                                        PDF
+                                      </a>
+                                      <a
+                                        href={`/sessions/${q.session_id}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 text-xs text-neutral-700 hover:text-neutral-950 font-medium px-2 py-1 rounded border border-neutral-200 hover:bg-neutral-100 transition-colors"
+                                      >
+                                        <ArrowSquareOut size={13} />
+                                        Open
+                                      </a>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

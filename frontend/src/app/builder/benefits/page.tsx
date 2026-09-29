@@ -127,6 +127,170 @@ function effectiveRole(offering: Offering): string {
   return offering.role || ROLE_FALLBACK[offering.offering_kind] || "included";
 }
 
+interface OfferingDescriptionEditorProps {
+  offering: Offering;
+  concept: Concept;
+  companyBaselineDesc: string | null;
+  onSave: (offering: Offering, newDesc: string) => void;
+  disabled?: boolean;
+}
+
+function OfferingDescriptionEditor({
+  offering,
+  concept,
+  companyBaselineDesc,
+  onSave,
+  disabled = false,
+}: OfferingDescriptionEditorProps) {
+  // Precedence: Tier Custom -> Company Baseline -> Global Default
+  const hasCustomOverride = Boolean(
+    offering.description_override && offering.description_override.trim().length > 0
+  );
+  const fallbackDesc = companyBaselineDesc || concept.description || "";
+  const serverDesc = hasCustomOverride ? (offering.description_override || "") : fallbackDesc;
+
+  const [text, setText] = useState<string>(serverDesc);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const textRef = useRef(text);
+  textRef.current = text;
+  const isDirtyRef = useRef(false);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Sync state if offering ID or server description changes externally while user is not editing
+  useEffect(() => {
+    if (!isDirtyRef.current) {
+      setText(serverDesc);
+      textRef.current = serverDesc;
+    }
+  }, [serverDesc, offering.id]);
+
+  const flushSave = useCallback(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    if (!isDirtyRef.current) return;
+    isDirtyRef.current = false;
+
+    const currentVal = textRef.current.trim();
+    const currentOfferingDesc = (offering.description_override || "").trim();
+
+    // If nothing changed compared to what is currently saved in offering, do nothing
+    if (currentVal === currentOfferingDesc) {
+      setSaveStatus("idle");
+      return;
+    }
+
+    setSaveStatus("saving");
+    // If text was cleared or equals the fallback, save empty string to reset the override
+    if (currentVal === "" || currentVal === fallbackDesc.trim()) {
+      onSave(offering, "");
+    } else {
+      onSave(offering, currentVal);
+    }
+    setTimeout(() => setSaveStatus("saved"), 300);
+    setTimeout(() => setSaveStatus("idle"), 2000);
+  }, [offering, fallbackDesc, onSave]);
+
+  // Window blur listener to ensure saving when switching tabs or windows
+  useEffect(() => {
+    const handleWindowBlur = () => {
+      if (isDirtyRef.current) {
+        flushSave();
+      }
+    };
+    window.addEventListener("blur", handleWindowBlur);
+    return () => {
+      window.removeEventListener("blur", handleWindowBlur);
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [flushSave]);
+
+  const handleChange = (newVal: string) => {
+    setText(newVal);
+    textRef.current = newVal;
+    isDirtyRef.current = true;
+    setSaveStatus("idle");
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      flushSave();
+    }, 600);
+  };
+
+  const handleReset = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    isDirtyRef.current = false;
+    setText(fallbackDesc);
+    textRef.current = fallbackDesc;
+    setSaveStatus("saving");
+    onSave(offering, "");
+    setTimeout(() => setSaveStatus("saved"), 300);
+    setTimeout(() => setSaveStatus("idle"), 2000);
+  };
+
+  return (
+    <div className="mt-2 pt-1.5 border-t border-[var(--rl-border)]/50 space-y-1" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center justify-between text-[10px]">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[var(--rl-text-muted)] font-medium">Description:</span>
+          {saveStatus === "saving" && (
+            <span className="text-[9px] text-[var(--rl-text-muted)] animate-pulse">saving...</span>
+          )}
+          {saveStatus === "saved" && (
+            <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-semibold">saved</span>
+          )}
+        </div>
+        {hasCustomOverride ? (
+          <div className="flex items-center gap-1">
+            <span className="rounded bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 px-1 py-0.2 text-[9.5px] font-semibold" title="Custom override for this tier">
+              Tier Custom
+            </span>
+            <button
+              type="button"
+              title="Reset to default description"
+              onClick={handleReset}
+              className="text-[var(--rl-text-muted)] hover:text-[var(--rl-red)] transition-colors p-0.5"
+            >
+              <ArrowCounterClockwise size={11} />
+            </button>
+          </div>
+        ) : companyBaselineDesc ? (
+          <span className="rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-1 py-0.2 text-[9.5px] font-semibold" title="Inherited from Tab 1 Company Baseline">
+            Company Baseline
+          </span>
+        ) : concept.description ? (
+          <span className="rounded bg-[var(--rl-bg)] border border-[var(--rl-border)] text-[var(--rl-text-muted)] px-1 py-0.2 text-[9.5px]">
+            Global Default
+          </span>
+        ) : (
+          <span className="text-[9.5px] text-[var(--rl-text-muted)] italic">
+            None
+          </span>
+        )}
+      </div>
+      <input
+        type="text"
+        value={text}
+        disabled={disabled}
+        onChange={(e) => handleChange(e.target.value)}
+        onBlur={flushSave}
+        className="w-full rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[10.5px] text-[var(--rl-text-strong)] placeholder:text-[var(--rl-text-muted)] placeholder:italic focus:outline-none focus:ring-1 focus:ring-[var(--rl-black)]"
+        placeholder={fallbackDesc || "Enter short description..."}
+        title="Short benefit description shown on quote cards"
+      />
+    </div>
+  );
+}
+
 let cachedReferenceData: {
   companies: Company[];
   segments: HierarchyItem[];
@@ -1298,7 +1462,7 @@ ${aiMarkdownTable}`;
       current_benefits: defaultOfferings.map((o) => ({
         label: o.label_override || o.concept?.label || o.offering_key,
         value: o.display_value || "Included",
-        description: (o.concept as any)?.description || "",
+        description: o.description_override || (o.concept_id ? baselineDescMap.get(o.concept_id) : null) || (o.concept as any)?.description || "",
         asset_id: o.concept?.default_asset?.id || null,
         concept_key: o.concept?.concept_key || "",
         is_detected: false,
@@ -1309,7 +1473,7 @@ ${aiMarkdownTable}`;
       available_addons: addonOfferings.map((o) => ({
         label: o.label_override || o.concept?.label || o.offering_key,
         value: o.display_value || "Optional",
-        description: (o.concept as any)?.description || "",
+        description: o.description_override || (o.concept_id ? baselineDescMap.get(o.concept_id) : null) || (o.concept as any)?.description || "",
         asset_id: o.concept?.default_asset?.id || null,
         concept_key: o.concept?.concept_key || "",
         is_detected: false,
@@ -1319,7 +1483,7 @@ ${aiMarkdownTable}`;
       })),
       displayOptions: (activeTemplate as any)?.config?.display_options || (activeTemplate?.fixed_fields as any)?.display_options || {},
     }),
-    [defaultOfferings, addonOfferings, activeTemplate]
+    [defaultOfferings, addonOfferings, activeTemplate, baselineDescMap]
   );
 
   const previewConceptAssets = useMemo(() => {
@@ -2358,9 +2522,9 @@ ${aiMarkdownTable}`;
                 <span className="font-bold text-[var(--rl-text-strong)]">
                   {selectedCatalog?.name || "Product Catalog"}
                 </span>
-                {catalogWorkspace?.active_revision && (
-                  <Badge variant={catalogWorkspace.active_revision.state === "published" ? "success" : "default"}>
-                    Rev {catalogWorkspace.active_revision.revision_number} ({catalogWorkspace.active_revision.state})
+                {catalogWorkspace?.catalog && (
+                  <Badge variant="success" className="font-semibold text-[10.5px]">
+                    Live Catalog
                   </Badge>
                 )}
               </div>
@@ -2678,55 +2842,14 @@ ${aiMarkdownTable}`;
 
                       {isActive ? (() => {
                         const companyBaselineDesc = offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null;
-                        const activeDesc = companyBaselineDesc || offering?.description_override || concept.description || "";
                         return (
-                        <div className="mt-2 pt-1.5 border-t border-[var(--rl-border)]/50 space-y-1" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center justify-between text-[10px]">
-                            <span className="text-[var(--rl-text-muted)] font-medium">Description:</span>
-                            {companyBaselineDesc ? (
-                              <span className="rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-1 py-0.2 text-[9.5px] font-semibold" title="Inherited from Tab 1 Company Baseline">
-                                Company Baseline
-                              </span>
-                            ) : offering?.description_override ? (
-                              <div className="flex items-center gap-1">
-                                <span className="rounded bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 px-1 py-0.2 text-[9.5px] font-semibold">
-                                  Catalog Custom
-                                </span>
-                                <button
-                                  type="button"
-                                  title="Reset to global default"
-                                  onClick={() => {
-                                    if (offering) updateOfferingDescriptionInline(offering, "");
-                                  }}
-                                  className="text-[var(--rl-text-muted)] hover:text-[var(--rl-red)] transition-colors p-0.5"
-                                >
-                                  <ArrowCounterClockwise size={11} />
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="rounded bg-[var(--rl-bg)] border border-[var(--rl-border)] text-[var(--rl-text-muted)] px-1 py-0.2 text-[9.5px]">
-                                Global Default
-                              </span>
-                            )}
-                          </div>
-                          <input
-                            type="text"
-                            defaultValue={activeDesc}
-                            key={`${offering?.id}-${activeDesc}`}
-                            onBlur={(e) => {
-                              if (offering) {
-                                const val = e.target.value.trim();
-                                const current = offering.description_override || "";
-                                if (val !== current) {
-                                  updateOfferingDescriptionInline(offering, val);
-                                }
-                              }
-                            }}
-                            className="w-full rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[10.5px] text-[var(--rl-text-strong)] placeholder:text-[var(--rl-text-muted)] placeholder:italic focus:outline-none focus:ring-1 focus:ring-[var(--rl-black)]"
-                            placeholder={companyBaselineDesc || concept.description || "Enter short description..."}
-                            title="Short benefit description shown on quote cards"
+                          <OfferingDescriptionEditor
+                            offering={offering!}
+                            concept={concept}
+                            companyBaselineDesc={companyBaselineDesc || null}
+                            onSave={updateOfferingDescriptionInline}
+                            disabled={workspaceLoading || saving}
                           />
-                        </div>
                         );
                       })() : (
                         (() => {
@@ -2886,55 +3009,14 @@ ${aiMarkdownTable}`;
 
                       {isActive ? (() => {
                         const companyBaselineDesc = offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null;
-                        const activeDesc = companyBaselineDesc || offering?.description_override || concept.description || "";
                         return (
-                        <div className="mt-2 pt-1.5 border-t border-[var(--rl-border)]/50 space-y-1" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center justify-between text-[10px]">
-                            <span className="text-[var(--rl-text-muted)] font-medium">Description:</span>
-                            {companyBaselineDesc ? (
-                              <span className="rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-1 py-0.2 text-[9.5px] font-semibold" title="Inherited from Tab 1 Company Baseline">
-                                Company Baseline
-                              </span>
-                            ) : offering?.description_override ? (
-                              <div className="flex items-center gap-1">
-                                <span className="rounded bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 px-1 py-0.2 text-[9.5px] font-semibold">
-                                  Catalog Custom
-                                </span>
-                                <button
-                                  type="button"
-                                  title="Reset to global default"
-                                  onClick={() => {
-                                    if (offering) updateOfferingDescriptionInline(offering, "");
-                                  }}
-                                  className="text-[var(--rl-text-muted)] hover:text-[var(--rl-red)] transition-colors p-0.5"
-                                >
-                                  <ArrowCounterClockwise size={11} />
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="rounded bg-[var(--rl-bg)] border border-[var(--rl-border)] text-[var(--rl-text-muted)] px-1 py-0.2 text-[9.5px]">
-                                Global Default
-                              </span>
-                            )}
-                          </div>
-                          <input
-                            type="text"
-                            defaultValue={activeDesc}
-                            key={`${offering?.id}-${activeDesc}`}
-                            onBlur={(e) => {
-                              if (offering) {
-                                const val = e.target.value.trim();
-                                const current = offering.description_override || "";
-                                if (val !== current) {
-                                  updateOfferingDescriptionInline(offering, val);
-                                }
-                              }
-                            }}
-                            className="w-full rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[10.5px] text-[var(--rl-text-strong)] placeholder:text-[var(--rl-text-muted)] placeholder:italic focus:outline-none focus:ring-1 focus:ring-[var(--rl-black)]"
-                            placeholder={companyBaselineDesc || concept.description || "Enter short description..."}
-                            title="Short benefit description shown on quote cards"
+                          <OfferingDescriptionEditor
+                            offering={offering!}
+                            concept={concept}
+                            companyBaselineDesc={companyBaselineDesc || null}
+                            onSave={updateOfferingDescriptionInline}
+                            disabled={workspaceLoading || saving}
                           />
-                        </div>
                         );
                       })() : (
                         (() => {
@@ -3142,6 +3224,28 @@ ${aiMarkdownTable}`;
                         )}
                         <span className="text-[10px] font-semibold text-[var(--rl-text-muted)] shrink-0">Default</span>
                       </div>
+
+                      {isActive ? (() => {
+                        const companyBaselineDesc = offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null;
+                        return (
+                          <OfferingDescriptionEditor
+                            offering={offering!}
+                            concept={concept}
+                            companyBaselineDesc={companyBaselineDesc || null}
+                            onSave={updateOfferingDescriptionInline}
+                            disabled={workspaceLoading || saving}
+                          />
+                        );
+                      })() : (
+                        (() => {
+                          const fallbackDesc = (offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null) || concept.description;
+                          return fallbackDesc ? (
+                            <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] truncate" title={fallbackDesc}>
+                              {fallbackDesc}
+                            </div>
+                          ) : null;
+                        })()
+                      )}
                     </div>
                   );
                 })}
@@ -3287,6 +3391,28 @@ ${aiMarkdownTable}`;
                         )}
                         <span className="text-[10px] font-semibold text-[var(--rl-text-muted)] shrink-0">Add-on</span>
                       </div>
+
+                      {isActive ? (() => {
+                        const companyBaselineDesc = offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null;
+                        return (
+                          <OfferingDescriptionEditor
+                            offering={offering!}
+                            concept={concept}
+                            companyBaselineDesc={companyBaselineDesc || null}
+                            onSave={updateOfferingDescriptionInline}
+                            disabled={workspaceLoading || saving}
+                          />
+                        );
+                      })() : (
+                        (() => {
+                          const fallbackDesc = (offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null) || concept.description;
+                          return fallbackDesc ? (
+                            <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] truncate" title={fallbackDesc}>
+                              {fallbackDesc}
+                            </div>
+                          ) : null;
+                        })()
+                      )}
                     </div>
                   );
                 })}

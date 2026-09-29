@@ -19,6 +19,8 @@ import {
   List,
   X,
   ChartLineUp,
+  CalendarBlank,
+  Columns,
 } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
 import { useAuth, clearAuthCache } from "@/lib/auth";
@@ -26,15 +28,47 @@ import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { GlobalAiCopilot } from "@/components/global-ai-copilot";
 
-const nav: Array<{ href: Route; label: string; icon: typeof Upload }> = [
-  { href: "/upload", label: "Upload", icon: Upload },
-  { href: "/sessions", label: "Sessions", icon: SquaresFour },
-  { href: "/insights" as Route, label: "Insights and Analytics", icon: ChartLineUp },
-  { href: "/builder/templates/quotation-templates" as Route, label: "Builder", icon: Wrench },
-  { href: "/extraction/company-detection" as Route, label: "Extraction & Aliases", icon: FunnelSimple },
-  { href: "/settings/system-checks", label: "Settings", icon: Gear },
-  { href: "/inbox", label: "Inbox", icon: Bell },
-  { href: "/trash", label: "Trash", icon: Trash },
+interface NavItem {
+  href: Route;
+  label: string;
+  icon: typeof Upload;
+}
+
+interface NavSection {
+  title?: string;
+  items: NavItem[];
+}
+
+const navSections: NavSection[] = [
+  {
+    title: "QUOTING",
+    items: [
+      { href: "/upload", label: "Upload & Intake", icon: Upload },
+      { href: "/comparison" as Route, label: "Marketing Comparison", icon: Columns },
+      { href: "/sessions", label: "Sessions & Drafts", icon: SquaresFour },
+    ],
+  },
+  {
+    title: "PORTFOLIO",
+    items: [
+      { href: "/insights" as Route, label: "Tenures & Timeline", icon: CalendarBlank },
+    ],
+  },
+  {
+    title: "STUDIO & CONFIG",
+    items: [
+      { href: "/builder/templates/quotation-templates" as Route, label: "Builder", icon: Wrench },
+      { href: "/extraction/company-detection" as Route, label: "Extraction & Aliases", icon: FunnelSimple },
+      { href: "/settings/system-checks", label: "Settings", icon: Gear },
+    ],
+  },
+  {
+    title: "SYSTEM",
+    items: [
+      { href: "/inbox", label: "Inbox", icon: Bell },
+      { href: "/trash", label: "Trash", icon: Trash },
+    ],
+  },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -116,13 +150,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const visibleNav = nav.filter((item) => {
-    const isStaff = user?.role === "staff";
-    if (isStaff) {
-      return item.href === "/upload" || item.href === "/sessions";
-    }
-    return true;
-  });
+  const isStaff = user?.role === "staff";
+
+  const filteredSections = navSections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => {
+        if (isStaff) {
+          return item.href === "/upload" || item.href === "/sessions";
+        }
+        return true;
+      }),
+    }))
+    .filter((section) => section.items.length > 0);
 
   return (
     <div className="min-h-screen bg-[var(--rl-bg)]">
@@ -135,25 +175,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               type="button"
               onClick={() => setMobileNavOpen(true)}
               aria-label="Open mobile navigation"
-              className="grid size-9 place-items-center rounded-[var(--rl-radius-sm)] text-[var(--rl-text-strong)] hover:bg-black/5 md:hidden transition-colors"
+              className="grid size-9 place-items-center rounded-[var(--rl-radius-sm)] text-[var(--rl-text-muted)] hover:bg-black/5 hover:text-[var(--rl-text-strong)] transition-colors md:hidden cursor-pointer"
             >
               <List size={20} weight="bold" />
             </button>
 
-            <Link href="/upload" className="flex items-center gap-3 shrink-0">
+            <Link href="/upload" className="flex items-center gap-2.5">
               <img
                 src="/assets/brand/logo-black.png"
                 alt="Risklocker"
-                className="h-7 sm:h-8 w-auto"
+                className="h-6 w-auto"
               />
             </Link>
 
-            {/* Desktop collapse toggle button */}
+            {/* Sidebar toggle button (desktop) */}
             <button
               type="button"
               onClick={toggleCollapse}
               aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               className="hidden md:grid size-8 place-items-center rounded-[var(--rl-radius-sm)] text-[var(--rl-text-muted)] hover:bg-black/5 hover:text-[var(--rl-text-strong)] transition-colors ml-1 cursor-pointer"
             >
               <SidebarSimple size={18} weight={isCollapsed ? "fill" : "bold"} />
@@ -206,34 +245,43 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </button>
               </div>
 
-              <nav className="flex flex-col gap-1">
-                {visibleNav.map((item) => {
-                  const Icon = item.icon;
-                  const isBuilder = item.href.startsWith("/builder");
-                  const active = isBuilder
-                    ? pathname.startsWith("/builder")
-                    : pathname === item.href || pathname.startsWith(`${item.href}/`);
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      onClick={() => setMobileNavOpen(false)}
-                      className={`relative flex items-center gap-3 rounded-[var(--rl-radius-sm)] px-3 py-2.5 text-[14px] font-medium transition-colors ${
-                        active
-                          ? "bg-[var(--rl-black)] text-white shadow-card"
-                          : "text-[var(--rl-text)] hover:bg-[var(--rl-bg)] hover:text-[var(--rl-text-strong)]"
-                      }`}
-                    >
-                      <Icon aria-hidden="true" size={18} weight={active ? "fill" : "regular"} />
-                      <span>{item.label}</span>
-                      {item.href === "/inbox" && unreadCount > 0 ? (
-                        <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[var(--rl-red)] px-1.5 text-[11px] font-bold text-white">
-                          {unreadCount}
-                        </span>
-                      ) : null}
-                    </Link>
-                  );
-                })}
+              <nav className="flex flex-col gap-4">
+                {filteredSections.map((section, sIdx) => (
+                  <div key={sIdx} className="space-y-1">
+                    {section.title && (
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)] px-3 block">
+                        {section.title}
+                      </span>
+                    )}
+                    {section.items.map((item) => {
+                      const Icon = item.icon;
+                      const isBuilder = item.href.startsWith("/builder");
+                      const active = isBuilder
+                        ? pathname.startsWith("/builder")
+                        : pathname === item.href || pathname.startsWith(`${item.href}/`);
+                      return (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          onClick={() => setMobileNavOpen(false)}
+                          className={`relative flex items-center gap-3 rounded-[var(--rl-radius-sm)] px-3 py-2 text-[13px] font-medium transition-colors ${
+                            active
+                              ? "bg-[var(--rl-black)] text-white shadow-card"
+                              : "text-[var(--rl-text)] hover:bg-[var(--rl-bg)] hover:text-[var(--rl-text-strong)]"
+                          }`}
+                        >
+                          <Icon aria-hidden="true" size={17} weight={active ? "fill" : "regular"} />
+                          <span>{item.label}</span>
+                          {item.href === "/inbox" && unreadCount > 0 ? (
+                            <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[var(--rl-red)] px-1.5 text-[11px] font-bold text-white">
+                              {unreadCount}
+                            </span>
+                          ) : null}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                ))}
               </nav>
             </div>
 
@@ -260,56 +308,68 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             : "grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)]"
         }`}
       >
-        {/* Desktop Sidebar (flex flex-col gap-1) */}
+        {/* Desktop Sidebar */}
         <aside className="hidden md:block">
-          <nav className="flex flex-col gap-1 sticky top-[80px]">
-            {visibleNav.map((item) => {
-              const Icon = item.icon;
-              const isBuilder = item.href.startsWith("/builder");
-              const active = isBuilder
-                ? pathname.startsWith("/builder")
-                : pathname === item.href || pathname.startsWith(`${item.href}/`);
+          <nav className="flex flex-col gap-3 sticky top-[80px]">
+            {filteredSections.map((section, sIdx) => (
+              <div key={sIdx} className="space-y-1">
+                {!isCollapsed && section.title && (
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)] px-3 pt-1 pb-0.5 block select-none">
+                    {section.title}
+                  </span>
+                )}
+                {isCollapsed && sIdx > 0 && (
+                  <div className="my-1.5 mx-2 border-t border-[var(--rl-border)]" />
+                )}
+                {section.items.map((item) => {
+                  const Icon = item.icon;
+                  const isBuilder = item.href.startsWith("/builder");
+                  const active = isBuilder
+                    ? pathname.startsWith("/builder")
+                    : pathname === item.href || pathname.startsWith(`${item.href}/`);
 
-              const navLink = (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`relative flex items-center rounded-[var(--rl-radius-sm)] transition-all ${
-                    isCollapsed
-                      ? "justify-center px-2 py-2.5"
-                      : "gap-3 px-3 py-2.5 text-[14px] font-medium"
-                  } ${
-                    active
-                      ? "bg-[var(--rl-black)] text-white shadow-card"
-                      : "text-[var(--rl-text)] hover:bg-[var(--rl-surface)] hover:text-[var(--rl-text-strong)]"
-                  }`}
-                >
-                  <Icon aria-hidden="true" size={18} weight={active ? "fill" : "regular"} className="shrink-0" />
-                  {!isCollapsed ? (
-                    <>
-                      <span className="truncate">{item.label}</span>
-                      {item.href === "/inbox" && unreadCount > 0 ? (
-                        <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[var(--rl-red)] px-1.5 text-[11px] font-bold text-white">
-                          {unreadCount}
-                        </span>
+                  const navLink = (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`relative flex items-center rounded-[var(--rl-radius-sm)] transition-all ${
+                        isCollapsed
+                          ? "justify-center px-2 py-2"
+                          : "gap-3 px-3 py-2 text-[13px] font-medium"
+                      } ${
+                        active
+                          ? "bg-[var(--rl-black)] text-white shadow-card"
+                          : "text-[var(--rl-text)] hover:bg-[var(--rl-surface)] hover:text-[var(--rl-text-strong)]"
+                      }`}
+                    >
+                      <Icon aria-hidden="true" size={18} weight={active ? "fill" : "regular"} className="shrink-0" />
+                      {!isCollapsed ? (
+                        <>
+                          <span className="truncate">{item.label}</span>
+                          {item.href === "/inbox" && unreadCount > 0 ? (
+                            <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[var(--rl-red)] px-1.5 text-[11px] font-bold text-white">
+                              {unreadCount}
+                            </span>
+                          ) : null}
+                        </>
+                      ) : item.href === "/inbox" && unreadCount > 0 ? (
+                        <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-[var(--rl-red)]" />
                       ) : null}
-                    </>
-                  ) : item.href === "/inbox" && unreadCount > 0 ? (
-                    <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-[var(--rl-red)]" />
-                  ) : null}
-                </Link>
-              );
+                    </Link>
+                  );
 
-              if (isCollapsed) {
-                return (
-                  <Tooltip key={item.href} content={item.label}>
-                    {navLink}
-                  </Tooltip>
-                );
-              }
+                  if (isCollapsed) {
+                    return (
+                      <Tooltip key={item.href} content={item.label}>
+                        {navLink}
+                      </Tooltip>
+                    );
+                  }
 
-              return navLink;
-            })}
+                  return navLink;
+                })}
+              </div>
+            ))}
           </nav>
         </aside>
 
@@ -317,7 +377,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main className="min-w-0 w-full animate-fade-in">{children}</main>
       </div>
 
-      {/* Global AI Copilot Floating Drawer */}
+      {/* Global AI Copilot */}
       <GlobalAiCopilot />
     </div>
   );

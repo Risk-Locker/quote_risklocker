@@ -98,6 +98,7 @@ def get_client_dossiers(
         .where(SessionModel.is_test.is_(False))
         .options(
             joinedload(SessionModel.draft),
+            joinedload(SessionModel.tenure),
             joinedload(SessionModel.tracked_vehicle).joinedload(TrackedVehicle.ownerships),
         )
         .order_by(SessionModel.created_at.desc())
@@ -133,9 +134,16 @@ def get_client_dossiers(
         is_comp = client_meta.get(name, {}).get("is_corporate", False)
         brn_val = client_meta.get(name, {}).get("brn")
 
+        # Client profile details
+        client_phone = ""
+        client_email = ""
+        client_address = ""
+        client_ic = ""
+
         # Vehicles connected to this customer
         vehicle_dict: dict[str, dict[str, Any]] = {}
         quotes_list: list[dict[str, Any]] = []
+        tenure_groups: dict[str, dict[str, Any]] = {}
         c_hits = 0
         c_misses = 0
         c_pending = 0
@@ -144,6 +152,15 @@ def get_client_dossiers(
 
         for s in sessions:
             fields = s.draft.fields if s.draft and isinstance(s.draft.fields, dict) else {}
+            if not client_phone:
+                client_phone = _safe_field_val(fields, "phone_number") or _safe_field_val(fields, "phone") or _safe_field_val(fields, "contact_number") or _safe_field_val(fields, "mobile_number")
+            if not client_email:
+                client_email = _safe_field_val(fields, "email") or _safe_field_val(fields, "email_address")
+            if not client_address:
+                client_address = _safe_field_val(fields, "address") or _safe_field_val(fields, "insured_address") or _safe_field_val(fields, "location")
+            if not client_ic:
+                client_ic = _safe_field_val(fields, "ic_no") or _safe_field_val(fields, "customer_ic") or _safe_field_val(fields, "ic_number") or _safe_field_val(fields, "ic_or_brn")
+
             raw_plate = _safe_field_val(fields, "vehicle_no") or _safe_field_val(fields, "vehicle_number")
             norm_plate = normalize_plate(raw_plate)
             model = _safe_field_val(fields, "car_model")
@@ -154,6 +171,12 @@ def get_client_dossiers(
             pm_val = _safe_field_val(fields, "total_amount")
             pm_num = _parse_money(pm_val)
             st = (s.quotation_status or "pending").lower()
+
+            eng_cc = _safe_field_val(fields, "engine_cc") or _safe_field_val(fields, "cubic_capacity")
+            eng_no = _safe_field_val(fields, "engine_no") or _safe_field_val(fields, "engine_number")
+            chassis = _safe_field_val(fields, "chassis_no") or _safe_field_val(fields, "chassis_number") or _safe_field_val(fields, "vin")
+            yom = _safe_field_val(fields, "year_of_manufacture") or _safe_field_val(fields, "make_year") or _safe_field_val(fields, "yom")
+            seating = _safe_field_val(fields, "seating_capacity") or _safe_field_val(fields, "seating")
 
             if st == "hit":
                 c_hits += 1
@@ -190,25 +213,127 @@ def get_client_dossiers(
                             "category": cat,
                             "is_current": is_active_owner or is_comp,
                             "is_pending_verification": is_pending,
+                            "engine_cc": eng_cc,
+                            "engine_no": eng_no,
+                            "chassis_no": chassis,
+                            "year_of_manufacture": yom,
+                            "seating_capacity": seating,
                         }
+                    else:
+                        v = vehicle_dict[norm_plate]
+                        if not v.get("engine_cc") and eng_cc: v["engine_cc"] = eng_cc
+                        if not v.get("engine_no") and eng_no: v["engine_no"] = eng_no
+                        if not v.get("chassis_no") and chassis: v["chassis_no"] = chassis
+                        if not v.get("year_of_manufacture") and yom: v["year_of_manufacture"] = yom
+                        if not v.get("seating_capacity") and seating: v["seating_capacity"] = seating
 
-            quotes_list.append(
-                {
-                    "session_id": s.id,
-                    "quotation_number": q_no,
-                    "created_at": s.created_at.isoformat() if s.created_at else None,
-                    "company": company,
-                    "vehicle_no": norm_plate or "—",
+            q_item = {
+                "session_id": s.id,
+                "quotation_number": q_no,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+                "company": company,
+                "vehicle_no": norm_plate or "—",
+                "car_model": model,
+                "vehicle_type": vtype,
+                "category": cat,
+                "gross_premium": pm_val,
+                "status": st,
+                "miss_reason": s.miss_reason,
+                "closed_at": s.closed_at.isoformat() if s.closed_at else None,
+                "pdf_download_url": f"/api/sessions/{s.id}/pdf?download=true",
+            }
+            quotes_list.append(q_item)
+
+            # Group into tenure
+            tenure_obj = s.tenure
+            cov_start_str = _safe_field_val(fields, "coverage_start_date") or _safe_field_val(fields, "start_date")
+            cov_end_str = _safe_field_val(fields, "coverage_end_date") or _safe_field_val(fields, "end_date") or _safe_field_val(fields, "expiry_date")
+
+            if tenure_obj:
+                t_key = tenure_obj.id
+                t_start = tenure_obj.coverage_start_date.strftime("%Y-%m-%d") if tenure_obj.coverage_start_date else cov_start_str
+                t_end = tenure_obj.coverage_end_date.strftime("%Y-%m-%d") if tenure_obj.coverage_end_date else cov_end_str
+                t_status = tenure_obj.status or "draft"
+                t_v_no = tenure_obj.vehicle_no or norm_plate
+                t_exp_month = tenure_obj.expiry_month or (t_end[:7] if t_end else "—")
+            else:
+                t_key = f"{norm_plate}_{cov_start_str}_{cov_end_str}" if (cov_start_str or cov_end_str) else f"{norm_plate}_{s.created_at.year if s.created_at else 'default'}"
+                t_start = cov_start_str
+                t_end = cov_end_str
+                t_status = st
+                t_v_no = norm_plate or "—"
+                t_exp_month = t_end[:7] if t_end and len(t_end) >= 7 else "—"
+
+            if t_key not in tenure_groups:
+                display_period = "—"
+                if t_start and t_end:
+                    display_period = f"{t_start} – {t_end}"
+                elif t_end:
+                    display_period = f"Expiring {t_end}"
+
+                tenure_groups[t_key] = {
+                    "tenure_id": tenure_obj.id if tenure_obj else None,
+                    "vehicle_no": t_v_no,
                     "car_model": model,
-                    "vehicle_type": vtype,
-                    "category": cat,
-                    "gross_premium": pm_val,
-                    "status": st,
-                    "miss_reason": s.miss_reason,
-                    "closed_at": s.closed_at.isoformat() if s.closed_at else None,
-                    "pdf_download_url": f"/api/sessions/{s.id}/pdf?download=true",
+                    "coverage_start_date": t_start,
+                    "coverage_end_date": t_end,
+                    "coverage_period": display_period,
+                    "expiry_month": t_exp_month,
+                    "status": t_status,
+                    "raw_quotes": [],
                 }
-            )
+            tenure_groups[t_key]["raw_quotes"].append(q_item)
+
+        # Process tenures and deduplicate to max 7 insurers per tenure
+        processed_tenures = []
+        for tg in tenure_groups.values():
+            insurer_map: dict[str, dict[str, Any]] = {}
+            for q in tg["raw_quotes"]:
+                c_name = q["company"].strip().title()
+                if any(x in c_name.lower() for x in ("amassurance", "am general", "kurnia")):
+                    comp_key = "AmAssurance"
+                elif any(x in c_name.lower() for x in ("berjaya", "sompo")):
+                    comp_key = "Berjaya Sompo"
+                elif "etiqa" in c_name.lower():
+                    comp_key = "Etiqa"
+                elif "lonpac" in c_name.lower():
+                    comp_key = "Lonpac"
+                elif "qbe" in c_name.lower():
+                    comp_key = "QBE"
+                elif any(x in c_name.lower() for x in ("stmb", "takaful malaysia")):
+                    comp_key = "STMB"
+                elif "tune" in c_name.lower():
+                    comp_key = "Tune Protect"
+                else:
+                    comp_key = q["company"]
+
+                existing = insurer_map.get(comp_key)
+                if not existing or (q.get("created_at") or "") > (existing.get("created_at") or ""):
+                    insurer_map[comp_key] = q
+
+            preferred_order = ["AmAssurance", "Berjaya Sompo", "Etiqa", "Lonpac", "QBE", "STMB", "Tune Protect"]
+            ordered_quotes = []
+            for pref in preferred_order:
+                if pref in insurer_map:
+                    ordered_quotes.append(insurer_map.pop(pref))
+            for rem_q in insurer_map.values():
+                ordered_quotes.append(rem_q)
+
+            deduped_quotes = ordered_quotes[:7]
+
+            processed_tenures.append({
+                "tenure_id": tg["tenure_id"],
+                "vehicle_no": tg["vehicle_no"],
+                "car_model": tg["car_model"],
+                "coverage_start_date": tg["coverage_start_date"],
+                "coverage_end_date": tg["coverage_end_date"],
+                "coverage_period": tg["coverage_period"],
+                "expiry_month": tg["expiry_month"],
+                "status": tg["status"],
+                "quotes": deduped_quotes,
+            })
+
+        processed_tenures.sort(key=lambda t: t.get("coverage_end_date") or "", reverse=True)
 
         c_closed = c_hits + c_misses
         c_hit_rate = round((c_hits / c_closed * 100), 1) if c_closed > 0 else 0.0
@@ -226,10 +351,17 @@ def get_client_dossiers(
             "customer_name": name,
             "client_type": "Company" if is_comp else "Individual",
             "is_corporate": is_comp,
-            "brn": brn_val,
+            "brn": brn_val or client_ic or None,
+            "profile": {
+                "ic_or_brn": brn_val or client_ic or None,
+                "phone": client_phone or None,
+                "email": client_email or None,
+                "address": client_address or None,
+            },
             "connected_vehicles": list(vehicle_dict.values()),
             "fleet_breakdown": fleet_counts,
             "quotations": quotes_list,
+            "tenures": processed_tenures,
             "stats": {
                 "total_quotations": len(quotes_list),
                 "total_vehicles": len(vehicle_dict),

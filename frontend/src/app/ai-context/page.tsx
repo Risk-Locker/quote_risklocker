@@ -292,7 +292,7 @@ export default function AIContextPage() {
 
   return (
     <AppShell>
-      <div className="grid gap-6 max-w-6xl mx-auto pb-12">
+      <div className="grid gap-6 w-full pb-12">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="font-[var(--font-manrope)] text-[28px] font-bold text-[var(--rl-text-strong)]">
