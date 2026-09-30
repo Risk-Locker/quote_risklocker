@@ -41,17 +41,11 @@ interface NavSection {
 
 const navSections: NavSection[] = [
   {
-    title: "QUOTING",
+    title: "OPERATIONS",
     items: [
       { href: "/upload", label: "Upload & Intake", icon: Upload },
-      { href: "/comparison" as Route, label: "Marketing Comparison", icon: Columns },
       { href: "/sessions", label: "Sessions & Drafts", icon: SquaresFour },
-    ],
-  },
-  {
-    title: "PORTFOLIO",
-    items: [
-      { href: "/insights" as Route, label: "Tenures & Timeline", icon: CalendarBlank },
+      { href: "/insights" as Route, label: "Timeline Ledger", icon: CalendarBlank },
     ],
   },
   {
@@ -157,7 +151,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       ...section,
       items: section.items.filter((item) => {
         if (isStaff) {
-          return item.href === "/upload" || item.href === "/sessions";
+          const hrefStr = String(item.href);
+          return hrefStr === "/upload" || hrefStr === "/sessions" || hrefStr === "/insights";
         }
         return true;
       }),

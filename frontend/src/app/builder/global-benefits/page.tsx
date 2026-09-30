@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   Star,
   Trash,
+  UploadSimple,
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
@@ -186,6 +187,12 @@ export default function GlobalBenefitsPage() {
   const [newVariantInput, setNewVariantInput] = useState("");
   const [formDescription, setFormDescription] = useState("");
   const [formAssetId, setFormAssetId] = useState("");
+  const replaceFileInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadNewInputRef = useRef<HTMLInputElement | null>(null);
+  const autoAssignFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [replacingAssetId, setReplacingAssetId] = useState<string | null>(null);
+  const [replacingIcon, setReplacingIcon] = useState(false);
+  const [uploadingNewIcon, setUploadingNewIcon] = useState(false);
   const [formMatch, setFormMatch] = useState<string[]>([]);
   const [formDisplayOverrides, setFormDisplayOverrides] = useState<Record<string, boolean>>({});
   const [formSort, setFormSort] = useState(0);
@@ -667,6 +674,112 @@ export default function GlobalBenefitsPage() {
       setError(apiErrorMessage(err));
     } finally {
       setAutoAssignSaving(false);
+    }
+  }
+
+  async function handleReplaceIconFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !formAssetId) return;
+    setReplacingIcon(true);
+    setError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await api<{ asset: Asset }>(`/business/assets/${formAssetId}/replace-file`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (res?.asset) {
+        setAssets((prev) => prev.map((a) => (a.id === formAssetId ? { ...a, ...res.asset } : a)));
+      }
+
+      setSuccessMessage(
+        `Replaced artwork file for "${res?.asset?.label || "icon"}". Updated in Assets folder and Global Benefits!`
+      );
+      setTimeout(() => setSuccessMessage(""), 5000);
+      await refresh(true, currentProfile?.id);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setReplacingIcon(false);
+      if (replaceFileInputRef.current) {
+        replaceFileInputRef.current.value = "";
+      }
+    }
+  }
+
+  async function handleUploadNewIcon(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingNewIcon(true);
+    setError("");
+    try {
+      const targetCategory = currentProfile?.asset_category || "General";
+      const cleanLabel = formLabel.trim() || file.name.replace(/\.[^/.]+$/, "");
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("label", cleanLabel);
+      formData.append("kind", "benefit_art");
+      formData.append("category", targetCategory);
+      formData.append("on_duplicate", "rename");
+
+      const res = await api<{ asset: Asset }>("/business/assets", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (res?.asset) {
+        setAssets((prev) => [res.asset, ...prev]);
+        setFormAssetId(res.asset.id);
+        setSuccessMessage(`Uploaded new icon "${res.asset.label}" to folder "${targetCategory}" and selected it!`);
+        setTimeout(() => setSuccessMessage(""), 5000);
+      }
+
+      await refresh(true, currentProfile?.id);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setUploadingNewIcon(false);
+      if (uploadNewInputRef.current) {
+        uploadNewInputRef.current.value = "";
+      }
+    }
+  }
+
+  async function handleAutoAssignReplaceFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !replacingAssetId) return;
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await api<{ asset: Asset }>(`/business/assets/${replacingAssetId}/replace-file`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (res?.asset && autoAssignData) {
+        setAutoAssignData((prev) => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            available_category_assets: prev.available_category_assets.map((a) =>
+              a.id === replacingAssetId ? { ...a, ...res.asset } : a
+            ),
+          };
+        });
+        setAssets((prev) => prev.map((a) => (a.id === replacingAssetId ? { ...a, ...res.asset } : a)));
+      }
+      setSuccessMessage(`Replaced artwork file for "${res?.asset?.label || "icon"}"!`);
+      setTimeout(() => setSuccessMessage(""), 4000);
+      await refresh(true, currentProfile?.id);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setReplacingAssetId(null);
+      if (autoAssignFileInputRef.current) {
+        autoAssignFileInputRef.current.value = "";
+      }
     }
   }
 
@@ -1217,46 +1330,126 @@ export default function GlobalBenefitsPage() {
 
                   {/* 1. Image / Artwork (Bound to Profile Category) */}
                   <div className="grid gap-1.5">
-                    <label className="text-xs font-bold text-[var(--rl-text-strong)] flex items-center justify-between">
-                      <span>
-                        1. Benefit Image / Icon <span className="text-[var(--rl-red)]">*</span>
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-[var(--rl-text-strong)] flex items-center gap-1">
+                        <span>1. Benefit Image / Icon</span>
+                        <span className="text-[var(--rl-red)]">*</span>
+                      </label>
+                      <span className="text-[11px] font-normal text-[var(--rl-text-muted)] flex items-center gap-1">
+                        <Folder size={12} weight="bold" /> Category folder: <strong>{currentProfile?.asset_category || "General"}</strong>
                       </span>
-                      <span className="text-[11px] font-normal text-[var(--rl-text-muted)]">
-                        Category folder: 📁 {currentProfile?.asset_category || "General"}
-                      </span>
-                    </label>
-                    <div className="flex items-center gap-3 p-3 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)]">
-                      <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg border border-[var(--rl-border)] bg-white shadow-xs">
-                        {formAssetId ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={fileUrl(assets.find((a) => a.id === formAssetId)?.url || "")}
-                            alt=""
-                            className="max-h-9 max-w-9 object-contain"
-                          />
-                        ) : (
-                          <ImageSquare size={24} className="text-[var(--rl-text-muted)]" />
-                        )}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <Select
-                          value={formAssetId}
-                          onChange={(e) => setFormAssetId(e.target.value)}
-                          className="text-xs font-medium bg-white"
-                        >
-                          <option value="">(Select Artwork Icon from "{currentProfile?.asset_category}")...</option>
-                          {categoryAssets.map((asset) => (
-                            <option key={asset.id} value={asset.id}>
-                              🖼️ {asset.label}
-                            </option>
-                          ))}
-                        </Select>
-                        <p className="mt-1 text-[11px] text-[var(--rl-text-muted)] truncate">
-                          {formAssetId
-                            ? `Selected: ${assets.find((a) => a.id === formAssetId)?.label}`
-                            : `Showing ${categoryAssets.length} icons in "${currentProfile?.asset_category}".`}
-                        </p>
+                    </div>
+
+                    <div className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                        <div className="relative group shrink-0">
+                          <span className="grid h-14 w-14 shrink-0 place-items-center rounded-lg border border-[var(--rl-border)] bg-white shadow-xs overflow-hidden">
+                            {formAssetId ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={fileUrl(assets.find((a) => a.id === formAssetId)?.url || "")}
+                                alt=""
+                                key={assets.find((a) => a.id === formAssetId)?.url || formAssetId}
+                                className="max-h-11 max-w-11 object-contain transition-transform group-hover:scale-105"
+                              />
+                            ) : (
+                              <ImageSquare size={28} className="text-[var(--rl-text-muted)]" />
+                            )}
+                          </span>
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <Select
+                              value={formAssetId}
+                              onChange={(e) => setFormAssetId(e.target.value)}
+                              className="text-xs font-medium bg-white flex-1"
+                            >
+                              <option value="">(Select Artwork Icon from "{currentProfile?.asset_category}")...</option>
+                              {categoryAssets.map((asset) => (
+                                <option key={asset.id} value={asset.id}>
+                                  🖼️ {asset.label}
+                                </option>
+                              ))}
+                            </Select>
+
+                            {formAssetId ? (
+                              <button
+                                type="button"
+                                title="Clear selected icon"
+                                onClick={() => setFormAssetId("")}
+                                className="h-8 w-8 shrink-0 rounded flex items-center justify-center text-[var(--rl-text-muted)] hover:text-red-600 hover:bg-red-50 border border-[var(--rl-border)] bg-white transition-colors"
+                              >
+                                <X size={14} />
+                              </button>
+                            ) : null}
+                          </div>
+
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            {formAssetId ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                disabled={replacingIcon}
+                                onClick={() => replaceFileInputRef.current?.click()}
+                                className="h-7 text-[11px] font-semibold gap-1.5 px-2.5 bg-white hover:bg-slate-50 border border-[var(--rl-border)] shadow-2xs"
+                              >
+                                {replacingIcon ? (
+                                  <>
+                                    <ArrowClockwise size={13} className="animate-spin" /> Replacing image...
+                                  </>
+                                ) : (
+                                  <>
+                                    <ArrowClockwise size={13} weight="bold" /> Replace Image File
+                                  </>
+                                )}
+                              </Button>
+                            ) : null}
+
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              disabled={uploadingNewIcon}
+                              onClick={() => uploadNewInputRef.current?.click()}
+                              className="h-7 text-[11px] font-semibold gap-1.5 px-2.5 bg-white hover:bg-slate-50 border border-[var(--rl-border)] shadow-2xs text-[var(--rl-text-strong)]"
+                            >
+                              {uploadingNewIcon ? (
+                                <>
+                                  <ArrowClockwise size={13} className="animate-spin" /> Uploading...
+                                </>
+                              ) : (
+                                <>
+                                  <Plus size={13} weight="bold" /> Upload New Icon to Folder
+                                </>
+                              )}
+                            </Button>
+
+                            <span className="text-[11px] text-[var(--rl-text-muted)] truncate ml-auto">
+                              {formAssetId
+                                ? `Selected: ${assets.find((a) => a.id === formAssetId)?.label || "Asset"}`
+                                : `Showing ${categoryAssets.length} icons in "${currentProfile?.asset_category}".`}
+                            </span>
+                          </div>
+                        </div>
                       </div>
+
+                      {/* Hidden file inputs for direct image replacement and new upload */}
+                      <input
+                        ref={replaceFileInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                        className="hidden"
+                        onChange={handleReplaceIconFile}
+                      />
+                      <input
+                        ref={uploadNewInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                        className="hidden"
+                        onChange={handleUploadNewIcon}
+                      />
                     </div>
                   </div>
 
@@ -1637,12 +1830,26 @@ export default function GlobalBenefitsPage() {
                         {/* Thumbnail & Select override */}
                         <div className="flex items-center gap-2.5 shrink-0">
                           {activeAsset ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={fileUrl(activeAsset.url)}
-                              alt={activeAsset.label}
-                              className="h-11 w-11 object-contain rounded-lg border border-[var(--rl-border)] bg-white p-1 shadow-xs shrink-0"
-                            />
+                            <div className="relative group shrink-0">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={fileUrl(activeAsset.url)}
+                                alt={activeAsset.label}
+                                className="h-11 w-11 object-contain rounded-lg border border-[var(--rl-border)] bg-white p-1 shadow-xs shrink-0"
+                              />
+                              <button
+                                type="button"
+                                title={`Replace artwork file for "${activeAsset.label}"`}
+                                onClick={() => {
+                                  setReplacingAssetId(activeAsset.id);
+                                  autoAssignFileInputRef.current?.click();
+                                }}
+                                className="absolute inset-0 bg-black/65 text-white rounded-lg opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-[9px] font-bold transition-opacity cursor-pointer"
+                              >
+                                <ArrowClockwise size={13} weight="bold" />
+                                <span>Swap</span>
+                              </button>
+                            </div>
                           ) : (
                             <div className="h-11 w-11 rounded-lg border border-dashed border-[var(--rl-border)] grid place-items-center text-[var(--rl-text-muted)] text-xs font-mono font-medium shrink-0 bg-[var(--rl-bg)]/50">
                               ?
@@ -1695,6 +1902,13 @@ export default function GlobalBenefitsPage() {
                   })
                 )}
               </div>
+              <input
+                ref={autoAssignFileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                className="hidden"
+                onChange={handleAutoAssignReplaceFile}
+              />
             </>
           ) : (
             <PageLoading />

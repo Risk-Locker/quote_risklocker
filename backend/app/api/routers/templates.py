@@ -466,11 +466,26 @@ def _get_cached_asset_bytes(storage_path: str, settings: Settings) -> bytes:
 
 
 
+def evict_asset_cache_paths(paths: list[str]) -> None:
+    with _asset_cache_lock:
+        for path in paths:
+            _asset_memory_cache.pop(path, None)
+            safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", path) + ".bin"
+            disk_path = _ASSET_CACHE_DIR / safe_name
+            if disk_path.exists():
+                try:
+                    disk_path.unlink()
+                except Exception:
+                    pass
+
+
+
 @router.get("/business/assets/{asset_id}/content")
 def business_asset_content(
     asset_id: str,
     request: Request,
     profile: str = Query(default="ui", pattern="^(ui|pdf|original)$"),
+    v: str | None = Query(default=None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
@@ -485,12 +500,15 @@ def business_asset_content(
     content_hash = str((item or {}).get("content_hash") or asset.content_hash)
     etag = f'"{content_hash}"'
 
+    has_version = bool(v or request.query_params.get("v"))
+    cache_control = "private, max-age=86400, immutable" if has_version else "private, no-cache"
+
     if_none_match = request.headers.get("if-none-match")
     if if_none_match and content_hash in if_none_match:
         return Response(
             status_code=status.HTTP_304_NOT_MODIFIED,
             headers={
-                "Cache-Control": "private, max-age=86400, immutable",
+                "Cache-Control": cache_control,
                 "ETag": etag,
             },
         )
@@ -505,7 +523,7 @@ def business_asset_content(
         data,
         media_type=content_type,
         headers={
-            "Cache-Control": "private, max-age=86400, immutable",
+            "Cache-Control": cache_control,
             "ETag": etag,
         },
     )

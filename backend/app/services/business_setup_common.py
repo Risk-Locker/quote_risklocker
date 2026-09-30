@@ -87,6 +87,7 @@ def _audit(db, user, action: str, entity_type: str, entity_id: str, details: dic
 def _asset_summary(asset: BusinessAsset | None) -> dict | None:
     if asset is None:
         return None
+    rev = getattr(asset, "revision", 1) or 1
     return {
         "id": asset.id,
         "asset_key": asset.asset_key,
@@ -98,7 +99,9 @@ def _asset_summary(asset: BusinessAsset | None) -> dict | None:
         "width_px": asset.width_px,
         "height_px": asset.height_px,
         "status": asset.status,
-        "url": f"/business/assets/{asset.id}/content?profile=ui",
+        "revision": rev,
+        "content_hash": getattr(asset, "content_hash", ""),
+        "url": f"/business/assets/{asset.id}/content?profile=ui&v={rev}",
     }
 
 

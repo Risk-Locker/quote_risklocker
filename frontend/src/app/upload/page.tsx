@@ -589,7 +589,7 @@ function UploadPageContent() {
                 {mode === "comparison"
                   ? "Upload 2 to 5 insurer quotation PDFs for the same vehicle (e.g. Etiqa, Berjaya Sompo, AmAssurance). Risklocker AI compiles your side-by-side comparison matrix."
                   : mode === "bulk"
-                  ? "Batch intake for up to 10 quotation PDFs across multiple vehicles."
+                  ? "High-speed parallel batch intake powered by a 10-worker concurrent extraction pool."
                   : "Upload an insurer quotation PDF. Risklocker AI auto-extracts vehicle details, rates, and benefits to review and issue a final branded PDF."}
               </p>
             </div>
@@ -634,8 +634,8 @@ function UploadPageContent() {
               >
                 <Files size={15} weight={mode === "bulk" ? "bold" : "regular"} />
                 Corporate Fleet
-                <span className="rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-bold text-[var(--rl-text-muted)]">
-                  Up to 10
+                <span className="rounded bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 text-[10px] font-bold">
+                  10 Parallel Slots
                 </span>
               </button>
             </div>

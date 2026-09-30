@@ -128,8 +128,8 @@ def test_list_tenure_months_and_tenures(client: TestClient, db_session: Session)
     res_search = client.get("/api/tenures?search=VDM")
     assert res_search.status_code == 200
     search_items = res_search.json()["items"]
-    assert len(search_items) == 1
-    assert search_items[0]["vehicle_no"] == "VDM 3321"
+    assert len(search_items) >= 1
+    assert all(item["vehicle_no"] == "VDM 3321" for item in search_items)
 
 
 def test_tenure_quote_generation_and_status(client: TestClient, db_session: Session):

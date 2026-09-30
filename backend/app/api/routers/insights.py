@@ -697,3 +697,46 @@ def insights_clients(
         page_size=page_size,
     )
 
+
+@router.get("/insights/customers/{customer_id}")
+def get_customer_detail(
+    customer_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.services.customer_account_service import get_customer_account
+    from app.core.exceptions import AppError
+
+    cust = get_customer_account(db, customer_id)
+    if not cust:
+        raise AppError("Customer not found.", 404)
+    return {
+        "customer": {
+            "id": cust.id,
+            "entity_type": cust.entity_type,
+            "id_type": cust.id_type,
+            "id_number": cust.id_number,
+            "canonical_name": cust.canonical_name,
+            "name_aliases": cust.name_aliases,
+            "phone": cust.phone,
+            "email": cust.email,
+            "address": cust.address,
+            "alternate_contacts": cust.alternate_contacts,
+            "is_fleet": cust.is_fleet,
+            "vehicles": [
+                {
+                    "id": v.id,
+                    "vehicle_no": v.vehicle_no,
+                    "brand": v.car_brand,
+                    "model": v.car_model,
+                    "chassis_no": v.chassis_no,
+                    "engine_no": v.engine_no,
+                }
+                for v in (cust.vehicles or [])
+            ],
+            "tenures_count": len(cust.tenures or []),
+            "sessions_count": len(cust.sessions or []),
+        }
+    }
+
+

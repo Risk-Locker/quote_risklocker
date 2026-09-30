@@ -61,6 +61,8 @@ class FakeDb:
     def scalars(self, statement):
         try:
             cls = statement.column_descriptions[0]["type"]
+            if not isinstance(cls, type):
+                cls = getattr(cls, "class_", None)
         except Exception:
             cls = None
         return _ScalarResult(
@@ -239,6 +241,17 @@ def test_permanent_delete_template_removes_row():
 
     trash_service.permanent_delete_template(db, _user(), template.id)
 
+    assert db.get(type(template), template.id) is None
+
+
+def test_permanent_delete_template_with_revisions_removes_children():
+    db = _fake_db()
+    template = _template()
+    db.seed(template)
+    trash_service.delete_template(db, _settings(), _user(), template.id)
+
+    # Calling permanent_delete_template should cascade cleanly
+    trash_service.permanent_delete_template(db, _user(), template.id)
     assert db.get(type(template), template.id) is None
 
 

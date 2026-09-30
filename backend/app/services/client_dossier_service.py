@@ -99,6 +99,7 @@ def get_client_dossiers(
         .options(
             joinedload(SessionModel.draft),
             joinedload(SessionModel.tenure),
+            joinedload(SessionModel.customer),
             joinedload(SessionModel.tracked_vehicle).joinedload(TrackedVehicle.ownerships),
         )
         .order_by(SessionModel.created_at.desc())
@@ -106,21 +107,51 @@ def get_client_dossiers(
 
     all_sessions = list(db.scalars(stmt).unique().all())
 
-    # Map sessions by resolved client name and track client metadata
+    from app.services.identity_normalization_service import (
+        normalize_canonical_name,
+        normalize_government_id,
+    )
+
+    # Map sessions by resolved customer account or canonical identity
     client_map: dict[str, list[SessionModel]] = defaultdict(list)
     client_meta: dict[str, dict[str, Any]] = {}
 
     for s in all_sessions:
         fields = s.draft.fields if s.draft and s.draft.fields else {}
         name, is_comp, brn = _resolve_session_client_identity(fields)
-        client_map[name].append(s)
-        if name not in client_meta:
-            client_meta[name] = {"is_corporate": is_comp, "brn": brn}
+
+        # Primary grouping by linked CustomerAccount if available
+        if s.customer:
+            key = s.customer.id
+            display_name = s.customer.canonical_name
+            is_comp = s.customer.entity_type == "corporate" or s.customer.is_fleet
+            brn = s.customer.id_number if s.customer.id_type in ("brn_new", "brn_old", "llp") else (brn or s.customer.id_number)
+            account_obj = s.customer
+        else:
+            norm_id, id_type = normalize_government_id(brn)
+            norm_name = normalize_canonical_name(name)
+            if norm_id:
+                key = f"ID:{norm_id}"
+            else:
+                key = f"NAME:{norm_name}"
+            display_name = name or norm_name or "Valued Client"
+            account_obj = None
+
+        client_map[key].append(s)
+        if key not in client_meta:
+            client_meta[key] = {
+                "display_name": display_name,
+                "is_corporate": is_comp,
+                "brn": brn,
+                "customer_account": account_obj,
+            }
         else:
             if is_comp:
-                client_meta[name]["is_corporate"] = True
-            if brn and not client_meta[name]["brn"]:
-                client_meta[name]["brn"] = brn
+                client_meta[key]["is_corporate"] = True
+            if brn and not client_meta[key]["brn"]:
+                client_meta[key]["brn"] = brn
+            if account_obj and not client_meta[key]["customer_account"]:
+                client_meta[key]["customer_account"] = account_obj
 
     # Build dossiers
     dossiers: list[dict[str, Any]] = []
@@ -130,15 +161,18 @@ def get_client_dossiers(
     global_hits = 0
     global_misses = 0
 
-    for name, sessions in client_map.items():
-        is_comp = client_meta.get(name, {}).get("is_corporate", False)
-        brn_val = client_meta.get(name, {}).get("brn")
+    for key, sessions in client_map.items():
+        meta = client_meta.get(key, {})
+        name = meta.get("display_name", "Valued Client")
+        is_comp = meta.get("is_corporate", False)
+        brn_val = meta.get("brn")
+        cust_acc = meta.get("customer_account")
 
         # Client profile details
-        client_phone = ""
-        client_email = ""
-        client_address = ""
-        client_ic = ""
+        client_phone = cust_acc.phone if cust_acc and cust_acc.phone else ""
+        client_email = cust_acc.email if cust_acc and cust_acc.email else ""
+        client_address = cust_acc.address if cust_acc and cust_acc.address else ""
+        client_ic = cust_acc.id_number if cust_acc and cust_acc.id_number else ""
 
         # Vehicles connected to this customer
         vehicle_dict: dict[str, dict[str, Any]] = {}

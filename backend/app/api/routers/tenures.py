@@ -21,8 +21,11 @@ from app.models.tables import (
     User,
 )
 from app.services.insurance_tenure_service import (
+    auto_project_next_renewal,
     get_tenure_timeline,
+    mark_tenure_lapsed,
     resolve_or_create_tenure,
+    shift_tenure_dates,
     update_tenure_status,
 )
 from app.services.quotation_reference_service import generate_quotation_reference
@@ -52,6 +55,16 @@ class TenureStatusUpdateRequest(BaseModel):
 
 class TenureGenerateQuoteRequest(BaseModel):
     session_id: str = Field(..., description="Session ID of the sourced insurer quote to generate an RL quote for")
+
+
+class ShiftTenureDatesRequest(BaseModel):
+    start_date: str = Field(..., description="New coverage start date (YYYY-MM-DD or DD/MM/YYYY)")
+    end_date: str | None = Field(None, description="Optional new coverage end date (YYYY-MM-DD or DD/MM/YYYY)")
+    force_past: bool = Field(False, description="Override locked check for historical records")
+
+
+class LapseTenureRequest(BaseModel):
+    reason: str | None = Field(None, description="Reason for lapse e.g. Customer sold vehicle, Competitor, Unreachable")
 
 
 @router.post("")
@@ -110,23 +123,18 @@ def list_tenure_months(
             "pending": pending_cnt,
         }
 
-    # Pre-populate active window (from 3 months prior to 12 months in the future)
-    now = datetime.now(timezone.utc)
-    cur_year = now.year
-    cur_month = now.month
-
-    for offset in range(-3, 13):
-        m = (cur_month - 1 + offset) % 12 + 1
-        y = cur_year + ((cur_month - 1 + offset) // 12)
-        key = f"{y:04d}-{m:02d}"
-        if key not in month_map:
-            month_map[key] = {
-                "month": key,
-                "total": 0,
-                "hit": 0,
-                "miss": 0,
-                "pending": 0,
-            }
+    # Pre-populate active window for multi-year operations (2024 through 2029)
+    for y in (2024, 2025, 2026, 2027, 2028, 2029):
+        for m in range(1, 13):
+            key = f"{y:04d}-{m:02d}"
+            if key not in month_map:
+                month_map[key] = {
+                    "month": key,
+                    "total": 0,
+                    "hit": 0,
+                    "miss": 0,
+                    "pending": 0,
+                }
 
     sorted_months = sorted(month_map.values(), key=lambda x: x["month"])
     return {"months": sorted_months}
@@ -209,7 +217,7 @@ def list_tenures(
                 "sum_insured": sum_ins,
             })
 
-            if s.quotation_ref and str(s.quotation_ref).startswith("RL"):
+            if s.quotation_ref and s.quotation_ref.startswith("RL"):
                 gen_quotes.append({
                     "session_id": s.id,
                     "quotation_ref": s.quotation_ref,
@@ -231,6 +239,8 @@ def list_tenures(
             "miss_reason": t.miss_reason,
             "sourced_quotes": sourced,
             "generated_quotations": gen_quotes,
+            "is_projected": t.is_projected,
+            "tenure_chain_id": t.tenure_chain_id,
             "created_at": t.created_at.isoformat(),
         })
 
@@ -271,7 +281,7 @@ def generate_tenure_quote(
     if not sess or sess.tenure_id != tenure_id:
         raise HTTPException(status_code=400, detail="Invalid session for this tenure")
 
-    if not sess.quotation_ref or not str(sess.quotation_ref).startswith("RL"):
+    if not sess.quotation_ref or not sess.quotation_ref.startswith("RL"):
         qref = generate_quotation_reference(db)
         sess.quotation_ref = qref
         sess.quotation_status = "ready"
@@ -317,3 +327,75 @@ def update_tenure_outcome(
         "success": True,
         "tenure": get_tenure_timeline(db, tenure_id),
     }
+
+
+@router.post("/{tenure_id}/project-renewal")
+def project_tenure_renewal(
+    tenure_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Auto-project the next annual renewal tenure in the chain as an upcoming reminder."""
+    try:
+        projected = auto_project_next_renewal(db, tenure_id, user_id=user.id)
+        db.commit()
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return {
+        "success": True,
+        "projected_tenure": get_tenure_timeline(db, projected.id),
+    }
+
+
+@router.post("/{tenure_id}/shift-dates")
+def shift_tenure_coverage_dates(
+    tenure_id: str,
+    payload: ShiftTenureDatesRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Shift tenure coverage dates (+1yr -1d sync) for late renewals or customer adjustments."""
+    try:
+        updated = shift_tenure_dates(
+            db,
+            tenure_id,
+            new_start_date=payload.start_date,
+            new_end_date=payload.end_date,
+            force_past=payload.force_past,
+            user_id=user.id,
+        )
+        db.commit()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "success": True,
+        "tenure": get_tenure_timeline(db, updated.id),
+    }
+
+
+@router.post("/{tenure_id}/lapse")
+def lapse_tenure(
+    tenure_id: str,
+    payload: LapseTenureRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Mark tenure as lapsed (unrenewed/customer discontinued) while preserving historical record."""
+    try:
+        lapsed = mark_tenure_lapsed(
+            db,
+            tenure_id,
+            reason=payload.reason,
+            user_id=user.id,
+        )
+        db.commit()
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return {
+        "success": True,
+        "tenure": get_tenure_timeline(db, lapsed.id),
+    }
+

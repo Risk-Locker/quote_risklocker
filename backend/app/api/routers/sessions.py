@@ -1308,3 +1308,69 @@ def post_resolve_session_ownership(
         notes=payload.notes,
     )
 
+
+@router.get("/sessions/{session_id}/customer-discrepancies")
+def get_session_customer_discrepancies(
+    session_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    session = get_session(db, session_id)
+    if not session or not can_view_owner_record(db, user, session.owner_id):
+        raise AppError("Session not found.", 404)
+    draft = db.get(QuotationDraft, session.draft_id)
+    opts = draft.display_options or {} if draft else {}
+    discrepancies = opts.get("customer_discrepancies") or []
+    customer_data = None
+    if session.customer:
+        customer_data = {
+            "id": session.customer.id,
+            "canonical_name": session.customer.canonical_name,
+            "id_number": session.customer.id_number,
+            "id_type": session.customer.id_type,
+            "is_fleet": session.customer.is_fleet,
+            "phone": session.customer.phone,
+            "email": session.customer.email,
+            "address": session.customer.address,
+        }
+    return {
+        "customer": customer_data,
+        "discrepancies": discrepancies,
+    }
+
+
+@router.post("/sessions/{session_id}/resolve-customer-discrepancy")
+def post_resolve_customer_discrepancy(
+    session_id: str,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    session = get_session(db, session_id)
+    if not session or not can_view_owner_record(db, user, session.owner_id):
+        raise AppError("Session not found.", 404)
+    if not session.customer:
+        raise AppError("No linked customer account.", 400)
+
+    action = payload.get("action")
+    field = payload.get("field")
+    val = payload.get("value")
+
+    if action == "update_master" and field in ("phone", "email", "address", "name"):
+        target_attr = "canonical_name" if field == "name" else field
+        setattr(session.customer, target_attr, val)
+        db.flush()
+
+    draft = db.get(QuotationDraft, session.draft_id)
+    discrepancies_remaining = 0
+    if draft and draft.display_options:
+        opts = dict(draft.display_options)
+        discrepancies = [d for d in opts.get("customer_discrepancies", []) if d.get("field") != field]
+        opts["customer_discrepancies"] = discrepancies
+        draft.display_options = opts
+        discrepancies_remaining = len(discrepancies)
+        db.flush()
+
+    return {"resolved": True, "discrepancies_remaining": discrepancies_remaining}
+
+

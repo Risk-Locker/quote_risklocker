@@ -210,6 +210,29 @@ class Batch(Base, TimestampMixin, SoftDeleteMixin):
     files: Mapped[list["UploadedFile"]] = relationship(back_populates="batch", cascade="all, delete-orphan")
 
 
+class CustomerAccount(Base, TimestampMixin):
+    __tablename__ = "customer_accounts"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    entity_type: Mapped[str] = mapped_column(String(20), nullable=False, default="individual")
+    id_type: Mapped[str] = mapped_column(String(30), nullable=False, default="nric")
+    id_number: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
+    canonical_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    name_aliases: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    alternate_contacts: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    passport_history: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    is_fleet: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    vehicles: Mapped[list["TrackedVehicle"]] = relationship(back_populates="customer")
+    tenures: Mapped[list["InsuranceTenure"]] = relationship(back_populates="customer")
+    ownerships: Mapped[list["VehicleOwnership"]] = relationship(back_populates="customer")
+    sessions: Mapped[list["Session"]] = relationship(back_populates="customer")
+
+
 class Session(Base, TimestampMixin):
     __tablename__ = "sessions"
 
@@ -235,6 +258,7 @@ class Session(Base, TimestampMixin):
     tenure_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
     is_tenure_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    customer_id: Mapped[str | None] = mapped_column(ForeignKey("customer_accounts.id", ondelete="SET NULL"), nullable=True, index=True)
 
     owner: Mapped[User] = relationship(foreign_keys=[owner_id])
     last_edited_by: Mapped[User | None] = relationship(foreign_keys=[last_edited_by_id])
@@ -242,6 +266,7 @@ class Session(Base, TimestampMixin):
     draft: Mapped[QuotationDraft] = relationship()
     tracked_vehicle: Mapped["TrackedVehicle | None"] = relationship(back_populates="sessions")
     tenure: Mapped["InsuranceTenure | None"] = relationship(back_populates="sessions")
+    customer: Mapped["CustomerAccount | None"] = relationship(back_populates="sessions")
     activities: Mapped[list["QuotationActivity"]] = relationship(back_populates="session", cascade="all, delete-orphan")
 
 
@@ -267,12 +292,21 @@ class InsuranceTenure(Base, TimestampMixin):
     windscreen_target: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     ncd_percentage: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     recommended_sum_insured_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    previous_tenure_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_tenures.id", ondelete="SET NULL"), nullable=True, index=True)
+    tenure_chain_id: Mapped[str] = mapped_column(UUID(as_uuid=False), default=new_id, nullable=False, index=True)
+    is_projected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"), index=True)
+    reminder_window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    lapsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delay_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
 
     tracked_vehicle: Mapped["TrackedVehicle"] = relationship(back_populates="tenures")
     ownership: Mapped["VehicleOwnership | None"] = relationship()
     winning_company: Mapped["InsuranceCompany | None"] = relationship()
     sessions: Mapped[list["Session"]] = relationship(back_populates="tenure")
+    customer_id: Mapped[str | None] = mapped_column(ForeignKey("customer_accounts.id", ondelete="SET NULL"), nullable=True, index=True)
+    customer: Mapped["CustomerAccount | None"] = relationship(back_populates="tenures")
     comparison_entries: Mapped[list["TenureComparisonEntry"]] = relationship(back_populates="tenure", cascade="all, delete-orphan")
+    previous_tenure: Mapped["InsuranceTenure | None"] = relationship(remote_side="InsuranceTenure.id", foreign_keys=[previous_tenure_id])
 
 
 class TenureComparisonEntry(Base, TimestampMixin):
@@ -316,6 +350,9 @@ class TrackedVehicle(Base, TimestampMixin):
     car_brand: Mapped[str | None] = mapped_column(String(120), nullable=True)
     car_model: Mapped[str | None] = mapped_column(String(160), nullable=True)
     engine_cc: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    chassis_no: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    engine_no: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    customer_id: Mapped[str | None] = mapped_column(ForeignKey("customer_accounts.id", ondelete="SET NULL"), nullable=True, index=True)
 
     ownerships: Mapped[list["VehicleOwnership"]] = relationship(
         back_populates="vehicle", cascade="all, delete-orphan", order_by="VehicleOwnership.sequence_order.asc()"
@@ -324,6 +361,7 @@ class TrackedVehicle(Base, TimestampMixin):
         back_populates="tracked_vehicle", cascade="all, delete-orphan", order_by="InsuranceTenure.coverage_start_date.desc()"
     )
     sessions: Mapped[list["Session"]] = relationship(back_populates="tracked_vehicle")
+    customer: Mapped["CustomerAccount | None"] = relationship(back_populates="vehicles")
 
 
     @property
@@ -355,8 +393,10 @@ class VehicleOwnership(Base, TimestampMixin):
     coverage_end_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     renewal_alert_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     policy_status: Mapped[str] = mapped_column(String(50), nullable=False, default="active")
+    customer_id: Mapped[str | None] = mapped_column(ForeignKey("customer_accounts.id", ondelete="SET NULL"), nullable=True, index=True)
 
     vehicle: Mapped[TrackedVehicle] = relationship(back_populates="ownerships")
+    customer: Mapped["CustomerAccount | None"] = relationship(back_populates="ownerships")
 
 
 class QuotationActivity(Base, TimestampMixin):

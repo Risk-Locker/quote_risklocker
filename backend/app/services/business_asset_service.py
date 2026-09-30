@@ -381,6 +381,8 @@ def update_business_asset(
     _audit(db, user, "business.asset.update", "business_asset", asset.id, {"label": asset.label, "category": asset.category, "kind": asset.asset_kind})
     db.commit()
     db.refresh(asset)
+    invalidate_cache("business:assets")
+    invalidate_cache("business:benefit_profiles")
     return _asset_summary(asset) or {}
 
 
@@ -470,6 +472,8 @@ def replace_business_asset_file(
             "filename": filename,
             "content_hash": content_hash,
         })
+        invalidate_cache("business:assets")
+        invalidate_cache("business:benefit_profiles")
         return _asset_summary(asset) or {}
     except Exception:
         db.rollback()

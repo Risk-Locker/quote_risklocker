@@ -49,6 +49,11 @@ export function TenureTimelineDrawer({
   const [savingStatus, setSavingStatus] = useState(false);
   const [generatingQuote, setGeneratingQuote] = useState<string | null>(null);
 
+  const [shiftingDates, setShiftingDates] = useState(false);
+  const [newStartDateInput, setNewStartDateInput] = useState("");
+  const [projectingRenewal, setProjectingRenewal] = useState(false);
+  const [lapsingTenure, setLapsingTenure] = useState(false);
+
   async function loadDetail() {
     if (!tenureId) return;
     setLoading(true);
@@ -60,10 +65,70 @@ export function TenureTimelineDrawer({
       setWinningRef(res.winning_quotation_ref || "");
       setMissReason(res.miss_reason || "");
       setNotes(res.notes || "");
+      if (res.coverage_start_date) {
+        setNewStartDateInput(res.coverage_start_date.substring(0, 10));
+      }
     } catch (err) {
       console.error("Failed to load tenure detail:", err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function doShiftDates(dateStr: string) {
+    if (!dateStr) return;
+    setShiftingDates(true);
+    try {
+      await api(`/tenures/${tenureId}/shift-dates`, {
+        method: "POST",
+        body: JSON.stringify({ start_date: dateStr }),
+      });
+      await loadDetail();
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      alert("Failed to shift dates: " + (err?.message || err));
+    } finally {
+      setShiftingDates(false);
+    }
+  }
+
+  async function handleQuickShift(daysToAdd: number) {
+    if (!data?.coverage_start_date) return;
+    const current = new Date(data.coverage_start_date);
+    current.setDate(current.getDate() + daysToAdd);
+    const dateStr = current.toISOString().substring(0, 10);
+    setNewStartDateInput(dateStr);
+    await doShiftDates(dateStr);
+  }
+
+  async function handleProjectRenewal() {
+    setProjectingRenewal(true);
+    try {
+      await api(`/tenures/${tenureId}/project-renewal`, { method: "POST" });
+      await loadDetail();
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      alert("Failed to project renewal: " + (err?.message || err));
+    } finally {
+      setProjectingRenewal(false);
+    }
+  }
+
+  async function handleMarkLapsed() {
+    const reason = prompt("Enter reason for lapse (e.g. Sold vehicle, Competitor, Unreachable):", "Customer discontinued");
+    if (!reason) return;
+    setLapsingTenure(true);
+    try {
+      await api(`/tenures/${tenureId}/lapse`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      });
+      await loadDetail();
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      alert("Failed to mark tenure lapsed: " + (err?.message || err));
+    } finally {
+      setLapsingTenure(false);
     }
   }
 
@@ -313,6 +378,111 @@ export function TenureTimelineDrawer({
                 )}
               </div>
 
+              {/* DATE MODULARITY & TENURE LIFECYCLE */}
+              <div className="bg-white border border-neutral-200 rounded-xl p-4 shadow-2xs space-y-3">
+                <div className="flex items-center justify-between border-b border-neutral-100 pb-2">
+                  <h3 className="text-xs font-bold text-neutral-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                    Coverage Period &amp; Date Shifter
+                  </h3>
+                  <div className="flex items-center gap-1.5">
+                    {data.is_projected && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-200">
+                        Projected Reminder
+                      </span>
+                    )}
+                    {(data.delay_days || 0) > 0 && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-900">
+                        +{data.delay_days}d Late
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-3 bg-neutral-50/80 border border-neutral-200/80 rounded-lg text-xs space-y-2">
+                  <div className="flex items-center justify-between text-neutral-700">
+                    <span>
+                      Current Coverage: <strong className="font-mono text-neutral-900">{data.coverage_start_date ? new Date(data.coverage_start_date).toLocaleDateString("en-GB") : "—"}</strong> → <strong className="font-mono text-neutral-900">{data.coverage_end_date ? new Date(data.coverage_end_date).toLocaleDateString("en-GB") : "—"}</strong>
+                    </span>
+                    <span className="text-[11px] text-neutral-500">
+                      Cohort: <strong>{data.expiry_month}</strong>
+                    </span>
+                  </div>
+
+                  {/* Quick Shift Buttons */}
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <span className="text-[11px] font-semibold text-neutral-500 mr-1">Quick Shift:</span>
+                    <button
+                      type="button"
+                      disabled={shiftingDates}
+                      onClick={() => handleQuickShift(1)}
+                      className="px-2 py-1 rounded bg-white border border-neutral-200 hover:bg-neutral-100 text-[11px] font-semibold text-neutral-800 transition-colors"
+                    >
+                      +1 Day
+                    </button>
+                    <button
+                      type="button"
+                      disabled={shiftingDates}
+                      onClick={() => handleQuickShift(7)}
+                      className="px-2 py-1 rounded bg-white border border-neutral-200 hover:bg-neutral-100 text-[11px] font-semibold text-neutral-800 transition-colors"
+                    >
+                      +1 Week
+                    </button>
+                    <button
+                      type="button"
+                      disabled={shiftingDates}
+                      onClick={() => handleQuickShift(30)}
+                      className="px-2 py-1 rounded bg-white border border-neutral-200 hover:bg-neutral-100 text-[11px] font-semibold text-neutral-800 transition-colors"
+                    >
+                      +1 Month
+                    </button>
+
+                    {/* Custom Date Input */}
+                    <div className="flex items-center gap-1 ml-auto">
+                      <input
+                        type="date"
+                        value={newStartDateInput}
+                        onChange={(e) => setNewStartDateInput(e.target.value)}
+                        className="text-xs h-7 px-2 border border-neutral-200 rounded bg-white focus:outline-hidden focus:ring-1 focus:ring-neutral-900"
+                      />
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={shiftingDates || !newStartDateInput}
+                        onClick={() => doShiftDates(newStartDateInput)}
+                        className="h-7 text-[11px] px-2"
+                      >
+                        {shiftingDates ? "Syncing..." : "Apply Shift"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Lifecycle Actions */}
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    type="button"
+                    disabled={lapsingTenure || data.status === "lapsed"}
+                    onClick={handleMarkLapsed}
+                    className="text-xs font-semibold text-red-600 hover:text-red-700 hover:underline disabled:opacity-50 cursor-pointer"
+                  >
+                    {data.status === "lapsed" ? "Policy Marked Lapsed" : "Customer Not Renewing / Mark Lapsed"}
+                  </button>
+
+                  {!data.is_projected && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={projectingRenewal}
+                      onClick={handleProjectRenewal}
+                      className="h-7 text-[11px] px-2.5 font-semibold"
+                    >
+                      {projectingRenewal ? "Projecting..." : "+ Project Next 1-Yr Renewal"}
+                    </Button>
+                  )}
+                </div>
+              </div>
+
               {/* 3. STATUS & OUTCOME RECORD */}
               <div className="bg-white border border-neutral-200 rounded-xl p-4 shadow-2xs space-y-4">
                 <div className="flex items-center justify-between border-b border-neutral-100 pb-2">
@@ -419,19 +589,39 @@ export function TenureTimelineDrawer({
 
                 <div className="space-y-2 pt-1">
                   {(!data.activities || data.activities.length === 0) ? (
-                    <div className="text-xs text-neutral-400 py-2">No activity entries recorded yet.</div>
+                    <div className="text-xs text-neutral-400 py-3 text-center bg-neutral-50/60 rounded-lg">
+                      No activity entries recorded yet for this tenure.
+                    </div>
                   ) : (
-                    data.activities.map((act: any) => (
-                      <div key={act.id} className="flex items-start gap-2.5 text-xs py-1 border-b border-neutral-100 last:border-none">
-                        <Clock className="w-3.5 h-3.5 text-neutral-400 mt-0.5 shrink-0" />
-                        <div className="flex-1">
-                          <p className="text-neutral-800 font-medium">{act.summary}</p>
-                          <span className="text-[10px] text-neutral-400">
-                            {act.created_at ? new Date(act.created_at).toLocaleString() : ""}
-                          </span>
+                    data.activities.map((act: any) => {
+                      let timeStr = "";
+                      if (act.created_at) {
+                        try {
+                          timeStr = new Date(act.created_at).toLocaleString("en-US", {
+                            year: "numeric",
+                            month: "numeric",
+                            day: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                            second: "2-digit",
+                            hour12: true,
+                          });
+                        } catch {
+                          timeStr = act.created_at;
+                        }
+                      }
+                      return (
+                        <div key={act.id} className="flex items-start gap-2.5 text-xs py-2 border-b border-neutral-100 last:border-none">
+                          <div className="w-2 h-2 rounded-full bg-blue-500 mt-1.5 shrink-0" />
+                          <div className="flex-1">
+                            <p className="text-neutral-900 font-semibold text-xs leading-snug">{act.summary}</p>
+                            {timeStr && (
+                              <p className="text-[11px] text-neutral-500 font-mono mt-0.5">{timeStr}</p>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>

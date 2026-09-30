@@ -20,7 +20,10 @@ from app.models.tables import (
     OurSpecial,
     OurSpecialVariant,
     OutputTemplateConfig,
+    QuotationDraft,
+    RenderSnapshot,
     TemplateAsset,
+    TemplateRevision,
     TrashRecord,
     UploadedFile,
 )
@@ -361,6 +364,19 @@ def permanent_delete_template(db: Session, user, template_id: str) -> None:
     template = db.get(OutputTemplateConfig, template_id)
     if not template or not template.deleted_at:
         raise AppError("Trash template not found.", 404)
+
+    # Clean up child render snapshots associated with template revisions
+    revisions = list(db.scalars(select(TemplateRevision).where(TemplateRevision.template_id == template.id)).all())
+    rev_ids = [r.id for r in revisions] if revisions else []
+    if rev_ids:
+        db.execute(delete(RenderSnapshot).where(RenderSnapshot.template_revision_id.in_(rev_ids)))
+
+    # Clean up child template revisions
+    db.execute(delete(TemplateRevision).where(TemplateRevision.template_id == template.id))
+
+    # Clear layout override references on drafts
+    db.execute(update(QuotationDraft).where(QuotationDraft.layout_override_template_id == template.id).values(layout_override_template_id=None))
+
     _remove_trash_entries(db, "template", [template.id])
     db.delete(template)
     db.commit()

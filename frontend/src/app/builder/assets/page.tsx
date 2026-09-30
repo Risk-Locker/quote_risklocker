@@ -302,14 +302,17 @@ export default function AssetLibraryPage() {
       if (replacementFile) {
         const formData = new FormData();
         formData.append("file", replacementFile);
-        await api(`/business/assets/${editingAsset.id}/replace-file`, {
+        const replaceRes = await api<{ asset: Asset }>(`/business/assets/${editingAsset.id}/replace-file`, {
           method: "POST",
           body: formData,
         });
+        if (replaceRes?.asset) {
+          setAssets((prev) => prev.map((a) => (a.id === editingAsset.id ? { ...a, ...replaceRes.asset } : a)));
+        }
       }
 
       // 2. Update metadata
-      await api(`/business/assets/${editingAsset.id}`, {
+      const patchRes = await api<{ asset: Asset }>(`/business/assets/${editingAsset.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           label: editLabel.trim(),
@@ -317,6 +320,10 @@ export default function AssetLibraryPage() {
           kind: editKind,
         }),
       });
+      if (patchRes?.asset) {
+        setAssets((prev) => prev.map((a) => (a.id === editingAsset.id ? { ...a, ...patchRes.asset } : a)));
+      }
+
       setEditOpen(false);
       setEditingAsset(null);
       setReplacementFile(null);

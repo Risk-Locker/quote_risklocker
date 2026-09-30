@@ -70,24 +70,36 @@ def create_app() -> FastAPI:
             import socket
             from app.workers.extraction_worker import run_one_job
 
-            async def _embedded_worker_loop():
-                worker_id = f"embedded:{socket.gethostname()}:{os.getpid()}"
-                while True:
-                    try:
-                        def _work():
-                            with SessionLocal() as db:
-                                return run_one_job(db, settings, worker_id=worker_id)
+            concurrency = int(os.getenv("WORKER_CONCURRENCY", "10"))
 
-                        job = await asyncio.to_thread(_work)
-                        if job is None:
-                            await asyncio.sleep(1.0)
-                    except asyncio.CancelledError:
-                        break
-                    except Exception:
-                        logger.exception("Embedded worker loop iteration failed — sleeping 2s before retry")
-                        await asyncio.sleep(2.0)
+            async def _embedded_worker_pool():
+                async def _worker_slot(slot_idx: int):
+                    slot_worker_id = f"embedded:{socket.gethostname()}:{os.getpid()}:slot{slot_idx}"
+                    while True:
+                        try:
+                            def _work():
+                                with SessionLocal() as db:
+                                    return run_one_job(db, settings, worker_id=slot_worker_id)
 
-            worker_task = asyncio.create_task(_embedded_worker_loop())
+                            job = await asyncio.to_thread(_work)
+                            if job is None:
+                                await asyncio.sleep(1.0)
+                        except asyncio.CancelledError:
+                            break
+                        except Exception:
+                            logger.exception("Embedded worker slot %s failed — sleeping 2s before retry", slot_idx)
+                            await asyncio.sleep(2.0)
+
+                slots = [asyncio.create_task(_worker_slot(i)) for i in range(concurrency)]
+                logger.info("Embedded worker pool started with %s concurrent processing slots", concurrency)
+                try:
+                    await asyncio.gather(*slots)
+                except asyncio.CancelledError:
+                    for s in slots:
+                        s.cancel()
+                    await asyncio.gather(*slots, return_exceptions=True)
+
+            worker_task = asyncio.create_task(_embedded_worker_pool())
 
         try:
             yield

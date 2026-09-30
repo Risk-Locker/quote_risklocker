@@ -118,32 +118,79 @@ def get_or_create_vehicle_tracking(
     brand: str | None = None,
     model: str | None = None,
     engine_cc: str | None = None,
+    chassis_no: str | None = None,
+    engine_no: str | None = None,
+    customer_id: str | None = None,
 ) -> tuple[TrackedVehicle | None, dict[str, Any] | None]:
     """Retrieve or register a tracked vehicle, sequencing owner transfers based on validity date."""
-    if not is_valid_malaysian_plate(vehicle_no):
-        return None, None
-    norm_plate = normalize_plate(vehicle_no)
-    if not norm_plate:
-        return None, None
+    norm_chassis = chassis_no.strip().upper() if chassis_no and chassis_no.strip() else None
+    norm_engine = engine_no.strip().upper() if engine_no and engine_no.strip() else None
+
+    veh: TrackedVehicle | None = None
+    clean_customer = (customer_name or "").strip()
 
     if session_id:
         sess = db.get(SessionModel, session_id)
         if sess and getattr(sess, "is_test", False):
             return None, None
 
-    clean_customer = (customer_name or "").strip()
-    veh = db.scalar(select(TrackedVehicle).where(TrackedVehicle.vehicle_no == norm_plate))
+    if is_valid_malaysian_plate(vehicle_no):
+        norm_plate = normalize_plate(vehicle_no)
+        if norm_plate:
+            veh = db.scalar(select(TrackedVehicle).where(TrackedVehicle.vehicle_no == norm_plate))
+            if not veh and norm_chassis:
+                veh = db.scalar(select(TrackedVehicle).where(TrackedVehicle.chassis_no == norm_chassis))
+                if veh:
+                    veh.vehicle_no = norm_plate  # Newly assigned plate to unplated vehicle!
+
+            if not veh:
+                veh = TrackedVehicle(
+                    id=new_id(),
+                    vehicle_no=norm_plate,
+                    car_brand=brand,
+                    car_model=model,
+                    engine_cc=engine_cc,
+                    chassis_no=norm_chassis,
+                    engine_no=norm_engine,
+                    customer_id=customer_id,
+                )
+                db.add(veh)
+                db.flush()
+    elif norm_chassis:
+        # Fallback tracking by chassis number for new/unregistered/unplated vehicles
+        veh = db.scalar(select(TrackedVehicle).where(TrackedVehicle.chassis_no == norm_chassis))
+        if not veh:
+            veh = TrackedVehicle(
+                id=new_id(),
+                vehicle_no=f"UNPLATED-{norm_chassis[:12]}",
+                car_brand=brand,
+                car_model=model,
+                engine_cc=engine_cc,
+                chassis_no=norm_chassis,
+                engine_no=norm_engine,
+                customer_id=customer_id,
+            )
+            db.add(veh)
+            db.flush()
+    else:
+        return None, None
 
     if not veh:
-        veh = TrackedVehicle(
-            id=new_id(),
-            vehicle_no=norm_plate,
-            car_brand=brand,
-            car_model=model,
-            engine_cc=engine_cc,
-        )
-        db.add(veh)
-        db.flush()
+        return None, None
+
+    # Update metadata if missing
+    if brand and not veh.car_brand:
+        veh.car_brand = brand
+    if model and not veh.car_model:
+        veh.car_model = model
+    if engine_cc and not veh.engine_cc:
+        veh.engine_cc = engine_cc
+    if norm_chassis and not veh.chassis_no:
+        veh.chassis_no = norm_chassis
+    if norm_engine and not veh.engine_no:
+        veh.engine_no = norm_engine
+    if customer_id and not veh.customer_id:
+        veh.customer_id = customer_id
 
     if session_id:
         sess_obj = db.get(SessionModel, session_id)
@@ -166,28 +213,7 @@ def get_or_create_vehicle_tracking(
             is_current=True,
             sequence_order=1,
             source_session_id=session_id,
-        )
-        db.add(new_ownership)
-        db.flush()
-        return veh, None
-
-    # Vehicle already exists: update vehicle metadata if missing
-    if brand and not veh.car_brand:
-        veh.car_brand = brand
-    if model and not veh.car_model:
-        veh.car_model = model
-    if engine_cc and not veh.engine_cc:
-        veh.engine_cc = engine_cc
-
-    if not current_owner:
-        new_ownership = VehicleOwnership(
-            id=new_id(),
-            vehicle_id=veh.id,
-            customer_name=clean_customer or "Unknown Customer",
-            valid_until=validity_date,
-            is_current=True,
-            sequence_order=1,
-            source_session_id=session_id,
+            customer_id=customer_id,
         )
         db.add(new_ownership)
         db.flush()

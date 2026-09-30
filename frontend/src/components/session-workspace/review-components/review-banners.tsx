@@ -113,6 +113,69 @@ export function ReviewBanners({
         </div>
       ) : null}
 
+      {/* Customer Contact & Profile Discrepancy Alerts */}
+      {workspace?.display_options &&
+      Array.isArray((workspace.display_options as Record<string, any>).customer_discrepancies) &&
+      ((workspace.display_options as Record<string, any>).customer_discrepancies as any[]).length > 0 ? (
+        ((workspace.display_options as Record<string, any>).customer_discrepancies as Array<{ field: string; current: string; detected: string; message: string }>).map((disc, idx) => (
+          <div
+            key={idx}
+            role="alert"
+            className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 bg-blue-50/90 border border-blue-200 rounded-[var(--rl-radius-sm)] shadow-xs"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded bg-blue-100 flex items-center justify-center text-blue-800 shrink-0 font-bold text-xs">
+                ID
+              </div>
+              <div className="text-sm">
+                <span className="font-semibold text-blue-900">Customer Profile Notice: </span>
+                <span className="text-blue-800">{disc.message}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+              <Button
+                variant="primary"
+                size="sm"
+                className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-7 px-2.5"
+                onClick={async () => {
+                  try {
+                    await fetch(`/api/sessions/${workspace.session_id}/resolve-customer-discrepancy`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ action: "update_master", field: disc.field, value: disc.detected }),
+                    });
+                    window.location.reload();
+                  } catch (e) {
+                    console.error(e);
+                  }
+                }}
+              >
+                Update Master Profile
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="text-xs h-7 px-2 border-blue-300 text-blue-700 hover:bg-blue-100"
+                onClick={async () => {
+                  try {
+                    await fetch(`/api/sessions/${workspace.session_id}/resolve-customer-discrepancy`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ action: "dismiss", field: disc.field }),
+                    });
+                    window.location.reload();
+                  } catch (e) {
+                    console.error(e);
+                  }
+                }}
+              >
+                Keep Current
+              </Button>
+            </div>
+          </div>
+        ))
+      ) : null}
+
       {learnPrompt ? (
         <Card role="status" className="flex flex-wrap items-center justify-between gap-3 border-amber-500/30 bg-amber-500/10 p-3">
           <p className="text-sm font-semibold text-[var(--rl-text-strong)]">

@@ -7,12 +7,9 @@ import {
   CalendarBlank,
   ChartLineUp,
   Database,
-  ListBullets,
   Users,
 } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
-import { TeamsCalendarView } from "@/components/insights/teams-calendar-view";
-import { HitMissCalendar } from "@/components/insights/hit-miss-calendar";
 import { ConnectedClientDossier } from "@/components/insights/connected-client-dossier";
 import { InsightsAnalyticsView } from "@/components/insights/insights-analytics-view";
 import { SyncSessionsModal } from "@/components/insights/sync-sessions-modal";
@@ -20,12 +17,16 @@ import { VehicleHistoryModal } from "@/components/insights/vehicle-history-modal
 import { TenureTimelineLedger } from "@/components/tenures/tenure-timeline-ledger";
 import { Button } from "@/components/ui/button";
 
-type TabKey = "timeline" | "clients" | "hit-miss" | "corporate" | "analytics" | "calendar";
+type TabKey = "timeline" | "clients" | "corporate" | "analytics";
 
 function InsightsContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const initialTab = (searchParams.get("tab") as TabKey) || "timeline";
+  const rawTab = searchParams.get("tab");
+  // Normalize old tab references
+  const initialTab: TabKey = (rawTab === "calendar" || rawTab === "hit-miss" || !rawTab)
+    ? "timeline"
+    : (rawTab as TabKey);
 
   const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
   const [showSyncModal, setShowSyncModal] = useState(false);
@@ -38,9 +39,11 @@ function InsightsContent() {
   }
 
   useEffect(() => {
-    const t = searchParams.get("tab") as TabKey;
-    if (t && ["timeline", "clients", "hit-miss", "corporate", "analytics", "calendar"].includes(t)) {
-      setActiveTab(t);
+    const t = searchParams.get("tab");
+    if (t === "calendar" || t === "hit-miss") {
+      setActiveTab("timeline");
+    } else if (t && ["timeline", "clients", "corporate", "analytics"].includes(t)) {
+      setActiveTab(t as TabKey);
     }
   }, [searchParams]);
 
@@ -71,9 +74,9 @@ function InsightsContent() {
         </div>
       </div>
 
-      {/* 6-Tab Navigation Switcher */}
+      {/* 4-Tab Navigation Switcher */}
       <div className="flex items-center gap-1 bg-neutral-100/90 p-1 rounded-lg border border-neutral-200/70 w-fit overflow-x-auto max-w-full">
-        {/* 1. Timeline Ledger */}
+        {/* 1. Timeline Ledger (Dual-View: Ledger & Calendar) */}
         <button
           type="button"
           onClick={() => handleTabChange("timeline")}
@@ -101,21 +104,7 @@ function InsightsContent() {
           <span>Client Records</span>
         </button>
 
-        {/* 3. Hit & Miss Activity */}
-        <button
-          type="button"
-          onClick={() => handleTabChange("hit-miss")}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all whitespace-nowrap ${
-            activeTab === "hit-miss"
-              ? "bg-white text-neutral-950 shadow-xs"
-              : "text-neutral-500 hover:text-neutral-800"
-          }`}
-        >
-          <ListBullets size={15} weight={activeTab === "hit-miss" ? "bold" : "regular"} />
-          <span>Hit &amp; Miss Activity</span>
-        </button>
-
-        {/* 4. Corporate Fleet */}
+        {/* 3. Corporate Fleet */}
         <button
           type="button"
           onClick={() => handleTabChange("corporate")}
@@ -129,7 +118,7 @@ function InsightsContent() {
           <span>Corporate Fleet</span>
         </button>
 
-        {/* 5. Analytics & Conversion */}
+        {/* 4. Analytics & Conversion */}
         <button
           type="button"
           onClick={() => handleTabChange("analytics")}
@@ -142,20 +131,6 @@ function InsightsContent() {
           <ChartLineUp size={15} weight={activeTab === "analytics" ? "bold" : "regular"} />
           <span>Analytics &amp; Conversion</span>
         </button>
-
-        {/* 6. Calendar */}
-        <button
-          type="button"
-          onClick={() => handleTabChange("calendar")}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all whitespace-nowrap ${
-            activeTab === "calendar"
-              ? "bg-white text-neutral-950 shadow-xs"
-              : "text-neutral-500 hover:text-neutral-800"
-          }`}
-        >
-          <CalendarBlank size={15} weight={activeTab === "calendar" ? "bold" : "regular"} />
-          <span>Calendar</span>
-        </button>
       </div>
 
       {/* Active Tab View */}
@@ -166,17 +141,11 @@ function InsightsContent() {
           <ConnectedClientDossier fixedClientType="Individual" onOpenVehicleHistory={(plate) => setInspectPlate(plate)} />
         )}
 
-        {activeTab === "hit-miss" && <HitMissCalendar />}
-
         {activeTab === "corporate" && (
           <ConnectedClientDossier fixedClientType="Company" onOpenVehicleHistory={(plate) => setInspectPlate(plate)} />
         )}
 
         {activeTab === "analytics" && <InsightsAnalyticsView />}
-
-        {activeTab === "calendar" && (
-          <TeamsCalendarView onOpenVehicleHistory={(plate) => setInspectPlate(plate)} />
-        )}
       </div>
 
 
