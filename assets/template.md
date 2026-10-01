@@ -765,7 +765,7 @@
         <p class="bank-details-label">Bank details</p>
 
         <p class="bank-account" data-field="payment.account_number">
-          12303105859
+          12300318500
         </p>
 
         <p class="payee-name" data-field="payment.account_name">

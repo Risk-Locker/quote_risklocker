@@ -55,6 +55,7 @@ class ComparisonEntryUpsertRequest(BaseModel):
     excess: float = 0.0
     windscreen_sum_insured: float | None = None
     special_perils: str | None = None
+    llp_llop: str | None = None
     is_recommended: bool = False
     is_manual: bool = True
     notes: str | None = None

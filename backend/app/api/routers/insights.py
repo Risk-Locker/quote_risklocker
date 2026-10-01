@@ -705,7 +705,7 @@ def get_customer_detail(
     user: User = Depends(current_user),
 ) -> dict:
     from app.services.customer_account_service import get_customer_account
-    from app.core.exceptions import AppError
+    from app.core.errors import AppError
 
     cust = get_customer_account(db, customer_id)
     if not cust:
@@ -738,5 +738,100 @@ def get_customer_detail(
             "sessions_count": len(cust.sessions or []),
         }
     }
+
+
+from pydantic import BaseModel
+
+
+class CustomerUpdateRequest(BaseModel):
+    canonical_name: str | None = None
+    id_number: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    address: str | None = None
+    notes: str | None = None
+
+
+@router.patch("/insights/customers/{customer_id}")
+def update_customer_endpoint(
+    customer_id: str,
+    payload: CustomerUpdateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Update master customer account and propagate name/IC to all tenures and quotation drafts."""
+    from app.services.customer_account_service import get_customer_account
+    from app.services.identity_normalization_service import normalize_government_id
+    from app.core.errors import AppError
+    from app.models.tables import InsuranceTenure, Session as SessionModel
+    from sqlalchemy import update
+
+    cust = get_customer_account(db, customer_id)
+    if not cust:
+        raise AppError("Customer not found.", 404)
+
+    if payload.canonical_name and payload.canonical_name.strip():
+        cust.canonical_name = payload.canonical_name.strip()
+    if payload.id_number and payload.id_number.strip():
+        norm_id, norm_type = normalize_government_id(payload.id_number.strip())
+        cust.id_number = norm_id or payload.id_number.strip()
+        if norm_type:
+            cust.id_type = norm_type
+    if payload.phone is not None:
+        cust.phone = payload.phone.strip() if payload.phone else None
+    if payload.email is not None:
+        cust.email = payload.email.strip().lower() if payload.email else None
+    if payload.address is not None:
+        cust.address = payload.address.strip() if payload.address else None
+    if payload.notes is not None:
+        cust.notes = payload.notes.strip() if payload.notes else None
+
+    # Propagate canonical_name across all tenures
+    db.execute(
+        update(InsuranceTenure)
+        .where(InsuranceTenure.customer_id == cust.id)
+        .values(customer_name=cust.canonical_name)
+    )
+
+    # Propagate name and IC to all quotation drafts under this customer
+    sessions_to_sync = list(
+        db.scalars(
+            select(SessionModel).where(SessionModel.customer_id == cust.id)
+        ).all()
+    )
+    for s in sessions_to_sync:
+        if s.draft and isinstance(s.draft.fields, dict):
+            f = dict(s.draft.fields)
+            if payload.canonical_name:
+                for name_k in ["customer_name", "policyholder_name", "client_name"]:
+                    if name_k in f:
+                        if isinstance(f[name_k], dict):
+                            f[name_k] = {**f[name_k], "value": cust.canonical_name}
+                        else:
+                            f[name_k] = cust.canonical_name
+            if payload.id_number:
+                for ic_k in ["customer_ic_no", "ic_no", "nric_no", "id_number"]:
+                    if ic_k in f:
+                        if isinstance(f[ic_k], dict):
+                            f[ic_k] = {**f[ic_k], "value": cust.id_number}
+                        else:
+                            f[ic_k] = cust.id_number
+            s.draft.fields = f
+
+    db.commit()
+    db.refresh(cust)
+    return {
+        "success": True,
+        "customer": {
+            "id": cust.id,
+            "canonical_name": cust.canonical_name,
+            "id_number": cust.id_number,
+            "phone": cust.phone,
+            "email": cust.email,
+            "address": cust.address,
+            "notes": cust.notes,
+        },
+    }
+
 
 

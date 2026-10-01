@@ -442,10 +442,20 @@ def _add_contribution_rows(text: str, page_text: list[dict], results: dict[str, 
         lower = line.lower().strip(" :-")
         window = " ".join(lines[index : index + 5])
         money_values = _money(re.sub(r"\(\d+(?:\.\d+)?\s*%\)", "", window))
-        if "ncd" in lower or "no-claim-discount" in lower or "dtt" in lower or "diskaun tanpa tuntutan" in lower:
-            percent = re.search(r"\((?P<ncd>\d{1,2}(?:\.\d+)?)\s*%\)|(?P<ncd2>\d{1,2}(?:\.\d+)?)\s*%", line)
+        if (
+            "ncd" in lower
+            or "ncb" in lower
+            or "no-claim-discount" in lower
+            or "no claim discount" in lower
+            or "no-claim-bonus" in lower
+            or "no claim bonus" in lower
+            or "non claim" in lower
+            or "dtt" in lower
+            or "diskaun tanpa tuntutan" in lower
+        ):
+            percent = re.search(r"\((?P<ncd>\d{1,2}(?:\.\d+)?)\s*%\)|(?P<ncd2>\d{1,2}(?:\.\d+)?)\s*%|(?i:\b(?:ncd|ncb)\b[^\d]{0,10}(?P<ncd3>\d{1,2}(?:\.\d+)?))", line)
             if percent:
-                _add_line_value(results, "ncd_percent", percent.group("ncd") or percent.group("ncd2"), "semantic_contribution_row", 0.96, line, text, page_text)
+                _add_line_value(results, "ncd_percent", percent.group("ncd") or percent.group("ncd2") or percent.group("ncd3"), "semantic_contribution_row", 0.96, line, text, page_text)
             if money_values:
                 _add_line_value(results, "ncd_amount", money_values[0], "semantic_contribution_row", 0.9, line, text, page_text)
         if lower.startswith("total payable") or lower.startswith("total amount") or lower.startswith("amount payable") or lower.startswith("total contribution payable") or lower.startswith("jumlah bayaran") or lower.startswith("jumlah perlu dibayar"):
@@ -674,7 +684,7 @@ def _add_amgen_profile(text: str, page_text: list[dict], results: dict[str, list
             _add_static(results, "total_amount", amounts[-1], "profile_total_table", 0.96, totals_window.group(0), text, page_text)
             _add_static(results, "optional_cover_amount", amounts[-4], "profile_total_table", 0.86, totals_window.group(0), text, page_text)
 
-    ncd = re.search(r"\bNCD\s+(?P<ncd>\d{1,2}(?:\.\d+)?)\s*%", text, re.IGNORECASE)
+    ncd = re.search(r"\b(?:NCD|NCB)\s+(?P<ncd>\d{1,2}(?:\.\d+)?)\s*%", text, re.IGNORECASE)
     if ncd:
         _add_static(results, "ncd_percent", ncd.group("ncd"), "profile_ncd", 0.95, ncd.group(0), text, page_text)
 
@@ -846,7 +856,7 @@ def find_candidates(
     if messy_name:
         _add(results, "customer_name", messy_name.group("name"), "messy_text_window", 0.82, text, messy_name.start(), messy_name.end(), page_text)
 
-    for match in re.finditer(r"(?i)\bNCD\b[^\d]{0,15}(?P<ncd>\d{1,2}(?:\.\d+)?)\s*%?", text):
+    for match in re.finditer(r"(?i)\b(?:NCD|NCB)\b[^\d]{0,15}(?P<ncd>\d{1,2}(?:\.\d+)?)\s*%?", text):
         _add(results, "ncd_percent", match.group("ncd"), "label_percent", 0.78, text, match.start(), match.end(), page_text)
 
     # Valuation type detection (Agreed Value vs Market Value)

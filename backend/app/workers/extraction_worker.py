@@ -343,14 +343,164 @@ def process_extraction_job(
         db.flush()
 
     auto_apply_extracted_benefits(db, draft)
+
+    # -------------------------------------------------------------------------
+    # Auto-Resolve Vehicle, Customer Account & Insurance Tenure for All Quotes
+    # -------------------------------------------------------------------------
+    from app.services.insurance_tenure_service import (
+        compute_quotation_content_hash,
+        evaluate_tenure_ingestion,
+        resolve_or_create_tenure,
+    )
+    from app.services.customer_account_service import resolve_or_create_customer
+    from app.services.vehicle_tracking_service import get_or_create_vehicle_tracking
+
+    def _fval(k: str) -> str:
+        item = (draft.fields or {}).get(k)
+        if isinstance(item, dict):
+            val = item.get("value")
+            return str(val).strip() if val is not None else ""
+        return str(item).strip() if item is not None else ""
+
+    raw_plate = _fval("vehicle_no")
+    raw_chassis = _fval("chassis_no")
+    raw_engine = _fval("engine_no")
+    raw_cc = _fval("engine_cc")
+    raw_brand = _fval("car_brand")
+    raw_model = _fval("car_model")
+    customer = _fval("customer_name") or _fval("insured_name")
+    raw_id = _fval("ic_or_brn") or _fval("customer_ic_no")
+
+    # Universal Tenure Dates Fallback: cover_start -> issue_date -> valid_until -> today
+    cover_start = _fval("cover_start_date") or _fval("issue_date") or _fval("valid_until")
+    cover_end = _fval("cover_end_date") or _fval("valid_until")
+
+    # Plate Fallback to Chassis
+    clean_plate = raw_plate.upper() if raw_plate else ""
+    clean_chassis = raw_chassis.upper() if raw_chassis else ""
+    if clean_plate in ("", "N/A", "NA", "NONE", "UNREGISTERED", "NEW", "TBA", "-", "UNKNOWN") and clean_chassis:
+        effective_veh_no = f"CHASSIS: {clean_chassis}"
+    else:
+        effective_veh_no = clean_plate or (f"CHASSIS: {clean_chassis}" if clean_chassis else "UNPLATED")
+
+    # Customer account resolution
+    cust_account = None
+    if customer or raw_id:
+        cust_account, discrepancies = resolve_or_create_customer(
+            db=db,
+            raw_name=customer or "Valued Client",
+            raw_id=raw_id or None,
+        )
+        if cust_account:
+            session.customer_id = cust_account.id
+            if discrepancies:
+                curr_opts = draft.display_options or {}
+                curr_opts["customer_discrepancies"] = discrepancies
+                draft.display_options = curr_opts
+
+    # Vehicle Tracking & Full Spec Persistence
+    veh, owner_alert = get_or_create_vehicle_tracking(
+        db=db,
+        vehicle_no=effective_veh_no,
+        customer_name=customer or "Valued Client",
+        validity_date=cover_end or cover_start or None,
+        session_id=session.id,
+        brand=raw_brand or None,
+        model=raw_model or None,
+        chassis_no=raw_chassis or None,
+        engine_no=raw_engine or None,
+        customer_id=cust_account.id if cust_account else None,
+    )
+    if veh:
+        session.tracked_vehicle_id = veh.id
+        if raw_cc and not veh.engine_cc:
+            veh.engine_cc = raw_cc
+        if raw_chassis and not veh.chassis_no:
+            veh.chassis_no = raw_chassis
+        if raw_engine and not veh.engine_no:
+            veh.engine_no = raw_engine
+        if raw_brand and not veh.car_brand:
+            veh.car_brand = raw_brand
+        if raw_model and not veh.car_model:
+            veh.car_model = raw_model
+        if owner_alert:
+            curr_opts = draft.display_options or {}
+            curr_opts["owner_change_alert"] = owner_alert
+            draft.display_options = curr_opts
+
+    # Insurance Tenure (100% Guaranteed Anchor with Any Date or Today)
+    tenure: InsuranceTenure | None = None
+    if session.tenure_id:
+        tenure = db.get(InsuranceTenure, session.tenure_id)
+        if tenure:
+            if veh and not tenure.tracked_vehicle_id:
+                tenure.tracked_vehicle_id = veh.id
+            if cust_account and not tenure.customer_id:
+                tenure.customer_id = cust_account.id
+
+    if not tenure:
+        tenure = resolve_or_create_tenure(
+            db=db,
+            vehicle_no=effective_veh_no,
+            customer_name=customer or "Valued Client",
+            start_date=cover_start or None,
+            end_date=cover_end or None,
+            tracked_vehicle_id=veh.id if veh else None,
+            customer_id=cust_account.id if cust_account else None,
+            chassis_no=raw_chassis or None,
+            engine_no=raw_engine or None,
+        )
+    session.tenure_id = tenure.id
+    session.coverage_start_date = tenure.coverage_start_date
+    session.coverage_end_date = tenure.coverage_end_date
+
+    # Propagate detected NCD into tenure if not initialized
+    if tenure and tenure.ncd_percentage is None and isinstance(draft.fields, dict):
+        from app.services.marketing_comparison_service import _extract_ncd_from_draft
+        ext_ncd = _extract_ncd_from_draft(draft.fields)
+        if ext_ncd is not None:
+            tenure.ncd_percentage = ext_ncd
+
+    # Compute content hash & evaluate tenure ingestion
+    content_hash = compute_quotation_content_hash(
+        fields=draft.fields,
+        benefits=draft_data.get("benefits"),
+    )
+    session.content_hash = content_hash
+
+    action, existing_sess, version = evaluate_tenure_ingestion(
+        db=db,
+        tenure_id=tenure.id,
+        company_name=session.detected_company,
+        company_id=draft.company_id,
+        content_hash=content_hash,
+        current_session_id=session.id,
+    )
+    curr_opts = draft.display_options or {}
+    if action == "SKIP_IDENTICAL" and existing_sess and existing_sess.id != session.id:
+        session.status = "trash"
+        session.is_tenure_active = False
+        session.tenure_version = existing_sess.tenure_version
+        curr_opts["duplicate_skipped"] = True
+        curr_opts["original_session_id"] = existing_sess.id
+        curr_opts["skip_message"] = (
+            f"Identical quote for {session.detected_company or 'this insurer'} already active in this tenure (v{existing_sess.tenure_version})."
+        )
+    else:
+        session.tenure_version = version
+        session.is_tenure_active = True
+        if version > 1:
+            curr_opts["tenure_version_notice"] = f"Created revised version v{version} under {session.detected_company or 'insurer'}."
+    draft.display_options = curr_opts
+
     complete_job(
         db,
         job,
         worker_id,
-        {"session_id": session.id, "draft_id": draft.id},
+        {"session_id": session.id, "draft_id": draft.id, "tenure_id": tenure.id},
     )
 
-    logger.info("Job %s: review saved and job marked complete (session=%s, draft=%s)", job.id, session.id, draft.id)
+    logger.info("Job %s: review saved and job marked complete (session=%s, draft=%s, tenure=%s)", job.id, session.id, draft.id, tenure.id)
 
     # Deferred Supabase promotion: runs AFTER the job is marked complete so the
     # user sees results immediately. Uses a fresh httpx.Client (not the shared

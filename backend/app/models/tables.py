@@ -270,6 +270,21 @@ class Session(Base, TimestampMixin):
     activities: Mapped[list["QuotationActivity"]] = relationship(back_populates="session", cascade="all, delete-orphan")
 
 
+class PersonInCharge(Base, TimestampMixin):
+    __tablename__ = "person_in_charge"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    type: Mapped[str] = mapped_column(String(50), nullable=False, default="subagent", index=True)  # subagent, client_self, company_personnel, external_contact
+    agency_group: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)  # e.g. BNI, BNI_DJ
+    commission_rate: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0.00, server_default=text("0.00"))
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    tenures: Mapped[list["InsuranceTenure"]] = relationship(back_populates="pic")
+
+
 class InsuranceTenure(Base, TimestampMixin):
     __tablename__ = "insurance_tenures"
 
@@ -299,14 +314,32 @@ class InsuranceTenure(Base, TimestampMixin):
     lapsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     delay_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
 
+    # Production Motor Renewal Ledger fields (12 stages, UCD & roadtax checklist)
+    stage: Mapped[str] = mapped_column(String(50), nullable=False, default="Quotations", server_default=text("'Quotations'"), index=True)
+    business_type: Mapped[str] = mapped_column(String(50), nullable=False, default="Renewal", server_default=text("'Renewal'"), index=True)
+    pic_id: Mapped[str | None] = mapped_column(ForeignKey("person_in_charge.id", ondelete="SET NULL"), nullable=True, index=True)
+    sub_agent_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    key_in_ucd: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    date_of_key_in: Mapped[date | None] = mapped_column(Date, nullable=True)
+    print_roadtax: Mapped[str] = mapped_column(String(20), nullable=False, default="No", server_default=text("'No'"))
+    roadtax_receipt: Mapped[str] = mapped_column(String(20), nullable=False, default="None", server_default=text("'None'"))
+    client_payment_received: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    agency_payment_done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_preference_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    loss_reason_category: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    stage_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
     tracked_vehicle: Mapped["TrackedVehicle"] = relationship(back_populates="tenures")
     ownership: Mapped["VehicleOwnership | None"] = relationship()
     winning_company: Mapped["InsuranceCompany | None"] = relationship()
     sessions: Mapped[list["Session"]] = relationship(back_populates="tenure")
     customer_id: Mapped[str | None] = mapped_column(ForeignKey("customer_accounts.id", ondelete="SET NULL"), nullable=True, index=True)
     customer: Mapped["CustomerAccount | None"] = relationship(back_populates="tenures")
+    pic: Mapped["PersonInCharge | None"] = relationship(back_populates="tenures")
     comparison_entries: Mapped[list["TenureComparisonEntry"]] = relationship(back_populates="tenure", cascade="all, delete-orphan")
     previous_tenure: Mapped["InsuranceTenure | None"] = relationship(remote_side="InsuranceTenure.id", foreign_keys=[previous_tenure_id])
+
 
 
 class TenureComparisonEntry(Base, TimestampMixin):

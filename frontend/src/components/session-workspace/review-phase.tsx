@@ -1783,7 +1783,11 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       const blob = await generateCanvasBlob();
       if (!blob) throw new Error("Could not generate quotation image blob");
       const url = URL.createObjectURL(blob);
-      window.open(url, "_blank");
+      try {
+        window.open(url, "_blank");
+      } catch {
+        // Best effort: popup might be blocked
+      }
       triggerDownload(url, `quotation_${formValues.vehicle_no || id}.png`);
       setTimeout(() => URL.revokeObjectURL(url), 30000);
       setToastMessage("High-definition quotation PNG opened in new tab and downloaded!");
@@ -1907,7 +1911,11 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
       const blob = pdf.output("blob");
       const url = URL.createObjectURL(blob);
-      window.open(url, "_blank");
+      try {
+        window.open(url, "_blank");
+      } catch {
+        // Best effort: popup might be blocked
+      }
       triggerDownload(url, `quotation_${formValues.vehicle_no || id}.pdf`);
       setTimeout(() => URL.revokeObjectURL(url), 30000);
       setToastMessage("Official quotation PDF generated, opened in new tab, and downloaded!");

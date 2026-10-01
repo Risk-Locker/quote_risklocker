@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -9,17 +10,19 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import current_user
 from app.db.session import get_db
 from app.models.tables import (
+    CustomerAccount,
     InsuranceTenure,
     QuotationActivity,
     QuotationDraft,
     Session as SessionModel,
     User,
 )
+from app.services.customer_account_service import resolve_or_create_customer
 from app.services.insurance_tenure_service import (
     auto_project_next_renewal,
     get_tenure_timeline,
@@ -36,10 +39,21 @@ router = APIRouter(prefix="/tenures", tags=["tenures"])
 
 
 class CreateTenureRequest(BaseModel):
-    vehicle_no: str = Field(..., description="Vehicle registration plate")
+    vehicle_no: str | None = Field(None, description="Vehicle registration plate")
     customer_name: str = Field(..., description="Customer / policyholder name")
     coverage_start_date: str | None = Field(None, description="Start date (YYYY-MM-DD)")
     coverage_end_date: str | None = Field(None, description="End date (YYYY-MM-DD)")
+    chassis_no: str | None = Field(None, description="Chassis / VIN for new or unregistered vehicles")
+    engine_no: str | None = Field(None, description="Engine number")
+    engine_cc: str | None = Field(None, description="Engine capacity")
+    car_model: str | None = Field(None, description="Car model")
+    ic_no: str | None = Field(None, description="Customer IC or Passport")
+    phone: str | None = Field(None, description="Customer phone")
+    email: str | None = Field(None, description="Customer email")
+    pic_id: str | None = Field(None, description="Person in charge ID")
+    sub_agent_name: str | None = Field(None, description="PIC / sub-agent name")
+    windscreen_target: float | None = Field(None, description="Initial windscreen target")
+    notes: str | None = Field(None, description="Notes")
     road_tax: float = 0.0
     runner_fee: float = 0.0
 
@@ -67,6 +81,36 @@ class LapseTenureRequest(BaseModel):
     reason: str | None = Field(None, description="Reason for lapse e.g. Customer sold vehicle, Competitor, Unreachable")
 
 
+class UpdateTenureLedgerRequest(BaseModel):
+    stage: str | None = None
+    business_type: str | None = None
+    comment: str | None = None
+    notes: str | None = None
+    client_preference_notes: str | None = None
+    sub_agent_name: str | None = None
+    pic_id: str | None = None
+    key_in_ucd: bool | None = None
+    date_of_key_in: str | None = None
+    print_roadtax: str | None = None
+    roadtax_receipt: str | None = None
+    client_payment_received: bool | None = None
+    agency_payment_done: bool | None = None
+    loss_reason_category: str | None = None
+    winning_company_id: str | None = None
+    winning_quotation_ref: str | None = None
+    won_premium: float | None = None
+    customer_name: str | None = None
+    customer_ic_no: str | None = None
+    vehicle_no: str | None = None
+    chassis_no: str | None = None
+    engine_no: str | None = None
+    car_brand: str | None = None
+    car_model: str | None = None
+    engine_cc: str | None = None
+    road_tax: float | None = None
+    runner_fee: float | None = None
+
+
 @router.post("")
 def create_tenure(
     payload: CreateTenureRequest,
@@ -74,19 +118,106 @@ def create_tenure(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Create a new insurance tenure directly from staff comparison ledger input."""
+    # Resolve or create customer if IC or name given
+    cust_id = None
+    if payload.ic_no or payload.customer_name:
+        cust, _ = resolve_or_create_customer(
+            db,
+            raw_name=payload.customer_name,
+            raw_id=payload.ic_no,
+            phone=payload.phone,
+            email=payload.email,
+        )
+        if cust:
+            cust_id = cust.id
+
+    effective_veh = (payload.vehicle_no or "").strip()
+    if not effective_veh and payload.chassis_no:
+        effective_veh = payload.chassis_no.strip().upper()
+
     tenure = resolve_or_create_tenure(
         db,
-        vehicle_no=payload.vehicle_no,
+        vehicle_no=effective_veh or "UNPLATED",
         customer_name=payload.customer_name,
         start_date=payload.coverage_start_date,
         end_date=payload.coverage_end_date,
+        customer_id=cust_id,
+        chassis_no=payload.chassis_no,
+        engine_no=payload.engine_no,
     )
     if payload.road_tax > 0.0:
         tenure.road_tax = payload.road_tax
     if payload.runner_fee > 0.0:
         tenure.runner_fee = payload.runner_fee
+    if payload.windscreen_target is not None:
+        tenure.windscreen_target = payload.windscreen_target
+    if payload.pic_id:
+        tenure.pic_id = payload.pic_id
+    if payload.sub_agent_name:
+        tenure.sub_agent_name = payload.sub_agent_name
+    if payload.notes:
+        tenure.notes = payload.notes
+
+    if tenure.tracked_vehicle:
+        if payload.car_model:
+            tenure.tracked_vehicle.car_model = payload.car_model
+        if payload.engine_cc:
+            tenure.tracked_vehicle.engine_cc = payload.engine_cc
+        if payload.chassis_no:
+            tenure.tracked_vehicle.chassis_no = payload.chassis_no
+        if payload.engine_no:
+            tenure.tracked_vehicle.engine_no = payload.engine_no
+
     db.commit()
-    return {"id": tenure.id, "vehicle_no": tenure.vehicle_no, "customer_name": tenure.customer_name}
+    return {
+        "id": tenure.id,
+        "tenure": {
+            "id": tenure.id,
+            "vehicle_no": tenure.vehicle_no,
+            "customer_name": tenure.customer_name,
+        },
+        "vehicle_no": tenure.vehicle_no,
+        "customer_name": tenure.customer_name,
+        "chassis_no": tenure.tracked_vehicle.chassis_no if tenure.tracked_vehicle else None,
+        "expiry_month": tenure.expiry_month,
+        "coverage_start_date": tenure.coverage_start_date.isoformat(),
+        "coverage_end_date": tenure.coverage_end_date.isoformat(),
+    }
+
+
+@router.get("/stage-summary")
+def get_tenure_stage_summary(
+    year: int | None = Query(None, description="Year to filter e.g. 2026"),
+    month: int | None = Query(None, ge=1, le=12, description="Month 1-12"),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Retrieve live counts for the 10 stage KPI summary cards."""
+    query = select(InsuranceTenure.stage, func.count(InsuranceTenure.id))
+
+    if year and month:
+        pattern = f"{year:04d}-{month:02d}"
+        query = query.where(InsuranceTenure.expiry_month == pattern)
+    elif year:
+        pattern = f"{year:04d}-%"
+        query = query.where(InsuranceTenure.expiry_month.like(pattern))
+
+    rows = db.execute(query.group_by(InsuranceTenure.stage)).all()
+    stage_counts = {r[0]: int(r[1]) for r in rows}
+
+    return {
+        "quotations": stage_counts.get("Quotations", 0),
+        "material_to_client": stage_counts.get("Material to Client", 0),
+        "issue_policy": stage_counts.get("Issue Policy", 0),
+        "ucd_invoice_to_client": stage_counts.get("UCD Invoice to Client", 0),
+        "ucd_receipt_to_client": stage_counts.get("UCD Receipt to Client", 0),
+        "pending_payment": stage_counts.get("Pending Payment", 0),
+        "pending_delivery": stage_counts.get("Pending Delivery", 0),
+        "close_win": stage_counts.get("Close - Win", 0),
+        "close_lose": stage_counts.get("Close - Lose", 0),
+        "others": stage_counts.get("Others", 0),
+        "total": sum(stage_counts.values()),
+    }
 
 
 @router.get("/months")
@@ -95,7 +226,6 @@ def list_tenure_months(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Retrieve list of available expiry months with tenure statistics."""
-    # Query aggregated stats from DB
     stmt = (
         select(
             InsuranceTenure.expiry_month,
@@ -123,7 +253,6 @@ def list_tenure_months(
             "pending": pending_cnt,
         }
 
-    # Pre-populate active window for multi-year operations (2024 through 2029)
     for y in (2024, 2025, 2026, 2027, 2028, 2029):
         for m in range(1, 13):
             key = f"{y:04d}-{m:02d}"
@@ -143,25 +272,54 @@ def list_tenure_months(
 @router.get("")
 def list_tenures(
     month: str | None = None,
+    year: int | None = None,
     search: str | None = None,
     status: str | None = None,
+    stage: str | None = None,
+    category: str | None = None,
+    sub_agent: str | None = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Retrieve customer-vehicle tenures for the monthly ledger with search and filters."""
+    """Retrieve customer-vehicle tenures for the Motor Renewal Ledger with search and filters."""
     query = select(InsuranceTenure)
 
-    if month and month.strip() != "all":
+    # 1. Year and Month filtering
+    if year and month and month.strip().isdigit():
+        m_int = int(month.strip())
+        pattern = f"{year:04d}-{m_int:02d}"
+        query = query.where(InsuranceTenure.expiry_month == pattern)
+    elif year and not month:
+        pattern = f"{year:04d}-%"
+        query = query.where(InsuranceTenure.expiry_month.like(pattern))
+    elif month and month.strip() != "all":
         m_str = month.strip()
-        if len(m_str) == 4:
+        if len(m_str) == 4 and m_str.isdigit():
             query = query.where(InsuranceTenure.expiry_month.startswith(m_str))
+        elif "-" in m_str:
+            query = query.where(InsuranceTenure.expiry_month == m_str)
+        elif m_str.isdigit() and year:
+            query = query.where(InsuranceTenure.expiry_month == f"{year:04d}-{int(m_str):02d}")
         else:
             query = query.where(InsuranceTenure.expiry_month == m_str)
 
-    if status:
+    # 2. Category filtering: active (exclude Close - Lose & Others) vs lost vs all
+    if category == "active":
+        query = query.where(~InsuranceTenure.stage.in_(["Close - Lose", "Others"]))
+    elif category == "lost":
+        query = query.where(InsuranceTenure.stage.in_(["Close - Lose", "Others"]))
+
+    # 3. Specific stage filter
+    if stage and stage != "all":
+        query = query.where(InsuranceTenure.stage == stage.strip())
+
+    if status and status != "all":
         query = query.where(InsuranceTenure.status == status.strip())
+
+    if sub_agent:
+        query = query.where(InsuranceTenure.sub_agent_name.ilike(f"%{sub_agent.strip()}%"))
 
     if search:
         term = f"%{search.strip()}%"
@@ -169,32 +327,57 @@ def list_tenures(
             or_(
                 InsuranceTenure.vehicle_no.ilike(term),
                 InsuranceTenure.customer_name.ilike(term),
+                InsuranceTenure.comment.ilike(term),
+                InsuranceTenure.sub_agent_name.ilike(term),
             )
         )
 
-    # Order by expiry month, then customer name
-    query = query.order_by(InsuranceTenure.coverage_start_date.desc(), InsuranceTenure.created_at.desc())
+    # Order by coverage end date, then customer name
+    query = query.order_by(InsuranceTenure.coverage_end_date.asc(), InsuranceTenure.vehicle_no.asc())
 
     # Count total
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
 
-    # Paginate
-    offset = (page - 1) * page_size
-    tenures = list(db.scalars(query.offset(offset).limit(page_size)).all())
+    # Paginate and pre-load relations
+    p = page if isinstance(page, int) else 1
+    ps = page_size if isinstance(page_size, int) else 50
+    offset = (p - 1) * ps
+    paged_query = (
+        query.options(
+            selectinload(InsuranceTenure.pic),
+            selectinload(InsuranceTenure.winning_company),
+            selectinload(InsuranceTenure.customer),
+            selectinload(InsuranceTenure.tracked_vehicle),
+        )
+        .offset(offset)
+        .limit(ps)
+    )
+    tenures = list(db.scalars(paged_query).all())
 
-    items = []
-    for t in tenures:
-        # Load active child sessions for this tenure
-        sessions = list(
+    # Batch-load all active sessions and pre-load drafts for all page tenures in one query
+    tenure_ids = [t.id for t in tenures]
+    sessions_by_tenure: dict[str, list[SessionModel]] = defaultdict(list)
+    if tenure_ids:
+        all_sessions = list(
             db.scalars(
                 select(SessionModel)
+                .options(selectinload(SessionModel.draft))
                 .where(
-                    SessionModel.tenure_id == t.id,
+                    SessionModel.tenure_id.in_(tenure_ids),
                     SessionModel.is_tenure_active,
                     SessionModel.status != "trash",
                 )
             ).all()
         )
+        for s in all_sessions:
+            if s.tenure_id:
+                sessions_by_tenure[s.tenure_id].append(s)
+
+    now = datetime.now(timezone.utc)
+    items = []
+    for t in tenures:
+        # Use pre-loaded active child sessions for this tenure
+        sessions = sessions_by_tenure.get(t.id, [])
 
         sourced = []
         gen_quotes = []
@@ -225,22 +408,51 @@ def list_tenures(
                     "status": s.quotation_status,
                 })
 
+        stage_up = t.stage_updated_at if t.stage_updated_at.tzinfo else t.stage_updated_at.replace(tzinfo=timezone.utc)
+        days_in_stage = max(0, (now - stage_up).days) if t.stage_updated_at else 0
+
         items.append({
             "id": t.id,
             "vehicle_no": t.vehicle_no,
             "customer_name": t.customer_name,
+            "chassis_no": t.tracked_vehicle.chassis_no if t.tracked_vehicle else None,
+            "engine_no": t.tracked_vehicle.engine_no if t.tracked_vehicle else None,
+            "car_brand": t.tracked_vehicle.car_brand if t.tracked_vehicle else None,
+            "car_model": t.tracked_vehicle.car_model if t.tracked_vehicle else None,
+            "engine_cc": t.tracked_vehicle.engine_cc if t.tracked_vehicle else None,
             "coverage_start_date": t.coverage_start_date.isoformat(),
             "coverage_end_date": t.coverage_end_date.isoformat(),
             "expiry_month": t.expiry_month,
             "status": t.status,
+            "stage": t.stage or "Quotations",
+            "business_type": t.business_type or "Renewal",
+            "pic_id": t.pic_id,
+            "sub_agent_name": t.sub_agent_name or (t.pic.name if t.pic else ""),
+            "pic_agency": t.pic.agency_group if t.pic else "",
+            "key_in_ucd": t.key_in_ucd,
+            "date_of_key_in": t.date_of_key_in.isoformat() if t.date_of_key_in else None,
+            "print_roadtax": t.print_roadtax or "No",
+            "roadtax_receipt": t.roadtax_receipt or "None",
+            "client_payment_received": t.client_payment_received,
+            "agency_payment_done": t.agency_payment_done,
+            "comment": t.comment or "",
+            "notes": t.notes or "",
+            "client_preference_notes": t.client_preference_notes or "",
+            "days_in_stage": days_in_stage,
             "winning_company_id": t.winning_company_id,
+            "winning_company_name": t.winning_company.name if t.winning_company else "",
             "winning_quotation_ref": t.winning_quotation_ref,
             "won_premium": float(t.won_premium) if t.won_premium is not None else None,
             "miss_reason": t.miss_reason,
+            "loss_reason_category": t.loss_reason_category,
+            "road_tax": float(t.road_tax or 0.0),
+            "runner_fee": float(t.runner_fee or 0.0),
             "sourced_quotes": sourced,
             "generated_quotations": gen_quotes,
             "is_projected": t.is_projected,
             "tenure_chain_id": t.tenure_chain_id,
+            "customer_id": t.customer_id,
+            "customer_ic_no": t.customer.id_number if t.customer else None,
             "created_at": t.created_at.isoformat(),
         })
 
@@ -250,6 +462,262 @@ def list_tenures(
         "page": page,
         "page_size": page_size,
     }
+
+
+@router.patch("/{tenure_id}/ledger-fields")
+def update_tenure_ledger_fields(
+    tenure_id: str,
+    payload: UpdateTenureLedgerRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Inline update operational fields on a tenure directly from the Motor Renewal Ledger."""
+    tenure = db.get(InsuranceTenure, tenure_id)
+    if not tenure:
+        raise HTTPException(status_code=404, detail="Tenure not found")
+
+    now = datetime.now(timezone.utc)
+    if payload.stage is not None and payload.stage != tenure.stage:
+        tenure.stage = payload.stage
+        tenure.stage_updated_at = now
+        if payload.stage == "Close - Win":
+            tenure.status = "hit"
+        elif payload.stage == "Close - Lose":
+            tenure.status = "miss"
+
+    if payload.business_type is not None:
+        tenure.business_type = payload.business_type
+    if payload.comment is not None:
+        tenure.comment = payload.comment
+    if payload.notes is not None:
+        tenure.notes = payload.notes
+    if payload.client_preference_notes is not None:
+        tenure.client_preference_notes = payload.client_preference_notes
+    if payload.sub_agent_name is not None:
+        tenure.sub_agent_name = payload.sub_agent_name
+    if payload.pic_id is not None:
+        tenure.pic_id = payload.pic_id
+    if payload.key_in_ucd is not None:
+        tenure.key_in_ucd = payload.key_in_ucd
+    if payload.date_of_key_in is not None:
+        try:
+            tenure.date_of_key_in = (
+                datetime.strptime(payload.date_of_key_in, "%Y-%m-%d").date()
+                if payload.date_of_key_in
+                else None
+            )
+        except Exception:
+            pass
+    if payload.print_roadtax is not None:
+        tenure.print_roadtax = payload.print_roadtax
+    if payload.roadtax_receipt is not None:
+        tenure.roadtax_receipt = payload.roadtax_receipt
+    if payload.client_payment_received is not None:
+        tenure.client_payment_received = payload.client_payment_received
+    if payload.agency_payment_done is not None:
+        tenure.agency_payment_done = payload.agency_payment_done
+    if payload.loss_reason_category is not None:
+        tenure.loss_reason_category = payload.loss_reason_category
+    if payload.winning_company_id is not None:
+        tenure.winning_company_id = payload.winning_company_id
+    if payload.winning_quotation_ref is not None:
+        tenure.winning_quotation_ref = payload.winning_quotation_ref
+    if payload.won_premium is not None:
+        tenure.won_premium = payload.won_premium
+    if payload.road_tax is not None:
+        tenure.road_tax = payload.road_tax
+    if payload.runner_fee is not None:
+        tenure.runner_fee = payload.runner_fee
+    if payload.vehicle_no is not None and payload.vehicle_no.strip():
+        tenure.vehicle_no = payload.vehicle_no.strip().upper()
+        if tenure.tracked_vehicle:
+            tenure.tracked_vehicle.vehicle_no = tenure.vehicle_no
+
+    if tenure.tracked_vehicle:
+        if payload.chassis_no is not None:
+            tenure.tracked_vehicle.chassis_no = payload.chassis_no.strip() or None
+        if payload.engine_no is not None:
+            tenure.tracked_vehicle.engine_no = payload.engine_no.strip() or None
+        if payload.car_brand is not None:
+            tenure.tracked_vehicle.car_brand = payload.car_brand.strip() or None
+        if payload.car_model is not None:
+            tenure.tracked_vehicle.car_model = payload.car_model.strip() or None
+        if payload.engine_cc is not None:
+            tenure.tracked_vehicle.engine_cc = payload.engine_cc.strip() or None
+
+    # Customer Name / IC updates with full propagation across all tenures and drafts
+    if (payload.customer_name and payload.customer_name.strip()) or (payload.customer_ic_no and payload.customer_ic_no.strip()):
+        clean_name = payload.customer_name.strip() if payload.customer_name else None
+        clean_ic = payload.customer_ic_no.strip() if payload.customer_ic_no else None
+        if clean_name:
+            tenure.customer_name = clean_name
+
+        cust = tenure.customer or (db.get(CustomerAccount, tenure.customer_id) if tenure.customer_id else None)
+        if not cust and (clean_name or clean_ic):
+            cust, _ = resolve_or_create_customer(
+                db,
+                raw_name=clean_name or tenure.customer_name,
+                raw_id=clean_ic,
+            )
+        if cust:
+            tenure.customer_id = cust.id
+            if clean_name:
+                cust.canonical_name = clean_name
+            if clean_ic:
+                from app.services.identity_normalization_service import normalize_government_id
+                norm_id, norm_type = normalize_government_id(clean_ic)
+                cust.id_number = norm_id or clean_ic
+                if norm_type:
+                    cust.id_type = norm_type
+
+            # Propagate customer_name to all tenures for this customer
+            from sqlalchemy import update
+            db.execute(
+                update(InsuranceTenure)
+                .where(InsuranceTenure.customer_id == cust.id)
+                .values(customer_name=cust.canonical_name)
+            )
+
+            # Propagate customer name and IC to all quotation drafts under this customer or tenure
+            sessions_to_sync = list(
+                db.scalars(
+                    select(SessionModel).where(
+                        or_(
+                            SessionModel.customer_id == cust.id,
+                            SessionModel.tenure_id == tenure.id,
+                        )
+                    )
+                ).all()
+            )
+            for s in sessions_to_sync:
+                if s.customer_id != cust.id:
+                    s.customer_id = cust.id
+                if s.draft and isinstance(s.draft.fields, dict):
+                    f = dict(s.draft.fields)
+                    if clean_name:
+                        for name_k in ["customer_name", "policyholder_name", "client_name"]:
+                            if name_k in f:
+                                if isinstance(f[name_k], dict):
+                                    f[name_k] = {**f[name_k], "value": cust.canonical_name}
+                                else:
+                                    f[name_k] = cust.canonical_name
+                    if clean_ic:
+                        for ic_k in ["customer_ic_no", "ic_no", "nric_no", "id_number"]:
+                            if ic_k in f:
+                                if isinstance(f[ic_k], dict):
+                                    f[ic_k] = {**f[ic_k], "value": cust.id_number}
+                                else:
+                                    f[ic_k] = cust.id_number
+                    s.draft.fields = f
+
+    db.commit()
+    db.refresh(tenure)
+    return {"success": True, "id": tenure.id, "stage": tenure.stage}
+
+
+@router.get("/stats/yoy")
+def get_tenure_yoy_stats(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Retrieve year-over-year tenure statistics (counts, growth, active vs lapsed)."""
+    rows = db.execute(
+        select(
+            InsuranceTenure.expiry_month,
+            InsuranceTenure.stage,
+            func.count(InsuranceTenure.id),
+        )
+        .where(InsuranceTenure.expiry_month.isnot(None))
+        .group_by(InsuranceTenure.expiry_month, InsuranceTenure.stage)
+    ).all()
+
+    year_data: dict[str, dict[str, Any]] = defaultdict(lambda: {"total": 0, "active": 0, "lost": 0})
+    for r in rows:
+        exp_m = str(r[0] or "")
+        y_str = exp_m[:4]
+        if len(y_str) != 4 or not y_str.isdigit():
+            continue
+        stage = str(r[1] or "")
+        count = int(r[2] or 0)
+        year_data[y_str]["total"] += count
+        if stage in ("Close - Lose", "Others"):
+            year_data[y_str]["lost"] += count
+        else:
+            year_data[y_str]["active"] += count
+
+    sorted_years = sorted(year_data.keys())
+    result_list = []
+    prev_total = None
+    for y in sorted_years:
+        tot = year_data[y]["total"]
+        growth = None
+        if prev_total is not None and prev_total > 0:
+            growth = round(((tot - prev_total) / prev_total) * 100, 1)
+        prev_total = tot
+        result_list.append({
+            "year": y,
+            "total": tot,
+            "active": year_data[y]["active"],
+            "lost": year_data[y]["lost"],
+            "growth_percentage": growth,
+        })
+
+    return {"years": result_list}
+
+
+class BulkDeleteTenuresRequest(BaseModel):
+    tenure_ids: list[str] = Field(..., min_length=1, description="List of tenure IDs to delete")
+
+
+@router.delete("/bulk")
+def bulk_delete_tenures(
+    payload: BulkDeleteTenuresRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Delete multiple vehicle renewal policy tenures from the ledger in bulk."""
+    deleted_ids: list[str] = []
+    for tid in payload.tenure_ids:
+        tenure = db.get(InsuranceTenure, tid)
+        if not tenure:
+            continue
+        child_sessions = db.scalars(
+            select(SessionModel).where(SessionModel.tenure_id == tid)
+        ).all()
+        for s in child_sessions:
+            s.tenure_id = None
+            s.is_tenure_active = False
+            s.status = "trash"
+        db.delete(tenure)
+        deleted_ids.append(tid)
+
+    db.commit()
+    return {"success": True, "deleted_count": len(deleted_ids), "deleted_ids": deleted_ids}
+
+
+@router.delete("/{tenure_id}")
+def delete_tenure_endpoint(
+    tenure_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Delete a vehicle renewal policy tenure from the ledger."""
+    tenure = db.get(InsuranceTenure, tenure_id)
+    if not tenure:
+        raise HTTPException(status_code=404, detail="Tenure not found")
+
+    # Unlink or trash child sessions safely
+    child_sessions = db.scalars(
+        select(SessionModel).where(SessionModel.tenure_id == tenure_id)
+    ).all()
+    for s in child_sessions:
+        s.tenure_id = None
+        s.is_tenure_active = False
+        s.status = "trash"
+
+    db.delete(tenure)
+    db.commit()
+    return {"success": True, "deleted_tenure_id": tenure_id}
 
 
 @router.get("/{tenure_id}")

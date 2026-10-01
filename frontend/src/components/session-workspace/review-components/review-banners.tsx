@@ -4,6 +4,7 @@ import React from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { CheckCircle, Lock, UserSwitch } from "@phosphor-icons/react";
+import { api } from "@/lib/api";
 import type { WorkspaceSnapshot } from "../types";
 
 export interface ReviewBannersProps {
@@ -139,9 +140,8 @@ export function ReviewBanners({
                 className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-7 px-2.5"
                 onClick={async () => {
                   try {
-                    await fetch(`/api/sessions/${workspace.session_id}/resolve-customer-discrepancy`, {
+                    await api(`/sessions/${workspace.session_id}/resolve-customer-discrepancy`, {
                       method: "POST",
-                      headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ action: "update_master", field: disc.field, value: disc.detected }),
                     });
                     window.location.reload();
@@ -158,9 +158,8 @@ export function ReviewBanners({
                 className="text-xs h-7 px-2 border-blue-300 text-blue-700 hover:bg-blue-100"
                 onClick={async () => {
                   try {
-                    await fetch(`/api/sessions/${workspace.session_id}/resolve-customer-discrepancy`, {
+                    await api(`/sessions/${workspace.session_id}/resolve-customer-discrepancy`, {
                       method: "POST",
-                      headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ action: "dismiss", field: disc.field }),
                     });
                     window.location.reload();

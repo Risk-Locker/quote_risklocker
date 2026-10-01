@@ -194,7 +194,8 @@ def test_successful_job_persists_initial_extraction_and_completes(tmp_path):
     assert batch.status == RecordStatus.CHECK_NEEDED.value
     assert session.detected_company == "Nova Mutual"
     assert job.state == "completed"
-    assert job.result == {"session_id": "session-1", "draft_id": "draft-1"}
+    assert job.result.get("session_id") == "session-1"
+    assert job.result.get("draft_id") == "draft-1"
     assert "PRIVATE CUSTOMER TEXT" not in str(job.result)
     assert seen["enhanced_reading"] is True
     assert seen["db_companies"][0]["name"] == "Nova Mutual"

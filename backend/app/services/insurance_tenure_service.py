@@ -147,9 +147,18 @@ def resolve_or_create_tenure(
     tracked_vehicle_id: str | None = None,
     ownership_id: str | None = None,
     customer_id: str | None = None,
+    chassis_no: str | None = None,
+    engine_no: str | None = None,
 ) -> InsuranceTenure:
     """Find existing InsuranceTenure matching the vehicle and coverage dates or create one."""
-    norm_plate = normalize_plate(vehicle_no)
+    clean_v = (vehicle_no or "").strip()
+    clean_chassis = (chassis_no or "").strip()
+    norm_plate = normalize_plate(clean_v) if clean_v else ""
+
+    # If vehicle_no is missing or unplated, anchor on chassis_no
+    if not norm_plate and clean_chassis:
+        norm_plate = clean_chassis.upper()
+
     start_dt, end_dt, expiry_month = normalize_tenure_dates(start_date, end_date)
 
     # 1. Resolve vehicle
@@ -158,10 +167,25 @@ def resolve_or_create_tenure(
         veh = db.get(TrackedVehicle, tracked_vehicle_id)
     if not veh and norm_plate:
         veh = db.scalar(select(TrackedVehicle).where(TrackedVehicle.vehicle_no == norm_plate))
-    if not veh and norm_plate:
-        veh = TrackedVehicle(vehicle_no=norm_plate, customer_id=customer_id)
+    if not veh and clean_chassis:
+        veh = db.scalar(select(TrackedVehicle).where(TrackedVehicle.chassis_no == clean_chassis))
+    if not veh and (norm_plate or clean_chassis):
+        primary_veh_no = norm_plate or clean_chassis.upper()
+        veh = TrackedVehicle(
+            vehicle_no=primary_veh_no,
+            chassis_no=clean_chassis or None,
+            engine_no=engine_no.strip() if engine_no else None,
+            customer_id=customer_id,
+        )
         db.add(veh)
         db.flush()
+    elif veh:
+        if clean_chassis and not veh.chassis_no:
+            veh.chassis_no = clean_chassis
+        if engine_no and not veh.engine_no:
+            veh.engine_no = engine_no.strip()
+        if customer_id and not veh.customer_id:
+            veh.customer_id = customer_id
 
     vehicle_id = veh.id if veh else new_id()
 
@@ -216,6 +240,7 @@ def resolve_or_create_tenure(
 
     # 3. Create new InsuranceTenure
     tenure = InsuranceTenure(
+        id=new_id(),
         tracked_vehicle_id=vehicle_id,
         ownership_id=ownership_id,
         customer_id=customer_id,
@@ -356,6 +381,7 @@ def evaluate_tenure_ingestion(
     company_name: str | None,
     company_id: str | None = None,
     content_hash: str | None,
+    current_session_id: str | None = None,
 ) -> tuple[str, SessionModel | None, int]:
     """Evaluate whether an incoming quotation PDF is identical, a revised version, or a new insurer.
 
@@ -387,10 +413,11 @@ def evaluate_tenure_ingestion(
         ).all()
     )
 
-    # Filter for sessions belonging to this same company
+    # Filter for sessions belonging to this same company (excluding current in-flight session)
     matching_sessions = [
         s for s in sessions
-        if s.detected_company and s.detected_company.strip().lower() == clean_comp
+        if (not current_session_id or s.id != current_session_id)
+        and s.detected_company and s.detected_company.strip().lower() == clean_comp
     ]
 
     if not matching_sessions:

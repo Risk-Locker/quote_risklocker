@@ -102,3 +102,40 @@ main .grid > *,
 main .flex > * {
   min-width: 0;
 }
+
+/* ==========================================================================
+   Print Styles for Underwriter Quotation & Marketing Comparison Summaries
+   ========================================================================== */
+@media print {
+  @page {
+    size: landscape;
+    margin: 8mm;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #1b1717 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  aside,
+  header,
+  nav,
+  .no-print {
+    display: none !important;
+  }
+
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  .break-inside-avoid {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+}
+

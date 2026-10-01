@@ -175,53 +175,55 @@ def _persist_upload(
             seed_base_benefits(db, draft, revision)
         auto_apply_extracted_benefits(db, draft)
 
+        fields_dict = draft_data.get("fields") or {}
+        raw_plate = fields_dict.get("vehicle_no", {}).get("value") or fields_dict.get("vehicle_number", {}).get("value")
+        from app.services.vehicle_tracking_service import normalize_plate
+        norm_plate = normalize_plate(raw_plate)
+        customer = (fields_dict.get("customer_name", {}).get("value") or fields_dict.get("insured_name", {}).get("value") or "").strip()
+        raw_id = (
+            fields_dict.get("ic_or_brn", {}).get("value")
+            or fields_dict.get("ic_no", {}).get("value")
+            or fields_dict.get("customer_ic", {}).get("value")
+            or fields_dict.get("brn", {}).get("value")
+        )
+        phone = (
+            fields_dict.get("phone", {}).get("value")
+            or fields_dict.get("phone_number", {}).get("value")
+            or fields_dict.get("contact_number", {}).get("value")
+        )
+        email = (
+            fields_dict.get("email", {}).get("value")
+            or fields_dict.get("email_address", {}).get("value")
+        )
+        address = (
+            fields_dict.get("address", {}).get("value")
+            or fields_dict.get("insured_address", {}).get("value")
+        )
+        chassis = (
+            fields_dict.get("chassis_no", {}).get("value")
+            or fields_dict.get("chassis_number", {}).get("value")
+            or fields_dict.get("vin", {}).get("value")
+        )
+        engine = (
+            fields_dict.get("engine_no", {}).get("value")
+            or fields_dict.get("engine_number", {}).get("value")
+        )
+        valid_until = (
+            fields_dict.get("valid_until", {}).get("value")
+            or fields_dict.get("cover_end_date", {}).get("value")
+            or fields_dict.get("issue_date", {}).get("value")
+        )
+        model = fields_dict.get("car_model", {}).get("value")
+        brand = fields_dict.get("car_brand", {}).get("value")
+
+        cust_account = None
+        veh = None
+
         if not is_test:
-            # Customer Account Entity Resolution & Government ID Deduplication
+            # Customer Account Entity Resolution & Government ID Deduplication (Production only)
             from app.services.customer_account_service import resolve_or_create_customer
-            from app.services.vehicle_tracking_service import get_or_create_vehicle_tracking, normalize_plate
-            from app.services.quotation_activity_service import log_quotation_activity
+            from app.services.vehicle_tracking_service import get_or_create_vehicle_tracking
 
-            fields_dict = draft_data.get("fields") or {}
-            raw_plate = fields_dict.get("vehicle_no", {}).get("value") or fields_dict.get("vehicle_number", {}).get("value")
-            norm_plate = normalize_plate(raw_plate)
-            customer = (fields_dict.get("customer_name", {}).get("value") or fields_dict.get("insured_name", {}).get("value") or "").strip()
-            raw_id = (
-                fields_dict.get("ic_or_brn", {}).get("value")
-                or fields_dict.get("ic_no", {}).get("value")
-                or fields_dict.get("customer_ic", {}).get("value")
-                or fields_dict.get("brn", {}).get("value")
-            )
-            phone = (
-                fields_dict.get("phone", {}).get("value")
-                or fields_dict.get("phone_number", {}).get("value")
-                or fields_dict.get("contact_number", {}).get("value")
-            )
-            email = (
-                fields_dict.get("email", {}).get("value")
-                or fields_dict.get("email_address", {}).get("value")
-            )
-            address = (
-                fields_dict.get("address", {}).get("value")
-                or fields_dict.get("insured_address", {}).get("value")
-            )
-            chassis = (
-                fields_dict.get("chassis_no", {}).get("value")
-                or fields_dict.get("chassis_number", {}).get("value")
-                or fields_dict.get("vin", {}).get("value")
-            )
-            engine = (
-                fields_dict.get("engine_no", {}).get("value")
-                or fields_dict.get("engine_number", {}).get("value")
-            )
-            valid_until = (
-                fields_dict.get("valid_until", {}).get("value")
-                or fields_dict.get("cover_end_date", {}).get("value")
-                or fields_dict.get("issue_date", {}).get("value")
-            )
-            model = fields_dict.get("car_model", {}).get("value")
-            brand = fields_dict.get("car_brand", {}).get("value")
-
-            # Resolve Master Customer
             cust_account, discrepancies = resolve_or_create_customer(
                 db=db,
                 raw_name=customer,
@@ -257,66 +259,68 @@ def _persist_upload(
                 curr_opts["owner_change_alert"] = owner_alert
                 draft.display_options = curr_opts
 
-            # Insurance Tenure Foundation & Zero-Change Deduplication
-            from app.services.insurance_tenure_service import (
-                compute_quotation_content_hash,
-                evaluate_tenure_ingestion,
-                resolve_or_create_tenure,
-            )
+        # Insurance Tenure Foundation & Zero-Change Deduplication (Active for all uploads)
+        from app.services.insurance_tenure_service import (
+            compute_quotation_content_hash,
+            evaluate_tenure_ingestion,
+            resolve_or_create_tenure,
+        )
 
-            cover_start = fields_dict.get("cover_start_date", {}).get("value") or fields_dict.get("issue_date", {}).get("value")
-            cover_end = fields_dict.get("cover_end_date", {}).get("value") or valid_until
+        cover_start = fields_dict.get("cover_start_date", {}).get("value") or fields_dict.get("issue_date", {}).get("value")
+        cover_end = fields_dict.get("cover_end_date", {}).get("value") or valid_until
 
-            tenure = None
-            if session.tenure_id:
-                tenure = db.get(InsuranceTenure, session.tenure_id)
-            if not tenure:
-                tenure = resolve_or_create_tenure(
-                    db=db,
-                    vehicle_no=norm_plate or (veh.vehicle_no if veh else "UNPLATED"),
-                    customer_name=customer,
-                    start_date=cover_start,
-                    end_date=cover_end,
-                    tracked_vehicle_id=veh.id if veh else None,
-                    customer_id=cust_account.id if cust_account else None,
-                )
-            session.tenure_id = tenure.id
-            session.coverage_start_date = tenure.coverage_start_date
-            session.coverage_end_date = tenure.coverage_end_date
-
-            content_hash = compute_quotation_content_hash(
-                fields=fields_dict,
-                benefits=draft_data.get("benefits"),
-            )
-            session.content_hash = content_hash
-
-            action, existing_sess, version = evaluate_tenure_ingestion(
+        tenure = None
+        if session.tenure_id:
+            tenure = db.get(InsuranceTenure, session.tenure_id)
+        if not tenure:
+            tenure = resolve_or_create_tenure(
                 db=db,
-                tenure_id=tenure.id,
-                company_name=session.detected_company,
-                company_id=draft.company_id,
-                content_hash=content_hash,
+                vehicle_no=norm_plate or (veh.vehicle_no if veh else (chassis or "UNPLATED")),
+                customer_name=customer,
+                start_date=cover_start,
+                end_date=cover_end,
+                tracked_vehicle_id=veh.id if veh else None,
+                customer_id=cust_account.id if cust_account else None,
             )
+        session.tenure_id = tenure.id
+        session.coverage_start_date = tenure.coverage_start_date
+        session.coverage_end_date = tenure.coverage_end_date
 
-            curr_opts = draft.display_options or {}
-            if action == "SKIP_IDENTICAL" and existing_sess:
-                # 100% identical quote already recorded in this tenure -> auto-skip duplicate
-                session.status = "trash"  # soft-delete the redundant session
-                session.is_tenure_active = False
-                session.tenure_version = existing_sess.tenure_version
-                curr_opts["duplicate_skipped"] = True
-                curr_opts["original_session_id"] = existing_sess.id
-                curr_opts["skip_message"] = (
-                    f"Identical quote for {session.detected_company or 'this insurer'} already active in this tenure (v{existing_sess.tenure_version})."
-                )
-            else:
-                session.tenure_version = version
-                session.is_tenure_active = True
-                if version > 1:
-                    curr_opts["tenure_version_notice"] = f"Created revised version v{version} under {session.detected_company or 'insurer'}."
-            draft.display_options = curr_opts
+        content_hash = compute_quotation_content_hash(
+            fields=fields_dict,
+            benefits=draft_data.get("benefits"),
+        )
+        session.content_hash = content_hash
 
-            # Log initial upload scan activity
+        action, existing_sess, version = evaluate_tenure_ingestion(
+            db=db,
+            tenure_id=tenure.id,
+            company_name=session.detected_company,
+            company_id=draft.company_id,
+            content_hash=content_hash,
+        )
+
+        curr_opts = draft.display_options or {}
+        if action == "SKIP_IDENTICAL" and existing_sess:
+            # 100% identical quote already recorded in this tenure -> auto-skip duplicate
+            session.status = "trash"  # soft-delete the redundant session
+            session.is_tenure_active = False
+            session.tenure_version = existing_sess.tenure_version
+            curr_opts["duplicate_skipped"] = True
+            curr_opts["original_session_id"] = existing_sess.id
+            curr_opts["skip_message"] = (
+                f"Identical quote for {session.detected_company or 'this insurer'} already active in this tenure (v{existing_sess.tenure_version})."
+            )
+        else:
+            session.tenure_version = version
+            session.is_tenure_active = True
+            if version > 1:
+                curr_opts["tenure_version_notice"] = f"Created revised version v{version} under {session.detected_company or 'insurer'}."
+        draft.display_options = curr_opts
+
+        if not is_test:
+            # Log initial upload scan activity (production only)
+            from app.services.quotation_activity_service import log_quotation_activity
             log_quotation_activity(
                 db=db,
                 session_id=session.id,

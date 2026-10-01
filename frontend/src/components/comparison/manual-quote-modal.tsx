@@ -12,6 +12,7 @@ import {
   FileText,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api";
 
 interface ManualQuoteModalProps {
   isOpen: boolean;
@@ -56,6 +57,8 @@ export function ManualQuoteModal({
   const [excess, setExcess] = useState("0");
   const [windscreen, setWindscreen] = useState("");
   const [specialPerils, setSpecialPerils] = useState("");
+  const [llpLlop, setLlpLlop] = useState("");
+  const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
   // Upload States
@@ -80,6 +83,8 @@ export function ManualQuoteModal({
       setExcess(initialData.excess !== undefined && initialData.excess !== null ? String(initialData.excess) : "0");
       setWindscreen(initialData.windscreen_sum_insured ? String(initialData.windscreen_sum_insured) : "");
       setSpecialPerils(initialData.special_perils || "");
+      setLlpLlop(initialData.llp_llop || "");
+      setNotes(initialData.notes || "");
     } else {
       setActiveTab(tenureId ? "upload" : "manual");
       setCompanyName("AmAssurance");
@@ -93,6 +98,8 @@ export function ManualQuoteModal({
       setExcess("0");
       setWindscreen("");
       setSpecialPerils("");
+      setLlpLlop("");
+      setNotes("");
       setUploadFile(null);
       setUploadError("");
       setUploadProgress("");
@@ -118,6 +125,8 @@ export function ManualQuoteModal({
         excess: parseFloat(excess) || 0,
         windscreen_sum_insured: windscreen ? parseFloat(windscreen) : null,
         special_perils: specialPerils || null,
+        llp_llop: llpLlop || null,
+        notes: notes || null,
         is_manual: true,
       });
       onClose();
@@ -165,36 +174,46 @@ export function ManualQuoteModal({
       form.append("file", uploadFile);
       form.append("is_test", String(isTestUpload));
 
-      const res = await fetch(`/api/comparison/${tenureId}/upload-quote`, {
+      const data = await api<{
+        status: string;
+        session_id: string | null;
+        job_id: string | null;
+        uploaded_file_id: string | null;
+      }>(`/comparison/${tenureId}/upload-quote`, {
         method: "POST",
         body: form,
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.detail || "Upload failed");
-      }
-
       setUploadProgress("Scanning document & extracting quotation terms...");
 
       // Poll extraction job if returned
-      if (data.job_id) {
+      if (data?.job_id) {
         let attempts = 0;
         const maxAttempts = 35; // 35 * 800ms = 28s
         while (attempts < maxAttempts) {
           attempts++;
           await new Promise((r) => setTimeout(r, 800));
-          const jobRes = await fetch(`/api/jobs/${data.job_id}`);
-          if (!jobRes.ok) continue;
-          const jobData = await jobRes.json();
-          const state = jobData.job?.state;
+          try {
+            const jobData = await api<{
+              job: {
+                state: string;
+                progress?: number;
+                error?: { message: string };
+              };
+            }>(`/jobs/${data.job_id}`);
+            const state = jobData?.job?.state;
 
-          if (state === "completed") {
-            setUploadProgress("Finalizing comparison matrix column...");
-            break;
-          }
-          if (state === "failed" || state === "cancelled") {
-            throw new Error(jobData.job?.error?.message || "Quotation extraction failed");
+            if (state === "completed") {
+              setUploadProgress("Finalizing comparison matrix column...");
+              break;
+            }
+            if (state === "failed" || state === "cancelled") {
+              throw new Error(jobData?.job?.error?.message || "Quotation extraction failed");
+            }
+          } catch (pollErr: any) {
+            if (pollErr?.message?.includes("failed") || pollErr?.message?.includes("cancelled")) {
+              throw pollErr;
+            }
           }
         }
       }
@@ -568,6 +587,35 @@ export function ManualQuoteModal({
                   placeholder="e.g. Included or 0.20%"
                   value={specialPerils}
                   onChange={(e) => setSpecialPerils(e.target.value)}
+                  className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
+                />
+              </div>
+            </div>
+
+            {/* Legal Liability & Notes */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
+                  LLP / LLOP (Passenger)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Included or RM 30.00"
+                  value={llpLlop}
+                  onChange={(e) => setLlpLlop(e.target.value)}
+                  className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
+                  Notes / Endorsements
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Workshop panel only"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
                   className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
                 />
               </div>

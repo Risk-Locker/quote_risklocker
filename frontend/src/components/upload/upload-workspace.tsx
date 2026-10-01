@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { Route } from "next";
@@ -20,7 +20,6 @@ import {
   X,
   Plus,
 } from "@phosphor-icons/react";
-import { AppShell } from "@/components/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -28,7 +27,7 @@ import { GeminiQuotaInfoButton } from "@/components/gemini-quota-meter";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 
-type UploadMode = "single" | "comparison" | "bulk";
+export type UploadMode = "single" | "comparison" | "bulk";
 
 interface UploadWorkspaceProps {
   defaultMode?: UploadMode;
@@ -99,7 +98,7 @@ function formatElapsed(seconds: number) {
   return minutes ? `${minutes}m ${remainder.toString().padStart(2, "0")}s` : `${remainder}s`;
 }
 
-function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceProps) {
+export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -1009,7 +1008,7 @@ function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceProps) {
                 <p className="text-xs text-[var(--rl-text-muted)]">
                   {mode === "comparison"
                     ? "Uploaded quotes will compile into comparison matrix for testing without contaminating live DB metrics."
-                    : "Saves sessions for preview and batch testing without recording to Hit &amp; Miss analytics or live records."}
+                    : "Saves sessions for preview and batch testing without recording to Hit & Miss analytics or live records."}
                 </p>
               </div>
             </label>
@@ -1368,21 +1367,5 @@ function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceProps) {
         </div>
       )}
     </div>
-  );
-}
-
-export default function UploadPage() {
-  return (
-    <AppShell>
-      <Suspense
-        fallback={
-          <div className="flex h-96 items-center justify-center">
-            <CircleNotch className="size-8 animate-spin text-slate-400" />
-          </div>
-        }
-      >
-        <UploadWorkspace defaultMode="comparison" />
-      </Suspense>
-    </AppShell>
   );
 }

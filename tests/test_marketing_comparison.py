@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.models.tables import (
     Base,
+    Batch,
     InsuranceCompany,
     InsuranceTenure,
     QuotationDraft,
@@ -546,5 +547,185 @@ def test_runner_fee_auto_assignment_in_tenure(db_session: Session):
     entry = res["entries"][0]
     assert entry["runner_fee"] == 20.0
     assert entry["total_payable"] == entry["motor_premium"] + 4812.0 + 20.0
+
+
+def test_manual_quote_winner_selection_creates_session_and_uploaded_file(db_session: Session):
+    """Verify manual quote winner selection creates valid UploadedFile and Session without FK violation."""
+    user = User(id=new_id(), email="agent@risklocker.local", name="Agent 007", password_hash="x")
+    db_session.add(user)
+
+    vehicle = TrackedVehicle(vehicle_no="WXY9999", car_model="Proton X50")
+    db_session.add(vehicle)
+    db_session.flush()
+
+    tenure = InsuranceTenure(
+        tracked_vehicle_id=vehicle.id,
+        vehicle_no="WXY9999",
+        customer_name="Tan Ah Kow",
+        coverage_start_date=datetime(2026, 10, 1, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 9, 30, tzinfo=timezone.utc),
+        expiry_month="2027-09",
+        status="draft",
+        road_tax=90.0,
+        runner_fee=50.0,
+    )
+    db_session.add(tenure)
+    db_session.flush()
+
+    # Manual entry has session_id=None
+    entry = TenureComparisonEntry(
+        tenure_id=tenure.id,
+        session_id=None,
+        company_name="AmAssurance",
+        sum_insured=65000.0,
+        motor_premium=1350.0,
+        road_tax=90.0,
+        runner_fee=50.0,
+        total_payable=1490.0,
+        is_manual=True,
+    )
+    db_session.add(entry)
+    db_session.commit()
+
+    # Select manual entry as winner
+    res = select_winner_and_generate_draft(
+        db_session,
+        tenure_id=tenure.id,
+        entry_id=entry.id,
+        user_id=user.id,
+    )
+
+    assert res["status"] == "success"
+    assert res["is_recommended"] is True
+    assert res["session_id"] is not None
+    assert res["draft_id"] is not None
+
+    # Verify session and uploaded file exist in DB
+    created_sess = db_session.get(SessionModel, res["session_id"])
+    assert created_sess is not None
+    assert created_sess.quotation_ref.startswith("RL-WXY9999-")
+    assert created_sess.tenure_id == tenure.id
+    assert created_sess.uploaded_file is not None
+    assert created_sess.uploaded_file.original_filename == "Manual Quote - AmAssurance.pdf"
+    assert created_sess.draft is not None
+    assert created_sess.draft.fields["sum_insured"] == 65000.0
+
+    # Tenure state updated
+    assert tenure.status == "quoted"
+    assert tenure.winning_quotation_ref == created_sess.quotation_ref
+
+
+def test_update_tenure_fixed_costs_persists_engine_chassis_and_customer(db_session: Session):
+    """Verify editing customer IC, engine no, and chassis no persists to DB master models."""
+    vehicle = TrackedVehicle(vehicle_no="ABC1122", car_model="Honda City")
+    db_session.add(vehicle)
+    db_session.flush()
+
+    tenure = InsuranceTenure(
+        tracked_vehicle_id=vehicle.id,
+        vehicle_no="ABC1122",
+        customer_name="Lee Chong Wei",
+        coverage_start_date=datetime(2026, 10, 1, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 9, 30, tzinfo=timezone.utc),
+        expiry_month="2027-09",
+        status="draft",
+        road_tax=90.0,
+        runner_fee=50.0,
+    )
+    db_session.add(tenure)
+    db_session.commit()
+
+    # Update via service
+    update_tenure_fixed_costs(
+        db_session,
+        tenure.id,
+        road_tax=95.0,
+        runner_fee=50.0,
+        customer_name="Lee Chong Wei",
+        ic_no="821021-08-5432",
+        engine_no="ENG-HND-8899",
+        chassis_no="CHS-HND-7766",
+        vehicle_model="Honda City RS",
+    )
+
+    # Refresh and verify
+    db_session.refresh(tenure)
+    assert tenure.tracked_vehicle.engine_no == "ENG-HND-8899"
+    assert tenure.tracked_vehicle.chassis_no == "CHS-HND-7766"
+    assert tenure.tracked_vehicle.car_model == "Honda City RS"
+    assert tenure.customer is not None
+    assert tenure.customer.id_number == "821021085432"
+
+    # Verify get_marketing_comparison returns them without any sessions
+    data = get_marketing_comparison(db_session, tenure.id)
+    assert data["tenure"]["engine_no"] == "ENG-HND-8899"
+    assert data["tenure"]["chassis_no"] == "CHS-HND-7766"
+    assert data["tenure"]["ic_no"] == "821021085432"
+    assert data["tenure"]["vehicle_model"] == "Honda City RS"
+
+
+def test_get_marketing_comparison_preserves_custom_road_tax(db_session: Session):
+    """Verify get_marketing_comparison does not overwrite user's road tax with draft candidates."""
+    user = User(id=new_id(), email="agent2@risklocker.local", name="Agent 2", password_hash="x")
+    db_session.add(user)
+
+    vehicle = TrackedVehicle(vehicle_no="TAX9999", car_model="Toyota Vios")
+    db_session.add(vehicle)
+    db_session.flush()
+
+    tenure = InsuranceTenure(
+        tracked_vehicle_id=vehicle.id,
+        vehicle_no="TAX9999",
+        customer_name="Siti Nurhaliza",
+        coverage_start_date=datetime(2026, 10, 1, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 9, 30, tzinfo=timezone.utc),
+        expiry_month="2027-09",
+        status="draft",
+        road_tax=100.0,  # Explicit custom road tax
+        runner_fee=50.0,
+    )
+    db_session.add(tenure)
+    db_session.flush()
+
+    batch = Batch(owner_id=user.id, name="Tax Batch")
+    db_session.add(batch)
+    db_session.flush()
+
+    uf = UploadedFile(
+        batch_id=batch.id,
+        owner_id=user.id,
+        original_filename="quote_tax.pdf",
+        content_type="application/pdf",
+        storage_path=".qc-tmp/quote_tax.pdf",
+    )
+    db_session.add(uf)
+    db_session.flush()
+
+    # Draft has higher candidate road tax 350.0
+    draft = QuotationDraft(
+        owner_id=user.id,
+        uploaded_file_id=uf.id,
+        fields={"road_tax": 350.0, "sum_insured": 50000.0, "total_payable": 1200.0},
+    )
+    db_session.add(draft)
+    db_session.flush()
+
+    sess = SessionModel(
+        owner_id=user.id,
+        uploaded_file_id=uf.id,
+        draft_id=draft.id,
+        tenure_id=tenure.id,
+        detected_company="Lonpac",
+        is_tenure_active=True,
+    )
+    db_session.add(sess)
+    db_session.commit()
+
+    # Call get_marketing_comparison
+    data = get_marketing_comparison(db_session, tenure.id)
+
+    # Road tax must remain the user's 100.0, NOT overwritten to 350.0!
+    assert data["tenure"]["road_tax"] == 100.0
+
 
 

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useMemo, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { Route } from "next";
 import {
@@ -25,6 +25,10 @@ import {
   Envelope,
   FloppyDisk,
   SidebarSimple,
+  UploadSimple,
+  CircleNotch,
+  Columns,
+  ArrowsClockwise,
 } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -57,7 +61,7 @@ interface TenureSpec {
   runner_fee_type?: string;
   fixed_costs_total: number;
   windscreen_target: number | null;
-  ncd_percentage: number;
+  ncd_percentage: number | null;
   engine_cc: string;
   vehicle_model: string;
   vehicle_type: string;
@@ -96,7 +100,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     entries: ComparisonEntry[];
     previous_policy: any;
     recommended_sum_insured: Record<string, number>;
-    ncd: { current: number; next: number };
+    ncd: { current: number | null; next: number | null };
+    pending_jobs_count?: number;
   } | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -158,6 +163,10 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       localStorage.setItem("rl_comparison_pdf_dock", pdfDockMode);
     }
   }, [pdfDockMode]);
+
+  // Company-Level Nested Quotations State
+  const [activeQuoteByCompany, setActiveQuoteByCompany] = useState<Record<string, number>>({});
+  const [expandedCompanies, setExpandedCompanies] = useState<Record<string, boolean>>({});
 
   // Edit state for Fixed Costs & Customer/Vehicle Specs
   const [editingFixedCosts, setEditingFixedCosts] = useState(false);
@@ -250,11 +259,34 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     }
   };
 
+  const searchParams = useSearchParams();
+  const isFromUpload = searchParams.get("from_upload") === "true";
+  const [isCompilingBatch, setIsCompilingBatch] = useState(isFromUpload);
+
   useEffect(() => {
     if (tenureId) {
       fetchComparison();
     }
   }, [tenureId]);
+
+  // Live polling for remaining background batch extractions
+  useEffect(() => {
+    if (!tenureId) return;
+    const shouldPoll = isFromUpload || (data?.pending_jobs_count !== undefined && data.pending_jobs_count > 0);
+    if (!shouldPoll) return;
+
+    let count = 0;
+    const interval = setInterval(() => {
+      count++;
+      fetchComparison(true);
+      if (count >= 12) {
+        clearInterval(interval);
+        setIsCompilingBatch(false);
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [tenureId, isFromUpload, data?.pending_jobs_count]);
 
   const handleSaveFixedCosts = async () => {
     try {
@@ -350,6 +382,37 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     return decodeMalaysianIC(data?.tenure?.ic_no);
   }, [data?.tenure?.ic_no]);
 
+  // Group quotes by underwriter company name for nested quotations
+  const companyGroups = useMemo(() => {
+    const quoteEntries = data?.entries || [];
+    const map = new Map<
+      string,
+      {
+        companyName: string;
+        companyId: string | null;
+        entries: ComparisonEntry[];
+        hasWinner: boolean;
+      }
+    >();
+    for (const entry of quoteEntries) {
+      const key = (entry.company_name || "Unknown Insurer").trim();
+      if (!map.has(key)) {
+        map.set(key, {
+          companyName: key,
+          companyId: entry.company_id,
+          entries: [],
+          hasWinner: false,
+        });
+      }
+      const grp = map.get(key)!;
+      grp.entries.push(entry);
+      if (entry.is_recommended) {
+        grp.hasWinner = true;
+      }
+    }
+    return Array.from(map.values());
+  }, [data?.entries]);
+
   if (loading && !data) {
     return (
       <div className="flex h-96 flex-col items-center justify-center gap-3">
@@ -374,11 +437,412 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const winnerEntries = entries.filter((e) => e.is_recommended);
   const hasWinners = winnerEntries.length > 0;
 
+  const renderUnderwriterCard = (
+    entry: ComparisonEntry,
+    group: {
+      companyName: string;
+      companyId: string | null;
+      entries: ComparisonEntry[];
+      hasWinner: boolean;
+    },
+    activeIdx: number,
+    isSplit: boolean
+  ) => {
+    const isWinner = entry.is_recommended;
+    const isViewingPdf = activePdfSession?.sessionId === entry.session_id;
+
+    return (
+      <div
+        key={entry.id}
+        className={`${
+          isSplit ? "w-[260px]" : "w-[275px]"
+        } shrink-0 rounded-2xl bg-white flex flex-col justify-between transition-all duration-200 relative break-inside-avoid print:w-auto print:flex-1 print:min-w-[200px] ${
+          isViewingPdf
+            ? "border-2 border-[#1b1717] ring-4 ring-[#1b1717]/15 shadow-xl scale-[1.01]"
+            : isWinner
+            ? "border-2 border-[#1b1717] shadow-lg ring-1 ring-black/5"
+            : "border border-[#e5e5ea] shadow-xs hover:border-neutral-400"
+        }`}
+      >
+        {/* Winner Top Ribbon */}
+        {isWinner && (
+          <div className="bg-[#1b1717] text-white text-xs font-bold px-3 py-1.5 flex items-center justify-between rounded-t-xl print:bg-black print:text-white">
+            <span className="flex items-center gap-1.5">
+              <Star weight="fill" size={14} className="text-amber-400" />
+              RECOMMENDED WINNER
+            </span>
+            <ShieldCheck size={16} weight="bold" />
+          </div>
+        )}
+
+        <div>
+          {/* Header */}
+          <div className={`p-4 border-b ${isWinner ? "border-[#e5e5ea] bg-[#f5f5f7]/60" : "border-[#e5e5ea]"}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <h3 className="font-bold text-sm text-[#1b1717] uppercase tracking-tight truncate">
+                    {entry.company_name}
+                  </h3>
+                  {isViewingPdf && (
+                    <span className="rounded bg-[#1b1717] text-white px-1.5 py-0.2 text-[9px] font-bold">
+                      PDF ★
+                    </span>
+                  )}
+                </div>
+                <span className="text-xs text-[#6e6e73] font-medium block mt-0.5">
+                  {entry.valuation_type === "agreed_value" ? "Agreed Value 约定价" : "Market Value 市价"}
+                </span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                {entry.is_manual && (
+                  <span className="rounded bg-[#f5f5f7] px-1.5 py-0.5 text-[10px] font-bold text-[#6e6e73] uppercase border border-[#e5e5ea]">
+                    Manual
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Multiple Quotes Revision Switcher (Quote 1/2, Quote 2/2) */}
+            {!isSplit && group.entries.length > 1 && (
+              <div className="mt-3 pt-2.5 border-t border-[#e5e5ea] flex items-center justify-between gap-1">
+                <div className="flex items-center gap-1 overflow-x-auto py-0.5">
+                  {group.entries.map((q, qIdx) => {
+                    const isCurrent = qIdx === activeIdx;
+                    const isEntryWinner = q.is_recommended;
+                    return (
+                      <button
+                        key={q.id}
+                        type="button"
+                        onClick={() =>
+                          setActiveQuoteByCompany((prev) => ({
+                            ...prev,
+                            [group.companyName]: qIdx,
+                          }))
+                        }
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                          isCurrent
+                            ? "bg-[#1b1717] text-white shadow-xs"
+                            : "bg-[#f5f5f7] text-[#454545] hover:bg-neutral-200 border border-[#e5e5ea]"
+                        }`}
+                        title={`Quote ${qIdx + 1}/${group.entries.length}: RM ${q.total_payable.toFixed(2)} (${
+                          q.valuation_type === "agreed_value" ? "Agreed" : "Market"
+                        })`}
+                      >
+                        <span>{`Quote ${qIdx + 1}/${group.entries.length}`}</span>
+                        {isEntryWinner && (
+                          <Star
+                            weight="fill"
+                            size={10}
+                            className={isCurrent ? "text-amber-300" : "text-amber-500"}
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setExpandedCompanies((prev) => ({
+                      ...prev,
+                      [group.companyName]: true,
+                    }))
+                  }
+                  className="text-[10px] font-semibold text-[#6e6e73] hover:text-[#1b1717] px-1.5 py-0.5 rounded hover:bg-neutral-100 transition-colors no-print shrink-0"
+                  title="View revisions side-by-side"
+                >
+                  Split
+                </button>
+              </div>
+            )}
+
+            {/* In Split View: show which quote this column represents */}
+            {isSplit && (
+              <div className="mt-2 pt-2 border-t border-[#e5e5ea] flex items-center justify-between">
+                <span className="text-[11px] font-bold text-[#1b1717] bg-[#f5f5f7] px-2 py-0.5 rounded">
+                  {`Quote ${activeIdx + 1} of ${group.entries.length}`}
+                </span>
+                {isWinner && (
+                  <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                    Winner ★
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Numeric Figures Card */}
+          <div className="p-4 space-y-3.5 border-b border-[#e5e5ea]">
+            <div>
+              <span className="text-[11px] uppercase font-bold text-[#6e6e73] block mb-0.5">
+                Sum Insured (保额)
+              </span>
+              <div className="flex items-baseline gap-1.5">
+                <p className="font-mono text-base font-bold text-[#1b1717]">
+                  RM {entry.sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                </p>
+                <span className="text-xs text-[#6e6e73]">
+                  {entry.valuation_type === "agreed_value" ? "[A]" : "[M]"}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <span className="text-[11px] uppercase font-bold text-[#6e6e73] block mb-0.5">
+                Motor Premium (车险)
+              </span>
+              <p className="font-mono text-sm font-bold text-[#1b1717]">
+                RM {entry.motor_premium.toFixed(2)}
+              </p>
+            </div>
+
+            {/* Total Payable Box */}
+            <div
+              className={`rounded-xl p-3.5 border transition-colors ${
+                isWinner
+                  ? "border-2 border-[#1b1717] bg-[#f5f5f7]"
+                  : "border border-[#e5e5ea] bg-[#f5f5f7]/80"
+              }`}
+            >
+              <span className="text-[11px] uppercase font-bold text-[#454545] block">
+                Total Payable (总额)
+              </span>
+              <p className="font-mono text-lg font-black text-[#1b1717]">
+                RM {entry.total_payable.toFixed(2)}
+              </p>
+              <span className="text-[11px] text-[#6e6e73] font-medium block mt-0.5">
+                (Incl. RM {tenure.fixed_costs_total.toFixed(2)} Road Tax &amp; Runner)
+              </span>
+            </div>
+          </div>
+
+          {/* Feature Comparison Rows */}
+          <div className="p-4 space-y-2.5 text-xs divide-y divide-[#e5e5ea]">
+            {/* Towing Limit */}
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-[#6e6e73]">Towing (拖车):</span>
+              <span className="font-bold text-[#1b1717]">{entry.towing_limit}</span>
+            </div>
+
+            {/* Agreed Value */}
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-[#6e6e73]">Agreed Value:</span>
+              <span className={`font-bold ${entry.agreed_value ? "text-emerald-700" : "text-[#6e6e73]"}`}>
+                {entry.agreed_value ? "Yes" : "No"}
+              </span>
+            </div>
+
+            {/* Waiver of Betterment */}
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-[#6e6e73]">Betterment Waiver:</span>
+              <span className={`font-bold ${entry.waiver_betterment ? "text-emerald-700" : "text-[#6e6e73]"}`}>
+                {entry.waiver_betterment ? "Yes" : "No"}
+              </span>
+            </div>
+
+            {/* Excess */}
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-[#6e6e73]">Excess:</span>
+              <span className="font-mono font-bold text-[#1b1717]">
+                RM {entry.excess.toFixed(2)}
+              </span>
+            </div>
+
+            {/* Net Rate % */}
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-[#6e6e73]">Net Rate %:</span>
+              <span className="font-mono font-bold text-[#1b1717]">
+                {entry.rate_percentage ? `${entry.rate_percentage.toFixed(4)}%` : "—"}
+              </span>
+            </div>
+
+            {/* Windscreen (Target vs Sourced) */}
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-[#6e6e73]">Windscreen:</span>
+              <div className="text-right">
+                <span className="font-mono font-bold text-[#1b1717]">
+                  {entry.windscreen_sum_insured
+                    ? `RM ${entry.windscreen_sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
+                    : "Not Included"}
+                </span>
+                {entry.windscreen_sum_insured && tenure.windscreen_target ? (
+                  <span
+                    className={`block text-[10px] font-bold ${
+                      entry.windscreen_sum_insured >= tenure.windscreen_target
+                        ? "text-emerald-700"
+                        : "text-amber-600"
+                    }`}
+                  >
+                    {entry.windscreen_sum_insured >= tenure.windscreen_target
+                      ? "✓ Target Met"
+                      : "Below Target"}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+
+            {/* Special Perils / Flood */}
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-[#6e6e73]">Special Perils:</span>
+              <span className={`font-bold ${entry.special_perils ? "text-emerald-700" : "text-[#6e6e73]"}`}>
+                {entry.special_perils || "Not Included"}
+              </span>
+            </div>
+
+            {/* LLP / LLOP (Passenger Liability) */}
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-[#6e6e73]">LLP / LLOP:</span>
+              <span className={`font-bold ${entry.llp_llop ? "text-[#1b1717]" : "text-[#6e6e73]"}`}>
+                {entry.llp_llop || "—"}
+              </span>
+            </div>
+
+            {/* Notes / Endorsements */}
+            {entry.notes && (
+              <div className="pt-2">
+                <span className="text-[10px] text-[#6e6e73] block mb-0.5 font-semibold">Notes:</span>
+                <p
+                  className="text-[11px] text-[#454545] bg-[#f5f5f7] p-2 rounded border border-[#e5e5ea] leading-tight line-clamp-2"
+                  title={entry.notes}
+                >
+                  {entry.notes}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Column Bottom Action Footer */}
+        <div className="p-3.5 border-t border-[#e5e5ea] bg-[#f5f5f7]/70 space-y-2 no-print print:hidden">
+          {/* Source PDF Viewing Option */}
+          {entry.session_id ? (
+            <button
+              type="button"
+              onClick={() =>
+                setActivePdfSession({
+                  sessionId: entry.session_id!,
+                  companyName: entry.company_name,
+                })
+              }
+              className={`w-full flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all shadow-2xs cursor-pointer ${
+                isViewingPdf
+                  ? "bg-[#1b1717] text-white border border-[#1b1717]"
+                  : "bg-white hover:bg-neutral-100 text-[#1b1717] border border-[#e5e5ea]"
+              }`}
+              title="View uploaded underwriter quotation PDF to verify values"
+            >
+              <FilePdf size={15} weight="bold" className={isViewingPdf ? "text-amber-300" : "text-[#ed1c24]"} />
+              <span>{isViewingPdf ? "Viewing PDF ★" : "View Source PDF"}</span>
+            </button>
+          ) : null}
+
+          {/* Winner Selection Button */}
+          <Button
+            variant={isWinner ? "primary" : "secondary"}
+            size="sm"
+            className={`w-full text-xs font-bold transition-all group ${
+              isWinner
+                ? "bg-[#1b1717] hover:bg-black text-white"
+                : "border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717]"
+            }`}
+            loading={selectingWinnerId === entry.id}
+            icon={<Star weight={isWinner ? "fill" : "bold"} size={14} className={isWinner ? "text-amber-400" : ""} />}
+            onClick={() => handleSelectWinner(entry.id)}
+            title={isWinner ? "Click to deselect / unpick this underwriter" : "Pick as recommended winner"}
+          >
+            {isWinner ? (
+              <>
+                <span className="inline group-hover:hidden">Selected Winner ★</span>
+                <span className="hidden group-hover:inline text-rose-300">Click to Deselect ✕</span>
+              </>
+            ) : (
+              "Pick as Winner"
+            )}
+          </Button>
+
+          {/* Direct Review & Issue Action for Selected Winners */}
+          {isWinner && entry.session_id && (
+            <Link
+              href={`/sessions/${entry.session_id}/review` as Route}
+              className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-lg text-xs font-bold text-[#ed1c24] bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors shadow-2xs"
+            >
+              <FilePdf size={14} weight="bold" />
+              <span>Review &amp; Issue PDF →</span>
+            </Link>
+          )}
+
+          <div className="flex items-center justify-between px-1 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setEditingEntry(entry);
+                setIsManualModalOpen(true);
+              }}
+              className="text-xs font-medium text-[#454545] hover:text-[#1b1717] flex items-center gap-1 cursor-pointer"
+            >
+              <PencilSimple size={13} />
+              Edit
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleDeleteEntry(entry.id)}
+              className="text-xs font-medium text-[#ed1c24] hover:text-[#c4171e] flex items-center gap-1 cursor-pointer"
+            >
+              <Trash size={13} />
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex gap-4 items-start relative w-full">
-      <div className="flex-1 min-w-0 space-y-6 pb-12 overflow-x-hidden">
+      <div className="flex-1 min-w-0 space-y-6 pb-12 overflow-x-hidden print:overflow-visible">
+        {/* Print-Only Executive Comparison Header */}
+        <div className="hidden print:block mb-6 border-b-2 border-[#1b1717] pb-4">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs font-black bg-[#1b1717] text-white px-2 py-0.5 rounded tracking-wider">
+                  RISK-LOCKER
+                </span>
+                <h1 className="text-xl font-bold tracking-tight text-[#1b1717]">
+                  MOTOR QUOTATION COMPARISON REPORT
+                </h1>
+              </div>
+              <p className="text-xs text-[#6e6e73] mt-1">
+                Underwriter Market Benchmarking · Policy Period: {tenure.coverage_period_formatted}
+              </p>
+            </div>
+            <div className="text-right text-xs space-y-0.5">
+              <p className="font-mono font-bold text-sm text-[#1b1717]">
+                {tenure.vehicle_no || tenure.chassis_no || "Unregistered Vehicle"}
+              </p>
+              <p className="font-semibold text-[#454545]">{tenure.customer_name} {tenure.ic_no ? `(${tenure.ic_no})` : ""}</p>
+              <p className="text-[#6e6e73]">{tenure.vehicle_model} · {tenure.engine_cc}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Live Batch Extraction Notification Banner */}
+        {isCompilingBatch && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 flex items-center justify-between text-xs text-amber-900 font-medium no-print print:hidden">
+            <span className="flex items-center gap-2">
+              <CircleNotch size={16} className="animate-spin text-amber-700" />
+              Scanning and compiling quotations for this vehicle... newly completed quotes will appear automatically.
+            </span>
+            <span className="text-[11px] text-amber-700 font-bold bg-amber-100/70 border border-amber-200 px-2 py-0.5 rounded">
+              {entries.length} quote(s) compiled
+            </span>
+          </div>
+        )}
+
         {/* 3-Stage Action Stepper Bar */}
-      <div className="rounded-2xl border border-[#e5e5ea] bg-white p-3 shadow-xs">
+        <div className="rounded-2xl border border-[#e5e5ea] bg-white p-3 shadow-xs no-print print:hidden">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
           {/* Stage 1: Compare Underwriters */}
           <div className="flex items-center gap-3 p-3 rounded-xl bg-[#f5f5f7]">
@@ -496,7 +960,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2.5 flex-wrap">
+        <div className="flex items-center gap-2.5 flex-wrap no-print print:hidden">
           <Button
             variant="secondary"
             size="sm"
@@ -516,6 +980,15 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             Print
           </Button>
 
+          <Link
+            href={`/upload?mode=comparison&tenure_id=${tenure.id}` as Route}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e5e5ea] bg-white hover:bg-neutral-50 text-xs font-semibold text-[#1b1717] transition-colors shadow-2xs"
+            title="Upload additional quotation PDFs for this vehicle"
+          >
+            <UploadSimple size={15} weight="bold" />
+            <span>Upload Quotes</span>
+          </Link>
+
           <Button
             variant="primary"
             size="sm"
@@ -532,11 +1005,11 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       </div>
 
       {/* Main 3-Pane Excel Comparison Grid */}
-      <div className="grid grid-cols-1 xl:grid-cols-[280px_minmax(0,1fr)_280px] gap-4 items-start">
+      <div className="grid grid-cols-1 xl:grid-cols-[280px_minmax(0,1fr)_280px] print:grid-cols-[240px_minmax(0,1fr)_220px] gap-4 items-start">
         {/* ============================================================== */}
         {/* LEFT PANE: Customer Dossier & Vehicle Fixed Costs              */}
         {/* ============================================================== */}
-        <div className="rounded-2xl border border-[#e5e5ea] bg-white shadow-sm overflow-hidden sticky top-6">
+        <div className="rounded-2xl border border-[#e5e5ea] bg-white shadow-sm overflow-hidden sticky top-6 print:static print:shadow-none break-inside-avoid">
           <div className="bg-[#f5f5f7] px-4 py-3 border-b border-[#e5e5ea] flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-[#1b1717]">
               Customer &amp; Vehicle Ledger
@@ -549,7 +1022,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                 }
                 setEditingFixedCosts(!editingFixedCosts);
               }}
-              className="rounded p-1 text-[#454545] hover:text-[#1b1717] hover:bg-neutral-200 transition-colors"
+              className="rounded p-1 text-[#454545] hover:text-[#1b1717] hover:bg-neutral-200 transition-colors no-print print:hidden"
               title="Edit customer, vehicle & fixed charges"
             >
               <PencilSimple size={15} weight="bold" />
@@ -827,7 +1300,11 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-[#6e6e73]">NCD Status:</span>
-                    <span className="font-bold text-[#1b1717]">{tenure.ncd_percentage.toFixed(0)}%</span>
+                    <span className="font-bold text-[#1b1717]">
+                      {tenure.ncd_percentage != null
+                        ? `${tenure.ncd_percentage % 1 === 0 ? tenure.ncd_percentage.toFixed(0) : tenure.ncd_percentage.toFixed(2)}%`
+                        : "Not Detected"}
+                    </span>
                   </div>
                 </div>
               )}
@@ -867,6 +1344,18 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                   <span className="size-2 rounded-full bg-neutral-400" />
                   <span>Net Rate % / Excess</span>
                 </li>
+                <li className="flex items-center gap-2">
+                  <span className="size-2 rounded-full bg-neutral-400" />
+                  <span>Windscreen (挡风玻璃)</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="size-2 rounded-full bg-neutral-400" />
+                  <span>Special Perils / Flood (天灾)</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="size-2 rounded-full bg-neutral-400" />
+                  <span>Passenger Liability (LLP)</span>
+                </li>
               </ul>
             </div>
           </div>
@@ -875,233 +1364,104 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         {/* ============================================================== */}
         {/* CENTER PANE: Dynamic Side-by-Side Underwriter Columns           */}
         {/* ============================================================== */}
-        <div className="min-w-0 overflow-x-auto pb-4">
-          <div className="flex gap-4 min-w-max">
-            {entries.map((entry) => {
-              const isWinner = entry.is_recommended;
-              const isViewingPdf = activePdfSession?.sessionId === entry.session_id;
+        <div className="min-w-0 overflow-x-auto pb-4 print:overflow-visible print:w-full">
+          <div className="flex gap-4 min-w-max print:min-w-0 print:flex-wrap">
+            {companyGroups.map((group) => {
+              const isExpanded = expandedCompanies[group.companyName] && group.entries.length > 1;
 
-              return (
-                <div
-                  key={entry.id}
-                  className={`w-[270px] shrink-0 rounded-2xl bg-white flex flex-col justify-between transition-all duration-200 relative ${
-                    isViewingPdf
-                      ? "border-2 border-[#1b1717] ring-4 ring-[#1b1717]/15 shadow-xl scale-[1.01]"
-                      : isWinner
-                      ? "border-2 border-[#1b1717] shadow-lg ring-1 ring-black/5"
-                      : "border border-[#e5e5ea] shadow-xs hover:border-neutral-400"
-                  }`}
-                >
-                  {/* Winner Top Ribbon */}
-                  {isWinner && (
-                    <div className="bg-[#1b1717] text-white text-xs font-bold px-3 py-1.5 flex items-center justify-between rounded-t-xl">
-                      <span className="flex items-center gap-1.5">
-                        <Star weight="fill" size={14} className="text-amber-400" />
-                        RECOMMENDED WINNER
-                      </span>
-                      <ShieldCheck size={16} weight="bold" />
-                    </div>
-                  )}
-
-                  <div>
-                    {/* Header */}
-                    <div className={`p-4 border-b ${isWinner ? "border-[#e5e5ea] bg-[#f5f5f7]/60" : "border-[#e5e5ea]"}`}>
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <h3 className="font-bold text-sm text-[#1b1717] uppercase tracking-tight">
-                              {entry.company_name}
-                            </h3>
-                            {isViewingPdf && (
-                              <span className="rounded bg-[#1b1717] text-white px-1.5 py-0.2 text-[9px] font-bold">
-                                PDF ★
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-xs text-[#6e6e73] font-medium block mt-0.5">
-                            {entry.valuation_type === "agreed_value" ? "Agreed Value 约定价" : "Market Value 市价"}
-                          </span>
-                        </div>
-                        {entry.is_manual && (
-                          <span className="rounded bg-[#f5f5f7] px-1.5 py-0.5 text-[10px] font-bold text-[#6e6e73] uppercase border border-[#e5e5ea]">
-                            Manual
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Numeric Figures Card */}
-                    <div className="p-4 space-y-3.5 border-b border-[#e5e5ea]">
-                      <div>
-                        <span className="text-[11px] uppercase font-bold text-[#6e6e73] block mb-0.5">
-                          Sum Insured (保额)
+              if (isExpanded) {
+                // Split view for this company: render multiple revisions side-by-side with shared header
+                return (
+                  <div
+                    key={group.companyName}
+                    className="flex flex-col gap-2 p-2.5 rounded-2xl bg-[#f5f5f7] border-2 border-[#1b1717]/20 shadow-xs break-inside-avoid"
+                  >
+                    <div className="flex items-center justify-between px-2 py-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs text-[#1b1717] uppercase tracking-wider">
+                          {group.companyName}
                         </span>
-                        <div className="flex items-baseline gap-1.5">
-                          <p className="font-mono text-base font-bold text-[#1b1717]">
-                            RM {entry.sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
-                          </p>
-                          <span className="text-xs text-[#6e6e73]">
-                            {entry.valuation_type === "agreed_value" ? "[A]" : "[M]"}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div>
-                        <span className="text-[11px] uppercase font-bold text-[#6e6e73] block mb-0.5">
-                          Motor Premium (车险)
-                        </span>
-                        <p className="font-mono text-sm font-bold text-[#1b1717]">
-                          RM {entry.motor_premium.toFixed(2)}
-                        </p>
-                      </div>
-
-                      {/* Total Payable Box */}
-                      <div className={`rounded-xl p-3.5 border transition-colors ${
-                        isWinner
-                          ? "border-2 border-[#1b1717] bg-[#f5f5f7]"
-                          : "border border-[#e5e5ea] bg-[#f5f5f7]/80"
-                      }`}>
-                        <span className="text-[11px] uppercase font-bold text-[#454545] block">
-                          Total Payable (总额)
-                        </span>
-                        <p className="font-mono text-lg font-black text-[#1b1717]">
-                          RM {entry.total_payable.toFixed(2)}
-                        </p>
-                        <span className="text-[11px] text-[#6e6e73] font-medium block mt-0.5">
-                          (Incl. RM {tenure.fixed_costs_total.toFixed(2)} Road Tax &amp; Runner)
+                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">
+                          {group.entries.length} Quotes Split
                         </span>
                       </div>
-                    </div>
-
-                    {/* Feature Comparison Rows */}
-                    <div className="p-4 space-y-3 text-xs divide-y divide-[#e5e5ea]">
-                      {/* Towing Limit */}
-                      <div className="flex items-center justify-between pt-1">
-                        <span className="text-[#6e6e73]">Towing (拖车):</span>
-                        <span className="font-bold text-[#1b1717]">
-                          {entry.towing_limit}
-                        </span>
-                      </div>
-
-                      {/* Agreed Value */}
-                      <div className="flex items-center justify-between pt-2">
-                        <span className="text-[#6e6e73]">Agreed Value:</span>
-                        <span className={`font-bold ${entry.agreed_value ? "text-emerald-700" : "text-[#6e6e73]"}`}>
-                          {entry.agreed_value ? "Yes" : "No"}
-                        </span>
-                      </div>
-
-                      {/* Waiver of Betterment */}
-                      <div className="flex items-center justify-between pt-2">
-                        <span className="text-[#6e6e73]">Betterment Waiver:</span>
-                        <span className={`font-bold ${entry.waiver_betterment ? "text-emerald-700" : "text-[#6e6e73]"}`}>
-                          {entry.waiver_betterment ? "Yes" : "No"}
-                        </span>
-                      </div>
-
-                      {/* Excess */}
-                      <div className="flex items-center justify-between pt-2">
-                        <span className="text-[#6e6e73]">Excess:</span>
-                        <span className="font-mono font-bold text-[#1b1717]">
-                          RM {entry.excess.toFixed(2)}
-                        </span>
-                      </div>
-
-                      {/* Net Rate % */}
-                      <div className="flex items-center justify-between pt-2">
-                        <span className="text-[#6e6e73]">Net Rate %:</span>
-                        <span className="font-mono font-bold text-[#1b1717]">
-                          {entry.rate_percentage ? `${entry.rate_percentage.toFixed(4)}%` : "—"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Column Bottom Action Footer */}
-                  <div className="p-3.5 border-t border-[#e5e5ea] bg-[#f5f5f7]/70 space-y-2">
-                    {/* Source PDF Viewing Option */}
-                    {entry.session_id ? (
                       <button
                         type="button"
                         onClick={() =>
-                          setActivePdfSession({
-                            sessionId: entry.session_id!,
-                            companyName: entry.company_name,
-                          })
+                          setExpandedCompanies((prev) => ({
+                            ...prev,
+                            [group.companyName]: false,
+                          }))
                         }
-                        className={`w-full flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all shadow-2xs cursor-pointer ${
-                          isViewingPdf
-                            ? "bg-[#1b1717] text-white border border-[#1b1717]"
-                            : "bg-white hover:bg-neutral-100 text-[#1b1717] border border-[#e5e5ea]"
-                        }`}
-                        title="View uploaded underwriter quotation PDF to verify values"
+                        className="text-[10px] font-bold text-[#454545] hover:text-[#1b1717] px-2 py-0.5 rounded bg-white hover:bg-neutral-200 border border-[#e5e5ea] transition-colors cursor-pointer no-print"
                       >
-                        <FilePdf size={15} weight="bold" className={isViewingPdf ? "text-amber-300" : "text-[#ed1c24]"} />
-                        <span>{isViewingPdf ? "Viewing PDF ★" : "View Source PDF"}</span>
-                      </button>
-                    ) : null}
-
-                    {/* Winner Selection Button */}
-                    <Button
-                      variant={isWinner ? "primary" : "secondary"}
-                      size="sm"
-                      className={`w-full text-xs font-bold transition-all group ${
-                        isWinner
-                          ? "bg-[#1b1717] hover:bg-black text-white"
-                          : "border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717]"
-                      }`}
-                      loading={selectingWinnerId === entry.id}
-                      icon={<Star weight={isWinner ? "fill" : "bold"} size={14} className={isWinner ? "text-amber-400" : ""} />}
-                      onClick={() => handleSelectWinner(entry.id)}
-                      title={isWinner ? "Click to deselect / unpick this underwriter" : "Pick as recommended winner"}
-                    >
-                      {isWinner ? (
-                        <>
-                          <span className="inline group-hover:hidden">Selected Winner ★</span>
-                          <span className="hidden group-hover:inline text-rose-300">Click to Deselect ✕</span>
-                        </>
-                      ) : (
-                        "Pick as Winner"
-                      )}
-                    </Button>
-
-                    {/* Direct Review & Issue Action for Selected Winners */}
-                    {isWinner && entry.session_id && (
-                      <Link
-                        href={`/sessions/${entry.session_id}/review` as Route}
-                        className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-lg text-xs font-bold text-[#ed1c24] bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors shadow-2xs"
-                      >
-                        <FilePdf size={14} weight="bold" />
-                        <span>Review &amp; Issue PDF →</span>
-                      </Link>
-                    )}
-
-                    <div className="flex items-center justify-between px-1 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingEntry(entry);
-                          setIsManualModalOpen(true);
-                        }}
-                        className="text-xs font-medium text-[#454545] hover:text-[#1b1717] flex items-center gap-1 cursor-pointer"
-                      >
-                        <PencilSimple size={13} />
-                        Edit
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteEntry(entry.id)}
-                        className="text-xs font-medium text-[#ed1c24] hover:text-[#c4171e] flex items-center gap-1 cursor-pointer"
-                      >
-                        <Trash size={13} />
-                        Delete
+                        Collapse to Tabbed
                       </button>
                     </div>
+
+                    <div className="flex gap-3">
+                      {group.entries.map((entry, idx) =>
+                        renderUnderwriterCard(entry, group, idx, true)
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
+                );
+              }
+
+              // Default: Tabbed Single Card with Revision Pills
+              const customIdx = activeQuoteByCompany[group.companyName];
+              let activeIdx = 0;
+              if (customIdx !== undefined && customIdx >= 0 && customIdx < group.entries.length) {
+                activeIdx = customIdx;
+              } else {
+                const winnerIdx = group.entries.findIndex((e) => e.is_recommended);
+                activeIdx = winnerIdx !== -1 ? winnerIdx : 0;
+              }
+              const entry = group.entries[activeIdx] || group.entries[0];
+
+              return renderUnderwriterCard(entry, group, activeIdx, false);
             })}
+
+            {/* Empty State Banner when no quotes are linked yet */}
+            {companyGroups.length === 0 && (
+              <div className="flex-1 min-w-[340px] max-w-[560px] p-8 rounded-2xl border-2 border-dashed border-[#e5e5ea] bg-white text-center flex flex-col items-center justify-center gap-4">
+                <div className="size-14 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                  <Columns size={28} weight="duotone" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#1b1717]">
+                    {isCompilingBatch || (data?.pending_jobs_count && data.pending_jobs_count > 0)
+                      ? "Extracting Quotation Documents..."
+                      : "No Insurer Quotes Added Yet"}
+                  </h3>
+                  <p className="text-xs text-[#6e6e73] max-w-sm mt-1 leading-relaxed">
+                    {isCompilingBatch || (data?.pending_jobs_count && data.pending_jobs_count > 0)
+                      ? "Our extraction pipeline is reading underwriter PDFs, extracting sums insured, motor premiums, and benefit riders. This matrix will refresh automatically."
+                      : `No quotation PDFs are linked to ${tenure.vehicle_no}. Upload underwriter quotation PDFs or enter manual portal figures to begin side-by-side comparison.`}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 pt-2">
+                  <Button
+                    type="button"
+                    onClick={() => router.push(`/upload/marketing-comparison?tenure_id=${tenureId}` as Route)}
+                    className="bg-[#1b1717] hover:bg-black text-white text-xs font-bold px-4 py-2 rounded-xl"
+                  >
+                    <Plus size={14} weight="bold" className="mr-1.5" />
+                    Upload Quotation PDFs
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => fetchComparison()}
+                    className="text-xs font-semibold px-3 py-2 rounded-xl"
+                  >
+                    <ArrowsClockwise size={14} weight="bold" className="mr-1" />
+                    Refresh
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {/* "+ Add Insurer Quote" Action Card */}
             <div
@@ -1109,7 +1469,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                 setEditingEntry(null);
                 setIsManualModalOpen(true);
               }}
-              className="w-[240px] shrink-0 rounded-2xl border-2 border-dashed border-[#e5e5ea] hover:border-[#1b1717] p-6 flex flex-col items-center justify-center text-center gap-3 cursor-pointer transition-colors bg-white group"
+              className="w-[240px] shrink-0 rounded-2xl border-2 border-dashed border-[#e5e5ea] hover:border-[#1b1717] p-6 flex flex-col items-center justify-center text-center gap-3 cursor-pointer transition-colors bg-white group no-print print:hidden"
             >
               <div className="size-12 rounded-full bg-[#f5f5f7] flex items-center justify-center text-[#454545] group-hover:bg-[#1b1717] group-hover:text-white transition-colors">
                 <Plus size={22} weight="bold" />
@@ -1213,13 +1573,17 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               <div className="rounded-lg bg-[#f5f5f7] p-2 border border-[#e5e5ea]">
                 <span className="text-xs text-[#6e6e73] block">Current NCD</span>
                 <span className="font-mono font-bold text-sm text-[#1b1717]">
-                  {ncd.current.toFixed(2)}%
+                  {ncd?.current != null
+                    ? `${ncd.current % 1 === 0 ? ncd.current.toFixed(0) : ncd.current.toFixed(2)}%`
+                    : "Not Detected"}
                 </span>
               </div>
               <div className="rounded-lg bg-emerald-50 p-2 border border-emerald-200">
                 <span className="text-xs text-emerald-800 block font-semibold">Next NCD</span>
                 <span className="font-mono font-bold text-sm text-emerald-800">
-                  {ncd.next.toFixed(2)}%
+                  {ncd?.next != null
+                    ? `${ncd.next % 1 === 0 ? ncd.next.toFixed(0) : ncd.next.toFixed(2)}%`
+                    : "Not Detected"}
                 </span>
               </div>
             </div>
@@ -1232,7 +1596,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       {activePdfSession && pdfDockMode === "docked" && (
         <div
           style={{ width: pdfPanelWidth }}
-          className="shrink-0 sticky top-4 h-[calc(100vh-2rem)] border border-[#e5e5ea] bg-white rounded-2xl shadow-xl flex flex-col overflow-hidden relative transition-all"
+          className="shrink-0 sticky top-4 h-[calc(100vh-2rem)] border border-[#e5e5ea] bg-white rounded-2xl shadow-xl flex flex-col overflow-hidden relative transition-all no-print print:hidden"
         >
           {/* Draggable Resize Divider on Left Edge */}
           <div
@@ -1290,7 +1654,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       {activePdfSession && pdfDockMode === "floating" && (
         <div
           style={{ width: pdfPanelWidth }}
-          className="fixed inset-y-0 right-0 z-50 bg-white border-l border-[#e5e5ea] shadow-2xl flex flex-col animate-in slide-in-from-right duration-150"
+          className="fixed inset-y-0 right-0 z-50 bg-white border-l border-[#e5e5ea] shadow-2xl flex flex-col animate-in slide-in-from-right duration-150 no-print print:hidden"
         >
           {/* Draggable Resize Divider on Left Edge */}
           <div

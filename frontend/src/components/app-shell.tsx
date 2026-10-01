@@ -21,6 +21,7 @@ import {
   ChartLineUp,
   CalendarBlank,
   Columns,
+  ClockCounterClockwise,
 } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
 import { useAuth, clearAuthCache } from "@/lib/auth";
@@ -43,9 +44,10 @@ const navSections: NavSection[] = [
   {
     title: "OPERATIONS",
     items: [
-      { href: "/upload", label: "Upload & Intake", icon: Upload },
-      { href: "/sessions", label: "Sessions & Drafts", icon: SquaresFour },
-      { href: "/insights" as Route, label: "Timeline Ledger", icon: CalendarBlank },
+      { href: "/ledger" as Route, label: "Motor Renewal Ledger", icon: CalendarBlank },
+      { href: "/sessions" as Route, label: "Sessions", icon: ClockCounterClockwise },
+      { href: "/upload/marketing-comparison" as Route, label: "Upload & Intake", icon: Upload },
+      { href: "/client-records" as Route, label: "Client Records", icon: Users },
     ],
   },
   {
@@ -152,7 +154,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       items: section.items.filter((item) => {
         if (isStaff) {
           const hrefStr = String(item.href);
-          return hrefStr === "/upload" || hrefStr === "/sessions" || hrefStr === "/insights";
+          return (
+            hrefStr.startsWith("/upload") ||
+            hrefStr.startsWith("/comparison") ||
+            hrefStr.startsWith("/ledger") ||
+            hrefStr.startsWith("/sessions") ||
+            hrefStr.startsWith("/insights") ||
+            hrefStr === "/client-records"
+          );
         }
         return true;
       }),
@@ -251,8 +260,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     {section.items.map((item) => {
                       const Icon = item.icon;
                       const isBuilder = item.href.startsWith("/builder");
+                      const isUpload = item.href.startsWith("/upload");
                       const active = isBuilder
                         ? pathname.startsWith("/builder")
+                        : isUpload
+                        ? pathname.startsWith("/upload")
                         : pathname === item.href || pathname.startsWith(`${item.href}/`);
                       return (
                         <Link
@@ -319,8 +331,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 {section.items.map((item) => {
                   const Icon = item.icon;
                   const isBuilder = item.href.startsWith("/builder");
+                  const isUpload = item.href.startsWith("/upload");
                   const active = isBuilder
                     ? pathname.startsWith("/builder")
+                    : isUpload
+                    ? pathname.startsWith("/upload")
                     : pathname === item.href || pathname.startsWith(`${item.href}/`);
 
                   const navLink = (
