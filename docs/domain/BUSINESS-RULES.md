@@ -35,6 +35,7 @@
 - Removing or customizing a benefit changes only that quotation. The published catalog remains unchanged.
 - A company/product/tier with no base offering for a concept does not receive that current benefit. An optional offer appears only in Available Add-ons when a verified catalog defines it.
 - Missing or unverified catalog information remains empty. Artwork and filenames never establish coverage by themselves.
+- Waiver of Betterment (`betterment-protection`): Strictly applicable to Private Car Comprehensive products (ICE and EV). Excluded from all motorcycle and commercial vehicle catalogs. QBE places it under Defaults (`base`/`included`, 0 RM) with description override "Waiver of betterment for up to 10 years of age". Tune Protect, Berjaya Sompo, AmAssurance, and Etiqa place it under Add-ons (`optional`/`addon_option`) with description override "Waiver of betterment for up to 15 years of age". Lonpac and STMB (Takaful Malaysia) place it under Add-ons with description override "Waiver of betterment for up to 10 years of age".
 
 ## Benefit Packs (Bundled Add-on Plans)
 
