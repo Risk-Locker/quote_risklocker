@@ -400,6 +400,17 @@ def _extract_excess(f: dict[str, Any]) -> float:
     return 0.0
 
 
+def _is_valid_windscreen_amt(val: float | None) -> bool:
+    """Validate windscreen coverage amount bounds.
+    
+    In Malaysia, private car windscreen protection coverage ranges between RM 300 and RM 30,000.
+    Rejects calendar years (e.g. 2020..2035) and policy/quotation reference numbers (e.g. 283233).
+    """
+    if val is None or val <= 0.0:
+        return False
+    return 300.0 <= val <= 30000.0 and int(val) not in range(2020, 2035)
+
+
 def _resolve_comparison_benefits(
     db: Session,
     session: SessionModel,
@@ -460,12 +471,22 @@ def _resolve_comparison_benefits(
             if el.normalized_label:
                 tokens.append(el.normalized_label)
                 
-    # 3. Add raw fields text
+    # 3. Add clean scalar fields text (ignore raw JSON/evidence blocks)
     for k in ("special_perils", "optional_covers", "benefits_selected", "extra_benefits", "llp_llop", "towing", "towing_limit", "windscreen_coverage", "windscreen_sum_insured"):
         val = f.get(k)
         if val:
-            if isinstance(val, list):
-                tokens.extend(str(item) for item in val)
+            if isinstance(val, dict):
+                clean_v = val.get("value") or val.get("detected_value")
+                if clean_v:
+                    tokens.append(str(clean_v))
+            elif isinstance(val, list):
+                for item in val:
+                    if isinstance(item, dict):
+                        clean_item = item.get("value") or item.get("detected_value") or item.get("label")
+                        if clean_item:
+                            tokens.append(str(clean_item))
+                    else:
+                        tokens.append(str(item))
             else:
                 tokens.append(str(val))
 
@@ -496,69 +517,81 @@ def _resolve_comparison_benefits(
 
     # --- WINDSCREEN ---
     windscreen_amount: float | None = None
-    cand_ws = _to_float(f.get("windscreen_coverage") or f.get("windscreen_sum_insured"))
-    if cand_ws > 0.0 and cand_ws not in range(2023, 2030):
-        windscreen_amount = cand_ws
-    else:
-        # Check ExtractionBenefitLine records first for explicit limit
-        if session.uploaded_file_id:
-            ext_lines = list(
-                db.scalars(
-                    select(ExtractionBenefitLine)
-                    .join(ExtractionRecord, ExtractionBenefitLine.extraction_record_id == ExtractionRecord.id)
-                    .where(ExtractionRecord.uploaded_file_id == session.uploaded_file_id)
-                ).all()
-            )
-            for el in ext_lines:
-                el_text = f"{el.raw_label or ''} {el.normalized_label or ''}".lower()
-                if any(w in el_text for w in ("windscreen", "w/screen", "cermin")):
-                    if isinstance(el.extracted_value, dict):
-                        v = _to_float(el.extracted_value.get("value") or el.extracted_value.get("amount") or el.extracted_value.get("coverage_limit"))
-                        if v >= 100.0 and int(v) not in range(2023, 2030):
+
+    # Priority 1: Check ExtractionBenefitLine records for explicit extracted limit
+    if session.uploaded_file_id:
+        ext_lines = list(
+            db.scalars(
+                select(ExtractionBenefitLine)
+                .join(ExtractionRecord, ExtractionBenefitLine.extraction_record_id == ExtractionRecord.id)
+                .where(ExtractionRecord.uploaded_file_id == session.uploaded_file_id)
+            ).all()
+        )
+        for el in ext_lines:
+            el_text = f"{el.raw_label or ''} {el.normalized_label or ''}".lower()
+            if any(w in el_text for w in ("windscreen", "w/screen", "cermin")):
+                # Check candidate mappings first (contains coverage_limit)
+                for m in (el.candidate_mappings or []):
+                    if isinstance(m, dict) and m.get("coverage_limit"):
+                        v = _to_float(m.get("coverage_limit"))
+                        if _is_valid_windscreen_amt(v):
                             windscreen_amount = v
                             break
-                    cand_cl = getattr(el, "coverage_limit", None)
-                    if cand_cl:
-                        v = _to_float(cand_cl)
-                        if v >= 100.0 and int(v) not in range(2023, 2030):
-                            windscreen_amount = v
-                            break
-                    for m in (el.candidate_mappings or []):
-                        if isinstance(m, dict) and m.get("coverage_limit"):
-                            v = _to_float(m.get("coverage_limit"))
-                            if v >= 100.0 and int(v) not in range(2023, 2030):
-                                windscreen_amount = v
-                                break
-                    if windscreen_amount:
+                if windscreen_amount:
+                    break
+                # Check extracted value
+                if isinstance(el.extracted_value, dict):
+                    v = _to_float(el.extracted_value.get("value") or el.extracted_value.get("amount") or el.extracted_value.get("coverage_limit"))
+                    if _is_valid_windscreen_amt(v):
+                        windscreen_amount = v
+                        break
+                cand_cl = getattr(el, "coverage_limit", None)
+                if cand_cl:
+                    v = _to_float(cand_cl)
+                    if _is_valid_windscreen_amt(v):
+                        windscreen_amount = v
+                        break
+                if windscreen_amount:
+                    break
+
+    # Priority 2: Check DraftBenefitSelection records
+    if windscreen_amount is None:
+        for s in selections:
+            s_text = f"{s.label_override or ''} {s.selection_key or ''}".lower()
+            if "windscreen" in s_text or "cermin" in s_text:
+                if isinstance(s.typed_value_override, dict):
+                    t_amt = _to_float(s.typed_value_override.get("amount") or s.typed_value_override.get("coverage") or s.typed_value_override.get("limit") or s.typed_value_override.get("value"))
+                    if _is_valid_windscreen_amt(t_amt):
+                        windscreen_amount = t_amt
+                        break
+                m = re.search(r"(?:rm|myr)\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?|[1-9][0-9]{2,4}(?:\.[0-9]+)?)", s.label_override or "", re.IGNORECASE)
+                if m:
+                    amt = _to_float(m.group(1).replace(",", ""))
+                    if _is_valid_windscreen_amt(amt):
+                        windscreen_amount = amt
                         break
 
-        if windscreen_amount is None:
-            for s in selections:
-                s_text = f"{s.label_override or ''} {s.selection_key or ''}".lower()
-                if "windscreen" in s_text or "cermin" in s_text:
-                    if isinstance(s.typed_value_override, dict):
-                        t_amt = _to_float(s.typed_value_override.get("amount") or s.typed_value_override.get("coverage") or s.typed_value_override.get("limit"))
-                        if t_amt >= 100.0 and int(t_amt) not in range(2023, 2030):
-                            windscreen_amount = t_amt
-                            break
-                    m = re.search(r"(?:rm|myr)?\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?|[1-9][0-9]{2,6}(?:\.[0-9]+)?)", s.label_override or "", re.IGNORECASE)
-                    if m:
-                        amt = _to_float(m.group(1).replace(",", ""))
-                        if amt >= 100.0 and int(amt) not in range(2023, 2030):
-                            windscreen_amount = amt
-                            break
-        if windscreen_amount is None:
-            for tok in tokens:
-                if "windscreen" in tok.lower() or "cermin" in tok.lower():
-                    m = re.search(r"(?:rm|myr)?\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?|[1-9][0-9]{2,6}(?:\.[0-9]+)?)", tok, re.IGNORECASE)
-                    if m:
-                        amt = _to_float(m.group(1).replace(",", ""))
-                        if amt >= 100.0 and int(amt) not in range(2023, 2030):
-                            windscreen_amount = amt
-                            break
-            if windscreen_amount is None and ("windscreen" in combined_text or "cermin" in combined_text):
-                if windscreen_target and windscreen_target > 0.0:
-                    windscreen_amount = float(windscreen_target)
+    # Priority 3: Check scalar draft fields (windscreen_coverage or windscreen_sum_insured)
+    if windscreen_amount is None:
+        cand_ws = _to_float(f.get("windscreen_coverage") or f.get("windscreen_sum_insured"))
+        if _is_valid_windscreen_amt(cand_ws):
+            windscreen_amount = cand_ws
+
+    # Priority 4: Explicit currency tokens mentioning windscreen
+    if windscreen_amount is None:
+        for tok in tokens:
+            if "windscreen" in tok.lower() or "cermin" in tok.lower():
+                m = re.search(r"(?:rm|myr)\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?|[1-9][0-9]{2,4}(?:\.[0-9]+)?)", tok, re.IGNORECASE)
+                if m:
+                    amt = _to_float(m.group(1).replace(",", ""))
+                    if _is_valid_windscreen_amt(amt):
+                        windscreen_amount = amt
+                        break
+
+    # Priority 5: Fallback to tenure target windscreen if windscreen is covered in quote
+    if windscreen_amount is None and any(w in combined_text for w in ("windscreen", "w/screen", "cermin")):
+        if windscreen_target and _is_valid_windscreen_amt(float(windscreen_target)):
+            windscreen_amount = float(windscreen_target)
 
     # --- LLP / LLOP ---
     has_llp = any(
@@ -879,16 +912,23 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                     h_prem = _extract_vehicle_motor_premium(f)
                     val_type, is_agr = _extract_valuation_type(f)
 
+                    # Always evaluate live ground-truth benefits from the session's actual extraction records / drafts
+                    b_res = _resolve_comparison_benefits(
+                        db, s, getattr(s, "company_id", None), f, float(tenure.windscreen_target) if tenure.windscreen_target else None
+                    )
+
                     needs_healing = (
                         e.sum_insured == 0.0
                         or e.motor_premium == 0.0
                         or (e.special_perils and any(bad in e.special_perils.lower() for bad in ("windscreen", "passenger", "llp", "driver")))
+                        or e.windscreen_sum_insured != b_res["windscreen_sum_insured"]
+                        or (e.windscreen_sum_insured is not None and not _is_valid_windscreen_amt(float(e.windscreen_sum_insured)))
+                        or e.special_perils != b_res["special_perils"]
+                        or e.llp_llop != b_res["llp_llop"]
+                        or e.towing_km != b_res["towing_km"]
                     )
 
                     if needs_healing:
-                        b_res = _resolve_comparison_benefits(
-                            db, s, getattr(s, "company_id", None), f, float(tenure.windscreen_target) if tenure.windscreen_target else None
-                        )
                         if h_sum > 0.0:
                             e.sum_insured = h_sum
                         if h_prem > 0.0:

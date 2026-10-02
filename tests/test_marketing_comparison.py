@@ -729,4 +729,127 @@ def test_get_marketing_comparison_preserves_custom_road_tax(db_session: Session)
     assert data["tenure"]["road_tax"] == 100.0
 
 
+def test_windscreen_extraction_and_auto_healing_prevents_corrupt_quotation_refs(db_session: Session):
+    """Verify windscreen extraction rejects quotation ref numbers, calendar years, and heals corrupt entries."""
+    from app.services.marketing_comparison_service import _is_valid_windscreen_amt, _resolve_comparison_benefits
+    from app.models.tables import ExtractionRecord, ExtractionBenefitLine
+
+    # 1. Bounds verification
+    assert _is_valid_windscreen_amt(4000.0) is True
+    assert _is_valid_windscreen_amt(1700.0) is True
+    assert _is_valid_windscreen_amt(500.0) is True
+    assert _is_valid_windscreen_amt(283233.0) is False  # Quotation number leak
+    assert _is_valid_windscreen_amt(2026.0) is False    # Calendar year leak
+    assert _is_valid_windscreen_amt(2024.0) is False    # Calendar year leak
+    assert _is_valid_windscreen_amt(0.0) is False
+    assert _is_valid_windscreen_amt(None) is False
+    assert _is_valid_windscreen_amt(99999.0) is False   # Exceeds max windscreen
+
+    # 2. Setup user and vehicle tenure
+    user = User(id=new_id(), email="ws_test@example.com", name="WS Tester", password_hash="x")
+    db_session.add(user)
+    db_session.flush()
+
+    vehicle = TrackedVehicle(vehicle_no="CHERY77", car_model="Chery Tiggo 7 Pro", manufacture_year=2024)
+    db_session.add(vehicle)
+    db_session.flush()
+
+    start_d = datetime(2026, 3, 29, tzinfo=timezone.utc)
+    end_d = datetime(2027, 3, 28, tzinfo=timezone.utc)
+    tenure = InsuranceTenure(
+        tracked_vehicle_id=vehicle.id,
+        vehicle_no=vehicle.vehicle_no,
+        customer_name="TAY HUI YIN",
+        coverage_start_date=start_d,
+        coverage_end_date=end_d,
+        expiry_month="2027-03",
+        windscreen_target=1700.0,
+        road_tax=90.0,
+        runner_fee=10.0,
+        status="active",
+    )
+    db_session.add(tenure)
+    db_session.flush()
+
+    batch = Batch(owner_id=user.id, name="WS Batch")
+    db_session.add(batch)
+    db_session.flush()
+
+    uf = UploadedFile(batch_id=batch.id, owner_id=user.id, original_filename="QBE_Quote.pdf", content_type="application/pdf", storage_path=".qc-tmp/qbe.pdf")
+    db_session.add(uf)
+    db_session.flush()
+
+    # Draft has evidence with quotation number MPA-26-49-00283233 and year 2026
+    draft = QuotationDraft(
+        owner_id=user.id,
+        uploaded_file_id=uf.id,
+        fields={
+            "sum_insured": 96000.0,
+            "total_payable": 3357.0,
+            "optional_covers": {
+                "value": "Windscreen; Legal Liability to Passenger",
+                "evidence": "Quotation No. MPA-26-49-00283233 Valid Until 22-04-2026",
+            },
+        },
+    )
+    db_session.add(draft)
+    db_session.flush()
+
+    sess = SessionModel(
+        owner_id=user.id,
+        uploaded_file_id=uf.id,
+        draft_id=draft.id,
+        tenure_id=tenure.id,
+        detected_company="QBE",
+        is_tenure_active=True,
+    )
+    db_session.add(sess)
+    db_session.flush()
+
+    # ExtractionBenefitLine with real extracted 4000.0
+    rec = ExtractionRecord(uploaded_file_id=uf.id, reading_quality="good")
+    db_session.add(rec)
+    db_session.flush()
+
+    ebl = ExtractionBenefitLine(
+        extraction_record_id=rec.id,
+        line_id="line_ws",
+        raw_label="Windscreen Damage",
+        normalized_label="windscreen damage",
+        extracted_value={"type": "money", "value": "4000", "currency": "MYR"},
+        candidate_mappings=[{"name": "Windscreen Damage", "coverage_limit": "4,000", "concept_key": "windscreen"}],
+    )
+    db_session.add(ebl)
+    db_session.flush()
+
+    # Verify _resolve_comparison_benefits resolves to 4000.0, NOT 283233.0 or 2026.0
+    b_res = _resolve_comparison_benefits(db_session, sess, None, draft.fields, windscreen_target=1700.0)
+    assert b_res["windscreen_sum_insured"] == 4000.0
+
+    # Simulate existing corrupt comparison entry in DB with 283233.0
+    corrupt_entry = TenureComparisonEntry(
+        tenure_id=tenure.id,
+        session_id=sess.id,
+        company_name="QBE",
+        sum_insured=96000.0,
+        motor_premium=3256.80,
+        total_payable=3356.80,
+        windscreen_sum_insured=283233.0,  # Old corrupt number
+        special_perils=None,
+        towing_km="Unlimited",
+    )
+    db_session.add(corrupt_entry)
+    db_session.commit()
+
+    # Calling get_marketing_comparison auto-heals the corrupt entry
+    res = get_marketing_comparison(db_session, tenure.id)
+    entry_res = next(e for e in res["entries"] if e["session_id"] == sess.id)
+    assert entry_res["windscreen_sum_insured"] == 4000.0
+    assert entry_res["towing_km"] == "100 km"
+
+    # Verify persisted in database
+    db_session.refresh(corrupt_entry)
+    assert corrupt_entry.windscreen_sum_insured == 4000.0
+
+
 
