@@ -198,6 +198,9 @@ def serialize_session(
     # Extract identifiers safely
     insured_name = _safe_field_val(fields, "customer_name") or _safe_field_val(fields, "insured_name")
     vehicle_plate = _safe_field_val(fields, "vehicle_no") or _safe_field_val(fields, "vehicle_number")
+    chassis_no = _safe_field_val(fields, "chassis_no") or _safe_field_val(fields, "chassis_number")
+    if not chassis_no and session.tracked_vehicle:
+        chassis_no = session.tracked_vehicle.chassis_no or ""
     vehicle_model = _safe_field_val(fields, "car_model")
     total_premium = _safe_field_val(fields, "total_amount")
 
@@ -240,6 +243,7 @@ def serialize_session(
         "draft_status": draft_status,
         "insured_name": insured_name,
         "vehicle_plate": vehicle_plate,
+        "chassis_no": chassis_no,
         "vehicle_model": vehicle_model,
         "total_premium": total_premium,
         "quotation_status": session.quotation_status or "pending",

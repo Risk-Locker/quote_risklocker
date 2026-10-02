@@ -259,6 +259,14 @@ export function IncludedCard({
           {card.is_detected ? (
             <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-800 ring-1 ring-amber-400/50 shrink-0">★ Detected</span>
           ) : null}
+          {card.cost_status === "unknown" ? (
+            <span
+              className="rounded bg-amber-50 border border-amber-300 px-1 py-0.5 text-[9px] font-bold text-amber-800 shrink-0 flex items-center gap-0.5"
+              title="Unclassified cost status from source quotation: Review whether this is Free/Included or a Paid add-on"
+            >
+              ⚠️ Review Cost
+            </span>
+          ) : null}
           {savedField ? (
             <span className="text-[9px] font-bold text-emerald-600 flex items-center gap-0.5">
               <Check size={10} weight="bold" /> Saved
@@ -660,6 +668,14 @@ export function AddonCard({
           )}
           {card.is_detected ? (
             <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-800 ring-1 ring-amber-400/50 shrink-0">★ Detected</span>
+          ) : null}
+          {card.cost_status === "unknown" ? (
+            <span
+              className="rounded bg-amber-50 border border-amber-300 px-1 py-0.5 text-[9px] font-bold text-amber-800 shrink-0 flex items-center gap-0.5"
+              title="Unclassified cost status from source quotation: Review whether this is Free/Included or a Paid add-on"
+            >
+              ⚠️ Review Cost
+            </span>
           ) : null}
           {savedField ? (
             <span className="text-[9px] font-bold text-emerald-600 flex items-center gap-0.5">

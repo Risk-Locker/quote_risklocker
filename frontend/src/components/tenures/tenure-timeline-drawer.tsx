@@ -468,18 +468,6 @@ export function TenureTimelineDrawer({
                   >
                     {data.status === "lapsed" ? "Policy Marked Lapsed" : "Customer Not Renewing / Mark Lapsed"}
                   </button>
-
-                  {!data.is_projected && (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={projectingRenewal}
-                      onClick={handleProjectRenewal}
-                      className="h-7 text-[11px] px-2.5 font-semibold"
-                    >
-                      {projectingRenewal ? "Projecting..." : "+ Project Next 1-Yr Renewal"}
-                    </Button>
-                  )}
                 </div>
               </div>
 

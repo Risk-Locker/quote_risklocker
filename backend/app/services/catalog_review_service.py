@@ -884,6 +884,7 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                 selection_id = new_id()
                 price_dict = None
                 has_pos_cost = False
+                is_explicitly_included = False
                 if premium_cost:
                     clean_p = str(premium_cost).upper().replace("RM", "").replace(",", "").strip()
                     try:
@@ -891,10 +892,12 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                         if val_num > 0:
                             has_pos_cost = True
                             price_dict = {"type": "money", "value": val_num, "amount": val_num, "currency": "MYR"}
+                        elif val_num == 0.0:
+                            is_explicitly_included = True
                     except ValueError:
-                        pass
-                
-                is_explicitly_included = False
+                        if clean_p.lower() in {"included", "foc", "free", "standard", "complimentary", "nil", "none"}:
+                            is_explicitly_included = True
+
                 ev_candidates = [
                     cov_limit,
                     line.evidence.get("evidence") if isinstance(line.evidence, dict) else None,
@@ -908,6 +911,10 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                         is_explicitly_included = True
                         break
 
+                raw_l_lower = (line.raw_label or "").lower()
+                if any(w in raw_l_lower for w in ["(included)", "(foc)", "foc", "complimentary", "free of charge"]):
+                    is_explicitly_included = True
+
                 is_line_optional = getattr(line, "is_optional_cover", None)
                 if is_line_optional is None and isinstance(line, dict):
                     is_line_optional = line.get("is_optional_cover")
@@ -916,14 +923,14 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     cost_status = "paid"
                 elif is_explicitly_included:
                     cost_status = "included"
-                elif matched and (matched.offering_kind == "base" or matched.role == "included"):
-                    cost_status = "included"
-                elif matched and (matched.offering_kind in {"optional", "upgrade"} or matched.role in {"addon_option", "bundle_component"}):
+                elif is_line_optional is True or (matched and (matched.offering_kind in {"optional", "upgrade"} or matched.role in {"addon_option", "bundle_component"})):
                     cost_status = "paid"
-                    if not price_dict and matched.optional_price:
+                    if not price_dict and matched and matched.optional_price:
                         price_dict = deepcopy(matched.optional_price)
-                else:
+                elif is_line_optional is False:
                     cost_status = "included"
+                else:
+                    cost_status = "unknown"
 
                 new_selection = DraftBenefitSelection(
                     id=selection_id,

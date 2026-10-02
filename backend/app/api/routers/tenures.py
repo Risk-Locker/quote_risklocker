@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import calendar
 from collections import defaultdict
 import logging
 from datetime import datetime, timezone
@@ -189,18 +190,40 @@ def create_tenure(
 def get_tenure_stage_summary(
     year: int | None = Query(None, description="Year to filter e.g. 2026"),
     month: int | None = Query(None, ge=1, le=12, description="Month 1-12"),
+    show_hidden: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Retrieve live counts for the 10 stage KPI summary cards."""
+    """Retrieve live counts for the 10 stage KPI summary cards matching active filter."""
     query = select(InsuranceTenure.stage, func.count(InsuranceTenure.id))
 
+    query = query.where(InsuranceTenure.is_projected == False)
+    if not show_hidden:
+        query = query.where(InsuranceTenure.is_hidden == False)
+
     if year and month:
+        _, last_day = calendar.monthrange(year, month)
+        start_of_month = datetime(year, month, 1, 0, 0, 0, tzinfo=timezone.utc)
+        end_of_month = datetime(year, month, last_day, 23, 59, 59, tzinfo=timezone.utc)
         pattern = f"{year:04d}-{month:02d}"
-        query = query.where(InsuranceTenure.expiry_month == pattern)
+        query = query.where(
+            or_(
+                InsuranceTenure.expiry_month == pattern,
+                InsuranceTenure.coverage_start_date.between(start_of_month, end_of_month),
+                InsuranceTenure.coverage_end_date.between(start_of_month, end_of_month),
+            )
+        )
     elif year:
+        start_of_year = datetime(year, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        end_of_year = datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
         pattern = f"{year:04d}-%"
-        query = query.where(InsuranceTenure.expiry_month.like(pattern))
+        query = query.where(
+            or_(
+                InsuranceTenure.expiry_month.like(pattern),
+                InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year),
+                InsuranceTenure.coverage_end_date.between(start_of_year, end_of_year),
+            )
+        )
 
     rows = db.execute(query.group_by(InsuranceTenure.stage)).all()
     stage_counts = {r[0]: int(r[1]) for r in rows}
@@ -222,51 +245,94 @@ def get_tenure_stage_summary(
 
 @router.get("/months")
 def list_tenure_months(
+    show_hidden: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Retrieve list of available expiry months with tenure statistics."""
-    stmt = (
-        select(
-            InsuranceTenure.expiry_month,
-            func.count(InsuranceTenure.id).label("total"),
-            func.count(func.nullif(InsuranceTenure.status != "hit", True)).label("hit"),
-            func.count(func.nullif(InsuranceTenure.status != "miss", True)).label("miss"),
-        )
-        .group_by(InsuranceTenure.expiry_month)
-        .order_by(InsuranceTenure.expiry_month.asc())
+    """Retrieve list of available months with start, end, and total tenure statistics."""
+    stmt = select(
+        InsuranceTenure.id,
+        InsuranceTenure.vehicle_no,
+        InsuranceTenure.coverage_start_date,
+        InsuranceTenure.coverage_end_date,
+        InsuranceTenure.expiry_month,
+        InsuranceTenure.status,
     )
-    rows = db.execute(stmt).all()
+    stmt = stmt.where(InsuranceTenure.is_projected == False)
+    if not show_hidden:
+        stmt = stmt.where(InsuranceTenure.is_hidden == False)
 
-    month_map: dict[str, dict[str, Any]] = {}
-    for r in rows:
-        month_str = r[0]
-        total_cnt = int(r[1] or 0)
-        hit_cnt = int(r[2] or 0)
-        miss_cnt = int(r[3] or 0)
-        pending_cnt = max(0, total_cnt - hit_cnt - miss_cnt)
-        month_map[month_str] = {
-            "month": month_str,
-            "total": total_cnt,
-            "hit": hit_cnt,
-            "miss": miss_cnt,
-            "pending": pending_cnt,
-        }
+    all_tenures = db.execute(stmt).all()
 
-    for y in (2024, 2025, 2026, 2027, 2028, 2029):
+    month_data: dict[str, dict[str, Any]] = defaultdict(lambda: {
+        "start_count": 0,
+        "end_count": 0,
+        "tenure_ids": set(),
+        "vehicles": set(),
+        "hit": 0,
+        "miss": 0,
+    })
+
+    for t_id, veh, start_dt, end_dt, exp_m, t_status in all_tenures:
+        # Start month
+        if start_dt:
+            s_ym = start_dt.strftime("%Y-%m")
+            month_data[s_ym]["start_count"] += 1
+            month_data[s_ym]["tenure_ids"].add(t_id)
+            if veh:
+                month_data[s_ym]["vehicles"].add(veh)
+
+        # End / Expiry month
+        e_ym = None
+        if end_dt:
+            e_ym = end_dt.strftime("%Y-%m")
+        elif exp_m:
+            e_ym = exp_m[:7]
+
+        if e_ym:
+            month_data[e_ym]["end_count"] += 1
+            month_data[e_ym]["tenure_ids"].add(t_id)
+            if veh:
+                month_data[e_ym]["vehicles"].add(veh)
+            if t_status == "hit":
+                month_data[e_ym]["hit"] += 1
+            elif t_status == "miss":
+                month_data[e_ym]["miss"] += 1
+
+    result: list[dict[str, Any]] = []
+    for y in range(2024, 2031):
         for m in range(1, 13):
             key = f"{y:04d}-{m:02d}"
-            if key not in month_map:
-                month_map[key] = {
+            info = month_data.get(key)
+            if info:
+                tot = len(info["tenure_ids"])
+                hit_cnt = info["hit"]
+                miss_cnt = info["miss"]
+                pending_cnt = max(0, tot - hit_cnt - miss_cnt)
+                result.append({
+                    "month": key,
+                    "total": tot,
+                    "start_count": info["start_count"],
+                    "end_count": info["end_count"],
+                    "cars": len(info["vehicles"]),
+                    "hit": hit_cnt,
+                    "miss": miss_cnt,
+                    "pending": pending_cnt,
+                })
+            else:
+                result.append({
                     "month": key,
                     "total": 0,
+                    "start_count": 0,
+                    "end_count": 0,
+                    "cars": 0,
                     "hit": 0,
                     "miss": 0,
                     "pending": 0,
-                }
+                })
 
-    sorted_months = sorted(month_map.values(), key=lambda x: x["month"])
-    return {"months": sorted_months}
+    result.sort(key=lambda x: x["month"])
+    return {"months": result}
 
 
 @router.get("")
@@ -278,32 +344,60 @@ def list_tenures(
     stage: str | None = None,
     category: str | None = None,
     sub_agent: str | None = None,
+    show_hidden: bool = False,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Retrieve customer-vehicle tenures for the Motor Renewal Ledger with search and filters."""
-    query = select(InsuranceTenure)
+    query = select(InsuranceTenure).where(InsuranceTenure.is_projected == False)
+
+    if not show_hidden:
+        query = query.where(InsuranceTenure.is_hidden == False)
 
     # 1. Year and Month filtering
-    if year and month and month.strip().isdigit():
-        m_int = int(month.strip())
-        pattern = f"{year:04d}-{m_int:02d}"
-        query = query.where(InsuranceTenure.expiry_month == pattern)
-    elif year and not month:
-        pattern = f"{year:04d}-%"
-        query = query.where(InsuranceTenure.expiry_month.like(pattern))
-    elif month and month.strip() != "all":
+    if month and month.strip() != "all":
         m_str = month.strip()
-        if len(m_str) == 4 and m_str.isdigit():
-            query = query.where(InsuranceTenure.expiry_month.startswith(m_str))
-        elif "-" in m_str:
-            query = query.where(InsuranceTenure.expiry_month == m_str)
+        y_val: int | None = None
+        m_val: int | None = None
+        if "-" in m_str:
+            parts = m_str.split("-")
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                y_val = int(parts[0])
+                m_val = int(parts[1])
         elif m_str.isdigit() and year:
-            query = query.where(InsuranceTenure.expiry_month == f"{year:04d}-{int(m_str):02d}")
+            y_val = year
+            m_val = int(m_str)
+
+        if y_val and m_val:
+            _, last_day = calendar.monthrange(y_val, m_val)
+            start_of_month = datetime(y_val, m_val, 1, 0, 0, 0, tzinfo=timezone.utc)
+            end_of_month = datetime(y_val, m_val, last_day, 23, 59, 59, tzinfo=timezone.utc)
+            ym_pattern = f"{y_val:04d}-{m_val:02d}"
+
+            query = query.where(
+                or_(
+                    InsuranceTenure.expiry_month == ym_pattern,
+                    InsuranceTenure.coverage_start_date.between(start_of_month, end_of_month),
+                    InsuranceTenure.coverage_end_date.between(start_of_month, end_of_month),
+                )
+            )
         else:
             query = query.where(InsuranceTenure.expiry_month == m_str)
+
+    elif year and str(year) != "all":
+        start_of_year = datetime(year, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        end_of_year = datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+        y_pattern = f"{year:04d}-%"
+
+        query = query.where(
+            or_(
+                InsuranceTenure.expiry_month.like(y_pattern),
+                InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year),
+                InsuranceTenure.coverage_end_date.between(start_of_year, end_of_year),
+            )
+        )
 
     # 2. Category filtering: active (exclude Close - Lose & Others) vs lost vs all
     if category == "active":
@@ -446,10 +540,13 @@ def list_tenures(
             "miss_reason": t.miss_reason,
             "loss_reason_category": t.loss_reason_category,
             "road_tax": float(t.road_tax or 0.0),
-            "runner_fee": float(t.runner_fee or 0.0),
             "sourced_quotes": sourced,
             "generated_quotations": gen_quotes,
             "is_projected": t.is_projected,
+            "is_hidden": t.is_hidden,
+            "superseded_by_tenure_id": t.superseded_by_tenure_id,
+            "tenure_type": t.tenure_type,
+            "manufacture_year": getattr(t.tracked_vehicle, "manufacture_year", None) if t.tracked_vehicle else None,
             "tenure_chain_id": t.tenure_chain_id,
             "customer_id": t.customer_id,
             "customer_ic_no": t.customer.id_number if t.customer else None,
@@ -617,39 +714,70 @@ def update_tenure_ledger_fields(
 
 @router.get("/stats/yoy")
 def get_tenure_yoy_stats(
+    show_hidden: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Retrieve year-over-year tenure statistics (counts, growth, active vs lapsed)."""
-    rows = db.execute(
-        select(
-            InsuranceTenure.expiry_month,
-            InsuranceTenure.stage,
-            func.count(InsuranceTenure.id),
-        )
-        .where(InsuranceTenure.expiry_month.isnot(None))
-        .group_by(InsuranceTenure.expiry_month, InsuranceTenure.stage)
-    ).all()
+    """Retrieve year-over-year tenure statistics (counts, cars, growth, active vs lost)."""
+    stmt = select(
+        InsuranceTenure.id,
+        InsuranceTenure.vehicle_no,
+        InsuranceTenure.coverage_start_date,
+        InsuranceTenure.coverage_end_date,
+        InsuranceTenure.expiry_month,
+        InsuranceTenure.stage,
+    )
+    stmt = stmt.where(InsuranceTenure.is_projected == False)
+    if not show_hidden:
+        stmt = stmt.where(InsuranceTenure.is_hidden == False)
 
-    year_data: dict[str, dict[str, Any]] = defaultdict(lambda: {"total": 0, "active": 0, "lost": 0})
-    for r in rows:
-        exp_m = str(r[0] or "")
-        y_str = exp_m[:4]
-        if len(y_str) != 4 or not y_str.isdigit():
-            continue
-        stage = str(r[1] or "")
-        count = int(r[2] or 0)
-        year_data[y_str]["total"] += count
-        if stage in ("Close - Lose", "Others"):
-            year_data[y_str]["lost"] += count
+    rows = db.execute(stmt).all()
+
+    year_data: dict[str, dict[str, Any]] = defaultdict(lambda: {
+        "active": 0,
+        "lost": 0,
+        "tenure_ids": set(),
+        "vehicles": set(),
+    })
+
+    all_years_tenures: set[str] = set()
+    all_years_vehicles: set[str] = set()
+    all_active = 0
+    all_lost = 0
+
+    for t_id, veh, start_dt, end_dt, exp_m, stage in rows:
+        all_years_tenures.add(t_id)
+        if veh:
+            all_years_vehicles.add(veh)
+        is_lost = stage in ("Close - Lose", "Others")
+        if is_lost:
+            all_lost += 1
         else:
-            year_data[y_str]["active"] += count
+            all_active += 1
+
+        # Determine year(s)
+        years_for_item = set()
+        if exp_m and len(exp_m) >= 4 and exp_m[:4].isdigit():
+            years_for_item.add(exp_m[:4])
+        if start_dt:
+            years_for_item.add(str(start_dt.year))
+        if end_dt:
+            years_for_item.add(str(end_dt.year))
+
+        for y_str in years_for_item:
+            year_data[y_str]["tenure_ids"].add(t_id)
+            if veh:
+                year_data[y_str]["vehicles"].add(veh)
+            if is_lost:
+                year_data[y_str]["lost"] += 1
+            else:
+                year_data[y_str]["active"] += 1
 
     sorted_years = sorted(year_data.keys())
     result_list = []
     prev_total = None
     for y in sorted_years:
-        tot = year_data[y]["total"]
+        tot = len(year_data[y]["tenure_ids"])
         growth = None
         if prev_total is not None and prev_total > 0:
             growth = round(((tot - prev_total) / prev_total) * 100, 1)
@@ -657,12 +785,21 @@ def get_tenure_yoy_stats(
         result_list.append({
             "year": y,
             "total": tot,
+            "cars": len(year_data[y]["vehicles"]),
             "active": year_data[y]["active"],
             "lost": year_data[y]["lost"],
             "growth_percentage": growth,
         })
 
-    return {"years": result_list}
+    return {
+        "years": result_list,
+        "all_years": {
+            "total": len(all_years_tenures),
+            "cars": len(all_years_vehicles),
+            "active": all_active,
+            "lost": all_lost,
+        },
+    }
 
 
 class BulkDeleteTenuresRequest(BaseModel):
@@ -803,16 +940,11 @@ def project_tenure_renewal(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Auto-project the next annual renewal tenure in the chain as an upcoming reminder."""
-    try:
-        projected = auto_project_next_renewal(db, tenure_id, user_id=user.id)
-        db.commit()
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
+    """Auto-projecting renewal slots is disabled. Policies strictly follow uploaded quotes."""
     return {
         "success": True,
-        "projected_tenure": get_tenure_timeline(db, projected.id),
+        "message": "Auto-projection disabled. Policies are created when uploaded by staff.",
+        "projected_tenure": get_tenure_timeline(db, tenure_id),
     }
 
 

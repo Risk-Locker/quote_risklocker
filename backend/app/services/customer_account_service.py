@@ -6,7 +6,7 @@ and non-destructive profile enrichment with discrepancy reporting.
 from __future__ import annotations
 
 from typing import Any
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models.tables import CustomerAccount, new_id
@@ -55,6 +55,28 @@ def resolve_or_create_customer(
 
     # 3. Existing Customer Found -> Non-destructive enrichment & discrepancy check
     if customer:
+        # Check if there is another pending record with same canonical name to merge
+        if id_number and canonical_name and not customer.id_number.startswith("PENDING-"):
+            pending_duplicate = db.scalar(
+                select(CustomerAccount).where(
+                    CustomerAccount.canonical_name == canonical_name,
+                    CustomerAccount.id != customer.id,
+                    CustomerAccount.id_number.like("PENDING-%"),
+                )
+            )
+            if pending_duplicate:
+                from app.models.tables import InsuranceTenure
+                try:
+                    db.execute(
+                        update(InsuranceTenure)
+                        .where(InsuranceTenure.customer_id == pending_duplicate.id)
+                        .values(customer_id=customer.id)
+                    )
+                    db.delete(pending_duplicate)
+                    db.flush()
+                except Exception:
+                    pass
+
         # Alias tracking: append new spelling variant if not already recorded
         raw_name_clean = (raw_name or "").strip()
         if raw_name_clean and raw_name_clean not in customer.name_aliases:

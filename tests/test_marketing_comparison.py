@@ -445,7 +445,7 @@ def test_dict_wrapped_extraction_fields_and_auto_healing(db_session: Session):
     assert healed["road_tax"] == 4812.0
     assert healed["total_payable"] == 2881.70 + 4862.0
     assert healed["agreed_value"] is True
-    assert healed["excess"] == 400.0
+    assert healed["excess"] == 0.0  # Statutory compulsory excess (RM 400) excluded per Task A2.3
     assert healed["windscreen_sum_insured"] == 4000.0
 
     # Verify recommended sum insured is non-zero
@@ -603,6 +603,7 @@ def test_manual_quote_winner_selection_creates_session_and_uploaded_file(db_sess
     # Verify session and uploaded file exist in DB
     created_sess = db_session.get(SessionModel, res["session_id"])
     assert created_sess is not None
+    assert created_sess.quotation_ref is not None
     assert created_sess.quotation_ref.startswith("RL-WXY9999-")
     assert created_sess.tenure_id == tenure.id
     assert created_sess.uploaded_file is not None

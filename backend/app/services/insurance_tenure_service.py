@@ -217,7 +217,6 @@ def resolve_or_create_tenure(
             existing_tenure.is_projected = False
             if existing_tenure.status in ("upcoming", "untracked"):
                 existing_tenure.status = "draft"
-        ensure_vehicle_tenure_chain(db, existing_tenure)
         return existing_tenure
 
     # Look for previous tenure on this vehicle ending before start_dt to chain them
@@ -257,7 +256,25 @@ def resolve_or_create_tenure(
     )
     db.add(tenure)
     db.flush()
-    ensure_vehicle_tenure_chain(db, tenure)
+
+    # Collision & superseding logic: if an uploaded quote overlaps an existing active tenure on the same vehicle,
+    # mark older overlapping tenures as is_hidden = True and link superseded_by_tenure_id.
+    overlapping = list(
+        db.scalars(
+            select(InsuranceTenure)
+            .where(
+                InsuranceTenure.tracked_vehicle_id == vehicle_id,
+                InsuranceTenure.id != tenure.id,
+                InsuranceTenure.is_hidden == False,
+                InsuranceTenure.coverage_start_date < end_dt,
+                InsuranceTenure.coverage_end_date > start_dt,
+            )
+        ).all()
+    )
+    for old_t in overlapping:
+        old_t.is_hidden = True
+        old_t.superseded_by_tenure_id = tenure.id
+
     return tenure
 
 
@@ -266,112 +283,10 @@ def ensure_vehicle_tenure_chain(
     tenure: InsuranceTenure,
     target_years: tuple[int, ...] | None = None,
 ) -> list[InsuranceTenure]:
-    """Ensure that the vehicle has an annual tenure slot across target years.
-
-    By default, projects the upcoming 1-year and 2-year renewal slots.
-    If target_years is explicitly provided, ensures those specific years exist.
+    """Disabled: Policies are strictly created when uploaded by staff.
+    No automatic past or future policies are created.
     """
-    if not tenure.tracked_vehicle_id or not tenure.coverage_start_date or not tenure.coverage_end_date:
-        return []
-
-    created: list[InsuranceTenure] = []
-    anchor_start = tenure.coverage_start_date
-    anchor_end = tenure.coverage_end_date
-    anchor_expiry_year = anchor_end.year
-
-    if target_years is None:
-        target_years = (anchor_expiry_year + 1, anchor_expiry_year + 2)
-
-    chain_id = tenure.tenure_chain_id or tenure.id
-    if not tenure.tenure_chain_id:
-        tenure.tenure_chain_id = chain_id
-
-    now = datetime.now(timezone.utc)
-
-    for yr in target_years:
-        if yr == anchor_expiry_year:
-            continue
-
-        offset = yr - anchor_expiry_year
-        try:
-            target_start = anchor_start.replace(year=anchor_start.year + offset)
-        except ValueError:
-            target_start = anchor_start.replace(year=anchor_start.year + offset, day=28)
-
-        try:
-            target_end = anchor_end.replace(year=anchor_end.year + offset)
-        except ValueError:
-            target_end = anchor_end.replace(year=anchor_end.year + offset, day=28)
-
-        target_expiry = target_end.strftime("%Y-%m")
-
-        # Check if tenure already exists within +/- 35 days of target_start
-        window_start = target_start - timedelta(days=35)
-        window_end = target_start + timedelta(days=35)
-
-        existing = db.scalar(
-            select(InsuranceTenure)
-            .where(
-                InsuranceTenure.tracked_vehicle_id == tenure.tracked_vehicle_id,
-                InsuranceTenure.coverage_start_date >= window_start,
-                InsuranceTenure.coverage_start_date <= window_end,
-            )
-            .limit(1)
-        )
-        if existing:
-            continue
-
-        target_end_utc = target_end if target_end.tzinfo else target_end.replace(tzinfo=timezone.utc)
-        status = "upcoming" if target_end_utc > now else "untracked"
-
-        chain_tenure = InsuranceTenure(
-            tracked_vehicle_id=tenure.tracked_vehicle_id,
-            ownership_id=tenure.ownership_id,
-            customer_id=tenure.customer_id,
-            vehicle_no=tenure.vehicle_no,
-            customer_name=tenure.customer_name,
-            coverage_start_date=target_start,
-            coverage_end_date=target_end,
-            expiry_month=target_expiry,
-            status=status,
-            is_projected=True,
-            tenure_chain_id=chain_id,
-            reminder_window_start=target_start - timedelta(days=90),
-            road_tax=tenure.road_tax,
-            runner_fee=tenure.runner_fee,
-            windscreen_target=tenure.windscreen_target,
-            ncd_percentage=tenure.ncd_percentage,
-        )
-        db.add(chain_tenure)
-        created.append(chain_tenure)
-
-    if created:
-        db.flush()
-
-    # Stitch previous_tenure_id and tenure_chain_id in ascending order of coverage_start_date
-    all_veh_tenures = db.scalars(
-        select(InsuranceTenure)
-        .where(InsuranceTenure.tracked_vehicle_id == tenure.tracked_vehicle_id)
-        .order_by(InsuranceTenure.coverage_start_date.asc())
-    ).all()
-
-    prev_item: InsuranceTenure | None = None
-    for t_item in all_veh_tenures:
-        if prev_item:
-            t_item.previous_tenure_id = prev_item.id
-            t_item.tenure_chain_id = chain_id
-            p_end = prev_item.coverage_end_date if prev_item.coverage_end_date.tzinfo else prev_item.coverage_end_date.replace(tzinfo=timezone.utc)
-            t_start = t_item.coverage_start_date if t_item.coverage_start_date.tzinfo else t_item.coverage_start_date.replace(tzinfo=timezone.utc)
-            exp_start = p_end + timedelta(days=1)
-            t_item.delay_days = max(0, (t_start - exp_start).days)
-        else:
-            t_item.previous_tenure_id = None
-            t_item.tenure_chain_id = chain_id
-            t_item.delay_days = 0
-        prev_item = t_item
-
-    db.flush()
-    return created
+    return []
 
 
 def evaluate_tenure_ingestion(
@@ -576,79 +491,13 @@ def auto_project_next_renewal(
     *,
     user_id: str | None = None,
 ) -> InsuranceTenure:
-    """Project the next 1-year renewal tenure as a variable reminder."""
+    """Disabled: Policies are strictly created when uploaded by staff.
+    No automatic future renewal slots are projected.
+    """
     tenure = db.get(InsuranceTenure, completed_tenure_id)
     if not tenure:
         raise ValueError(f"Tenure {completed_tenure_id} not found")
-
-    # Check if a projected or future tenure already exists in this chain or for this vehicle
-    existing_future = db.scalar(
-        select(InsuranceTenure)
-        .where(
-            InsuranceTenure.tracked_vehicle_id == tenure.tracked_vehicle_id,
-            InsuranceTenure.coverage_start_date > tenure.coverage_start_date,
-        )
-        .order_by(InsuranceTenure.coverage_start_date.asc())
-        .limit(1)
-    )
-    if existing_future:
-        if not existing_future.previous_tenure_id:
-            existing_future.previous_tenure_id = tenure.id
-        if tenure.road_tax > 0 and (not existing_future.road_tax or existing_future.road_tax == 0):
-            existing_future.road_tax = tenure.road_tax
-        if tenure.runner_fee > 0 and (not existing_future.runner_fee or existing_future.runner_fee == 0):
-            existing_future.runner_fee = tenure.runner_fee
-        return existing_future
-
-    next_start = tenure.coverage_end_date + timedelta(days=1)
-    try:
-        next_end = next_start.replace(year=next_start.year + 1) - timedelta(days=1)
-    except ValueError:
-        next_end = next_start + timedelta(days=364)
-
-    reminder_window_start = next_start - timedelta(days=90)
-    expiry_month = next_end.strftime("%Y-%m")
-
-    projected_tenure = InsuranceTenure(
-        tracked_vehicle_id=tenure.tracked_vehicle_id,
-        ownership_id=tenure.ownership_id,
-        customer_id=tenure.customer_id,
-        vehicle_no=tenure.vehicle_no,
-        customer_name=tenure.customer_name,
-        coverage_start_date=next_start,
-        coverage_end_date=next_end,
-        expiry_month=expiry_month,
-        status="upcoming",
-        is_projected=True,
-        previous_tenure_id=tenure.id,
-        tenure_chain_id=tenure.tenure_chain_id or tenure.id,
-        reminder_window_start=reminder_window_start,
-        road_tax=tenure.road_tax,
-        runner_fee=tenure.runner_fee,
-        windscreen_target=tenure.windscreen_target,
-        ncd_percentage=tenure.ncd_percentage,
-    )
-    db.add(projected_tenure)
-    db.flush()
-
-    if user_id:
-        active_sess = db.scalar(
-            select(SessionModel)
-            .where(SessionModel.tenure_id == tenure.id)
-            .limit(1)
-        )
-        if active_sess:
-            act = QuotationActivity(
-                session_id=active_sess.id,
-                vehicle_no=tenure.vehicle_no,
-                customer_name=tenure.customer_name,
-                action_type="tenure_projected",
-                user_id=user_id,
-                summary=f"Projected next renewal for {expiry_month} (Start: {next_start.strftime('%Y-%m-%d')})",
-            )
-            db.add(act)
-
-    return projected_tenure
+    return tenure
 
 
 def shift_tenure_dates(
@@ -806,13 +655,6 @@ def update_tenure_status(
             summary=f"Tenure status updated to {status.upper()}" + (f": {notes}" if notes else ""),
         )
         db.add(act)
-
-    # When won or hit, automatically project the next year's renewal
-    if status in ("hit", "won"):
-        try:
-            auto_project_next_renewal(db, tenure_id, user_id=user_id)
-        except Exception:
-            pass
 
     db.flush()
     return tenure

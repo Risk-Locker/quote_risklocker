@@ -44,6 +44,11 @@ interface TenureSpec {
   vehicle_no: string;
   customer_name: string;
   ic_no?: string;
+  formatted_ic?: string;
+  birth_date?: string;
+  customer_age?: number;
+  customer_gender?: string;
+  nric_state?: string;
   phone?: string;
   email?: string;
   address?: string;
@@ -79,10 +84,17 @@ interface ComparisonEntry {
   road_tax: number;
   runner_fee: number;
   total_payable: number;
+  rounded_total_payable?: number | null;
+  exact_total_payable?: number | null;
   towing_limit: string;
+  towing_km?: string;
   agreed_value: boolean;
   waiver_betterment: boolean;
+  betterment_rate?: number;
+  betterment_display?: string;
   excess: number;
+  rate_factor?: number | null;
+  rate_factor_formatted?: string | null;
   rate_percentage: number | null;
   windscreen_sum_insured: number | null;
   special_perils: string | null;
@@ -90,6 +102,9 @@ interface ComparisonEntry {
   is_recommended: boolean;
   is_manual: boolean;
   sort_order: number;
+  rank?: number;
+  version?: number;
+  uploaded_at?: string;
   notes: string | null;
 }
 
@@ -102,6 +117,25 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     recommended_sum_insured: Record<string, number>;
     ncd: { current: number | null; next: number | null };
     pending_jobs_count?: number;
+    vehicle_age?: number;
+    date_conflict?: {
+      has_conflict: boolean;
+      majority_date?: string;
+      unique_dates?: string[];
+      message?: string;
+    };
+    generated_quotations?: Array<{
+      session_id: string;
+      reference_number: string;
+      quotation_ref?: string;
+      company_name: string;
+      total_payable: number;
+      sum_insured: number;
+      status: string;
+      version_number?: number;
+      created_at: string;
+      has_pdf: boolean;
+    }>;
   } | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -179,10 +213,13 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [engineNoInput, setEngineNoInput] = useState("");
   const [chassisNoInput, setChassisNoInput] = useState("");
   const [vehicleModelInput, setVehicleModelInput] = useState("");
+  const [manufactureYearInput, setManufactureYearInput] = useState("");
   const [startDateInput, setStartDateInput] = useState("");
   const [endDateInput, setEndDateInput] = useState("");
   const [savingFixedCosts, setSavingFixedCosts] = useState(false);
   const [selectingWinnerId, setSelectingWinnerId] = useState<string | null>(null);
+  const [generatingQuoteEntryId, setGeneratingQuoteEntryId] = useState<string | null>(null);
+  const [generatingAllQuotes, setGeneratingAllQuotes] = useState(false);
 
   // Bi-directional Date Helpers (+1yr -1d / -1yr +1d)
   const handleStartDateChange = (newStart: string) => {
@@ -237,6 +274,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     setEngineNoInput(tenure.engine_no || "");
     setChassisNoInput(tenure.chassis_no || "");
     setVehicleModelInput(tenure.vehicle_model || "");
+    setManufactureYearInput(tenure.manufacture_year ? String(tenure.manufacture_year) : "");
     if (tenure.coverage_start_date) {
       setStartDateInput(tenure.coverage_start_date.split("T")[0]);
     }
@@ -305,6 +343,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           engine_no: engineNoInput || undefined,
           chassis_no: chassisNoInput || undefined,
           vehicle_model: vehicleModelInput || undefined,
+          manufacture_year: parseInt(manufactureYearInput, 10) || undefined,
         }),
       });
       setData(updated);
@@ -314,6 +353,34 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       alert("Error updating details: " + err.message);
     } finally {
       setSavingFixedCosts(false);
+    }
+  };
+
+  const handleGenerateSingleQuote = async (entryId: string) => {
+    try {
+      setGeneratingQuoteEntryId(entryId);
+      await api(`/comparison/${tenureId}/entry/${entryId}/generate-quote`, {
+        method: "POST",
+      });
+      await fetchComparison(true);
+    } catch (err: any) {
+      alert("Failed to generate quotation: " + (err.message || String(err)));
+    } finally {
+      setGeneratingQuoteEntryId(null);
+    }
+  };
+
+  const handleGenerateAllQuotes = async () => {
+    try {
+      setGeneratingAllQuotes(true);
+      await api(`/comparison/${tenureId}/generate-all-quotes`, {
+        method: "POST",
+      });
+      await fetchComparison(true);
+    } catch (err: any) {
+      alert("Failed to generate all quotations: " + (err.message || String(err)));
+    } finally {
+      setGeneratingAllQuotes(false);
     }
   };
 
@@ -484,6 +551,29 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                   <h3 className="font-bold text-sm text-[#1b1717] uppercase tracking-tight truncate">
                     {entry.company_name}
                   </h3>
+                  {entry.rank === 1 && (
+                    <span className="rounded bg-amber-400/25 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 text-[10px]">
+                      🏆 Rank #1 · Best Deal
+                    </span>
+                  )}
+                  {entry.rank === 2 && (
+                    <span className="rounded bg-neutral-100 text-neutral-700 border border-neutral-300 font-bold px-1.5 py-0.5 text-[10px]">
+                      Rank #2
+                    </span>
+                  )}
+                  {entry.rank === 3 && (
+                    <span className="rounded bg-neutral-100 text-neutral-700 border border-neutral-300 font-bold px-1.5 py-0.5 text-[10px]">
+                      Rank #3
+                    </span>
+                  )}
+                  {entry.version && (
+                    <span
+                      className="rounded bg-blue-50 text-blue-700 border border-blue-200 font-bold px-1.5 py-0.5 text-[10px]"
+                      title={entry.uploaded_at ? `Uploaded ${new Date(entry.uploaded_at).toLocaleTimeString()}` : undefined}
+                    >
+                      v{entry.version}
+                    </span>
+                  )}
                   {isViewingPdf && (
                     <span className="rounded bg-[#1b1717] text-white px-1.5 py-0.2 text-[9px] font-bold">
                       PDF ★
@@ -608,8 +698,11 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               <span className="text-[11px] uppercase font-bold text-[#454545] block">
                 Total Payable (总额)
               </span>
-              <p className="font-mono text-lg font-black text-[#1b1717]">
-                RM {entry.total_payable.toFixed(2)}
+              <p
+                className="font-mono text-lg font-black text-[#1b1717]"
+                title={entry.exact_total_payable && entry.rounded_total_payable && entry.exact_total_payable !== entry.rounded_total_payable ? `Exact cents: RM ${entry.exact_total_payable.toFixed(2)}` : undefined}
+              >
+                RM {(entry.rounded_total_payable != null ? entry.rounded_total_payable : Math.ceil(entry.total_payable)).toFixed(2)}
               </p>
               <span className="text-[11px] text-[#6e6e73] font-medium block mt-0.5">
                 (Incl. RM {tenure.fixed_costs_total.toFixed(2)} Road Tax &amp; Runner)
@@ -622,7 +715,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             {/* Towing Limit */}
             <div className="flex items-center justify-between pt-1">
               <span className="text-[#6e6e73]">Towing (拖车):</span>
-              <span className="font-bold text-[#1b1717]">{entry.towing_limit}</span>
+              <span className="font-bold text-[#1b1717]">{entry.towing_km || entry.towing_limit || "Unlimited"}</span>
             </div>
 
             {/* Agreed Value */}
@@ -633,11 +726,15 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               </span>
             </div>
 
-            {/* Waiver of Betterment */}
+            {/* Betterment Co-pay / Waiver */}
             <div className="flex items-center justify-between pt-2">
-              <span className="text-[#6e6e73]">Betterment Waiver:</span>
-              <span className={`font-bold ${entry.waiver_betterment ? "text-emerald-700" : "text-[#6e6e73]"}`}>
-                {entry.waiver_betterment ? "Yes" : "No"}
+              <span className="text-[#6e6e73]">Betterment (自付额):</span>
+              <span className={`font-bold ${
+                (entry.betterment_display && entry.betterment_display.startsWith("No")) || entry.waiver_betterment
+                  ? "text-emerald-700"
+                  : "text-amber-700"
+              }`}>
+                {entry.betterment_display || (entry.waiver_betterment ? "No (0%)" : "Yes")}
               </span>
             </div>
 
@@ -649,11 +746,18 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               </span>
             </div>
 
-            {/* Net Rate % */}
+            {/* Net Rate (Decimal Factor) */}
             <div className="flex items-center justify-between pt-2">
-              <span className="text-[#6e6e73]">Net Rate %:</span>
-              <span className="font-mono font-bold text-[#1b1717]">
-                {entry.rate_percentage ? `${entry.rate_percentage.toFixed(4)}%` : "—"}
+              <span className="text-[#6e6e73]">Net Rate:</span>
+              <span
+                className="font-mono font-bold text-[#1b1717] cursor-help"
+                title={entry.rate_factor_formatted ? `Full 6-decimal factor: ${entry.rate_factor_formatted}` : (entry.rate_percentage ? `Rate percentage: ${entry.rate_percentage.toFixed(4)}%` : undefined)}
+              >
+                {entry.rate_factor != null
+                  ? `Rate: ${entry.rate_factor.toFixed(4)}`
+                  : entry.rate_percentage
+                  ? `${entry.rate_percentage.toFixed(4)}%`
+                  : "—"}
               </span>
             </div>
 
@@ -761,14 +865,31 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             )}
           </Button>
 
-          {/* Direct Review & Issue Action for Selected Winners */}
-          {isWinner && entry.session_id && (
+          {/* Generate Quotation Button for this specific card */}
+          <Button
+            variant="secondary"
+            size="sm"
+            className="w-full text-xs font-bold border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717]"
+            loading={generatingQuoteEntryId === entry.id}
+            onClick={() => handleGenerateSingleQuote(entry.id)}
+            icon={<FilePdf size={14} weight="bold" className="text-[#ed1c24]" />}
+            title="Generate official Risk-Locker quotation draft from this underwriter"
+          >
+            Generate Quotation
+          </Button>
+
+          {/* Direct Review & Issue Action if session exists */}
+          {entry.session_id && (
             <Link
               href={`/sessions/${entry.session_id}/review` as Route}
-              className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-lg text-xs font-bold text-[#ed1c24] bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors shadow-2xs"
+              className={`flex items-center justify-center gap-1.5 w-full py-1.5 rounded-lg text-xs font-bold transition-colors shadow-2xs ${
+                isWinner
+                  ? "text-[#ed1c24] bg-rose-50 hover:bg-rose-100 border border-rose-200"
+                  : "text-[#1b1717] bg-white hover:bg-neutral-100 border border-[#e5e5ea]"
+              }`}
             >
-              <FilePdf size={14} weight="bold" />
-              <span>Review &amp; Issue PDF →</span>
+              <FilePdf size={14} weight="bold" className={isWinner ? "text-[#ed1c24]" : "text-[#454545]"} />
+              <span>{isWinner ? "Review & Issue Winner PDF →" : "Review & Edit Draft →"}</span>
             </Link>
           )}
 
@@ -946,17 +1067,35 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               Expiring {tenure.expiry_month}
             </span>
           </div>
-          <p className="text-xs text-[#6e6e73] mt-1.5 flex items-center gap-2 flex-wrap">
+          <div className="text-xs text-[#6e6e73] mt-2 flex items-center gap-2 flex-wrap">
             <span>Period: <strong className="text-[#1b1717] font-mono">{tenure.coverage_period_formatted}</strong></span>
             <span>•</span>
             <span>Model: <strong className="text-[#1b1717]">{tenure.vehicle_model || "Motor Vehicle"}</strong> ({tenure.engine_cc || "N/A"})</span>
-            {tenure.ic_no && (
+            {(tenure.formatted_ic || tenure.ic_no) && (
               <>
                 <span>•</span>
-                <span>IC: <strong className="text-[#1b1717] font-mono">{tenure.ic_no}</strong></span>
+                <span>IC: <strong className="text-[#1b1717] font-mono">{tenure.formatted_ic || tenure.ic_no}</strong></span>
               </>
             )}
-          </p>
+            {tenure.birth_date && (
+              <>
+                <span>•</span>
+                <span>DOB: <strong className="text-[#1b1717] font-mono">{new Date(tenure.birth_date).toLocaleDateString("en-MY", { day: "2-digit", month: "2-digit", year: "numeric" })}</strong></span>
+              </>
+            )}
+            {tenure.customer_age != null && (
+              <span>({tenure.customer_age} yo{tenure.customer_gender ? `, ${tenure.customer_gender}` : ""}{tenure.nric_state ? `, ${tenure.nric_state}` : ""})</span>
+            )}
+            <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-tight ${
+              (tenure.runner_fee_type === "passport" || tenure.runner_fee >= 20.0)
+                ? "bg-purple-100 text-purple-800 border border-purple-200"
+                : "bg-blue-100 text-blue-800 border border-blue-200"
+            }`}>
+              {(tenure.runner_fee_type === "passport" || tenure.runner_fee >= 20.0)
+                ? `Passport (RM ${tenure.runner_fee.toFixed(2)})`
+                : `MyKad (RM ${tenure.runner_fee.toFixed(2)})`}
+            </span>
+          </div>
         </div>
 
         {/* Action Buttons */}
@@ -979,6 +1118,20 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           >
             Print
           </Button>
+
+          {entries.length > 0 && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleGenerateAllQuotes}
+              loading={generatingAllQuotes}
+              icon={<FilePdf weight="bold" size={16} className="text-[#ed1c24]" />}
+              className="border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717] font-semibold"
+              title="Generate official Risk-Locker quotations for all underwriter options"
+            >
+              Generate All Quotations
+            </Button>
+          )}
 
           <Link
             href={`/upload?mode=comparison&tenure_id=${tenure.id}` as Route}
@@ -1003,6 +1156,32 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           </Button>
         </div>
       </div>
+
+      {/* Date Reconciliation Conflict Banner (Non-blocking) */}
+      {data.date_conflict?.has_conflict && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-950 shadow-xs flex items-start justify-between gap-3 no-print print:hidden">
+          <div className="space-y-1">
+            <p className="font-bold flex items-center gap-1.5 text-amber-900">
+              <CalendarBlank size={16} weight="bold" className="text-amber-700" />
+              Coverage Date Reconciliation Variance Detected
+            </p>
+            <p className="text-amber-800 leading-relaxed">
+              {data.date_conflict.message}
+            </p>
+            <div className="flex items-center gap-2 pt-1 font-mono text-[11px]">
+              <span className="font-bold text-amber-900">Detected dates:</span>
+              {data.date_conflict.unique_dates?.map((d) => (
+                <span key={d} className="px-1.5 py-0.5 bg-amber-100 rounded border border-amber-200">
+                  {d}
+                </span>
+              ))}
+            </div>
+          </div>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 bg-amber-200/70 px-2 py-1 rounded">
+            Non-Blocking
+          </span>
+        </div>
+      )}
 
       {/* Main 3-Pane Excel Comparison Grid */}
       <div className="grid grid-cols-1 xl:grid-cols-[280px_minmax(0,1fr)_280px] print:grid-cols-[240px_minmax(0,1fr)_220px] gap-4 items-start">
@@ -1210,6 +1389,16 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                     />
                   </div>
                   <div>
+                    <label className="text-[11px] font-semibold text-[#454545] block mb-1">Year of Make (YOM)</label>
+                    <input
+                      type="number"
+                      value={manufactureYearInput}
+                      onChange={(e) => setManufactureYearInput(e.target.value)}
+                      placeholder="e.g. 2020"
+                      className="w-full rounded px-2.5 py-1.5 text-xs font-mono border border-[#e5e5ea] bg-white text-[#1b1717]"
+                    />
+                  </div>
+                  <div>
                     <label className="text-[11px] font-semibold text-[#454545] block mb-1">Engine CC</label>
                     <input
                       type="text"
@@ -1275,6 +1464,13 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                   <div className="flex justify-between">
                     <span className="text-[#6e6e73]">Model:</span>
                     <span className="font-semibold text-[#1b1717]">{tenure.vehicle_model}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#6e6e73]">Year of Make:</span>
+                    <span className="font-semibold text-[#1b1717]">
+                      {tenure.manufacture_year || "Not Recorded"}
+                      {data?.vehicle_age ? ` (${data.vehicle_age} yrs)` : ""}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-[#6e6e73]">Engine CC:</span>
@@ -1590,6 +1786,88 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           </div>
         </div>
       </div>
+
+      {/* ============================================================== */}
+      {/* BOTTOM SECTION: Generated Risk-Locker Quotations               */}
+      {/* ============================================================== */}
+      {data.generated_quotations && data.generated_quotations.length > 0 && (
+        <div className="rounded-2xl border border-[#e5e5ea] bg-white p-6 shadow-sm no-print print:hidden">
+          <div className="flex items-center justify-between pb-4 border-b border-[#e5e5ea] mb-4">
+            <div>
+              <h3 className="text-base font-bold text-[#1b1717] flex items-center gap-2">
+                <FilePdf size={20} weight="fill" className="text-[#ed1c24]" />
+                Generated Risk-Locker Quotations
+              </h3>
+              <p className="text-xs text-[#6e6e73] mt-0.5">
+                Official branded client quotations generated from this marketing comparison
+              </p>
+            </div>
+            <span className="rounded-full bg-[#f5f5f7] border border-[#e5e5ea] px-3 py-1 text-xs font-bold text-[#1b1717]">
+              {data.generated_quotations.length} Issued
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {data.generated_quotations.map((gq) => (
+              <div
+                key={gq.session_id}
+                className="p-4 rounded-xl border border-[#e5e5ea] bg-[#f5f5f7]/50 hover:bg-[#f5f5f7] transition-all space-y-3"
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-mono text-xs font-bold text-[#1b1717] bg-white px-2 py-0.5 rounded border border-[#e5e5ea]">
+                        {gq.quotation_ref || gq.reference_number || "Draft Quote"}
+                      </span>
+                      <span className="rounded bg-blue-50 text-blue-700 border border-blue-200 font-bold px-1.5 py-0.5 text-[10px]">
+                        v{gq.version_number || 1}
+                      </span>
+                    </div>
+                    <p className="text-xs font-bold text-[#1b1717] mt-1.5 uppercase">
+                      {gq.company_name}
+                    </p>
+                  </div>
+                  <div className="text-right flex flex-col items-end gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      {gq.status}
+                    </span>
+                    {gq.created_at && (
+                      <span className="text-[10px] text-[#6e6e73]">
+                        {new Date(gq.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-baseline justify-between text-xs pt-1 border-t border-[#e5e5ea]/80">
+                  <span className="text-[#6e6e73]">Total Payable:</span>
+                  <span className="font-mono font-bold text-sm text-[#1b1717]">
+                    RM {gq.total_payable.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <Link
+                    href={`/sessions/${gq.session_id}/review` as Route}
+                    className="flex-1 text-center py-1.5 px-2.5 rounded-lg text-xs font-bold text-white bg-[#1b1717] hover:bg-black transition-colors"
+                  >
+                    Review Quote
+                  </Link>
+                  <a
+                    href={`/api/sessions/${gq.session_id}/pdf`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="py-1.5 px-3 rounded-lg text-xs font-bold text-[#1b1717] bg-white hover:bg-neutral-100 border border-[#e5e5ea] transition-colors flex items-center gap-1"
+                  >
+                    <FilePdf size={14} className="text-[#ed1c24]" />
+                    PDF
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       </div>
 
       {/* Docked Source PDF Viewer Pane (Sticky side-by-side with matrix, 0 columns covered) */}

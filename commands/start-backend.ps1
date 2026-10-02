@@ -41,7 +41,8 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-if ($env:BACKEND_RELOAD -eq "1" -or $env:BACKEND_RELOAD -eq "true") {
+$enableReload = if ($null -ne $env:BACKEND_RELOAD) { $env:BACKEND_RELOAD -in @("1", "true") } else { $true }
+if ($enableReload) {
     Write-Host "Backend reload mode is enabled. If a port is left open, run: npm run stop"
     & $pythonExe -u -m uvicorn app.main:app --reload --host 127.0.0.1 --port $port --log-level info --access-log
 }

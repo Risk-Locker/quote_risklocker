@@ -402,6 +402,7 @@ async def upload_one(
     file: UploadFile = File(...),
     enhanced_reading: bool = Form(False),
     is_test: bool = Form(False),
+    tenure_id: str | None = Form(None),
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
     db: Session = Depends(get_db),
     settings: Settings = Depends(settings_dep),
@@ -415,6 +416,7 @@ async def upload_one(
         idempotency_key=idempotency_key,
         enhanced_reading=enhanced_reading,
         is_test=is_test,
+        tenure_id=tenure_id,
     )
     return {
         "session_id": queued.session.id,

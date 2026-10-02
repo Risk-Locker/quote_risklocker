@@ -112,6 +112,13 @@ def _catalog_overview(db, draft: QuotationDraft) -> dict:
         if concept_ids
         else {}
     )
+    selections = list(
+        db.scalars(
+            select(DraftBenefitSelection).where(DraftBenefitSelection.draft_id == draft.id)
+        ).all()
+    ) if getattr(draft, "id", None) else []
+    selection_by_offering = {s.catalog_offering_id: s for s in selections if s.catalog_offering_id}
+
     overview = {"defaults": [], "addons": []}
     for offering in sorted(offerings, key=lambda item: (int(item.sort_order or 0), item.offering_key)):
         concept = concepts.get(offering.concept_id)
@@ -121,8 +128,12 @@ def _catalog_overview(db, draft: QuotationDraft) -> dict:
         except RenderContextError:
             value = ""
         entry = {"offering_id": offering.id, "label": label, "value": value}
-        role = offering.role
-        is_default = role == "included" or (role is None and offering.offering_kind == "base")
+        sel = selection_by_offering.get(offering.id)
+        if sel:
+            is_default = sel.cost_status == "included"
+        else:
+            role = offering.role
+            is_default = role == "included" or (role is None and offering.offering_kind == "base")
         if is_default:
             overview["defaults"].append(entry)
         else:

@@ -313,6 +313,9 @@ class InsuranceTenure(Base, TimestampMixin):
     reminder_window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     lapsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     delay_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    is_hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"), index=True)
+    tenure_type: Mapped[str] = mapped_column(String(50), nullable=False, default="variable", server_default=text("'variable'"))
+    superseded_by_tenure_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_tenures.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # Production Motor Renewal Ledger fields (12 stages, UCD & roadtax checklist)
     stage: Mapped[str] = mapped_column(String(50), nullable=False, default="Quotations", server_default=text("'Quotations'"), index=True)
@@ -339,6 +342,7 @@ class InsuranceTenure(Base, TimestampMixin):
     pic: Mapped["PersonInCharge | None"] = relationship(back_populates="tenures")
     comparison_entries: Mapped[list["TenureComparisonEntry"]] = relationship(back_populates="tenure", cascade="all, delete-orphan")
     previous_tenure: Mapped["InsuranceTenure | None"] = relationship(remote_side="InsuranceTenure.id", foreign_keys=[previous_tenure_id])
+    superseded_by: Mapped["InsuranceTenure | None"] = relationship(remote_side="InsuranceTenure.id", foreign_keys=[superseded_by_tenure_id])
 
 
 
@@ -365,6 +369,12 @@ class TenureComparisonEntry(Base, TimestampMixin):
     special_perils: Mapped[str | None] = mapped_column(String(50), nullable=True)
     llp_llop: Mapped[str | None] = mapped_column(String(50), nullable=True)
     personal_accident: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    betterment_rate: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    betterment_display: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    towing_km: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
+    uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=utcnow)
     is_recommended: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
     is_manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
@@ -385,6 +395,7 @@ class TrackedVehicle(Base, TimestampMixin):
     engine_cc: Mapped[str | None] = mapped_column(String(50), nullable=True)
     chassis_no: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     engine_no: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    manufacture_year: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     customer_id: Mapped[str | None] = mapped_column(ForeignKey("customer_accounts.id", ondelete="SET NULL"), nullable=True, index=True)
 
     ownerships: Mapped[list["VehicleOwnership"]] = relationship(

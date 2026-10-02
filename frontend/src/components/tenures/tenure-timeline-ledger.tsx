@@ -16,6 +16,8 @@ import {
   FilePdf,
   CaretLeft,
   CaretRight,
+  CaretDown,
+  CaretUp,
   Table,
   Columns,
   ListDashes,
@@ -40,10 +42,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { TenureTimelineDrawer } from "@/components/tenures/tenure-timeline-drawer";
 import { EditVehicleDealModal } from "@/components/tenures/edit-vehicle-deal-modal";
+import { getVehicleDisplayName } from "@/lib/vehicle-utils";
 
 export interface YoYStatItem {
   year: string;
   total: number;
+  cars: number;
   active: number;
   lost: number;
   growth_percentage: number | null;
@@ -55,7 +59,10 @@ export function formatDateSafe(dateStr?: string | null): string {
   const parts = datePart.split("-");
   if (parts.length === 3) {
     const [y, m, d] = parts;
-    return `${d}/${m}/${y}`;
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const monthIdx = parseInt(m, 10) - 1;
+    const monthName = months[monthIdx] || m;
+    return `${parseInt(d, 10)} ${monthName} ${y}`;
   }
   return dateStr;
 }
@@ -63,6 +70,9 @@ export function formatDateSafe(dateStr?: string | null): string {
 export interface MonthItem {
   month: string;
   total: number;
+  start_count: number;
+  end_count: number;
+  cars: number;
   hit: number;
   miss: number;
   pending: number;
@@ -129,7 +139,11 @@ export interface TenureRow {
   car_brand?: string | null;
   car_model?: string | null;
   engine_cc?: string | null;
+  manufacture_year?: number | null;
   is_projected?: boolean;
+  is_hidden?: boolean;
+  tenure_type?: string;
+  superseded_by_tenure_id?: string | null;
   created_at?: string;
 }
 
@@ -277,11 +291,22 @@ export function TenureTimelineLedger() {
 
   // YoY Statistics Ribbon State
   const [yoyStats, setYoyStats] = useState<YoYStatItem[]>([]);
+  const [allYearsSummary, setAllYearsSummary] = useState<{ total: number; cars: number; active: number; lost: number } | null>(null);
   const [loadingYoy, setLoadingYoy] = useState(false);
 
   // Bulk Selection & Operations
   const [selectedTenureIds, setSelectedTenureIds] = useState<string[]>([]);
   const [deletingBulk, setDeletingBulk] = useState(false);
+
+  // Inline Expandable Sub-panel State
+  const [expandedTenureIds, setExpandedTenureIds] = useState<string[]>([]);
+  const [showHidden, setShowHidden] = useState<boolean>(false);
+
+  const toggleExpandRow = (id: string) => {
+    setExpandedTenureIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
 
   // PICs directory for dropdown selection
   const [pics, setPics] = useState<PicItem[]>([]);
@@ -298,14 +323,20 @@ export function TenureTimelineLedger() {
   const loadYoyStats = useCallback(async () => {
     setLoadingYoy(true);
     try {
-      const res = await api<{ years: YoYStatItem[] }>("/tenures/stats/yoy");
+      const res = await api<{
+        years: YoYStatItem[];
+        all_years?: { total: number; cars: number; active: number; lost: number };
+      }>("/tenures/stats/yoy" + (showHidden ? "?show_hidden=true" : ""));
       setYoyStats(res.years || []);
+      if (res.all_years) {
+        setAllYearsSummary(res.all_years);
+      }
     } catch (err) {
       console.error("Failed to load YoY stats:", err);
     } finally {
       setLoadingYoy(false);
     }
-  }, []);
+  }, [showHidden]);
 
   useEffect(() => {
     loadYoyStats();
@@ -322,7 +353,7 @@ export function TenureTimelineLedger() {
   const loadMonths = useCallback(async () => {
     setLoadingMonths(true);
     try {
-      const res = await api<{ months: MonthItem[] }>("/tenures/months");
+      const res = await api<{ months: MonthItem[] }>("/tenures/months" + (showHidden ? "?show_hidden=true" : ""));
       const list = res.months || [];
       setMonths(list);
     } catch (err) {
@@ -330,7 +361,7 @@ export function TenureTimelineLedger() {
     } finally {
       setLoadingMonths(false);
     }
-  }, []);
+  }, [showHidden]);
 
   useEffect(() => {
     loadMonths();
@@ -384,6 +415,10 @@ export function TenureTimelineLedger() {
         params.set("search", search.trim());
       }
 
+      if (showHidden) {
+        params.set("show_hidden", "true");
+      }
+
       params.set("page_size", "100");
 
       const res = await api<{ items: TenureRow[]; total: number }>(`/tenures?${params.toString()}`);
@@ -393,7 +428,7 @@ export function TenureTimelineLedger() {
     } finally {
       setLoadingTenures(false);
     }
-  }, [selectedYear, selectedMonth, category, stageFilter, search]);
+  }, [selectedYear, selectedMonth, category, stageFilter, search, showHidden]);
 
   useEffect(() => {
     loadTenures();
@@ -576,7 +611,7 @@ export function TenureTimelineLedger() {
     setSelectedMonth(currentMonthKey);
   }
 
-  // 12 Clean Month list for selected year (NO "Future" tab)
+  // 12 Clean Month list for selected year (shows start, end, total, and cars)
   const monthsOfYear = useMemo(() => {
     const yr = selectedYear === "all" ? currentYear : selectedYear;
     return MONTH_NAMES.map((name, idx) => {
@@ -587,18 +622,21 @@ export function TenureTimelineLedger() {
         label: name,
         monthNum: idx + 1,
         total: existing ? existing.total : 0,
+        start_count: existing ? existing.start_count : 0,
+        end_count: existing ? existing.end_count : 0,
+        cars: existing ? existing.cars : 0,
       };
     });
   }, [selectedYear, months, currentYear]);
 
-  // Year items to show in year switcher
+  // Year items to show in year switcher (strictly dynamic from actual uploaded policies + current year)
   const availableYears = useMemo(() => {
-    const defaultList = ["2025", "2026", "2027", "2028"];
-    if (!defaultList.includes(currentYear)) {
-      defaultList.push(currentYear);
-    }
-    return defaultList.sort();
-  }, [currentYear]);
+    const yearsSet = new Set<string>([currentYear]);
+    yoyStats.forEach((s) => {
+      if (s.year) yearsSet.add(s.year);
+    });
+    return Array.from(yearsSet).sort();
+  }, [currentYear, yoyStats]);
 
   // Find PIC details helper
   function getPicDisplay(t: TenureRow) {
@@ -624,7 +662,7 @@ export function TenureTimelineLedger() {
     return null;
   }
 
-  // Calendar Geometry for Visual View
+  // Calendar Geometry for Visual View (maps both Start and Expiry events)
   const calendarData = useMemo(() => {
     let yr = parseInt(currentYear, 10);
     let mo = currentMonthNum - 1;
@@ -642,30 +680,46 @@ export function TenureTimelineLedger() {
     const daysInMonth = new Date(yr, mo + 1, 0).getDate();
     const monthLabel = new Date(yr, mo, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
-    const dayMap: Record<number, TenureRow[]> = {};
+    type CalendarEvent = {
+      type: "start" | "end";
+      tenure: TenureRow;
+    };
+
+    const dayMap: Record<number, CalendarEvent[]> = {};
     for (let d = 1; d <= daysInMonth; d++) {
       dayMap[d] = [];
     }
 
     tenures.forEach((t) => {
+      // 1. Check start date
+      if (t.coverage_start_date) {
+        const datePart = t.coverage_start_date.split("T")[0];
+        const parts = datePart.split("-");
+        if (parts.length === 3) {
+          const itemYr = parseInt(parts[0], 10);
+          const itemMo = parseInt(parts[1], 10) - 1;
+          const itemDay = parseInt(parts[2], 10);
+          if (itemYr === yr && itemMo === mo && dayMap[itemDay]) {
+            dayMap[itemDay].push({ type: "start", tenure: t });
+          }
+        }
+      }
+      // 2. Check end date
       if (t.coverage_end_date) {
-        // Deterministic split to avoid local timezone offset shifting the day
         const datePart = t.coverage_end_date.split("T")[0];
         const parts = datePart.split("-");
         if (parts.length === 3) {
           const itemYr = parseInt(parts[0], 10);
           const itemMo = parseInt(parts[1], 10) - 1;
           const itemDay = parseInt(parts[2], 10);
-          if (itemYr === yr && itemMo === mo) {
-            if (dayMap[itemDay]) {
-              dayMap[itemDay].push(t);
-            }
+          if (itemYr === yr && itemMo === mo && dayMap[itemDay]) {
+            dayMap[itemDay].push({ type: "end", tenure: t });
           }
         }
       }
     });
 
-    const agendaDays: Array<{ day: number; dateStr: string; items: TenureRow[] }> = [];
+    const agendaDays: Array<{ day: number; dateStr: string; items: CalendarEvent[] }> = [];
     for (let d = 1; d <= daysInMonth; d++) {
       if (dayMap[d]?.length > 0) {
         const dt = new Date(yr, mo, d);
@@ -756,144 +810,21 @@ export function TenureTimelineLedger() {
       </div>
 
       {/* ========================================================================= */}
-      {/* 1.5 YEAR-OVER-YEAR MOTOR PORTFOLIO STATS RIBBON                            */}
+      {/* 2. POLICIES & RENEWALS BY DATE (YEARS & MONTHS)                           */}
       {/* ========================================================================= */}
-      {yoyStats.length > 0 && (
-        <div className="bg-white border border-[#e5e5ea] rounded-[var(--rl-radius)] p-3.5 shadow-2xs space-y-2.5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-neutral-900 uppercase tracking-wider flex items-center gap-1.5">
-              <TrendUp className="w-4 h-4 text-emerald-600" />
-              Annual Portfolio Trajectory &amp; YoY Growth
-            </span>
-            <span className="text-[11px] text-neutral-400">
-              Click a year to view that renewal cohort
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-            {yoyStats.map((item) => {
-              const isSelected = selectedYear === item.year;
-              return (
-                <button
-                  key={item.year}
-                  type="button"
-                  onClick={() => {
-                    setSelectedYear(item.year);
-                    setSelectedMonth("all");
-                  }}
-                  className={`p-2.5 rounded-[var(--rl-radius-sm)] border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                    isSelected
-                      ? "bg-neutral-900 border-neutral-900 text-white shadow-xs"
-                      : "bg-[#fafafb] border-neutral-200/80 hover:border-neutral-400 hover:bg-white"
-                  }`}
-                  title={`Filter renewals to ${item.year}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span
-                      className={`text-xs font-bold font-mono ${
-                        isSelected ? "text-amber-400" : "text-neutral-900"
-                      }`}
-                    >
-                      {item.year}
-                    </span>
-                    {item.growth_percentage !== null && (
-                      <span
-                        className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded ${
-                          item.growth_percentage >= 0
-                            ? isSelected
-                              ? "bg-emerald-500/20 text-emerald-300"
-                              : "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                            : isSelected
-                            ? "bg-rose-500/20 text-rose-300"
-                            : "bg-rose-50 text-rose-700 border border-rose-200"
-                        }`}
-                      >
-                        {item.growth_percentage >= 0 ? "+" : ""}
-                        {item.growth_percentage}%
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-1 flex items-baseline justify-between">
-                    <span
-                      className={`text-base font-extrabold font-mono ${
-                        isSelected ? "text-white" : "text-neutral-900"
-                      }`}
-                    >
-                      {item.total}{" "}
-                      <span
-                        className={`text-[10px] font-normal ${
-                          isSelected ? "text-neutral-400" : "text-neutral-400"
-                        }`}
-                      >
-                        deals
-                      </span>
-                    </span>
-                    <span
-                      className={`text-[10px] font-medium ${
-                        isSelected ? "text-neutral-300" : "text-neutral-500"
-                      }`}
-                    >
-                      {item.active} act · {item.lost} lost
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 2. YEAR & 12 CLEAN MONTH TABS BAR (NO "FUTURE" TAB)                        */}
-      {/* ========================================================================= */}
-      <div className="bg-white border border-[#e5e5ea] rounded-[var(--rl-radius)] p-3.5 shadow-2xs space-y-3">
-        {/* Tier 1: Year Hierarchy Bar */}
+      <div className="bg-white border border-[#e5e5ea] rounded-[var(--rl-radius)] p-4 shadow-2xs space-y-3.5">
+        {/* Top Header: Title & Actions */}
         <div className="flex items-center justify-between flex-wrap gap-2 pb-2.5 border-b border-[#f2f2f7]">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="flex items-center gap-1.5 text-xs font-semibold text-[#1b1717]">
-              <CalendarBlank className="w-4 h-4 text-[#454545]" />
-              Renewal Year:
-            </span>
-            <div className="flex items-center gap-1 flex-wrap">
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedYear("all");
-                  setSelectedMonth("all");
-                }}
-                className={`px-3 py-1 rounded-[var(--rl-radius-sm)] text-xs font-medium transition-all cursor-pointer ${
-                  selectedYear === "all"
-                    ? "bg-[#1b1717] text-white shadow-2xs font-semibold"
-                    : "bg-[#f5f5f7] text-[#6e6e73] hover:text-[#1b1717] hover:bg-[#e5e5ea]"
-                }`}
-              >
-                All Years
-              </button>
-
-              {availableYears.map((yr) => {
-                const isSelected = selectedYear === yr;
-                return (
-                  <button
-                    key={yr}
-                    type="button"
-                    onClick={() => {
-                      setSelectedYear(yr);
-                      setSelectedMonth(`${yr}-${String(currentMonthNum).padStart(2, "0")}`);
-                    }}
-                    className={`px-3 py-1 rounded-[var(--rl-radius-sm)] text-xs font-medium transition-all cursor-pointer ${
-                      isSelected
-                        ? "bg-[#1b1717] text-white shadow-2xs font-semibold"
-                        : "bg-[#f5f5f7] text-[#6e6e73] hover:text-[#1b1717] hover:bg-[#e5e5ea]"
-                    }`}
-                  >
-                    <span>{yr}</span>
-                    {yr === currentYear && (
-                      <span className="ml-1 text-[10px] text-amber-500 font-bold">●</span>
-                    )}
-                  </button>
-                );
-              })}
+          <div>
+            <div className="flex items-center gap-2">
+              <CalendarBlank className="w-4 h-4 text-neutral-700" />
+              <span className="text-xs font-bold text-neutral-900 uppercase tracking-wider">
+                Policies &amp; Renewals
+              </span>
             </div>
+            <p className="text-[11px] text-neutral-500 mt-0.5">
+              Select a year and month to view policy periods and cars. Hover on a month to see starting vs expiring policies.
+            </p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -931,67 +862,161 @@ export function TenureTimelineLedger() {
                 loadMonths();
                 loadStageSummary();
                 loadTenures();
+                loadYoyStats();
               }}
-              className="text-[11px] text-[#8e8e93] hover:text-[#1b1717] flex items-center gap-1 ml-1 cursor-pointer"
+              className="text-[11px] font-medium text-[#8e8e93] hover:text-[#1b1717] flex items-center gap-1 ml-1 cursor-pointer"
             >
               <ArrowsClockwise className="w-3 h-3" /> Refresh
             </button>
           </div>
         </div>
 
-        {/* Tier 2: 12 Clean Month Tabs (No Future tab) */}
-        {loadingMonths ? (
-          <div className="h-9 flex items-center text-xs text-[#8e8e93]">Loading tenure timeline...</div>
-        ) : (
-          <div
-            ref={monthScrollRef}
-            className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-0.5 scroll-smooth scrollbar-thin"
-          >
-            {/* "All Months in {Year}" button */}
+        {/* Row 1: Years Switcher with Cars and Policy Counts */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-neutral-700 uppercase tracking-wide">
+              Step 1: Select Year
+            </span>
+            {selectedYear !== "all" && (
+              <span className="text-[11px] text-neutral-500">
+                Viewing {selectedYear} ({yoyStats.find((s) => s.year === selectedYear)?.total ?? 0} policies · {yoyStats.find((s) => s.year === selectedYear)?.cars ?? 0} cars)
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {/* All Years button */}
             <button
               type="button"
-              onClick={() => setSelectedMonth("all")}
-              className={`shrink-0 min-w-max px-3.5 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
-                selectedMonth === "all"
-                  ? "bg-[#1b1717] text-white shadow-2xs"
-                  : "bg-[#f5f5f7] text-[#6e6e73] hover:bg-[#e5e5ea] border border-[#e5e5ea]"
+              onClick={() => {
+                setSelectedYear("all");
+                setSelectedMonth("all");
+              }}
+              className={`px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                selectedYear === "all"
+                  ? "bg-[#1b1717] text-white shadow-2xs font-bold"
+                  : "bg-[#f5f5f7] text-[#454545] hover:text-[#1b1717] hover:bg-[#e5e5ea] border border-[#e5e5ea]"
               }`}
             >
-              <span>{selectedYear === "all" ? "All Months" : `All ${selectedYear}`}</span>
+              <span>All Years</span>
+              {allYearsSummary && (
+                <span
+                  className={`px-1.5 py-0.2 rounded text-[10px] font-mono font-bold ${
+                    selectedYear === "all" ? "bg-white/20 text-white" : "bg-[#e5e5ea] text-neutral-700"
+                  }`}
+                >
+                  {allYearsSummary.total} policies · {allYearsSummary.cars} cars
+                </span>
+              )}
             </button>
 
-            {/* 12 Months: Jan to Dec */}
-            {monthsOfYear.map((m) => {
-              const isActive = selectedMonth === m.month;
-              const isCurrent = m.month === currentMonthKey;
+            {/* Dynamic Year Buttons */}
+            {availableYears.map((yr) => {
+              const isSelected = selectedYear === yr;
+              const stat = yoyStats.find((s) => s.year === yr);
+              const totalPolicies = stat ? stat.total : 0;
+              const totalCars = stat ? stat.cars : 0;
+
               return (
                 <button
-                  key={m.month}
+                  key={yr}
                   type="button"
-                  data-month={m.month}
-                  onClick={() => setSelectedMonth(m.month)}
-                  className={`shrink-0 min-w-max px-3.5 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-medium whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
-                    isActive
+                  onClick={() => {
+                    setSelectedYear(yr);
+                    setSelectedMonth("all");
+                  }}
+                  className={`px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                    isSelected
                       ? "bg-[#1b1717] text-white shadow-2xs font-bold"
-                      : "bg-[#f5f5f7] text-[#454545] hover:bg-[#e5e5ea] border border-[#e5e5ea]"
-                  } ${isCurrent && !isActive ? "ring-1 ring-[#007aff]/60 font-semibold" : ""}`}
-                  title={isCurrent ? "Current active calendar month" : undefined}
+                      : "bg-[#f5f5f7] text-[#454545] hover:text-[#1b1717] hover:bg-[#e5e5ea] border border-[#e5e5ea]"
+                  }`}
+                  title={`${yr}: ${totalPolicies} policies, ${totalCars} cars`}
                 >
-                  <span>{m.label}</span>
-                  {m.total > 0 && (
+                  <span className="font-mono font-bold">{yr}</span>
+                  {yr === currentYear && (
+                    <span className="text-[10px] text-amber-500 font-bold" title="Current Year">●</span>
+                  )}
+                  {totalPolicies > 0 && (
                     <span
-                      className={`px-1.5 py-0.2 rounded-[var(--rl-radius-sm)] text-[10px] font-bold ${
-                        isActive ? "bg-white/20 text-white" : "bg-[#e5e5ea] text-[#1b1717]"
+                      className={`px-1.5 py-0.2 rounded text-[10px] font-mono font-bold ${
+                        isSelected ? "bg-white/20 text-white" : "bg-[#e5e5ea] text-neutral-700"
                       }`}
                     >
-                      {m.total}
+                      {totalPolicies} {totalPolicies === 1 ? "pol" : "pols"} · {totalCars} {totalCars === 1 ? "car" : "cars"}
                     </span>
                   )}
                 </button>
               );
             })}
           </div>
-        )}
+        </div>
+
+        {/* Row 2: 12 Months Tabs with Start/End Hover Tooltip */}
+        <div className="space-y-1.5 pt-2 border-t border-[#f2f2f7]">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-neutral-700 uppercase tracking-wide">
+              Step 2: Filter by Month
+            </span>
+            <span className="text-[10px] text-neutral-400">
+              Hover over a month to see starting vs expiring breakdown
+            </span>
+          </div>
+
+          {loadingMonths ? (
+            <div className="h-9 flex items-center text-xs text-[#8e8e93]">Loading tenure timeline...</div>
+          ) : (
+            <div
+              ref={monthScrollRef}
+              className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-0.5 scroll-smooth scrollbar-thin"
+            >
+              {/* "All Months" tab */}
+              <button
+                type="button"
+                onClick={() => setSelectedMonth("all")}
+                className={`shrink-0 min-w-max px-3.5 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+                  selectedMonth === "all"
+                    ? "bg-[#1b1717] text-white shadow-2xs font-bold"
+                    : "bg-[#f5f5f7] text-[#6e6e73] hover:bg-[#e5e5ea] border border-[#e5e5ea]"
+                }`}
+              >
+                <span>{selectedYear === "all" ? "All Months" : `All ${selectedYear}`}</span>
+              </button>
+
+              {/* 12 Months: Jan to Dec */}
+              {monthsOfYear.map((m) => {
+                const isActive = selectedMonth === m.month;
+                const isCurrent = m.month === currentMonthKey;
+                const tooltipText = `${m.label} ${selectedYear === "all" ? currentYear : selectedYear}\n• ${m.start_count} Starting\n• ${m.end_count} Expiring\n${m.total} Total Policies · ${m.cars} Cars`;
+
+                return (
+                  <button
+                    key={m.month}
+                    type="button"
+                    data-month={m.month}
+                    onClick={() => setSelectedMonth(m.month)}
+                    className={`shrink-0 min-w-max px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-medium whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+                      isActive
+                        ? "bg-[#1b1717] text-white shadow-2xs font-bold"
+                        : "bg-[#f5f5f7] text-[#454545] hover:bg-[#e5e5ea] border border-[#e5e5ea]"
+                    } ${isCurrent && !isActive ? "ring-1 ring-[#007aff]/60 font-semibold" : ""}`}
+                    title={tooltipText}
+                  >
+                    <span>{m.label}</span>
+                    {m.total > 0 && (
+                      <span
+                        className={`px-1.5 py-0.2 rounded text-[10px] font-bold font-mono ${
+                          isActive ? "bg-white/20 text-white" : "bg-[#e5e5ea] text-[#1b1717]"
+                        }`}
+                      >
+                        ({m.total})
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ========================================================================= */}
@@ -1097,6 +1122,20 @@ export function TenureTimelineLedger() {
             </button>
           </div>
 
+          <button
+            type="button"
+            onClick={() => setShowHidden(!showHidden)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all border cursor-pointer ${
+              showHidden
+                ? "bg-amber-100 text-amber-900 border-amber-300 shadow-2xs"
+                : "bg-white text-neutral-600 border-neutral-200 hover:text-neutral-900"
+            }`}
+            title="Toggle display of older superseded or archived tenures"
+          >
+            <Archive size={14} weight={showHidden ? "fill" : "regular"} />
+            <span>{showHidden ? "Hide Superseded" : "Show Superseded"}</span>
+          </button>
+
           <Link
             href={"/upload/marketing-comparison" as Route}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
@@ -1128,7 +1167,7 @@ export function TenureTimelineLedger() {
       )}
 
       {/* ========================================================================= */}
-      {/* 4. VIEW 1: EXCEL DIGITAL TWIN TABLE LEDGER                                 */}
+      {/* 4. VIEW 1: EXECUTIVE TABLE LEDGER & INLINE EXPANDABLE SUB-PANEL            */}
       {/* ========================================================================= */}
       {viewMode === "ledger" && (
         <div className="bg-white border border-neutral-200/90 rounded-[var(--rl-radius)] overflow-hidden shadow-2xs">
@@ -1136,7 +1175,7 @@ export function TenureTimelineLedger() {
             <table className="w-full text-left text-xs whitespace-nowrap">
               <thead className="bg-[#f9f9fb] border-b border-neutral-200/80 text-[11px] font-bold uppercase tracking-wider text-neutral-600">
                 <tr>
-                  <th className="py-3 px-2 w-14 text-center">
+                  <th className="py-3 px-3 w-16 text-center">
                     <div className="flex items-center justify-center">
                       <input
                         type="checkbox"
@@ -1148,32 +1187,25 @@ export function TenureTimelineLedger() {
                       />
                     </div>
                   </th>
-                  <th className="py-3 px-3">Vehicle &amp; Client</th>
-                  <th className="py-3 px-3">Stages</th>
-                  <th className="py-3 px-3">Expiry Date</th>
-                  <th className="py-3 px-3 min-w-[160px]">Comment</th>
-                  <th className="py-3 px-3 min-w-[160px]">Notes / Pattern</th>
-                  <th className="py-3 px-3">Sub Agent / PIC</th>
-                  <th className="py-3 px-3">Business</th>
-                  <th className="py-3 px-3">Insurer &amp; Quotes</th>
-                  <th className="py-3 px-3 text-center">Payment</th>
-                  <th className="py-3 px-3 text-center">Key-in UCD</th>
-                  <th className="py-3 px-3">Roadtax Status</th>
-                  <th className="py-3 px-3 text-center">Days</th>
-                  <th className="py-3 px-3 text-right">Actions</th>
+                  <th className="py-3 px-3 min-w-[200px]">Vehicle &amp; Client</th>
+                  <th className="py-3 px-3 min-w-[170px]">Coverage Period</th>
+                  <th className="py-3 px-3 min-w-[140px]">Pipeline Stage</th>
+                  <th className="py-3 px-3 min-w-[170px]">Quotes &amp; Insurers</th>
+                  <th className="py-3 px-3 min-w-[160px]">Milestones &amp; Status</th>
+                  <th className="py-3 px-3 text-right min-w-[190px]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
                 {loadingTenures ? (
                   <tr>
-                    <td colSpan={14} className="py-14 text-center text-neutral-400">
+                    <td colSpan={7} className="py-14 text-center text-neutral-400">
                       <ArrowsClockwise className="w-5 h-5 animate-spin mx-auto mb-2 text-neutral-500" />
                       Loading Motor Renewal Ledger...
                     </td>
                   </tr>
                 ) : tenures.length === 0 ? (
                   <tr>
-                    <td colSpan={14} className="py-14 text-center text-neutral-400">
+                    <td colSpan={7} className="py-14 text-center text-neutral-400">
                       {category === "lost"
                         ? "No lost client records found matching the active filters."
                         : `No active renewal policies found for ${selectedMonth === "all" ? selectedYear : selectedMonth}.`}
@@ -1184,339 +1216,566 @@ export function TenureTimelineLedger() {
                     const picInfo = getPicDisplay(t);
                     const stageConf = STAGE_CONFIGS[t.stage] || STAGE_CONFIGS.Quotations;
                     const isOverdue = t.days_in_stage > 7 && !stageConf.isLost && t.stage !== "Close - Win";
+                    const isExpanded = expandedTenureIds.includes(t.id);
 
                     return (
-                      <tr
-                        key={t.id}
-                        className={`hover:bg-neutral-50/80 transition-colors ${
-                          stageConf.isLost ? "bg-rose-50/20" : ""
-                        }`}
-                      >
-                        {/* 0. Select Checkbox & Direct Delete */}
-                        <td className="py-3 px-2 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            <input
-                              type="checkbox"
-                              checked={selectedTenureIds.includes(t.id)}
-                              onChange={() => handleToggleSelectRow(t.id)}
-                              className="w-3.5 h-3.5 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer"
-                              title={`Select ${t.vehicle_no}`}
-                              aria-label={`Select ${t.vehicle_no}`}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteTenure(t.id, t.vehicle_no)}
-                              className="flex size-6 items-center justify-center rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                              title={`Delete deal for ${t.vehicle_no}`}
-                              aria-label={`Delete deal for ${t.vehicle_no}`}
-                            >
-                              <Trash size={13} weight="bold" />
-                            </button>
-                          </div>
-                        </td>
+                      <React.Fragment key={t.id}>
+                        <tr
+                          className={`hover:bg-neutral-50/80 transition-colors ${
+                            stageConf.isLost ? "bg-rose-50/20" : isExpanded ? "bg-[#f5f5f7]/60" : ""
+                          }`}
+                        >
+                          {/* 0. Select Checkbox & Direct Delete & Expand */}
+                          <td className="py-3 px-3 text-center">
+                            {(() => {
+                              const displayName = getVehicleDisplayName(t.vehicle_no, t.chassis_no);
+                              return (
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedTenureIds.includes(t.id)}
+                                    onChange={() => handleToggleSelectRow(t.id)}
+                                    className="w-3.5 h-3.5 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer"
+                                    title={`Select ${displayName}`}
+                                    aria-label={`Select ${displayName}`}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleExpandRow(t.id)}
+                                    className={`p-1 rounded transition-colors cursor-pointer ${
+                                      isExpanded
+                                        ? "bg-neutral-900 text-white"
+                                        : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
+                                    }`}
+                                    title={isExpanded ? "Collapse inline deal sub-panel" : "Expand inline deal sub-panel"}
+                                    aria-label={isExpanded ? "Collapse inline deal sub-panel" : "Expand inline deal sub-panel"}
+                                  >
+                                    {isExpanded ? <CaretUp size={13} weight="bold" /> : <CaretDown size={13} weight="bold" />}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteTenure(t.id, displayName)}
+                                    className="flex size-6 items-center justify-center rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                    title={`Delete deal for ${displayName}`}
+                                    aria-label={`Delete deal for ${displayName}`}
+                                  >
+                                    <Trash size={13} weight="bold" />
+                                  </button>
+                                </div>
+                              );
+                            })()}
+                          </td>
 
-                        {/* 1. Name: Plate & Customer */}
-                        <td className="py-3 px-3">
-                          <div className="flex items-center justify-between gap-1">
-                            <div className="font-bold text-neutral-900 font-mono text-sm flex items-center gap-1.5">
-                              <Car className="w-3.5 h-3.5 text-neutral-600 shrink-0" />
-                              <span className="truncate max-w-[130px]">{t.vehicle_no}</span>
-                              {t.vehicle_no?.startsWith("CHASSIS:") && (
-                                <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 font-sans text-[9px] font-bold shrink-0">
-                                  CHASSIS
+                          {/* 1. Vehicle & Client */}
+                          <td className="py-3 px-3">
+                            {(() => {
+                              const displayName = getVehicleDisplayName(t.vehicle_no, t.chassis_no);
+                              const isChassis = displayName.startsWith("Chassis:");
+                              const isBlank = displayName === "No Plate (Blank)";
+
+                              return (
+                                <>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <div className="font-bold text-neutral-900 font-mono text-sm flex items-center gap-1.5">
+                                      <Car className="w-3.5 h-3.5 text-neutral-600 shrink-0" />
+                                      <span className="truncate max-w-[150px]" title={displayName}>
+                                        {displayName}
+                                      </span>
+                                    </div>
+                                    {isChassis && (
+                                      <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 font-sans text-[9px] font-bold shrink-0">
+                                        CHASSIS
+                                      </span>
+                                    )}
+                                    {isBlank && (
+                                      <span className="px-1.5 py-0.2 rounded bg-neutral-100 text-neutral-600 font-sans text-[9px] font-bold shrink-0">
+                                        NO PLATE
+                                      </span>
+                                    )}
+                                    {t.is_hidden && (
+                                      <span className="px-1.5 py-0.2 rounded bg-neutral-200 text-neutral-700 font-sans text-[9px] font-bold shrink-0">
+                                        SUPERSEDED
+                                      </span>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingTenure(t)}
+                                      className="p-1 rounded text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 transition-colors cursor-pointer"
+                                      title="Edit Customer, Plate & Deal Details"
+                                    >
+                                      <PencilSimple size={13} weight="bold" />
+                                    </button>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                    <Link
+                                      href={`/client-records?search=${encodeURIComponent(t.customer_name)}` as Route}
+                                      className="text-neutral-800 hover:text-blue-600 font-medium text-[11px] truncate max-w-[140px] inline-block"
+                                      title={`View client record for ${t.customer_name}`}
+                                    >
+                                      {t.customer_name}
+                                    </Link>
+                                    {t.customer_ic_no && (
+                                      <span className="text-[10px] text-neutral-400 font-mono truncate max-w-[90px]">
+                                        {t.customer_ic_no}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {(t.car_model || t.car_brand || t.engine_cc || t.manufacture_year) && (
+                                    <div className="text-[10px] text-neutral-500 font-medium mt-0.5 truncate max-w-[210px]">
+                                      {t.car_brand ? `${t.car_brand} ` : ""}
+                                      {t.car_model || ""}
+                                      {t.engine_cc ? ` · ${t.engine_cc}cc` : ""}
+                                      {t.manufacture_year ? ` · YOM ${t.manufacture_year}` : ""}
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </td>
+
+                          {/* 2. Coverage Period */}
+                          <td className="py-3 px-3">
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-1 text-[11px]">
+                                <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200 shrink-0">
+                                  Start
+                                </span>
+                                <span className="font-mono font-medium text-neutral-800">
+                                  {formatDateSafe(t.coverage_start_date)}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1 text-[11px]">
+                                <span className="text-[9px] font-bold uppercase tracking-wider text-rose-700 bg-rose-50 px-1 py-0.2 rounded border border-rose-200 shrink-0">
+                                  End
+                                </span>
+                                <span className="font-mono font-medium text-neutral-800">
+                                  {formatDateSafe(t.coverage_end_date)}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <span className="text-[10px] text-neutral-500 font-medium">
+                                Exp: {t.expiry_month}
+                              </span>
+                              {t.tenure_type && t.tenure_type !== "standard_1y" && (
+                                <span className="px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 text-[9px] font-bold border border-blue-200">
+                                  {t.tenure_type}
                                 </span>
                               )}
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => setEditingTenure(t)}
-                              className="p-1 rounded text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 transition-colors cursor-pointer"
-                              title="Edit Customer, Plate & Deal Details (propagates everywhere)"
-                            >
-                              <PencilSimple size={13} weight="bold" />
-                            </button>
-                          </div>
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            <Link
-                              href={`/client-records?search=${encodeURIComponent(t.customer_name)}` as Route}
-                              className="text-neutral-700 hover:text-blue-600 font-medium text-[11px] truncate max-w-[130px] inline-block"
-                              title={`View client record for ${t.customer_name}`}
-                            >
-                              {t.customer_name}
-                            </Link>
-                            {t.customer_ic_no && (
-                              <span className="text-[10px] text-neutral-400 font-mono truncate max-w-[85px]">
-                                {t.customer_ic_no}
+                          </td>
+
+                          {/* 3. Pipeline Stage */}
+                          <td className="py-3 px-3">
+                            <div className="flex items-center gap-1.5">
+                              <select
+                                value={t.stage || "Quotations"}
+                                onChange={(e) => patchTenureField(t.id, { stage: e.target.value })}
+                                className={`h-7 px-2 text-[11px] font-bold rounded border cursor-pointer transition-colors outline-none ${stageConf.badge}`}
+                              >
+                                {STAGE_ORDER.map((st) => (
+                                  <option key={st} value={st}>
+                                    {st}
+                                  </option>
+                                ))}
+                              </select>
+                              <span
+                                className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold font-mono shrink-0 ${
+                                  isOverdue
+                                    ? "bg-rose-100 text-rose-800 border border-rose-200"
+                                    : "bg-neutral-100 text-neutral-700"
+                                }`}
+                                title={`${t.days_in_stage} day(s) in this pipeline stage`}
+                              >
+                                {t.days_in_stage}d
+                              </span>
+                            </div>
+                            {t.business_type && (
+                              <span className="text-[10px] text-neutral-500 font-semibold block mt-1">
+                                {t.business_type}
                               </span>
                             )}
-                          </div>
-                          {(t.car_model || t.car_brand || t.engine_cc) && (
-                            <div className="text-[10px] text-neutral-500 font-medium mt-0.5 truncate max-w-[190px]">
-                              {t.car_brand ? `${t.car_brand} ` : ""}{t.car_model || ""}{t.engine_cc ? ` · ${t.engine_cc}cc` : ""}
-                            </div>
-                          )}
-                        </td>
+                          </td>
 
-                        {/* 2. Stages Dropdown */}
-                        <td className="py-3 px-3">
-                          <select
-                            value={t.stage || "Quotations"}
-                            onChange={(e) => patchTenureField(t.id, { stage: e.target.value })}
-                            className={`h-7 px-2 text-[11px] font-bold rounded border cursor-pointer transition-colors outline-none ${stageConf.badge}`}
-                          >
-                            {STAGE_ORDER.map((st) => (
-                              <option key={st} value={st}>
-                                {st}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-
-                        {/* 3. Expiry Date */}
-                        <td className="py-3 px-3">
-                          <div className="font-mono text-xs font-semibold text-neutral-800">
-                            {formatDateSafe(t.coverage_end_date)}
-                          </div>
-                          <div className="text-[10px] text-neutral-400 font-medium">
-                            {t.expiry_month}
-                          </div>
-                        </td>
-
-                        {/* 4. Comment (Inline Live Edit) */}
-                        <td className="py-3 px-3">
-                          <input
-                            type="text"
-                            defaultValue={t.comment || ""}
-                            placeholder="Add comment..."
-                            onBlur={(e) => {
-                              if (e.target.value !== (t.comment || "")) {
-                                patchTenureField(t.id, { comment: e.target.value });
-                              }
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                e.currentTarget.blur();
-                              }
-                            }}
-                            className="w-full h-7 px-2 text-xs rounded border border-transparent hover:border-neutral-300 focus:border-neutral-900 bg-transparent hover:bg-white focus:bg-white transition-all outline-none"
-                          />
-                        </td>
-
-                        {/* 5. Notes / Pattern (Inline Live Edit) */}
-                        <td className="py-3 px-3">
-                          <input
-                            type="text"
-                            defaultValue={t.client_preference_notes || t.notes || ""}
-                            placeholder="Habitual pattern..."
-                            onBlur={(e) => {
-                              if (e.target.value !== (t.client_preference_notes || "")) {
-                                patchTenureField(t.id, { client_preference_notes: e.target.value });
-                              }
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                e.currentTarget.blur();
-                              }
-                            }}
-                            className="w-full h-7 px-2 text-xs rounded border border-transparent hover:border-neutral-300 focus:border-neutral-900 bg-transparent hover:bg-white focus:bg-white transition-all outline-none"
-                          />
-                        </td>
-
-                        {/* 6. Sub Agent / Person In Charge (PIC) */}
-                        <td className="py-3 px-3">
-                          <div className="flex flex-col gap-0.5">
-                            <select
-                              value={t.pic_id || ""}
-                              onChange={(e) => {
-                                const selectedPicId = e.target.value;
-                                const matched = pics.find((p) => p.id === selectedPicId);
-                                patchTenureField(t.id, {
-                                  pic_id: selectedPicId || null,
-                                  sub_agent_name: matched ? matched.name : "",
-                                });
-                              }}
-                              className="h-7 px-2 text-xs font-semibold rounded border border-neutral-200 bg-white text-neutral-800 outline-none cursor-pointer max-w-[150px]"
-                            >
-                              <option value="">— Unassigned PIC —</option>
-                              {pics.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {p.name} {p.type === "subagent" ? `(SubAgent · ${p.commission_rate}%)` : `(${p.type})`}
-                                </option>
-                              ))}
-                            </select>
-
-                            {picInfo && (
-                              <div className="flex items-center gap-1">
-                                {picInfo.type === "subagent" ? (
-                                  <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1 rounded">
-                                    SubAgent · {picInfo.commission}% Comm
+                          {/* 4. Insurer & Quotes */}
+                          <td className="py-3 px-3">
+                            {t.sourced_quotes.length === 0 ? (
+                              <span className="text-neutral-400 italic text-[11px]">0 quotes compiled</span>
+                            ) : (
+                              <div className="flex flex-col gap-1 max-w-[210px]">
+                                {t.sourced_quotes.slice(0, 3).map((q) => (
+                                  <span
+                                    key={q.session_id}
+                                    className="inline-flex items-center justify-between gap-1.5 px-2 py-0.5 rounded bg-neutral-100 text-neutral-800 text-[10px] font-medium border border-neutral-200/60"
+                                  >
+                                    <span className="font-bold truncate max-w-[110px]">{q.company}</span>
+                                    {q.total_payable && (
+                                      <span className="text-neutral-700 font-mono font-bold shrink-0">RM {q.total_payable}</span>
+                                    )}
                                   </span>
-                                ) : picInfo.type === "client_self" ? (
-                                  <span className="text-[10px] font-medium text-neutral-600 bg-neutral-100 px-1 rounded">
-                                    Client (Self)
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] font-medium text-blue-800 bg-blue-50 px-1 rounded">
-                                    Company Personnel
+                                ))}
+                                {t.sourced_quotes.length > 3 && (
+                                  <span className="text-[10px] text-neutral-500 font-bold px-1">
+                                    +{t.sourced_quotes.length - 3} more quotes
                                   </span>
                                 )}
                               </div>
                             )}
-                          </div>
-                        </td>
-
-                        {/* 7. Business Type (Renewal / New Business) */}
-                        <td className="py-3 px-3">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const nextType = t.business_type === "New Business" ? "Renewal" : "New Business";
-                              patchTenureField(t.id, { business_type: nextType });
-                            }}
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer ${
-                              t.business_type === "New Business"
-                                ? "bg-purple-100 text-purple-900 border-purple-200"
-                                : "bg-neutral-100 text-neutral-800 border-neutral-200"
-                            }`}
-                            title="Click to toggle Renewal / New Business"
-                          >
-                            {t.business_type || "Renewal"}
-                          </button>
-                        </td>
-
-                        {/* 8. Insurer & Sourced Quotes */}
-                        <td className="py-3 px-3">
-                          {t.sourced_quotes.length === 0 ? (
-                            <span className="text-neutral-400 italic text-[11px]">0 quotes</span>
-                          ) : (
-                            <div className="flex flex-wrap gap-1 max-w-[180px]">
-                              {t.sourced_quotes.map((q) => (
-                                <span
-                                  key={q.session_id}
-                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-800 text-[10px] font-medium border border-neutral-200/60"
-                                >
-                                  <span className="font-bold">{q.company}</span>
-                                  {q.total_payable && (
-                                    <span className="text-neutral-500 font-mono">RM {q.total_payable}</span>
-                                  )}
+                            {t.generated_quotations && t.generated_quotations.length > 0 && (
+                              <div className="mt-1">
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 text-[10px] font-bold border border-emerald-200">
+                                  <FilePdf size={11} weight="fill" className="text-emerald-600" />
+                                  <span>{t.generated_quotations.length} Issued</span>
                                 </span>
-                              ))}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* 5. Milestones & Status */}
+                          <td className="py-3 px-3">
+                            <div className="space-y-1.5">
+                              {/* Row 1: Payment Status */}
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${
+                                    t.client_payment_received
+                                      ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                      : "bg-neutral-50 text-neutral-500 border-neutral-200"
+                                  }`}
+                                  title="Client Payment Status"
+                                >
+                                  {t.client_payment_received ? "✓ Cli Paid" : "Cli Unpaid"}
+                                </span>
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${
+                                    t.agency_payment_done
+                                      ? "bg-blue-50 text-blue-800 border-blue-200"
+                                      : "bg-neutral-50 text-neutral-500 border-neutral-200"
+                                  }`}
+                                  title="Agency Payment Status"
+                                >
+                                  {t.agency_payment_done ? "✓ Agc Paid" : "Agc Due"}
+                                </span>
+                              </div>
+
+                              {/* Row 2: Roadtax, UCD, PIC */}
+                              <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
+                                {t.key_in_ucd && (
+                                  <span className="text-teal-700 font-bold bg-teal-50 px-1.5 py-0.2 rounded border border-teal-200">
+                                    UCD ✓
+                                  </span>
+                                )}
+                                {t.print_roadtax && t.print_roadtax !== "No" && (
+                                  <span className="text-neutral-700 font-semibold bg-neutral-100 px-1.5 py-0.2 rounded border border-neutral-200 truncate max-w-[100px]">
+                                    RT: {t.print_roadtax}
+                                  </span>
+                                )}
+                                {picInfo && (
+                                  <span className="text-neutral-500 font-medium truncate max-w-[95px]" title={`PIC: ${picInfo.name}`}>
+                                    PIC: {picInfo.name}
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                          )}
-                        </td>
+                          </td>
 
-                        {/* 9. Payment Status (Client Paid / Agency Paid) */}
-                        <td className="py-3 px-3 text-center">
-                          <div className="flex items-center justify-center gap-1.5">
-                            <label
-                              className="flex items-center gap-0.5 text-[10px] font-semibold text-neutral-700 cursor-pointer"
-                              title="Client Payment Received"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={Boolean(t.client_payment_received)}
-                                onChange={(e) =>
-                                  patchTenureField(t.id, { client_payment_received: e.target.checked })
-                                }
-                                className="w-3.5 h-3.5 accent-emerald-600 rounded cursor-pointer"
-                              />
-                              <span>Cli</span>
-                            </label>
+                          {/* 6. Actions */}
+                          <td className="py-3 px-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <Link
+                                href={`/comparison?tenure_id=${t.id}` as Route}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold transition-colors shadow-2xs cursor-pointer"
+                                title="Go to Marketing Comparison matrix for this vehicle"
+                              >
+                                <Columns className="w-3.5 h-3.5" />
+                                <span>Compare</span>
+                              </Link>
 
-                            <label
-                              className="flex items-center gap-0.5 text-[10px] font-semibold text-neutral-700 cursor-pointer"
-                              title="Agency Payment Settled"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={Boolean(t.agency_payment_done)}
-                                onChange={(e) =>
-                                  patchTenureField(t.id, { agency_payment_done: e.target.checked })
-                                }
-                                className="w-3.5 h-3.5 accent-blue-600 rounded cursor-pointer"
-                              />
-                              <span>Agc</span>
-                            </label>
-                          </div>
-                        </td>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => setActiveDrawerTenureId(t.id)}
+                                className="h-7 text-xs font-medium cursor-pointer"
+                              >
+                                Timeline <ArrowRight className="w-3 h-3 ml-0.5" />
+                              </Button>
 
-                        {/* 10. Key-in UCD */}
-                        <td className="py-3 px-3 text-center">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(t.key_in_ucd)}
-                            onChange={(e) => patchTenureField(t.id, { key_in_ucd: e.target.checked })}
-                            className="w-4 h-4 accent-teal-600 rounded cursor-pointer"
-                            title="Keyed-in to UCD Portal"
-                          />
-                        </td>
+                              <button
+                                type="button"
+                                onClick={() => toggleExpandRow(t.id)}
+                                className={`h-7 px-2 text-xs font-bold rounded flex items-center gap-1 transition-colors cursor-pointer ${
+                                  isExpanded
+                                    ? "bg-neutral-900 text-white"
+                                    : "bg-neutral-100 hover:bg-neutral-200 text-neutral-700"
+                                }`}
+                                title={isExpanded ? "Close sub-panel" : "Expand inline editor"}
+                              >
+                                <span>{isExpanded ? "Done" : "Details"}</span>
+                                {isExpanded ? <CaretUp size={11} weight="bold" /> : <CaretDown size={11} weight="bold" />}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
 
-                        {/* 11. Roadtax Status (Print Roadtax & Receipt) */}
-                        <td className="py-3 px-3">
-                          <div className="flex flex-col gap-1">
-                            <select
-                              value={t.print_roadtax || "No"}
-                              onChange={(e) => patchTenureField(t.id, { print_roadtax: e.target.value })}
-                              className="h-6 px-1.5 text-[10px] font-semibold rounded border border-neutral-200 bg-white text-neutral-800 outline-none cursor-pointer"
-                              title="Print Roadtax"
-                            >
-                              <option value="No">Print: No</option>
-                              <option value="MyEG Pending">MyEG Pending</option>
-                              <option value="Done">Print: Done</option>
-                              <option value="Counter">Counter</option>
-                              <option value="Digital Only">Digital Only</option>
-                            </select>
+                        {/* Inline Expandable Sub-panel */}
+                        {isExpanded && (
+                          <tr className="bg-[#f9f9fb] border-b-2 border-neutral-300">
+                            <td colSpan={7} className="p-4 whitespace-normal">
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                                {/* Sub-panel Card 1: Deal Intelligence & Remarks */}
+                                <div className="p-3.5 bg-white rounded-xl border border-neutral-200 shadow-2xs space-y-3">
+                                  <div className="flex items-center justify-between pb-1.5 border-b border-neutral-100">
+                                    <span className="font-bold text-neutral-900 uppercase tracking-wider text-[11px] flex items-center gap-1">
+                                      <NotePencil size={14} className="text-amber-600" />
+                                      Deal Intelligence &amp; Remarks
+                                    </span>
+                                    {savingFieldId === t.id && (
+                                      <span className="text-[10px] text-neutral-500 font-semibold animate-pulse">
+                                        Saving...
+                                      </span>
+                                    )}
+                                    {savedFieldId === t.id && (
+                                      <span className="text-[10px] text-emerald-600 font-bold">
+                                        ✓ Saved
+                                      </span>
+                                    )}
+                                  </div>
 
-                            <select
-                              value={t.roadtax_receipt || "None"}
-                              onChange={(e) => patchTenureField(t.id, { roadtax_receipt: e.target.value })}
-                              className="h-6 px-1.5 text-[10px] font-semibold rounded border border-neutral-200 bg-white text-neutral-800 outline-none cursor-pointer"
-                              title="Roadtax Receipt Status"
-                            >
-                              <option value="None">Rcpt: None</option>
-                              <option value="Pending">Rcpt: Pending</option>
-                              <option value="Received">Rcpt: Received</option>
-                              <option value="Sent to Client">Rcpt: Sent to Client</option>
-                            </select>
-                          </div>
-                        </td>
+                                  {t.is_hidden && (
+                                    <div className="p-2 rounded bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-medium flex items-center gap-1.5">
+                                      <Warning size={14} weight="bold" className="text-amber-700 shrink-0" />
+                                      <span>This tenure was superseded by a newer quotation on this vehicle.</span>
+                                    </div>
+                                  )}
 
-                        {/* 12. Days in Stage */}
-                        <td className="py-3 px-3 text-center">
-                          <span
-                            className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-bold font-mono ${
-                              isOverdue
-                                ? "bg-rose-100 text-rose-800 border border-rose-200"
-                                : "bg-neutral-100 text-neutral-700"
-                            }`}
-                          >
-                            {t.days_in_stage}d
-                          </span>
-                        </td>
+                                  <div>
+                                    <label className="text-[11px] font-bold text-neutral-700 block mb-1">
+                                      Deal Comment
+                                    </label>
+                                    <input
+                                      type="text"
+                                      defaultValue={t.comment || ""}
+                                      placeholder="Add deal comment / reminder..."
+                                      onBlur={(e) => {
+                                        if (e.target.value !== (t.comment || "")) {
+                                          patchTenureField(t.id, { comment: e.target.value });
+                                        }
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") e.currentTarget.blur();
+                                      }}
+                                      className="w-full h-8 px-2.5 text-xs rounded border border-neutral-300 bg-white focus:ring-1 focus:ring-neutral-900 outline-none"
+                                    />
+                                  </div>
 
-                        {/* 13. Actions */}
-                        <td className="py-3 px-3 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <Link
-                              href={`/comparison?tenure_id=${t.id}` as Route}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold transition-colors shadow-2xs cursor-pointer"
-                              title="Go to Marketing Comparison matrix for this vehicle"
-                            >
-                              <Columns className="w-3.5 h-3.5" />
-                              <span>Compare</span>
-                            </Link>
+                                  <div>
+                                    <label className="text-[11px] font-bold text-neutral-700 block mb-1">
+                                      Client Habitual Preference Notes
+                                    </label>
+                                    <textarea
+                                      rows={2}
+                                      defaultValue={t.client_preference_notes || t.notes || ""}
+                                      placeholder="Habitual pattern, underwriter preferences, agreed value rules..."
+                                      onBlur={(e) => {
+                                        if (e.target.value !== (t.client_preference_notes || "")) {
+                                          patchTenureField(t.id, { client_preference_notes: e.target.value });
+                                        }
+                                      }}
+                                      className="w-full p-2 text-xs rounded border border-neutral-300 bg-white focus:ring-1 focus:ring-neutral-900 outline-none resize-none"
+                                    />
+                                  </div>
+                                </div>
 
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              onClick={() => setActiveDrawerTenureId(t.id)}
-                              className="h-7 text-xs font-medium cursor-pointer"
-                            >
-                              Timeline <ArrowRight className="w-3 h-3 ml-0.5" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
+                                {/* Sub-panel Card 2: Ownership, PIC & Business Classification */}
+                                <div className="p-3.5 bg-white rounded-xl border border-neutral-200 shadow-2xs space-y-3">
+                                  <div className="flex items-center justify-between pb-1.5 border-b border-neutral-100">
+                                    <span className="font-bold text-neutral-900 uppercase tracking-wider text-[11px] flex items-center gap-1">
+                                      <Users size={14} className="text-blue-600" />
+                                      Ownership &amp; Vehicle Specs
+                                    </span>
+                                  </div>
+
+                                  <div>
+                                    <label className="text-[11px] font-bold text-neutral-700 block mb-1">
+                                      Assigned Sub Agent / PIC
+                                    </label>
+                                    <select
+                                      value={t.pic_id || ""}
+                                      onChange={(e) => {
+                                        const selectedPicId = e.target.value;
+                                        const matched = pics.find((p) => p.id === selectedPicId);
+                                        patchTenureField(t.id, {
+                                          pic_id: selectedPicId || null,
+                                          sub_agent_name: matched ? matched.name : "",
+                                        });
+                                      }}
+                                      className="w-full h-8 px-2 text-xs font-semibold rounded border border-neutral-300 bg-white text-neutral-800 outline-none cursor-pointer"
+                                    >
+                                      <option value="">— Unassigned PIC —</option>
+                                      {pics.map((p) => (
+                                        <option key={p.id} value={p.id}>
+                                          {p.name} {p.type === "subagent" ? `(SubAgent · ${p.commission_rate}%)` : `(${p.type})`}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    {picInfo && (
+                                      <div className="mt-1 flex items-center gap-1.5">
+                                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">
+                                          Commission: {picInfo.commission}%
+                                        </span>
+                                        {picInfo.agency && (
+                                          <span className="text-[10px] text-neutral-600 font-medium">
+                                            Agency: {picInfo.agency}
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div>
+                                    <label className="text-[11px] font-bold text-neutral-700 block mb-1">
+                                      Business Type
+                                    </label>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => patchTenureField(t.id, { business_type: "Renewal" })}
+                                        className={`px-3 py-1 text-xs font-bold rounded border cursor-pointer transition-colors ${
+                                          t.business_type !== "New Business"
+                                            ? "bg-neutral-900 text-white border-neutral-900"
+                                            : "bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-50"
+                                        }`}
+                                      >
+                                        Renewal
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => patchTenureField(t.id, { business_type: "New Business" })}
+                                        className={`px-3 py-1 text-xs font-bold rounded border cursor-pointer transition-colors ${
+                                          t.business_type === "New Business"
+                                            ? "bg-purple-600 text-white border-purple-600"
+                                            : "bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-50"
+                                        }`}
+                                      >
+                                        New Business
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  <div className="pt-2 border-t border-neutral-100 text-[11px] text-neutral-600 space-y-1">
+                                    <div className="flex justify-between">
+                                      <span>Year of Make (YOM):</span>
+                                      <strong className="text-neutral-900">{t.manufacture_year || "—"}</strong>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span>Engine No:</span>
+                                      <strong className="text-neutral-900 font-mono">{t.engine_no || "—"}</strong>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span>Chassis No:</span>
+                                      <strong className="text-neutral-900 font-mono">{t.chassis_no || "—"}</strong>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Sub-panel Card 3: Operations, Payments & Fulfillment */}
+                                <div className="p-3.5 bg-white rounded-xl border border-neutral-200 shadow-2xs space-y-3">
+                                  <div className="flex items-center justify-between pb-1.5 border-b border-neutral-100">
+                                    <span className="font-bold text-neutral-900 uppercase tracking-wider text-[11px] flex items-center gap-1">
+                                      <CurrencyDollar size={14} className="text-emerald-600" />
+                                      Operations &amp; Fulfillment
+                                    </span>
+                                  </div>
+
+                                  <div className="space-y-1.5">
+                                    <label className="flex items-center gap-2 text-xs font-semibold text-neutral-800 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(t.client_payment_received)}
+                                        onChange={(e) =>
+                                          patchTenureField(t.id, { client_payment_received: e.target.checked })
+                                        }
+                                        className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+                                      />
+                                      <span>Client Payment Received</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 text-xs font-semibold text-neutral-800 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(t.agency_payment_done)}
+                                        onChange={(e) =>
+                                          patchTenureField(t.id, { agency_payment_done: e.target.checked })
+                                        }
+                                        className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
+                                      />
+                                      <span>Agency Underwriter Payment Done</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 text-xs font-semibold text-neutral-800 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(t.key_in_ucd)}
+                                        onChange={(e) => patchTenureField(t.id, { key_in_ucd: e.target.checked })}
+                                        className="w-4 h-4 accent-teal-600 rounded cursor-pointer"
+                                      />
+                                      <span>Keyed-in to UCD Portal</span>
+                                    </label>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-neutral-100">
+                                    <div>
+                                      <label className="text-[10px] font-bold text-neutral-600 block mb-0.5">
+                                        Print Roadtax
+                                      </label>
+                                      <select
+                                        value={t.print_roadtax || "No"}
+                                        onChange={(e) => patchTenureField(t.id, { print_roadtax: e.target.value })}
+                                        className="w-full h-7 px-1.5 text-xs font-semibold rounded border border-neutral-300 bg-white"
+                                      >
+                                        <option value="No">No</option>
+                                        <option value="MyEG Pending">MyEG Pending</option>
+                                        <option value="Done">Done</option>
+                                        <option value="Counter">Counter</option>
+                                        <option value="Digital Only">Digital Only</option>
+                                      </select>
+                                    </div>
+                                    <div>
+                                      <label className="text-[10px] font-bold text-neutral-600 block mb-0.5">
+                                        Roadtax Receipt
+                                      </label>
+                                      <select
+                                        value={t.roadtax_receipt || "None"}
+                                        onChange={(e) => patchTenureField(t.id, { roadtax_receipt: e.target.value })}
+                                        className="w-full h-7 px-1.5 text-xs font-semibold rounded border border-neutral-300 bg-white"
+                                      >
+                                        <option value="None">None</option>
+                                        <option value="Pending">Pending</option>
+                                        <option value="Received">Received</option>
+                                        <option value="Sent to Client">Sent to Client</option>
+                                      </select>
+                                    </div>
+                                  </div>
+
+                                  <div className="pt-2 border-t border-neutral-100 flex items-center justify-between">
+                                    <Link
+                                      href={`/comparison?tenure_id=${t.id}` as Route}
+                                      className="text-xs font-bold text-amber-700 hover:text-amber-900 flex items-center gap-1"
+                                    >
+                                      <span>Open Comparison Matrix →</span>
+                                    </Link>
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingTenure(t)}
+                                      className="text-xs font-bold text-neutral-700 hover:text-neutral-900 underline cursor-pointer"
+                                    >
+                                      Edit Deal Modal
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     );
                   })
                 )}
@@ -1537,7 +1796,7 @@ export function TenureTimelineLedger() {
                 {calendarData.monthLabel}
               </span>
               <span className="text-xs font-medium text-neutral-500">
-                · {tenures.length} policies expiring this month
+                · {calendarData.agendaDays.reduce((acc, g) => acc + g.items.length, 0)} timeline events ({calendarData.agendaDays.reduce((acc, g) => acc + g.items.filter(i => i.type === "start").length, 0)} starting · {calendarData.agendaDays.reduce((acc, g) => acc + g.items.filter(i => i.type === "end").length, 0)} expiring)
               </span>
             </div>
 
@@ -1626,40 +1885,52 @@ export function TenureTimelineLedger() {
                       </div>
 
                       <div className="flex-1 space-y-1 overflow-y-auto max-h-[110px] scrollbar-thin">
-                        {dayTenures.map((t) => (
-                          <div
-                            key={t.id}
-                            onClick={() => setActiveDrawerTenureId(t.id)}
-                            className="p-1.5 bg-neutral-50 hover:bg-neutral-100/90 border border-neutral-200/80 rounded cursor-pointer transition-all hover:shadow-xs group text-[11px]"
-                          >
-                            <div className="flex items-center justify-between gap-1">
-                              <span className="font-bold text-neutral-900 font-mono">
-                                {t.vehicle_no}
-                              </span>
-                              <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-neutral-200 text-neutral-800">
-                                {t.stage || "Quotations"}
-                              </span>
-                            </div>
+                        {dayTenures.map((item, itemIdx) => {
+                          const t = item.tenure;
+                          const isStart = item.type === "start";
+                          const displayName = getVehicleDisplayName(t.vehicle_no, t.chassis_no);
 
-                            <p className="text-[10px] text-neutral-500 truncate mt-0.5">
-                              {t.customer_name}
-                            </p>
+                          return (
+                            <div
+                              key={`${t.id}-${item.type}-${itemIdx}`}
+                              onClick={() => setActiveDrawerTenureId(t.id)}
+                              className="p-1.5 bg-neutral-50 hover:bg-neutral-100/90 border border-neutral-200/80 rounded cursor-pointer transition-all hover:shadow-xs group text-[11px]"
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span
+                                  className={`text-[9px] font-bold px-1 py-0.2 rounded uppercase shrink-0 ${
+                                    isStart
+                                      ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                                      : "bg-rose-100 text-rose-800 border border-rose-200"
+                                  }`}
+                                >
+                                  {isStart ? "Start" : "Exp"}
+                                </span>
+                                <span className="font-bold text-neutral-900 font-mono truncate text-[11px]" title={displayName}>
+                                  {displayName}
+                                </span>
+                              </div>
 
-                            <div className="flex items-center justify-between gap-1 pt-1 mt-1 border-t border-neutral-200/50">
-                              <span className="text-[9px] text-neutral-400">
-                                {t.sourced_quotes.length} quotes
-                              </span>
-                              <Link
-                                href={`/comparison?tenure_id=${t.id}` as Route}
-                                onClick={(e) => e.stopPropagation()}
-                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500 hover:bg-amber-600 text-slate-950 text-[9px] font-bold transition-colors"
-                              >
-                                <Columns className="w-2.5 h-2.5" />
-                                <span>Compare</span>
-                              </Link>
+                              <p className="text-[10px] text-neutral-500 truncate mt-0.5">
+                                {t.customer_name}
+                              </p>
+
+                              <div className="flex items-center justify-between gap-1 pt-1 mt-1 border-t border-neutral-200/50">
+                                <span className="text-[9px] text-neutral-400">
+                                  {t.sourced_quotes.length} quotes
+                                </span>
+                                <Link
+                                  href={`/comparison?tenure_id=${t.id}` as Route}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500 hover:bg-amber-600 text-slate-950 text-[9px] font-bold transition-colors"
+                                >
+                                  <Columns className="w-2.5 h-2.5" />
+                                  <span>Compare</span>
+                                </Link>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   );
@@ -1673,7 +1944,7 @@ export function TenureTimelineLedger() {
             <div className="space-y-3">
               {calendarData.agendaDays.length === 0 ? (
                 <div className="bg-white border border-neutral-200 rounded-[var(--rl-radius)] p-12 text-center text-xs text-neutral-400">
-                  No policy expiries recorded for {calendarData.monthLabel}.
+                  No policy start or expiry dates recorded for {calendarData.monthLabel}.
                 </div>
               ) : (
                 calendarData.agendaDays.map((group) => (
@@ -1687,69 +1958,84 @@ export function TenureTimelineLedger() {
                         <span className="text-xs font-bold text-neutral-900">{group.dateStr}</span>
                       </div>
                       <span className="text-[11px] font-semibold text-neutral-500">
-                        {group.items.length} {group.items.length === 1 ? "Policy" : "Policies"} Expiring
+                        {group.items.length} {group.items.length === 1 ? "Event" : "Events"} ({group.items.filter(i => i.type === "start").length} Starts · {group.items.filter(i => i.type === "end").length} Expiries)
                       </span>
                     </div>
 
                     <div className="divide-y divide-neutral-100 p-2">
-                      {group.items.map((t) => (
-                        <div
-                          key={t.id}
-                          onClick={() => setActiveDrawerTenureId(t.id)}
-                          className="p-3 hover:bg-neutral-50/70 rounded-lg cursor-pointer transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                        >
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-sm text-neutral-900 font-mono">{t.vehicle_no}</span>
-                              <span className="text-xs text-neutral-400">·</span>
-                              <span className="text-xs font-medium text-neutral-700">{t.customer_name}</span>
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">
-                                {t.stage || "Quotations"}
-                              </span>
+                      {group.items.map((item, itemIdx) => {
+                        const t = item.tenure;
+                        const isStart = item.type === "start";
+                        const displayName = getVehicleDisplayName(t.vehicle_no, t.chassis_no);
+
+                        return (
+                          <div
+                            key={`${t.id}-${item.type}-${itemIdx}`}
+                            onClick={() => setActiveDrawerTenureId(t.id)}
+                            className="p-3 hover:bg-neutral-50/70 rounded-lg cursor-pointer transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                          >
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span
+                                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${
+                                    isStart
+                                      ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                                      : "bg-rose-100 text-rose-800 border border-rose-200"
+                                  }`}
+                                >
+                                  {isStart ? "Policy Start" : "Policy Expiry"}
+                                </span>
+                                <span className="font-bold text-sm text-neutral-900 font-mono">{displayName}</span>
+                                <span className="text-xs text-neutral-400">·</span>
+                                <span className="text-xs font-medium text-neutral-700">{t.customer_name}</span>
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">
+                                  {t.stage || "Quotations"}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-2 text-xs text-neutral-500 flex-wrap">
+                                <span>Coverage:</span>
+                                <strong className="font-mono text-neutral-800">
+                                  {formatDateSafe(t.coverage_start_date)} – {formatDateSafe(t.coverage_end_date)}
+                                </strong>
+                                <span className="text-neutral-400">·</span>
+                                <span>{t.sourced_quotes.length} Quotes</span>
+                                {t.sub_agent_name && (
+                                  <>
+                                    <span className="text-neutral-400">·</span>
+                                    <span className="text-emerald-700 font-medium">
+                                      PIC: {t.sub_agent_name}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
                             </div>
 
-                            <div className="flex items-center gap-2 text-xs text-neutral-500">
-                              <span>Expiry:</span>
-                              <strong className="font-mono text-neutral-800">
-                                {t.coverage_end_date ? new Date(t.coverage_end_date).toLocaleDateString("en-GB") : "—"}
-                              </strong>
-                              <span className="text-neutral-400">·</span>
-                              <span>{t.sourced_quotes.length} Sourced Quotes</span>
-                              {t.sub_agent_name && (
-                                <>
-                                  <span className="text-neutral-400">·</span>
-                                  <span className="text-emerald-700 font-medium">
-                                    PIC: {t.sub_agent_name}
-                                  </span>
-                                </>
-                              )}
+                            <div className="flex items-center gap-2 shrink-0">
+                              <Link
+                                href={`/comparison?tenure_id=${t.id}` as Route}
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold transition-colors shadow-2xs"
+                              >
+                                <Columns className="w-3.5 h-3.5" />
+                                <span>Marketing Comparison</span>
+                              </Link>
+
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveDrawerTenureId(t.id);
+                                }}
+                                className="h-8 text-xs font-medium cursor-pointer"
+                              >
+                                Timeline &amp; Activity <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                              </Button>
                             </div>
                           </div>
-
-                          <div className="flex items-center gap-2 shrink-0">
-                            <Link
-                              href={`/comparison?tenure_id=${t.id}` as Route}
-                              onClick={(e) => e.stopPropagation()}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold transition-colors shadow-2xs"
-                            >
-                              <Columns className="w-3.5 h-3.5" />
-                              <span>Marketing Comparison</span>
-                            </Link>
-
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setActiveDrawerTenureId(t.id);
-                              }}
-                              className="h-8 text-xs font-medium"
-                            >
-                              Timeline &amp; Activity <ArrowRight className="w-3.5 h-3.5 ml-1" />
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 ))

@@ -1,4 +1,4 @@
-"""Hermetic unit tests for perpetual multi-year tenure chain generation and cohort alignment."""
+"""Hermetic unit tests verifying no automatic past or future tenure projection is generated."""
 
 from datetime import datetime, timezone
 import pytest
@@ -11,6 +11,7 @@ from app.models.tables import (
     TrackedVehicle,
 )
 from app.services.insurance_tenure_service import (
+    auto_project_next_renewal,
     ensure_vehicle_tenure_chain,
     resolve_or_create_tenure,
 )
@@ -29,8 +30,8 @@ def db_session():
         session.close()
 
 
-def test_ensure_vehicle_tenure_chain_auto_generates_future_and_multi_year(db_session: Session):
-    """Verify default upcoming renewal projection and full multi-year chain backfill."""
+def test_resolve_or_create_tenure_creates_single_policy_without_auto_projections(db_session: Session):
+    """Verify that resolving or creating a tenure creates strictly ONE policy for the uploaded quotation period."""
     start_dt = datetime(2026, 1, 17, tzinfo=timezone.utc)
     end_dt = datetime(2027, 1, 16, tzinfo=timezone.utc)
 
@@ -47,57 +48,19 @@ def test_ensure_vehicle_tenure_chain_auto_generates_future_and_multi_year(db_ses
     assert tenure.id is not None
     assert tenure.tracked_vehicle_id is not None
     assert tenure.expiry_month == "2027-01"
+    assert tenure.is_projected is False
 
-    # Default projection creates anchor (2026-2027, exp 2027) + upcoming (exp 2028, exp 2029) => 3 slots
-    initial_tenures = db_session.scalars(
-        select(InsuranceTenure)
-        .where(InsuranceTenure.tracked_vehicle_id == tenure.tracked_vehicle_id)
-        .order_by(InsuranceTenure.coverage_start_date.asc())
-    ).all()
-    assert len(initial_tenures) == 3
-
-    # Now run multi-year backfill across 2024-2029
-    ensure_vehicle_tenure_chain(
-        db_session,
-        tenure,
-        target_years=(2024, 2025, 2026, 2027, 2028, 2029),
-    )
-    db_session.commit()
-
+    # Strictly 1 tenure created: NO automatic previous or future slots
     all_tenures = db_session.scalars(
         select(InsuranceTenure)
         .where(InsuranceTenure.tracked_vehicle_id == tenure.tracked_vehicle_id)
-        .order_by(InsuranceTenure.coverage_start_date.asc())
     ).all()
-
-    # Target years (2024, 2025, 2026, 2027, 2028, 2029) => 6 total slots
-    assert len(all_tenures) == 6
-
-    # Verify each year slot exists
-    years = [t.coverage_start_date.year for t in all_tenures]
-    assert 2023 in years or 2024 in years
-    assert 2025 in years
-    assert 2026 in years
-    assert 2027 in years
-    assert 2028 in years
-
-    # Verify that chain IDs are linked
-    for t in all_tenures:
-        assert t.tenure_chain_id == tenure.tenure_chain_id
-        assert t.vehicle_no == "JTV 7029"
-
-    # Verify projected flags
-    projected_tenures = [t for t in all_tenures if t.id != tenure.id]
-    for pt in projected_tenures:
-        assert pt.is_projected is True
-        assert pt.status in ("upcoming", "untracked")
-
-    # Verify original tenure is NOT projected
-    assert tenure.is_projected is False
+    assert len(all_tenures) == 1
+    assert all_tenures[0].id == tenure.id
 
 
-def test_tenure_chain_idempotency(db_session: Session):
-    """Calling ensure_vehicle_tenure_chain multiple times should not create duplicate tenures."""
+def test_ensure_vehicle_tenure_chain_and_auto_project_are_disabled(db_session: Session):
+    """Calling ensure_vehicle_tenure_chain or auto_project_next_renewal does NOT generate dummy future slots."""
     start_dt = datetime(2026, 10, 11, tzinfo=timezone.utc)
     end_dt = datetime(2027, 10, 10, tzinfo=timezone.utc)
 
@@ -110,38 +73,20 @@ def test_tenure_chain_idempotency(db_session: Session):
     )
     db_session.commit()
 
-    count_before = len(
-        db_session.scalars(
-            select(InsuranceTenure).where(InsuranceTenure.tracked_vehicle_id == tenure.tracked_vehicle_id)
-        ).all()
-    )
-
-    # Call again explicitly with target years
-    ensure_vehicle_tenure_chain(
+    # ensure_vehicle_tenure_chain returns empty list and creates 0 tenures
+    result = ensure_vehicle_tenure_chain(
         db_session,
         tenure,
         target_years=(2024, 2025, 2026, 2027, 2028, 2029),
     )
-    db_session.commit()
+    assert result == []
 
-    count_intermediate = len(
-        db_session.scalars(
-            select(InsuranceTenure).where(InsuranceTenure.tracked_vehicle_id == tenure.tracked_vehicle_id)
-        ).all()
-    )
+    # auto_project_next_renewal does not create a new tenure
+    proj_result = auto_project_next_renewal(db_session, tenure.id)
+    assert proj_result.id == tenure.id
 
-    # Call a third time
-    ensure_vehicle_tenure_chain(
-        db_session,
-        tenure,
-        target_years=(2024, 2025, 2026, 2027, 2028, 2029),
-    )
-    db_session.commit()
-
-    count_after = len(
-        db_session.scalars(
-            select(InsuranceTenure).where(InsuranceTenure.tracked_vehicle_id == tenure.tracked_vehicle_id)
-        ).all()
-    )
-
-    assert count_intermediate == count_after
+    # Total tenures in DB remains exactly 1
+    total_tenures = db_session.scalars(
+        select(InsuranceTenure).where(InsuranceTenure.tracked_vehicle_id == tenure.tracked_vehicle_id)
+    ).all()
+    assert len(total_tenures) == 1

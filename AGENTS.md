@@ -31,9 +31,18 @@ This file plus the whole `docs/` folder is a portable agent brain. Copy `AGENTS.
 - Anything temporary goes in a gitignored folder INSIDE the project. This project uses `/.qc-tmp/`.
 - If a new temporary folder is needed: append one line to `.gitignore` (e.g., `/.new-tmp/`), then create it. Never remove, edit, or comment out existing `.gitignore` lines — only append.
 
-## 5. Code Change Rules
+## 5. Code Change & Dual-Track Execution Rules
 
-- **Mandatory Implementation Plan Gate**: NEVER touch, edit, or create code or configuration files without first creating an `implementation_plan.md` artifact and waiting for explicit user approval. Zero exceptions. No spontaneous code edits or unapproved refactors.
+- **Smart Dual-Track Protocol**:
+  - ⚡ **Fast Track (Surgical Polish & Styling)**: When a request involves ONLY styling, button positioning, color tokens, typography, copy fixes, or minor visual tweaks:
+    - **NEVER** run `git status` or `git diff` (pure wasted overhead; commit happens only when explicitly prompted).
+    - **NEVER** run the full 6/6 deploy gate or backend `pytest` suite for pure CSS/HTML/copy changes.
+    - Validate solely with single-file typecheck (`npx tsc --noEmit` or IDE diagnostics on the touched file).
+    - Deliver instantaneous turnaround (5–10 seconds).
+  - 🛡️ **Deep Track (Features, Schema, API, Refactor, Deploy)**:
+    - Mandatory Implementation Plan Gate: NEVER touch, edit, or create multi-file feature code or configuration files without first creating an `implementation_plan.md` artifact and waiting for explicit user approval.
+    - Enforce the 4 Agent Council Roles: Mentor (architecture & UI placement), Anti-Slop Builder (helper reuse, no bloat), QA Gauntlet (exhaustive Playwright testing), and Janitor (debris cleanup).
+    - Full 6/6 pre-deploy gate (`.\commands\verify-deploy-gate.ps1`) before committing, pushing, or completing major milestones.
 - **Hermetic Test Suite Invariant**: All tests in `tests/` must be 100% hermetic (using in-memory SQLite engines or mocks). Tests must NEVER attempt live network database connections (`SessionLocal()`), so tests run safely in CI without mutating or depending on production data.
 - When code is deleted or commented out, mark it inline: `// RL-DISABLED <feature> — disabled <date>; restore when <condition>` so future agents know why and when to bring it back.
 - Match existing code style. No gratuitous comments; no refactors bundled into unrelated work.
@@ -41,21 +50,27 @@ This file plus the whole `docs/` folder is a portable agent brain. Copy `AGENTS.
 - Commit and push only when the user explicitly asks. Documentation updates never depend on committing.
 - **Mandatory Pre-Commit & Pre-Push Gate**: When the user asks to commit, push (to `origin main`, `origin v18`, `origin v19`, or any branch), or create/publish a new branch, NEVER touch git or run commit/push commands immediately. You MUST first run the pre-deployment verification check via `.\commands\verify-deploy-gate.ps1`, mirroring `.github/workflows/deploy.yml` 1:1 (hermetic backend `pytest` under dummy CI environment, frontend `tsc --noEmit` and `npm run build`, schema verification, code map, brain verification). If ANY check fails, do NOT commit or push — fix all errors first so CI/CD deployment never fails downstream.
 
-## 6. Interaction Rules
+## 6. Interaction & Principal Engineer Rules
 
 - Read `docs/core/INSTRUCTIONS.md` — it defines how the owner talks and how to interpret him.
 - NEVER take the owner's words literally. References, sarcasm, analogies, and examples are references to intent, not literal requirements. Do not invent or hunt for things the owner did not actually ask for.
+- **Principal Staff Engineer Active Ownership**: Act as a technical co-founder / principal engineer. When the owner requests a feature, do NOT execute it naively (which causes technical debt or schema corruption) and do NOT block it with bureaucratic warnings. Understand the underlying business intent, upgrade the architecture to match `docs/domain/SAAS-BLUEPRINT.md` (strict foreign keys, indexes, atomic transactions, error handling, UI empty states), and build it right the first time.
+- **Proactive UI Placement Rule (Mentor Duty)**: If the owner requests a new button, control, or feature without specifying where it belongs in the UI, do NOT ask vague questions or dump it at the bottom of the page. Analyze the route and component hierarchy, automatically integrate it into the most ergonomic parent container (e.g., table action bar, details drawer, modal header), and document why that location was selected.
+- **No Pointless Git Checks**: Do NOT run `git status` or `git diff` during intermediate coding iterations. Git checks belong strictly to explicit commit/push workflows.
 - Ask questions before big or ambiguous work. For design/UX changes, analyze first, research options, present 6-8 concrete options, get approval, then execute.
 
-## 7. Skills
+## 7. Skills & Council Agents
 
 - Load a skill only when the task matches its description (`docs/core/SKILLS.md` registry). Read the selected skill completely before using it.
 - When a capability is missing, use the `find-skills` skill before proposing anything new, then record the result in `docs/core/SKILLS.md`.
+- Council Agent Personas live in `.agents/agents/` (`principal-architect.md`, `mentor.md`, `anti-slop.md`, `qa-gauntlet.md`, `janitor.md`). Mobilize their respective invariants during Deep Track work.
 
-## 8. Verification
+## 8. Verification (Tiered by Risk)
 
-- Never declare done without: backend `python -m pytest -q` (green), frontend `npx tsc --noEmit` and `npm run build` (green), zero IDE/lint diagnostics on changed files, `python commands/verify-brain.py` (green), and `python commands/update-code-map.py --check` when structure changed.
-- E2E/QA scripts live in `/.qc-tmp/` (see `docs/architecture/OPERATIONS.md` for the runbook).
+- **Fast Track (Cosmetic/Copy)**: Single-file `tsc` or IDE diagnostics check.
+- **Deep Track (Logic/API/Feature)**: Backend `python -m pytest -q` (green), frontend `npx tsc --noEmit` and `npm run build` (green), zero IDE/lint diagnostics on changed files, `python commands/verify-brain.py` (green), and `python commands/update-code-map.py --check` when structure changed.
+- **Commit / Push**: Full 6/6 pre-deploy gate (`.\commands\verify-deploy-gate.ps1`).
+- E2E/QA scripts live in `/.qc-tmp/` (see `docs/architecture/OPERATIONS.md` for the runbook) or execute via `commands/qa-crawl-page.mjs`.
 
 ## 9. Project-Specific (adapt when copying to another project)
 

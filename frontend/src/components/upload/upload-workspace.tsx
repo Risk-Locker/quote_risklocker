@@ -101,6 +101,7 @@ function formatElapsed(seconds: number) {
 export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const existingTenureId = searchParams.get("tenure_id");
 
   const [mode, setMode] = useState<UploadMode>(defaultMode);
 
@@ -424,8 +425,6 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
       )
     );
 
-    const existingTenureId = searchParams.get("tenure_id");
-
     const CHUNK_SIZE = 5;
     for (let c = 0; c < stagedItems.length; c += CHUNK_SIZE) {
       const currentChunk = stagedItems.slice(c, c + CHUNK_SIZE);
@@ -436,18 +435,15 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
             form.append("file", item.file);
             form.append("enhanced_reading", String(enhanced));
             form.append("is_test", String(isTestUpload));
+            if (existingTenureId) {
+              form.append("tenure_id", existingTenureId);
+            }
 
             const result = await api<UploadResult>("/uploads", {
               method: "POST",
               headers: { "Idempotency-Key": crypto.randomUUID() },
               body: form,
             });
-
-            // In comparison mode with known tenure ID, redirect immediately once the file is enqueued
-            if (mode === "comparison" && existingTenureId && !redirectedRef.current) {
-              redirectedRef.current = true;
-              router.push(`/comparison?tenure_id=${existingTenureId}&from_upload=true` as Route);
-            }
 
             setBulkFiles((prev) =>
               prev.map((i) =>
@@ -517,13 +513,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
               };
             }>(`/sessions/${sessionId}`);
 
-            const resolvedTenureId = sRes.session.tenure_id;
-
-            // In comparison mode, automatically navigate directly into the 3-column Marketing Comparison workspace!
-            if (mode === "comparison" && !redirectedRef.current && resolvedTenureId) {
-              redirectedRef.current = true;
-              router.push(`/comparison?tenure_id=${resolvedTenureId}&from_upload=true` as Route);
-            }
+            const resolvedTenureId = sRes.session.tenure_id || existingTenureId;
 
             setBulkFiles((prev) =>
               prev.map((i) =>

@@ -5,6 +5,7 @@ Provides immutable government ID normalization (NRIC, Passport, SSM BRN) and can
 from __future__ import annotations
 
 import re
+from typing import Any
 
 # SSM / Corporate Legal Suffix Standardization Patterns
 _CORP_SUFFIX_REPLACEMENTS = [
@@ -27,8 +28,76 @@ _CORP_SUFFIX_REPLACEMENTS = [
 # Old SSM format: 5 to 9 digits followed by 1 letter (e.g. 123456-X, 001234567-T)
 _OLD_SSM_RE = re.compile(r"^\d{5,9}[A-Z]$")
 
-# Hyphenated NRIC: YYMMDD-PB-####
-_HYPHEN_NRIC_RE = re.compile(r"^\d{6}-\d{2}-\d{4}$")
+# PB (Place of Birth) state codes for Malaysian NRIC
+_NRIC_STATE_CODES: dict[str, str] = {
+    "01": "Johor", "21": "Johor", "22": "Johor", "23": "Johor", "24": "Johor",
+    "02": "Kedah", "25": "Kedah", "26": "Kedah", "27": "Kedah",
+    "03": "Kelantan", "28": "Kelantan", "29": "Kelantan",
+    "04": "Melaka", "30": "Melaka",
+    "05": "Negeri Sembilan", "31": "Negeri Sembilan", "59": "Negeri Sembilan",
+    "06": "Pahang", "32": "Pahang", "33": "Pahang",
+    "07": "Pulau Pinang", "34": "Pulau Pinang", "35": "Pulau Pinang",
+    "08": "Perak", "36": "Perak", "37": "Perak", "38": "Perak", "39": "Perak",
+    "09": "Perlis", "40": "Perlis",
+    "10": "Selangor", "41": "Selangor", "42": "Selangor", "43": "Selangor", "44": "Selangor",
+    "11": "Terengganu", "45": "Terengganu", "46": "Terengganu",
+    "12": "Sabah", "47": "Sabah", "48": "Sabah", "49": "Sabah",
+    "13": "Sarawak", "50": "Sarawak", "51": "Sarawak", "52": "Sarawak", "53": "Sarawak",
+    "14": "Wilayah Persekutuan Kuala Lumpur", "54": "Wilayah Persekutuan Kuala Lumpur", "55": "Wilayah Persekutuan Kuala Lumpur", "56": "Wilayah Persekutuan Kuala Lumpur", "57": "Wilayah Persekutuan Kuala Lumpur",
+    "15": "Wilayah Persekutuan Labuan", "58": "Wilayah Persekutuan Labuan",
+    "16": "Wilayah Persekutuan Putrajaya",
+}
+
+
+def parse_nric_details(nric: str | None) -> dict[str, Any]:
+    """Parse 12-digit Malaysian NRIC YYMMDD-PB-###G into demographic details.
+
+    Returns dict with:
+        - valid: bool
+        - formatted: str (e.g. 700322-08-5316)
+        - birth_date: str (YYYY-MM-DD)
+        - age: int
+        - gender: 'male' | 'female'
+        - state: str (Malaysian state of birth)
+    """
+    if not nric:
+        return {"valid": False}
+    digits, id_type = normalize_government_id(nric)
+    if id_type != "nric" or len(digits) != 12 or not digits.isdigit():
+        return {"valid": False}
+
+    yy = int(digits[0:2])
+    mm = int(digits[2:4])
+    dd = int(digits[4:6])
+    pb = digits[6:8]
+    g = int(digits[11])
+
+    # Reference year: 2026
+    from datetime import date
+    current_year = date.today().year
+    century_cutoff = current_year % 100
+    birth_year = (2000 + yy) if yy <= century_cutoff else (1900 + yy)
+
+    try:
+        bdate = date(birth_year, mm, dd)
+    except ValueError:
+        return {"valid": False}
+
+    today = date.today()
+    age = today.year - bdate.year - ((today.month, today.day) < (bdate.month, bdate.day))
+    gender = "male" if g % 2 != 0 else "female"
+    state = _NRIC_STATE_CODES.get(pb, "Malaysia")
+    formatted = f"{digits[0:6]}-{digits[6:8]}-{digits[8:12]}"
+
+    return {
+        "valid": True,
+        "nric": digits,
+        "formatted": formatted,
+        "birth_date": bdate.isoformat(),
+        "age": age,
+        "gender": gender,
+        "state": state,
+    }
 
 
 def normalize_government_id(raw_id: str | None) -> tuple[str, str]:
@@ -42,7 +111,25 @@ def normalize_government_id(raw_id: str | None) -> tuple[str, str]:
     if not raw_id:
         return "", "unknown"
 
-    cleaned = re.sub(r"[^A-Za-z0-9]", "", str(raw_id).strip().upper())
+    raw_str = raw_id.strip()
+
+    # Reject internal placeholder IDs
+    if raw_str.upper().startswith("PENDING-") or "PENDING-" in raw_str.upper():
+        return "", "unknown"
+
+    # Pre-clean common parenthetical annotations: (new), (baru), (old), (lama), etc.
+    cleaned_note = re.sub(r"(?i)\s*\((?:new|baru|old|lama|c|co)\)\s*", "", raw_str).strip()
+
+    # Direct 12-digit NRIC extraction if present anywhere (e.g. 700322-08-5316 or 700322085316)
+    m_nric = re.search(r"\b(\d{6})[-\s]?(\d{2})[-\s]?(\d{4})\b", cleaned_note)
+    if m_nric:
+        nric_digits = f"{m_nric.group(1)}{m_nric.group(2)}{m_nric.group(3)}"
+        mm = int(nric_digits[2:4])
+        dd = int(nric_digits[4:6])
+        if 1 <= mm <= 12 and 1 <= dd <= 31:
+            return nric_digits, "nric"
+
+    cleaned = re.sub(r"[^A-Za-z0-9]", "", cleaned_note.upper())
     if not cleaned:
         return "", "unknown"
 
@@ -101,7 +188,7 @@ def normalize_canonical_name(name: str | None) -> str:
         return ""
 
     # Remove all punctuation and symbols
-    cleaned = re.sub(r"[\.,/\\_\-\(\)\[\]\{\}\"\'`@#\$\%^&\*~:;!?|]", " ", str(name).strip().upper())
+    cleaned = re.sub(r"[\.,/\\_\-\(\)\[\]\{\}\"\'`@#\$\%^&\*~:;!?|]", " ", name.strip().upper())
 
     # Standardize corporate suffixes
     for pattern, replacement in _CORP_SUFFIX_REPLACEMENTS:

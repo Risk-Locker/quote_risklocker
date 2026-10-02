@@ -206,6 +206,8 @@ def get_company_matrix_data(db: Session, company_id: str) -> dict[str, Any]:
             is_custom = bool(off_desc and str(off_desc).strip())
             c_desc = str(off_desc).strip() if is_custom else (conc.description if conc and conc.description else "")
 
+            # Catalog structure display partitioning: separates base offerings from optional add-ons
+            # Note: Actual quotation cost_status is decoupled and determined per-draft by extraction evidence
             is_default = o.role == "included" or o.offering_kind == "base"
             if is_default:
                 defaults.append({

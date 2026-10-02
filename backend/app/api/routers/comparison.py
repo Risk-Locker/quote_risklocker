@@ -16,6 +16,8 @@ from app.models.tables import InsuranceTenure, User, new_id
 from app.services.marketing_comparison_service import (
     delete_comparison_entry,
     format_whatsapp_teaser,
+    generate_all_quotations,
+    generate_quotation_for_entry,
     get_marketing_comparison,
     save_comparison_entry,
     select_winner_and_generate_draft,
@@ -41,6 +43,7 @@ class FixedCostsUpdateRequest(BaseModel):
     engine_no: str | None = Field(None, description="Engine number")
     chassis_no: str | None = Field(None, description="Chassis / VIN number")
     vehicle_model: str | None = Field(None, description="Vehicle make and model")
+    manufacture_year: int | None = Field(None, description="Vehicle year of manufacture (e.g. 2020)")
 
 
 class ComparisonEntryUpsertRequest(BaseModel):
@@ -106,6 +109,7 @@ def update_fixed_costs(
             engine_no=payload.engine_no,
             chassis_no=payload.chassis_no,
             vehicle_model=payload.vehicle_model,
+            manufacture_year=payload.manufacture_year,
         )
 
     except ValueError as e:
@@ -217,6 +221,7 @@ async def upload_comparison_quote(
             idempotency_key=idempotency_key,
             enhanced_reading=False,
             is_test=is_test,
+            tenure_id=tenure_id,
         )
         if queued.session:
             queued.session.tenure_id = tenure_id
@@ -232,3 +237,42 @@ async def upload_comparison_quote(
     except Exception as e:
         logger.exception("Failed to upload quotation PDF for tenure %s: %s", tenure_id, e)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post("/{tenure_id}/entry/{entry_id}/generate-quote")
+def generate_single_entry_quote(
+    tenure_id: str,
+    entry_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Generate official Risk-Locker quotation for a specific comparison card."""
+    try:
+        return generate_quotation_for_entry(db, tenure_id, entry_id, user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.exception("Failed to generate quote for entry %s under tenure %s: %s", entry_id, tenure_id, e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to generate quote")
+
+
+@router.post("/{tenure_id}/generate-all-quotes")
+def generate_all_deal_quotes(
+    tenure_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Generate official Risk-Locker quotations for all underwriter cards under this comparison deal."""
+    try:
+        results = generate_all_quotations(db, tenure_id, user.id)
+        return {
+            "status": "success",
+            "tenure_id": tenure_id,
+            "generated_count": len(results),
+            "quotes": results,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.exception("Failed to generate all quotes for tenure %s: %s", tenure_id, e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to generate all quotes")

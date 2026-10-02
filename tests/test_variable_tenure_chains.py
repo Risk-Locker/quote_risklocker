@@ -53,6 +53,7 @@ def test_tenure_chaining_on_creation(db_session: Session):
 
     assert tenure_1.previous_tenure_id is None
     assert tenure_1.tenure_chain_id is not None
+    assert tenure_1.reminder_window_start is not None
     assert tenure_1.reminder_window_start.date() == (start_1 - timedelta(days=90)).date()
 
     # Year 2 tenure: 2026-01-01 to 2026-12-31 on same vehicle
@@ -87,23 +88,18 @@ def test_auto_project_next_renewal(db_session: Session):
     t.runner_fee = 10.00
     db_session.commit()
 
+    # auto_project_next_renewal was permanently disabled (STATE.md:66)
+    # Policies are created when uploaded by staff; no dummy projections created.
     projected = auto_project_next_renewal(db_session, t.id)
     db_session.commit()
 
     assert projected is not None
-    assert projected.is_projected is True
-    assert projected.status == "upcoming"
-    assert projected.previous_tenure_id == t.id
-    assert projected.tenure_chain_id == t.tenure_chain_id
-    assert projected.coverage_start_date.date() == (end + timedelta(days=1)).date()
-    assert projected.road_tax == 90.00
-    assert projected.runner_fee == 10.00
-    # Reminder window is 90 days before start
-    assert projected.reminder_window_start.date() == (projected.coverage_start_date - timedelta(days=90)).date()
+    assert projected.id == t.id
+    assert projected.is_projected is False
 
-    # Calling it again returns the already projected tenure idempotently
+    # Calling it again returns the same tenure idempotently
     projected2 = auto_project_next_renewal(db_session, t.id)
-    assert projected2.id == projected.id
+    assert projected2.id == t.id
 
 
 def test_auto_project_triggered_on_won_status(db_session: Session):
@@ -138,14 +134,11 @@ def test_auto_project_triggered_on_won_status(db_session: Session):
     )
     db_session.commit()
 
-    # Must have auto-projected the 2027-2028 renewal
+    # Auto-projection on won status is disabled; no dummy upcoming tenure is generated
     projected = db_session.query(InsuranceTenure).filter(
         InsuranceTenure.previous_tenure_id == t.id
     ).first()
-    assert projected is not None
-    assert projected.is_projected is True
-    assert projected.status == "upcoming"
-    assert projected.coverage_start_date.date() == datetime(2027, 3, 1).date()
+    assert projected is None
 
 
 def test_shift_tenure_dates_modular_sync(db_session: Session):
@@ -170,8 +163,15 @@ def test_shift_tenure_dates_modular_sync(db_session: Session):
     )
     db_session.commit()
 
-    # Projected Tenure 2 originally expected on 2026-01-01
-    t2 = auto_project_next_renewal(db_session, t1.id)
+    # Renewal Tenure 2 originally expected on 2026-01-01
+    t2 = resolve_or_create_tenure(
+        db_session,
+        vehicle_no="BEE9999",
+        customer_name="Late Renewal Corp",
+        start_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        end_date=datetime(2026, 12, 31, tzinfo=timezone.utc),
+    )
+    t2.previous_tenure_id = t1.id
     db_session.commit()
 
     batch = Batch(id=new_id(), owner_id=user.id, name="Test Batch")
@@ -223,8 +223,10 @@ def test_shift_tenure_dates_modular_sync(db_session: Session):
 
     # Delay days calculated from expected 2026-01-01
     assert shifted.delay_days == 15
+    assert shifted.coverage_start_date is not None
     assert shifted.coverage_start_date.date() == new_start.date()
     # End date automatically synchronized to +1 year - 1 day
+    assert shifted.coverage_end_date is not None
     assert shifted.coverage_end_date.date() == datetime(2027, 1, 15).date()
     assert shifted.is_projected is False
     assert shifted.status == "draft"
@@ -232,7 +234,9 @@ def test_shift_tenure_dates_modular_sync(db_session: Session):
     # Child session and draft dates were synchronized
     db_session.refresh(sess)
     db_session.refresh(draft)
+    assert sess.coverage_start_date is not None
     assert sess.coverage_start_date.date() == new_start.date()
+    assert sess.coverage_end_date is not None
     assert sess.coverage_end_date.date() == datetime(2027, 1, 15).date()
     assert draft.fields["cover_start_date"]["value"] == "16/01/2026"
     assert draft.fields["cover_end_date"]["value"] == "15/01/2027"

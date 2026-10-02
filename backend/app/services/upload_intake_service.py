@@ -86,6 +86,7 @@ async def create_queued_upload(
     idempotency_key: str,
     enhanced_reading: bool = False,
     is_test: bool = False,
+    tenure_id: str | None = None,
     storage: SupabaseStorage | None = None,
     quarantine: Callable[[bytes, Settings], ContextManager[tuple[Any, dict]]] = quarantined_pdf,
 ) -> QueuedUpload:
@@ -198,6 +199,7 @@ async def create_queued_upload(
             quotation_ref=q_ref,
             status=AccountStatus.ACTIVE.value,
             is_test=is_test,
+            tenure_id=tenure_id,
         )
         job = Job(
             id=job_id,
@@ -212,6 +214,7 @@ async def create_queued_upload(
                 "is_test": is_test,
                 "node_host": socket.gethostname(),
                 "storage_provider": storage_provider,
+                "tenure_id": tenure_id,
             },
             result={},
             safe_error={},

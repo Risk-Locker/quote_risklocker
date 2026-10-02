@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +27,7 @@ from app.models.tables import (
     ExtractionRecord,
     FieldAlias,
     InsuranceCompany,
+    InsuranceTenure,
     Job,
     QuotationDraft,
     Session,
@@ -295,6 +297,30 @@ def process_extraction_job(
     batch.status = draft.status
     session.detected_company = str((draft.fields.get("insurance_company") or {}).get("value") or "") or None
     company_id = (values["company_resolution"] or {}).get("company_id")
+    if not session.detected_company and company_id:
+        comp_obj = db.get(InsuranceCompany, company_id)
+        if comp_obj:
+            session.detected_company = comp_obj.name
+    elif not session.detected_company and uploaded.original_filename:
+        # Match filename against company names/aliases using standardized resolver
+        fn_clean = uploaded.original_filename.replace("_", " ").replace("-", " ")
+        db_comps = context.get("db_companies") or []
+        res = resolve_company(fn_clean, db_comps)
+        if res.get("status") == "matched" and res.get("company_id"):
+            session.detected_company = res.get("display_name")
+            if not company_id:
+                company_id = res.get("company_id")
+        else:
+            fn_lower = fn_clean.lower()
+            for comp_dict in db_comps:
+                c_name = str(comp_dict.get("name") or "").lower()
+                c_aliases = [str(a).lower() for a in comp_dict.get("aliases") or []]
+                if any(n and len(n) >= 3 and n in fn_lower for n in [c_name, *c_aliases]):
+                    session.detected_company = comp_dict.get("name")
+                    if not company_id:
+                        company_id = comp_dict.get("company_id")
+                    break
+
     if company_id:
         draft.company_id = company_id
         uploaded.insurance_company_id = company_id
@@ -368,6 +394,15 @@ def process_extraction_job(
     raw_cc = _fval("engine_cc")
     raw_brand = _fval("car_brand")
     raw_model = _fval("car_model")
+    raw_yom = _fval("vehicle_year") or _fval("manufacture_year") or _fval("year_of_manufacture") or _fval("yom")
+    veh_yom_val: int | None = None
+    if raw_yom:
+        m_yom = re.search(r"\b(19\d{2}|20\d{2})\b", raw_yom)
+        if m_yom:
+            try:
+                veh_yom_val = int(m_yom.group(1))
+            except Exception:
+                pass
     customer = _fval("customer_name") or _fval("insured_name")
     raw_id = _fval("ic_or_brn") or _fval("customer_ic_no")
 
@@ -375,9 +410,19 @@ def process_extraction_job(
     cover_start = _fval("cover_start_date") or _fval("issue_date") or _fval("valid_until")
     cover_end = _fval("cover_end_date") or _fval("valid_until")
 
-    # Plate Fallback to Chassis
-    clean_plate = raw_plate.upper() if raw_plate else ""
-    clean_chassis = raw_chassis.upper() if raw_chassis else ""
+    # Plate Fallback to Filename or Chassis
+    clean_plate = raw_plate.upper().strip() if raw_plate else ""
+    if clean_plate in ("", "N/A", "NA", "NONE", "UNREGISTERED", "NEW", "TBA", "-", "UNKNOWN") and uploaded.original_filename:
+        clean_fn = uploaded.original_filename.upper().replace("_", " ").replace("-", " ")
+        for fn_candidate in re.findall(r"\b[A-Z]{1,3}\s*\d{1,4}\s*[A-Z]?\b", clean_fn):
+            compact_cand = re.sub(r"\s+", "", fn_candidate)
+            if not re.fullmatch(r"20\d{2}|19\d{2}|PDF|REF|STMB|AMGEN|QBE|PDS|QUOTATION", compact_cand):
+                clean_plate = compact_cand
+                if isinstance(draft.fields, dict):
+                    draft.fields["vehicle_no"] = {"value": compact_cand, "status": "ready", "source": "filename"}
+                break
+
+    clean_chassis = raw_chassis.upper().strip() if raw_chassis else ""
     if clean_plate in ("", "N/A", "NA", "NONE", "UNREGISTERED", "NEW", "TBA", "-", "UNKNOWN") and clean_chassis:
         effective_veh_no = f"CHASSIS: {clean_chassis}"
     else:
@@ -413,6 +458,8 @@ def process_extraction_job(
     )
     if veh:
         session.tracked_vehicle_id = veh.id
+        if veh_yom_val and not veh.manufacture_year:
+            veh.manufacture_year = veh_yom_val
         if raw_cc and not veh.engine_cc:
             veh.engine_cc = raw_cc
         if raw_chassis and not veh.chassis_no:

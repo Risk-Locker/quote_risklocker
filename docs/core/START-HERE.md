@@ -18,6 +18,7 @@ External chat tools cannot be forced to follow repository instructions. Give the
 | Request area | Read first | Then inspect |
 | :--- | :--- | :--- |
 | General orientation or unclear scope | `docs/core/STATE.md`, `docs/domain/PROJECT-CONTEXT.md`, `docs/architecture/STRUCTURE.md` | `docs/generated/CODEBASE-MAP.md` |
+| SaaS Architecture, Data Integrity & Scalability | `docs/domain/SAAS-BLUEPRINT.md`, `docs/architecture/ARCHITECTURE.md` | models, migrations, services, API contracts |
 | Visual whole-project overview | `docs/domain/PROJECT-DIAGRAM.md` | linked topic documents and implementation files |
 | Product behavior, roles, workflow, accuracy | `docs/domain/BUSINESS-RULES.md` | relevant routes, services, tests |
 | Frontend, UX, accessibility, template editor | `docs/architecture/DESIGN-SYSTEM.md`, `docs/architecture/STRUCTURE.md` | relevant Next.js routes and components |
@@ -62,6 +63,7 @@ External chat tools cannot be forced to follow repository instructions. Give the
 | Document | Purpose | Update when |
 | :--- | :--- | :--- |
 | `docs/domain/BUSINESS-RULES.md` | Mandatory business rules & security invariants | Business logic, compliance, or workflow rules change |
+| `docs/domain/SAAS-BLUEPRINT.md` | North Star SaaS blueprint, relational integrity & enterprise standards | Multi-tenancy, entity relations, or API contract standards change |
 | `docs/domain/PROJECT-CONTEXT.md` | Product vision, user roles, supported workflows | Product scope or target user requirements change |
 | `docs/domain/PROJECT-DIAGRAM.md` | Visual user workflow & system boundary diagram | Major user flows or system integrations change |
 | `docs/domain/benefits/BENEFITS-CONFIGURATION.md` | Canonical 51-concept insurer & vehicle matrix | Insurer benefit configurations or seed lists change |
