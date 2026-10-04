@@ -14,7 +14,6 @@ import {
   PencilSimple,
   Plus,
   ShieldCheck,
-  Sparkle,
   X,
 } from "@phosphor-icons/react";
 import type { CompanyMatrixData } from "../types";
@@ -99,7 +98,7 @@ export function OverviewMatrixTab({
           </p>
         </div>
 
-        {/* Action Buttons: Export DOCX, Export XLSX, AI Seed Spec */}
+        {/* Action Buttons: Export DOCX, Export XLSX */}
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="secondary"
@@ -119,14 +118,7 @@ export function OverviewMatrixTab({
           >
             Download Excel (.xlsx)
           </Button>
-          <Button
-            size="sm"
-            onClick={() => document.getElementById("global-ai-copilot-trigger")?.click()}
-            icon={<Sparkle size={15} weight="fill" className="text-amber-500" />}
-            className="bg-[var(--rl-black)] text-white hover:bg-[#2d2d2d] text-xs font-semibold"
-          >
-            AI Catalog Copilot
-          </Button>
+          {/* RL-DISABLED AI Catalog Copilot button — disabled 2026-10-03; redundant with global floating copilot */}
         </div>
       </div>
 
@@ -245,10 +237,7 @@ export function OverviewMatrixTab({
                               • <span className="font-medium text-[var(--rl-text-strong)]">Vehicle:</span>{" "}
                               {s.vehicle_category_name}
                             </div>
-                            <div>
-                              • <span className="font-medium text-[var(--rl-text-strong)]">Revision:</span> rev{" "}
-                              {s.revision_number} ({s.state})
-                            </div>
+                            {/* RL-DISABLED Revision label — disabled 2026-10-03; internal tracking only, confusing for users */}
                           </div>
                         </div>
                       </td>

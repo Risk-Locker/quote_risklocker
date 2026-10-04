@@ -24,8 +24,9 @@ export interface CompanyBenefitsTabProps {
   configsSaving: boolean;
   configsSearch: string;
   setConfigsSearch: (v: string) => void;
-  configsCategoryFilter: "all" | "default" | "addon";
-  setConfigsCategoryFilter: (v: "all" | "default" | "addon") => void;
+  // RL-DISABLED configsCategoryFilter/setConfigsCategoryFilter — disabled 2026-10-03; category tagging removed, all benefits are flat
+  // configsCategoryFilter: "all" | "default" | "addon";
+  // setConfigsCategoryFilter: (v: "all" | "default" | "addon") => void;
   setAllConfigsEnabled: (enabled: boolean) => void;
   saveCompanyConfigs: () => void;
   customizingCostIds: Set<string>;
@@ -45,8 +46,9 @@ export function CompanyBenefitsTab({
   configsSaving,
   configsSearch,
   setConfigsSearch,
-  configsCategoryFilter,
-  setConfigsCategoryFilter,
+  // RL-DISABLED configsCategoryFilter/setConfigsCategoryFilter — disabled 2026-10-03
+  // configsCategoryFilter,
+  // setConfigsCategoryFilter,
   setAllConfigsEnabled,
   saveCompanyConfigs,
   customizingCostIds,
@@ -70,12 +72,7 @@ export function CompanyBenefitsTab({
       .filter((c) => {
         if (c.status === "retired") return false;
         const cfg = configMap.get(c.id);
-        const isDefault =
-          c.value_schema?.category === "default" ||
-          c.category === "default" ||
-          (c.sort_order !== undefined && c.sort_order <= 11);
-        if (configsCategoryFilter === "default" && !isDefault) return false;
-        if (configsCategoryFilter === "addon" && isDefault) return false;
+        // RL-DISABLED default/addon category filtering — disabled 2026-10-03; all benefits are now a flat list
         if (configsSearch.trim()) {
           const q = configsSearch.toLowerCase();
           const labelMatch = c.label?.toLowerCase().includes(q);
@@ -101,7 +98,7 @@ export function CompanyBenefitsTab({
         }
         return (a.concept.sort_order ?? 99) - (b.concept.sort_order ?? 99);
       });
-  }, [concepts, companyConfigs, configsCategoryFilter, configsSearch]);
+  }, [concepts, companyConfigs, configsSearch]);
 
   return (
     <div className="space-y-6">
@@ -143,39 +140,7 @@ export function CompanyBenefitsTab({
             />
           </div>
 
-          {/* Category filters */}
-          <div className="flex items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-0.5 text-xs">
-            <button
-              onClick={() => setConfigsCategoryFilter("all")}
-              className={`rounded-[3px] px-2.5 py-1 font-medium transition-all ${
-                configsCategoryFilter === "all"
-                  ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] shadow-sm font-semibold"
-                  : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-              }`}
-            >
-              All ({concepts.length})
-            </button>
-            <button
-              onClick={() => setConfigsCategoryFilter("default")}
-              className={`rounded-[3px] px-2.5 py-1 font-medium transition-all ${
-                configsCategoryFilter === "default"
-                  ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] shadow-sm font-semibold"
-                  : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-              }`}
-            >
-              Core Defaults
-            </button>
-            <button
-              onClick={() => setConfigsCategoryFilter("addon")}
-              className={`rounded-[3px] px-2.5 py-1 font-medium transition-all ${
-                configsCategoryFilter === "addon"
-                  ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] shadow-sm font-semibold"
-                  : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-              }`}
-            >
-              Add-ons
-            </button>
-          </div>
+          {/* RL-DISABLED Category filters — disabled 2026-10-03; all benefits are now a flat unified list */}
 
           {/* Quick Toggle Buttons */}
           <div className="flex items-center gap-1.5">
@@ -246,7 +211,7 @@ export function CompanyBenefitsTab({
               </thead>
               <tbody className="divide-y divide-[var(--rl-border)]/70 bg-[var(--rl-surface)]">
                 {filteredCompanyBenefitRows.map(({ concept: c, isEnabled, baselineDescription, baselineCost }) => {
-                  const isDefault = c.category === "default" || (c.sort_order !== undefined && c.sort_order <= 11);
+                  // RL-DISABLED isDefault categorization — disabled 2026-10-03; all benefits are treated equally
                   const hasCustom = Boolean(baselineDescription && baselineDescription.trim() && baselineDescription.trim() !== (c.description || "").trim());
 
                   return (
@@ -317,10 +282,10 @@ export function CompanyBenefitsTab({
                       {/* Default Price / Cost */}
                       <td className="px-4 py-3 align-top">
                         <div className="space-y-1">
-                          {isDefault && !baselineCost && !customizingCostIds.has(c.id) ? (
+                          {!baselineCost && !customizingCostIds.has(c.id) ? (
                             <div className="flex items-center gap-2 pt-1">
                               <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                Included (FOC)
+                                0 RM (Free)
                               </span>
                               <button
                                 type="button"
@@ -328,7 +293,7 @@ export function CompanyBenefitsTab({
                                 className="text-[10px] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] underline"
                                 title="Click to enter a custom cost override"
                               >
-                                Customize
+                                Set Price
                               </button>
                             </div>
                           ) : (
@@ -346,9 +311,7 @@ export function CompanyBenefitsTab({
                                   }
                                 }}
                                 placeholder={
-                                  isDefault
-                                    ? "e.g. RM 50.00"
-                                    : c.concept_key === "windscreen"
+                                  c.concept_key === "windscreen"
                                     ? "15% of Sum Covered"
                                     : "e.g. RM 20.00 or 15% of Sum Covered"
                                 }
@@ -361,9 +324,7 @@ export function CompanyBenefitsTab({
                                     ? "Formula: 15% of Sum Covered"
                                     : baselineCost?.includes("%")
                                     ? "Tariff formula (% rate)"
-                                    : isDefault
-                                    ? "Free default (leave blank for FOC)"
-                                    : "Base add-on cost"}
+                                    : "Leave blank for 0 RM (free)"}
                                 </span>
                                 {(baselineCost || customizingCostIds.has(c.id)) && (
                                   <button

@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   ArrowClockwise,
@@ -79,6 +80,8 @@ import { OverviewMatrixTab } from "./components/overview-matrix-tab";
 import { CompanyBenefitsTab } from "./components/company-benefits-tab";
 import { BenefitsStepNavigator } from "./components/benefits-step-navigator";
 import { BenefitsDialogs } from "./components/benefits-dialogs";
+import { toSlug, resolveBySlugOrId, getEntitySlug } from "@/lib/slug-utils";
+import { saveBuilderState, loadBuilderState } from "@/lib/navigation-state";
 
 const BENEFITS_TOUR_STEPS: TourStep[] = [
   {
@@ -725,6 +728,25 @@ function BenefitsPageContent() {
     }
   }, [selectedProfileId, cloneName, cloneNotes, loadBenefitProfiles]);
 
+  const handleCreateNewProfile = useCallback(async () => {
+    const name = prompt("Enter new profile name:");
+    if (!name?.trim()) return;
+    setProfileActionLoading(true);
+    setError("");
+    try {
+      const res = await api<{ profile: BenefitProfile }>("/business/benefit-profiles", {
+        method: "POST",
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      const newProfId = res.profile?.id;
+      await loadBenefitProfiles(newProfId);
+    } catch (err) {
+      if (mountedRef.current) setError(apiErrorMessage(err));
+    } finally {
+      if (mountedRef.current) setProfileActionLoading(false);
+    }
+  }, [loadBenefitProfiles]);
+
   const loadMatrix = useCallback(async (companyId: string) => {
     if (!companyId) return;
     setMatrixLoading(true);
@@ -748,13 +770,40 @@ function BenefitsPageContent() {
     window.location.href = `${API_BASE}/business/companies/${selectedCompanyId}/export-matrix?format=xlsx`;
   }
 
-  const syncUrl = useCallback((company: string, product = "", config = "") => {
-    const next = new URLSearchParams();
-    if (company) next.set("company", company);
-    if (product) next.set("product", product);
-    if (config) next.set("catalog", config);
-    window.history.replaceState(null, "", `/builder/benefits${next.size ? `?${next}` : ""}`);
-  }, []);
+  const syncUrl = useCallback(
+    (companyId: string, productId = "", catalogId = "") => {
+      const next = new URLSearchParams();
+      if (companyId) {
+        const comp = companies.find((c) => c.id === companyId);
+        next.set("company", comp ? getEntitySlug(comp) : companyId);
+      }
+      if (productId) {
+        const prod = companyWorkspace?.products?.find((p) => p.id === productId);
+        next.set("product", prod ? getEntitySlug(prod) : productId);
+      }
+      if (catalogId) {
+        const cat =
+          companyWorkspace?.catalogs?.find((c) => c.id === catalogId) ||
+          (catalogWorkspace?.catalog?.id === catalogId ? catalogWorkspace.catalog : undefined);
+        next.set("catalog", cat ? getEntitySlug(cat) : catalogId);
+      }
+
+      const nextUrl = `/builder/benefits${next.size ? `?${next.toString()}` : ""}`;
+      const currentUrl = typeof window !== "undefined" ? `${window.location.pathname}${window.location.search}` : "";
+
+      if (typeof window !== "undefined" && currentUrl !== nextUrl) {
+        window.history.pushState({ companyId, productId, catalogId }, "", nextUrl);
+      }
+
+      saveBuilderState({
+        companyId,
+        productId,
+        catalogId,
+        screenTab,
+      });
+    },
+    [companies, companyWorkspace, catalogWorkspace, screenTab]
+  );
 
   const loadReferenceData = useCallback(async (force = false) => {
     if (!force && cachedReferenceData && Date.now() - cachedReferenceData.timestamp < 120000) {
@@ -851,12 +900,17 @@ function BenefitsPageContent() {
   }, []);
 
   const loadCatalog = useCallback(
-    async (catalogId: string, silent = false) => {
-      if (!catalogId) {
+    async (catalogIdOrSlug: string, silent = false) => {
+      if (!catalogIdOrSlug) {
         setCatalogWorkspace(null);
         catalogWorkspaceRef.current = null;
         return;
       }
+      const matchedCat = companyWorkspace?.catalogs
+        ? resolveBySlugOrId(companyWorkspace.catalogs, catalogIdOrSlug)
+        : null;
+      const catalogId = matchedCat ? matchedCat.id : catalogIdOrSlug;
+
       const cached = catalogCacheRef.current.get(catalogId);
       const isFresh = cached && Date.now() - cached.ts < 30000;
       if (cached) {
@@ -889,12 +943,15 @@ function BenefitsPageContent() {
         if (!silent && mountedRef.current) setWorkspaceLoading(false);
       }
     },
-    [selectedCompanyId, syncUrl]
+    [companyWorkspace, selectedCompanyId, syncUrl]
   );
 
   const loadCompany = useCallback(
-    async (companyId: string, preferredProduct = selectedProductId, preferredCatalog = selectedCatalogId) => {
-      if (!companyId) return;
+    async (companyIdOrSlug: string, preferredProduct = selectedProductId, preferredCatalog = selectedCatalogId) => {
+      if (!companyIdOrSlug) return;
+      const matchedComp = resolveBySlugOrId(companies, companyIdOrSlug);
+      const companyId = matchedComp ? matchedComp.id : companyIdOrSlug;
+
       const cached = companyCacheRef.current.get(companyId);
       const isFresh = cached && Date.now() - cached.ts < 60000;
 
@@ -914,13 +971,15 @@ function BenefitsPageContent() {
         );
 
         const catalog =
-          (preferredCatalog && matchingCatalogs.find((item) => item.id === preferredCatalog)) ||
+          (preferredCatalog && resolveBySlugOrId(matchingCatalogs, preferredCatalog)) ||
+          (preferredCatalog && resolveBySlugOrId(cached.workspace.catalogs, preferredCatalog)) ||
           matchingCatalogs[0] ||
           cached.workspace.catalogs.find((item) => (item.engine_type || "ice") === targetEngine && (!targetVehicleId || item.vehicle_category_id === targetVehicleId)) ||
           cached.workspace.catalogs.find((item) => (item.engine_type || "ice") === targetEngine) ||
           cached.workspace.catalogs[0];
 
-        const prodId = catalog?.product_id || preferredProduct || "";
+        const matchedProd = preferredProduct ? resolveBySlugOrId(cached.workspace.products || [], preferredProduct) : null;
+        const prodId = catalog?.product_id || matchedProd?.id || preferredProduct || "";
         setSelectedProductId(prodId);
         if (catalog?.id) {
           setSelectedCatalogId(catalog.id);
@@ -956,13 +1015,15 @@ function BenefitsPageContent() {
         );
 
         const catalog =
-          (preferredCatalog && matchingCatalogs.find((item) => item.id === preferredCatalog)) ||
+          (preferredCatalog && resolveBySlugOrId(matchingCatalogs, preferredCatalog)) ||
+          (preferredCatalog && resolveBySlugOrId(result.workspace.catalogs, preferredCatalog)) ||
           matchingCatalogs[0] ||
           result.workspace.catalogs.find((item) => (item.engine_type || "ice") === targetEngine && (!targetVehicleId || item.vehicle_category_id === targetVehicleId)) ||
           result.workspace.catalogs.find((item) => (item.engine_type || "ice") === targetEngine) ||
           result.workspace.catalogs[0];
 
-        const prodId = catalog?.product_id || preferredProduct || "";
+        const matchedProd = preferredProduct ? resolveBySlugOrId(result.workspace.products || [], preferredProduct) : null;
+        const prodId = catalog?.product_id || matchedProd?.id || preferredProduct || "";
         setSelectedProductId(prodId);
         if (catalog?.id) {
           setSelectedCatalogId(catalog.id);
@@ -976,7 +1037,7 @@ function BenefitsPageContent() {
         setWorkspaceLoading(false);
       }
     },
-    [builderCoverageFilter, loadCatalog, matchesCoverage, selectedCatalogId, selectedEngineType, selectedProductId, selectedSegmentId, selectedVehicleId, syncUrl]
+    [companies, builderCoverageFilter, loadCatalog, matchesCoverage, selectedCatalogId, selectedEngineType, selectedProductId, selectedSegmentId, selectedVehicleId, syncUrl]
   );
 
   useEffect(() => {
@@ -1546,8 +1607,20 @@ ${aiMarkdownTable}`;
     loadReferenceData()
       .then((items) => {
         if (cancelled) return;
-        const companyId = selectedCompanyId && items.some((item) => item.id === selectedCompanyId) ? selectedCompanyId : items[0]?.id || "";
-        if (companyId) return loadCompany(companyId);
+        const saved = loadBuilderState();
+        const rawCompParam = params.get("company") || "";
+        const candidateCompany = rawCompParam || saved?.companyId || "";
+        const resolvedComp = resolveBySlugOrId(items, candidateCompany);
+        const companyId = resolvedComp?.id || items[0]?.id || "";
+
+        const rawCatParam = params.get("catalog") || saved?.catalogId || "";
+        const rawProdParam = params.get("product") || saved?.productId || "";
+
+        if (saved?.screenTab && !rawCompParam) {
+          setScreenTab(saved.screenTab);
+        }
+
+        if (companyId) return loadCompany(companyId, rawProdParam, rawCatParam);
       })
       .catch((err) => !cancelled && setError(apiErrorMessage(err)))
       .finally(() => !cancelled && setLoading(false));
@@ -1557,6 +1630,43 @@ ${aiMarkdownTable}`;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const sp = new URLSearchParams(window.location.search);
+      const compParam = sp.get("company");
+      const catParam = sp.get("catalog");
+      const prodParam = sp.get("product");
+
+      if (compParam) {
+        const resolvedComp = resolveBySlugOrId(companies, compParam);
+        if (resolvedComp) {
+          if (resolvedComp.id !== selectedCompanyId) {
+            void loadCompany(resolvedComp.id, prodParam || "", catParam || "");
+          } else if (catParam && companyWorkspace?.catalogs) {
+            const resolvedCat = resolveBySlugOrId(companyWorkspace.catalogs, catParam);
+            if (resolvedCat && resolvedCat.id !== selectedCatalogId) {
+              void loadCatalog(resolvedCat.id);
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [companies, companyWorkspace, selectedCompanyId, selectedCatalogId, loadCompany, loadCatalog]);
+
+  useEffect(() => {
+    if (selectedCompanyId) {
+      saveBuilderState({
+        companyId: selectedCompanyId,
+        productId: selectedProductId,
+        catalogId: selectedCatalogId,
+        screenTab,
+      });
+    }
+  }, [screenTab, selectedCompanyId, selectedProductId, selectedCatalogId]);
 
   function refreshCurrent() {
     return loadCompany(selectedCompanyId, selectedProductId, selectedCatalogId);
@@ -2316,10 +2426,32 @@ ${aiMarkdownTable}`;
       <div className="border-b border-[var(--rl-border)] bg-[var(--rl-surface)] px-6 py-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[var(--rl-text-muted)]">
-              <span>Builder</span>
-              <CaretRight size={12} weight="bold" />
-              <span>Product Benefits Configuration</span>
+            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--rl-text-muted)] flex-wrap">
+              <Link href={"/builder/templates/quotation-templates" as any} className="hover:text-[var(--rl-text-strong)] transition-colors">
+                Builder
+              </Link>
+              <CaretRight size={11} weight="bold" className="shrink-0" />
+              <button
+                type="button"
+                onClick={() => setScreenTab("company_benefits")}
+                className="hover:text-[var(--rl-text-strong)] transition-colors cursor-pointer"
+              >
+                Benefits
+              </button>
+              {selectedCompany && (
+                <>
+                  <CaretRight size={11} weight="bold" className="shrink-0" />
+                  <span className="text-[var(--rl-text-strong)] font-bold">{selectedCompany.name}</span>
+                </>
+              )}
+              {selectedCatalog && (
+                <>
+                  <CaretRight size={11} weight="bold" className="shrink-0" />
+                  <span className="text-[var(--rl-text-muted)] font-normal normal-case">
+                    {selectedCatalog.name || selectedCatalog.package?.name || "Catalog"}
+                  </span>
+                </>
+              )}
             </div>
             <h1 className="mt-0.5 text-xl font-bold tracking-tight text-[var(--rl-text-strong)]">
               Benefits & Add-ons Architecture
@@ -2439,6 +2571,7 @@ ${aiMarkdownTable}`;
           selectedCatalogId={selectedCatalogId}
           loadCatalog={loadCatalog}
           fileUrl={fileUrl}
+          handleCreateNewProfile={handleCreateNewProfile}
         />
       </div>
 
@@ -2455,8 +2588,7 @@ ${aiMarkdownTable}`;
             configsSaving={configsSaving}
             configsSearch={configsSearch}
             setConfigsSearch={setConfigsSearch}
-            configsCategoryFilter={configsCategoryFilter}
-            setConfigsCategoryFilter={setConfigsCategoryFilter}
+            // RL-DISABLED configsCategoryFilter/setConfigsCategoryFilter — disabled 2026-10-03; category tagging removed
             setAllConfigsEnabled={setAllConfigsEnabled}
             saveCompanyConfigs={saveCompanyConfigs}
             customizingCostIds={customizingCostIds}
@@ -3421,7 +3553,7 @@ ${aiMarkdownTable}`;
               </div>
             )}
 
-            {/* ── Revisions & Bundles Overview ─────────────────────────── */}
+            {/* ── Structure & Bundles Overview ─────────────────────────── */}
             <div className="rl-tour-bundles rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5">
               <div className="flex items-center gap-4 border-b border-[var(--rl-border)] pb-3 text-xs">
                 <button

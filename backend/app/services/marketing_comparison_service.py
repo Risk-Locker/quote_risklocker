@@ -117,10 +117,8 @@ def calculate_vehicle_age(manufacture_year: int | None, coverage_start_date: dat
     return completed
 
 
-def calculate_betterment_rate(age_in_years: int, company_name: str | None = None) -> tuple[float, str]:
-    """Calculate Betterment co-payment percentage according to Malaysian standard scale and insurer rules.
-
-    Standard Malaysian Scale (anchored Jan 1 of manufacture year):
+def get_standard_betterment_rate(age_in_years: int) -> tuple[float, str]:
+    """Calculate Malaysian Tariff standard scale for Betterment co-payment:
     < 5 years: 0% ("No (0%)")
     5 years: 15% ("Yes (15%)")
     6 years: 20% ("Yes (20%)")
@@ -128,20 +126,7 @@ def calculate_betterment_rate(age_in_years: int, company_name: str | None = None
     8 years: 30% ("Yes (30%)")
     9 years: 35% ("Yes (35%)")
     >= 10 years: 40% ("Yes (40%)")
-
-    QBE Special Rule:
-    0–10 years inclusive: 0% ("No (0%)")
-    > 10 years: 40% ("Yes (40%)")
     """
-    comp_lower = (company_name or "").lower()
-    is_qbe = "qbe" in comp_lower
-
-    if is_qbe:
-        if age_in_years <= 10:
-            return 0.0, "No (0%)"
-        else:
-            return 40.0, "Yes (40%)"
-
     if age_in_years < 5:
         return 0.0, "No (0%)"
     elif age_in_years == 5:
@@ -156,6 +141,132 @@ def calculate_betterment_rate(age_in_years: int, company_name: str | None = None
         return 35.0, "Yes (35%)"
     else:  # >= 10
         return 40.0, "Yes (40%)"
+
+
+def check_has_betterment_peril(f: dict | None = None, combined_text: str = "", raw_w: Any = None) -> bool:
+    """Check if quotation draft fields, perils, or benefit selections include betterment benefits/riders."""
+    if raw_w is not None:
+        if str(raw_w).strip().lower() in ("true", "yes", "1"):
+            return True
+        if str(raw_w).strip().lower() in ("false", "no", "0"):
+            return False
+
+    txt = (combined_text or "").lower()
+    if f and isinstance(f, dict):
+        txt += " " + " ".join(str(v) for v in f.values()).lower()
+
+    keywords = (
+        "waiver of betterment",
+        "betterment waiver",
+        "car spare parts waiver",
+        "spare parts waiver",
+        "waiver for betterment",
+        "waiver of betterment contribution",
+        "exemption of betterment",
+        "betterment",
+    )
+    return any(k in txt for k in keywords)
+
+
+def evaluate_betterment_rules(
+    yom: int | None,
+    quote_year: int | None,
+    company_name: str | None = None,
+    has_betterment_peril: bool = False,
+    is_comprehensive_private: bool = True,
+) -> tuple[bool, float, str]:
+    """Evaluate Waiver of Betterment and Betterment Co-Payment Rate based on underwriting rules:
+
+    0 to 5 years --> 0% (Waiver of Betterment = YES)
+
+    1st Condition:
+    1.1 IF YEAR OF MAKE + 4 <= QUOTATION DATE (YEAR), then WAIVER OF BETTERMENT = NO
+    1.2 IF YEAR OF MAKE + 4 > QUOTATION DATE (YEAR), then WAIVER OF BETTERMENT = YES
+
+    2nd Condition (in case it is NO in Condition 1):
+    2.1 IF QBE COMPREHENSIVE PRIVATE CAR and (YEAR OF MAKE + 9) > CURRENT_YEAR:
+        then WAIVER OF BETTERMENT = YES.
+        If <= current_year, then NO.
+
+    2.2 If NOT QBE:
+        Check for perils related to betterment, waiver of betterment, car spare parts waiver of betterment.
+        If NO perils added:
+            WAIVER OF BETTERMENT = NO
+        If perils ARE added:
+            FOR (TUNE, SOMPO, AMASSURANCE, ETIQA) ONLY:
+                IF (YEAR OF MAKE + 14) > CURRENT_YEAR -> WAIVER OF BETTERMENT = YES
+                ELSE -> WAIVER OF BETTERMENT = NO
+            FOR (LONPAC, STMB) ONLY:
+                IF (YEAR OF MAKE + 9) > CURRENT_YEAR -> WAIVER OF BETTERMENT = YES
+                ELSE -> WAIVER OF BETTERMENT = NO
+            FOR ALL OTHERS:
+                IF (YEAR OF MAKE + 9) > CURRENT_YEAR -> WAIVER OF BETTERMENT = YES
+                ELSE -> WAIVER OF BETTERMENT = NO
+
+    Returns:
+        tuple[bool, float, str]: (waiver_betterment, betterment_rate, betterment_display)
+    """
+    quote_y = quote_year or datetime.now().year
+    veh_yom = yom if (yom and yom > 1900) else None
+    veh_age = max(0, quote_y - veh_yom) if veh_yom else 0
+
+    # 1st Condition:
+    # 1.2 IF YEAR OF MAKE + 4 > QUOTATION DATE, then WAIVER OF BETTERMENT = YES (0% betterment)
+    if veh_yom and (veh_yom + 4) > quote_y:
+        return True, 0.0, "No (0%)"
+
+    # 1.1 IF YEAR OF MAKE + 4 <= QUOTATION DATE, then WAIVER OF BETTERMENT = NO initially
+    comp_lower = (company_name or "").lower()
+    is_qbe = "qbe" in comp_lower
+    is_tune_sompo_amgen_etiqa = any(x in comp_lower for x in ("tune", "sompo", "amassurance", "amgen", "etiqa"))
+    is_lonpac_stmb = any(x in comp_lower for x in ("lonpac", "stmb", "takaful malaysia", "syarikat takaful"))
+
+    # 2nd Condition:
+    if is_qbe and is_comprehensive_private:
+        # 2.1 IF QBE COMPREHENSIVE PRIVATE CAR and (YEAR OF MAKE + 9) > CURRENT_YEAR then Waiver of Betterment = YES
+        if veh_yom and (veh_yom + 9) > quote_y:
+            return True, 0.0, "No (0%)"
+        else:
+            rate, disp = get_standard_betterment_rate(veh_age)
+            return False, rate, disp
+
+    # 2.2 If it's not QBE: check for perils related to betterment
+    if not has_betterment_peril:
+        rate, disp = get_standard_betterment_rate(veh_age)
+        return False, rate, disp
+
+    # Perils added: check insurance company
+    if is_tune_sompo_amgen_etiqa:
+        # FOR (TUNE, SOMPO, AMASSURANCE, ETIQA) ONLY:
+        # IF YEAR OF MAKE + 14 > CURRENT YEAR THEN WAIVER OF BETTERMENT = YES, ELSE NO
+        if not veh_yom or (veh_yom + 14) > quote_y:
+            return True, 0.0, "No (0%)"
+        else:
+            rate, disp = get_standard_betterment_rate(veh_age)
+            return False, rate, disp
+    elif is_lonpac_stmb:
+        # FOR (LONPAC, STMB) ONLY:
+        # IF YEAR OF MAKE + 9 > CURRENT YEAR THEN WAIVER OF BETTERMENT = YES, ELSE NO
+        if not veh_yom or (veh_yom + 9) > quote_y:
+            return True, 0.0, "No (0%)"
+        else:
+            rate, disp = get_standard_betterment_rate(veh_age)
+            return False, rate, disp
+    else:
+        # Other insurers with betterment rider: standard 10-year rule
+        if not veh_yom or (veh_yom + 9) > quote_y:
+            return True, 0.0, "No (0%)"
+        else:
+            rate, disp = get_standard_betterment_rate(veh_age)
+            return False, rate, disp
+
+
+def calculate_betterment_rate(age_in_years: int, company_name: str | None = None) -> tuple[float, str]:
+    """Backward-compatible helper returning standard or QBE betterment rate."""
+    comp_lower = (company_name or "").lower()
+    if "qbe" in comp_lower and age_in_years <= 10:
+        return 0.0, "No (0%)"
+    return get_standard_betterment_rate(age_in_years)
 
 
 def normalize_towing_km(raw_towing: Any, combined_text: str = "") -> str:
@@ -676,6 +787,7 @@ def _resolve_comparison_benefits(
         "llp_llop": llp_val,
         "towing_limit": clean_towing,
         "towing_km": clean_towing,
+        "combined_text": combined_text,
     }
 
 
@@ -778,17 +890,18 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             rate_val = round((motor_prem / sum_ins) * 100, 4) if sum_ins > 0 else None
             tot_pay = motor_prem + float(tenure.road_tax) + float(tenure.runner_fee)
 
-            bet_rate, bet_disp = calculate_betterment_rate(veh_age, comp_name)
-            raw_w = _extract_val(f.get("waiver_of_betterment"))
-            if raw_w is not None and str(raw_w).strip().lower() in ("false", "no", "0"):
-                has_waiver = False
-            elif raw_w in [True, "Yes", "yes", "true", "True", "1"]:
-                has_waiver = True
-            else:
-                has_waiver = (bet_rate == 0.0)
-
             b_res = _resolve_comparison_benefits(
                 db, s, getattr(s, "company_id", None), f, float(tenure.windscreen_target) if tenure.windscreen_target else None
+            )
+            raw_w = _extract_val(f.get("waiver_of_betterment"))
+            has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
+            quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now().year
+            has_waiver, bet_rate, bet_disp = evaluate_betterment_rules(
+                yom=veh_yom,
+                quote_year=quote_year,
+                company_name=comp_name,
+                has_betterment_peril=has_peril,
+                is_comprehensive_private=True,
             )
 
             entry = TenureComparisonEntry(
@@ -839,17 +952,18 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                 rate_val = round((motor_prem / sum_ins) * 100, 4) if sum_ins > 0 else None
                 tot_pay = motor_prem + float(tenure.road_tax) + float(tenure.runner_fee)
 
-                bet_rate, bet_disp = calculate_betterment_rate(veh_age, comp_name)
-                raw_w = _extract_val(f.get("waiver_of_betterment"))
-                if raw_w is not None and str(raw_w).strip().lower() in ("false", "no", "0"):
-                    has_waiver = False
-                elif raw_w in [True, "Yes", "yes", "true", "True", "1"]:
-                    has_waiver = True
-                else:
-                    has_waiver = (bet_rate == 0.0)
-
                 b_res = _resolve_comparison_benefits(
                     db, s, getattr(s, "company_id", None), f, float(tenure.windscreen_target) if tenure.windscreen_target else None
+                )
+                raw_w = _extract_val(f.get("waiver_of_betterment"))
+                has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
+                quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now().year
+                has_waiver, bet_rate, bet_disp = evaluate_betterment_rules(
+                    yom=veh_yom,
+                    quote_year=quote_year,
+                    company_name=comp_name,
+                    has_betterment_peril=has_peril,
+                    is_comprehensive_private=True,
                 )
 
                 new_entry = TenureComparisonEntry(
@@ -892,10 +1006,17 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                 e.total_payable = float(e.motor_premium) + float(e.road_tax) + float(e.runner_fee)
                 needs_commit = True
 
-            bet_rate, bet_disp = calculate_betterment_rate(veh_age, e.company_name)
+            quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now().year
+            has_waiver_fallback, fallback_bet_rate, fallback_bet_disp = evaluate_betterment_rules(
+                yom=veh_yom,
+                quote_year=quote_year,
+                company_name=e.company_name,
+                has_betterment_peril=bool(e.waiver_betterment),
+                is_comprehensive_private=True,
+            )
             if e.betterment_rate is None or e.betterment_display is None:
-                e.betterment_rate = bet_rate
-                e.betterment_display = bet_disp
+                e.betterment_rate = fallback_bet_rate
+                e.betterment_display = fallback_bet_disp
                 needs_commit = True
 
             clean_tow = normalize_towing_km(e.towing_km or e.towing_limit, "")
@@ -938,15 +1059,19 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                         e.excess = _extract_excess(f)
                         e.towing_limit = b_res["towing_km"]
                         e.towing_km = b_res["towing_km"]
-                        e.betterment_rate = bet_rate
-                        e.betterment_display = bet_disp
+
                         raw_w = _extract_val(f.get("waiver_of_betterment"))
-                        if raw_w is not None and str(raw_w).strip().lower() in ("false", "no", "0"):
-                            e.waiver_betterment = False
-                        elif raw_w in [True, "Yes", "yes", "true", "True", "1"]:
-                            e.waiver_betterment = True
-                        else:
-                            e.waiver_betterment = (bet_rate == 0.0)
+                        has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
+                        live_waiver, live_bet_rate, live_bet_disp = evaluate_betterment_rules(
+                            yom=veh_yom,
+                            quote_year=quote_year,
+                            company_name=e.company_name,
+                            has_betterment_peril=has_peril,
+                            is_comprehensive_private=True,
+                        )
+                        e.betterment_rate = live_bet_rate
+                        e.betterment_display = live_bet_disp
+                        e.waiver_betterment = live_waiver
                         e.windscreen_sum_insured = b_res["windscreen_sum_insured"]
                         e.special_perils = b_res["special_perils"]
                         e.llp_llop = b_res["llp_llop"]
@@ -1471,6 +1596,16 @@ def save_comparison_entry(
             entry.valuation_type = "agreed_value"
     if "waiver_betterment" in payload:
         entry.waiver_betterment = bool(payload["waiver_betterment"])
+        if entry.waiver_betterment:
+            entry.betterment_rate = 0.0
+            entry.betterment_display = "No (0%)"
+        else:
+            veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if tenure.tracked_vehicle else None
+            quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now().year
+            veh_age = max(0, quote_year - (veh_yom or quote_year))
+            rate, disp = get_standard_betterment_rate(veh_age)
+            entry.betterment_rate = rate
+            entry.betterment_display = disp
     if "excess" in payload:
         entry.excess = _to_float(payload["excess"])
     if "windscreen_sum_insured" in payload:

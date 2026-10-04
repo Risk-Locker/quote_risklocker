@@ -145,19 +145,17 @@ export interface TenureRow {
   tenure_type?: string;
   superseded_by_tenure_id?: string | null;
   created_at?: string;
+  is_main?: boolean;
+  stage_updated_at?: string;
 }
 
 export interface StageSummary {
   quotations: number;
   material_to_client: number;
-  issue_policy: number;
-  ucd_invoice_to_client: number;
-  ucd_receipt_to_client: number;
-  pending_payment: number;
-  pending_delivery: number;
   close_win: number;
+  issue_policy: number;
   close_lose: number;
-  others: number;
+  others?: number;
   total: number;
 }
 
@@ -179,47 +177,19 @@ export const STAGE_CONFIGS: Record<
     border: "border-purple-200",
     badge: "bg-purple-100 text-purple-800 border-purple-200",
   },
-  "Issue Policy": {
-    label: "Issue Policy",
-    bg: "bg-amber-50/60",
-    text: "text-amber-900",
-    border: "border-amber-200",
-    badge: "bg-amber-100 text-amber-800 border-amber-200",
-  },
-  "UCD Invoice to Client": {
-    label: "UCD Invoice to Client",
-    bg: "bg-teal-50/60",
-    text: "text-teal-900",
-    border: "border-teal-200",
-    badge: "bg-teal-100 text-teal-800 border-teal-200",
-  },
-  "UCD Receipt to Client": {
-    label: "UCD Receipt to Client",
-    bg: "bg-sky-50/60",
-    text: "text-sky-900",
-    border: "border-sky-200",
-    badge: "bg-sky-100 text-sky-800 border-sky-200",
-  },
-  "Pending Payment": {
-    label: "Pending Payment",
-    bg: "bg-orange-50/60",
-    text: "text-orange-900",
-    border: "border-orange-200",
-    badge: "bg-orange-100 text-orange-800 border-orange-200",
-  },
-  "Pending Delivery": {
-    label: "Pending Delivery",
-    bg: "bg-pink-50/60",
-    text: "text-pink-900",
-    border: "border-pink-200",
-    badge: "bg-pink-100 text-pink-800 border-pink-200",
-  },
   "Close - Win": {
     label: "Close - Win",
     bg: "bg-emerald-50/60",
     text: "text-emerald-900",
     border: "border-emerald-200",
     badge: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  },
+  "Issue Policy": {
+    label: "Issue Policy",
+    bg: "bg-amber-50/60",
+    text: "text-amber-900",
+    border: "border-amber-200",
+    badge: "bg-amber-100 text-amber-800 border-amber-200",
   },
   "Close - Lose": {
     label: "Close - Lose",
@@ -229,27 +199,14 @@ export const STAGE_CONFIGS: Record<
     badge: "bg-rose-100 text-rose-800 border-rose-200",
     isLost: true,
   },
-  Others: {
-    label: "Others",
-    bg: "bg-neutral-100/60",
-    text: "text-neutral-800",
-    border: "border-neutral-200",
-    badge: "bg-neutral-200 text-neutral-800 border-neutral-300",
-    isLost: true,
-  },
 };
 
 export const STAGE_ORDER = [
   "Quotations",
   "Material to Client",
-  "Issue Policy",
-  "UCD Invoice to Client",
-  "UCD Receipt to Client",
-  "Pending Payment",
-  "Pending Delivery",
   "Close - Win",
+  "Issue Policy",
   "Close - Lose",
-  "Others",
 ];
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -554,26 +511,33 @@ export function TenureTimelineLedger() {
         return summary.quotations || 0;
       case "Material to Client":
         return summary.material_to_client || 0;
-      case "Issue Policy":
-        return summary.issue_policy || 0;
-      case "UCD Invoice to Client":
-        return summary.ucd_invoice_to_client || 0;
-      case "UCD Receipt to Client":
-        return summary.ucd_receipt_to_client || 0;
-      case "Pending Payment":
-        return summary.pending_payment || 0;
-      case "Pending Delivery":
-        return summary.pending_delivery || 0;
       case "Close - Win":
         return summary.close_win || 0;
+      case "Issue Policy":
+        return summary.issue_policy || 0;
       case "Close - Lose":
         return summary.close_lose || 0;
-      case "Others":
-        return summary.others || 0;
       default:
         return 0;
     }
   }
+
+  // Handle setting a tenure as the approved/main policy for this vehicle
+  const handleSetMainTenure = async (targetTenureId: string, vehicleNo: string) => {
+    try {
+      await api(`/tenures/${targetTenureId}/set-main`, { method: "POST" });
+      setTenures((prev) =>
+        prev.map((t) => {
+          if (t.vehicle_no === vehicleNo) {
+            return { ...t, is_main: t.id === targetTenureId };
+          }
+          return t;
+        })
+      );
+    } catch (err: any) {
+      alert("Failed to set main policy: " + (err?.message || err));
+    }
+  };
 
   // Handle stage card click: toggle filter
   function handleStageCardClick(stage: string) {
@@ -581,8 +545,7 @@ export function TenureTimelineLedger() {
       setStageFilter("all");
     } else {
       setStageFilter(stage);
-      // If clicking Close - Lose or Others, switch category to lost so the rows are visible!
-      if (stage === "Close - Lose" || stage === "Others") {
+      if (stage === "Close - Lose") {
         setCategory("lost");
       } else if (category === "lost") {
         setCategory("active");
@@ -690,7 +653,10 @@ export function TenureTimelineLedger() {
       dayMap[d] = [];
     }
 
-    tenures.forEach((t) => {
+    // Filter to ONLY approved / main policies for calendar view
+    const calendarTenures = tenures.filter((t) => t.is_main);
+
+    calendarTenures.forEach((t) => {
       // 1. Check start date
       if (t.coverage_start_date) {
         const datePart = t.coverage_start_date.split("T")[0];
@@ -742,16 +708,73 @@ export function TenureTimelineLedger() {
     };
   }, [selectedMonth, selectedYear, tenures, currentYear, currentMonthNum]);
 
+  // Group tenures by vehicle for the vehicle-centric ledger
+  const vehicleGroups = useMemo(() => {
+    const map = new Map<string, TenureRow[]>();
+    for (const t of tenures) {
+      const key = (t.vehicle_no || t.chassis_no || t.id).trim().toUpperCase();
+      if (!map.has(key)) {
+        map.set(key, []);
+      }
+      map.get(key)!.push(t);
+    }
+
+    const groups: Array<{
+      vehicle_no: string;
+      customer_name: string;
+      customer_ic_no?: string | null;
+      car_brand?: string | null;
+      car_model?: string | null;
+      engine_cc?: string | null;
+      manufacture_year?: number | null;
+      chassis_no?: string | null;
+      engine_no?: string | null;
+      mainTenure: TenureRow;
+      tenures: TenureRow[];
+    }> = [];
+
+    map.forEach((tList, key) => {
+      const sorted = [...tList].sort((a, b) => {
+        const da = a.coverage_start_date || "";
+        const db = b.coverage_start_date || "";
+        return db.localeCompare(da);
+      });
+      const main = sorted.find((t) => t.is_main) || sorted[0];
+      groups.push({
+        vehicle_no: key,
+        customer_name: main.customer_name,
+        customer_ic_no: main.customer_ic_no,
+        car_brand: main.car_brand,
+        car_model: main.car_model,
+        engine_cc: main.engine_cc,
+        manufacture_year: main.manufacture_year,
+        chassis_no: main.chassis_no,
+        engine_no: main.engine_no,
+        mainTenure: main,
+        tenures: sorted,
+      });
+    });
+
+    return groups;
+  }, [tenures]);
+
+  const [expandedVehicleKeys, setExpandedVehicleKeys] = useState<string[]>([]);
+  const toggleExpandVehicle = (key: string) => {
+    setExpandedVehicleKeys((prev) =>
+      prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key]
+    );
+  };
+
   return (
     <div className="space-y-5">
       {/* ========================================================================= */}
-      {/* 1. TOP STAGE KPI BANNER: 10 SUMMARY CARDS (Excel 1:1)                      */}
+      {/* 1. TOP STAGE KPI BANNER: 5 SUMMARY CARDS                                   */}
       {/* ========================================================================= */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-neutral-900 uppercase tracking-wider">
-              10-Stage Pipeline Overview
+              5-Stage Pipeline Overview
             </span>
             {loadingSummary && (
               <ArrowsClockwise className="w-3.5 h-3.5 animate-spin text-neutral-400" />
@@ -769,8 +792,8 @@ export function TenureTimelineLedger() {
           )}
         </div>
 
-        {/* 10 KPI Cards Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-10 gap-2">
+        {/* 5 KPI Cards Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
           {STAGE_ORDER.map((stageKey) => {
             const conf = STAGE_CONFIGS[stageKey] || STAGE_CONFIGS.Quotations;
             const count = getStageCount(stageKey);
@@ -1212,128 +1235,138 @@ export function TenureTimelineLedger() {
                     </td>
                   </tr>
                 ) : (
-                  tenures.map((t) => {
-                    const picInfo = getPicDisplay(t);
-                    const stageConf = STAGE_CONFIGS[t.stage] || STAGE_CONFIGS.Quotations;
-                    const isOverdue = t.days_in_stage > 7 && !stageConf.isLost && t.stage !== "Close - Win";
-                    const isExpanded = expandedTenureIds.includes(t.id);
+                  vehicleGroups.map((group) => {
+                    const mainTenure = group.mainTenure;
+                    const picInfo = getPicDisplay(mainTenure);
+                    const stageConf = STAGE_CONFIGS[mainTenure.stage] || STAGE_CONFIGS.Quotations;
+                    const isOverdue = mainTenure.days_in_stage > 7 && !stageConf.isLost && mainTenure.stage !== "Close - Win";
+                    const isVehicleExpanded = expandedVehicleKeys.includes(group.vehicle_no);
+                    const isGroupSelected = group.tenures.some((t) => selectedTenureIds.includes(t.id));
+                    const displayName = getVehicleDisplayName(group.vehicle_no, group.chassis_no);
+                    const isChassis = displayName.startsWith("Chassis:");
+                    const isBlank = displayName === "No Plate (Blank)";
+                    const hasMultiplePeriods = group.tenures.length > 1;
 
                     return (
-                      <React.Fragment key={t.id}>
+                      <React.Fragment key={group.vehicle_no}>
+                        {/* Primary Vehicle Row */}
                         <tr
                           className={`hover:bg-neutral-50/80 transition-colors ${
-                            stageConf.isLost ? "bg-rose-50/20" : isExpanded ? "bg-[#f5f5f7]/60" : ""
+                            stageConf.isLost ? "bg-rose-50/20" : isVehicleExpanded ? "bg-[#f5f5f7]/60" : ""
                           }`}
                         >
                           {/* 0. Select Checkbox & Direct Delete & Expand */}
                           <td className="py-3 px-3 text-center">
-                            {(() => {
-                              const displayName = getVehicleDisplayName(t.vehicle_no, t.chassis_no);
-                              return (
-                                <div className="flex items-center justify-center gap-1.5">
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedTenureIds.includes(t.id)}
-                                    onChange={() => handleToggleSelectRow(t.id)}
-                                    className="w-3.5 h-3.5 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer"
-                                    title={`Select ${displayName}`}
-                                    aria-label={`Select ${displayName}`}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleExpandRow(t.id)}
-                                    className={`p-1 rounded transition-colors cursor-pointer ${
-                                      isExpanded
-                                        ? "bg-neutral-900 text-white"
-                                        : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
-                                    }`}
-                                    title={isExpanded ? "Collapse inline deal sub-panel" : "Expand inline deal sub-panel"}
-                                    aria-label={isExpanded ? "Collapse inline deal sub-panel" : "Expand inline deal sub-panel"}
-                                  >
-                                    {isExpanded ? <CaretUp size={13} weight="bold" /> : <CaretDown size={13} weight="bold" />}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteTenure(t.id, displayName)}
-                                    className="flex size-6 items-center justify-center rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                                    title={`Delete deal for ${displayName}`}
-                                    aria-label={`Delete deal for ${displayName}`}
-                                  >
-                                    <Trash size={13} weight="bold" />
-                                  </button>
-                                </div>
-                              );
-                            })()}
+                            <div className="flex items-center justify-center gap-1.5">
+                              <input
+                                type="checkbox"
+                                checked={isGroupSelected}
+                                onChange={() => {
+                                  const ids = group.tenures.map((t) => t.id);
+                                  if (isGroupSelected) {
+                                    setSelectedTenureIds((prev) => prev.filter((id) => !ids.includes(id)));
+                                  } else {
+                                    setSelectedTenureIds((prev) => [...prev, ...ids]);
+                                  }
+                                }}
+                                className="w-3.5 h-3.5 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer"
+                                title={`Select ${displayName}`}
+                                aria-label={`Select ${displayName}`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => toggleExpandVehicle(group.vehicle_no)}
+                                className={`p-1 rounded transition-colors cursor-pointer ${
+                                  isVehicleExpanded
+                                    ? "bg-neutral-900 text-white"
+                                    : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
+                                }`}
+                                title={isVehicleExpanded ? "Collapse policy periods" : "Expand all policy periods"}
+                                aria-label={isVehicleExpanded ? "Collapse policy periods" : "Expand all policy periods"}
+                              >
+                                {isVehicleExpanded ? <CaretUp size={13} weight="bold" /> : <CaretDown size={13} weight="bold" />}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteTenure(mainTenure.id, displayName)}
+                                className="flex size-6 items-center justify-center rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                title={`Delete ${displayName}`}
+                                aria-label={`Delete ${displayName}`}
+                              >
+                                <Trash size={13} weight="bold" />
+                              </button>
+                            </div>
                           </td>
 
                           {/* 1. Vehicle & Client */}
                           <td className="py-3 px-3">
-                            {(() => {
-                              const displayName = getVehicleDisplayName(t.vehicle_no, t.chassis_no);
-                              const isChassis = displayName.startsWith("Chassis:");
-                              const isBlank = displayName === "No Plate (Blank)";
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <div className="font-bold text-neutral-900 font-mono text-sm flex items-center gap-1.5">
+                                <Car className="w-3.5 h-3.5 text-neutral-600 shrink-0" />
+                                <span className="truncate max-w-[150px]" title={displayName}>
+                                  {displayName}
+                                </span>
+                              </div>
 
-                              return (
-                                <>
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <div className="font-bold text-neutral-900 font-mono text-sm flex items-center gap-1.5">
-                                      <Car className="w-3.5 h-3.5 text-neutral-600 shrink-0" />
-                                      <span className="truncate max-w-[150px]" title={displayName}>
-                                        {displayName}
-                                      </span>
-                                    </div>
-                                    {isChassis && (
-                                      <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 font-sans text-[9px] font-bold shrink-0">
-                                        CHASSIS
-                                      </span>
-                                    )}
-                                    {isBlank && (
-                                      <span className="px-1.5 py-0.2 rounded bg-neutral-100 text-neutral-600 font-sans text-[9px] font-bold shrink-0">
-                                        NO PLATE
-                                      </span>
-                                    )}
-                                    {t.is_hidden && (
-                                      <span className="px-1.5 py-0.2 rounded bg-neutral-200 text-neutral-700 font-sans text-[9px] font-bold shrink-0">
-                                        SUPERSEDED
-                                      </span>
-                                    )}
-                                    <button
-                                      type="button"
-                                      onClick={() => setEditingTenure(t)}
-                                      className="p-1 rounded text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 transition-colors cursor-pointer"
-                                      title="Edit Customer, Plate & Deal Details"
-                                    >
-                                      <PencilSimple size={13} weight="bold" />
-                                    </button>
-                                  </div>
-                                  <div className="flex items-center gap-1.5 mt-0.5">
-                                    <Link
-                                      href={`/client-records?search=${encodeURIComponent(t.customer_name)}` as Route}
-                                      className="text-neutral-800 hover:text-blue-600 font-medium text-[11px] truncate max-w-[140px] inline-block"
-                                      title={`View client record for ${t.customer_name}`}
-                                    >
-                                      {t.customer_name}
-                                    </Link>
-                                    {t.customer_ic_no && (
-                                      <span className="text-[10px] text-neutral-400 font-mono truncate max-w-[90px]">
-                                        {t.customer_ic_no}
-                                      </span>
-                                    )}
-                                  </div>
-                                  {(t.car_model || t.car_brand || t.engine_cc || t.manufacture_year) && (
-                                    <div className="text-[10px] text-neutral-500 font-medium mt-0.5 truncate max-w-[210px]">
-                                      {t.car_brand ? `${t.car_brand} ` : ""}
-                                      {t.car_model || ""}
-                                      {t.engine_cc ? ` · ${t.engine_cc}cc` : ""}
-                                      {t.manufacture_year ? ` · YOM ${t.manufacture_year}` : ""}
-                                    </div>
-                                  )}
-                                </>
-                              );
-                            })()}
+                              {/* Multi-Period Toggle Pill Badge */}
+                              <button
+                                type="button"
+                                onClick={() => toggleExpandVehicle(group.vehicle_no)}
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold border transition-colors cursor-pointer flex items-center gap-1 ${
+                                  hasMultiplePeriods
+                                    ? "bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300 shadow-2xs"
+                                    : "bg-neutral-100 text-neutral-600 border-neutral-200"
+                                }`}
+                                title={`This vehicle has ${group.tenures.length} policy period(s). Click to expand.`}
+                              >
+                                <span>{group.tenures.length} {group.tenures.length === 1 ? "Period" : "Periods"}</span>
+                                {isVehicleExpanded ? <CaretUp size={10} weight="bold" /> : <CaretDown size={10} weight="bold" />}
+                              </button>
+
+                              {isChassis && (
+                                <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 font-sans text-[9px] font-bold shrink-0">
+                                  CHASSIS
+                                </span>
+                              )}
+                              {isBlank && (
+                                <span className="px-1.5 py-0.2 rounded bg-neutral-100 text-neutral-600 font-sans text-[9px] font-bold shrink-0">
+                                  NO PLATE
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setEditingTenure(mainTenure)}
+                                className="p-1 rounded text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 transition-colors cursor-pointer"
+                                title="Edit Customer, Plate & Deal Details"
+                              >
+                                <PencilSimple size={13} weight="bold" />
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <Link
+                                href={`/client-records?search=${encodeURIComponent(group.customer_name)}` as Route}
+                                className="text-neutral-800 hover:text-blue-600 font-medium text-[11px] truncate max-w-[140px] inline-block"
+                                title={`View client record for ${group.customer_name}`}
+                              >
+                                {group.customer_name}
+                              </Link>
+                              {group.customer_ic_no && (
+                                <span className="text-[10px] text-neutral-400 font-mono truncate max-w-[90px]">
+                                  {group.customer_ic_no}
+                                </span>
+                              )}
+                            </div>
+                            {(group.car_model || group.car_brand || group.engine_cc || group.manufacture_year) && (
+                              <div className="text-[10px] text-neutral-500 font-medium mt-0.5 truncate max-w-[210px]">
+                                {group.car_brand ? `${group.car_brand} ` : ""}
+                                {group.car_model || ""}
+                                {group.engine_cc ? ` · ${group.engine_cc}cc` : ""}
+                                {group.manufacture_year ? ` · YOM ${group.manufacture_year}` : ""}
+                              </div>
+                            )}
                           </td>
 
-                          {/* 2. Coverage Period */}
+                          {/* 2. Coverage Period (Main Policy) */}
                           <td className="py-3 px-3">
                             <div className="space-y-0.5">
                               <div className="flex items-center gap-1 text-[11px]">
@@ -1341,7 +1374,7 @@ export function TenureTimelineLedger() {
                                   Start
                                 </span>
                                 <span className="font-mono font-medium text-neutral-800">
-                                  {formatDateSafe(t.coverage_start_date)}
+                                  {formatDateSafe(mainTenure.coverage_start_date)}
                                 </span>
                               </div>
                               <div className="flex items-center gap-1 text-[11px]">
@@ -1349,28 +1382,28 @@ export function TenureTimelineLedger() {
                                   End
                                 </span>
                                 <span className="font-mono font-medium text-neutral-800">
-                                  {formatDateSafe(t.coverage_end_date)}
+                                  {formatDateSafe(mainTenure.coverage_end_date)}
                                 </span>
                               </div>
                             </div>
                             <div className="flex items-center gap-1.5 mt-1">
                               <span className="text-[10px] text-neutral-500 font-medium">
-                                Exp: {t.expiry_month}
+                                Exp: {mainTenure.expiry_month}
                               </span>
-                              {t.tenure_type && t.tenure_type !== "standard_1y" && (
-                                <span className="px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 text-[9px] font-bold border border-blue-200">
-                                  {t.tenure_type}
+                              {mainTenure.is_main && (
+                                <span className="px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-800 text-[9px] font-bold border border-emerald-200 flex items-center gap-0.5">
+                                  ★ Main
                                 </span>
                               )}
                             </div>
                           </td>
 
-                          {/* 3. Pipeline Stage */}
+                          {/* 3. Pipeline Stage (Main Policy) */}
                           <td className="py-3 px-3">
                             <div className="flex items-center gap-1.5">
                               <select
-                                value={t.stage || "Quotations"}
-                                onChange={(e) => patchTenureField(t.id, { stage: e.target.value })}
+                                value={mainTenure.stage || "Quotations"}
+                                onChange={(e) => patchTenureField(mainTenure.id, { stage: e.target.value })}
                                 className={`h-7 px-2 text-[11px] font-bold rounded border cursor-pointer transition-colors outline-none ${stageConf.badge}`}
                               >
                                 {STAGE_ORDER.map((st) => (
@@ -1385,25 +1418,20 @@ export function TenureTimelineLedger() {
                                     ? "bg-rose-100 text-rose-800 border border-rose-200"
                                     : "bg-neutral-100 text-neutral-700"
                                 }`}
-                                title={`${t.days_in_stage} day(s) in this pipeline stage`}
+                                title={`${mainTenure.days_in_stage} day(s) in this pipeline stage`}
                               >
-                                {t.days_in_stage}d
+                                {mainTenure.days_in_stage}d
                               </span>
                             </div>
-                            {t.business_type && (
-                              <span className="text-[10px] text-neutral-500 font-semibold block mt-1">
-                                {t.business_type}
-                              </span>
-                            )}
                           </td>
 
                           {/* 4. Insurer & Quotes */}
                           <td className="py-3 px-3">
-                            {t.sourced_quotes.length === 0 ? (
+                            {mainTenure.sourced_quotes.length === 0 ? (
                               <span className="text-neutral-400 italic text-[11px]">0 quotes compiled</span>
                             ) : (
                               <div className="flex flex-col gap-1 max-w-[210px]">
-                                {t.sourced_quotes.slice(0, 3).map((q) => (
+                                {mainTenure.sourced_quotes.slice(0, 3).map((q) => (
                                   <span
                                     key={q.session_id}
                                     className="inline-flex items-center justify-between gap-1.5 px-2 py-0.5 rounded bg-neutral-100 text-neutral-800 text-[10px] font-medium border border-neutral-200/60"
@@ -1414,18 +1442,18 @@ export function TenureTimelineLedger() {
                                     )}
                                   </span>
                                 ))}
-                                {t.sourced_quotes.length > 3 && (
+                                {mainTenure.sourced_quotes.length > 3 && (
                                   <span className="text-[10px] text-neutral-500 font-bold px-1">
-                                    +{t.sourced_quotes.length - 3} more quotes
+                                    +{mainTenure.sourced_quotes.length - 3} more quotes
                                   </span>
                                 )}
                               </div>
                             )}
-                            {t.generated_quotations && t.generated_quotations.length > 0 && (
+                            {mainTenure.generated_quotations && mainTenure.generated_quotations.length > 0 && (
                               <div className="mt-1">
                                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 text-[10px] font-bold border border-emerald-200">
                                   <FilePdf size={11} weight="fill" className="text-emerald-600" />
-                                  <span>{t.generated_quotations.length} Issued</span>
+                                  <span>{mainTenure.generated_quotations.length} Issued</span>
                                 </span>
                               </div>
                             )}
@@ -1438,36 +1466,31 @@ export function TenureTimelineLedger() {
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 <span
                                   className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${
-                                    t.client_payment_received
+                                    mainTenure.client_payment_received
                                       ? "bg-emerald-50 text-emerald-800 border-emerald-200"
                                       : "bg-neutral-50 text-neutral-500 border-neutral-200"
                                   }`}
                                   title="Client Payment Status"
                                 >
-                                  {t.client_payment_received ? "✓ Cli Paid" : "Cli Unpaid"}
+                                  {mainTenure.client_payment_received ? "✓ Cli Paid" : "Cli Unpaid"}
                                 </span>
                                 <span
                                   className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${
-                                    t.agency_payment_done
+                                    mainTenure.agency_payment_done
                                       ? "bg-blue-50 text-blue-800 border-blue-200"
                                       : "bg-neutral-50 text-neutral-500 border-neutral-200"
                                   }`}
                                   title="Agency Payment Status"
                                 >
-                                  {t.agency_payment_done ? "✓ Agc Paid" : "Agc Due"}
+                                  {mainTenure.agency_payment_done ? "✓ Agc Paid" : "Agc Due"}
                                 </span>
                               </div>
 
                               {/* Row 2: Roadtax, UCD, PIC */}
                               <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
-                                {t.key_in_ucd && (
+                                {mainTenure.key_in_ucd && (
                                   <span className="text-teal-700 font-bold bg-teal-50 px-1.5 py-0.2 rounded border border-teal-200">
                                     UCD ✓
-                                  </span>
-                                )}
-                                {t.print_roadtax && t.print_roadtax !== "No" && (
-                                  <span className="text-neutral-700 font-semibold bg-neutral-100 px-1.5 py-0.2 rounded border border-neutral-200 truncate max-w-[100px]">
-                                    RT: {t.print_roadtax}
                                   </span>
                                 )}
                                 {picInfo && (
@@ -1483,7 +1506,7 @@ export function TenureTimelineLedger() {
                           <td className="py-3 px-3 text-right">
                             <div className="flex items-center justify-end gap-1.5">
                               <Link
-                                href={`/comparison?tenure_id=${t.id}` as Route}
+                                href={`/comparison?tenure_id=${mainTenure.id}` as Route}
                                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold transition-colors shadow-2xs cursor-pointer"
                                 title="Go to Marketing Comparison matrix for this vehicle"
                               >
@@ -1494,7 +1517,7 @@ export function TenureTimelineLedger() {
                               <Button
                                 size="sm"
                                 variant="secondary"
-                                onClick={() => setActiveDrawerTenureId(t.id)}
+                                onClick={() => setActiveDrawerTenureId(mainTenure.id)}
                                 className="h-7 text-xs font-medium cursor-pointer"
                               >
                                 Timeline <ArrowRight className="w-3 h-3 ml-0.5" />
@@ -1502,26 +1525,196 @@ export function TenureTimelineLedger() {
 
                               <button
                                 type="button"
-                                onClick={() => toggleExpandRow(t.id)}
+                                onClick={() => toggleExpandVehicle(group.vehicle_no)}
                                 className={`h-7 px-2 text-xs font-bold rounded flex items-center gap-1 transition-colors cursor-pointer ${
-                                  isExpanded
+                                  isVehicleExpanded
                                     ? "bg-neutral-900 text-white"
                                     : "bg-neutral-100 hover:bg-neutral-200 text-neutral-700"
                                 }`}
-                                title={isExpanded ? "Close sub-panel" : "Expand inline editor"}
+                                title={isVehicleExpanded ? "Collapse periods" : "Expand periods list"}
                               >
-                                <span>{isExpanded ? "Done" : "Details"}</span>
-                                {isExpanded ? <CaretUp size={11} weight="bold" /> : <CaretDown size={11} weight="bold" />}
+                                <span>{hasMultiplePeriods ? `Periods (${group.tenures.length})` : isVehicleExpanded ? "Done" : "Details"}</span>
+                                {isVehicleExpanded ? <CaretUp size={11} weight="bold" /> : <CaretDown size={11} weight="bold" />}
                               </button>
                             </div>
                           </td>
                         </tr>
 
-                        {/* Inline Expandable Sub-panel */}
-                        {isExpanded && (
+                        {/* Inline Expandable Sub-panel: Serialized Policy Periods & Deal Details */}
+                        {isVehicleExpanded && (
                           <tr className="bg-[#f9f9fb] border-b-2 border-neutral-300">
-                            <td colSpan={7} className="p-4 whitespace-normal">
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                            <td colSpan={7} className="p-4 whitespace-normal space-y-4">
+                              {/* Serialized Policy Periods Sub-table */}
+                              <div className="bg-white rounded-xl border border-neutral-200 shadow-2xs overflow-hidden">
+                                <div className="px-4 py-2.5 bg-neutral-100/70 border-b border-neutral-200 flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <CalendarBlank size={14} className="text-neutral-700" />
+                                    <span className="font-bold text-xs text-neutral-900 uppercase tracking-wider">
+                                      Serialized Policy Periods for {displayName} ({group.tenures.length} Periods)
+                                    </span>
+                                  </div>
+                                  <span className="text-[11px] text-neutral-500 font-medium">
+                                    ★ Marked &quot;Approved / Main&quot; policy appears in Calendar View
+                                  </span>
+                                </div>
+
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-left text-xs whitespace-nowrap">
+                                    <thead className="bg-neutral-50/60 text-[10px] font-bold uppercase tracking-wider text-neutral-500 border-b border-neutral-200/60">
+                                      <tr>
+                                        <th className="py-2.5 px-3">Approved / Main Role</th>
+                                        <th className="py-2.5 px-3">Coverage Period</th>
+                                        <th className="py-2.5 px-3">Sourced Quotes</th>
+                                        <th className="py-2.5 px-3">Stage</th>
+                                        <th className="py-2.5 px-3">Fulfillment &amp; Checklist</th>
+                                        <th className="py-2.5 px-3 text-right">Actions</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-neutral-100">
+                                      {group.tenures.map((t) => {
+                                        const tStageConf = STAGE_CONFIGS[t.stage] || STAGE_CONFIGS.Quotations;
+                                        return (
+                                          <tr key={t.id} className={`hover:bg-neutral-50/60 transition-colors ${t.is_main ? "bg-amber-50/30" : ""}`}>
+                                            {/* Approved / Main Toggle */}
+                                            <td className="py-2.5 px-3">
+                                              {t.is_main ? (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleSetMainTenure(t.id, group.vehicle_no)}
+                                                  className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold text-[11px] flex items-center gap-1 shadow-2xs cursor-pointer hover:bg-emerald-200 transition-colors"
+                                                  title="Currently marked as the Approved / Main policy for Calendar View"
+                                                >
+                                                  <CheckCircle size={13} weight="fill" className="text-emerald-700" />
+                                                  <span>★ Approved / Main</span>
+                                                </button>
+                                              ) : (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleSetMainTenure(t.id, group.vehicle_no)}
+                                                  className="px-2.5 py-1 rounded-full bg-neutral-100 hover:bg-amber-100 text-neutral-600 hover:text-amber-900 border border-neutral-200 hover:border-amber-300 font-medium text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
+                                                  title="Click to set this period as the Approved / Main policy for Calendar View"
+                                                >
+                                                  <Clock size={12} className="text-neutral-400" />
+                                                  <span>Set as Main Policy</span>
+                                                </button>
+                                              )}
+                                            </td>
+
+                                            {/* Coverage Period */}
+                                            <td className="py-2.5 px-3">
+                                              <div className="font-mono font-bold text-neutral-900 text-xs">
+                                                {formatDateSafe(t.coverage_start_date)} → {formatDateSafe(t.coverage_end_date)}
+                                              </div>
+                                              <div className="text-[10px] text-neutral-500 font-medium mt-0.5">
+                                                Expiry Cohort: {t.expiry_month}
+                                              </div>
+                                            </td>
+
+                                            {/* Sourced Quotes */}
+                                            <td className="py-2.5 px-3">
+                                              {t.sourced_quotes.length === 0 ? (
+                                                <span className="text-neutral-400 italic text-[11px]">0 quotes</span>
+                                              ) : (
+                                                <div className="flex flex-wrap gap-1 max-w-[260px]">
+                                                  {t.sourced_quotes.map((q) => (
+                                                    <span
+                                                      key={q.session_id}
+                                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-800 text-[10px] font-medium border border-neutral-200/60"
+                                                    >
+                                                      <span className="font-bold">{q.company}</span>
+                                                      {q.total_payable && <span className="font-mono text-neutral-700 font-semibold">RM {q.total_payable}</span>}
+                                                    </span>
+                                                  ))}
+                                                </div>
+                                              )}
+                                            </td>
+
+                                            {/* Stage */}
+                                            <td className="py-2.5 px-3">
+                                              <select
+                                                value={t.stage || "Quotations"}
+                                                onChange={(e) => patchTenureField(t.id, { stage: e.target.value })}
+                                                className={`h-6 px-1.5 text-[11px] font-bold rounded border cursor-pointer transition-colors outline-none ${tStageConf.badge}`}
+                                              >
+                                                {STAGE_ORDER.map((st) => (
+                                                  <option key={st} value={st}>
+                                                    {st}
+                                                  </option>
+                                                ))}
+                                              </select>
+                                            </td>
+
+                                            {/* Fulfillment & Checklist */}
+                                            <td className="py-2.5 px-3">
+                                              <div className="flex items-center gap-3 text-xs">
+                                                <label className="flex items-center gap-1 text-[11px] font-medium text-neutral-700 cursor-pointer">
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={Boolean(t.key_in_ucd)}
+                                                    onChange={(e) => patchTenureField(t.id, { key_in_ucd: e.target.checked })}
+                                                    className="w-3.5 h-3.5 accent-teal-600 rounded cursor-pointer"
+                                                  />
+                                                  <span>UCD</span>
+                                                </label>
+                                                <label className="flex items-center gap-1 text-[11px] font-medium text-neutral-700 cursor-pointer">
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={Boolean(t.client_payment_received)}
+                                                    onChange={(e) => patchTenureField(t.id, { client_payment_received: e.target.checked })}
+                                                    className="w-3.5 h-3.5 accent-emerald-600 rounded cursor-pointer"
+                                                  />
+                                                  <span>Client Paid</span>
+                                                </label>
+                                                <label className="flex items-center gap-1 text-[11px] font-medium text-neutral-700 cursor-pointer">
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={Boolean(t.agency_payment_done)}
+                                                    onChange={(e) => patchTenureField(t.id, { agency_payment_done: e.target.checked })}
+                                                    className="w-3.5 h-3.5 accent-blue-600 rounded cursor-pointer"
+                                                  />
+                                                  <span>Agency Paid</span>
+                                                </label>
+                                              </div>
+                                            </td>
+
+                                            {/* Period Actions */}
+                                            <td className="py-2.5 px-3 text-right">
+                                              <div className="flex items-center justify-end gap-1.5">
+                                                <Link
+                                                  href={`/comparison?tenure_id=${t.id}` as Route}
+                                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500 hover:bg-amber-600 text-slate-950 text-[11px] font-bold transition-colors shadow-2xs"
+                                                >
+                                                  <Columns className="w-3 h-3" />
+                                                  <span>Compare</span>
+                                                </Link>
+                                                <Button
+                                                  size="sm"
+                                                  variant="secondary"
+                                                  onClick={() => setActiveDrawerTenureId(t.id)}
+                                                  className="h-6 text-[11px] font-medium px-2"
+                                                >
+                                                  Timeline
+                                                </Button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleDeleteTenure(t.id, displayName)}
+                                                  className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                                                  title="Delete this period"
+                                                >
+                                                  <Trash size={12} weight="bold" />
+                                                </button>
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+
+                              {/* Sub-panel Secondary Cards: Remarks & Operations */}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                                 {/* Sub-panel Card 1: Deal Intelligence & Remarks */}
                                 <div className="p-3.5 bg-white rounded-xl border border-neutral-200 shadow-2xs space-y-3">
                                   <div className="flex items-center justify-between pb-1.5 border-b border-neutral-100">
@@ -1529,24 +1722,17 @@ export function TenureTimelineLedger() {
                                       <NotePencil size={14} className="text-amber-600" />
                                       Deal Intelligence &amp; Remarks
                                     </span>
-                                    {savingFieldId === t.id && (
+                                    {savingFieldId === mainTenure.id && (
                                       <span className="text-[10px] text-neutral-500 font-semibold animate-pulse">
                                         Saving...
                                       </span>
                                     )}
-                                    {savedFieldId === t.id && (
+                                    {savedFieldId === mainTenure.id && (
                                       <span className="text-[10px] text-emerald-600 font-bold">
                                         ✓ Saved
                                       </span>
                                     )}
                                   </div>
-
-                                  {t.is_hidden && (
-                                    <div className="p-2 rounded bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-medium flex items-center gap-1.5">
-                                      <Warning size={14} weight="bold" className="text-amber-700 shrink-0" />
-                                      <span>This tenure was superseded by a newer quotation on this vehicle.</span>
-                                    </div>
-                                  )}
 
                                   <div>
                                     <label className="text-[11px] font-bold text-neutral-700 block mb-1">
@@ -1554,11 +1740,11 @@ export function TenureTimelineLedger() {
                                     </label>
                                     <input
                                       type="text"
-                                      defaultValue={t.comment || ""}
+                                      defaultValue={mainTenure.comment || ""}
                                       placeholder="Add deal comment / reminder..."
                                       onBlur={(e) => {
-                                        if (e.target.value !== (t.comment || "")) {
-                                          patchTenureField(t.id, { comment: e.target.value });
+                                        if (e.target.value !== (mainTenure.comment || "")) {
+                                          patchTenureField(mainTenure.id, { comment: e.target.value });
                                         }
                                       }}
                                       onKeyDown={(e) => {
@@ -1574,11 +1760,11 @@ export function TenureTimelineLedger() {
                                     </label>
                                     <textarea
                                       rows={2}
-                                      defaultValue={t.client_preference_notes || t.notes || ""}
+                                      defaultValue={mainTenure.client_preference_notes || mainTenure.notes || ""}
                                       placeholder="Habitual pattern, underwriter preferences, agreed value rules..."
                                       onBlur={(e) => {
-                                        if (e.target.value !== (t.client_preference_notes || "")) {
-                                          patchTenureField(t.id, { client_preference_notes: e.target.value });
+                                        if (e.target.value !== (mainTenure.client_preference_notes || "")) {
+                                          patchTenureField(mainTenure.id, { client_preference_notes: e.target.value });
                                         }
                                       }}
                                       className="w-full p-2 text-xs rounded border border-neutral-300 bg-white focus:ring-1 focus:ring-neutral-900 outline-none resize-none"
@@ -1586,149 +1772,23 @@ export function TenureTimelineLedger() {
                                   </div>
                                 </div>
 
-                                {/* Sub-panel Card 2: Ownership, PIC & Business Classification */}
-                                <div className="p-3.5 bg-white rounded-xl border border-neutral-200 shadow-2xs space-y-3">
-                                  <div className="flex items-center justify-between pb-1.5 border-b border-neutral-100">
-                                    <span className="font-bold text-neutral-900 uppercase tracking-wider text-[11px] flex items-center gap-1">
-                                      <Users size={14} className="text-blue-600" />
-                                      Ownership &amp; Vehicle Specs
-                                    </span>
-                                  </div>
-
-                                  <div>
-                                    <label className="text-[11px] font-bold text-neutral-700 block mb-1">
-                                      Assigned Sub Agent / PIC
-                                    </label>
-                                    <select
-                                      value={t.pic_id || ""}
-                                      onChange={(e) => {
-                                        const selectedPicId = e.target.value;
-                                        const matched = pics.find((p) => p.id === selectedPicId);
-                                        patchTenureField(t.id, {
-                                          pic_id: selectedPicId || null,
-                                          sub_agent_name: matched ? matched.name : "",
-                                        });
-                                      }}
-                                      className="w-full h-8 px-2 text-xs font-semibold rounded border border-neutral-300 bg-white text-neutral-800 outline-none cursor-pointer"
-                                    >
-                                      <option value="">— Unassigned PIC —</option>
-                                      {pics.map((p) => (
-                                        <option key={p.id} value={p.id}>
-                                          {p.name} {p.type === "subagent" ? `(SubAgent · ${p.commission_rate}%)` : `(${p.type})`}
-                                        </option>
-                                      ))}
-                                    </select>
-                                    {picInfo && (
-                                      <div className="mt-1 flex items-center gap-1.5">
-                                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">
-                                          Commission: {picInfo.commission}%
-                                        </span>
-                                        {picInfo.agency && (
-                                          <span className="text-[10px] text-neutral-600 font-medium">
-                                            Agency: {picInfo.agency}
-                                          </span>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  <div>
-                                    <label className="text-[11px] font-bold text-neutral-700 block mb-1">
-                                      Business Type
-                                    </label>
-                                    <div className="flex items-center gap-2">
-                                      <button
-                                        type="button"
-                                        onClick={() => patchTenureField(t.id, { business_type: "Renewal" })}
-                                        className={`px-3 py-1 text-xs font-bold rounded border cursor-pointer transition-colors ${
-                                          t.business_type !== "New Business"
-                                            ? "bg-neutral-900 text-white border-neutral-900"
-                                            : "bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-50"
-                                        }`}
-                                      >
-                                        Renewal
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => patchTenureField(t.id, { business_type: "New Business" })}
-                                        className={`px-3 py-1 text-xs font-bold rounded border cursor-pointer transition-colors ${
-                                          t.business_type === "New Business"
-                                            ? "bg-purple-600 text-white border-purple-600"
-                                            : "bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-50"
-                                        }`}
-                                      >
-                                        New Business
-                                      </button>
-                                    </div>
-                                  </div>
-
-                                  <div className="pt-2 border-t border-neutral-100 text-[11px] text-neutral-600 space-y-1">
-                                    <div className="flex justify-between">
-                                      <span>Year of Make (YOM):</span>
-                                      <strong className="text-neutral-900">{t.manufacture_year || "—"}</strong>
-                                    </div>
-                                    <div className="flex justify-between">
-                                      <span>Engine No:</span>
-                                      <strong className="text-neutral-900 font-mono">{t.engine_no || "—"}</strong>
-                                    </div>
-                                    <div className="flex justify-between">
-                                      <span>Chassis No:</span>
-                                      <strong className="text-neutral-900 font-mono">{t.chassis_no || "—"}</strong>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* Sub-panel Card 3: Operations, Payments & Fulfillment */}
+                                {/* Sub-panel Card 2: Operations & Fulfillment */}
                                 <div className="p-3.5 bg-white rounded-xl border border-neutral-200 shadow-2xs space-y-3">
                                   <div className="flex items-center justify-between pb-1.5 border-b border-neutral-100">
                                     <span className="font-bold text-neutral-900 uppercase tracking-wider text-[11px] flex items-center gap-1">
                                       <CurrencyDollar size={14} className="text-emerald-600" />
-                                      Operations &amp; Fulfillment
+                                      Operations &amp; Roadtax Fulfillment
                                     </span>
                                   </div>
 
-                                  <div className="space-y-1.5">
-                                    <label className="flex items-center gap-2 text-xs font-semibold text-neutral-800 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={Boolean(t.client_payment_received)}
-                                        onChange={(e) =>
-                                          patchTenureField(t.id, { client_payment_received: e.target.checked })
-                                        }
-                                        className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
-                                      />
-                                      <span>Client Payment Received</span>
-                                    </label>
-                                    <label className="flex items-center gap-2 text-xs font-semibold text-neutral-800 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={Boolean(t.agency_payment_done)}
-                                        onChange={(e) =>
-                                          patchTenureField(t.id, { agency_payment_done: e.target.checked })
-                                        }
-                                        className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
-                                      />
-                                      <span>Agency Underwriter Payment Done</span>
-                                    </label>
-                                    <label className="flex items-center gap-2 text-xs font-semibold text-neutral-800 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={Boolean(t.key_in_ucd)}
-                                        onChange={(e) => patchTenureField(t.id, { key_in_ucd: e.target.checked })}
-                                        className="w-4 h-4 accent-teal-600 rounded cursor-pointer"
-                                      />
-                                      <span>Keyed-in to UCD Portal</span>
-                                    </label>
-                                  </div>
-
-                                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-neutral-100">
+                                  <div className="grid grid-cols-2 gap-2">
                                     <div>
                                       <label className="text-[10px] font-bold text-neutral-600 block mb-0.5">
                                         Print Roadtax
                                       </label>
                                       <select
-                                        value={t.print_roadtax || "No"}
-                                        onChange={(e) => patchTenureField(t.id, { print_roadtax: e.target.value })}
+                                        value={mainTenure.print_roadtax || "No"}
+                                        onChange={(e) => patchTenureField(mainTenure.id, { print_roadtax: e.target.value })}
                                         className="w-full h-7 px-1.5 text-xs font-semibold rounded border border-neutral-300 bg-white"
                                       >
                                         <option value="No">No</option>
@@ -1743,8 +1803,8 @@ export function TenureTimelineLedger() {
                                         Roadtax Receipt
                                       </label>
                                       <select
-                                        value={t.roadtax_receipt || "None"}
-                                        onChange={(e) => patchTenureField(t.id, { roadtax_receipt: e.target.value })}
+                                        value={mainTenure.roadtax_receipt || "None"}
+                                        onChange={(e) => patchTenureField(mainTenure.id, { roadtax_receipt: e.target.value })}
                                         className="w-full h-7 px-1.5 text-xs font-semibold rounded border border-neutral-300 bg-white"
                                       >
                                         <option value="None">None</option>
@@ -1757,14 +1817,14 @@ export function TenureTimelineLedger() {
 
                                   <div className="pt-2 border-t border-neutral-100 flex items-center justify-between">
                                     <Link
-                                      href={`/comparison?tenure_id=${t.id}` as Route}
+                                      href={`/comparison?tenure_id=${mainTenure.id}` as Route}
                                       className="text-xs font-bold text-amber-700 hover:text-amber-900 flex items-center gap-1"
                                     >
                                       <span>Open Comparison Matrix →</span>
                                     </Link>
                                     <button
                                       type="button"
-                                      onClick={() => setEditingTenure(t)}
+                                      onClick={() => setEditingTenure(mainTenure)}
                                       className="text-xs font-bold text-neutral-700 hover:text-neutral-900 underline cursor-pointer"
                                     >
                                       Edit Deal Modal

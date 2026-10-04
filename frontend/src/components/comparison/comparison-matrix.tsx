@@ -1996,6 +1996,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         onSave={handleSaveEntry}
         initialData={editingEntry}
         tenureId={tenureId}
+        tenureStartDate={tenure?.coverage_start_date}
         onUploadSuccess={() => fetchComparison()}
       />
     </div>

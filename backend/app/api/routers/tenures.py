@@ -110,6 +110,7 @@ class UpdateTenureLedgerRequest(BaseModel):
     engine_cc: str | None = None
     road_tax: float | None = None
     runner_fee: float | None = None
+    is_main: bool | None = None
 
 
 @router.post("")
@@ -544,6 +545,7 @@ def list_tenures(
             "generated_quotations": gen_quotes,
             "is_projected": t.is_projected,
             "is_hidden": t.is_hidden,
+            "is_main": bool(t.is_main),
             "superseded_by_tenure_id": t.superseded_by_tenure_id,
             "tenure_type": t.tenure_type,
             "manufacture_year": getattr(t.tracked_vehicle, "manufacture_year", None) if t.tracked_vehicle else None,
@@ -707,9 +709,55 @@ def update_tenure_ledger_fields(
                                     f[ic_k] = cust.id_number
                     s.draft.fields = f
 
+    if payload.is_main is not None:
+        tenure.is_main = payload.is_main
+        if payload.is_main:
+            cohort_year = tenure.coverage_start_date.year if tenure.coverage_start_date else None
+            other_tenures = db.scalars(
+                select(InsuranceTenure).where(
+                    InsuranceTenure.vehicle_no == tenure.vehicle_no,
+                    InsuranceTenure.id != tenure.id,
+                )
+            ).all()
+            for ot in other_tenures:
+                ot_year = ot.coverage_start_date.year if ot.coverage_start_date else None
+                if ot_year == cohort_year:
+                    ot.is_main = False
+
     db.commit()
     db.refresh(tenure)
-    return {"success": True, "id": tenure.id, "stage": tenure.stage}
+    return {"success": True, "id": tenure.id, "stage": tenure.stage, "is_main": tenure.is_main}
+
+
+@router.post("/{tenure_id}/set-main")
+def set_tenure_as_main(
+    tenure_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Mark this tenure as the approved/main policy for this vehicle and cohort."""
+    tenure = db.get(InsuranceTenure, tenure_id)
+    if not tenure:
+        raise HTTPException(status_code=404, detail="Tenure not found")
+
+    tenure.is_main = True
+    cohort_year = tenure.coverage_start_date.year if tenure.coverage_start_date else None
+
+    # Unset other tenures for the same vehicle in the same cohort year
+    other_tenures = db.scalars(
+        select(InsuranceTenure).where(
+            InsuranceTenure.vehicle_no == tenure.vehicle_no,
+            InsuranceTenure.id != tenure.id,
+        )
+    ).all()
+    for ot in other_tenures:
+        ot_year = ot.coverage_start_date.year if ot.coverage_start_date else None
+        if ot_year == cohort_year:
+            ot.is_main = False
+
+    db.commit()
+    db.refresh(tenure)
+    return {"status": "success", "tenure_id": tenure.id, "is_main": tenure.is_main}
 
 
 @router.get("/stats/yoy")

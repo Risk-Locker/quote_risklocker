@@ -53,7 +53,7 @@ from app.storage.supabase import SupabaseStorage
 
 from app.services.business_setup_common import (
     BUSINESS_ROLES, OFFERING_KINDS, STATUSES, ALIAS_KINDS, VARIANT_TYPES,
-    _require_business, _slug, _require_revision, _audit, _asset_summary, _normalize_string_list
+    _require_business, _slug, _resolve_company_id, _require_revision, _audit, _asset_summary, _normalize_string_list
 )
 
 from app.services.company_setup_service import _catalog

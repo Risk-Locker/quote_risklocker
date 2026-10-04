@@ -9,6 +9,7 @@ import {
   Copy,
   Info,
   Lightning,
+  Plus,
   ShieldCheck,
   Table,
   Trash,
@@ -63,6 +64,7 @@ export interface BenefitsStepNavigatorProps {
   selectedCatalogId: string;
   loadCatalog: (id: string) => Promise<unknown>;
   fileUrl: (path?: string | null) => string;
+  handleCreateNewProfile: () => void;
 }
 
 export function BenefitsStepNavigator({
@@ -100,6 +102,7 @@ export function BenefitsStepNavigator({
   selectedCatalogId,
   loadCatalog,
   fileUrl,
+  handleCreateNewProfile,
 }: BenefitsStepNavigatorProps) {
   return (
     <div className="mt-4 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3.5 space-y-3.5">
@@ -266,6 +269,19 @@ export function BenefitsStepNavigator({
               <span>Clone as New Version</span>
             </Button>
           )}
+
+          {/* Create New Profile */}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleCreateNewProfile}
+            disabled={profileActionLoading}
+            className="gap-1.5 text-xs h-7 px-2.5"
+            title="Create a new empty benefit profile from scratch"
+          >
+            <Plus size={13} weight="bold" />
+            <span>New Profile</span>
+          </Button>
         </div>
       </div>
 

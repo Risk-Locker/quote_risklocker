@@ -438,8 +438,8 @@ def generate_company_matrix_docx(data: dict[str, Any]) -> io.BytesIO:
                 f"• Segment: {s['segment_name']}\n"
                 f"• Vehicle: {s['vehicle_category_name']}\n"
                 f"• Coverage: {s['coverage_type_name']}\n"
-                f"• System: {s['system_type']}\n"
-                f"• Revision: rev {s['revision_number']} ({s['state']})"
+                f"• System: {s['system_type']}"
+                # RL-DISABLED Revision label — disabled 2026-10-03; internal tracking only
             )
             r0_meta.font.name = "Arial"
             r0_meta.font.size = Pt(8)
@@ -560,7 +560,7 @@ def generate_company_matrix_xlsx(data: dict[str, Any]) -> io.BytesIO:
         "Segment",
         "Vehicle Category",
         "System Type",
-        "Revision",
+        "Status",
         "Defaults Count",
         "Add-ons Count",
         "Bundles Count",
@@ -587,7 +587,7 @@ def generate_company_matrix_xlsx(data: dict[str, Any]) -> io.BytesIO:
             s["segment_name"],
             s["vehicle_category_name"],
             s["system_type"],
-            f"rev {s['revision_number']}",
+            s["state"].title(),  # RL-DISABLED revision number — disabled 2026-10-03; show state only
             len(s["defaults"]),
             len(s["addons"]),
             len(s["bundles"]),

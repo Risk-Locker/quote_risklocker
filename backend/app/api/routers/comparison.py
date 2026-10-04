@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -210,6 +211,21 @@ async def upload_comparison_quote(
     tenure = db.get(InsuranceTenure, tenure_id)
     if not tenure:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenure {tenure_id} not found")
+
+    # Check if filename specifies a date and verify against tenure coverage period
+    fname = file.filename or ""
+    date_match = re.search(r"(?:^|[_\-\s])(\d{4})(\d{2})(\d{2})(?:[_\-\s]|\.pdf)", fname, re.IGNORECASE)
+    if date_match and tenure.coverage_start_date:
+        y, m, d = date_match.groups()
+        file_date_str = f"{y}{m}{d}"
+        tenure_date_str = tenure.coverage_start_date.strftime("%Y%m%d")
+        if file_date_str != tenure_date_str:
+            target_fmt = tenure.coverage_start_date.strftime("%d/%m/%Y")
+            file_fmt = f"{d}/{m}/{y}"
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot upload: quotation validity date ({file_fmt}) does not match this comparison period ({target_fmt}).",
+            )
 
     idempotency_key = f"comp_{tenure_id}_{new_id()[:12]}"
     try:

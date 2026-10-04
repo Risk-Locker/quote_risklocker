@@ -58,7 +58,30 @@ ALIAS_KINDS = frozenset({"detection", "legal_name", "brand", "product", "compati
 VARIANT_TYPES = frozenset({"money", "distance", "duration"})
 
 
-__all__ = ['_require_business', '_slug', '_require_revision', '_audit', '_asset_summary', '_normalize_string_list', 'BUSINESS_ROLES', 'OFFERING_KINDS', 'STATUSES', 'ALIAS_KINDS', 'VARIANT_TYPES']
+__all__ = ['_require_business', '_slug', '_resolve_company_id', '_require_revision', '_audit', '_asset_summary', '_normalize_string_list', 'BUSINESS_ROLES', 'OFFERING_KINDS', 'STATUSES', 'ALIAS_KINDS', 'VARIANT_TYPES']
+
+
+def _resolve_company_id(db, identifier: str) -> str:
+    import uuid
+    if not identifier:
+        raise AppError("Company ID is required.", 400)
+    try:
+        uuid.UUID(str(identifier))
+        return str(identifier)
+    except (ValueError, TypeError):
+        slug = str(identifier).lower().strip()
+        comp = db.scalar(
+            select(InsuranceCompany).where(
+                or_(
+                    func.lower(InsuranceCompany.slug) == slug,
+                    func.lower(InsuranceCompany.name) == slug,
+                    func.lower(func.replace(InsuranceCompany.name, " ", "-")) == slug,
+                )
+            )
+        )
+        if comp:
+            return comp.id
+        raise AppError(f"Insurance company '{identifier}' not found.", 404)
 
 
 def _require_business(user) -> None:

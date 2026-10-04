@@ -41,7 +41,7 @@ export function TenureTimelineDrawer({
   const [expandedCompany, setExpandedCompany] = useState<string | null>(null);
 
   // Status update modal state
-  const [statusVal, setStatusVal] = useState("draft");
+  const [stageVal, setStageVal] = useState("Quotations");
   const [wonPremium, setWonPremium] = useState("");
   const [winningRef, setWinningRef] = useState("");
   const [missReason, setMissReason] = useState("");
@@ -50,7 +50,8 @@ export function TenureTimelineDrawer({
   const [generatingQuote, setGeneratingQuote] = useState<string | null>(null);
 
   const [shiftingDates, setShiftingDates] = useState(false);
-  const [newStartDateInput, setNewStartDateInput] = useState("");
+  const [startDateInput, setStartDateInput] = useState("");
+  const [endDateInput, setEndDateInput] = useState("");
   const [projectingRenewal, setProjectingRenewal] = useState(false);
   const [lapsingTenure, setLapsingTenure] = useState(false);
 
@@ -60,13 +61,16 @@ export function TenureTimelineDrawer({
     try {
       const res = await api<any>(`/tenures/${tenureId}`);
       setData(res);
-      setStatusVal(res.status || "draft");
+      setStageVal(res.stage || "Quotations");
       setWonPremium(res.won_premium ? String(res.won_premium) : "");
       setWinningRef(res.winning_quotation_ref || "");
-      setMissReason(res.miss_reason || "");
+      setMissReason(res.loss_reason_category || res.miss_reason || "");
       setNotes(res.notes || "");
       if (res.coverage_start_date) {
-        setNewStartDateInput(res.coverage_start_date.substring(0, 10));
+        setStartDateInput(res.coverage_start_date.substring(0, 10));
+      }
+      if (res.coverage_end_date) {
+        setEndDateInput(res.coverage_end_date.substring(0, 10));
       }
     } catch (err) {
       console.error("Failed to load tenure detail:", err);
@@ -75,30 +79,25 @@ export function TenureTimelineDrawer({
     }
   }
 
-  async function doShiftDates(dateStr: string) {
-    if (!dateStr) return;
+  async function handleUpdateDates() {
+    if (!startDateInput) return;
     setShiftingDates(true);
     try {
       await api(`/tenures/${tenureId}/shift-dates`, {
         method: "POST",
-        body: JSON.stringify({ start_date: dateStr }),
+        body: JSON.stringify({
+          start_date: startDateInput,
+          end_date: endDateInput || null,
+          force_past: true,
+        }),
       });
       await loadDetail();
       if (onRefresh) onRefresh();
     } catch (err: any) {
-      alert("Failed to shift dates: " + (err?.message || err));
+      alert("Failed to update dates: " + (err?.message || err));
     } finally {
       setShiftingDates(false);
     }
-  }
-
-  async function handleQuickShift(daysToAdd: number) {
-    if (!data?.coverage_start_date) return;
-    const current = new Date(data.coverage_start_date);
-    current.setDate(current.getDate() + daysToAdd);
-    const dateStr = current.toISOString().substring(0, 10);
-    setNewStartDateInput(dateStr);
-    await doShiftDates(dateStr);
   }
 
   async function handleProjectRenewal() {
@@ -143,13 +142,13 @@ export function TenureTimelineDrawer({
   async function handleSaveStatus() {
     setSavingStatus(true);
     try {
-      await api(`/tenures/${tenureId}/status`, {
-        method: "POST",
+      await api(`/tenures/${tenureId}/ledger-fields`, {
+        method: "PATCH",
         body: JSON.stringify({
-          status: statusVal,
+          stage: stageVal,
           winning_quotation_ref: winningRef || null,
           won_premium: wonPremium ? parseFloat(wonPremium) : null,
-          miss_reason: missReason || null,
+          loss_reason_category: missReason || null,
           notes: notes || null,
         }),
       });
@@ -399,7 +398,7 @@ export function TenureTimelineDrawer({
                   </div>
                 </div>
 
-                <div className="p-3 bg-neutral-50/80 border border-neutral-200/80 rounded-lg text-xs space-y-2">
+                <div className="p-3 bg-neutral-50/80 border border-neutral-200/80 rounded-lg text-xs space-y-3">
                   <div className="flex items-center justify-between text-neutral-700">
                     <span>
                       Current Coverage: <strong className="font-mono text-neutral-900">{data.coverage_start_date ? new Date(data.coverage_start_date).toLocaleDateString("en-GB") : "—"}</strong> → <strong className="font-mono text-neutral-900">{data.coverage_end_date ? new Date(data.coverage_end_date).toLocaleDateString("en-GB") : "—"}</strong>
@@ -409,52 +408,37 @@ export function TenureTimelineDrawer({
                     </span>
                   </div>
 
-                  {/* Quick Shift Buttons */}
-                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                    <span className="text-[11px] font-semibold text-neutral-500 mr-1">Quick Shift:</span>
-                    <button
-                      type="button"
-                      disabled={shiftingDates}
-                      onClick={() => handleQuickShift(1)}
-                      className="px-2 py-1 rounded bg-white border border-neutral-200 hover:bg-neutral-100 text-[11px] font-semibold text-neutral-800 transition-colors"
-                    >
-                      +1 Day
-                    </button>
-                    <button
-                      type="button"
-                      disabled={shiftingDates}
-                      onClick={() => handleQuickShift(7)}
-                      className="px-2 py-1 rounded bg-white border border-neutral-200 hover:bg-neutral-100 text-[11px] font-semibold text-neutral-800 transition-colors"
-                    >
-                      +1 Week
-                    </button>
-                    <button
-                      type="button"
-                      disabled={shiftingDates}
-                      onClick={() => handleQuickShift(30)}
-                      className="px-2 py-1 rounded bg-white border border-neutral-200 hover:bg-neutral-100 text-[11px] font-semibold text-neutral-800 transition-colors"
-                    >
-                      +1 Month
-                    </button>
-
-                    {/* Custom Date Input */}
-                    <div className="flex items-center gap-1 ml-auto">
+                  {/* Clean Side-by-side Date Inputs */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-neutral-600 mb-1">Coverage Start Date</label>
                       <input
                         type="date"
-                        value={newStartDateInput}
-                        onChange={(e) => setNewStartDateInput(e.target.value)}
-                        className="text-xs h-7 px-2 border border-neutral-200 rounded bg-white focus:outline-hidden focus:ring-1 focus:ring-neutral-900"
+                        value={startDateInput}
+                        onChange={(e) => setStartDateInput(e.target.value)}
+                        className="w-full text-xs h-8 px-2.5 border border-neutral-200 rounded-lg bg-white focus:outline-hidden focus:ring-1 focus:ring-neutral-900"
                       />
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        disabled={shiftingDates || !newStartDateInput}
-                        onClick={() => doShiftDates(newStartDateInput)}
-                        className="h-7 text-[11px] px-2"
-                      >
-                        {shiftingDates ? "Syncing..." : "Apply Shift"}
-                      </Button>
                     </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-neutral-600 mb-1">Coverage End Date</label>
+                      <input
+                        type="date"
+                        value={endDateInput}
+                        onChange={(e) => setEndDateInput(e.target.value)}
+                        className="w-full text-xs h-8 px-2.5 border border-neutral-200 rounded-lg bg-white focus:outline-hidden focus:ring-1 focus:ring-neutral-900"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-1">
+                    <Button
+                      size="sm"
+                      disabled={shiftingDates || !startDateInput}
+                      onClick={handleUpdateDates}
+                      className="h-8 text-xs font-semibold px-4 bg-neutral-900 hover:bg-neutral-800 text-white cursor-pointer"
+                    >
+                      {shiftingDates ? "Updating Dates..." : "Update Dates"}
+                    </Button>
                   </div>
                 </div>
 
@@ -478,29 +462,35 @@ export function TenureTimelineDrawer({
                     <span className="w-2 h-2 rounded-full bg-purple-500"></span>
                     3. Delivery Status &amp; Outcome
                   </h3>
-                  <span className="text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-neutral-100 text-neutral-700">
-                    Current: {data.status}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {data.stage_updated_at && (
+                      <span className="text-[10px] text-neutral-400">
+                        Updated {new Date(data.stage_updated_at).toLocaleDateString("en-GB")}
+                      </span>
+                    )}
+                    <span className="text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-neutral-100 text-neutral-700">
+                      {stageVal}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                   <div>
-                    <label className="block font-semibold text-neutral-700 mb-1">Tenure Status</label>
+                    <label className="block font-semibold text-neutral-700 mb-1">Tenure Stage</label>
                     <select
-                      value={statusVal}
-                      onChange={(e) => setStatusVal(e.target.value)}
+                      value={stageVal}
+                      onChange={(e) => setStageVal(e.target.value)}
                       className="w-full h-8 px-2 rounded-lg border border-neutral-200 bg-white text-xs font-medium focus:ring-1 focus:ring-neutral-900 outline-none"
                     >
-                      <option value="draft">Draft / Ingestion</option>
-                      <option value="comparing">Comparing (Sourcing Quotes)</option>
-                      <option value="sent">Sent to Client (Proposal Pending)</option>
-                      <option value="hit">HIT — Policy Won / Bound</option>
-                      <option value="miss">MISS — Lost to Competitor / Declined</option>
-                      <option value="closed">Closed</option>
+                      <option value="Quotations">Quotations (Ingestion &amp; Comparison)</option>
+                      <option value="Material to Client">Material to Client (Sent / Reviewing)</option>
+                      <option value="Close - Win">Close - Win (Policy Won &amp; Bound)</option>
+                      <option value="Issue Policy">Issue Policy (Final Policy Issued)</option>
+                      <option value="Close - Lose">Close - Lose (Lost to Competitor / Declined)</option>
                     </select>
                   </div>
 
-                  {statusVal === "hit" && (
+                  {(stageVal === "Close - Win" || stageVal === "Issue Policy") && (
                     <>
                       <div>
                         <label className="block font-semibold text-neutral-700 mb-1">Won Premium (RM)</label>
@@ -526,7 +516,7 @@ export function TenureTimelineDrawer({
                     </>
                   )}
 
-                  {statusVal === "miss" && (
+                  {stageVal === "Close - Lose" && (
                     <div className="sm:col-span-2">
                       <label className="block font-semibold text-neutral-700 mb-1">Miss Reason</label>
                       <input

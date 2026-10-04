@@ -98,6 +98,25 @@ function formatElapsed(seconds: number) {
   return minutes ? `${minutes}m ${remainder.toString().padStart(2, "0")}s` : `${remainder}s`;
 }
 
+export function extractDateFromFilename(filename: string): { raw: string; formatted: string; iso: string } | null {
+  // Matches YYYYMMDD at start or preceded by delimiter, e.g. 20230830_JRW1813_Quotation_STMB.pdf
+  const match = filename.match(/(?:^|[_\-\s])(\d{4})(\d{2})(\d{2})(?:[_\-\s]|\.pdf)/i);
+  if (match) {
+    const [, year, month, day] = match;
+    const y = parseInt(year, 10);
+    const m = parseInt(month, 10);
+    const d = parseInt(day, 10);
+    if (y >= 2000 && y <= 2050 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return {
+        raw: `${year}${month}${day}`,
+        formatted: `${day.padStart(2, "0")}/${month.padStart(2, "0")}/${year}`,
+        iso: `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`,
+      };
+    }
+  }
+  return null;
+}
+
 export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -340,6 +359,36 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
       );
     }
 
+    // In comparison mode: enforce identical tenure / quotation validity dates
+    let targetDateInfo: { raw: string; formatted: string; iso: string } | null = null;
+    if (mode === "comparison") {
+      if (bulkFiles.length > 0) {
+        targetDateInfo = extractDateFromFilename(bulkFiles[0].file.name);
+      } else if (validPdfs.length > 0) {
+        targetDateInfo = extractDateFromFilename(validPdfs[0].name);
+      }
+    }
+
+    const eligiblePdfs: File[] = [];
+    let disqualifiedCount = 0;
+
+    for (const f of validPdfs) {
+      if (mode === "comparison" && targetDateInfo) {
+        const fileDate = extractDateFromFilename(f.name);
+        if (fileDate && fileDate.raw !== targetDateInfo.raw) {
+          disqualifiedCount += 1;
+          continue; // Disqualify mismatched PDF immediately with no trace
+        }
+      }
+      eligiblePdfs.push(f);
+    }
+
+    if (disqualifiedCount > 0 && targetDateInfo) {
+      setBulkNotice(
+        `Wrong PDFs were uploaded: insurance validity dates do not match. The first quotation period (${targetDateInfo.formatted}) was selected, and ${disqualifiedCount} mismatched PDF(s) were disqualified.`
+      );
+    }
+
     setBulkFiles((prev) => {
       const currentCount = prev.length;
       const availableSlots = Math.max(0, maxBulkLimit - currentCount);
@@ -349,10 +398,10 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
         return prev;
       }
 
-      const toAdd = validPdfs.slice(0, availableSlots);
-      if (validPdfs.length > availableSlots) {
+      const toAdd = eligiblePdfs.slice(0, availableSlots);
+      if (eligiblePdfs.length > availableSlots) {
         setBulkNotice(
-          `Added ${availableSlots} PDF(s). Remaining ${validPdfs.length - availableSlots} file(s) omitted (limit is ${maxBulkLimit}).`
+          `Added ${availableSlots} PDF(s). Remaining ${eligiblePdfs.length - availableSlots} file(s) omitted (limit is ${maxBulkLimit}).`
         );
       }
 

@@ -13,6 +13,7 @@ import {
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { extractDateFromFilename } from "@/components/upload/upload-workspace";
 
 interface ManualQuoteModalProps {
   isOpen: boolean;
@@ -20,6 +21,7 @@ interface ManualQuoteModalProps {
   onSave: (payload: any) => Promise<void>;
   initialData?: any;
   tenureId?: string;
+  tenureStartDate?: string;
   onUploadSuccess?: () => void;
 }
 
@@ -41,6 +43,7 @@ export function ManualQuoteModal({
   onSave,
   initialData,
   tenureId,
+  tenureStartDate,
   onUploadSuccess,
 }: ManualQuoteModalProps) {
   const [activeTab, setActiveTab] = useState<"upload" | "manual">("upload");
@@ -137,6 +140,34 @@ export function ManualQuoteModal({
     }
   };
 
+  function validateDateMatch(pdf: File): boolean {
+    if (!tenureStartDate) return true;
+    const fileDate = extractDateFromFilename(pdf.name);
+    if (!fileDate) return true; // No date in filename, allowed through to backend extraction check
+
+    let targetDate = extractDateFromFilename(tenureStartDate);
+    if (!targetDate) {
+      const iso = tenureStartDate.split("T")[0];
+      const parts = iso.split("-");
+      if (parts.length === 3) {
+        targetDate = {
+          raw: parts.join(""),
+          formatted: `${parts[2]}/${parts[1]}/${parts[0]}`,
+          iso,
+        };
+      }
+    }
+
+    if (fileDate && targetDate && fileDate.raw !== targetDate.raw) {
+      setUploadError(
+        `Cannot upload: quotation validity date (${fileDate.formatted}) does not match this comparison period (${targetDate.formatted}).`
+      );
+      setUploadFile(null);
+      return false;
+    }
+    return true;
+  }
+
   const handleFileDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
@@ -144,8 +175,10 @@ export function ManualQuoteModal({
     const files = Array.from(e.dataTransfer.files || []);
     const pdf = files.find((f) => f.name.toLowerCase().endsWith(".pdf"));
     if (pdf) {
-      setUploadFile(pdf);
-      setUploadError("");
+      if (validateDateMatch(pdf)) {
+        setUploadFile(pdf);
+        setUploadError("");
+      }
     } else {
       setUploadError("Please drop a valid underwriter PDF file.");
     }
@@ -158,8 +191,10 @@ export function ManualQuoteModal({
         setUploadError("Please select a PDF file.");
         return;
       }
-      setUploadFile(file);
-      setUploadError("");
+      if (validateDateMatch(file)) {
+        setUploadFile(file);
+        setUploadError("");
+      }
     }
   };
 
