@@ -56,7 +56,9 @@ def list_pics(
                 "agency_group": p.agency_group,
                 "commission_rate": float(p.commission_rate or 0.0),
                 "phone": p.phone,
+                "whatsapp_number": p.whatsapp_number or p.phone,
                 "email": p.email,
+                "is_owner": bool(p.is_owner),
                 "notes": p.notes,
                 "tenures_count": tenure_count,
                 "clients_count": distinct_clients,
@@ -88,7 +90,9 @@ def get_pic_detail(db: Session, pic_id: str) -> dict[str, Any] | None:
         "agency_group": pic.agency_group,
         "commission_rate": float(pic.commission_rate or 0.0),
         "phone": pic.phone,
+        "whatsapp_number": pic.whatsapp_number or pic.phone,
         "email": pic.email,
+        "is_owner": bool(pic.is_owner),
         "notes": pic.notes,
         "tenures": [
             {
@@ -113,10 +117,18 @@ def create_pic(
     agency_group: str | None = None,
     commission_rate: float = 0.0,
     phone: str | None = None,
+    whatsapp_number: str | None = None,
     email: str | None = None,
+    is_owner: bool = False,
     notes: str | None = None,
 ) -> PersonInCharge:
     """Create a new Person In Charge or SubAgent record."""
+    if is_owner:
+        # Unset other owners to ensure default owner PIC is unique
+        existing_owners = list(db.scalars(select(PersonInCharge).where(PersonInCharge.is_owner == True)).all())
+        for o in existing_owners:
+            o.is_owner = False
+
     pic = PersonInCharge(
         id=new_id(),
         name=name.strip(),
@@ -124,7 +136,9 @@ def create_pic(
         agency_group=agency_group.strip() if agency_group else None,
         commission_rate=commission_rate if pic_type == "subagent" else 0.0,
         phone=phone.strip() if phone else None,
+        whatsapp_number=whatsapp_number.strip() if whatsapp_number else (phone.strip() if phone else None),
         email=email.strip() if email else None,
+        is_owner=is_owner,
         notes=notes.strip() if notes else None,
     )
     db.add(pic)
@@ -141,7 +155,9 @@ def update_pic(
     agency_group: str | None = None,
     commission_rate: float | None = None,
     phone: str | None = None,
+    whatsapp_number: str | None = None,
     email: str | None = None,
+    is_owner: bool | None = None,
     notes: str | None = None,
 ) -> PersonInCharge | None:
     """Update fields of an existing Person In Charge."""
@@ -161,8 +177,16 @@ def update_pic(
         pic.commission_rate = commission_rate
     if phone is not None:
         pic.phone = phone.strip() or None
+    if whatsapp_number is not None:
+        pic.whatsapp_number = whatsapp_number.strip() or None
     if email is not None:
         pic.email = email.strip() or None
+    if is_owner is not None:
+        if is_owner:
+            other_owners = list(db.scalars(select(PersonInCharge).where(PersonInCharge.id != pic.id, PersonInCharge.is_owner == True)).all())
+            for o in other_owners:
+                o.is_owner = False
+        pic.is_owner = is_owner
     if notes is not None:
         pic.notes = notes.strip() or None
 

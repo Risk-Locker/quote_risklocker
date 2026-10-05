@@ -149,6 +149,7 @@ def resolve_or_create_tenure(
     customer_id: str | None = None,
     chassis_no: str | None = None,
     engine_no: str | None = None,
+    created_by_id: str | None = None,
 ) -> InsuranceTenure:
     """Find existing InsuranceTenure matching the vehicle and coverage dates or create one."""
     clean_v = (vehicle_no or "").strip()
@@ -253,6 +254,7 @@ def resolve_or_create_tenure(
         tenure_chain_id=chain_id,
         delay_days=delay_days,
         reminder_window_start=start_dt - timedelta(days=90),
+        created_by_id=created_by_id,
     )
     db.add(tenure)
     db.flush()
@@ -469,7 +471,7 @@ def get_tenure_timeline(db: Session, tenure_id: str) -> dict[str, Any] | None:
         "status": tenure.status,
         "stage": tenure.stage or "Quotations",
         "stage_updated_at": tenure.stage_updated_at.isoformat() if tenure.stage_updated_at else None,
-        "is_main": bool(tenure.is_main),
+        "is_main": tenure.is_main,
         "is_projected": tenure.is_projected,
         "reminder_window_start": tenure.reminder_window_start.isoformat() if tenure.reminder_window_start else None,
         "lapsed_at": tenure.lapsed_at.isoformat() if tenure.lapsed_at else None,

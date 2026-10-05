@@ -16,10 +16,10 @@ from app.services.template_revision_service import validate_template_config  # n
 
 def test_clean_insurer_independent_masters_are_defined():
     specs = master_template_specs()
-    assert [item["key"] for item in specs] == ["agency_bilingual"]
-    assert [item["name"] for item in specs] == ["Bilingual Agency Motor"]
-    assert [item["is_default"] for item in specs] == [True]
-    assert [item["config"]["page_profile"]["height"] for item in specs] == [1123]
+    assert [item["key"] for item in specs] == ["agency_bilingual", "agency_english", "agency_mandarin"]
+    assert [item["name"] for item in specs] == ["Bilingual Agency Motor", "English Agency Motor", "Mandarin Agency Motor"]
+    assert [item["is_default"] for item in specs] == [True, False, False]
+    assert [item["config"]["page_profile"]["height"] for item in specs] == [1123, 1123, 1123]
 
 
 def test_master_nodes_are_clean_bounded_and_publishable():

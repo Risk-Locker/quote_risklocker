@@ -42,7 +42,7 @@ The three inactive settings are loaded by backend configuration but do not chang
 - Playwright is available from `frontend/node_modules` (require path in scripts: `C:/.../frontend/node_modules/playwright`).
 - Scripts: `groups3-e2e.js` (group/marquee E2E — add 3 texts, marquee-select 3, group, drag group, ungroup), `marquee-probe.js` (marquee lifecycle diagnostics with console capture), plus older groups/groups2/debug scripts. Screenshots go to `.qc-tmp/shots/`.
 - Run: `node .qc-tmp/groups3-e2e.js` with backend :8100 and frontend :3000 up.
-- Dev login for E2E: admin@risklocker.local / admin123. Default motor template: `4a16bc96-7ca1-44db-be1b-c0a462e71e2f` (5 image, 24 text, 11 variable, 4 group elements; no specials — E2E group tests must add text elements first).
+- Dev login for E2E: system@risklocker.com / almW8hsv&2jssy62(fwg6@#g. Default motor template: `4a16bc96-7ca1-44db-be1b-c0a462e71e2f` (5 image, 24 text, 11 variable, 4 group elements; no specials — E2E group tests must add text elements first).
 - Logs from `commands/start-*.ps1` redirects go to `.qc-tmp/` too.
 
 ## Maintenance

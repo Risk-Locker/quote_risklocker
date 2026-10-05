@@ -18,17 +18,19 @@ MUTED = "#66666B"
 BORDER = "#D9D9DE"
 
 
-def _text(node_id: str, text: str, x: float, y: float, w: float, h: float, z: int, *, size: int | float = 14, weight: str = "600", color: str = INK, align: str = "left", locked: bool = False, group_id: str | None = None) -> dict:
+def _text(node_id: str, text: str, x: float, y: float, w: float, h: float, z: int, *, size: int | float = 14, weight: str = "600", color: str = INK, align: str = "left", locked: bool = False, group_id: str | None = None, visible: bool = True) -> dict:
     res = {"id": node_id, "type": "text", "text": text, "x": x, "y": y, "w": w, "h": h, "z": z, "style": {"fontSize": size, "fontWeight": weight, "color": color, "textAlign": align}}
     if locked: res["locked"] = True
     if group_id: res["groupId"] = group_id
+    if not visible: res["visible"] = False
     return res
 
 
-def _variable(node_id: str, variable_id: str, x: float, y: float, w: float, h: float, z: int, *, size: int | float = 14, weight: str = "700", color: str = INK, align: str = "left", prefix: str = "", suffix: str = "", transform: str = "none", locked: bool = False, group_id: str | None = None) -> dict:
+def _variable(node_id: str, variable_id: str, x: float, y: float, w: float, h: float, z: int, *, size: int | float = 14, weight: str = "700", color: str = INK, align: str = "left", prefix: str = "", suffix: str = "", transform: str = "none", locked: bool = False, group_id: str | None = None, visible: bool = True) -> dict:
     res = {"id": node_id, "type": "variable", "variableId": variable_id, "prefix": prefix, "suffix": suffix, "x": x, "y": y, "w": w, "h": h, "z": z, "style": {"fontSize": size, "fontWeight": weight, "color": color, "textAlign": align, "textTransform": transform}}
     if locked: res["locked"] = True
     if group_id: res["groupId"] = group_id
+    if not visible: res["visible"] = False
     return res
 
 
@@ -146,7 +148,7 @@ def _agency_bilingual_config() -> dict:
     LABEL_COLOR = "#334155"
     MUTED_COLOR = "#64748B"
     BORDER_COLOR = "#E2E8F0"
-    RED_COLOR = "#DC2626"
+    RED_COLOR = "#ED1C24"
     BG_LIGHT = "#F8FAFC"
 
     elements = [
@@ -154,12 +156,13 @@ def _agency_bilingual_config() -> dict:
         _rectangle("page_bg", 0, 0, 794, height, 1, background="#FFFFFF", border=""),
 
         # 2. Header: Logos, Insurer Name, Quotation Ref, Vehicle No, and Top Divider
-        _image("risklocker_logo", "risklocker_logo", 40, 32, 150, 42, 5),
-        _variable("header_insurer_name", "insurance_company", 210, 36, 230, 34, 5, size=16, weight="800", color=DARK, align="left", transform="uppercase"),
-        _text("ref_label", "Quotation Ref: ", 460, 36, 150, 16, 5, size=10.5, weight="500", color=MUTED_COLOR, align="right"),
-        _variable("ref_val", "quotation_reference", 614, 36, 140, 16, 5, size=10.5, weight="700", color=MUTED_COLOR, align="left"),
-        _text("vehicle_no_label", "Vehicle No: ", 460, 56, 150, 16, 5, size=10.5, weight="500", color=MUTED_COLOR, align="right"),
-        _variable("vehicle_no_val", "vehicle_no", 614, 56, 140, 16, 5, size=10.5, weight="700", color=MUTED_COLOR, align="left"),
+        _image("risklocker_logo", "risklocker_logo", 40, 8, 72, 74, 5),
+        _text("ref_label", "Quotation Ref: ", 354, 20, 400, 16, 5, size=10, weight="500", color=MUTED_COLOR, align="right", visible=False),
+        _variable("ref_val", "quotation_reference", 354, 20, 400, 16, 5, size=10, weight="700", color=RED_COLOR, align="right", prefix="Quotation Ref: "),
+        _text("vehicle_no_label", "Vehicle No: ", 354, 38, 400, 16, 5, size=10, weight="500", color=MUTED_COLOR, align="right", visible=False),
+        _variable("vehicle_no_val", "vehicle_no", 354, 38, 400, 16, 5, size=10, weight="700", color=RED_COLOR, align="right", prefix="Vehicle No: "),
+        _text("header_insurer_label", "Insurer: ", 354, 56, 400, 16, 5, size=10, weight="500", color=MUTED_COLOR, align="right", visible=False),
+        _variable("header_insurer_name", "insurance_company", 354, 56, 400, 18, 5, size=10.5, weight="800", color=RED_COLOR, align="right", transform="uppercase", prefix="Insurer: "),
         _line("header_rule", 40, 82, 714, 2, color=BORDER_COLOR, height=1),
 
         # 3. Main Title
@@ -223,27 +226,32 @@ def _agency_bilingual_config() -> dict:
             },
         },
 
-        # 5. Right Column: Payment Method & Excess / All Driver Card (x=508, w=246, y=134, h=272)
+        # 5. Right Column: 3 Modular Cards (Payment, QR Code, All Driver & Policy Excess)
         _layer_group("grp_payment_card", "Payment Method Card"),
-        _layer_group("grp_excess_card", "Excess & All Driver Card"),
+        _layer_group("grp_qr_card", "DuitNow QR Card"),
+        _layer_group("grp_excess_card", "All Drivers & Excess Card"),
 
-        _rectangle("pay_card_bg", 508, 134, 246, 272, 2, background="#FFFFFF", border=BORDER_COLOR, radius=6, group_id="grp_payment_card"),
-        _text("pay_title", "Payment Method", 522, 144, 218, 15, 5, size=10, weight="700", color=LABEL_COLOR, group_id="grp_payment_card"),
-        _image("bank_logo", "bank_logo", 522, 163, 100, 24, 5, group_id="grp_payment_card"),
-        _text("pay_details_lbl", "Bank details", 522, 193, 218, 13, 5, size=8.5, weight="600", color=MUTED_COLOR, group_id="grp_payment_card"),
-        _text("pay_acc_no", "12300318500", 522, 207, 218, 15, 5, size=11, weight="700", color=DARK, group_id="grp_payment_card"),
-        _text("pay_holder", "RiskLocker Sdn. Bhd.", 522, 223, 218, 13, 5, size=9, weight="600", color=LABEL_COLOR, group_id="grp_payment_card"),
+        # Card 1: Payment Method (x=508, y=134, w=246, h=92)
+        _rectangle("pay_card_bg", 508, 134, 246, 92, 2, background="#FFFFFF", border=BORDER_COLOR, radius=6, group_id="grp_payment_card"),
+        _text("pay_title", "Payment Method", 522, 142, 218, 14, 5, size=9.5, weight="700", color=LABEL_COLOR, group_id="grp_payment_card"),
+        _image("bank_logo", "bank_logo", 522, 158, 96, 22, 5, group_id="grp_payment_card"),
+        _text("pay_acc_no", "12300318500", 522, 184, 218, 14, 5, size=10.5, weight="700", color=DARK, group_id="grp_payment_card"),
+        _text("pay_holder", "RiskLocker Sdn. Bhd.", 522, 200, 218, 14, 5, size=8.5, weight="600", color=MUTED_COLOR, group_id="grp_payment_card"),
 
-        # All Driver & Excess Box inside right card
-        _rectangle("all_driver_bg", 518, 242, 226, 156, 3, background=BG_LIGHT, border=BORDER_COLOR, radius=4, group_id="grp_excess_card"),
-        _text("all_driver_title", "All Driver Included", 528, 249, 206, 15, 5, size=10, weight="700", color=DARK, group_id="grp_excess_card"),
-        _text("all_driver_sub", "Authorised Drivers Covered", 528, 264, 206, 13, 5, size=8.5, weight="500", color=MUTED_COLOR, group_id="grp_excess_card"),
-        _line("divider_driver_excess", 528, 280, 206, 4, color=BORDER_COLOR, height=1, group_id="grp_excess_card"),
-        _text("excess_label", "Policy Excess / 自负额", 528, 286, 206, 14, 5, size=8.5, weight="600", color=LABEL_COLOR, group_id="grp_excess_card"),
-        _variable("excess_val", "excess_amount", 528, 300, 206, 15, 5, size=10.5, weight="800", color=DARK, prefix="RM ", group_id="grp_excess_card"),
-        _text("compulsory_excess_label", "Compulsory Excess / 强制自负额", 528, 318, 206, 14, 5, size=8.5, weight="600", color=LABEL_COLOR, group_id="grp_excess_card"),
-        _variable("compulsory_excess_val", "compulsory_excess", 528, 332, 206, 15, 5, size=10.5, weight="800", color=DARK, prefix="RM ", group_id="grp_excess_card"),
-        _text("excess_note", "Compulsory Excess as per quotation schedule", 528, 350, 206, 12, 5, size=7.5, weight="500", color=MUTED_COLOR, group_id="grp_excess_card"),
+        # Card 2: Dedicated DuitNow QR (x=508, y=232, w=246, h=88)
+        _rectangle("qr_card_bg", 508, 232, 246, 88, 2, background="#FFFFFF", border=BORDER_COLOR, radius=6, group_id="grp_qr_card"),
+        _image("qr_code_img", "qr_code", 520, 240, 72, 72, 5, group_id="grp_qr_card"),
+        _text("qr_title", "DuitNow QR", 602, 248, 140, 16, 5, size=10.5, weight="800", color=DARK, group_id="grp_qr_card"),
+        _text("qr_sub", "Scan to Pay / 扫码付款", 602, 266, 140, 14, 5, size=8.5, weight="600", color=LABEL_COLOR, group_id="grp_qr_card"),
+        _text("qr_hint", "Instant Verification", 602, 282, 140, 13, 5, size=8, weight="500", color=MUTED_COLOR, group_id="grp_qr_card"),
+
+        # Card 3: All Driver & Policy Excess (x=508, y=328, w=246, h=78)
+        _rectangle("all_driver_bg", 508, 328, 246, 78, 2, background=BG_LIGHT, border=BORDER_COLOR, radius=6, group_id="grp_excess_card"),
+        _text("all_driver_title", "All Driver Included", 522, 334, 218, 14, 5, size=9.5, weight="700", color=DARK, group_id="grp_excess_card"),
+        _text("all_driver_sub", "Authorised Drivers Covered", 522, 348, 218, 12, 5, size=8, weight="500", color=MUTED_COLOR, group_id="grp_excess_card"),
+        _line("divider_driver_excess", 522, 362, 218, 4, color=BORDER_COLOR, height=1, group_id="grp_excess_card"),
+        _text("excess_label", "Policy Excess / 自负额", 522, 368, 120, 14, 5, size=8.5, weight="600", color=LABEL_COLOR, group_id="grp_excess_card"),
+        _variable("excess_val", "excess_amount", 642, 368, 98, 14, 5, size=10, weight="800", color=DARK, prefix="RM ", align="right", group_id="grp_excess_card"),
 
         # 6. Section 1: Our Specials / 特别优惠 (Included Benefits Grid)
         _rectangle("specials_header_bg", 40, 414, 714, 26, 2, background=NAVY, border="", radius=4, locked=True),
@@ -263,7 +271,8 @@ def _agency_bilingual_config() -> dict:
         "version": 7, "template_name": name, "v7_master_key": key, "is_default": True, "locked": False,
         "assets": {
             "risklocker_logo": "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f",
-            "bank_logo": "2168eaee-3e56-4903-8c4f-841f01ff2407"
+            "bank_logo": "2168eaee-3e56-4903-8c4f-841f01ff2407",
+            "qr_code": "9ca8e404c89dd905",
         },
         "page_profile": {
             "profile_key": "a4", "name": "A4",
@@ -275,10 +284,138 @@ def _agency_bilingual_config() -> dict:
     return validate_template_config(config)
 
 
+def _agency_english_config() -> dict:
+    name = "English Agency Motor"
+    key = "agency_english"
+    config = deepcopy(_agency_bilingual_config())
+    config["template_name"] = name
+    config["v7_master_key"] = key
+    config["is_default"] = False
+
+    elements = config["canvas"]["elements"]
+    for e in elements:
+        eid = e.get("id")
+        if eid == "header_insurer_label":
+            e["text"] = "Insurer: "
+        elif eid == "cov_header_txt":
+            e["text"] = "Coverage & Vehicle Information"
+        elif eid == "lbl_customer":
+            e["text"] = "Customer Name"
+        elif eid == "lbl_cov_type":
+            e["text"] = "Coverage Type"
+        elif eid == "lbl_car_model":
+            e["text"] = "Car Model"
+        elif eid == "lbl_engine_cc":
+            e["text"] = "Engine Capacity"
+        elif eid == "lbl_ncd":
+            e["text"] = "NCD"
+        elif eid == "lbl_period":
+            e["text"] = "Cover Period"
+        elif eid == "lbl_valuation_type":
+            e["text"] = "Valuation Type"
+        elif eid == "lbl_sum_insured":
+            e["text"] = "Vehicle Sum Insured"
+        elif eid == "premium_info_block":
+            e["labels"] = {
+                "premium": "Insurance Premium",
+                "roadtax": "Roadtax",
+                "runner": "Runner Fee",
+                "total": "TOTAL PAYABLE",
+                "extras": "Purchased Extras",
+            }
+        elif eid == "qr_sub":
+            e["text"] = "Scan to Pay"
+        elif eid == "all_driver_title":
+            e["text"] = "All Drivers Included"
+        elif eid == "excess_label":
+            e["text"] = "Policy Excess"
+        elif eid == "specials_header_txt":
+            e["text"] = "Your Benefits"
+        elif eid == "addons_header_txt":
+            e["text"] = "Available Add-ons (Optional)"
+        elif eid == "footer_terms":
+            e["text"] = "*Terms & Conditions Apply | Quotation Validity: {valid_until}"
+
+    return validate_template_config(config)
+
+
+def _agency_mandarin_config() -> dict:
+    name = "Mandarin Agency Motor"
+    key = "agency_mandarin"
+    config = deepcopy(_agency_bilingual_config())
+    config["template_name"] = name
+    config["v7_master_key"] = key
+    config["is_default"] = False
+
+    elements = config["canvas"]["elements"]
+    for e in elements:
+        eid = e.get("id")
+        if eid == "title_motor":
+            e["text"] = "汽车保险 "
+        elif eid == "title_quotation":
+            e["text"] = "报价单"
+        elif eid == "ref_label":
+            e["text"] = "报价单号: "
+        elif eid == "vehicle_no_label":
+            e["text"] = "车牌号码: "
+        elif eid == "header_insurer_label":
+            e["text"] = "保险公司: "
+        elif eid == "cov_header_txt":
+            e["text"] = "车辆及保单资料"
+        elif eid == "lbl_customer":
+            e["text"] = "客户姓名"
+        elif eid == "lbl_cov_type":
+            e["text"] = "保单种类"
+        elif eid == "lbl_car_model":
+            e["text"] = "车型"
+        elif eid == "lbl_engine_cc":
+            e["text"] = "发动机排量"
+        elif eid == "lbl_ncd":
+            e["text"] = "无索偿折扣"
+        elif eid == "lbl_period":
+            e["text"] = "保单期限"
+        elif eid == "lbl_valuation_type":
+            e["text"] = "估价方式"
+        elif eid == "lbl_sum_insured":
+            e["text"] = "车辆保额"
+        elif eid == "premium_info_block":
+            e["labels"] = {
+                "premium": "基本保费",
+                "roadtax": "路税",
+                "runner": "跑腿服务费",
+                "total": "应付总额",
+                "extras": "已购买附加项目",
+            }
+        elif eid == "pay_title":
+            e["text"] = "付款方式"
+        elif eid == "qr_title":
+            e["text"] = "DuitNow 二维码"
+        elif eid == "qr_sub":
+            e["text"] = "扫码付款"
+        elif eid == "qr_hint":
+            e["text"] = "即时到账"
+        elif eid == "all_driver_title":
+            e["text"] = "受权驾驶员全面保障"
+        elif eid == "all_driver_sub":
+            e["text"] = "已包含所有合法驾驶人"
+        elif eid == "excess_label":
+            e["text"] = "自负额"
+        elif eid == "specials_header_txt":
+            e["text"] = "特别优惠与专享保障"
+        elif eid == "addons_header_txt":
+            e["text"] = "可添加项目 (额外收费)"
+        elif eid == "footer_terms":
+            e["text"] = "*适用条款及细则 | 报价有效期: {valid_until}"
+
+    return validate_template_config(config)
+
+
 def master_template_specs() -> list[dict]:
-    # RL-DISABLED legacy templates (standard_a4, dense_a4, extended_portrait) — disabled 2026-09-07; restore when explicitly requested
+    # Canonical motor templates: Bilingual, English, and Mandarin presets
     return [
         {"key": "agency_bilingual", "name": "Bilingual Agency Motor", "is_default": True, "config": _agency_bilingual_config()},
+        {"key": "agency_english", "name": "English Agency Motor", "is_default": False, "config": _agency_english_config()},
+        {"key": "agency_mandarin", "name": "Mandarin Agency Motor", "is_default": False, "config": _agency_mandarin_config()},
     ]
 
 

@@ -48,21 +48,28 @@ import { useAuth } from "@/lib/auth";
 import { CanvasElementView, FONT_LIBRARY, type CanvasElement, type CanvasStyle, SNAP, snapValue, computeGuides } from "@/components/template-canvas/shared";
 import { LayersPanel, type LayerAction } from "@/components/template-builder/layers-panel";
 import { SYSTEM_BENEFIT_PRESETS, getBenefitPreset, applyPresetToCanvasElement } from "@/lib/benefit-presets";
+import { HeaderSectionManager } from "@/components/template-builder/section-editor/header-section-manager";
 import { VehicleFieldsManager } from "@/components/template-builder/section-editor/vehicle-fields-manager";
+import { RightContainerManager } from "@/components/template-builder/section-editor/right-container-manager";
 import { FooterSectionManager } from "@/components/template-builder/section-editor/footer-section-manager";
 import {
   extractSectionsFromCanvas,
   compileSectionsToCanvas,
+  defaultHeaderConfig,
+  defaultRightContainers,
+  getPresetSections,
   type StructuredSections,
+  type SectionHeaderConfig,
   type VehicleSpecFieldSlot,
   type SectionFooterConfig,
+  type ContainerBlockConfig,
 } from "@/lib/template-section-compiler";
 
 type TemplateVariable = { id: string; label: string; type: string; source: string; field?: string; fixed_value?: string };
 type BenefitCard = { icon?: string; title?: string; subtitle?: string; lines?: string[]; asset_id?: string };
 type PackageConfig = { name: string; included_cards?: string[]; add_on_cards?: string[]; included?: string[]; add_ons?: string[] };
 type PageProfile = { id?: string; profile_key: string; name: string; width: number; height: number; unit: "px"; safe_margins: { top?: number; right?: number; bottom?: number; left?: number }; background_behavior?: string };
-type TemplateConfig = { version?: number; page_profile?: PageProfile; variables: TemplateVariable[]; cards: Record<string, BenefitCard>; packages: PackageConfig[]; assets: Record<string, string>; canvas: { width: number; height: number; elements: CanvasElement[] } };
+type TemplateConfig = { version?: number; page_profile?: PageProfile; variables: TemplateVariable[]; cards: Record<string, BenefitCard>; packages: PackageConfig[]; assets: Record<string, string>; canvas: { width: number; height: number; elements: CanvasElement[] }; sections?: StructuredSections; display_options?: any };
 type TemplateRecord = { id: string; revision: number; name: string; insurance_type: string; status: string; locked: boolean; fixed_fields: TemplateConfig };
 type AssetRecord = { id: string; label: string; filename: string; url: string; source?: string; folder?: string };
 type DragState = {
@@ -79,9 +86,316 @@ type DragState = {
   changed: boolean;
 };
 
-const assetSlots = ["risklocker_logo", "insurer_logo", "bank_logo", "all_driver_icon", "background"];
+const assetSlots = ["risklocker_logo", "insurer_logo", "bank_logo", "qr_code", "all_driver_icon", "background"];
 const variableTypes = ["text", "money", "number", "date", "percent", "image", "boolean", "choice", "benefit_card"];
 const sourceFields = ["customer_name", "vehicle_no", "insurance_company", "coverage_type", "cover_period", "valuation_type", "car_model", "ncd_percent", "coverage_amount", "premium", "roadtax", "service_fee", "total_amount", "valid_until"];
+
+const BUILDER_MOCK_BENEFIT_DATA = {
+  current_benefits: [
+    // 9 Default Standard Benefits (Comprehensive Cover)
+    {
+      id: "mock_def_1",
+      label: "24/7 Unlimited Towing & Roadside",
+      value: "Unlimited",
+      description: "Breakdown towing up to unlimited km across Malaysia & Singapore.",
+      cost_status: "standard" as const,
+      is_extra: false,
+      asset_id: "24fc9a59-cc1f-4faa-a304-586c995f38cb",
+      asset_url: "/business/assets/24fc9a59-cc1f-4faa-a304-586c995f38cb/content?profile=ui",
+    },
+    {
+      id: "mock_def_2",
+      label: "Windscreen Repair & Replacement",
+      value: "RM 4,000",
+      description: "Full front, rear and side window glass repair with zero NCD loss.",
+      cost_status: "standard" as const,
+      is_extra: false,
+      asset_id: "a3934bc2-efeb-4805-8dfb-49a3b1706755",
+      asset_url: "/business/assets/a3934bc2-efeb-4805-8dfb-49a3b1706755/content?profile=ui",
+    },
+    {
+      id: "mock_def_3",
+      label: "Special Perils (Flood & Storm)",
+      value: "RM 55,000",
+      description: "Comprehensive flood, typhoon, storm, and natural disaster cover.",
+      cost_status: "standard" as const,
+      is_extra: false,
+      asset_id: "86aad637-1db3-4f51-a94e-81816288cfd5",
+      asset_url: "/business/assets/86aad637-1db3-4f51-a94e-81816288cfd5/content?profile=ui",
+    },
+    {
+      id: "mock_def_4",
+      label: "All Authorized Drivers Protection",
+      value: "Included",
+      description: "Authorizes any licensed driver to drive without naming fees.",
+      cost_status: "standard" as const,
+      is_extra: false,
+      asset_id: "6158f952-fe6a-4d25-a669-93ee1b1e3dc9",
+      asset_url: "/business/assets/6158f952-fe6a-4d25-a669-93ee1b1e3dc9/content?profile=ui",
+    },
+    {
+      id: "mock_def_5",
+      label: "Key Care & Replacement Cover",
+      value: "RM 1,500",
+      description: "Reimbursement for car key or smart transmitter loss or theft.",
+      cost_status: "standard" as const,
+      is_extra: false,
+      asset_id: "127d792b-38db-4f0e-88db-70b56d028d3f",
+      asset_url: "/business/assets/127d792b-38db-4f0e-88db-70b56d028d3f/content?profile=ui",
+    },
+    {
+      id: "mock_def_6",
+      label: "Legal Liability to Passengers",
+      value: "Included",
+      description: "Legal liability protection against passenger injury lawsuits.",
+      cost_status: "standard" as const,
+      is_extra: false,
+      asset_id: "813d8795-e713-4718-91fe-7c6badb88c5d",
+      asset_url: "/business/assets/813d8795-e713-4718-91fe-7c6badb88c5d/content?profile=ui",
+    },
+    {
+      id: "mock_def_7",
+      label: "Legal Liability of Passengers",
+      value: "Included",
+      description: "Covers legal liability for damage caused by your passengers.",
+      cost_status: "standard" as const,
+      is_extra: false,
+      asset_id: "1c6ce75e-7b20-4c32-bb05-4ce87ea42f7b",
+      asset_url: "/business/assets/1c6ce75e-7b20-4c32-bb05-4ce87ea42f7b/content?profile=ui",
+    },
+    {
+      id: "mock_def_8",
+      label: "Minor Roadside Repair Assistance",
+      value: "Free Labor",
+      description: "Complimentary battery jump-start and emergency roadside repair.",
+      cost_status: "standard" as const,
+      is_extra: false,
+      asset_id: "675008fc-4845-4f5d-afeb-dd853cc57af9",
+      asset_url: "/business/assets/675008fc-4845-4f5d-afeb-dd853cc57af9/content?profile=ui",
+    },
+    {
+      id: "mock_def_9",
+      label: "Waiver of Betterment",
+      value: "Included",
+      description: "Waives betterment fees on repair parts for vehicles 5+ years.",
+      cost_status: "standard" as const,
+      is_extra: false,
+      asset_id: "242eb9fc-070c-4b68-99fa-b3addca99513",
+      asset_url: "/business/assets/242eb9fc-070c-4b68-99fa-b3addca99513/content?profile=ui",
+    },
+    // 9 Purchased Add-ons / Extras (Paid Endorsements)
+    {
+      id: "mock_ext_1",
+      label: "Windscreen Protection Buy-Up",
+      value: "RM 5,000",
+      price: 150,
+      detected_cost: "RM 150.00",
+      cost_status: "paid" as const,
+      is_extra: true,
+      description: "Enhanced glass and solar tint cover for premium windshields.",
+      asset_id: "a3934bc2-efeb-4805-8dfb-49a3b1706755",
+      asset_url: "/business/assets/a3934bc2-efeb-4805-8dfb-49a3b1706755/content?profile=ui",
+    },
+    {
+      id: "mock_ext_2",
+      label: "Special Perils Natural Disaster Buy-Up",
+      value: "RM 65,000",
+      price: 220,
+      detected_cost: "RM 220.00",
+      cost_status: "paid" as const,
+      is_extra: true,
+      description: "Agreed value full water surge and landslide disaster compensation.",
+      asset_id: "e22a75aa-2f71-45b7-812a-8f1317fb0f03",
+      asset_url: "/business/assets/e22a75aa-2f71-45b7-812a-8f1317fb0f03/content?profile=ui",
+    },
+    {
+      id: "mock_ext_3",
+      label: "Passenger Personal Accident Cover",
+      value: "RM 50,000",
+      price: 125,
+      detected_cost: "RM 125.00",
+      cost_status: "paid" as const,
+      is_extra: true,
+      description: "Lump sum compensation per passenger seat for accidental injury.",
+      asset_id: "ea1aa024-8cac-4a01-aa5c-d898e9ac88ec",
+      asset_url: "/business/assets/ea1aa024-8cac-4a01-aa5c-d898e9ac88ec/content?profile=ui",
+    },
+    {
+      id: "mock_ext_4",
+      label: "Inconvenience Daily Allowance",
+      value: "RM 100/day",
+      price: 80,
+      detected_cost: "RM 80.00",
+      cost_status: "paid" as const,
+      is_extra: true,
+      description: "Daily cash payout during approved accident repairs up to 14 days.",
+      asset_id: "36ad2b39-0b47-48b0-bda3-8b5be9915551",
+      asset_url: "/business/assets/36ad2b39-0b47-48b0-bda3-8b5be9915551/content?profile=ui",
+    },
+    {
+      id: "mock_ext_5",
+      label: "Full Car Spray Painting Cover",
+      value: "RM 2,500",
+      price: 180,
+      detected_cost: "RM 180.00",
+      cost_status: "paid" as const,
+      is_extra: true,
+      description: "OEM quality full exterior respray to restore showroom finish.",
+      asset_id: "f44085b3-dafa-4000-883c-0fdf367557e0",
+      asset_url: "/business/assets/f44085b3-dafa-4000-883c-0fdf367557e0/content?profile=ui",
+    },
+    {
+      id: "mock_ext_6",
+      label: "Strike, Riot & Civil Commotion",
+      value: "RM 55,000",
+      price: 65,
+      detected_cost: "RM 65.00",
+      cost_status: "paid" as const,
+      is_extra: true,
+      description: "Covers vehicle damage caused by street disturbances and riots.",
+      asset_id: "15ef4ce8-180b-47ba-aae6-64661aba06e9",
+      asset_url: "/business/assets/15ef4ce8-180b-47ba-aae6-64661aba06e9/content?profile=ui",
+    },
+    {
+      id: "mock_ext_7",
+      label: "Child Car Safety Seat Replacement",
+      value: "RM 800",
+      price: 35,
+      detected_cost: "RM 35.00",
+      cost_status: "paid" as const,
+      is_extra: true,
+      description: "Direct refund or replacement of child car seat post-collision.",
+      asset_id: "18d5b7f9-a52f-4ce4-a87d-55e1479c9d0e",
+      asset_url: "/business/assets/18d5b7f9-a52f-4ce4-a87d-55e1479c9d0e/content?profile=ui",
+    },
+    {
+      id: "mock_ext_8",
+      label: "Sport Rim & Alloy Wheel Protection",
+      value: "RM 2,000",
+      price: 95,
+      detected_cost: "RM 95.00",
+      cost_status: "paid" as const,
+      is_extra: true,
+      description: "Curbside gouge and impact repair for original alloy rims.",
+      asset_id: "5c74bccd-b72e-4e2d-a4bf-58b0b5365abe",
+      asset_url: "/business/assets/5c74bccd-b72e-4e2d-a4bf-58b0b5365abe/content?profile=ui",
+    },
+    {
+      id: "mock_ext_9",
+      label: "EV Wallbox Home Charger Protection",
+      value: "RM 12,000",
+      price: 110,
+      detected_cost: "RM 110.00",
+      cost_status: "paid" as const,
+      is_extra: true,
+      description: "Surge and accidental impact cover for home EV charging unit.",
+      asset_id: "16fc3692-648f-47b6-9b6b-c4e4d42bf6aa",
+      asset_url: "/business/assets/16fc3692-648f-47b6-9b6b-c4e4d42bf6aa/content?profile=ui",
+    },
+  ],
+  available_addons: [
+    // 9 Available Add-ons (Optional Upgrades)
+    {
+      id: "mock_add_1",
+      label: "Executive Courtesy Replacement Car",
+      value: "14 Days",
+      price: 120,
+      detected_cost: "RM 120.00",
+      is_addon: true,
+      description: "Guaranteed replacement loaner delivered while car is in workshop.",
+      asset_id: "765dd7fe-b39b-4f79-a280-a7f8206853fa",
+      asset_url: "/business/assets/765dd7fe-b39b-4f79-a280-a7f8206853fa/content?profile=ui",
+    },
+    {
+      id: "mock_add_2",
+      label: "Ceramic Paint Coating Protection",
+      value: "RM 3,000",
+      price: 250,
+      detected_cost: "RM 250.00",
+      is_addon: true,
+      description: "High-gloss ceramic nano-coating restoration after bodywork.",
+      asset_id: "e0abf138-5f13-409d-9a8c-5fb6d482c628",
+      asset_url: "/business/assets/e0abf138-5f13-409d-9a8c-5fb6d482c628/content?profile=ui",
+    },
+    {
+      id: "mock_add_3",
+      label: "Doorstep Road Tax Renewal & Dispatch",
+      value: "Included",
+      price: 30,
+      detected_cost: "RM 30.00",
+      is_addon: true,
+      description: "Hassle-free physical roadtax delivery or digital e-LKM registration.",
+      asset_id: "4f114d30-75fd-42a8-8208-eb93824aef7d",
+      asset_url: "/business/assets/4f114d30-75fd-42a8-8208-eb93824aef7d/content?profile=ui",
+    },
+    {
+      id: "mock_add_4",
+      label: "Interstate Breakdown Hotel Cover",
+      value: "RM 1,200",
+      price: 45,
+      detected_cost: "RM 45.00",
+      is_addon: true,
+      description: "Emergency hotel reimbursement when breakdown is >100km from home.",
+      asset_id: "f7261b47-afa5-4ad7-aa7a-7f548b2e329e",
+      asset_url: "/business/assets/f7261b47-afa5-4ad7-aa7a-7f548b2e329e/content?profile=ui",
+    },
+    {
+      id: "mock_add_5",
+      label: "Total Loss Agreed Value Guarantee",
+      value: "Agreed Value",
+      price: 160,
+      detected_cost: "RM 160.00",
+      is_addon: true,
+      description: "100% full payout on total loss without market depreciation cuts.",
+      asset_id: "61fcba89-6d3a-4117-ae63-f3bcf8132441",
+      asset_url: "/business/assets/61fcba89-6d3a-4117-ae63-f3bcf8132441/content?profile=ui",
+    },
+    {
+      id: "mock_add_6",
+      label: "Personal Belongings & Baggage Loss",
+      value: "RM 1,500",
+      price: 40,
+      detected_cost: "RM 40.00",
+      is_addon: true,
+      description: "Compensation for laptop, phone or baggage theft from locked car.",
+      asset_id: "05d9af52-da17-4d71-a3e7-bfb3ddbe9662",
+      asset_url: "/business/assets/05d9af52-da17-4d71-a3e7-bfb3ddbe9662/content?profile=ui",
+    },
+    {
+      id: "mock_add_7",
+      label: "Legal Defense & Criminal Proceedings",
+      value: "RM 10,000",
+      price: 50,
+      detected_cost: "RM 50.00",
+      is_addon: true,
+      description: "Defense legal fees for court hearings arising from traffic accidents.",
+      asset_id: "813d8795-e713-4718-91fe-7c6badb88c5d",
+      asset_url: "/business/assets/813d8795-e713-4718-91fe-7c6badb88c5d/content?profile=ui",
+    },
+    {
+      id: "mock_add_8",
+      label: "4S Authorized Body & Paint Guarantee",
+      value: "Lifetime",
+      price: 140,
+      detected_cost: "RM 140.00",
+      is_addon: true,
+      description: "Exclusive repair at 4S service centers with genuine OEM parts.",
+      asset_id: "09f68035-7724-4d87-b325-08d9feef8545",
+      asset_url: "/business/assets/09f68035-7724-4d87-b325-08d9feef8545/content?profile=ui",
+    },
+    {
+      id: "mock_add_9",
+      label: "Emergency Battery Jump-Start & Fuel",
+      value: "24/7 Nationwide",
+      price: 35,
+      detected_cost: "RM 35.00",
+      is_addon: true,
+      description: "On-demand emergency response team for jump-start and fuel delivery.",
+      asset_id: "2563d7c1-1db7-4d5f-9953-79c7fc3ca989",
+      asset_url: "/business/assets/2563d7c1-1db7-4d5f-9953-79c7fc3ca989/content?profile=ui",
+    },
+  ],
+};
 
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)); }
 function templateFingerprint(value: TemplateRecord) { return JSON.stringify({ name: value.name, fixed_fields: value.fixed_fields }); }
@@ -153,6 +467,22 @@ function defaultStyle(type: string): CanvasStyle {
   };
 }
 
+const BUILDER_MOCK_VARIABLES: Record<string, string> = {
+  insurance_company: "QBE Insurance (Malaysia) Berhad",
+  vehicle_no: "WXY 8899",
+  make_model: "Honda City 1.5L V",
+  year_make: "2021",
+  capacity: "1498 CC",
+  ncd: "55%",
+  sum_insured: "55,000.00",
+  premium: "1,245.80",
+  total_optional_cover_amount: "300.00",
+  excess_amount: "0.00",
+  valid_until: "14 Days",
+  quotation_date: "05/10/2026",
+  quote_no: "QT-2026-8899",
+};
+
 export default function TemplateBuilderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
@@ -167,9 +497,12 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
   const [showLeft, setShowLeft] = useState(true);
   const [showRight, setShowRight] = useState(true);
   const [leftWidth, setLeftWidth] = useState(280);
-  const [rightWidth, setRightWidth] = useState(320);
-  const [builderMode, setBuilderMode] = useState<"sections" | "freeform">("sections");
-  const [activeSectionTab, setActiveSectionTab] = useState<"section1" | "benefits" | "footer">("section1");
+  const [rightWidth, setRightWidth] = useState(300);
+  const [activeSectionTab, setActiveSectionTab] = useState<"header" | "section1" | "rightBox" | "benefits" | "footer">("section1");
+  const [isAddSectionMenuOpen, setIsAddSectionMenuOpen] = useState(false);
+  const [benefitTabKind, setBenefitTabKind] = useState<"current_benefits" | "purchased_extras" | "available_addons">("current_benefits");
+  const [simulatedExtrasCount, setSimulatedExtrasCount] = useState<0 | 1 | 3 | 4 | 6 | 8>(1);
+  const [showGuides, setShowGuides] = useState(true);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [rulerGuides, setRulerGuides] = useState<{ x: number[]; y: number[] }>({ x: [], y: [] });
   const [rulerDrag, setRulerDrag] = useState<{ axis: "x" | "y"; pos: number; active: boolean; origin?: number; outside?: boolean } | null>(null);
@@ -223,6 +556,9 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
       };
     }
     loaded.fixed_fields = convertLegacyNodes(loaded.fixed_fields);
+    const sections = loaded.fixed_fields.sections || extractSectionsFromCanvas(loaded.fixed_fields.canvas.elements);
+    loaded.fixed_fields.sections = sections;
+    loaded.fixed_fields.canvas.elements = compileSectionsToCanvas(sections, loaded.fixed_fields.canvas.elements, { simulatedExtrasCount: 1 });
     setTemplate(loaded);
     setSavedFingerprint(templateFingerprint(original));
     setAssets(businessAssetResult.assets.items.map((asset) => ({ ...asset, filename: asset.label, source: "business", folder: asset.asset_kind === "company_logo" ? "Company logos" : "Benefit artwork" })));
@@ -240,17 +576,68 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
 
   const config = template?.fixed_fields;
   const elements = config?.canvas?.elements || [];
+
+  const currentSections = useMemo(() => {
+    return extractSectionsFromCanvas(elements, (config as any)?.sections);
+  }, [elements, config]);
+
+  const visibleVehicleFields = useMemo(() => {
+    return (currentSections.section1?.vehicleFields || []).filter((f) => f.visible !== false);
+  }, [currentSections]);
+
+  const specRowH = currentSections.section1?.rowHeight ?? 28;
+  const isLumpSum = currentSections.section1?.extrasDisplayMode === "lump_sum";
+  const extrasRowsCount = isLumpSum ? 1 : (simulatedExtrasCount > 0 ? simulatedExtrasCount + 1 : 0);
+  const specDeltaY = Math.max(0, (visibleVehicleFields.length + extrasRowsCount - 9) * specRowH);
+
   const canvasW = config?.canvas.width || 794;
-  const canvasH = config?.canvas.height || 1123;
+  const canvasH = Math.max(config?.canvas.height || 1123, 1123 + specDeltaY);
   const selected = elements.find((item) => item.id === primaryId) || null;
   const selection = elements.filter((item) => selectedIds.has(item.id));
   const readOnly = Boolean(template?.locked) || previewMode;
   const dirty = Boolean(template && savedFingerprint && templateFingerprint(template) !== savedFingerprint);
   const selectedCard = selected?.cardId && config?.cards ? config.cards[selected.cardId] : null;
 
-  const currentSections = useMemo(() => {
-    return extractSectionsFromCanvas(elements, (config as any)?.sections);
-  }, [elements, config]);
+  const handleSimulatedExtrasChange = (count: 0 | 1 | 3 | 4 | 6 | 8) => {
+    setSimulatedExtrasCount(count);
+    const visibleCount = visibleVehicleFields.length;
+    const extrasCount = isLumpSum ? 1 : (count > 0 ? count + 1 : 0);
+    const dy = Math.max(0, (visibleCount + extrasCount - 9) * specRowH);
+    const nextCanvasH = Math.max(1123, 1123 + dy);
+    const recompiled = compileSectionsToCanvas(currentSections, elements, { simulatedExtrasCount: count });
+    commit((curr) => ({
+      ...curr,
+      canvas: {
+        ...curr.canvas,
+        height: nextCanvasH,
+        elements: recompiled,
+      },
+    }));
+  };
+
+  const handleExtrasDisplayModeChange = (mode: "itemized" | "lump_sum") => {
+    const nextSections: StructuredSections = {
+      ...currentSections,
+      section1: {
+        ...currentSections.section1,
+        extrasDisplayMode: mode,
+      },
+    };
+    const isLump = mode === "lump_sum";
+    const extrasCount = isLump ? 1 : (simulatedExtrasCount > 0 ? simulatedExtrasCount + 1 : 0);
+    const dy = Math.max(0, (visibleVehicleFields.length + extrasCount - 9) * specRowH);
+    const nextCanvasH = Math.max(1123, 1123 + dy);
+    const recompiled = compileSectionsToCanvas(nextSections, elements, { simulatedExtrasCount });
+    commit((curr) => ({
+      ...curr,
+      sections: nextSections,
+      canvas: {
+        ...curr.canvas,
+        height: nextCanvasH,
+        elements: recompiled,
+      },
+    }));
+  };
 
   const handleVehicleFieldsChange = (updatedFields: VehicleSpecFieldSlot[]) => {
     const nextSections: StructuredSections = {
@@ -260,12 +647,38 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
         vehicleFields: updatedFields,
       },
     };
-    const recompiled = compileSectionsToCanvas(nextSections, elements);
+    const visibleCount = updatedFields.filter((f) => f.visible !== false).length;
+    const extrasCount = simulatedExtrasCount > 0 ? simulatedExtrasCount + 1 : 0;
+    const dy = Math.max(0, (visibleCount + extrasCount - 9) * (nextSections.section1.rowHeight ?? 28));
+    const nextCanvasH = Math.max(1123, 1123 + dy);
+    const recompiled = compileSectionsToCanvas(nextSections, elements, { simulatedExtrasCount });
     commit((curr) => ({
       ...curr,
       sections: nextSections as any,
       canvas: {
         ...curr.canvas,
+        height: nextCanvasH,
+        elements: recompiled,
+      },
+    }));
+  };
+
+  const handleHeaderChange = (updatedHeader: SectionHeaderConfig) => {
+    const nextSections: StructuredSections = {
+      ...currentSections,
+      header: updatedHeader,
+    };
+    const visibleCount = (nextSections.section1?.vehicleFields || []).filter((f) => f.visible !== false).length;
+    const extrasCount = simulatedExtrasCount > 0 ? simulatedExtrasCount + 1 : 0;
+    const dy = Math.max(0, (visibleCount + extrasCount - 9) * (nextSections.section1?.rowHeight ?? 28));
+    const nextCanvasH = Math.max(1123, 1123 + dy);
+    const recompiled = compileSectionsToCanvas(nextSections, elements, { simulatedExtrasCount });
+    commit((curr) => ({
+      ...curr,
+      sections: nextSections as any,
+      canvas: {
+        ...curr.canvas,
+        height: nextCanvasH,
         elements: recompiled,
       },
     }));
@@ -276,15 +689,130 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
       ...currentSections,
       footer: updatedFooter,
     };
-    const recompiled = compileSectionsToCanvas(nextSections, elements);
+    const visibleCount = (nextSections.section1?.vehicleFields || []).filter((f) => f.visible !== false).length;
+    const extrasCount = simulatedExtrasCount > 0 ? simulatedExtrasCount + 1 : 0;
+    const dy = Math.max(0, (visibleCount + extrasCount - 9) * (nextSections.section1?.rowHeight ?? 28));
+    const nextCanvasH = Math.max(1123, 1123 + dy);
+    const recompiled = compileSectionsToCanvas(nextSections, elements, { simulatedExtrasCount });
     commit((curr) => ({
       ...curr,
       sections: nextSections as any,
       canvas: {
         ...curr.canvas,
+        height: nextCanvasH,
         elements: recompiled,
       },
     }));
+  };
+
+  const handleRightContainersChange = (updatedContainers: ContainerBlockConfig[]) => {
+    const nextSections: StructuredSections = {
+      ...currentSections,
+      rightContainers: updatedContainers,
+    };
+    const visibleCount = (nextSections.section1?.vehicleFields || []).filter((f) => f.visible !== false).length;
+    const extrasCount = simulatedExtrasCount > 0 ? simulatedExtrasCount + 1 : 0;
+    const dy = Math.max(0, (visibleCount + extrasCount - 9) * (nextSections.section1?.rowHeight ?? 28));
+    const nextCanvasH = Math.max(1123, 1123 + dy);
+    const recompiled = compileSectionsToCanvas(nextSections, elements, { simulatedExtrasCount });
+    commit((curr) => ({
+      ...curr,
+      sections: nextSections as any,
+      canvas: {
+        ...curr.canvas,
+        height: nextCanvasH,
+        elements: recompiled,
+      },
+    }));
+  };
+
+  const handleApplyPreset = (preset: "bilingual" | "english" | "mandarin") => {
+    const nextSections = getPresetSections(preset);
+    const visibleCount = (nextSections.section1?.vehicleFields || []).filter((f) => f.visible !== false).length;
+    const extrasCount = simulatedExtrasCount > 0 ? simulatedExtrasCount + 1 : 0;
+    const dy = Math.max(0, (visibleCount + extrasCount - 9) * (nextSections.section1?.rowHeight ?? 28));
+    const nextCanvasH = Math.max(1123, 1123 + dy);
+    const recompiled = compileSectionsToCanvas(nextSections, elements, { simulatedExtrasCount });
+    commit((curr) => ({
+      ...curr,
+      sections: nextSections as any,
+      canvas: {
+        ...curr.canvas,
+        height: nextCanvasH,
+        elements: recompiled,
+      },
+    }));
+  };
+
+  const handleAddSpecRow = () => {
+    const newId = `field_${Date.now()}`;
+    const newSlot: VehicleSpecFieldSlot = {
+      id: newId,
+      variableId: "vehicle_no",
+      labelEn: "New Spec Field",
+      labelZh: "新项目",
+      visible: true,
+      rowOrder: currentSections.section1.vehicleFields.length,
+    };
+    handleVehicleFieldsChange([...currentSections.section1.vehicleFields, newSlot]);
+    toast("Added new specification row.", "success");
+  };
+
+  const handleAddRightBoxBlock = (type: "text" | "variable" | "image" | "divider") => {
+    const containers = currentSections.rightContainers || defaultRightContainers();
+    const active = containers[0] || defaultRightContainers()[0];
+    const newId = `rc_b_${Date.now()}`;
+    let newBlock: any;
+    if (type === "text") {
+      newBlock = { id: newId, type: "text", text: "Custom Note", fontSize: 9.5, fontWeight: "500", color: "#0F172A", visible: true, order: (active.blocks || []).length };
+    } else if (type === "variable") {
+      newBlock = { id: newId, type: "variable", variableId: "vehicle_no", fontSize: 9.5, fontWeight: "700", color: "#0F172A", visible: true, order: (active.blocks || []).length };
+    } else if (type === "image") {
+      newBlock = { id: newId, type: "image", imageWidth: 100, imageHeight: 32, visible: true, order: (active.blocks || []).length };
+    } else {
+      newBlock = { id: newId, type: "divider", dividerHeight: 1, dividerColor: "#E2E8F0", visible: true, order: (active.blocks || []).length };
+    }
+    const updated = [{ ...active, blocks: [...(active.blocks || []), newBlock] }];
+    handleRightContainersChange(updated);
+    toast(`Added ${type} block to Right Box.`, "success");
+  };
+
+  const handleAddBenefitGrid = (gridKind: "current_benefits" | "purchased_extras" | "available_addons") => {
+    const existing = elements.find((e) => e.type === "benefit-grid" && e.gridKind === gridKind);
+    if (existing) {
+      selectOnly(existing.id);
+      setActiveSectionTab("benefits");
+      setBenefitTabKind(gridKind);
+      toast(`Grid "${gridKind}" already exists on canvas. Selected for editing.`, "info");
+      return;
+    }
+    const yPos = gridKind === "current_benefits" ? 444 : gridKind === "purchased_extras" ? 660 : 875;
+    const newGrid: CanvasElement = {
+      id: `${gridKind}_grid`,
+      type: "benefit-grid",
+      gridKind,
+      excludeExtras: gridKind === "current_benefits",
+      x: 16,
+      y: yPos,
+      w: 758,
+      h: 185,
+      z: 2,
+      columns: 3,
+      benefitPreset: "masonry-flow",
+      cardStyle: "outlined",
+      layoutMode: "masonry",
+    };
+    commit((curr) => ({
+      ...curr,
+      canvas: {
+        ...curr.canvas,
+        elements: [...curr.canvas.elements, newGrid],
+      },
+    }));
+    selectOnly(newGrid.id);
+    setActiveSectionTab("benefits");
+    setBenefitTabKind(gridKind);
+    toast(`Added "${gridKind}" grid to canvas.`, "success");
   };
 
   const sortedElements = useMemo(() => {
@@ -323,6 +851,46 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
   function selectOnly(id: string) {
     setSelectedIds(new Set([id]));
     setPrimaryId(id);
+  }
+
+  function handleElementClickNavigate(element: CanvasElement) {
+    const eid = element.id || "";
+    if (
+      eid.startsWith("label_") ||
+      eid.startsWith("value_") ||
+      eid.startsWith("colon_") ||
+      eid.startsWith("spec_") ||
+      eid === "quote_vehicle" ||
+      (element.x < 480 && element.y >= 100 && element.y <= 420)
+    ) {
+      setActiveSectionTab("section1");
+    } else if (
+      eid.startsWith("rc_") ||
+      eid.startsWith("right_box_") ||
+      eid === "pay_bank_logo" ||
+      eid === "bank_logo" ||
+      eid === "agreed_value" ||
+      eid === "agreed_value_amount" ||
+      (element.x >= 480 && element.y >= 100 && element.y <= 420)
+    ) {
+      setActiveSectionTab("rightBox");
+    } else if (
+      eid === "benefit_grid" ||
+      eid.startsWith("benefit_") ||
+      eid.startsWith("addon_") ||
+      eid.startsWith("card_") ||
+      (element.y > 420 && element.y < 850)
+    ) {
+      setActiveSectionTab("benefits");
+    } else if (
+      eid === "payment_text" ||
+      eid === "terms" ||
+      eid.startsWith("pay_") ||
+      eid.startsWith("footer_") ||
+      element.y >= 850
+    ) {
+      setActiveSectionTab("footer");
+    }
   }
 
   function toggleSelect(id: string) {
@@ -763,6 +1331,7 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
 
   function pointerDown(event: React.PointerEvent, element: CanvasElement, mode: "move" | "resize", handle?: string) {
     if (readOnly || !template) return;
+    if (mode === "move" || mode === "resize") return; // Canvas elements strictly locked to container layout
     if (drawLineMode) return;
     if (element.locked) return;
     if (element.type === "image" && element.assetSlot === "background" && mode === "move") return;
@@ -815,6 +1384,7 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
   function pointerMove(event: React.PointerEvent) {
     const drag = dragRef.current;
     if (!drag || !template) return;
+    if (drag.mode === "move" || drag.mode === "resize") return;
     const dx = (event.clientX - drag.startX) / zoom;
     const dy = (event.clientY - drag.startY) / zoom;
     if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
@@ -905,12 +1475,7 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
       setDrawPreview({ x: drawRef.current.x, y: drawRef.current.y, w: lineThickness, h: lineThickness });
       return;
     }
-    setMarquee({
-      startX: (event.clientX - rect.left) / zoom,
-      startY: (event.clientY - rect.top) / zoom,
-      curX: (event.clientX - rect.left) / zoom,
-      curY: (event.clientY - rect.top) / zoom,
-    });
+    return;
   }
 
   function canvasPointerMove(event: React.PointerEvent) {
@@ -1095,15 +1660,41 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
   async function saveDraft(showToast = true): Promise<TemplateRecord> {
     if (!template) throw new Error("Template is not loaded.");
     setError("");
+
+    // Strip preview simulated extras before persisting so DB always stores clean canonical template
+    const cleanConfig = clone(template.fixed_fields);
+    if (cleanConfig.sections) {
+      cleanConfig.canvas.elements = compileSectionsToCanvas(cleanConfig.sections, cleanConfig.canvas.elements, { simulatedExtrasCount: 0 });
+      const visibleCount = (cleanConfig.sections.section1?.vehicleFields || []).filter((f) => f.visible !== false).length;
+      const baseDeltaY = Math.max(0, (visibleCount - 9) * (cleanConfig.sections.section1?.rowHeight ?? 28));
+      const newHeight = Math.max(1123, 1123 + baseDeltaY);
+      cleanConfig.canvas.height = newHeight;
+      if (cleanConfig.page_profile) {
+        cleanConfig.page_profile.height = newHeight;
+      }
+    }
+
     const result = await api<{ template: TemplateRecord }>(`/admin/templates/${template.id}`, {
       method: "PATCH",
       body: JSON.stringify({
         base_revision: template.revision,
         name: template.name,
         insurance_type: template.insurance_type,
-        fixed_fields: template.fixed_fields,
+        fixed_fields: cleanConfig,
       }),
     });
+
+    // If user currently has simulated extras enabled, recompile local view with preview extras
+    if (simulatedExtrasCount > 0 && result.template.fixed_fields?.sections) {
+      const activeSections = result.template.fixed_fields.sections;
+      const recompiled = compileSectionsToCanvas(activeSections, result.template.fixed_fields.canvas.elements, { simulatedExtrasCount });
+      const visibleCount = (activeSections.section1?.vehicleFields || []).filter((f) => f.visible !== false).length;
+      const extrasRows = simulatedExtrasCount + 1;
+      const previewDeltaY = Math.max(0, (visibleCount + extrasRows - 9) * (activeSections.section1?.rowHeight ?? 28));
+      result.template.fixed_fields.canvas.elements = recompiled;
+      result.template.fixed_fields.canvas.height = Math.max(1123, 1123 + previewDeltaY);
+    }
+
     setTemplate(result.template);
     setSavedFingerprint(templateFingerprint(result.template));
     if (showToast) toast("Template draft saved.", "success");
@@ -1155,6 +1746,21 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
       if (meta && event.key.toLowerCase() === "z") { event.preventDefault(); if (event.shiftKey) redo(); else undo(); return; }
       if (meta && event.key.toLowerCase() === "y") { event.preventDefault(); redo(); return; }
       if (meta && event.key.toLowerCase() === "d") { event.preventDefault(); duplicateSelection(); return; }
+      if (meta && (event.key === "+" || event.key === "=" || event.code === "Equal" || event.code === "NumpadAdd")) {
+        event.preventDefault();
+        setZoom((z) => Math.min(2.5, +(z + 0.1).toFixed(2)));
+        return;
+      }
+      if (meta && (event.key === "-" || event.key === "_" || event.code === "Minus" || event.code === "NumpadSubtract")) {
+        event.preventDefault();
+        setZoom((z) => Math.max(0.2, +(z - 0.1).toFixed(2)));
+        return;
+      }
+      if (meta && (event.key === "0" || event.code === "Digit0" || event.code === "Numpad0")) {
+        event.preventDefault();
+        setZoom(1);
+        return;
+      }
       if (!selectedIds.size) return;
       if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); deleteSelection(); return; }
       const step = event.shiftKey ? 10 : 1;
@@ -1166,6 +1772,21 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selectedIds, selectedRulerGuide, readOnly, history, future, elements]);
+
+  useEffect(() => {
+    const handleWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      const workspace = workspaceRef.current;
+      if (!workspace) return;
+      if (workspace.contains(e.target as Node)) {
+        e.preventDefault();
+        const delta = e.deltaY < 0 ? 0.08 : -0.08;
+        setZoom((prev) => Math.min(2.5, Math.max(0.2, +(prev + delta).toFixed(2))));
+      }
+    };
+    window.addEventListener("wheel", handleWheel, { passive: false });
+    return () => window.removeEventListener("wheel", handleWheel);
+  }, []);
 
   useEffect(() => {
     if (!dirty) return;
@@ -1256,34 +1877,117 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
           {template?.locked ? <Badge variant="warning">Locked default</Badge> : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {/* Mode Switcher */}
-          <div className="flex items-center p-0.5 bg-neutral-100 rounded-md border border-[var(--rl-border)] text-xs mr-1">
-            <button
-              type="button"
-              onClick={() => setBuilderMode("sections")}
-              className={`px-2.5 py-1 rounded transition-all flex items-center gap-1.5 text-xs font-semibold ${
-                builderMode === "sections"
-                  ? "bg-white text-[var(--rl-text-strong)] shadow-sm font-bold"
-                  : "text-neutral-500 hover:text-neutral-800"
-              }`}
-              title="Structured Section & Slot Editor (+ Add Field, Reorder)"
+          {/* Add Section Menu Dropdown */}
+          <div className="relative">
+            <Button
+              variant="primary"
+              size="sm"
+              icon={<Plus weight="bold" size={15} />}
+              onClick={() => setIsAddSectionMenuOpen(!isAddSectionMenuOpen)}
+              className="gap-1.5 font-bold shadow-xs bg-emerald-600 hover:bg-emerald-700 text-white"
             >
-              <ListDashes size={13} weight="bold" />
-              Sections
-            </button>
-            <button
-              type="button"
-              onClick={() => setBuilderMode("freeform")}
-              className={`px-2.5 py-1 rounded transition-all flex items-center gap-1.5 text-xs font-semibold ${
-                builderMode === "freeform"
-                  ? "bg-white text-[var(--rl-text-strong)] shadow-sm font-bold"
-                  : "text-neutral-500 hover:text-neutral-800"
-              }`}
-              title="Freeform Layers (Manual Drag & Drop Coordinates)"
-            >
-              <SquaresFour size={13} weight="bold" />
-              Freeform
-            </button>
+              + Add Section
+              <CaretDown size={12} weight="bold" />
+            </Button>
+
+            {isAddSectionMenuOpen && (
+              <div
+                className="absolute left-0 mt-1.5 w-64 rounded-lg border border-[var(--rl-border)] bg-white shadow-xl z-50 py-1.5 text-xs animate-fade-in"
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)] border-b border-neutral-100">
+                  Add Section or Container
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveSectionTab("section1");
+                    setShowLeft(true);
+                    handleAddSpecRow();
+                    setIsAddSectionMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-blue-50 text-neutral-800 font-medium"
+                >
+                  <span className="w-5 h-5 rounded bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-[11px]">1</span>
+                  <div>
+                    <div className="font-semibold text-blue-900">+ Spec Row (Vehicle Table)</div>
+                    <div className="text-[10px] text-neutral-500">Insert car specs, NCD, or policy field</div>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveSectionTab("rightBox");
+                    setShowLeft(true);
+                    setIsAddSectionMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-purple-50 text-neutral-800 font-medium"
+                >
+                  <span className="w-5 h-5 rounded bg-purple-100 text-purple-700 flex items-center justify-center font-bold text-[11px]">2</span>
+                  <div>
+                    <div className="font-semibold text-purple-900">+ Right Container Box (Modular Div)</div>
+                    <div className="text-[10px] text-neutral-500">Add QR code, bank details, logos</div>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleAddBenefitGrid("current_benefits");
+                    setIsAddSectionMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-emerald-50 text-neutral-800 font-medium"
+                >
+                  <span className="w-5 h-5 rounded bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-[11px]">3</span>
+                  <div>
+                    <div className="font-semibold text-emerald-900">+ Default Benefits Grid (9 items)</div>
+                    <div className="text-[10px] text-neutral-500">Standard included comprehensive benefits</div>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleAddBenefitGrid("purchased_extras");
+                    setIsAddSectionMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-red-50 text-neutral-800 font-medium"
+                >
+                  <span className="w-5 h-5 rounded bg-red-100 text-red-700 flex items-center justify-center font-bold text-[11px]">4</span>
+                  <div>
+                    <div className="font-semibold text-red-900">+ Purchased Extras Grid (9 items)</div>
+                    <div className="text-[10px] text-neutral-500">Paid add-on endorsements with costs</div>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleAddBenefitGrid("available_addons");
+                    setIsAddSectionMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-amber-50 text-neutral-800 font-medium"
+                >
+                  <span className="w-5 h-5 rounded bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-[11px]">5</span>
+                  <div>
+                    <div className="font-semibold text-amber-900">+ Available Add-ons Grid (9 items)</div>
+                    <div className="text-[10px] text-neutral-500">Optional add-on recommendations</div>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveSectionTab("footer");
+                    setShowLeft(true);
+                    setIsAddSectionMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-neutral-100 text-neutral-800 font-medium border-t border-neutral-100"
+                >
+                  <span className="w-5 h-5 rounded bg-neutral-200 text-neutral-700 flex items-center justify-center font-bold text-[11px]">6</span>
+                  <div>
+                    <div className="font-semibold text-neutral-900">+ Footer & Payment Section</div>
+                    <div className="text-[10px] text-neutral-500">Bank account details and terms</div>
+                  </div>
+                </button>
+              </div>
+            )}
           </div>
           <Button
             variant="secondary"
@@ -1454,96 +2158,250 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
       <div
         className="hidden min-h-0 flex-1 lg:grid"
         style={{
-          gridTemplateColumns: `${showLeft && !previewMode ? (builderMode === "sections" ? Math.max(leftWidth, 380) : leftWidth) : 0}px 6px minmax(0,1fr) 6px ${showRight && !previewMode ? rightWidth : 0}px`,
+          gridTemplateColumns: `${showLeft && !previewMode ? Math.max(leftWidth, 380) : 0}px 6px minmax(0,1fr) 6px ${showRight && !previewMode ? rightWidth : 0}px`,
           transition: "grid-template-columns 160ms ease",
         }}
       >
         {!previewMode && showLeft ? (
           <aside className="min-h-0 overflow-y-auto border-r border-[var(--rl-border)] bg-[var(--rl-surface)] flex flex-col">
-            {builderMode === "sections" ? (
+            {true ? (
               <div className="flex flex-col h-full overflow-hidden">
-                {/* Section Subtabs */}
-                <div className="flex border-b border-[var(--rl-border)] bg-neutral-50/80 p-2 gap-1.5 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setActiveSectionTab("section1")}
-                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-bold transition-all text-center ${
-                      activeSectionTab === "section1"
-                        ? "bg-[var(--rl-primary)] text-white shadow-sm"
-                        : "text-[var(--rl-text-muted)] hover:bg-neutral-200/60 hover:text-[var(--rl-text-strong)]"
-                    }`}
-                  >
-                    [1] Specs
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveSectionTab("benefits")}
-                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-bold transition-all text-center ${
-                      activeSectionTab === "benefits"
-                        ? "bg-[var(--rl-primary)] text-white shadow-sm"
-                        : "text-[var(--rl-text-muted)] hover:bg-neutral-200/60 hover:text-[var(--rl-text-strong)]"
-                    }`}
-                  >
-                    [2] Benefits
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveSectionTab("footer")}
-                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-bold transition-all text-center ${
-                      activeSectionTab === "footer"
-                        ? "bg-[var(--rl-primary)] text-white shadow-sm"
-                        : "text-[var(--rl-text-muted)] hover:bg-neutral-200/60 hover:text-[var(--rl-text-strong)]"
-                    }`}
-                  >
-                    [3] Footer
-                  </button>
+                {/* Section Subtabs and Preset Quick Selector */}
+                <div className="border-b border-[var(--rl-border)] bg-neutral-50/80 p-2 space-y-1.5 shrink-0">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-bold text-[var(--rl-text-muted)] uppercase tracking-wide">Language Preset:</span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleApplyPreset("bilingual")}
+                        className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white border border-neutral-200 hover:border-neutral-400 text-neutral-700"
+                        title="Reset to Malaysian Bilingual standard"
+                      >
+                        Bilingual
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyPreset("english")}
+                        className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white border border-neutral-200 hover:border-neutral-400 text-neutral-700"
+                        title="Switch all labels to English"
+                      >
+                        English
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyPreset("mandarin")}
+                        className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white border border-neutral-200 hover:border-neutral-400 text-neutral-700"
+                        title="Switch all labels to Chinese (numbers stay English)"
+                      >
+                        中文 (Full)
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-1 overflow-x-auto">
+                    <button
+                      type="button"
+                      onClick={() => setActiveSectionTab("header")}
+                      className={`flex-1 py-1.5 px-1.5 rounded-md text-[11px] font-bold transition-all text-center whitespace-nowrap ${
+                        activeSectionTab === "header"
+                          ? "bg-[var(--rl-primary)] text-white shadow-sm"
+                          : "text-[var(--rl-text-muted)] hover:bg-neutral-200/60 hover:text-[var(--rl-text-strong)]"
+                      }`}
+                    >
+                      [0] Header
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveSectionTab("section1")}
+                      className={`flex-1 py-1.5 px-1.5 rounded-md text-[11px] font-bold transition-all text-center whitespace-nowrap ${
+                        activeSectionTab === "section1"
+                          ? "bg-[var(--rl-primary)] text-white shadow-sm"
+                          : "text-[var(--rl-text-muted)] hover:bg-neutral-200/60 hover:text-[var(--rl-text-strong)]"
+                      }`}
+                    >
+                      [1] Specs
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveSectionTab("rightBox")}
+                      className={`flex-1 py-1.5 px-1.5 rounded-md text-[11px] font-bold transition-all text-center whitespace-nowrap ${
+                        activeSectionTab === "rightBox"
+                          ? "bg-[var(--rl-primary)] text-white shadow-sm"
+                          : "text-[var(--rl-text-muted)] hover:bg-neutral-200/60 hover:text-[var(--rl-text-strong)]"
+                      }`}
+                    >
+                      [2] Right Box
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveSectionTab("benefits")}
+                      className={`flex-1 py-1.5 px-1.5 rounded-md text-[11px] font-bold transition-all text-center whitespace-nowrap ${
+                        activeSectionTab === "benefits"
+                          ? "bg-[var(--rl-primary)] text-white shadow-sm"
+                          : "text-[var(--rl-text-muted)] hover:bg-neutral-200/60 hover:text-[var(--rl-text-strong)]"
+                      }`}
+                    >
+                      [3] Benefits
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveSectionTab("footer")}
+                      className={`flex-1 py-1.5 px-1.5 rounded-md text-[11px] font-bold transition-all text-center whitespace-nowrap ${
+                        activeSectionTab === "footer"
+                          ? "bg-[var(--rl-primary)] text-white shadow-sm"
+                          : "text-[var(--rl-text-muted)] hover:bg-neutral-200/60 hover:text-[var(--rl-text-strong)]"
+                      }`}
+                    >
+                      [4] Footer
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddSectionMenuOpen(true)}
+                      className="py-1.5 px-2 rounded-md text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 cursor-pointer"
+                      title="Add section or container"
+                    >
+                      + Add
+                    </button>
+                  </div>
                 </div>
 
                 {/* Section Content */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  {activeSectionTab === "header" && (
+                    <HeaderSectionManager
+                      header={currentSections.header || defaultHeaderConfig()}
+                      onChange={handleHeaderChange}
+                    />
+                  )}
+
                   {activeSectionTab === "section1" && (
                     <VehicleFieldsManager
                       fields={currentSections.section1.vehicleFields}
                       onChange={handleVehicleFieldsChange}
+                      extrasDisplayMode={currentSections.section1.extrasDisplayMode ?? "itemized"}
+                      onExtrasDisplayModeChange={handleExtrasDisplayModeChange}
+                    />
+                  )}
+
+                  {activeSectionTab === "rightBox" && (
+                    <RightContainerManager
+                      containers={currentSections.rightContainers || defaultRightContainers()}
+                      onChange={handleRightContainersChange}
                     />
                   )}
 
                   {activeSectionTab === "benefits" && (
                     <div className="space-y-4 text-xs">
-                      <div className="pb-3 border-b border-[var(--rl-border)]">
-                        <h4 className="text-sm font-bold text-[var(--rl-text-strong)]">
-                          Benefits & Add-ons Grid
-                        </h4>
-                        <p className="text-xs text-[var(--rl-text-muted)]">
-                          Select a layout preset, card styling, and column structure for the dynamic benefit cards.
+                      <div className="pb-2 border-b border-[var(--rl-border)]">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-sm font-bold text-[var(--rl-text-strong)]">
+                            Benefits & Add-ons Grid
+                          </h4>
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                            27 Preview Items Active
+                          </span>
+                        </div>
+                        <p className="text-xs text-[var(--rl-text-muted)] mt-0.5">
+                          9 Defaults · 9 Purchased Extras · 9 Available Add-ons shown with realistic values.
                         </p>
                       </div>
 
+                      {/* 3-Category Pill Switcher */}
+                      <div className="flex gap-1 p-1 bg-neutral-100 rounded-lg">
+                        <button
+                          type="button"
+                          onClick={() => setBenefitTabKind("current_benefits")}
+                          className={`flex-1 py-1 px-1 rounded text-[11px] font-bold text-center transition-all cursor-pointer ${
+                            benefitTabKind === "current_benefits"
+                              ? "bg-white text-emerald-700 shadow-xs"
+                              : "text-neutral-600 hover:text-black"
+                          }`}
+                        >
+                          Defaults (9)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBenefitTabKind("purchased_extras")}
+                          className={`flex-1 py-1 px-1 rounded text-[11px] font-bold text-center transition-all cursor-pointer ${
+                            benefitTabKind === "purchased_extras"
+                              ? "bg-white text-red-700 shadow-xs"
+                              : "text-neutral-600 hover:text-black"
+                          }`}
+                        >
+                          Purchased (9)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBenefitTabKind("available_addons")}
+                          className={`flex-1 py-1 px-1 rounded text-[11px] font-bold text-center transition-all cursor-pointer ${
+                            benefitTabKind === "available_addons"
+                              ? "bg-white text-amber-700 shadow-xs"
+                              : "text-neutral-600 hover:text-black"
+                          }`}
+                        >
+                          Add-ons (9)
+                        </button>
+                      </div>
+
                       {(() => {
-                        const currentGrid =
+                        const targetGrid =
                           elements.find(
-                            (e) => e.type === "benefit-grid" && e.gridKind === "current_benefits"
-                          ) || elements.find((e) => e.type === "benefit-grid");
-                        if (!currentGrid) {
+                            (e) => e.type === "benefit-grid" && e.gridKind === benefitTabKind
+                          ) ||
+                          (benefitTabKind === "current_benefits"
+                            ? elements.find((e) => e.type === "benefit-grid" && !e.gridKind)
+                            : null);
+
+                        if (!targetGrid) {
                           return (
-                            <div className="p-4 rounded border border-dashed border-neutral-300 text-center text-neutral-500">
-                              No dynamic benefit grid found in this template.
+                            <div className="p-4 rounded-lg border border-dashed border-neutral-300 bg-neutral-50 text-center space-y-2">
+                              <p className="text-xs text-neutral-600 font-medium">
+                                No {benefitTabKind === "current_benefits" ? "Default Benefits" : benefitTabKind === "purchased_extras" ? "Purchased Extras" : "Available Add-ons"} grid found on canvas.
+                              </p>
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                onClick={() => handleAddBenefitGrid(benefitTabKind)}
+                                className="gap-1 font-bold text-xs"
+                              >
+                                <Plus size={13} weight="bold" />
+                                Add {benefitTabKind === "current_benefits" ? "Default Grid" : benefitTabKind === "purchased_extras" ? "Purchased Grid" : "Add-ons Grid"}
+                              </Button>
                             </div>
                           );
                         }
+
                         return (
-                          <div className="space-y-3">
+                          <div className="space-y-3 p-3 rounded-lg border border-[var(--rl-border)] bg-neutral-50/50">
+                            <div className="flex items-center justify-between pb-2 border-b border-neutral-200">
+                              <span className="font-bold text-neutral-800 text-xs">
+                                {benefitTabKind === "current_benefits"
+                                  ? "Default Protection Grid (9 items)"
+                                  : benefitTabKind === "purchased_extras"
+                                  ? "Purchased Extras Grid (9 items)"
+                                  : "Available Add-ons Grid (9 items)"}
+                              </span>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => selectOnly(targetGrid.id)}
+                                className="h-6 text-[10px] text-blue-600 hover:underline px-1"
+                              >
+                                Select on Canvas
+                              </Button>
+                            </div>
+
                             <div>
                               <label className="block text-xs font-bold text-[var(--rl-text-strong)] mb-1">
                                 Benefit Template Preset
                               </label>
                               <Select
-                                value={currentGrid.benefitPreset || "masonry-flow"}
+                                value={targetGrid.benefitPreset || "masonry-flow"}
                                 disabled={readOnly}
                                 onChange={(event) => {
                                   const preset = getBenefitPreset(event.target.value);
-                                  const applied = applyPresetToCanvasElement(currentGrid, preset);
-                                  updateElement(currentGrid.id, applied);
+                                  const applied = applyPresetToCanvasElement(targetGrid, preset);
+                                  updateElement(targetGrid.id, applied);
                                 }}
                               >
                                 {SYSTEM_BENEFIT_PRESETS.map((p) => (
@@ -1560,10 +2418,10 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                                   Columns
                                 </label>
                                 <Select
-                                  value={String(currentGrid.columns || 3)}
+                                  value={String(targetGrid.columns || 3)}
                                   disabled={readOnly}
                                   onChange={(e) =>
-                                    updateElement(currentGrid.id, {
+                                    updateElement(targetGrid.id, {
                                       columns: Number(e.target.value),
                                     })
                                   }
@@ -1579,16 +2437,16 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                                   Card Style
                                 </label>
                                 <Select
-                                  value={currentGrid.cardStyle || "standard"}
+                                  value={targetGrid.cardStyle || "outlined"}
                                   disabled={readOnly}
                                   onChange={(e) =>
-                                    updateElement(currentGrid.id, {
+                                    updateElement(targetGrid.id, {
                                       cardStyle: e.target.value as any,
                                     })
                                   }
                                 >
-                                  <option value="standard">Standard</option>
                                   <option value="outlined">Outlined</option>
+                                  <option value="standard">Standard</option>
                                   <option value="soft">Soft</option>
                                   <option value="minimal">Minimal</option>
                                 </Select>
@@ -1597,6 +2455,34 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                           </div>
                         );
                       })()}
+
+                      {/* Quick Add Another Grid Action */}
+                      <div className="pt-2 border-t border-[var(--rl-border)] flex flex-wrap gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => handleAddBenefitGrid("current_benefits")}
+                          className="h-7 text-[11px] gap-1 flex-1 font-semibold"
+                        >
+                          <Plus size={11} weight="bold" /> + Defaults Grid
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => handleAddBenefitGrid("purchased_extras")}
+                          className="h-7 text-[11px] gap-1 flex-1 font-semibold"
+                        >
+                          <Plus size={11} weight="bold" /> + Extras Grid
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => handleAddBenefitGrid("available_addons")}
+                          className="h-7 text-[11px] gap-1 flex-1 font-semibold"
+                        >
+                          <Plus size={11} weight="bold" /> + Add-ons Grid
+                        </Button>
+                      </div>
                     </div>
                   )}
 
@@ -1917,6 +2803,43 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                 </div>
               ) : null}
             </div>
+
+            {/* Canvas Toolbar Right Controls: Extras Simulator & Guides Toggle */}
+            <div className="flex items-center gap-3">
+              {/* Simulated Extras Control */}
+              <div className="flex items-center gap-1.5 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-2.5 py-1 text-xs">
+                <span className="font-semibold text-[var(--rl-text-muted)] select-none">
+                  Simulate Extras:
+                </span>
+                <div className="flex items-center gap-0.5">
+                  {([0, 1, 3, 4, 6, 8] as const).map((count) => (
+                    <button
+                      key={count}
+                      type="button"
+                      onClick={() => handleSimulatedExtrasChange(count)}
+                      title={count === 0 ? "No simulated extras" : `Preview layout with ${count} purchased add-on${count > 1 ? "s" : ""} inserted`}
+                      className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all cursor-pointer ${
+                        simulatedExtrasCount === count
+                          ? "bg-[var(--rl-primary)] text-white shadow-xs"
+                          : "text-[var(--rl-text-muted)] hover:bg-[var(--rl-bg)] hover:text-[var(--rl-text)]"
+                      }`}
+                    >
+                      {count === 0 ? "Off" : (count === 1 ? "1 (Default)" : `+${count}`)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Guides Toggle */}
+              <Button
+                variant={showGuides ? "primary" : "secondary"}
+                size="sm"
+                onClick={() => setShowGuides((prev) => !prev)}
+                title={showGuides ? "Hide modular container outlines and action badges" : "Show modular container outlines and action badges"}
+              >
+                Guides {showGuides ? "On" : "Off"}
+              </Button>
+            </div>
           </div>
           <div className="m-auto w-fit flex-shrink-0 rounded-md bg-neutral-300 p-6 shadow-inner" style={{ minHeight: ((canvasH) * zoom) + 60 }}>
             <div className="relative" style={{ width: (canvasW) * zoom, height: (canvasH) * zoom }}>
@@ -2075,6 +2998,115 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                     />
                   </>
                 ) : null}
+                {/* Visual Modular Container Guides with Direct Action Headers */}
+                {!previewMode && showGuides && (
+                  <>
+                    {/* Section 1 Left: Specs Table Container */}
+                    <div
+                      className="pointer-events-none absolute border border-blue-400/40 bg-blue-50/5 rounded transition-all"
+                      style={{ left: 16, top: 128, width: 476, height: 284 + specDeltaY, zIndex: 10 }}
+                    >
+                      <div className="absolute top-2 right-2 flex items-center gap-1.5 select-none pointer-events-auto">
+                        <span className="bg-blue-600/90 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-xs">
+                          Section 1: Specs Table
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddSpecRow();
+                          }}
+                          className="flex items-center gap-1 px-2 py-0.5 rounded bg-blue-500 hover:bg-blue-600 text-white text-[10px] font-semibold shadow-xs cursor-pointer transition-colors"
+                          title="Add a new specification key-value row"
+                        >
+                          <Plus size={11} weight="bold" /> Add Row
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Section 1 Right: Right Container Box */}
+                    <div
+                      className="pointer-events-none absolute border border-purple-400/40 bg-purple-50/5 rounded transition-all"
+                      style={{ left: 504, top: 128, width: 254, height: 284 + specDeltaY, zIndex: 10 }}
+                    >
+                      <div className="absolute top-2 right-2 flex items-center gap-1.5 select-none pointer-events-auto">
+                        <span className="bg-purple-600/90 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-xs">
+                          Section 1: Right Box
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddRightBoxBlock("text");
+                          }}
+                          className="flex items-center gap-1 px-2 py-0.5 rounded bg-purple-500 hover:bg-purple-600 text-white text-[10px] font-semibold shadow-xs cursor-pointer transition-colors"
+                          title="Add a text block to the right box"
+                        >
+                          <Plus size={11} weight="bold" /> Block
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Section 2: Dynamic Benefit Area */}
+                    <div
+                      className="pointer-events-none absolute border border-emerald-400/40 bg-emerald-50/5 rounded transition-all"
+                      style={{ left: 16, top: 400 + specDeltaY, width: 758, height: 683, zIndex: 10 }}
+                    >
+                      <div className="absolute top-2 right-2 flex items-center gap-2 select-none pointer-events-auto">
+                        <span className="bg-emerald-600/90 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-xs">
+                          Section 2: Benefits Area
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAddBenefitGrid("current_benefits");
+                            }}
+                            className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] font-semibold shadow-xs cursor-pointer transition-colors"
+                            title="Add or ensure benefits grid"
+                          >
+                            <Plus size={11} weight="bold" /> Grid
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveSectionTab("benefits");
+                            }}
+                            className="px-2 py-0.5 rounded bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-300 text-[10px] font-medium shadow-xs cursor-pointer transition-colors"
+                            title="Open Benefits Manager tab"
+                          >
+                            Configure
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Section 3: Footer */}
+                    <div
+                      className="pointer-events-none absolute border border-amber-400/40 bg-amber-50/5 rounded transition-all"
+                      style={{ left: 16, top: 1088 + specDeltaY, width: 758, height: 26, zIndex: 10 }}
+                    >
+                      <div className="absolute -top-3 right-2 flex items-center gap-1.5 select-none pointer-events-auto">
+                        <span className="bg-amber-600/90 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-xs">
+                          Section 3: Footer
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveSectionTab("footer");
+                          }}
+                          className="px-2 py-0.5 rounded bg-amber-500 hover:bg-amber-600 text-white text-[10px] font-semibold shadow-xs cursor-pointer transition-colors"
+                          title="Open Footer Settings tab"
+                        >
+                          Edit Footer
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
                 {sortedElements.map((element) => (
                   <CanvasElementView
                     key={element.id}
@@ -2084,8 +3116,15 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                     config={config}
                     scenarioCount={scenarioCount}
                     readOnly={readOnly}
-                    onPointerDown={(event) => builderMode === "sections" ? selectOnly(element.id) : pointerDown(event, element, "move")}
-                    onResizePointerDown={(event, handle) => builderMode === "sections" ? selectOnly(element.id) : pointerDown(event, element, "resize", handle)}
+                    variableValues={BUILDER_MOCK_VARIABLES}
+                    benefitData={BUILDER_MOCK_BENEFIT_DATA}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      selectOnly(element.id);
+                      handleElementClickNavigate(element);
+                    }}
+                    onResizePointerDown={undefined}
                     onContextMenu={(event) => {
                       if (readOnly) return;
                       event.preventDefault();
@@ -2139,7 +3178,7 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
           tabIndex={0}
           className="z-10 cursor-col-resize border-x border-[var(--rl-border)] bg-[var(--rl-bg)] transition-colors hover:bg-[var(--rl-border)]"
           onPointerDown={startPanelResize("right")}
-          onKeyDown={(event) => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); setRightWidth((value) => Math.max(200, Math.min(520, value + (event.key === "ArrowLeft" ? 16 : -16)))); } }}
+          onKeyDown={(event) => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); setRightWidth((value: number) => Math.max(200, Math.min(520, value + (event.key === "ArrowLeft" ? 16 : -16)))); } }}
           title="Drag to resize the inspector panel"
         />
 
@@ -2177,24 +3216,24 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                     <Input value={selected.name || selected.groupName || ""} disabled={readOnly} onChange={(event) => updateElement(selected.id, { name: event.target.value, groupName: event.target.value })} />
                   </label>
                 ) : null}
-                {selected.type !== "layer-group" ? <div className="grid grid-cols-2 gap-2">
-                  {(["x", "y", "w", "h", "z"] as const).map((key) => (
-                    <label key={key} className="grid gap-1 text-xs font-bold uppercase">
-                      {key}
-                      <Input
-                        type="number"
-                        min={key === "z" ? 1 : 0}
-                        max={key === "x" ? canvasW - selected.w : key === "y" ? canvasH - selected.h : key === "w" ? canvasW - selected.x : key === "h" ? canvasH - selected.y : undefined}
-                        value={selected[key] || 0}
-                        disabled={readOnly || Boolean(selected.locked)}
-                        onChange={(event) => {
-                          const raw = Number(event.target.value);
-                          const value = key === "x" ? Math.max(0, Math.min(canvasW - selected.w, raw)) : key === "y" ? Math.max(0, Math.min(canvasH - selected.h, raw)) : key === "w" ? Math.max(1, Math.min(canvasW - selected.x, raw)) : key === "h" ? Math.max(1, Math.min(canvasH - selected.y, raw)) : Math.max(1, raw);
-                          updateElement(selected.id, { [key]: value });
-                        }}
-                      />
-                    </label>
-                  ))}
+                {/* Modular Container Layout Info */}
+                <div className="rounded border border-neutral-200 bg-neutral-50 p-3 text-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[var(--rl-text-muted)] uppercase text-[10px] tracking-wider">Container Placement</span>
+                    <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-semibold">Auto-Managed</span>
+                  </div>
+                  <p className="text-neutral-600 text-[11px] leading-relaxed">
+                    This element is automatically positioned by the Modular Container Engine. Order, labels, typography, and styling are managed inside its section editor.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handleElementClickNavigate(selected)}
+                    className="w-full text-center py-1.5 px-2 rounded bg-white border border-neutral-300 hover:bg-neutral-100 text-neutral-800 text-[11px] font-bold transition-colors shadow-xs"
+                  >
+                    Open Section Editor →
+                  </button>
+                </div>
+                {selected.type !== "layer-group" ? (
                   <label className="grid gap-1 text-xs font-bold uppercase">
                     rotate°
                     <Input
@@ -2204,7 +3243,7 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                       onChange={(event) => updateStyle(selected.id, { rotation: Number(event.target.value) })}
                     />
                   </label>
-                </div> : null}
+                ) : null}
                 {selected.type !== "layer-group" ? <RangeControl label="Opacity" value={selected.opacity ?? 1} min={0} max={1} step={0.05} unit="" disabled={readOnly || Boolean(selected.locked)} resetValue={1} onGestureStart={beginPropertyGesture} onGestureEnd={endPropertyGesture} onChange={(value) => updateElement(selected.id, { opacity: value })} /> : null}
                 {selected.type === "shape" ? (
                   <label className="grid gap-1 font-bold">

@@ -58,6 +58,7 @@ type GlobalBenefit = {
   display_overrides?: Record<string, boolean>;
   revision: number;
   status: string;
+  coverage_format?: "RM" | "KM" | "text" | null;
 };
 
 type VisualProfile = {
@@ -197,6 +198,7 @@ export default function GlobalBenefitsPage() {
   const [formDisplayOverrides, setFormDisplayOverrides] = useState<Record<string, boolean>>({});
   const [formSort, setFormSort] = useState(0);
   const [formActive, setFormActive] = useState(true);
+  const [formCoverageFormat, setFormCoverageFormat] = useState<"RM" | "KM" | "text">("RM");
 
   const activeProfile = useMemo(
     () => visualProfiles.find((p) => p.is_active) || null,
@@ -456,6 +458,15 @@ export default function GlobalBenefitsPage() {
     setFormDisplayOverrides(item.display_overrides || {});
     setFormSort(item.sort_order || 0);
     setFormActive(item.status === "active");
+
+    const effFormat: "RM" | "KM" | "text" =
+      item.coverage_format ||
+      (item.concept_key.includes("towing")
+        ? "KM"
+        : item.concept_key.includes("windscreen") || item.concept_key.includes("peril")
+        ? "RM"
+        : "text");
+    setFormCoverageFormat(effFormat);
   }
 
   function newBenefit() {
@@ -471,6 +482,7 @@ export default function GlobalBenefitsPage() {
     setNewVariantInput("");
     setFormDescription("");
     setFormAssetId("");
+    setFormCoverageFormat("text");
     setFormMatch([]);
     setFormDisplayOverrides({});
     setFormSort(benefits.length + 1);
@@ -811,6 +823,7 @@ export default function GlobalBenefitsPage() {
         display_overrides: formDisplayOverrides,
         sort_order: Math.max(0, Number(formSort) || 0),
         status: formActive ? "active" : "inactive",
+        coverage_format: formCoverageFormat,
       };
       if (!isNew && selected) {
         payload.id = selected.id;
@@ -1261,6 +1274,11 @@ export default function GlobalBenefitsPage() {
                               {item.variants?.length} Plans
                             </span>
                           ) : null}
+                          {item.coverage_format && item.coverage_format !== "text" ? (
+                            <span className="shrink-0 rounded bg-slate-100 px-1 text-[9px] font-bold text-slate-700 border border-slate-300">
+                              {item.coverage_format}
+                            </span>
+                          ) : null}
                         </div>
                         {item.description && (
                           <p className="mt-0.5 truncate text-[10px] text-[var(--rl-text-muted)] italic leading-snug">
@@ -1489,6 +1507,78 @@ export default function GlobalBenefitsPage() {
                       placeholder="e.g. 24/7 emergency towing assistance to nearest workshop or preferred location..."
                       className="text-xs"
                     />
+                  </div>
+
+                  {/* 4. Coverage Format (Unit / Display Mode) */}
+                  <div className="grid gap-2 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] p-3.5 bg-slate-50/70">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-xs font-bold text-[var(--rl-text-strong)] flex items-center gap-1.5">
+                          <span>4. Coverage Display Format</span>
+                          <span className="text-[var(--rl-red)]">*</span>
+                        </label>
+                        <p className="text-[11px] text-[var(--rl-text-muted)] mt-0.5">
+                          Controls whether numerical values prepend RM currency, append KM distance, or display as plain text.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] uppercase font-bold text-[var(--rl-text-muted)]">Preview:</span>
+                        <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-white border border-[var(--rl-border)] text-[var(--rl-text-strong)] shadow-2xs">
+                          {formCoverageFormat === "RM"
+                            ? "RM 4,000"
+                            : formCoverageFormat === "KM"
+                            ? "100 KM / Unlimited KM"
+                            : "Included / Full Value"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setFormCoverageFormat("RM")}
+                        className={`flex flex-col items-center justify-center p-2.5 rounded-md border text-center transition-all ${
+                          formCoverageFormat === "RM"
+                            ? "border-[var(--rl-red)] bg-red-50 text-[var(--rl-red)] font-bold shadow-xs ring-1 ring-[var(--rl-red)]"
+                            : "border-[var(--rl-border)] bg-white text-[var(--rl-text-strong)] hover:bg-slate-50"
+                        }`}
+                      >
+                        <span className="text-xs font-bold">🪙 RM (Currency)</span>
+                        <span className="text-[10px] text-[var(--rl-text-muted)] mt-0.5">
+                          e.g. RM 4,000 (Windscreen, Perils)
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setFormCoverageFormat("KM")}
+                        className={`flex flex-col items-center justify-center p-2.5 rounded-md border text-center transition-all ${
+                          formCoverageFormat === "KM"
+                            ? "border-emerald-600 bg-emerald-50 text-emerald-800 font-bold shadow-xs ring-1 ring-emerald-600"
+                            : "border-[var(--rl-border)] bg-white text-[var(--rl-text-strong)] hover:bg-slate-50"
+                        }`}
+                      >
+                        <span className="text-xs font-bold">🛣️ KM (Distance / Unlimited)</span>
+                        <span className="text-[10px] text-[var(--rl-text-muted)] mt-0.5">
+                          e.g. 50 KM, 100 KM, Unlimited KM
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setFormCoverageFormat("text")}
+                        className={`flex flex-col items-center justify-center p-2.5 rounded-md border text-center transition-all ${
+                          formCoverageFormat === "text"
+                            ? "border-indigo-600 bg-indigo-50 text-indigo-800 font-bold shadow-xs ring-1 ring-indigo-600"
+                            : "border-[var(--rl-border)] bg-white text-[var(--rl-text-strong)] hover:bg-slate-50"
+                        }`}
+                      >
+                        <span className="text-xs font-bold">📝 Plain Text (No RM/KM)</span>
+                        <span className="text-[10px] text-[var(--rl-text-muted)] mt-0.5">
+                          e.g. "Included", raw custom text
+                        </span>
+                      </button>
+                    </div>
                   </div>
                 </div>
 

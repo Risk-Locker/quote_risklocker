@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import os
 import shutil
 from pathlib import Path
 
@@ -25,6 +26,25 @@ def package_available(name: str) -> bool:
 def playwright_ready() -> tuple[bool, str]:
     if not package_available("playwright"):
         return False, "Install Playwright and Chromium: python -m playwright install chromium"
+
+    # Fast disk check to avoid spawning sync_playwright inside asyncio event loop on Windows
+    candidate_roots: list[Path] = []
+    if "PLAYWRIGHT_BROWSERS_PATH" in os.environ:
+        candidate_roots.append(Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"]))
+    if "LOCALAPPDATA" in os.environ:
+        candidate_roots.append(Path(os.environ["LOCALAPPDATA"]) / "ms-playwright")
+    candidate_roots.append(Path.home() / ".cache" / "ms-playwright")
+    candidate_roots.append(Path.home() / "AppData" / "Local" / "ms-playwright")
+
+    for root in candidate_roots:
+        if root.exists():
+            for p in root.glob("chromium-*/chrome-win*/chrome.exe"):
+                if p.exists():
+                    return True, "Ready"
+            for p in root.glob("chromium-*/chrome-linux/chrome"):
+                if p.exists():
+                    return True, "Ready"
+
     try:
         from playwright.sync_api import sync_playwright  # type: ignore
 
@@ -32,7 +52,7 @@ def playwright_ready() -> tuple[bool, str]:
             executable = Path(playwright.chromium.executable_path)
         if executable.exists():
             return True, "Ready"
-    except Exception as exc:
+    except BaseException as exc:
         logger.warning("Playwright readiness check failed: %s", exc)
     return False, "Install Chromium for PDF rendering: python -m playwright install chromium"
 

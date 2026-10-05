@@ -21,6 +21,7 @@ import {
   CurrencyDollar,
   Sparkle,
   Trash,
+  FileText,
 } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,8 @@ interface SessionItem {
   last_edited_at?: string | null;
   uploaded_file_id?: string | null;
   draft_id?: string | null;
+  template_id?: string | null;
+  template_name?: string | null;
   tenure_id?: string | null;
   customer_id?: string | null;
   tracked_vehicle_id?: string | null;
@@ -59,6 +62,12 @@ interface SessionItem {
   updated_at: string;
 }
 
+interface StaffOption {
+  id: string;
+  name: string;
+  email: string;
+}
+
 export default function SessionsPage() {
   const router = useRouter();
   const [sessions, setSessions] = useState<SessionItem[]>([]);
@@ -66,6 +75,8 @@ export default function SessionsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<"all" | "single" | "comparison" | "test">("all");
+  const [staffFilter, setStaffFilter] = useState<string>("all");
+  const [staffOptions, setStaffOptions] = useState<StaffOption[]>([]);
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -79,10 +90,20 @@ export default function SessionsPage() {
       if (activeTab === "test") {
         params.set("type_filter", "test");
       }
+      if (staffFilter && staffFilter !== "all") {
+        params.set("staff_id", staffFilter);
+      }
 
-      const res = await api<{ sessions: SessionItem[]; total: number }>(`/sessions?${params.toString()}`);
+      const res = await api<{
+        sessions: SessionItem[];
+        total: number;
+        filter_options?: { staff?: StaffOption[] };
+      }>(`/sessions?${params.toString()}`);
       setSessions(res.sessions || []);
       setTotalCount(res.total || 0);
+      if (res.filter_options?.staff?.length) {
+        setStaffOptions(res.filter_options.staff);
+      }
     } catch (err) {
       console.error("Failed to load sessions:", err);
       setSessions([]);
@@ -90,7 +111,7 @@ export default function SessionsPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, activeTab]);
+  }, [search, activeTab, staffFilter]);
 
   useEffect(() => {
     fetchSessions();
@@ -215,16 +236,36 @@ export default function SessionsPage() {
             </button>
           </div>
 
-          {/* Search Box */}
-          <div className="relative w-full sm:w-80">
-            <MagnifyingGlass size={15} weight="bold" className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search plate, chassis, client, or ref..."
-              className="w-full pl-9 pr-3 py-1.5 text-xs rounded-xl border border-neutral-200 bg-white focus:outline-none focus:ring-1 focus:ring-neutral-900 shadow-2xs"
-            />
+          {/* Controls: Staff Filter & Search Box */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto">
+            {/* Filter by Staff */}
+            <div className="relative">
+              <select
+                aria-label="Filter quotations by staff member"
+                value={staffFilter}
+                onChange={(e) => setStaffFilter(e.target.value)}
+                className="h-8.5 px-3 text-xs font-semibold rounded-xl border border-neutral-200 bg-white text-neutral-800 focus:outline-none focus:ring-1 focus:ring-neutral-900 shadow-2xs cursor-pointer w-full sm:w-auto"
+              >
+                <option value="all">👥 All Staff Members</option>
+                {staffOptions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    👤 {s.name} ({s.email})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Search Box */}
+            <div className="relative w-full sm:w-80">
+              <MagnifyingGlass size={15} weight="bold" className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search plate, chassis, client, or ref..."
+                className="w-full pl-9 pr-3 py-1.5 text-xs rounded-xl border border-neutral-200 bg-white focus:outline-none focus:ring-1 focus:ring-neutral-900 shadow-2xs"
+              />
+            </div>
           </div>
         </div>
 
@@ -307,19 +348,26 @@ export default function SessionsPage() {
                       <div className="flex items-center gap-2 text-[11px] text-neutral-400 mt-0.5">
                         <span>Uploaded: {formatDate(s.created_at)}</span>
                         {s.created_by && <span>· By {s.created_by}</span>}
+                        {s.last_edited_by && <span>· Edited by {s.last_edited_by}</span>}
                       </div>
                     </div>
                   </div>
 
                   {/* Middle: Insurer, Quotation Ref & Premium */}
                   <div className="flex-1 min-w-[220px]">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs font-extrabold text-neutral-900 px-2 py-0.5 rounded bg-neutral-100 border border-neutral-200">
                         {s.detected_company || "Unknown Insurer"}
                       </span>
                       {s.quotation_ref && (
                         <span className="font-mono text-xs font-bold text-blue-700">
                           {s.quotation_ref}
+                        </span>
+                      )}
+                      {s.template_name && (
+                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded flex items-center gap-1">
+                          <FileText size={11} weight="bold" />
+                          {s.template_name}
                         </span>
                       )}
                     </div>

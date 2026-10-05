@@ -69,6 +69,7 @@ from app.extraction.benefit_lines import is_spurious_benefit_line
 
 
 from app.services.workspace_common import (
+    BUSINESS_ROLES,
     _field_summary,
     _require_business_user,
     _resolve_vehicle_category,

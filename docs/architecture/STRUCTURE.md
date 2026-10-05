@@ -370,6 +370,38 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Drawer Integration: Added 1-click "Marketing Comparison" button in `tenure-timeline-drawer.tsx`.
 - Tests: `tests/test_marketing_comparison.py` (5 hermetic tests), `tests/test_comparison_api.py` (CRUD & teaser API tests).
 
+## Modular Container & Div Block Template Engine, Benefit Formatting & Security Hardening (v26)
+
+- Modular Container & Div Block Engine: Replaced fixed Canva-style coordinates with a component-based Container & Div Block Engine (`frontend/src/components/template-builder/section-editor/right-container-manager.tsx`, `frontend/src/lib/template-section-compiler.ts`, `backend/app/services/template_section_compiler.py`).
+  - Right container generic div block engine: Supports column/row flexbox auto-flow, custom border, background, padding, gap, and dynamic block insertion (images, text, variables, dividers) with no hardcoded slot assumptions.
+  - Left table custom row styling: "+ Insert Row Below" anywhere in vehicle spec rows, custom label (EN/ZH), variable bindings, font-size (8-22px), font-weight (400-800), and color picker with hex inputs.
+  - Master template language presets: Bilingual, English, and Mandarin Full (`master_template_service.py`).
+  - Strict A4 boundary guard: Constrained within standard 794x1123px bounds with overflow-safety.
+- Global Benefits Coverage Format: Added explicit `RM` (currency), `KM` (distance / unlimited), and `text` formatting options across `backend/app/domain/benefits.py`, `backend/app/api/schemas.py`, `backend/app/services/benefit_concept_service.py`, `frontend/src/lib/benefit-utils.ts`, `frontend/src/app/builder/global-benefits/page.tsx`, and `frontend/src/components/comparison/comparison-matrix.tsx`.
+- Security & Auth Lockout: 5 consecutive failed login attempts trigger a 120-second HTTP 429 lockout (`backend/app/services/auth_service.py`, `backend/app/core/errors.py`); asynchronous login alert emails dispatched via Resend REST API (`backend/app/services/security_notification_service.py`); strict 403 on `/users` management for non-super_admin accounts.
+- Master Admin Account: In-place migration of master admin credentials to `system@risklocker.com` preserving all quotation sessions; revoked previous sessions.
+- Session Audit & Staff Attribution: Migration `migrations/065_insurance_tenure_created_by.sql` adds `created_by_id` to `insurance_tenures`; added Staff filter dropdown and attribution tags on `/sessions` (`frontend/src/app/sessions/page.tsx`).
+## Enterprise Upload Sessions, NxM Snapshot Grid & Motor Renewal Ledger (v26 Upgrade)
+
+- Migration: `migrations/066_enterprise_upload_sessions_and_ledger.sql` (adds `duplicate_of_session_id`, `duplicate_resolution`, `batch_session_index` to `sessions`; `whatsapp_number`, `is_owner` to `person_in_charge`; `is_discarded`, `external_policy_start_date`, `external_policy_end_date`, `last_activity_at` to `insurance_tenures`; `is_hidden`, `manual_rank` to `tenure_comparison_entries`).
+- Ingestion & Disqualification: Comparison-mode uploads disqualify documents with vehicle plates mismatched to target vehicle plate, routing them to isolated background sessions to prevent cross-vehicle rate contamination (`backend/app/workers/extraction_worker.py`).
+- Duplicate Quote Versioning: Identical company quotes uploaded to the same tenure are flagged as pending duplicates with 1-click user resolution ("Replace Previous", "Keep Both", "Remove").
+- Comparison Matrix Enhancements:
+  - Top-Level Session Timeline Ribbon plotting distinct upload batches with company badges.
+  - Card visibility toggle (`is_hidden`) and manual rank override (`manual_rank`) with server-side dynamic re-ranking.
+  - High-Res NxM Snapshot Export Modal (`html-to-image`) enabling clipboard copying and PNG download of visible cards.
+  - Ruler baseline alignment with `min-h-[52px]` on card headers.
+  - 6-decimal exact net rate formula ("Basic Premium" vs "Basic Contribution").
+- Motor Renewal Ledger:
+  - 1 row per vehicle per year in Tabular view (month tab strip hidden, year-only switching).
+  - Sortable column headers (Plate, Stage, Last Activity).
+  - Close / Lost sub-card for tracking external competitor policy start/end dates and discarding/restoring clients.
+  - Interactive Calendar View plotting all uploaded quotation sessions by quotation date (`quotation_date`) with a vehicle selector filter.
+  - PIC directory with direct WhatsApp links (`https://wa.me/...`) and agency owner default flag.
+- Read-Only Logs Drawer: Converted tenure drawer into an immutable audit timeline and PDF download center (`frontend/src/components/tenures/tenure-timeline-drawer.tsx`).
+- Global Navigation Invariant: All external comparison links, session review links, and PDF downloads enforce `target="_blank" rel="noopener noreferrer"`.
+- Tests: `tests/test_enterprise_comparison_and_ledger.py` (819 hermetic tests green).
+
 - Start every repository task at [START-HERE.md](START-HERE.md).
 - Use [PROJECT-DIAGRAM.md](PROJECT-DIAGRAM.md) for the complete visual workflow and system overview.
 - Use [generated/CODEBASE-MAP.md](generated/CODEBASE-MAP.md) to locate routes, symbols, migrations, tests, and commands.

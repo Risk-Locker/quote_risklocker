@@ -86,6 +86,8 @@ export interface PicItem {
   commission_rate: number;
   phone: string | null;
   email: string | null;
+  whatsapp_number?: string | null;
+  is_owner?: boolean;
 }
 
 export interface TenureRow {
@@ -147,6 +149,10 @@ export interface TenureRow {
   created_at?: string;
   is_main?: boolean;
   stage_updated_at?: string;
+  last_activity_at?: string | null;
+  is_discarded?: boolean;
+  external_policy_start_date?: string | null;
+  external_policy_end_date?: string | null;
 }
 
 export interface StageSummary {
@@ -245,6 +251,24 @@ export function TenureTimelineLedger() {
   const [loadingTenures, setLoadingTenures] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+
+  // Sorting state (default: last_activity desc)
+  const [sortBy, setSortBy] = useState<"last_activity" | "vehicle_no" | "customer_name" | "stage">("last_activity");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  // Calendar Sessions state
+  const [calendarSessions, setCalendarSessions] = useState<any[]>([]);
+  const [calendarVehicleFilter, setCalendarVehicleFilter] = useState<string>("all");
+  const [loadingCalendar, setLoadingCalendar] = useState(false);
+
+  const handleSort = (column: "last_activity" | "vehicle_no" | "customer_name" | "stage") => {
+    if (sortBy === column) {
+      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(column);
+      setSortDir("desc");
+    }
+  };
 
   // YoY Statistics Ribbon State
   const [yoyStats, setYoyStats] = useState<YoYStatItem[]>([]);
@@ -354,7 +378,8 @@ export function TenureTimelineLedger() {
     setLoadingTenures(true);
     try {
       const params = new URLSearchParams();
-      if (selectedMonth && selectedMonth !== "all") {
+      // Tabular view is strictly by Year; Calendar view can filter by Month
+      if (viewMode === "calendar" && selectedMonth && selectedMonth !== "all") {
         params.set("month", selectedMonth);
       } else if (selectedYear && selectedYear !== "all") {
         params.set("year", selectedYear);
@@ -376,7 +401,9 @@ export function TenureTimelineLedger() {
         params.set("show_hidden", "true");
       }
 
-      params.set("page_size", "100");
+      params.set("sort_by", sortBy);
+      params.set("sort_dir", sortDir);
+      params.set("page_size", "150");
 
       const res = await api<{ items: TenureRow[]; total: number }>(`/tenures?${params.toString()}`);
       setTenures(res.items || []);
@@ -385,11 +412,41 @@ export function TenureTimelineLedger() {
     } finally {
       setLoadingTenures(false);
     }
-  }, [selectedYear, selectedMonth, category, stageFilter, search, showHidden]);
+  }, [viewMode, selectedYear, selectedMonth, category, stageFilter, search, showHidden, sortBy, sortDir]);
 
   useEffect(() => {
     loadTenures();
   }, [loadTenures]);
+
+  // Load Calendar Quotation Sessions
+  const loadCalendarSessions = useCallback(async () => {
+    setLoadingCalendar(true);
+    try {
+      const params = new URLSearchParams();
+      if (selectedYear && selectedYear !== "all") {
+        params.set("year", selectedYear);
+      }
+      if (selectedMonth && selectedMonth !== "all" && selectedMonth.includes("-")) {
+        const m = parseInt(selectedMonth.split("-")[1], 10);
+        params.set("month", String(m));
+      }
+      if (calendarVehicleFilter && calendarVehicleFilter !== "all") {
+        params.set("vehicle_no", calendarVehicleFilter);
+      }
+      const res = await api<{ sessions: any[]; total: number }>(`/tenures/calendar-sessions?${params.toString()}`);
+      setCalendarSessions(res.sessions || []);
+    } catch (err) {
+      console.error("Failed to load calendar sessions:", err);
+    } finally {
+      setLoadingCalendar(false);
+    }
+  }, [selectedYear, selectedMonth, calendarVehicleFilter]);
+
+  useEffect(() => {
+    if (viewMode === "calendar") {
+      loadCalendarSessions();
+    }
+  }, [viewMode, loadCalendarSessions]);
 
   // Handle live inline edit patch
   const patchTenureField = async (tenureId: string, updates: Partial<TenureRow>) => {
@@ -607,19 +664,27 @@ export function TenureTimelineLedger() {
       const matched = pics.find((p) => p.id === t.pic_id);
       if (matched) {
         return {
+          id: matched.id,
           name: matched.name,
           type: matched.type,
           commission: matched.commission_rate,
           agency: matched.agency_group,
+          phone: matched.phone,
+          whatsapp: matched.whatsapp_number || matched.phone,
+          isOwner: matched.is_owner,
         };
       }
     }
     if (t.sub_agent_name) {
       return {
+        id: null,
         name: t.sub_agent_name,
         type: "subagent" as const,
         commission: 0,
         agency: t.pic_agency || null,
+        phone: null,
+        whatsapp: null,
+        isOwner: false,
       };
     }
     return null;
@@ -643,17 +708,37 @@ export function TenureTimelineLedger() {
     const daysInMonth = new Date(yr, mo + 1, 0).getDate();
     const monthLabel = new Date(yr, mo, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
-    type CalendarEvent = {
-      type: "start" | "end";
-      tenure: TenureRow;
-    };
+    type CalendarEvent =
+      | {
+          type: "start" | "end";
+          tenure: TenureRow;
+        }
+      | {
+          type: "session";
+          session: any;
+        };
 
     const dayMap: Record<number, CalendarEvent[]> = {};
     for (let d = 1; d <= daysInMonth; d++) {
       dayMap[d] = [];
     }
 
-    // Filter to ONLY approved / main policies for calendar view
+    // 1. Add uploaded quotation sessions plotted by quotation_date
+    calendarSessions.forEach((s) => {
+      if (s.quotation_date) {
+        const parts = s.quotation_date.split("-");
+        if (parts.length === 3) {
+          const itemYr = parseInt(parts[0], 10);
+          const itemMo = parseInt(parts[1], 10) - 1;
+          const itemDay = parseInt(parts[2], 10);
+          if (itemYr === yr && itemMo === mo && dayMap[itemDay]) {
+            dayMap[itemDay].push({ type: "session", session: s });
+          }
+        }
+      }
+    });
+
+    // 2. Filter to ONLY approved / main policies for coverage start/end events
     const calendarTenures = tenures.filter((t) => t.is_main);
 
     calendarTenures.forEach((t) => {
@@ -706,9 +791,21 @@ export function TenureTimelineLedger() {
       dayMap,
       agendaDays,
     };
-  }, [selectedMonth, selectedYear, tenures, currentYear, currentMonthNum]);
+  }, [selectedMonth, selectedYear, tenures, calendarSessions, currentYear, currentMonthNum]);
 
-  // Group tenures by vehicle for the vehicle-centric ledger
+  // Unique vehicle list for calendar filter dropdown
+  const calendarVehicleOptions = useMemo(() => {
+    const set = new Set<string>();
+    tenures.forEach((t) => {
+      if (t.vehicle_no) set.add(t.vehicle_no.trim().toUpperCase());
+    });
+    calendarSessions.forEach((s) => {
+      if (s.vehicle_no && s.vehicle_no !== "Unknown") set.add(s.vehicle_no.trim().toUpperCase());
+    });
+    return Array.from(set).sort();
+  }, [tenures, calendarSessions]);
+
+  // Group tenures by vehicle for the vehicle-centric ledger (1 row per vehicle per year)
   const vehicleGroups = useMemo(() => {
     const map = new Map<string, TenureRow[]>();
     for (const t of tenures) {
@@ -755,8 +852,23 @@ export function TenureTimelineLedger() {
       });
     });
 
-    return groups;
-  }, [tenures]);
+    return [...groups].sort((a, b) => {
+      let cmp = 0;
+      if (sortBy === "vehicle_no") {
+        cmp = a.vehicle_no.localeCompare(b.vehicle_no);
+      } else if (sortBy === "customer_name") {
+        cmp = (a.customer_name || "").localeCompare(b.customer_name || "");
+      } else if (sortBy === "stage") {
+        cmp = (a.mainTenure.stage || "").localeCompare(b.mainTenure.stage || "");
+      } else {
+        // "last_activity"
+        const dateA = a.mainTenure.last_activity_at || a.mainTenure.stage_updated_at || a.mainTenure.created_at || "";
+        const dateB = b.mainTenure.last_activity_at || b.mainTenure.stage_updated_at || b.mainTenure.created_at || "";
+        cmp = dateA.localeCompare(dateB);
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [tenures, sortBy, sortDir]);
 
   const [expandedVehicleKeys, setExpandedVehicleKeys] = useState<string[]>([]);
   const toggleExpandVehicle = (key: string) => {
@@ -974,72 +1086,74 @@ export function TenureTimelineLedger() {
           </div>
         </div>
 
-        {/* Row 2: 12 Months Tabs with Start/End Hover Tooltip */}
-        <div className="space-y-1.5 pt-2 border-t border-[#f2f2f7]">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-neutral-700 uppercase tracking-wide">
-              Step 2: Filter by Month
-            </span>
-            <span className="text-[10px] text-neutral-400">
-              Hover over a month to see starting vs expiring breakdown
-            </span>
-          </div>
-
-          {loadingMonths ? (
-            <div className="h-9 flex items-center text-xs text-[#8e8e93]">Loading tenure timeline...</div>
-          ) : (
-            <div
-              ref={monthScrollRef}
-              className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-0.5 scroll-smooth scrollbar-thin"
-            >
-              {/* "All Months" tab */}
-              <button
-                type="button"
-                onClick={() => setSelectedMonth("all")}
-                className={`shrink-0 min-w-max px-3.5 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
-                  selectedMonth === "all"
-                    ? "bg-[#1b1717] text-white shadow-2xs font-bold"
-                    : "bg-[#f5f5f7] text-[#6e6e73] hover:bg-[#e5e5ea] border border-[#e5e5ea]"
-                }`}
-              >
-                <span>{selectedYear === "all" ? "All Months" : `All ${selectedYear}`}</span>
-              </button>
-
-              {/* 12 Months: Jan to Dec */}
-              {monthsOfYear.map((m) => {
-                const isActive = selectedMonth === m.month;
-                const isCurrent = m.month === currentMonthKey;
-                const tooltipText = `${m.label} ${selectedYear === "all" ? currentYear : selectedYear}\n• ${m.start_count} Starting\n• ${m.end_count} Expiring\n${m.total} Total Policies · ${m.cars} Cars`;
-
-                return (
-                  <button
-                    key={m.month}
-                    type="button"
-                    data-month={m.month}
-                    onClick={() => setSelectedMonth(m.month)}
-                    className={`shrink-0 min-w-max px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-medium whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
-                      isActive
-                        ? "bg-[#1b1717] text-white shadow-2xs font-bold"
-                        : "bg-[#f5f5f7] text-[#454545] hover:bg-[#e5e5ea] border border-[#e5e5ea]"
-                    } ${isCurrent && !isActive ? "ring-1 ring-[#007aff]/60 font-semibold" : ""}`}
-                    title={tooltipText}
-                  >
-                    <span>{m.label}</span>
-                    {m.total > 0 && (
-                      <span
-                        className={`px-1.5 py-0.2 rounded text-[10px] font-bold font-mono ${
-                          isActive ? "bg-white/20 text-white" : "bg-[#e5e5ea] text-[#1b1717]"
-                        }`}
-                      >
-                        ({m.total})
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
+        {/* Row 2: 12 Months Tabs with Start/End Hover Tooltip - ONLY SHOWN IN CALENDAR VIEW */}
+        {viewMode === "calendar" && (
+          <div className="space-y-1.5 pt-2 border-t border-[#f2f2f7]">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-neutral-700 uppercase tracking-wide">
+                Step 2: Filter by Month
+              </span>
+              <span className="text-[10px] text-neutral-400">
+                Hover over a month to see starting vs expiring breakdown
+              </span>
             </div>
-          )}
-        </div>
+
+            {loadingMonths ? (
+              <div className="h-9 flex items-center text-xs text-[#8e8e93]">Loading tenure timeline...</div>
+            ) : (
+              <div
+                ref={monthScrollRef}
+                className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-0.5 scroll-smooth scrollbar-thin"
+              >
+                {/* "All Months" tab */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedMonth("all")}
+                  className={`shrink-0 min-w-max px-3.5 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+                    selectedMonth === "all"
+                      ? "bg-[#1b1717] text-white shadow-2xs font-bold"
+                      : "bg-[#f5f5f7] text-[#6e6e73] hover:bg-[#e5e5ea] border border-[#e5e5ea]"
+                  }`}
+                >
+                  <span>{selectedYear === "all" ? "All Months" : `All ${selectedYear}`}</span>
+                </button>
+
+                {/* 12 Months: Jan to Dec */}
+                {monthsOfYear.map((m) => {
+                  const isActive = selectedMonth === m.month;
+                  const isCurrent = m.month === currentMonthKey;
+                  const tooltipText = `${m.label} ${selectedYear === "all" ? currentYear : selectedYear}\n• ${m.start_count} Starting\n• ${m.end_count} Expiring\n${m.total} Total Policies · ${m.cars} Cars`;
+
+                  return (
+                    <button
+                      key={m.month}
+                      type="button"
+                      data-month={m.month}
+                      onClick={() => setSelectedMonth(m.month)}
+                      className={`shrink-0 min-w-max px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-medium whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+                        isActive
+                          ? "bg-[#1b1717] text-white shadow-2xs font-bold"
+                          : "bg-[#f5f5f7] text-[#454545] hover:bg-[#e5e5ea] border border-[#e5e5ea]"
+                      } ${isCurrent && !isActive ? "ring-1 ring-[#007aff]/60 font-semibold" : ""}`}
+                      title={tooltipText}
+                    >
+                      <span>{m.label}</span>
+                      {m.total > 0 && (
+                        <span
+                          className={`px-1.5 py-0.2 rounded text-[10px] font-bold font-mono ${
+                            isActive ? "bg-white/20 text-white" : "bg-[#e5e5ea] text-[#1b1717]"
+                          }`}
+                        >
+                          ({m.total})
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ========================================================================= */}
@@ -1210,11 +1324,41 @@ export function TenureTimelineLedger() {
                       />
                     </div>
                   </th>
-                  <th className="py-3 px-3 min-w-[200px]">Vehicle &amp; Client</th>
+                  <th
+                    onClick={() => handleSort("vehicle_no")}
+                    className="py-3 px-3 min-w-[200px] cursor-pointer hover:text-black transition-colors"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Vehicle &amp; Customer</span>
+                      {sortBy === "vehicle_no" && (
+                        <span>{sortDir === "asc" ? "▲" : "▼"}</span>
+                      )}
+                    </div>
+                  </th>
                   <th className="py-3 px-3 min-w-[170px]">Coverage Period</th>
-                  <th className="py-3 px-3 min-w-[140px]">Pipeline Stage</th>
-                  <th className="py-3 px-3 min-w-[170px]">Quotes &amp; Insurers</th>
-                  <th className="py-3 px-3 min-w-[160px]">Milestones &amp; Status</th>
+                  <th
+                    onClick={() => handleSort("stage")}
+                    className="py-3 px-3 min-w-[140px] cursor-pointer hover:text-black transition-colors"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Pipeline Stage</span>
+                      {sortBy === "stage" && (
+                        <span>{sortDir === "asc" ? "▲" : "▼"}</span>
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleSort("last_activity")}
+                    className="py-3 px-3 min-w-[190px] cursor-pointer hover:text-black transition-colors"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Latest Activity &amp; Quotes</span>
+                      {sortBy === "last_activity" && (
+                        <span>{sortDir === "asc" ? "▲" : "▼"}</span>
+                      )}
+                    </div>
+                  </th>
+                  <th className="py-3 px-3 min-w-[160px]">PIC &amp; Milestones</th>
                   <th className="py-3 px-3 text-right min-w-[190px]">Actions</th>
                 </tr>
               </thead>
@@ -1368,24 +1512,40 @@ export function TenureTimelineLedger() {
 
                           {/* 2. Coverage Period (Main Policy) */}
                           <td className="py-3 px-3">
-                            <div className="space-y-0.5">
-                              <div className="flex items-center gap-1 text-[11px]">
-                                <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200 shrink-0">
-                                  Start
-                                </span>
-                                <span className="font-mono font-medium text-neutral-800">
-                                  {formatDateSafe(mainTenure.coverage_start_date)}
-                                </span>
+                            {mainTenure.stage === "Issue Policy" && mainTenure.coverage_start_date ? (
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-1 text-[11px]">
+                                  <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200 shrink-0">
+                                    Start
+                                  </span>
+                                  <span className="font-mono font-medium text-neutral-800">
+                                    {formatDateSafe(mainTenure.coverage_start_date)}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1 text-[11px]">
+                                  <span className="text-[9px] font-bold uppercase tracking-wider text-rose-700 bg-rose-50 px-1 py-0.2 rounded border border-rose-200 shrink-0">
+                                    End
+                                  </span>
+                                  <span className="font-mono font-medium text-neutral-800">
+                                    {formatDateSafe(mainTenure.coverage_end_date)}
+                                  </span>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-1 text-[11px]">
-                                <span className="text-[9px] font-bold uppercase tracking-wider text-rose-700 bg-rose-50 px-1 py-0.2 rounded border border-rose-200 shrink-0">
-                                  End
+                            ) : mainTenure.external_policy_start_date ? (
+                              <div className="space-y-0.5">
+                                <span className="text-[9px] font-bold uppercase tracking-wider text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200">
+                                  External Policy
                                 </span>
-                                <span className="font-mono font-medium text-neutral-800">
-                                  {formatDateSafe(mainTenure.coverage_end_date)}
-                                </span>
+                                <div className="text-[11px] font-mono text-neutral-700">
+                                  {formatDateSafe(mainTenure.external_policy_start_date)} → {formatDateSafe(mainTenure.external_policy_end_date)}
+                                </div>
                               </div>
-                            </div>
+                            ) : (
+                              <div className="space-y-0.5">
+                                <span className="text-neutral-400 font-mono text-xs">—</span>
+                                <div className="text-[10px] text-neutral-400 font-medium">Pending Issue</div>
+                              </div>
+                            )}
                             <div className="flex items-center gap-1.5 mt-1">
                               <span className="text-[10px] text-neutral-500 font-medium">
                                 Exp: {mainTenure.expiry_month}
@@ -1425,28 +1585,38 @@ export function TenureTimelineLedger() {
                             </div>
                           </td>
 
-                          {/* 4. Insurer & Quotes */}
+                          {/* 4. Latest Activity & Quotes */}
                           <td className="py-3 px-3">
                             {mainTenure.sourced_quotes.length === 0 ? (
                               <span className="text-neutral-400 italic text-[11px]">0 quotes compiled</span>
                             ) : (
-                              <div className="flex flex-col gap-1 max-w-[210px]">
-                                {mainTenure.sourced_quotes.slice(0, 3).map((q) => (
-                                  <span
-                                    key={q.session_id}
-                                    className="inline-flex items-center justify-between gap-1.5 px-2 py-0.5 rounded bg-neutral-100 text-neutral-800 text-[10px] font-medium border border-neutral-200/60"
+                              <div className="space-y-1 max-w-[210px]">
+                                <div className="flex items-center justify-between gap-1.5">
+                                  <span className="font-bold text-xs text-neutral-900 truncate">
+                                    {mainTenure.sourced_quotes[0].company}
+                                  </span>
+                                  {mainTenure.sourced_quotes[0].total_payable && (
+                                    <span className="text-neutral-900 font-mono font-bold text-xs bg-neutral-100 px-1.5 py-0.5 rounded border border-neutral-200 shrink-0">
+                                      RM {mainTenure.sourced_quotes[0].total_payable}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center justify-between text-[10px]">
+                                  <Link
+                                    href={`/comparison?tenure_id=${mainTenure.id}` as Route}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="font-bold text-amber-800 hover:text-amber-950 hover:underline flex items-center gap-1"
+                                    title="Open Marketing Comparison in new tab"
                                   >
-                                    <span className="font-bold truncate max-w-[110px]">{q.company}</span>
-                                    {q.total_payable && (
-                                      <span className="text-neutral-700 font-mono font-bold shrink-0">RM {q.total_payable}</span>
-                                    )}
-                                  </span>
-                                ))}
-                                {mainTenure.sourced_quotes.length > 3 && (
-                                  <span className="text-[10px] text-neutral-500 font-bold px-1">
-                                    +{mainTenure.sourced_quotes.length - 3} more quotes
-                                  </span>
-                                )}
+                                    <span>Comparison ({mainTenure.sourced_quotes.length}) →</span>
+                                  </Link>
+                                  {mainTenure.last_activity_at && (
+                                    <span className="text-neutral-400 font-mono">
+                                      {new Date(mainTenure.last_activity_at).toLocaleDateString("en-MY", { day: "2-digit", month: "short" })}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             )}
                             {mainTenure.generated_quotations && mainTenure.generated_quotations.length > 0 && (
@@ -1459,10 +1629,34 @@ export function TenureTimelineLedger() {
                             )}
                           </td>
 
-                          {/* 5. Milestones & Status */}
+                          {/* 5. PIC & Milestones */}
                           <td className="py-3 px-3">
                             <div className="space-y-1.5">
-                              {/* Row 1: Payment Status */}
+                              {/* Row 1: PIC info */}
+                              <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                                {picInfo ? (
+                                  <div className="flex items-center gap-1">
+                                    <span className="font-semibold text-neutral-800 truncate max-w-[110px]" title={`PIC: ${picInfo.name}`}>
+                                      {picInfo.name}
+                                    </span>
+                                    {picInfo.whatsapp && (
+                                      <a
+                                        href={`https://wa.me/${picInfo.whatsapp.replace(/[^0-9]/g, "")}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-emerald-600 hover:text-emerald-800 text-[10px] font-bold bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200"
+                                        title={`WhatsApp ${picInfo.whatsapp}`}
+                                      >
+                                        WA
+                                      </a>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-neutral-400 italic text-[11px]">Unassigned</span>
+                                )}
+                              </div>
+
+                              {/* Row 2: Payment Status */}
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 <span
                                   className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${
@@ -1485,20 +1679,6 @@ export function TenureTimelineLedger() {
                                   {mainTenure.agency_payment_done ? "✓ Agc Paid" : "Agc Due"}
                                 </span>
                               </div>
-
-                              {/* Row 2: Roadtax, UCD, PIC */}
-                              <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
-                                {mainTenure.key_in_ucd && (
-                                  <span className="text-teal-700 font-bold bg-teal-50 px-1.5 py-0.2 rounded border border-teal-200">
-                                    UCD ✓
-                                  </span>
-                                )}
-                                {picInfo && (
-                                  <span className="text-neutral-500 font-medium truncate max-w-[95px]" title={`PIC: ${picInfo.name}`}>
-                                    PIC: {picInfo.name}
-                                  </span>
-                                )}
-                              </div>
                             </div>
                           </td>
 
@@ -1507,8 +1687,10 @@ export function TenureTimelineLedger() {
                             <div className="flex items-center justify-end gap-1.5">
                               <Link
                                 href={`/comparison?tenure_id=${mainTenure.id}` as Route}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold transition-colors shadow-2xs cursor-pointer"
-                                title="Go to Marketing Comparison matrix for this vehicle"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-[#1b1717] hover:bg-black text-white text-xs font-bold transition-colors shadow-2xs cursor-pointer"
+                                title="Go to Marketing Comparison matrix for this vehicle (New Tab)"
                               >
                                 <Columns className="w-3.5 h-3.5" />
                                 <span>Compare</span>
@@ -1518,9 +1700,9 @@ export function TenureTimelineLedger() {
                                 size="sm"
                                 variant="secondary"
                                 onClick={() => setActiveDrawerTenureId(mainTenure.id)}
-                                className="h-7 text-xs font-medium cursor-pointer"
+                                className="h-7 text-xs font-semibold cursor-pointer border-[#e5e5ea] hover:border-black"
                               >
-                                Timeline <ArrowRight className="w-3 h-3 ml-0.5" />
+                                Logs
                               </Button>
 
                               <button
@@ -1533,7 +1715,7 @@ export function TenureTimelineLedger() {
                                 }`}
                                 title={isVehicleExpanded ? "Collapse periods" : "Expand periods list"}
                               >
-                                <span>{hasMultiplePeriods ? `Periods (${group.tenures.length})` : isVehicleExpanded ? "Done" : "Details"}</span>
+                                <span>{hasMultiplePeriods ? `Periods (${group.tenures.length})` : isVehicleExpanded ? "Close" : "Details"}</span>
                                 {isVehicleExpanded ? <CaretUp size={11} weight="bold" /> : <CaretDown size={11} weight="bold" />}
                               </button>
                             </div>
@@ -1713,8 +1895,8 @@ export function TenureTimelineLedger() {
                                 </div>
                               </div>
 
-                              {/* Sub-panel Secondary Cards: Remarks & Operations */}
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                              {/* Sub-panel Secondary Cards: Remarks, Operations & Lost Client Retention */}
+                              <div className={`grid grid-cols-1 ${mainTenure.stage === "Close - Lose" ? "md:grid-cols-3" : "md:grid-cols-2"} gap-4 text-xs`}>
                                 {/* Sub-panel Card 1: Deal Intelligence & Remarks */}
                                 <div className="p-3.5 bg-white rounded-xl border border-neutral-200 shadow-2xs space-y-3">
                                   <div className="flex items-center justify-between pb-1.5 border-b border-neutral-100">
@@ -1818,6 +2000,8 @@ export function TenureTimelineLedger() {
                                   <div className="pt-2 border-t border-neutral-100 flex items-center justify-between">
                                     <Link
                                       href={`/comparison?tenure_id=${mainTenure.id}` as Route}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
                                       className="text-xs font-bold text-amber-700 hover:text-amber-900 flex items-center gap-1"
                                     >
                                       <span>Open Comparison Matrix →</span>
@@ -1831,6 +2015,95 @@ export function TenureTimelineLedger() {
                                     </button>
                                   </div>
                                 </div>
+
+                                {/* Sub-panel Card 3: Lost Client Retention & External Policy Dates */}
+                                {mainTenure.stage === "Close - Lose" && (
+                                  <div className="p-3.5 bg-amber-50/50 rounded-xl border border-amber-200/80 shadow-2xs space-y-3">
+                                    <div className="flex items-center justify-between pb-1.5 border-b border-amber-200/60">
+                                      <span className="font-bold text-amber-950 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                                        <Clock size={14} className="text-amber-700" />
+                                        Lost Client Retention
+                                      </span>
+                                      <span
+                                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                          mainTenure.is_discarded
+                                            ? "bg-rose-100 text-rose-800 border border-rose-300"
+                                            : "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                        }`}
+                                      >
+                                        {mainTenure.is_discarded ? "Discarded" : "Active Pipeline"}
+                                      </span>
+                                    </div>
+
+                                    <p className="text-[11px] text-amber-900/80 leading-relaxed">
+                                      Track competitor policy dates to automatically queue this vehicle for renewal outreach next year.
+                                    </p>
+
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                        <label className="text-[10px] font-bold text-amber-900 block mb-0.5">
+                                          External Policy Start
+                                        </label>
+                                        <input
+                                          type="date"
+                                          defaultValue={
+                                            mainTenure.external_policy_start_date
+                                              ? mainTenure.external_policy_start_date.split("T")[0]
+                                              : ""
+                                          }
+                                          onBlur={(e) => {
+                                            const val = e.target.value;
+                                            if (val !== (mainTenure.external_policy_start_date?.split("T")[0] || "")) {
+                                              patchTenureField(mainTenure.id, { external_policy_start_date: val || null });
+                                            }
+                                          }}
+                                          className="w-full h-7 px-2 text-xs font-mono font-medium rounded border border-amber-300 bg-white"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[10px] font-bold text-amber-900 block mb-0.5">
+                                          External Policy End
+                                        </label>
+                                        <input
+                                          type="date"
+                                          defaultValue={
+                                            mainTenure.external_policy_end_date
+                                              ? mainTenure.external_policy_end_date.split("T")[0]
+                                              : ""
+                                          }
+                                          onBlur={(e) => {
+                                            const val = e.target.value;
+                                            if (val !== (mainTenure.external_policy_end_date?.split("T")[0] || "")) {
+                                              patchTenureField(mainTenure.id, { external_policy_end_date: val || null });
+                                            }
+                                          }}
+                                          className="w-full h-7 px-2 text-xs font-mono font-medium rounded border border-amber-300 bg-white"
+                                        />
+                                      </div>
+                                    </div>
+
+                                    <div className="pt-2 border-t border-amber-200/60 flex items-center justify-between">
+                                      <span className="text-[10px] text-amber-800">
+                                        {mainTenure.is_discarded
+                                          ? "Excluded from active renewal queue."
+                                          : "Queued for next year's renewal."}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          patchTenureField(mainTenure.id, { is_discarded: !mainTenure.is_discarded })
+                                        }
+                                        className={`px-2 py-1 text-xs font-bold rounded transition-colors cursor-pointer border ${
+                                          mainTenure.is_discarded
+                                            ? "bg-white text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+                                            : "bg-white text-rose-700 border-rose-300 hover:bg-rose-50"
+                                        }`}
+                                      >
+                                        {mainTenure.is_discarded ? "Restore Client" : "Discard Client"}
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -1850,17 +2123,37 @@ export function TenureTimelineLedger() {
       {/* ========================================================================= */}
       {viewMode === "calendar" && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between px-1">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
+            <div className="flex items-center gap-3 flex-wrap">
               <span className="text-sm font-bold text-neutral-900">
                 {calendarData.monthLabel}
               </span>
               <span className="text-xs font-medium text-neutral-500">
-                · {calendarData.agendaDays.reduce((acc, g) => acc + g.items.length, 0)} timeline events ({calendarData.agendaDays.reduce((acc, g) => acc + g.items.filter(i => i.type === "start").length, 0)} starting · {calendarData.agendaDays.reduce((acc, g) => acc + g.items.filter(i => i.type === "end").length, 0)} expiring)
+                · {calendarData.agendaDays.reduce((acc, g) => acc + g.items.length, 0)} timeline events ({calendarData.agendaDays.reduce((acc, g) => acc + g.items.filter(i => i.type === "start").length, 0)} starting · {calendarData.agendaDays.reduce((acc, g) => acc + g.items.filter(i => i.type === "end").length, 0)} expiring · {calendarData.agendaDays.reduce((acc, g) => acc + g.items.filter(i => i.type === "session").length, 0)} quotes)
               </span>
+
+              {/* Vehicle Filter Selector */}
+              <div className="flex items-center gap-1.5 ml-1">
+                <label className="text-xs font-bold text-neutral-600">Vehicle:</label>
+                <select
+                  value={calendarVehicleFilter}
+                  onChange={(e) => setCalendarVehicleFilter(e.target.value)}
+                  className="h-7 px-2 text-xs font-mono font-bold rounded-[var(--rl-radius-sm)] border border-neutral-300 bg-white text-neutral-800"
+                >
+                  <option value="all">All Vehicles ({calendarVehicleOptions.length})</option>
+                  {calendarVehicleOptions.map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+                {loadingCalendar && (
+                  <span className="text-xs text-blue-600 font-semibold animate-pulse">Loading quotes...</span>
+                )}
+              </div>
             </div>
 
-            <div className="flex items-center rounded-[var(--rl-radius-sm)] border border-neutral-200 bg-neutral-100 p-0.5">
+            <div className="flex items-center rounded-[var(--rl-radius-sm)] border border-neutral-200 bg-neutral-100 p-0.5 shrink-0">
               <button
                 type="button"
                 onClick={() => setCalendarDisplay("grid")}
@@ -1946,6 +2239,54 @@ export function TenureTimelineLedger() {
 
                       <div className="flex-1 space-y-1 overflow-y-auto max-h-[110px] scrollbar-thin">
                         {dayTenures.map((item, itemIdx) => {
+                          if (item.type === "session") {
+                            const s = item.session;
+                            return (
+                              <div
+                                key={`sess-${s.session_id}-${itemIdx}`}
+                                className="p-1.5 bg-blue-50/70 hover:bg-blue-100/90 border border-blue-200/90 rounded transition-all text-[11px]"
+                              >
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="text-[9px] font-bold px-1 py-0.2 rounded uppercase shrink-0 bg-blue-100 text-blue-800 border border-blue-200">
+                                    Quote
+                                  </span>
+                                  <span className="font-bold text-neutral-900 font-mono truncate text-[11px]" title={s.vehicle_no}>
+                                    {s.vehicle_no}
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-blue-900 truncate mt-0.5 font-medium">
+                                  {s.detected_company || "Underwriter"}
+                                </p>
+                                <div className="flex items-center justify-between gap-1 pt-1 mt-1 border-t border-blue-200/50">
+                                  <span className="text-[9px] font-bold text-neutral-700 font-mono">
+                                    {s.total_payable ? `RM ${s.total_payable}` : (s.sum_insured ? `SI: RM ${s.sum_insured}` : "—")}
+                                  </span>
+                                  {s.tenure_id ? (
+                                    <Link
+                                      href={`/comparison?tenure_id=${s.tenure_id}` as Route}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500 hover:bg-amber-600 text-slate-950 text-[9px] font-bold transition-colors"
+                                    >
+                                      <Columns className="w-2.5 h-2.5" />
+                                      <span>Compare</span>
+                                    </Link>
+                                  ) : (
+                                    <Link
+                                      href={`/sessions/${s.session_id}/review` as Route}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-neutral-200 hover:bg-neutral-300 text-neutral-800 text-[9px] font-bold transition-colors"
+                                    >
+                                      <ArrowSquareOut className="w-2.5 h-2.5" />
+                                      <span>Review</span>
+                                    </Link>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          }
+
                           const t = item.tenure;
                           const isStart = item.type === "start";
                           const displayName = getVehicleDisplayName(t.vehicle_no, t.chassis_no);
@@ -1981,6 +2322,8 @@ export function TenureTimelineLedger() {
                                 </span>
                                 <Link
                                   href={`/comparison?tenure_id=${t.id}` as Route}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
                                   onClick={(e) => e.stopPropagation()}
                                   className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500 hover:bg-amber-600 text-slate-950 text-[9px] font-bold transition-colors"
                                 >
@@ -2024,6 +2367,65 @@ export function TenureTimelineLedger() {
 
                     <div className="divide-y divide-neutral-100 p-2">
                       {group.items.map((item, itemIdx) => {
+                        if (item.type === "session") {
+                          const s = item.session;
+                          return (
+                            <div
+                              key={`agenda-sess-${s.session_id}-${itemIdx}`}
+                              className="p-3 hover:bg-blue-50/40 rounded-lg transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-blue-100/60"
+                            >
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase bg-blue-100 text-blue-800 border border-blue-200">
+                                    Quotation Uploaded
+                                  </span>
+                                  <span className="font-bold text-sm text-neutral-900 font-mono">{s.vehicle_no}</span>
+                                  <span className="text-xs text-neutral-400">·</span>
+                                  <span className="text-xs font-semibold text-neutral-700">
+                                    {s.detected_company || "Underwriter"}
+                                  </span>
+                                  <span className="text-xs text-neutral-400">·</span>
+                                  <span className="text-xs font-medium text-neutral-600">{s.customer_name}</span>
+                                </div>
+
+                                <div className="flex items-center gap-2 text-xs text-neutral-500 flex-wrap">
+                                  <span>Quotation Date:</span>
+                                  <strong className="font-mono text-neutral-800">{s.quotation_date}</strong>
+                                  <span className="text-neutral-400">·</span>
+                                  <span>Total Payable:</span>
+                                  <strong className="font-mono text-emerald-700">
+                                    {s.total_payable ? `RM ${s.total_payable}` : (s.sum_insured ? `SI: RM ${s.sum_insured}` : "—")}
+                                  </strong>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2 shrink-0">
+                                {s.tenure_id ? (
+                                  <Link
+                                    href={`/comparison?tenure_id=${s.tenure_id}` as Route}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold transition-colors shadow-2xs"
+                                  >
+                                    <Columns className="w-3.5 h-3.5" />
+                                    <span>Marketing Comparison</span>
+                                  </Link>
+                                ) : (
+                                  <Link
+                                    href={`/sessions/${s.session_id}/review` as Route}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-800 text-xs font-bold transition-colors"
+                                  >
+                                    <ArrowSquareOut className="w-3.5 h-3.5" />
+                                    <span>Review Session</span>
+                                  </Link>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        }
+
                         const t = item.tenure;
                         const isStart = item.type === "start";
                         const displayName = getVehicleDisplayName(t.vehicle_no, t.chassis_no);
@@ -2074,6 +2476,8 @@ export function TenureTimelineLedger() {
                             <div className="flex items-center gap-2 shrink-0">
                               <Link
                                 href={`/comparison?tenure_id=${t.id}` as Route}
+                                target="_blank"
+                                rel="noopener noreferrer"
                                 onClick={(e) => e.stopPropagation()}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold transition-colors shadow-2xs"
                               >
@@ -2090,7 +2494,7 @@ export function TenureTimelineLedger() {
                                 }}
                                 className="h-8 text-xs font-medium cursor-pointer"
                               >
-                                Timeline &amp; Activity <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                                Logs &amp; Activity <ArrowRight className="w-3.5 h-3.5 ml-1" />
                               </Button>
                             </div>
                           </div>

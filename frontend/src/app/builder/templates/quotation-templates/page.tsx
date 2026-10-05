@@ -86,7 +86,7 @@ function pageProfile(template: TemplateRecord) {
 function resolveNodeImageUrl(node: CanvasNode, template: TemplateRecord): string | null {
   const isImageOrLogo =
     node.type === "image" ||
-    ["pay_holder", "text_ltaa394", "pay_bank_sub", "text_ul2w5ka", "pay_bank_logo", "bank_logo", "risklocker_logo"].includes(node.id);
+    ["pay_holder", "text_ltaa394", "pay_bank_sub", "text_ul2w5ka", "pay_bank_logo", "bank_logo", "risklocker_logo", "qr_code_img", "rc_b_qr_code"].includes(node.id);
   if (!isImageOrLogo) return null;
 
   const slot =
@@ -97,7 +97,9 @@ function resolveNodeImageUrl(node: CanvasNode, template: TemplateRecord): string
         ? "bank_logo"
         : node.id === "driver_icon"
           ? "all_driver_icon"
-          : "");
+          : node.id === "qr_code_img" || node.id === "rc_b_qr_code" || node.id === "qr_code"
+            ? "qr_code"
+            : "");
   const assetId = (node as any).assetId || (template.fixed_fields as any)?.assets?.[slot];
   if (slot === "risklocker_logo" || assetId === "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f") {
     return "/api/business/assets/e9685e1f-ac95-410c-a2e9-eccb7ca35d5f/content?profile=ui";
@@ -107,6 +109,9 @@ function resolveNodeImageUrl(node: CanvasNode, template: TemplateRecord): string
   }
   if (slot === "all_driver_icon" || assetId === "91116a7dc3540d62") {
     return "/api/template-assets/91116a7dc3540d62";
+  }
+  if (slot === "qr_code" || node.id === "rc_b_qr_code" || node.id === "qr_code" || node.id === "qr_code_img" || assetId === "9ca8e404c89dd905") {
+    return "/api/template-assets/9ca8e404c89dd905";
   }
   if (slot === "background") {
     return null;
@@ -119,14 +124,36 @@ function resolveNodeImageUrl(node: CanvasNode, template: TemplateRecord): string
 
 const LOGO_TEXT_IDS = new Set(["pay_holder", "text_ltaa394", "pay_bank_sub", "text_ul2w5ka"]);
 
+const SAMPLE_VAR_VALUES: Record<string, string> = {
+  total_amount: "RM 1,480.00",
+  total_premium_adjusted: "RM 1,480.00",
+  premium: "RM 1,220.00",
+  insurance_company: "AmGeneral Insurance Berhad",
+  customer_name: "Ahmad Bin Abdullah",
+  vehicle_no: "WYY 8888",
+  car_model: "Honda Civic 1.5 VTEC Turbo",
+  engine_cc: "1498",
+  ncd_percent: "55%",
+  cover_period: "01/01/2026 - 31/12/2026",
+  coverage_type: "Comprehensive Private",
+  valuation_type: "Agreed Value",
+  coverage_amount: "RM 85,000.00",
+  quotation_reference: "QT-2026-0042",
+  excess_amount: "RM 0.00",
+  valid_until: "15/10/2026",
+  roadtax: "RM 90.00",
+  service_fee: "RM 50.00",
+};
+
 function TemplateThumbnail({ template, large = false }: { template: TemplateRecord; large?: boolean }) {
   const page = pageProfile(template);
   const elements = (template.fixed_fields.canvas?.elements || []).filter((item) => item.type !== "layer-group");
-  const textNodes = elements.filter((item) => (item.type === "text" || item.type === "variable") && !LOGO_TEXT_IDS.has(item.id)).slice(0, large ? 80 : 42);
-  const shapeNodes = elements.filter((item) => !["text", "variable", "layer-group"].includes(item.type) || LOGO_TEXT_IDS.has(item.id)).slice(0, large ? 100 : 60);
+  const textNodes = elements.filter((item) => (item.type === "text" || item.type === "variable") && !LOGO_TEXT_IDS.has(item.id));
+  const shapeNodes = elements.filter((item) => !["text", "variable", "layer-group"].includes(item.type) || LOGO_TEXT_IDS.has(item.id));
+
   return (
-    <div className={`grid place-items-center bg-[#ececee] ${large ? "h-[68vh] p-8" : "h-[300px] p-6"}`}>
-      <svg viewBox={`0 0 ${page.width} ${page.height}`} className="h-full max-w-full bg-white shadow-card" role="img" aria-label={`Preview of ${template.name}`}>
+    <div className={`grid place-items-center bg-[#f1f1f4] ${large ? "h-[68vh] p-8" : "h-[300px] p-4"}`}>
+      <svg viewBox={`0 0 ${page.width} ${page.height}`} className="h-full max-w-full bg-white shadow-md rounded-sm" role="img" aria-label={`Preview of ${template.name}`}>
         <rect x="0" y="0" width={page.width} height={page.height} fill="white" />
         {shapeNodes.map((node) => {
           const imgUrl = resolveNodeImageUrl(node, template);
@@ -147,20 +174,73 @@ function TemplateThumbnail({ template, large = false }: { template: TemplateReco
           if (node.type === "image") {
             if ((node as any).assetSlot === "background") return null;
           }
-          const fill = node.style?.background || (node.type === "benefit-grid" ? "#fff7f7" : "#f0f0f1");
-          const stroke = node.type === "benefit-grid" ? "#ed1c24" : (node.style?.borderColor || "#d1d1d4");
+          if (node.type === "benefit-grid") {
+            // Render simulated benefit cards inside the grid area
+            const cols = 3;
+            const cardGap = 8;
+            const cardW = (node.w - (cardGap * (cols - 1))) / cols;
+            const cardH = Math.min(54, (node.h - 16) / 2);
+            const sampleBenefits = node.gridKind === "available_addons"
+              ? ["Flood & Storm (Special Perils)", "Windscreen Protection (RM 1,000)", "Legal Liability to Passengers", "24hr Roadside Assist"]
+              : ["24 Hours Free Towing (300km)", "Key Care Protection (RM 1,500)", "All Authorized Drivers Covered", "Flood Evacuation Support"];
+
+            return (
+              <g key={node.id}>
+                <rect x={node.x} y={node.y} width={node.w} height={node.h} fill="#FAFAFA" stroke="#E2E8F0" strokeWidth={1} rx={4} />
+                {sampleBenefits.slice(0, 6).map((bText, bIdx) => {
+                  const col = bIdx % cols;
+                  const row = Math.floor(bIdx / cols);
+                  const bx = node.x + 4 + col * (cardW + cardGap);
+                  const by = node.y + 6 + row * (cardH + 6);
+                  if (by + cardH > node.y + node.h) return null;
+                  return (
+                    <g key={`b_${node.id}_${bIdx}`}>
+                      <rect x={bx} y={by} width={cardW - 8} height={cardH} fill="#FFFFFF" stroke="#E2E8F0" strokeWidth={1} rx={4} />
+                      <circle cx={bx + 10} cy={by + cardH / 2} r={4} fill="#10B981" />
+                      <text x={bx + 20} y={by + cardH / 2 + 3} fontSize={7.5} fontWeight={600} fill="#1E293B">
+                        {bText.slice(0, 24)}
+                      </text>
+                    </g>
+                  );
+                })}
+              </g>
+            );
+          }
+          const fill = node.style?.background || "#f0f0f1";
+          const stroke = node.style?.borderColor || "#d1d1d4";
           const strokeWidth = Math.max(1, Number(node.style?.borderWidth || 1));
           if (node.type === "line") return <line key={node.id} x1={node.x} y1={node.y} x2={node.x + node.w} y2={node.y + node.h} stroke={node.style?.color || "#171717"} strokeWidth={strokeWidth} />;
           if (node.type === "ellipse" || node.shapeKind === "circle") return <ellipse key={node.id} cx={node.x + node.w / 2} cy={node.y + node.h / 2} rx={node.w / 2} ry={node.h / 2} fill={fill} stroke={stroke} strokeWidth={strokeWidth} />;
           if (node.type === "triangle" || node.shapeKind === "triangle") return <polygon key={node.id} points={`${node.x + node.w / 2},${node.y} ${node.x + node.w},${node.y + node.h} ${node.x},${node.y + node.h}`} fill={fill} stroke={stroke} strokeWidth={strokeWidth} />;
           if (node.type === "diamond" || node.shapeKind === "diamond") return <polygon key={node.id} points={`${node.x + node.w / 2},${node.y} ${node.x + node.w / 2},${node.y + node.h / 2} ${node.x + node.w / 2},${node.y + node.h} ${node.x},${node.y + node.h / 2}`} fill={fill} stroke={stroke} strokeWidth={strokeWidth} />;
-          return <rect key={node.id} x={node.x} y={node.y} width={node.w} height={node.h} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={node.type === "benefit-grid" ? "7 5" : undefined} />;
+          return <rect key={node.id} x={node.x} y={node.y} width={node.w} height={node.h} fill={fill} stroke={stroke} strokeWidth={strokeWidth} rx={(node.style as any)?.borderRadius || 0} />;
         })}
-        {textNodes.map((node) => (
-          <text key={node.id} x={node.x} y={node.y + Math.min(node.h, Number(node.style?.fontSize || 14))} fill={node.type === "variable" ? "#ed1c24" : (node.style?.color || "#171717")} fontSize={Math.max(7, Number(node.style?.fontSize || 14))} fontWeight={node.type === "variable" ? 600 : 400}>
-            {(node.type === "variable" ? `{${node.variableId || "variable"}}` : (node.text || "Text")).slice(0, 70)}
-          </text>
-        ))}
+        {textNodes.map((node) => {
+          const varId = node.variableId || "";
+          const isVar = node.type === "variable";
+          const displayText = isVar
+            ? `${(node as any).prefix || ""}${SAMPLE_VAR_VALUES[varId] || (node as any).text || `{${varId}}`}${(node as any).suffix || ""}`
+            : (node.text || "");
+          const fill = node.style?.color || (isVar && varId.includes("premium") ? "#DC2626" : "#0F172A");
+          const fontSize = Math.max(7, Number(node.style?.fontSize || 10));
+          const fontWeight = Number((node.style as any)?.fontWeight || (isVar ? 700 : 500));
+          const textAlign = (node.style as any)?.textAlign || "left";
+          const textX = textAlign === "right" ? node.x + node.w : textAlign === "center" ? node.x + node.w / 2 : node.x;
+
+          return (
+            <text
+              key={node.id}
+              x={textX}
+              y={node.y + Math.min(node.h, fontSize * 1.15)}
+              fill={fill}
+              fontSize={fontSize}
+              fontWeight={fontWeight}
+              textAnchor={textAlign === "right" ? "end" : textAlign === "center" ? "middle" : "start"}
+            >
+              {displayText.slice(0, 80)}
+            </text>
+          );
+        })}
       </svg>
     </div>
   );

@@ -14,8 +14,9 @@ import {
 interface AddFieldDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAddField: (slot: VehicleSpecFieldSlot) => void;
+  onAddField: (slot: VehicleSpecFieldSlot, targetIndex?: number | null) => void;
   existingFieldIds: Set<string>;
+  targetIndex?: number | null;
 }
 
 export function AddFieldDialog({
@@ -23,6 +24,7 @@ export function AddFieldDialog({
   onOpenChange,
   onAddField,
   existingFieldIds,
+  targetIndex,
 }: AddFieldDialogProps) {
   const [selectedVariableId, setSelectedVariableId] = useState<string>("engine_cc");
   const [isCustom, setIsCustom] = useState<boolean>(false);
@@ -78,7 +80,7 @@ export function AddFieldDialog({
       rowOrder: 999, // Will be appended at the end
     };
 
-    onAddField(slot);
+    onAddField(slot, targetIndex);
     onOpenChange(false);
   };
 

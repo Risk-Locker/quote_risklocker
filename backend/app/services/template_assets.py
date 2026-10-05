@@ -150,6 +150,7 @@ SYSTEM_ASSET_ALIASES: dict[str, str] = {
     "hongleong": "2168eaee-3e56-4903-8c4f-841f01ff2407",
     "all_driver_icon": "91116a7dc3540d62",
     "background": "49e754a6faa949c2",
+    "qr_code": "9ca8e404c89dd905",
 }
 
 
@@ -207,6 +208,10 @@ def resolve_template_asset(db: Session | None, asset_id: str) -> Path | bytes:
         compat = compatibility_asset_root() / "hongleongbanl.png"
         if compat.exists():
             return compat.resolve()
+    elif asset_id in {"c2003185-0000-4000-8000-000000000001", "qr_code", "payment_qr", "qr"}:
+        compat = compatibility_asset_root() / "qr.jpeg"
+        if compat.exists():
+            return compat.resolve()
     elif asset_id in {"91116a7dc3540d62", "all_driver_icon"}:
         for root in (asset_root(), compatibility_asset_root()):
             for path in root.iterdir() if root.exists() else []:
@@ -244,7 +249,8 @@ def find_asset_by_hint(db: Session | None, hints: list[str]) -> str:
     if db is not None:
         business_assets = db.scalars(select(BusinessAsset).where(BusinessAsset.status.in_(["active", "unassigned"]))).all()
         for b in business_assets:
-            lowered.append((b.id, (b.filename or "").lower(), (b.label or "").lower()))
+            fname = f"{b.original_filename or ''} {b.asset_key or ''}".strip().lower()
+            lowered.append((b.id, fname, (b.label or "").lower()))
             
     for hint in hints:
         token = hint.lower()
@@ -259,6 +265,8 @@ def find_asset_by_hint(db: Session | None, hints: list[str]) -> str:
             return "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f"
         if "hongleong" in token or "bank" in token:
             return "2168eaee-3e56-4903-8c4f-841f01ff2407"
+        if "qr" in token or "duitnow" in token:
+            return "c2003185-0000-4000-8000-000000000001"
         if "driver" in token:
             return "91116a7dc3540d62"
         if "template_bg" in token or "bg" in token:

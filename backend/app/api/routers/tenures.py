@@ -111,6 +111,9 @@ class UpdateTenureLedgerRequest(BaseModel):
     road_tax: float | None = None
     runner_fee: float | None = None
     is_main: bool | None = None
+    is_discarded: bool | None = None
+    external_policy_start_date: str | None = None
+    external_policy_end_date: str | None = None
 
 
 @router.post("")
@@ -146,7 +149,10 @@ def create_tenure(
         customer_id=cust_id,
         chassis_no=payload.chassis_no,
         engine_no=payload.engine_no,
+        created_by_id=user.id,
     )
+    if not tenure.created_by_id:
+        tenure.created_by_id = user.id
     if payload.road_tax > 0.0:
         tenure.road_tax = payload.road_tax
     if payload.runner_fee > 0.0:
@@ -185,6 +191,99 @@ def create_tenure(
         "coverage_start_date": tenure.coverage_start_date.isoformat(),
         "coverage_end_date": tenure.coverage_end_date.isoformat(),
     }
+
+
+@router.get("/calendar-sessions")
+def list_calendar_sessions(
+    year: int | None = Query(None, description="Filter by quotation year e.g. 2026"),
+    month: int | None = Query(None, ge=1, le=12, description="Filter by quotation month 1-12"),
+    vehicle_no: str | None = Query(None, description="Filter by vehicle registration plate"),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Retrieve all uploaded quotation sessions plotted by quotation date for the calendar view."""
+    stmt = (
+        select(SessionModel)
+        .options(
+            selectinload(SessionModel.draft),
+            selectinload(SessionModel.tenure),
+        )
+        .where(SessionModel.status != "trash")
+    )
+
+    if vehicle_no and vehicle_no.strip():
+        veh = vehicle_no.strip().upper()
+        stmt = stmt.join(SessionModel.tenure).where(InsuranceTenure.vehicle_no == veh)
+
+    sessions = list(db.scalars(stmt).all())
+
+    events = []
+    for s in sessions:
+        draft = s.draft
+        f = draft.fields if draft else {}
+
+        def _val(k: str) -> Any:
+            item = f.get(k)
+            return item.get("value") if isinstance(item, dict) else item
+
+        raw_q_date = _val("quotation_date") or _val("quotation_issue_date") or _val("issue_date")
+        q_date_str = None
+        if raw_q_date:
+            try:
+                s_raw = str(raw_q_date).strip()
+                if "-" in s_raw:
+                    q_date_str = s_raw[:10]
+                elif "/" in s_raw:
+                    parts = s_raw.split("/")
+                    if len(parts) == 3:
+                        q_date_str = f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+            except Exception:
+                pass
+
+        if not q_date_str and s.created_at:
+            q_date_str = s.created_at.strftime("%Y-%m-%d")
+
+        if not q_date_str:
+            continue
+
+        if year:
+            try:
+                ev_year = int(q_date_str.split("-")[0])
+                if ev_year != year:
+                    continue
+            except Exception:
+                continue
+
+        if month:
+            try:
+                ev_month = int(q_date_str.split("-")[1])
+                if ev_month != month:
+                    continue
+            except Exception:
+                continue
+
+        tot = _val("total_amount") or _val("total_payable")
+        sum_ins = _val("sum_insured") or _val("coverage_amount")
+        t_veh = s.tenure.vehicle_no if s.tenure else _val("vehicle_no") or "Unknown"
+        t_cust = s.tenure.customer_name if s.tenure else _val("customer_name") or "Unknown"
+
+        events.append({
+            "session_id": s.id,
+            "tenure_id": s.tenure_id,
+            "vehicle_no": t_veh,
+            "customer_name": t_cust,
+            "quotation_date": q_date_str,
+            "detected_company": s.detected_company or "Unknown",
+            "total_payable": tot,
+            "sum_insured": sum_ins,
+            "tenure_version": s.tenure_version,
+            "status": s.status,
+            "is_tenure_active": s.is_tenure_active,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        })
+
+    events.sort(key=lambda x: (x["quotation_date"], x["vehicle_no"]))
+    return {"sessions": events, "total": len(events)}
 
 
 @router.get("/stage-summary")
@@ -346,8 +445,11 @@ def list_tenures(
     category: str | None = None,
     sub_agent: str | None = None,
     show_hidden: bool = False,
+    show_discarded: bool = False,
+    sort_by: str | None = Query("last_activity", description="Sort by last_activity, vehicle_no, customer_name, stage, coverage_end_date"),
+    sort_dir: str | None = Query("desc", description="Sort direction asc or desc"),
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=50, ge=1, le=100),
+    page_size: int = Query(default=50, ge=1, le=500),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -356,6 +458,9 @@ def list_tenures(
 
     if not show_hidden:
         query = query.where(InsuranceTenure.is_hidden == False)
+
+    if not show_discarded:
+        query = query.where(InsuranceTenure.is_discarded == False)
 
     # 1. Year and Month filtering
     if month and month.strip() != "all":
@@ -427,8 +532,37 @@ def list_tenures(
             )
         )
 
-    # Order by coverage end date, then customer name
-    query = query.order_by(InsuranceTenure.coverage_end_date.asc(), InsuranceTenure.vehicle_no.asc())
+    # Dynamic sorting
+    actual_sort_by = (
+        sort_by if isinstance(sort_by, str)
+        else getattr(sort_by, "default", "last_activity")
+    ) or "last_activity"
+    actual_sort_dir = (
+        sort_dir if isinstance(sort_dir, str)
+        else getattr(sort_dir, "default", "desc")
+    ) or "desc"
+
+    is_desc = str(actual_sort_dir).lower() == "desc"
+    s_by = str(actual_sort_by).lower()
+
+    if s_by == "vehicle_no":
+        sort_col = InsuranceTenure.vehicle_no
+        query = query.order_by(sort_col.desc().nullslast() if is_desc else sort_col.asc().nullsfirst(), InsuranceTenure.coverage_end_date.asc())
+    elif s_by == "customer_name":
+        sort_col = InsuranceTenure.customer_name
+        query = query.order_by(sort_col.desc().nullslast() if is_desc else sort_col.asc().nullsfirst(), InsuranceTenure.vehicle_no.asc())
+    elif s_by == "stage":
+        sort_col = InsuranceTenure.stage
+        query = query.order_by(sort_col.desc().nullslast() if is_desc else sort_col.asc().nullsfirst(), InsuranceTenure.vehicle_no.asc())
+    elif s_by == "coverage_end_date":
+        sort_col = InsuranceTenure.coverage_end_date
+        query = query.order_by(sort_col.desc().nullslast() if is_desc else sort_col.asc().nullsfirst(), InsuranceTenure.vehicle_no.asc())
+    else:
+        # Default: last_activity
+        if is_desc:
+            query = query.order_by(InsuranceTenure.last_activity_at.desc().nullslast(), InsuranceTenure.coverage_end_date.asc())
+        else:
+            query = query.order_by(InsuranceTenure.last_activity_at.asc().nullsfirst(), InsuranceTenure.coverage_end_date.asc())
 
     # Count total
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
@@ -545,13 +679,17 @@ def list_tenures(
             "generated_quotations": gen_quotes,
             "is_projected": t.is_projected,
             "is_hidden": t.is_hidden,
-            "is_main": bool(t.is_main),
+            "is_main": t.is_main,
             "superseded_by_tenure_id": t.superseded_by_tenure_id,
             "tenure_type": t.tenure_type,
             "manufacture_year": getattr(t.tracked_vehicle, "manufacture_year", None) if t.tracked_vehicle else None,
             "tenure_chain_id": t.tenure_chain_id,
             "customer_id": t.customer_id,
             "customer_ic_no": t.customer.id_number if t.customer else None,
+            "is_discarded": bool(t.is_discarded),
+            "external_policy_start_date": t.external_policy_start_date.isoformat() if t.external_policy_start_date else None,
+            "external_policy_end_date": t.external_policy_end_date.isoformat() if t.external_policy_end_date else None,
+            "last_activity_at": (t.last_activity_at or t.updated_at or t.created_at).isoformat() if (t.last_activity_at or t.updated_at or t.created_at) else None,
             "created_at": t.created_at.isoformat(),
         })
 
@@ -709,6 +847,27 @@ def update_tenure_ledger_fields(
                                     f[ic_k] = cust.id_number
                     s.draft.fields = f
 
+    if payload.is_discarded is not None:
+        tenure.is_discarded = payload.is_discarded
+    if payload.external_policy_start_date is not None:
+        try:
+            tenure.external_policy_start_date = (
+                datetime.strptime(payload.external_policy_start_date, "%Y-%m-%d").date()
+                if payload.external_policy_start_date
+                else None
+            )
+        except Exception:
+            pass
+    if payload.external_policy_end_date is not None:
+        try:
+            tenure.external_policy_end_date = (
+                datetime.strptime(payload.external_policy_end_date, "%Y-%m-%d").date()
+                if payload.external_policy_end_date
+                else None
+            )
+        except Exception:
+            pass
+
     if payload.is_main is not None:
         tenure.is_main = payload.is_main
         if payload.is_main:
@@ -724,6 +883,7 @@ def update_tenure_ledger_fields(
                 if ot_year == cohort_year:
                     ot.is_main = False
 
+    tenure.last_activity_at = now
     db.commit()
     db.refresh(tenure)
     return {"success": True, "id": tenure.id, "stage": tenure.stage, "is_main": tenure.is_main}

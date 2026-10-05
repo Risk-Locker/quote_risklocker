@@ -131,3 +131,47 @@ class BenefitValue(BaseModel):
         elif self.type in {"occurrence", "duration", "count", "boolean"} and self.value is None:
             raise ValueError(f"{self.type} requires a value.")
         return self
+
+
+def format_coverage_value(val: object, coverage_format: str | None = None) -> str:
+    """Format benefit coverage according to configured unit/format (RM, KM, or text)."""
+    if val is None:
+        return ""
+    text_val = str(val).strip()
+    if not text_val:
+        return ""
+
+    fmt = (coverage_format or "").strip().upper()
+    import re
+    if fmt == "RM":
+        clean_str = re.sub(r"^(?:RM|MYR)\s*", "", text_val, flags=re.IGNORECASE).strip()
+        clean_num_str = clean_str.replace(",", "")
+        try:
+            num = float(clean_num_str)
+            if num.is_integer():
+                return f"RM {int(num):,}"
+            return f"RM {num:,.2f}"
+        except ValueError:
+            m = re.search(r"(\d+(?:,\d+)*(?:\.\d+)?)", text_val)
+            if m:
+                try:
+                    num = float(m.group(1).replace(",", ""))
+                    return f"RM {int(num):,}" if num.is_integer() else f"RM {num:,.2f}"
+                except ValueError:
+                    pass
+            return text_val
+
+    elif fmt == "KM":
+        if "unlimited" in text_val.lower():
+            return "Unlimited KM"
+        m = re.search(r"(\d+(?:,\d+)*(?:\.\d+)?)", text_val)
+        if m:
+            try:
+                num = float(m.group(1).replace(",", ""))
+                return f"{int(num):,} KM" if num.is_integer() else f"{num:,.0f} KM"
+            except ValueError:
+                pass
+        return f"{text_val} KM" if not text_val.lower().endswith("km") else text_val
+
+    return text_val
+

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 from sqlalchemy import func, or_, select, String
-from sqlalchemy.orm import Session, defer, joinedload
+from sqlalchemy.orm import Session, defer, joinedload, object_session
 
 from app.core.cache import _memory_cache, invalidate_cache
 from app.core.errors import AppError
-from app.models.tables import Session as SessionModel, UploadedFile, QuotationDraft, User
+from app.models.tables import Session as SessionModel, UploadedFile, QuotationDraft, User, OutputTemplateConfig, TemplateRevision
 
 
 def get_session_filter_options(db: Session) -> dict[str, Any]:
@@ -221,6 +221,28 @@ def serialize_session(
 
     quotation_ref = session.quotation_ref or _safe_field_val(fields, "quotation_reference")
 
+    # Resolve bound or default template name
+    template_id = None
+    template_name = None
+    if session.draft:
+        template_id = session.draft.layout_override_template_id
+        if not template_id and session.draft.template_revision_id:
+            db_inst = kwargs.get("db") or (object_session(session) if session else None)
+            if db_inst:
+                rev = db_inst.get(TemplateRevision, session.draft.template_revision_id)
+                if rev:
+                    template_id = rev.template_id
+    if not template_id and session.uploaded_file:
+        template_id = session.uploaded_file.template_id
+
+    db_inst = kwargs.get("db") or (object_session(session) if session else None)
+    if template_id and db_inst:
+        tpl = db_inst.get(OutputTemplateConfig, template_id)
+        if tpl:
+            template_name = tpl.name
+    if not template_name:
+        template_name = "Agency Motor (Bilingual)"
+
     return {
         "id": session.id,
         "owner_id": session.owner_id,
@@ -233,6 +255,8 @@ def serialize_session(
         "is_edited": session.last_edited_at is not None,
         "uploaded_file_id": session.uploaded_file_id,
         "draft_id": session.draft_id,
+        "template_id": template_id,
+        "template_name": template_name,
         "tenure_id": session.tenure_id,
         "customer_id": session.customer_id,
         "tracked_vehicle_id": session.tracked_vehicle_id,

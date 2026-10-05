@@ -27,7 +27,9 @@ class CreatePicRequest(BaseModel):
     agency_group: str | None = Field(None, description="Agency team or group e.g. BNI, BNI_DJ")
     commission_rate: float = Field(0.0, description="Commission percentage (applicable to subagents)")
     phone: str | None = None
+    whatsapp_number: str | None = Field(None, description="Direct WhatsApp number in international format e.g. +60123456789")
     email: str | None = None
+    is_owner: bool = Field(False, description="Whether this PIC is the primary agency owner / default PIC")
     notes: str | None = None
 
 
@@ -37,7 +39,9 @@ class UpdatePicRequest(BaseModel):
     agency_group: str | None = None
     commission_rate: float | None = None
     phone: str | None = None
+    whatsapp_number: str | None = None
     email: str | None = None
+    is_owner: bool | None = None
     notes: str | None = None
 
 
@@ -67,7 +71,9 @@ def add_pic(
         agency_group=payload.agency_group,
         commission_rate=payload.commission_rate,
         phone=payload.phone,
+        whatsapp_number=payload.whatsapp_number,
         email=payload.email,
+        is_owner=payload.is_owner,
         notes=payload.notes,
     )
     return {
@@ -77,7 +83,9 @@ def add_pic(
         "agency_group": pic.agency_group,
         "commission_rate": float(pic.commission_rate or 0.0),
         "phone": pic.phone,
+        "whatsapp_number": pic.whatsapp_number,
         "email": pic.email,
+        "is_owner": pic.is_owner,
         "notes": pic.notes,
     }
 
@@ -111,7 +119,9 @@ def update_single_pic(
         agency_group=payload.agency_group,
         commission_rate=payload.commission_rate,
         phone=payload.phone,
+        whatsapp_number=payload.whatsapp_number,
         email=payload.email,
+        is_owner=payload.is_owner,
         notes=payload.notes,
     )
     if not pic:
@@ -123,7 +133,9 @@ def update_single_pic(
         "agency_group": pic.agency_group,
         "commission_rate": float(pic.commission_rate or 0.0),
         "phone": pic.phone,
+        "whatsapp_number": pic.whatsapp_number,
         "email": pic.email,
+        "is_owner": pic.is_owner,
         "notes": pic.notes,
     }
 

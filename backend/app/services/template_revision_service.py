@@ -141,6 +141,31 @@ def validate_template_config(config: dict, *, compatibility: bool = False) -> di
         raise ValueError("A fixed page profile and canvas are required.")
     width = _number(page.get("width"), "Page width")
     height = _number(page.get("height"), "Page height")
+
+    elements = canvas.get("elements")
+    if not isinstance(elements, list):
+        raise ValueError("Template canvas elements must be an array.")
+
+    # Accommodate dynamic row expansion automatically if content elements extend beyond base height
+    non_bg_elements = [
+        e for e in elements
+        if isinstance(e, dict) and e.get("id") not in ("page_bg", "bg")
+        and not (float(e.get("y") or 0) == 0 and float(e.get("h") or 0) >= height)
+    ]
+    max_bottom = max(
+        (float(e.get("y") or 0) + float(e.get("h") or 0) for e in non_bg_elements),
+        default=0.0,
+    )
+    canvas_h = float(canvas.get("height") or height)
+    if max_bottom > height and abs(canvas_h - height) < 1e-3:
+        needed_height = float(int(max_bottom + 24.0))
+        height = needed_height
+        page["height"] = height
+        canvas["height"] = height
+        for e in elements:
+            if isinstance(e, dict) and e.get("id") in ("page_bg", "bg"):
+                e["h"] = height
+
     if _number(canvas.get("width"), "Canvas width") != width or _number(canvas.get("height"), "Canvas height") != height:
         raise ValueError("Canvas dimensions must match the fixed page profile.")
     page_unit = str(page.get("unit") or "px")
@@ -158,9 +183,6 @@ def validate_template_config(config: dict, *, compatibility: bool = False) -> di
             raise ValueError(f"Page {side} safe margin must be numeric.") from exc
         if margin < 0 or margin * 2 >= (height if side in {"top", "bottom"} else width):
             raise ValueError("Page safe margins must remain inside the fixed page.")
-    elements = canvas.get("elements")
-    if not isinstance(elements, list):
-        raise ValueError("Template canvas elements must be an array.")
     ids: set[str] = set()
     group_ids = {str(item.get("id") or "") for item in elements if isinstance(item, dict) and item.get("type") == "layer-group"}
     grid_counts = {kind: 0 for kind in GRID_KINDS}

@@ -852,4 +852,63 @@ def test_windscreen_extraction_and_auto_healing_prevents_corrupt_quotation_refs(
     assert corrupt_entry.windscreen_sum_insured == 4000.0
 
 
+def test_marketing_comparison_overhaul_features(db_session: Session):
+    from datetime import date
+    from app.services.marketing_comparison_service import (
+        _extract_exact_basic_figure,
+        calculate_exact_rate,
+        format_canonical_perils,
+    )
+
+    # 1. Exact Basic Figure Detection
+    etiqa_fields = {"basic_contribution": {"value": 2450.50}}
+    amt, label = _extract_exact_basic_figure(etiqa_fields, "Etiqa General Takaful")
+    assert label == "Basic Contribution"
+    assert amt == 2450.50
+
+    sompo_fields = {"basic_premium": {"value": 3120.00}}
+    amt2, label2 = _extract_exact_basic_figure(sompo_fields, "Berjaya Sompo")
+    assert label2 == "Basic Premium"
+    assert amt2 == 3120.00
+
+    # 2. Rate Formula = Basic Figure / Sum Insured (6 decimal places)
+    rate_str, rate_val = calculate_exact_rate(2450.50, 96000.0)
+    assert rate_str == "0.025526"
+    assert round(rate_val, 6) == 0.025526
+
+    # 3. Canonical Short Perils
+    raw_text = "Includes legal liability to passengers (LLP) and towing assistance plus flood"
+    perils = format_canonical_perils(raw_text)
+    assert "LLP" in perils
+    assert "TOWING" in perils
+    assert "FLOOD" in perils
+
+    # 4. Strictly Prior Calendar Year Policy Check
+    tenure_2026, _, _, _ = _seed_tenure_with_sessions(db_session)
+    tenure_2026.coverage_start_date = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    tenure_2026.coverage_end_date = datetime(2027, 2, 28, tzinfo=timezone.utc)
+
+    # Add a same-year 2026 prior tenure (e.g. from an earlier quote in Jan 2026)
+    same_year_tenure = InsuranceTenure(
+        id=new_id(),
+        tracked_vehicle_id=tenure_2026.tracked_vehicle_id,
+        customer_id=tenure_2026.customer_id,
+        vehicle_no=tenure_2026.vehicle_no,
+        customer_name=tenure_2026.customer_name,
+        coverage_start_date=datetime(2026, 1, 15, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 1, 14, tzinfo=timezone.utc),
+        status="completed",
+        expiry_month="January",
+    )
+    db_session.add(same_year_tenure)
+    db_session.commit()
+
+    res = get_marketing_comparison(db_session, tenure_2026.id)
+    prev = res.get("previous_policy")
+    assert prev is not None
+    assert prev["year"] == 2025
+    assert prev["year"] != 2026
+
+
+
 

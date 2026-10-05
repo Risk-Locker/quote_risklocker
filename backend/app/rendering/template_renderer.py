@@ -112,8 +112,13 @@ def _variable_value(fields: dict, config: dict[str, Any], variable_id: str | Non
     return val
 
 
-def _format_value(value: str, prefix: str = "", suffix: str = "") -> str:
-    value = value.strip()
+def _format_value(value: Any, prefix: str = "", suffix: str = "") -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (int, float)):
+        value = f"{float(value):,.2f}"
+    else:
+        value = str(value).strip()
     if not value:
         return ""
     if prefix and prefix.strip().upper() == "RM" and re.match(r"^\d+(?:\.\d+)?$", value):
@@ -184,6 +189,7 @@ SYSTEM_DEFAULT_SLOTS = {
     "bank_logo": "2168eaee-3e56-4903-8c4f-841f01ff2407",
     "all_driver_icon": "91116a7dc3540d62",
     "background": "49e754a6faa949c2",
+    "qr_code": "9ca8e404c89dd905",
 }
 
 
@@ -244,6 +250,8 @@ def _image_html(
             slot = "bank_logo"
         elif eid in {"driver_icon", "all_driver_icon"}:
             slot = "all_driver_icon"
+        elif eid in {"rc_b_qr_code", "qr_code", "qr"}:
+            slot = "qr_code"
 
     asset_id = str(element.get("assetId") or _asset_id_for_slot(config, slot, fields, db))
     if (not asset_id or asset_id == "None") and slot in SYSTEM_DEFAULT_SLOTS:
@@ -258,6 +266,8 @@ def _image_html(
             asset_id = SYSTEM_DEFAULT_SLOTS["risklocker_logo"]
         elif eid in {"pay_bank_logo", "pay_bank_sub", "text_ul2w5ka"}:
             asset_id = SYSTEM_DEFAULT_SLOTS["bank_logo"]
+        elif eid in {"rc_b_qr_code", "qr_code", "qr"}:
+            asset_id = SYSTEM_DEFAULT_SLOTS["qr_code"]
 
     if resolved_assets is not None:
         src = resolved_assets.get(asset_id, "")
@@ -269,7 +279,8 @@ def _image_html(
         # Preserve the authored geometry when an optional or legacy image is
         # unavailable. A broken-image glyph must never leak into a customer PDF.
         return f'<div data-missing-asset="{escape(str(element.get("assetSlot") or asset_id or "image"))}" style="{_style(element)}"></div>'
-    return f'<img alt="" src="{src}" style="{_style(element)};object-fit:contain" />'
+    obj_pos = "left center" if (eid == "risklocker_logo" or slot == "risklocker_logo") else "center"
+    return f'<img alt="" src="{src}" style="{_style(element)};object-fit:contain;object-position:{obj_pos}" />'
 
 
 def _benefit_section(element: dict[str, Any], db: Any = None) -> str:
@@ -849,11 +860,12 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
         total = _value(fields, "total_amount")
     rows.append(("total", str(labels.get("total") or "TOTAL PAYABLE"), "", _format_value(total, "RM ")))
     html: list[str] = []
+    z = int(element.get("z") or 4)
     for index, (kind, label, middle_val, right_val) in enumerate(rows):
         row_y = y + index * row_height
         if kind == "divider":
             html.append(
-                f'<div style="position:absolute;left:{x}px;top:{row_y}px;width:{width}px;height:1px;background:#E2E8F0"></div>'
+                f'<div style="position:absolute;left:{x - 12}px;top:{row_y + 6}px;width:{width + 24}px;height:1px;z-index:{z};background:#E2E8F0"></div>'
             )
             continue
         if kind == "total":
@@ -867,7 +879,7 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
             limit_html = f'<span style="font-size:9px;font-weight:600;color:#B91C1C;margin-left:4px;white-space:nowrap">{escape(middle_val)}</span>' if middle_val else ""
             value_style = "font-size:9.5px;font-weight:700;color:#0F172A;white-space:nowrap;text-align:right"
             html.append(
-                f'<div style="position:absolute;left:{x}px;top:{row_y}px;width:{width}px;height:{row_height}px;'
+                f'<div style="position:absolute;left:{x}px;top:{row_y}px;width:{width}px;height:{row_height}px;z-index:{z};'
                 f'display:flex;align-items:center;justify-content:space-between;box-sizing:border-box;padding-left:10px">'
                 f'<div style="display:flex;align-items:center;min-width:0;overflow:hidden">'
                 f'<span style="{label_style}">{escape(label)}</span>'
@@ -879,7 +891,7 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
             label_style = "font-size:9.5px;font-weight:600;color:#334155"
             value_style = "font-size:10px;font-weight:700;color:#0F172A"
         html.append(
-            f'<div style="position:absolute;left:{x}px;top:{row_y}px;width:{width}px;height:{row_height}px;'
+            f'<div style="position:absolute;left:{x}px;top:{row_y}px;width:{width}px;height:{row_height}px;z-index:{z};'
             f'display:flex;align-items:center;justify-content:space-between">'
             f'<span style="{label_style}">{escape(label)}</span>'
             f'<span style="{value_style}">{escape(right_val)}</span></div>'
@@ -888,9 +900,21 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
 
 
 def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_context: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """Dynamically balance the heights of current benefits, purchased extras, and available add-ons grids."""
+    """Dynamically balance the heights of coverage card, right containers, and benefit grids."""
     extras = list((render_context or {}).get("extras") or []) if render_context else []
-    extra_shift = (len(extras) + (1 if extras else 0)) * 15.0
+    pib_elem = next((e for e in elements if e.get("id") == "premium_info_block" or e.get("type") == "premium-info-block"), None)
+    pib_y = float(pib_elem.get("y") or 276.0) if pib_elem else 276.0
+    total_pib_rows = (len(extras) + 6) if extras else 5
+    content_bottom = pib_y + (total_pib_rows * 14.0)
+    card_bottom = max(370.0, content_bottom + 10.0)
+    cov_table_y = 160.0
+    cov_table_h = card_bottom - cov_table_y
+    y_top = card_bottom + 10.0
+    drivers_h = 74.0
+    drivers_y = card_bottom - drivers_h
+    qr_y = 210.0
+    qr_h = (drivers_y - 8.0) - qr_y
+    qr_center_y = qr_y + qr_h / 2.0
 
     current_cards = [c for c in list((render_context or {}).get("current_benefits") or []) if not _is_core_motor_cover(c)] if render_context else []
     addon_cards = list((render_context or {}).get("available_addons") or []) if render_context else []
@@ -909,15 +933,10 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     hdr2_bg = next((e for e in elements if e.get("id") == "addons_header_bg"), None)
     hdr2_txt = next((e for e in elements if e.get("id") == "addons_header_txt"), None)
 
-    base_y_top = float(hdr1_bg.get("y") or 414) if hdr1_bg else float(grid1.get("y") or 444)
-    y_top = base_y_top + extra_shift
-    y_bottom = float(grid2.get("y") or 796) + float(grid2.get("h") or 262)
-
     hdr_h = 26.0
     gap = 8.0
     pad = 3.0
 
-    has_explicit_extras_grid = any(e.get("gridKind") in {"extras", "purchased_extras"} for e in elements)
     has_extras_section = len(extras_cards) > 0
 
     cols = max(1, int(grid1.get("columns") or 3)) if grid1 else 3
@@ -947,6 +966,54 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     )
     card_gap = 5.0
 
+    def _adjust_common(e: dict[str, Any]) -> dict[str, Any]:
+        eid = e.get("id")
+        if eid == "cov_table_bg":
+            e["h"] = cov_table_h
+        elif eid == "premium_info_block" or e.get("type") == "premium-info-block":
+            e["h"] = total_pib_rows * 14.0
+        elif eid == "rc_container_payment":
+            e["y"] = 134.0
+            e["h"] = 68.0
+        elif eid == "rc_b_pay_title":
+            e["y"] = 143.0
+            e["h"] = 14.0
+        elif eid == "rc_b_pay_details":
+            e["x"] = 517.0
+            e["y"] = 160.0
+            e["w"] = 150.0
+            e["h"] = 28.0
+        elif eid == "rc_b_bank_logo":
+            e["x"] = 672.0
+            e["y"] = 160.0
+            e["w"] = 72.0
+            e["h"] = 28.0
+        elif eid == "rc_container_qr":
+            e["y"] = qr_y
+            e["h"] = qr_h
+        elif eid == "rc_b_qr_code":
+            e["x"] = 516.0
+            e["y"] = qr_center_y - 35.0
+            e["w"] = 70.0
+            e["h"] = 70.0
+        elif eid == "rc_b_qr_text":
+            e["x"] = 594.0
+            e["y"] = qr_center_y - 27.0
+            e["w"] = 152.0
+            e["h"] = 54.0
+        elif eid == "rc_container_drivers":
+            e["y"] = drivers_y
+            e["h"] = drivers_h
+        elif eid == "rc_b_driver_title":
+            e["y"] = drivers_y + 8.0
+        elif eid == "rc_b_driver_sub":
+            e["y"] = drivers_y + 24.0
+        elif eid == "rc_b_driver_divider":
+            e["y"] = drivers_y + 42.0
+        elif eid == "rc_b_excess_val":
+            e["y"] = drivers_y + 48.0
+        return e
+
     if has_extras_section:
         n1 = len(foc_cards)
         n_ext = len(extras_cards)
@@ -974,9 +1041,8 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
         for elem in elements:
             e = dict(elem)
             eid = e.get("id")
-            if (eid in {"cov_table_bg", "premium_info_block"} or e.get("type") == "premium-info-block") and extra_shift > 0:
-                e["h"] = float(e.get("h") or (246 if eid == "cov_table_bg" else 132)) + extra_shift
-            elif eid == "specials_header_bg" and hdr1_bg:
+            e = _adjust_common(e)
+            if eid == "specials_header_bg" and hdr1_bg:
                 e["y"] = y_top
                 e["h"] = hdr_h
             elif eid == "specials_header_txt" and hdr1_txt:
@@ -1057,9 +1123,8 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     for elem in elements:
         e = dict(elem)
         eid = e.get("id")
-        if (eid in {"cov_table_bg", "premium_info_block"} or e.get("type") == "premium-info-block") and extra_shift > 0:
-            e["h"] = float(e.get("h") or (246 if eid == "cov_table_bg" else 132)) + extra_shift
-        elif eid == "specials_header_bg" and hdr1_bg:
+        e = _adjust_common(e)
+        if eid == "specials_header_bg" and hdr1_bg:
             e["y"] = y_top
             e["h"] = hdr_h
         elif eid == "specials_header_txt" and hdr1_txt:
@@ -1196,9 +1261,9 @@ def _element_html(
     eid = element.get("id") or ""
     if element.get("visible") is False or element_type == "layer-group":
         return ""
-    if element_type == "text" and eid in {"pay_holder", "text_ltaa394", "pay_bank_sub", "text_ul2w5ka"}:
+    if element_type == "text" and eid in {"text_ltaa394", "text_ul2w5ka"}:
         element_type = "image"
-        if eid in {"pay_holder", "text_ltaa394"}:
+        if eid == "text_ltaa394":
             element = dict(element, type="image", assetSlot="risklocker_logo", assetId=SYSTEM_DEFAULT_SLOTS["risklocker_logo"])
         else:
             element = dict(element, type="image", assetSlot="bank_logo", assetId=SYSTEM_DEFAULT_SLOTS["bank_logo"])
@@ -1242,6 +1307,25 @@ def _element_html(
                 except Exception:
                     value = f"{clean_num} kW" if is_ev else f"{clean_num} cc"
                 return f'<div style="{_style(element)}">{escape(value)}</div>'
+        if eid in {"ref_val", "vehicle_no_val", "header_insurer_name"} and element.get("style", {}).get("textAlign") == "right":
+            prefix = str(element.get("prefix") or "")
+            raw_val = _variable_value(fields, config, var_id)
+            if not raw_val and eid == "ref_val":
+                raw_val = "RL260000341"
+            elif not raw_val and eid == "vehicle_no_val":
+                raw_val = "JXS2820"
+            elif not raw_val and eid == "header_insurer_name":
+                raw_val = "QBE INSURANCE (MALAYSIA) BERHAD"
+            val_style = "font-size:10px;font-weight:700;color:#ED1C24"
+            if eid == "header_insurer_name":
+                val_style = "font-size:10px;font-weight:800;color:#ED1C24;text-transform:uppercase"
+            lbl_style = "font-size:10px;font-weight:500;color:#64748B"
+            return (
+                f'<div style="{_style(element)};text-align:right;white-space:nowrap;display:flex;align-items:center;justify-content:flex-end">'
+                f'<span style="{lbl_style};margin-right:4px;flex-shrink:0">{escape(prefix)}</span>'
+                f'<span style="{val_style}">{escape(raw_val)}</span>'
+                f'</div>'
+            )
         value = _format_value(_variable_value(fields, config, var_id), str(element.get("prefix") or ""), str(element.get("suffix") or ""))
         return f'<div style="{_style(element)}">{escape(value)}</div>'
     if element_type == "special":
@@ -1254,7 +1338,7 @@ def _element_html(
         return _premium_info_block(element, fields, render_context or {})
     text = str(element.get("text") or "")
     if eid in {"lbl_engine_cc", "label_engine_cc"} or "Vehicle CC" in text or ("Engine Capacity" in text and "发动机排量" not in text):
-        text = "Engine Capacity/发动机排量 : "
+        text = "Engine Capacity / 发动机排量"
     if "{" in text:
         def _replace_var(m):
             v_name = m.group(1)

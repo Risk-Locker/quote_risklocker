@@ -58,18 +58,6 @@
       ]
     },
     {
-      "source": "github/awesome-copilot",
-      "skills": [
-        "playwright-automation-fill-in-form"
-      ]
-    },
-    {
-      "source": "prime-skills/runcomfy-agent-skills",
-      "skills": [
-        "image-edit"
-      ]
-    },
-    {
       "source": "vercel-labs/agent-browser",
       "skills": [
         "agent-browser"

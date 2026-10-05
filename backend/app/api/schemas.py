@@ -237,6 +237,7 @@ class BenefitConceptSaveRequest(StrictRequest):
     concept_key: str = Field(min_length=1, max_length=160)
     label: str = Field(min_length=1, max_length=255)
     category: str | None = Field(default=None, pattern=r"^(default|addon)$")
+    coverage_format: str | None = Field(default=None, pattern=r"^(RM|KM|text)$")
     variants: list[str] = Field(default_factory=list, max_length=50)
     value_schema: dict = Field(default_factory=dict)
     display_template: str = Field(default="{label}", min_length=1, max_length=500)

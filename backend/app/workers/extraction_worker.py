@@ -480,10 +480,34 @@ def process_extraction_job(
     if session.tenure_id:
         tenure = db.get(InsuranceTenure, session.tenure_id)
         if tenure:
-            if veh and not tenure.tracked_vehicle_id:
-                tenure.tracked_vehicle_id = veh.id
-            if cust_account and not tenure.customer_id:
-                tenure.customer_id = cust_account.id
+            # Check for plate mismatch in comparison mode
+            anchor_plate = normalize_plate(tenure.vehicle_no) if tenure.vehicle_no else ""
+            extracted_plate = normalize_plate(effective_veh_no) if effective_veh_no else ""
+            if anchor_plate and extracted_plate and anchor_plate != extracted_plate:
+                # Plate mismatch: exclude this document from anchor tenure and route to its own tenure
+                doc_tenure = resolve_or_create_tenure(
+                    db=db,
+                    vehicle_no=effective_veh_no,
+                    customer_name=customer or "Valued Client",
+                    start_date=cover_start or None,
+                    end_date=cover_end or None,
+                    tracked_vehicle_id=veh.id if veh else None,
+                    customer_id=cust_account.id if cust_account else None,
+                    chassis_no=raw_chassis or None,
+                    engine_no=raw_engine or None,
+                )
+                curr_opts = draft.display_options or {}
+                curr_opts["disqualified_from_comparison"] = True
+                curr_opts["disqualified_from_tenure_id"] = tenure.id
+                curr_opts["target_plate"] = effective_veh_no
+                curr_opts["target_tenure_id"] = doc_tenure.id
+                draft.display_options = curr_opts
+                tenure = doc_tenure
+            else:
+                if veh and not tenure.tracked_vehicle_id:
+                    tenure.tracked_vehicle_id = veh.id
+                if cust_account and not tenure.customer_id:
+                    tenure.customer_id = cust_account.id
 
     if not tenure:
         tenure = resolve_or_create_tenure(
@@ -500,6 +524,7 @@ def process_extraction_job(
     session.tenure_id = tenure.id
     session.coverage_start_date = tenure.coverage_start_date
     session.coverage_end_date = tenure.coverage_end_date
+    tenure.last_activity_at = datetime.now(timezone.utc)
 
     # Propagate detected NCD into tenure if not initialized
     if tenure and tenure.ncd_percentage is None and isinstance(draft.fields, dict):
@@ -525,13 +550,35 @@ def process_extraction_job(
     )
     curr_opts = draft.display_options or {}
     if action == "SKIP_IDENTICAL" and existing_sess and existing_sess.id != session.id:
-        session.status = "trash"
+        from app.models.tables import Session as SessionModel
+        existing_company_sessions = list(
+            db.scalars(
+                select(SessionModel).where(
+                    SessionModel.tenure_id == tenure.id,
+                    SessionModel.status != "trash",
+                )
+            ).all()
+        )
+        clean_comp = (session.detected_company or "").strip().lower()
+        same_comp_sessions = [
+            s for s in existing_company_sessions
+            if s.detected_company and s.detected_company.strip().lower() == clean_comp
+        ]
+        max_v = max((s.tenure_version for s in same_comp_sessions), default=existing_sess.tenure_version)
+        new_version = max_v + 1
+
+        session.status = "active"
         session.is_tenure_active = False
-        session.tenure_version = existing_sess.tenure_version
-        curr_opts["duplicate_skipped"] = True
+        session.tenure_version = new_version
+        session.duplicate_of_session_id = existing_sess.id
+        session.duplicate_resolution = "pending"
+
+        curr_opts["duplicate_detected"] = True
         curr_opts["original_session_id"] = existing_sess.id
-        curr_opts["skip_message"] = (
-            f"Identical quote for {session.detected_company or 'this insurer'} already active in this tenure (v{existing_sess.tenure_version})."
+        curr_opts["original_version"] = existing_sess.tenure_version
+        curr_opts["new_version"] = new_version
+        curr_opts["duplicate_message"] = (
+            f"Uploaded quote for {session.detected_company or 'this insurer'} is identical to v{existing_sess.tenure_version}."
         )
     else:
         session.tenure_version = version

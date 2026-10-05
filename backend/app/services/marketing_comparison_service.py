@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import math
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -316,7 +316,7 @@ def rank_comparison_entries(
     explicit_winning_ref: str | None = None,
     auto_recommend_rank1: bool = True,
 ) -> list[TenureComparisonEntry]:
-    """Rank entries using the 4-tier Best Deal criteria:
+    """Rank entries using the 4-tier Best Deal criteria, respecting manual_rank and is_hidden:
     1. total_payable ASC (lowest premium)
     2. excess ASC (lower excess)
     3. betterment_rate ASC (lower co-pay)
@@ -327,6 +327,13 @@ def rank_comparison_entries(
     strictly rank 1 is recommended (single winner).
     Preserves multi-winner user selections if already recommended.
     """
+    visible_entries = [e for e in entries if not getattr(e, "is_hidden", False)]
+    hidden_entries = [e for e in entries if getattr(e, "is_hidden", False)]
+
+    # Separate visible entries with manual_rank vs automatic
+    manual_ranked = [e for e in visible_entries if e.manual_rank is not None and e.manual_rank > 0]
+    auto_ranked = [e for e in visible_entries if e.manual_rank is None or e.manual_rank <= 0]
+
     def sort_key(e: TenureComparisonEntry):
         tot = float(e.total_payable) if e.total_payable else float("inf")
         if tot <= 0.0:
@@ -336,23 +343,44 @@ def rank_comparison_entries(
         tow = _towing_sort_value(e.towing_km or e.towing_limit)
         return (tot, exc, bet, tow)
 
-    sorted_entries = sorted(entries, key=sort_key)
-    for idx, e in enumerate(sorted_entries):
-        e.rank = idx + 1
+    auto_sorted = sorted(auto_ranked, key=sort_key)
 
-    has_explicit_winners = any(e.is_recommended for e in sorted_entries)
+    # Assign manual ranks
+    used_ranks: set[int] = {e.manual_rank for e in manual_ranked if e.manual_rank is not None}
+    for e in manual_ranked:
+        e.rank = e.manual_rank
+
+    # Assign remaining ranks to auto_sorted entries
+    curr_rank = 1
+    for e in auto_sorted:
+        while curr_rank in used_ranks:
+            curr_rank += 1
+        e.rank = curr_rank
+        used_ranks.add(curr_rank)
+        curr_rank += 1
+
+    # Hidden entries get rank starting after visible
+    base_hidden_rank = max(used_ranks, default=0) + 1
+    for idx, e in enumerate(hidden_entries):
+        e.rank = base_hidden_rank + idx
+
+    all_sorted = sorted(entries, key=lambda x: x.rank or 999)
+
+    has_explicit_winners = any(e.is_recommended for e in visible_entries)
     if explicit_winning_company_id or explicit_winning_ref:
-        for e in sorted_entries:
+        for e in visible_entries:
             if explicit_winning_company_id and e.company_id == explicit_winning_company_id:
                 e.is_recommended = True
             elif explicit_winning_ref and e.notes and explicit_winning_ref in e.notes:
                 e.is_recommended = True
-    elif not has_explicit_winners and auto_recommend_rank1 and sorted_entries:
-        sorted_entries[0].is_recommended = True
-        for e in sorted_entries[1:]:
-            e.is_recommended = False
+    elif not has_explicit_winners and auto_recommend_rank1 and visible_entries:
+        min_rank_entry = min(visible_entries, key=lambda x: x.rank or 999)
+        min_rank_entry.is_recommended = True
+        for e in visible_entries:
+            if e.id != min_rank_entry.id:
+                e.is_recommended = False
 
-    return sorted_entries
+    return all_sorted
 
 
 def _extract_vehicle_year_from_draft(f: dict[str, Any]) -> int | None:
@@ -440,12 +468,139 @@ def detect_runner_fee_from_id(ic_or_passport: str | None) -> float:
     return 10.0
 
 
-def _extract_vehicle_basic_premium(f: dict[str, Any]) -> float:
+def _extract_exact_basic_figure(f: dict[str, Any], company_name: str = "") -> tuple[float, str]:
+    """Extract exact basic figure and term label:
+    - For Etiqa, STMB: exact term "Basic Contribution"
+    - For Berjaya Sompo, QBE, AmAssurance, Tune Protect, Lonpac, and others: exact term "Basic Premium"
+    """
+    norm_name = (company_name or "").lower()
+    is_takaful = any(k in norm_name for k in ("etiqa", "stmb", "takaful"))
+
+    if is_takaful:
+        term_label = "Basic Contribution"
+        for k in ("basic_contribution", "gross_basic_contribution", "contribution_before_ncd", "basic_premium"):
+            val = _to_float(f.get(k))
+            if val > 0.0:
+                return val, term_label
+        for raw_k, raw_v in f.items():
+            if re.search(r"(?i)basic\s+(?:contribution|premium)", raw_k):
+                val = _to_float(raw_v)
+                if val > 0.0:
+                    return val, term_label
+            if isinstance(raw_v, list):
+                for item in raw_v:
+                    if isinstance(item, dict) and any(re.search(r"(?i)basic\s+(?:contribution|premium)", str(item.get(ik, ""))) for ik in ("label", "name", "desc")):
+                        val = _to_float(item.get("amount") or item.get("value"))
+                        if val > 0.0:
+                            return val, term_label
+    else:
+        term_label = "Basic Premium"
+        for k in ("basic_premium", "gross_basic_premium", "premium_before_ncd", "basic_contribution"):
+            val = _to_float(f.get(k))
+            if val > 0.0:
+                return val, term_label
+        for raw_k, raw_v in f.items():
+            if re.search(r"(?i)basic\s+(?:premium|contribution)", raw_k):
+                val = _to_float(raw_v)
+                if val > 0.0:
+                    return val, term_label
+            if isinstance(raw_v, list):
+                for item in raw_v:
+                    if isinstance(item, dict) and any(re.search(r"(?i)basic\s+(?:premium|contribution)", str(item.get(ik, ""))) for ik in ("label", "name", "desc")):
+                        val = _to_float(item.get("amount") or item.get("value"))
+                        if val > 0.0:
+                            return val, term_label
+
+    return 0.0, term_label
+
+
+def calculate_exact_rate(basic_amt: float, sum_insured: float) -> tuple[str, float]:
+    """Calculate exact rate factor rounded to 6 decimal places using Decimal and ROUND_HALF_UP."""
+    if sum_insured <= 0.0 or basic_amt <= 0.0:
+        return "0.000000", 0.0
+    from decimal import Decimal, ROUND_HALF_UP
+    rate_dec = (Decimal(str(basic_amt)) / Decimal(str(sum_insured))).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+    return f"{rate_dec:.6f}", float(rate_dec)
+
+
+def format_canonical_perils(combined_text: str, tokens: list[str] | None = None) -> list[str]:
+    """Extract canonical short peril/add-on tags in standard Malaysian market order."""
+    token_str = " ".join(tokens) if tokens else ""
+    text = (combined_text + " " + token_str).lower()
+    found: list[str] = []
+    seen: set[str] = set()
+
+    def add(tag: str):
+        if tag not in seen:
+            seen.add(tag)
+            found.append(tag)
+
+    # 1. Telematics (Drive Less Save More)
+    if any(k in text for k in ("drive less save more", "telematics", "pay as you drive", "mileage based")):
+        add("TELEMATICS")
+
+    # 2. Towing upgrade / 24/7 Unlimited / Towing Assistance
+    if any(k in text for k in ("towing", "tunda", "24/7 emergency", "unlimited towing", "towing mileage", "extra towing", "towing upgrade", "towing assistance", "breakdown assistance")):
+        add("TOWING")
+
+    # 3. LLP (Legal Liability to Passengers)
+    if any(k in text for k in ("legal liability to passenger", "liability to passenger", "legal liability to pax", "end 100", "endorsement 100")):
+        add("LLP")
+    elif re.search(r"\bllp\b", text):
+        add("LLP")
+
+    # 4. LLOP (Legal Liability of Passengers)
+    if any(k in text for k in ("legal liability of passenger", "liability of passenger", "negligent act", "end 72", "endorsement 72")):
+        add("LLOP")
+    elif re.search(r"\bllop\b", text):
+        add("LLOP")
+
+    # 5. EV Wall Charger
+    if any(k in text for k in ("ev home wall charger", "wall charger", "ev charger", "ev coverage")):
+        add("EV CHARGE")
+
+    # 6. PA (Personal Accident to Driver)
+    if any(k in text for k in ("personal accident", "pa to driver", "driver & passenger pa", "driver pa")):
+        add("PA")
+    elif re.search(r"\bpa\b", text) and "driver" in text:
+        add("PA")
+
+    # 7. Compassionate Benefit
+    if any(k in text for k in ("compassionate benefit", "compassionate allowance", "compassionate")):
+        add("COMPASSIONATE")
+
+    # 8. Loss & Theft (Special Relief Allowance)
+    if any(k in text for k in ("special relief allowance", "total loss and theft", "loss and theft", "theft allowance")):
+        add("LOSS & THEFT")
+
+    # 9. Flood / Special Perils
+    if any(k in text for k in ("flood", "banjir", "special perils", "peril khas", "natural disaster", "storm", "landslide", "water damage")):
+        add("FLOOD")
+
+    # 10. Windscreen
+    if any(k in text for k in ("windscreen", "cermin", "w/screen")):
+        add("WINDSCREEN")
+
+    # 11. Key Care
+    if any(k in text for k in ("key care", "key replacement", "replacement of key")):
+        add("KEY CARE")
+
+    # 12. CART / Loss of Use
+    if any(k in text for k in ("assessed repair time", "cart", "loss of use")):
+        add("CART")
+
+    return found
+
+
+def _extract_vehicle_basic_premium(f: dict[str, Any], company_name: str = "") -> float:
     """Extract basic premium / basic contribution before NCD."""
+    val, _ = _extract_exact_basic_figure(f, company_name)
+    if val > 0.0:
+        return val
     for k in ("basic_premium", "basic_contribution", "gross_basic_premium", "premium_before_ncd"):
-        val = _to_float(f.get(k))
-        if val > 0.0:
-            return val
+        v = _to_float(f.get(k))
+        if v > 0.0:
+            return v
     return 0.0
 
 
@@ -781,6 +936,7 @@ def _resolve_comparison_benefits(
 
     clean_towing = normalize_towing_km(towing_limit_val, combined_text)
 
+    canonical_perils_list = format_canonical_perils(combined_text, tokens)
     return {
         "special_perils": special_perils_val,
         "windscreen_sum_insured": windscreen_amount,
@@ -788,6 +944,8 @@ def _resolve_comparison_benefits(
         "towing_limit": clean_towing,
         "towing_km": clean_towing,
         "combined_text": combined_text,
+        "canonical_perils": canonical_perils_list,
+        "canonical_perils_formatted": ", ".join(canonical_perils_list),
     }
 
 
@@ -1011,7 +1169,7 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                 yom=veh_yom,
                 quote_year=quote_year,
                 company_name=e.company_name,
-                has_betterment_peril=bool(e.waiver_betterment),
+                has_betterment_peril=e.waiver_betterment,
                 is_comprehensive_private=True,
             )
             if e.betterment_rate is None or e.betterment_display is None:
@@ -1038,6 +1196,16 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                         db, s, getattr(s, "company_id", None), f, float(tenure.windscreen_target) if tenure.windscreen_target else None
                     )
 
+                    raw_w = _extract_val(f.get("waiver_of_betterment"))
+                    has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
+                    live_waiver, live_bet_rate, live_bet_disp = evaluate_betterment_rules(
+                        yom=veh_yom,
+                        quote_year=quote_year,
+                        company_name=e.company_name,
+                        has_betterment_peril=has_peril,
+                        is_comprehensive_private=True,
+                    )
+
                     needs_healing = (
                         e.sum_insured == 0.0
                         or e.motor_premium == 0.0
@@ -1047,6 +1215,9 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                         or e.special_perils != b_res["special_perils"]
                         or e.llp_llop != b_res["llp_llop"]
                         or e.towing_km != b_res["towing_km"]
+                        or e.betterment_rate != live_bet_rate
+                        or e.betterment_display != live_bet_disp
+                        or e.waiver_betterment != live_waiver
                     )
 
                     if needs_healing:
@@ -1059,16 +1230,6 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                         e.excess = _extract_excess(f)
                         e.towing_limit = b_res["towing_km"]
                         e.towing_km = b_res["towing_km"]
-
-                        raw_w = _extract_val(f.get("waiver_of_betterment"))
-                        has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
-                        live_waiver, live_bet_rate, live_bet_disp = evaluate_betterment_rules(
-                            yom=veh_yom,
-                            quote_year=quote_year,
-                            company_name=e.company_name,
-                            has_betterment_peril=has_peril,
-                            is_comprehensive_private=True,
-                        )
                         e.betterment_rate = live_bet_rate
                         e.betterment_display = live_bet_disp
                         e.waiver_betterment = live_waiver
@@ -1098,17 +1259,28 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
         company_counts[key] += 1
         e.version = company_counts[key]
 
+    # Auto-detect Windscreen Target into tenure if not set or 0
+    if not tenure.windscreen_target or float(tenure.windscreen_target) <= 0.0:
+        for e in entries:
+            if e.windscreen_sum_insured and float(e.windscreen_sum_insured) > 0.0:
+                tenure.windscreen_target = float(e.windscreen_sum_insured)
+                needs_commit = True
+                break
+
     if needs_commit:
         db.commit()
 
 
-    # 3. Retrieve Previous Policy (Year - 1 / 365 Days Prior)
+    # 3. Retrieve Previous Policy (Strictly prior calendar year e.g. 2025 for 2026 tenure)
+    current_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now().year
+    year_start_date = datetime(current_year, 1, 1).date() if isinstance(tenure.coverage_start_date, datetime) else date(current_year, 1, 1)
+
     prev_tenure = db.scalar(
         select(InsuranceTenure)
         .where(
             InsuranceTenure.tracked_vehicle_id == tenure.tracked_vehicle_id,
             InsuranceTenure.id != tenure.id,
-            InsuranceTenure.coverage_start_date < tenure.coverage_start_date,
+            InsuranceTenure.coverage_start_date < year_start_date,
         )
         .order_by(InsuranceTenure.coverage_start_date.desc())
         .limit(1)
@@ -1124,16 +1296,31 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             ).all()
         )
         best_prev = prev_entries[0] if prev_entries else None
+        
+        # Extract canonical perils from previous policy session if available
+        prev_perils: list[str] = []
+        if best_prev and best_prev.session_id:
+            p_sess = db.get(SessionModel, best_prev.session_id)
+            if p_sess:
+                p_f = p_sess.draft.fields if p_sess.draft and isinstance(p_sess.draft.fields, dict) else {}
+                p_res = _resolve_comparison_benefits(
+                    db, p_sess, getattr(p_sess, "company_id", None), p_f, None
+                )
+                prev_perils = p_res.get("canonical_perils") or []
+        
+        prev_perils_str = ", ".join(prev_perils) if prev_perils else "Standard Policy Coverage"
+
         prev_policy_data = {
+            "id": prev_tenure.id,
             "year": prev_tenure.coverage_start_date.year,
             "period": f"{prev_tenure.coverage_start_date.strftime('%d/%m/%Y')} - {prev_tenure.coverage_end_date.strftime('%d/%m/%Y')}",
             "insurer": (prev_tenure.winning_company.name if prev_tenure.winning_company else None) or (best_prev.company_name if best_prev else "Previous Insurer"),
             "sum_insured": float(best_prev.sum_insured) if best_prev else 0.0,
             "insurance_premium": float(prev_tenure.won_premium) if prev_tenure.won_premium is not None else (float(best_prev.motor_premium) if best_prev else 0.0),
-            "perils": "LLP, LLOP, PA",
+            "perils": prev_perils_str,
             "model": tenure.tracked_vehicle.car_model if tenure.tracked_vehicle else "Standard Model",
             "yom": getattr(tenure.tracked_vehicle, "manufacture_year", None) or 2023,
-            "sub_agent": "RM_01_EugeneLee",
+            "sub_agent": tenure.sub_agent_name or "RM_01_EugeneLee",
         }
 
     # 4. Formulate Recommended Sum Insured matrix
@@ -1288,12 +1475,28 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     nric_details = parse_nric_details(cust_ic) if cust_ic else {"valid": False}
 
     # 9. Format Entry Payloads
+    # 9. Format Entry Payloads
     entry_dicts = []
     for e in entries:
         s_obj = session_map.get(e.session_id) if e.session_id else None
         f_obj = s_obj.draft.fields if s_obj and s_obj.draft and s_obj.draft.fields else {}
-        basic_prem = _extract_vehicle_basic_premium(f_obj)
-        rate_factor = round(basic_prem / float(e.sum_insured), 6) if (e.sum_insured and float(e.sum_insured) > 0 and basic_prem > 0) else (round(float(e.motor_premium) / float(e.sum_insured), 6) if (e.sum_insured and float(e.sum_insured) > 0) else None)
+        basic_prem, basic_term_label = _extract_exact_basic_figure(f_obj, e.company_name)
+        if basic_prem <= 0.0:
+            basic_prem = _extract_vehicle_basic_premium(f_obj, e.company_name)
+        
+        rate_str, rate_num = calculate_exact_rate(
+            basic_prem if basic_prem > 0 else float(e.motor_premium),
+            float(e.sum_insured)
+        ) if (e.sum_insured and float(e.sum_insured) > 0) else ("0.000000", 0.0)
+
+        # Resolve canonical short perils for this entry
+        entry_perils = []
+        if s_obj:
+            entry_b_res = _resolve_comparison_benefits(
+                db, s_obj, getattr(s_obj, "company_id", None), f_obj, float(tenure.windscreen_target) if tenure.windscreen_target else None
+            )
+            entry_perils = entry_b_res.get("canonical_perils") or []
+        entry_perils_str = ", ".join(entry_perils) if entry_perils else ""
 
         entry_dicts.append({
             "id": e.id,
@@ -1316,20 +1519,108 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "betterment_rate": float(e.betterment_rate) if e.betterment_rate is not None else 0.0,
             "betterment_display": e.betterment_display or ("No (0%)" if e.waiver_betterment else "Yes"),
             "excess": float(e.excess),
-            "rate_factor": rate_factor,
-            "rate_factor_formatted": f"{rate_factor:.6f}" if rate_factor is not None else None,
+            "basic_figure_name": basic_term_label,
+            "basic_figure_amount": basic_prem,
+            "rate_factor": rate_num if rate_num > 0 else None,
+            "rate_factor_formatted": rate_str if rate_num > 0 else None,
             "rate_percentage": float(e.rate_percentage) if e.rate_percentage is not None else None,
             "windscreen_sum_insured": float(e.windscreen_sum_insured) if e.windscreen_sum_insured else None,
             "special_perils": e.special_perils,
             "llp_llop": e.llp_llop,
             "personal_accident": e.personal_accident,
+            "canonical_perils": entry_perils,
+            "canonical_perils_formatted": entry_perils_str,
             "is_recommended": e.is_recommended,
+            "is_hidden": bool(getattr(e, "is_hidden", False)),
+            "manual_rank": e.manual_rank,
             "rank": e.rank or 1,
             "version": e.version or 1,
             "uploaded_at": e.uploaded_at.isoformat() if e.uploaded_at else (e.created_at.isoformat() if e.created_at else None),
             "is_manual": e.is_manual,
             "sort_order": e.sort_order,
             "notes": e.notes,
+            "quotation_ref": s_obj.quotation_ref if s_obj else None,
+            "is_takaful": "contribution" in basic_term_label.lower() or "takaful" in e.company_name.lower(),
+        })
+
+    # 10. Group sessions into upload session timeline ribbon
+    sorted_sessions = sorted(sessions, key=lambda s: s.created_at or datetime.min.replace(tzinfo=timezone.utc))
+    batches_map: dict[str, list[SessionModel]] = defaultdict(list)
+    for s in sorted_sessions:
+        b_idx = getattr(s, "batch_session_index", 1) or 1
+        time_slot = s.created_at.strftime("%Y%m%d%H%M") if s.created_at else "0"
+        b_key = f"{b_idx}_{time_slot[:11]}"
+        batches_map[b_key].append(s)
+
+    upload_sessions = []
+    for idx, (b_key, b_sess) in enumerate(batches_map.items()):
+        first_s = b_sess[0]
+        upload_sessions.append({
+            "session_id": first_s.id,
+            "batch_index": idx + 1,
+            "uploaded_at": first_s.created_at.isoformat() if first_s.created_at else None,
+            "quotes": [
+                {
+                    "session_id": s.id,
+                    "company_name": s.detected_company or (s.uploaded_file.original_filename if s.uploaded_file else "Quote"),
+                    "version": s.tenure_version,
+                }
+                for s in b_sess
+            ],
+        })
+
+    # 11. Duplicate quote alerts (pending resolution)
+    duplicate_alerts = []
+    for s in sessions:
+        if s.duplicate_resolution == "pending" and s.duplicate_of_session_id:
+            orig_s = session_map.get(s.duplicate_of_session_id) or db.get(SessionModel, s.duplicate_of_session_id)
+            d = s.draft
+            f = d.fields if d else {}
+            tot = 0.0
+            if "total_payable" in f:
+                val = f["total_payable"].get("value") if isinstance(f["total_payable"], dict) else f["total_payable"]
+                try:
+                    tot = float(str(val).replace(",", ""))
+                except Exception:
+                    tot = 0.0
+            q_date = f.get("quotation_date", {}).get("value") if isinstance(f.get("quotation_date"), dict) else f.get("quotation_date")
+            f_name = s.uploaded_file.original_filename if s.uploaded_file else "Quotation.pdf"
+            duplicate_alerts.append({
+                "id": s.id,
+                "session_id": s.id,
+                "company_name": s.detected_company or "Insurer",
+                "file_name": f_name,
+                "total_payable": tot,
+                "quotation_date": str(q_date) if q_date else None,
+                "original_session_id": s.duplicate_of_session_id,
+                "original_version": orig_s.tenure_version if orig_s else 1,
+                "original_date": orig_s.created_at.isoformat() if orig_s and orig_s.created_at else None,
+                "new_version": s.tenure_version,
+                "new_date": s.created_at.isoformat() if s.created_at else None,
+            })
+
+    # 12. Disqualified documents (plate mismatch during comparison upload)
+    disqualified_documents = []
+    disq_sessions = list(
+        db.scalars(
+            select(SessionModel)
+            .join(QuotationDraft, SessionModel.draft_id == QuotationDraft.id)
+            .where(
+                QuotationDraft.display_options["disqualified_from_tenure_id"].as_string() == tenure.id
+            )
+        ).all()
+    )
+    for ds in disq_sessions:
+        d_opts = ds.draft.display_options or {}
+        f_name = ds.uploaded_file.original_filename if ds.uploaded_file else "Quotation.pdf"
+        disqualified_documents.append({
+            "session_id": ds.id,
+            "file_name": f_name,
+            "extracted_plate": d_opts.get("extracted_plate") or "UNKNOWN",
+            "plate_detected": d_opts.get("extracted_plate") or "UNKNOWN",
+            "target_plate": d_opts.get("target_plate") or tenure.vehicle_no,
+            "target_tenure_id": d_opts.get("target_tenure_id") or ds.tenure_id,
+            "company_name": ds.detected_company or "Underwriter",
         })
 
     return {
@@ -1367,6 +1658,9 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "vehicle_type": "Comprehensive (综合险)",
         },
         "entries": entry_dicts,
+        "upload_sessions": upload_sessions,
+        "duplicate_alerts": duplicate_alerts,
+        "disqualified_documents": disqualified_documents,
         "previous_policy": prev_policy_data,
         "recommended_sum_insured": rec_sum_insured,
         "ncd": {
@@ -1948,6 +2242,39 @@ def generate_quotation_for_entry(
         entry.session_id = session_model.id
         session_id = session_model.id
 
+    pdf_url = None
+    pdf_ver_id = None
+    if draft_id:
+        pdf_ver = db.scalar(
+            select(GeneratedPdfVersion)
+            .where(GeneratedPdfVersion.draft_id == draft_id)
+            .order_by(GeneratedPdfVersion.version_number.desc())
+            .limit(1)
+        )
+        if pdf_ver:
+            pdf_url = f"/versions/{pdf_ver.id}/pdf?download=true"
+            pdf_ver_id = pdf_ver.id
+        elif session_id:
+            try:
+                sess_obj = db.get(SessionModel, session_id)
+                user_obj = db.get(User, user_id)
+                d_obj = db.get(QuotationDraft, draft_id)
+                if sess_obj and user_obj and d_obj:
+                    from app.services.generation_service import request_version_generation
+                    gen_res = request_version_generation(
+                        db,
+                        user_obj,
+                        session_id,
+                        draft_revision=d_obj.revision,
+                        idempotency_key=f"comp_{entry_id}_{new_id()[:8]}",
+                    )
+                    ver = gen_res.get("version")
+                    if ver:
+                        pdf_url = f"/versions/{ver.id}/pdf?download=true"
+                        pdf_ver_id = ver.id
+            except Exception as e:
+                logger.warning("Could not pre-render PDF version synchronously: %s", e)
+
     db.commit()
     return {
         "status": "success",
@@ -1957,6 +2284,8 @@ def generate_quotation_for_entry(
         "draft_id": draft_id,
         "quotation_ref": ref_num,
         "company_name": entry.company_name,
+        "pdf_url": pdf_url,
+        "pdf_version_id": pdf_ver_id,
     }
 
 
@@ -1976,6 +2305,88 @@ def generate_all_quotations(
         res = generate_quotation_for_entry(db, tenure_id, entry.id, user_id)
         results.append(res)
     return results
+
+
+def rescan_comparison_tenure(db: Session, tenure_id: str) -> dict[str, Any]:
+    """Force re-extract and rescan all sessions and entries under a tenure."""
+    tenure = db.get(InsuranceTenure, tenure_id)
+    if not tenure:
+        raise ValueError(f"Tenure {tenure_id} not found")
+
+    from sqlalchemy import or_
+    sessions = list(
+        db.scalars(
+            select(SessionModel)
+            .where(
+                or_(
+                    SessionModel.tenure_id == tenure.id,
+                    SessionModel.tracked_vehicle_id == tenure.tracked_vehicle_id,
+                )
+            )
+        ).all()
+    )
+
+    entries = list(
+        db.scalars(
+            select(TenureComparisonEntry).where(TenureComparisonEntry.tenure_id == tenure.id)
+        ).all()
+    )
+    entry_by_session = {e.session_id: e for e in entries if e.session_id}
+
+    veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if tenure.tracked_vehicle else None
+    quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now().year
+
+    detected_ws = None
+    for s in sessions:
+        f = s.draft.fields if s.draft and isinstance(s.draft.fields, dict) else {}
+        b_res = _resolve_comparison_benefits(
+            db, s, getattr(s, "company_id", None), f, float(tenure.windscreen_target) if tenure.windscreen_target else None
+        )
+        if b_res.get("windscreen_sum_insured") and float(b_res["windscreen_sum_insured"]) > 0:
+            detected_ws = float(b_res["windscreen_sum_insured"])
+
+        entry = entry_by_session.get(s.id)
+        if entry:
+            sum_ins = _extract_vehicle_sum_insured(f)
+            motor_prem = _extract_vehicle_motor_premium(f)
+            val_type, agreed = _extract_valuation_type(f)
+            if sum_ins > 0:
+                entry.sum_insured = sum_ins
+            if motor_prem > 0:
+                entry.motor_premium = motor_prem
+            entry.valuation_type = val_type
+            entry.agreed_value = agreed
+            entry.excess = _extract_excess(f)
+            entry.towing_limit = b_res["towing_km"]
+            entry.towing_km = b_res["towing_km"]
+            entry.windscreen_sum_insured = b_res["windscreen_sum_insured"]
+            entry.special_perils = b_res["special_perils"]
+            entry.llp_llop = b_res["llp_llop"]
+
+            raw_w = _extract_val(f.get("waiver_of_betterment"))
+            has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
+            live_waiver, live_bet_rate, live_bet_disp = evaluate_betterment_rules(
+                yom=veh_yom,
+                quote_year=quote_year,
+                company_name=entry.company_name,
+                has_betterment_peril=has_peril,
+                is_comprehensive_private=True,
+            )
+            entry.betterment_rate = live_bet_rate
+            entry.betterment_display = live_bet_disp
+            entry.waiver_betterment = live_waiver
+
+            entry.road_tax = float(tenure.road_tax)
+            entry.runner_fee = float(tenure.runner_fee)
+            entry.total_payable = float(entry.motor_premium) + entry.road_tax + entry.runner_fee
+            if entry.sum_insured > 0:
+                entry.rate_percentage = round((float(entry.motor_premium) / float(entry.sum_insured)) * 100, 4)
+
+    if detected_ws:
+        tenure.windscreen_target = detected_ws
+
+    db.commit()
+    return get_marketing_comparison(db, tenure_id)
 
 
 def format_whatsapp_teaser(db: Session, tenure_id: str) -> str:

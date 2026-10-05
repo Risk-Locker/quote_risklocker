@@ -144,11 +144,21 @@ def serialize_concept(db, item: BenefitConcept, preloaded_assets: dict | None = 
     value_schema = item.value_schema or {}
     category = value_schema.get("category") or ("default" if item.sort_order is not None and item.sort_order <= 11 else "addon")
     variants = value_schema.get("variants") or []
+    coverage_format = value_schema.get("coverage_format")
+    if not coverage_format:
+        ck = (item.concept_key or "").lower()
+        if "windscreen" in ck or "cermin" in ck or "peril" in ck:
+            coverage_format = "RM"
+        elif "towing" in ck:
+            coverage_format = "KM"
+        else:
+            coverage_format = "text"
     return {
         "id": item.id,
         "concept_key": item.concept_key,
         "label": item.label,
         "category": category,
+        "coverage_format": coverage_format,
         "variants": variants,
         "value_schema": item.value_schema,
         "display_template": item.display_template,
@@ -252,6 +262,8 @@ def save_benefit_concept(db, user, payload: dict) -> dict:
         value_schema["category"] = payload["category"]
     if "variants" in payload:
         value_schema["variants"] = payload["variants"]
+    if "coverage_format" in payload and payload["coverage_format"]:
+        value_schema["coverage_format"] = payload["coverage_format"]
     concept.value_schema = value_schema
     concept.display_template = payload.get("display_template") or "{label}"
     concept.required_variables = list(dict.fromkeys(payload.get("required_variables") or []))

@@ -13,9 +13,17 @@ from starlette import status
 
 
 class AppError(Exception):
-    def __init__(self, message: str, status_code: int = status.HTTP_400_BAD_REQUEST):
+    def __init__(
+        self,
+        message: str,
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+        headers: dict[str, str] | None = None,
+        extra: dict | None = None,
+    ):
         self.message = message
         self.status_code = status_code
+        self.headers = headers
+        self.extra = extra or {}
         super().__init__(message)
 
 
@@ -109,9 +117,11 @@ def _integrity_message(exc: IntegrityError) -> tuple[str, int]:
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
+        content = {"error": {"message": exc.message, **exc.extra}}
         return JSONResponse(
             status_code=exc.status_code,
-            content={"error": {"message": exc.message}},
+            content=content,
+            headers=exc.headers,
         )
 
     @app.exception_handler(RequestValidationError)

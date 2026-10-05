@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 
 import { fileUrl } from "@/lib/api";
 import { packFixedGrid } from "./grid-layout";
+import { getOfficialInsurerName, getInsurerShortName } from "@/lib/company-names";
 
 export type CanvasStyle = {
   fontSize?: number;
@@ -63,6 +64,7 @@ export type CanvasElement = {
   section?: "specials" | "add_ons";
   columns?: number;
   gridKind?: "current_benefits" | "available_addons" | "extras" | "purchased_extras";
+  excludeExtras?: boolean;
   packing?: {
     strategy?: "balanced" | "square_biased" | "staggered";
     alignment?: "start" | "center" | "end";
@@ -160,15 +162,23 @@ export function resolveVariableValue(
   variableId: string | undefined
 ): string | null {
   if (!variableValues || !variableId) return null;
+  let raw: string | null = null;
   if (variableId in variableValues && variableValues[variableId] !== undefined && String(variableValues[variableId]).trim() !== "") {
-    return String(variableValues[variableId]).trim();
-  }
-  for (const alias of VARIABLE_FALLBACK_MAP[variableId] || []) {
-    if (alias in variableValues && variableValues[alias] !== undefined && String(variableValues[alias]).trim() !== "") {
-      return String(variableValues[alias]).trim();
+    raw = String(variableValues[variableId]).trim();
+  } else {
+    for (const alias of VARIABLE_FALLBACK_MAP[variableId] || []) {
+      if (alias in variableValues && variableValues[alias] !== undefined && String(variableValues[alias]).trim() !== "") {
+        raw = String(variableValues[alias]).trim();
+        break;
+      }
     }
   }
-  return null;
+  if (!raw) return null;
+
+  if (variableId === "insurance_company" || variableId === "company_name" || variableId === "insurer_name") {
+    return getOfficialInsurerName(raw);
+  }
+  return raw;
 }
 
 export function formatVariableValue(value: string | null, prefix = "", suffix = ""): string {
@@ -271,6 +281,7 @@ export function computeGuides(
 export const SYSTEM_SLOT_DEFAULTS: Record<string, string> = {
   risklocker_logo: "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f",
   bank_logo: "2168eaee-3e56-4903-8c4f-841f01ff2407",
+  qr_code: "9ca8e404c89dd905",
   all_driver_icon: "91116a7dc3540d62",
   background: "49e754a6faa949c2",
 };
@@ -322,7 +333,7 @@ export function CanvasElementView({
   const eid = element.id || "";
   const isImageOrLogo =
     element.type === "image" ||
-    ["pay_holder", "text_ltaa394", "pay_bank_sub", "text_ul2w5ka", "pay_bank_logo", "bank_logo", "risklocker_logo"].includes(eid);
+    ["pay_holder", "text_ltaa394", "pay_bank_sub", "text_ul2w5ka", "pay_bank_logo", "bank_logo", "risklocker_logo", "qr_code", "rc_b_qr_code"].includes(eid);
 
   const slot =
     element.assetSlot ||
@@ -330,9 +341,11 @@ export function CanvasElementView({
       ? "risklocker_logo"
       : eid === "bank_logo" || eid === "pay_bank_logo" || eid === "pay_bank_sub" || eid === "text_ul2w5ka"
         ? "bank_logo"
-        : eid === "driver_icon"
-          ? "all_driver_icon"
-          : "");
+        : eid === "qr_code" || eid === "rc_b_qr_code"
+          ? "qr_code"
+          : eid === "driver_icon"
+            ? "all_driver_icon"
+            : "");
 
   let assetId = element.assetId || (slot ? config?.assets?.[slot] : "");
   if ((!assetId || assetId === "None") && slot && SYSTEM_SLOT_DEFAULTS[slot]) {
@@ -347,6 +360,8 @@ export function CanvasElementView({
       assetId = SYSTEM_SLOT_DEFAULTS["risklocker_logo"];
     } else if (eid === "pay_bank_logo" || eid === "pay_bank_sub" || eid === "text_ul2w5ka") {
       assetId = SYSTEM_SLOT_DEFAULTS["bank_logo"];
+    } else if (eid === "qr_code" || eid === "rc_b_qr_code") {
+      assetId = SYSTEM_SLOT_DEFAULTS["qr_code"];
     }
   }
   const asset = assets.find((item) => item.id === assetId);
@@ -357,7 +372,9 @@ export function CanvasElementView({
         ? `/business/assets/${assetId}/content?profile=ui`
         : `/template-assets/${assetId}`
   ) : "");
-  if (!resolvedUrl && slot && SYSTEM_SLOT_DEFAULTS[slot]) {
+  if ((!resolvedUrl || resolvedUrl.includes("9ca8e404c89dd905") || resolvedUrl.includes("c2003185-0000-4000-8000-000000000001")) && (slot === "qr_code" || eid === "qr_code" || eid === "rc_b_qr_code" || assetId === "9ca8e404c89dd905" || assetId === "c2003185-0000-4000-8000-000000000001")) {
+    resolvedUrl = fileUrl("/template-assets/9ca8e404c89dd905");
+  } else if (!resolvedUrl && slot && SYSTEM_SLOT_DEFAULTS[slot]) {
     const fallbackId = SYSTEM_SLOT_DEFAULTS[slot];
     resolvedUrl = `/business/assets/${fallbackId}/content?profile=ui`;
   }
@@ -453,15 +470,17 @@ export function CanvasElementView({
     >
       {isImageOrLogo ? (
         resolvedUrl ? (
-          <img className="h-full w-full object-contain" src={fileUrl(resolvedUrl)} alt="" />
+          <img className={`h-full w-full object-contain ${eid === "risklocker_logo" || slot === "risklocker_logo" ? "object-left" : ""}`} src={fileUrl(resolvedUrl)} alt="" />
         ) : slot ? (
           <div className="flex h-full w-full items-center justify-center rounded border border-dashed border-gray-200 bg-gray-50/60 p-1 text-center font-bold text-gray-500 text-[10px]">
             {slot === "risklocker_logo" ? (
-              <img className="h-full w-full object-contain" src={fileUrl("/business/assets/e9685e1f-ac95-410c-a2e9-eccb7ca35d5f/content?profile=ui")} alt="Risklocker" />
+              <img className="h-full w-full object-contain object-left" src={fileUrl("/business/assets/e9685e1f-ac95-410c-a2e9-eccb7ca35d5f/content?profile=ui")} alt="Risklocker" />
             ) : slot === "bank_logo" ? (
               <img className="h-full w-full object-contain" src={fileUrl("/business/assets/2168eaee-3e56-4903-8c4f-841f01ff2407/content?profile=ui")} alt="Hong Leong Bank" />
+            ) : slot === "qr_code" ? (
+              <img className="h-full w-full object-contain" src="/assets/qr.jpeg" alt="QR Code" />
             ) : slot === "insurer_logo" ? (
-              <span className="text-slate-800 font-bold text-[11px]">{variableValues?.insurance_company || variableValues?.insurance_name || "INSURER"}</span>
+              <span className="text-slate-800 font-bold text-[11px]">{getOfficialInsurerName(variableValues?.insurance_company || variableValues?.insurance_name)}</span>
             ) : (
               slot
             )}
@@ -477,7 +496,17 @@ export function CanvasElementView({
         (() => {
           let text = element.text || "";
           if (element.id === "lbl_engine_cc" || text.includes("Vehicle CC / 引擎容量") || (text.includes("Engine Capacity") && !text.includes("发动机排量"))) {
-            text = "Engine Capacity/发动机排量 : ";
+            text = "Engine Capacity / 发动机排量";
+          }
+          if (element.id === "specials_title" || text.includes("Featured Standard Benefits") || text.includes("Featured standard") || text.includes("Our Specials")) {
+            const shortName = getInsurerShortName(variableValues?.insurance_company || variableValues?.insurance_name || "QBE");
+            text = `${shortName} Free Added Coverage`;
+          }
+          if (element.id === "extras_title" || text.includes("Purchased Add-Ons & Extras") || text.includes("Purchased Addons and Extras")) {
+            text = "Included Optional Add-On";
+          }
+          if (element.id === "addons_title" || text.includes("You May Add On")) {
+            text = "Recommended Add-On Upgrades :";
           }
           if (text.includes("{") && variableValues) {
             text = text.replace(/\{([a-zA-Z0-9_-]+)\}/g, (match, varName) => {
@@ -517,6 +546,22 @@ export function CanvasElementView({
               <span className="text-[var(--rl-red)]">
                 {displayValue}
               </span>
+            );
+          }
+          if ((eid === "ref_val" || eid === "vehicle_no_val" || eid === "header_insurer_name") && element.style?.textAlign === "right") {
+            const prefix = element.prefix || "";
+            const isInsurer = eid === "header_insurer_name";
+            let val = raw !== null ? formatVariableValue(raw, "", element.suffix || "") : "";
+            if (!val && eid === "ref_val") val = "RL260000341";
+            else if (!val && eid === "vehicle_no_val") val = "JXS2820";
+            else if (!val && eid === "header_insurer_name") val = "QBE INSURANCE (MALAYSIA) BERHAD";
+            return (
+              <div className="w-full h-full flex items-center justify-end text-right overflow-hidden whitespace-nowrap">
+                <span className="text-[10px] font-medium text-slate-500 mr-1 shrink-0">{prefix}</span>
+                <span className={`text-[10px] font-bold text-red-600 truncate ${isInsurer ? "font-extrabold uppercase" : ""}`}>
+                  {val}
+                </span>
+              </div>
             );
           }
           if (raw !== null) {
@@ -883,19 +928,45 @@ export function CanvasElementView({
                               const customCostColor = (element as any).costColor;
                               const customCostBg = (element as any).costBgColor;
 
+                              const hasVal = Boolean(val && !computedHideCoverage);
+                              const hasCost = Boolean(costBadge && !computedHideCost);
+
                               return (
                                 <>
-                                  {val && !computedHideCoverage && (
-                                    <span
-                                      className="font-bold leading-tight text-[var(--rl-text-strong)] truncate"
-                                      style={{ fontSize: customCovSize, color: customCovColor || undefined }}
-                                    >
-                                      {val}
-                                    </span>
+                                  {(hasVal || hasCost) && (
+                                    <div className="flex items-center justify-between gap-1 min-w-0">
+                                      {hasVal ? (
+                                        <span
+                                          className="font-bold leading-tight text-[var(--rl-text-strong)] truncate"
+                                          style={{ fontSize: customCovSize, color: customCovColor || undefined }}
+                                        >
+                                          {val}
+                                        </span>
+                                      ) : <span />}
+                                      {hasCost && (
+                                        <span
+                                          className={`inline-block rounded px-1 py-0.5 font-bold whitespace-nowrap leading-tight border text-[8px] ${
+                                            customCostBg || customCostColor
+                                              ? ""
+                                              : isDark
+                                                ? "bg-red-950/40 text-red-300 border-red-800/50"
+                                                : "bg-red-50 text-red-600 border-red-200"
+                                          }`}
+                                          style={{
+                                            fontSize: customCostSize ? Math.min(customCostSize, 9) : 8.5,
+                                            color: customCostColor || undefined,
+                                            backgroundColor: customCostBg || undefined,
+                                            borderColor: customCostBg || undefined,
+                                          }}
+                                        >
+                                          {costBadge}
+                                        </span>
+                                      )}
+                                    </div>
                                   )}
                                   {desc && showDescription && (
                                     <span
-                                      className="line-clamp-4 leading-snug text-[var(--rl-text-muted)]"
+                                      className="line-clamp-2 leading-tight text-[var(--rl-text-muted)] mt-0.5"
                                       style={{
                                         fontSize: customDescSize,
                                         fontWeight: customDescWeight ? (customDescWeight === "bold" ? 700 : customDescWeight === "semibold" ? 600 : customDescWeight === "medium" ? 500 : 400) : undefined,
@@ -904,27 +975,6 @@ export function CanvasElementView({
                                     >
                                       {desc}
                                     </span>
-                                  )}
-                                  {costBadge && !computedHideCost && (
-                                    <div className="mt-1 flex items-center">
-                                      <span
-                                        className={`inline-block rounded px-1.5 py-0.5 font-bold whitespace-nowrap leading-tight border ${
-                                          customCostBg || customCostColor
-                                            ? ""
-                                            : isDark
-                                              ? "bg-red-950/40 text-red-300 border-red-800/50"
-                                              : "bg-red-50 text-red-600 border-red-200"
-                                        }`}
-                                        style={{
-                                          fontSize: customCostSize,
-                                          color: customCostColor || undefined,
-                                          backgroundColor: customCostBg || undefined,
-                                          borderColor: customCostBg || undefined,
-                                        }}
-                                      >
-                                        {costBadge}
-                                      </span>
-                                    </div>
                                   )}
                                 </>
                               );
@@ -1156,19 +1206,45 @@ export function CanvasElementView({
                                       const customCostColor = (element as any).costColor;
                                       const customCostBg = (element as any).costBgColor;
 
+                                      const hasVal = Boolean(val && !computedHideCoverage);
+                                      const hasCost = Boolean(costBadge && !computedHideCost);
+
                                       return (
                                         <>
-                                          {val && !computedHideCoverage && (
-                                            <span
-                                              className={`font-bold leading-tight truncate ${isDark ? "text-white" : "text-[var(--rl-text-strong)]"}`}
-                                              style={{ fontSize: customCovSize, color: customCovColor || undefined }}
-                                            >
-                                              {val}
-                                            </span>
+                                          {(hasVal || hasCost) && (
+                                            <div className="flex items-center justify-between gap-1 min-w-0">
+                                              {hasVal ? (
+                                                <span
+                                                  className={`font-bold leading-tight truncate ${isDark ? "text-white" : "text-[var(--rl-text-strong)]"}`}
+                                                  style={{ fontSize: customCovSize, color: customCovColor || undefined }}
+                                                >
+                                                  {val}
+                                                </span>
+                                              ) : <span />}
+                                              {hasCost && (
+                                                <span
+                                                  className={`inline-block rounded px-1 py-0.5 font-bold whitespace-nowrap leading-tight border text-[8px] ${
+                                                    customCostBg || customCostColor
+                                                      ? ""
+                                                      : isDark
+                                                        ? "bg-red-950/40 text-red-300 border-red-800/50"
+                                                        : "bg-red-50 text-red-600 border-red-200"
+                                                  }`}
+                                                  style={{
+                                                    fontSize: customCostSize ? Math.min(customCostSize, 9) : 8.5,
+                                                    color: customCostColor || undefined,
+                                                    backgroundColor: customCostBg || undefined,
+                                                    borderColor: customCostBg || undefined,
+                                                  }}
+                                                >
+                                                  {costBadge}
+                                                </span>
+                                              )}
+                                            </div>
                                           )}
                                           {!isMinimal && desc && showDescription && (
                                             <span
-                                              className={`line-clamp-4 leading-snug ${isDark ? "text-slate-400" : "text-[var(--rl-text-muted)]"}`}
+                                              className={`line-clamp-2 leading-tight mt-0.5 ${isDark ? "text-slate-400" : "text-[var(--rl-text-muted)]"}`}
                                               style={{ 
                                                 fontSize: customDescSize,
                                                 fontWeight: customDescWeight ? (customDescWeight === "bold" ? 700 : customDescWeight === "semibold" ? 600 : customDescWeight === "medium" ? 500 : 400) : undefined,
@@ -1177,27 +1253,6 @@ export function CanvasElementView({
                                             >
                                               {desc}
                                             </span>
-                                          )}
-                                          {costBadge && !computedHideCost && (
-                                            <div className="mt-1 flex items-center">
-                                              <span
-                                                className={`inline-block rounded px-1.5 py-0.5 font-bold whitespace-nowrap leading-tight border ${
-                                                  customCostBg || customCostColor
-                                                    ? ""
-                                                    : isDark
-                                                      ? "bg-red-950/40 text-red-300 border-red-800/50"
-                                                      : "bg-red-50 text-red-600 border-red-200"
-                                                }`}
-                                                style={{
-                                                  fontSize: customCostSize,
-                                                  color: customCostColor || undefined,
-                                                  backgroundColor: customCostBg || undefined,
-                                                  borderColor: customCostBg || undefined,
-                                                }}
-                                              >
-                                                {costBadge}
-                                              </span>
-                                            </div>
                                           )}
                                         </>
                                       );
@@ -1538,8 +1593,20 @@ export function balanceBenefitGridElements(
   },
 ): CanvasElement[] {
   const extras = benefitData?.extras || [];
-  const extraShift = (extras.length + (extras.length > 0 ? 1 : 0)) * 15;
-  if (!benefitData && extraShift === 0) return elements;
+  const pibElem = elements.find((e) => e.id === "premium_info_block" || e.type === "premium-info-block");
+  const pibY = pibElem ? Number(pibElem.y || 276) : 276;
+  const totalPibRows = extras.length > 0 ? extras.length + 6 : 5;
+  const contentBottom = pibY + (totalPibRows * 14);
+  const cardBottom = Math.max(370, contentBottom + 10);
+  const covTableY = 160;
+  const covTableH = cardBottom - covTableY;
+  const yTop = cardBottom + 10;
+  const driversH = 74;
+  const driversY = cardBottom - driversH;
+  const qrY = 210;
+  const qrH = (driversY - 8) - qrY;
+  const qrCenterY = qrY + qrH / 2;
+
   const currentCards = benefitData?.current_benefits || [];
   const addonCards = benefitData?.available_addons || [];
 
@@ -1559,9 +1626,6 @@ export function balanceBenefitGridElements(
   const hdr1Txt = elements.find((e) => e.id === "specials_header_txt");
   const hdr2Bg = elements.find((e) => e.id === "addons_header_bg");
   const hdr2Txt = elements.find((e) => e.id === "addons_header_txt");
-
-  const baseTop = hdr1Bg ? Number(hdr1Bg.y || 414) : Number(grid1.y || 444);
-  const yTop = baseTop + extraShift;
 
   const hdrH = 26;
   const gap = 8;
@@ -1586,10 +1650,56 @@ export function balanceBenefitGridElements(
     : Math.max(64, 44 + dynamicIconExtra + 14);
   const cardGap = 5;
 
-  const hasExplicitExtrasGrid = elements.some((e) => e.gridKind === "extras" || e.gridKind === "purchased_extras");
-  const hasExtrasSection = extrasCards.length > 0;
+  const adjustCommon = (e: CanvasElement): CanvasElement => {
+    if (e.id === "cov_table_bg") {
+      e.h = covTableH;
+    } else if (e.id === "premium_info_block" || e.type === "premium-info-block") {
+      e.h = totalPibRows * 14;
+    } else if (e.id === "rc_container_payment") {
+      e.y = 134;
+      e.h = 68;
+    } else if (e.id === "rc_b_pay_title") {
+      e.y = 143;
+      e.h = 14;
+    } else if (e.id === "rc_b_pay_details") {
+      e.x = 517;
+      e.y = 160;
+      e.w = 150;
+      e.h = 28;
+    } else if (e.id === "rc_b_bank_logo") {
+      e.x = 672;
+      e.y = 160;
+      e.w = 72;
+      e.h = 28;
+    } else if (e.id === "rc_container_qr") {
+      e.y = qrY;
+      e.h = qrH;
+    } else if (e.id === "rc_b_qr_code") {
+      e.x = 516;
+      e.y = qrCenterY - 35;
+      e.w = 70;
+      e.h = 70;
+    } else if (e.id === "rc_b_qr_text") {
+      e.x = 594;
+      e.y = qrCenterY - 27;
+      e.w = 152;
+      e.h = 54;
+    } else if (e.id === "rc_container_drivers") {
+      e.y = driversY;
+      e.h = driversH;
+    } else if (e.id === "rc_b_driver_title") {
+      e.y = driversY + 8;
+    } else if (e.id === "rc_b_driver_sub") {
+      e.y = driversY + 24;
+    } else if (e.id === "rc_b_driver_divider") {
+      e.y = driversY + 42;
+    } else if (e.id === "rc_b_excess_val") {
+      e.y = driversY + 48;
+    }
+    return e;
+  };
 
-  if (hasExtrasSection) {
+  if (extrasCards.length > 0) {
     const n1 = focCards.length;
     const nExt = extrasCards.length;
     const n2 = addonCards.length;
@@ -1614,10 +1724,8 @@ export function balanceBenefitGridElements(
 
     const adjusted: CanvasElement[] = [];
     for (const elem of elements) {
-      const e = { ...elem };
-      if ((e.id === "cov_table_bg" || e.id === "premium_info_block" || e.type === "premium-info-block") && extraShift > 0) {
-        e.h = Number(e.h || (e.id === "cov_table_bg" ? 246 : 132)) + extraShift;
-      } else if (e.id === "specials_header_bg" && hdr1Bg) {
+      const e = adjustCommon({ ...elem });
+      if (e.id === "specials_header_bg" && hdr1Bg) {
         e.y = yTop;
         e.h = hdrH;
       } else if (e.id === "specials_header_txt" && hdr1Txt) {
@@ -1697,10 +1805,8 @@ export function balanceBenefitGridElements(
   const footerShift = gridBottom > 1020 ? gridBottom + 24 - 1050 : 0;
 
   return elements.map((elem) => {
-    const e = { ...elem };
-    if ((e.id === "cov_table_bg" || e.id === "premium_info_block" || e.type === "premium-info-block") && extraShift > 0) {
-      e.h = Number(e.h || (e.id === "cov_table_bg" ? 246 : 132)) + extraShift;
-    } else if (e.id === "specials_header_bg" && hdr1Bg) {
+    const e = adjustCommon({ ...elem });
+    if (e.id === "specials_header_bg" && hdr1Bg) {
       e.y = yTop;
       e.h = hdrH;
     } else if (e.id === "specials_header_txt" && hdr1Txt) {

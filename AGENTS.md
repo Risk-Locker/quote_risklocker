@@ -76,7 +76,7 @@ This file plus the whole `docs/` folder is a portable agent brain. Copy `AGENTS.
 
 - Stack: Next.js 15.5 frontend (`frontend/`), FastAPI backend (`backend/`), Supabase/Postgres (`migrations/`), private Supabase Storage for PDFs.
 - Dev servers: backend :8100, frontend :3000, started with `commands/start-backend.ps1` and `commands/start-frontend.ps1` (port file `.qc-tmp\backend-port.txt`).
-- Dev login: admin@risklocker.local / admin123.
+- Dev login: system@risklocker.com / almW8hsv&2jssy62(fwg6@#g.
 - Default motor template id `4a16bc96-7ca1-44db-be1b-c0a462e71e2f` — contains ONLY 5 image, 24 text, 11 variable, 4 group elements (no specials); E2E group tests must add text elements first.
 - Non-negotiable business rules (full list in `docs/domain/BUSINESS-RULES.md`): Supabase/Postgres only for app data; private Supabase Storage for persistent PDFs; never expose backend secrets to the frontend; never silently guess uncertain extracted values; deterministic PDF generation from reviewed drafts; no hardcoded fees; preserve Upload -> Check Values -> Generate PDF.
 

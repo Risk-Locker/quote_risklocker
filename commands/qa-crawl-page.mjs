@@ -83,8 +83,8 @@ try {
   // Check if redirected to login
   if (page.url().includes('/login')) {
     console.log(`[2/5] Auth required, logging in as dev admin...`);
-    await page.fill('input[type="email"], input[name="email"]', 'admin@risklocker.local');
-    await page.fill('input[type="password"], input[name="password"]', 'admin123');
+    await page.fill('input[type="email"], input[name="email"]', 'system@risklocker.com');
+    await page.fill('input[type="password"], input[name="password"]', 'almW8hsv&2jssy62(fwg6@#g');
     await page.click('button[type="submit"], button:has-text("Sign in"), button:has-text("Login")');
     await page.waitForNavigation({ waitUntil: 'networkidle' });
     await page.goto(targetUrl, { waitUntil: 'networkidle' });

@@ -6,22 +6,17 @@ import type { Route } from "next";
 import {
   X,
   FilePdf,
-  CheckCircle,
-  XCircle,
-  PaperPlaneTilt,
   Clock,
   Car,
-  User,
   ArrowsClockwise,
   ArrowSquareOut,
   CaretDown,
   CaretUp,
-  Tag,
   Columns,
+  ShieldCheck,
+  CheckCircle,
 } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 
 export interface TenureTimelineDrawerProps {
   tenureId: string;
@@ -34,26 +29,10 @@ export function TenureTimelineDrawer({
   tenureId,
   isOpen,
   onClose,
-  onRefresh,
 }: TenureTimelineDrawerProps) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<any>(null);
   const [expandedCompany, setExpandedCompany] = useState<string | null>(null);
-
-  // Status update modal state
-  const [stageVal, setStageVal] = useState("Quotations");
-  const [wonPremium, setWonPremium] = useState("");
-  const [winningRef, setWinningRef] = useState("");
-  const [missReason, setMissReason] = useState("");
-  const [notes, setNotes] = useState("");
-  const [savingStatus, setSavingStatus] = useState(false);
-  const [generatingQuote, setGeneratingQuote] = useState<string | null>(null);
-
-  const [shiftingDates, setShiftingDates] = useState(false);
-  const [startDateInput, setStartDateInput] = useState("");
-  const [endDateInput, setEndDateInput] = useState("");
-  const [projectingRenewal, setProjectingRenewal] = useState(false);
-  const [lapsingTenure, setLapsingTenure] = useState(false);
 
   async function loadDetail() {
     if (!tenureId) return;
@@ -61,73 +40,10 @@ export function TenureTimelineDrawer({
     try {
       const res = await api<any>(`/tenures/${tenureId}`);
       setData(res);
-      setStageVal(res.stage || "Quotations");
-      setWonPremium(res.won_premium ? String(res.won_premium) : "");
-      setWinningRef(res.winning_quotation_ref || "");
-      setMissReason(res.loss_reason_category || res.miss_reason || "");
-      setNotes(res.notes || "");
-      if (res.coverage_start_date) {
-        setStartDateInput(res.coverage_start_date.substring(0, 10));
-      }
-      if (res.coverage_end_date) {
-        setEndDateInput(res.coverage_end_date.substring(0, 10));
-      }
     } catch (err) {
       console.error("Failed to load tenure detail:", err);
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function handleUpdateDates() {
-    if (!startDateInput) return;
-    setShiftingDates(true);
-    try {
-      await api(`/tenures/${tenureId}/shift-dates`, {
-        method: "POST",
-        body: JSON.stringify({
-          start_date: startDateInput,
-          end_date: endDateInput || null,
-          force_past: true,
-        }),
-      });
-      await loadDetail();
-      if (onRefresh) onRefresh();
-    } catch (err: any) {
-      alert("Failed to update dates: " + (err?.message || err));
-    } finally {
-      setShiftingDates(false);
-    }
-  }
-
-  async function handleProjectRenewal() {
-    setProjectingRenewal(true);
-    try {
-      await api(`/tenures/${tenureId}/project-renewal`, { method: "POST" });
-      await loadDetail();
-      if (onRefresh) onRefresh();
-    } catch (err: any) {
-      alert("Failed to project renewal: " + (err?.message || err));
-    } finally {
-      setProjectingRenewal(false);
-    }
-  }
-
-  async function handleMarkLapsed() {
-    const reason = prompt("Enter reason for lapse (e.g. Sold vehicle, Competitor, Unreachable):", "Customer discontinued");
-    if (!reason) return;
-    setLapsingTenure(true);
-    try {
-      await api(`/tenures/${tenureId}/lapse`, {
-        method: "POST",
-        body: JSON.stringify({ reason }),
-      });
-      await loadDetail();
-      if (onRefresh) onRefresh();
-    } catch (err: any) {
-      alert("Failed to mark tenure lapsed: " + (err?.message || err));
-    } finally {
-      setLapsingTenure(false);
     }
   }
 
@@ -139,49 +55,11 @@ export function TenureTimelineDrawer({
 
   if (!isOpen) return null;
 
-  async function handleSaveStatus() {
-    setSavingStatus(true);
-    try {
-      await api(`/tenures/${tenureId}/ledger-fields`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          stage: stageVal,
-          winning_quotation_ref: winningRef || null,
-          won_premium: wonPremium ? parseFloat(wonPremium) : null,
-          loss_reason_category: missReason || null,
-          notes: notes || null,
-        }),
-      });
-      await loadDetail();
-      if (onRefresh) onRefresh();
-    } catch (err: any) {
-      alert("Failed to save status: " + (err?.message || err));
-    } finally {
-      setSavingStatus(false);
-    }
-  }
-
-  async function handleGenerateQuote(sessionId: string) {
-    setGeneratingQuote(sessionId);
-    try {
-      await api(`/tenures/${tenureId}/generate-quote`, {
-        method: "POST",
-        body: JSON.stringify({ session_id: sessionId }),
-      });
-      await loadDetail();
-      if (onRefresh) onRefresh();
-    } catch (err: any) {
-      alert("Failed to generate quote: " + (err?.message || err));
-    } finally {
-      setGeneratingQuote(null);
-    }
-  }
-
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden bg-black/40 backdrop-blur-xs flex justify-end animate-fade-in">
+    <div className="fixed inset-0 z-50 overflow-hidden bg-black/40 backdrop-blur-xs flex justify-end animate-fade-in no-print">
       <div className="w-full max-w-2xl bg-white h-full shadow-2xl flex flex-col border-l border-neutral-200">
         {/* Drawer Header */}
-        <div className="px-6 py-5 border-b border-neutral-200 bg-neutral-50/60 flex items-center justify-between">
+        <div className="px-6 py-5 border-b border-neutral-200 bg-neutral-50/70 flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2">
               <span className="text-base font-bold text-neutral-900 tracking-tight flex items-center gap-1.5">
@@ -192,63 +70,85 @@ export function TenureTimelineDrawer({
               <span className="text-sm font-medium text-neutral-700">{data?.customer_name}</span>
             </div>
             <p className="text-xs text-neutral-500 mt-1">
-              Coverage: {data?.coverage_start_date ? new Date(data.coverage_start_date).toLocaleDateString("en-GB") : "—"} to{" "}
-              {data?.coverage_end_date ? new Date(data.coverage_end_date).toLocaleDateString("en-GB") : "—"}{" "}
-              <span className="font-semibold text-neutral-700">(Expiring {data?.expiry_month})</span>
+              Confirmed Period:{" "}
+              {data?.stage === "Issue Policy" && data?.coverage_start_date ? (
+                <strong className="font-mono text-neutral-800">
+                  {new Date(data.coverage_start_date).toLocaleDateString("en-GB")} to{" "}
+                  {data.coverage_end_date ? new Date(data.coverage_end_date).toLocaleDateString("en-GB") : "—"}
+                </strong>
+              ) : (
+                <span className="text-neutral-400 font-mono">— (Pending Policy Issue)</span>
+              )}{" "}
+              <span className="font-semibold text-neutral-600">(Cohort {data?.expiry_month})</span>
             </p>
           </div>
           <div className="flex items-center gap-2">
             <Link
               href={`/comparison?tenure_id=${tenureId}` as Route}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold transition-colors shadow-xs"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1b1717] hover:bg-black text-white text-xs font-bold transition-colors shadow-xs"
             >
               <Columns className="w-4 h-4" />
-              <span>Marketing Comparison</span>
+              <span>Open Comparison</span>
             </Link>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-200/60 transition-colors"
+              className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-200/60 transition-colors cursor-pointer"
+              title="Close Logs Drawer"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Content Area */}
+        {/* Content Area: Pure Read-Only Audit & Quotation PDF Viewer */}
         <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
           {loading ? (
             <div className="py-20 text-center text-xs text-neutral-400 flex flex-col items-center gap-2">
               <ArrowsClockwise className="w-6 h-6 animate-spin text-neutral-500" />
-              <span>Loading tenure timeline...</span>
+              <span>Loading tenure logs...</span>
             </div>
           ) : !data ? (
             <div className="py-20 text-center text-sm text-neutral-500">Tenure not found.</div>
           ) : (
             <>
-              {/* Previous Policy Banner */}
-              {data.previous_tenure && (
-                <div className="p-3 bg-amber-50/80 border border-amber-200/80 rounded-xl text-xs text-amber-900 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold uppercase tracking-wider text-[10px] bg-amber-200/80 px-2 py-0.5 rounded text-amber-950">
-                      Previous Year Policy
+              {/* Summary Status Strip */}
+              <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-xl text-xs flex items-center justify-between">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-bold text-neutral-500 uppercase tracking-wider text-[10px]">
+                    Current Stage:
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md font-bold text-xs bg-neutral-900 text-white">
+                    {data.stage || "Quotations"}
+                  </span>
+                  {data.won_premium && (
+                    <span className="text-emerald-700 font-bold font-mono">
+                      Bound: RM {Number(data.won_premium).toFixed(2)}
                     </span>
-                    <span>
-                      Exp: {data.previous_tenure.expiry_month} · Outcome: <strong>{data.previous_tenure.status.toUpperCase()}</strong>
-                      {data.previous_tenure.won_premium && ` (RM ${data.previous_tenure.won_premium.toFixed(2)})`}
+                  )}
+                  {data.winning_quotation_ref && (
+                    <span className="font-mono text-neutral-500 text-[11px]">
+                      Ref: {data.winning_quotation_ref}
                     </span>
-                  </div>
+                  )}
                 </div>
-              )}
+                {data.last_activity_at && (
+                  <span className="text-[11px] text-neutral-400 font-mono">
+                    Last active: {new Date(data.last_activity_at).toLocaleDateString("en-MY")}
+                  </span>
+                )}
+              </div>
 
               {/* 1. SOURCED INSURER QUOTATIONS & VERSIONS */}
               <div className="bg-white border border-neutral-200 rounded-xl p-4 shadow-2xs space-y-3">
                 <div className="flex items-center justify-between border-b border-neutral-100 pb-2">
                   <h3 className="text-xs font-bold text-neutral-900 uppercase tracking-wider flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                    1. Sourced Insurer Quotations &amp; Versions
+                    1. Uploaded Insurer Quotations &amp; Versions
                   </h3>
                   <span className="text-[11px] text-neutral-400 font-medium">
-                    {Object.keys(data.sourced_quotes_by_company || {}).length} Insurers
+                    {Object.keys(data.sourced_quotes_by_company || {}).length} Underwriter(s)
                   </span>
                 </div>
 
@@ -259,7 +159,7 @@ export function TenureTimelineDrawer({
                     const isExpanded = expandedCompany === company;
 
                     return (
-                      <div key={company} className="border border-neutral-200/70 rounded-lg p-3 bg-neutral-50/40 space-y-2">
+                      <div key={company} className="border border-neutral-200/70 rounded-xl p-3 bg-neutral-50/50 space-y-2">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-sm text-neutral-900">{company}</span>
@@ -269,15 +169,15 @@ export function TenureTimelineDrawer({
                             {hasHistory && (
                               <button
                                 onClick={() => setExpandedCompany(isExpanded ? null : company)}
-                                className="text-[11px] text-neutral-500 hover:text-neutral-800 underline flex items-center gap-0.5 ml-1"
+                                className="text-[11px] text-neutral-500 hover:text-neutral-800 underline flex items-center gap-0.5 ml-1 cursor-pointer"
                               >
                                 {quotes.length} versions {isExpanded ? <CaretUp /> : <CaretDown />}
                               </button>
                             )}
                           </div>
                           <div className="text-right">
-                            <span className="text-xs font-semibold text-neutral-900">
-                              Total: RM {activeQuote?.total_payable || "—"}
+                            <span className="text-xs font-mono font-bold text-neutral-900">
+                              RM {activeQuote?.total_payable || "—"}
                             </span>
                           </div>
                         </div>
@@ -286,42 +186,54 @@ export function TenureTimelineDrawer({
                           <span>Sum Insured: RM {activeQuote?.sum_insured || "—"}</span>
                           <div className="flex items-center gap-2">
                             <a
-                              href={`/sessions/${activeQuote?.session_id}`}
+                              href={`/sessions/${activeQuote?.session_id}/review`}
                               target="_blank"
-                              rel="noreferrer"
-                              className="text-[11px] font-medium text-blue-600 hover:underline flex items-center gap-1"
+                              rel="noopener noreferrer"
+                              className="text-[11px] font-semibold text-neutral-700 hover:text-black flex items-center gap-1 bg-white px-2 py-1 rounded border border-neutral-200"
                             >
-                              Review &amp; Edit <ArrowSquareOut className="w-3 h-3" />
+                              Review Draft <ArrowSquareOut className="w-3 h-3" />
                             </a>
-                            {!activeQuote?.quotation_ref && (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                disabled={generatingQuote === activeQuote?.session_id}
-                                onClick={() => handleGenerateQuote(activeQuote.session_id)}
-                                className="h-6 text-[10px] px-2"
-                              >
-                                {generatingQuote === activeQuote?.session_id ? "Generating..." : "+ Create RL Quote"}
-                              </Button>
-                            )}
+                            <a
+                              href={`/api/sessions/${activeQuote?.session_id}/pdf`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] font-semibold text-rose-700 hover:text-rose-900 flex items-center gap-1 bg-rose-50 px-2 py-1 rounded border border-rose-200"
+                            >
+                              <FilePdf size={13} className="text-rose-600" />
+                              Source PDF
+                            </a>
                           </div>
                         </div>
 
                         {/* Version History Accordion */}
                         {isExpanded && hasHistory && (
-                          <div className="mt-2 pt-2 border-t border-neutral-200/60 space-y-1.5 text-xs bg-white p-2 rounded">
+                          <div className="mt-2 pt-2 border-t border-neutral-200/60 space-y-1.5 text-xs bg-white p-2.5 rounded-lg">
                             <span className="text-[10px] font-bold uppercase text-neutral-400">Version History</span>
                             {quotes.map((q: any) => (
-                              <div key={q.session_id} className="flex items-center justify-between text-neutral-600 py-0.5">
+                              <div key={q.session_id} className="flex items-center justify-between text-neutral-600 py-1 border-b border-neutral-100 last:border-none">
                                 <div className="flex items-center gap-2">
-                                  <span className="font-semibold text-neutral-700">v{q.version}</span>
+                                  <span className="font-bold text-neutral-800">v{q.version}</span>
                                   <span className="text-neutral-400">·</span>
-                                  <span>Total: RM {q.total_payable || "—"}</span>
-                                  {q.is_active && <span className="text-[10px] text-green-700 font-bold bg-green-50 px-1 rounded">(Active)</span>}
+                                  <span className="font-mono font-semibold">RM {q.total_payable || "—"}</span>
+                                  {q.is_active && (
+                                    <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-1 rounded">
+                                      (Active)
+                                    </span>
+                                  )}
                                 </div>
-                                <span className="text-[10px] text-neutral-400">
-                                  {q.created_at ? new Date(q.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
-                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] text-neutral-400 font-mono">
+                                    {q.created_at ? new Date(q.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
+                                  </span>
+                                  <a
+                                    href={`/api/sessions/${q.session_id}/pdf`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-[10px] text-rose-700 hover:underline flex items-center gap-0.5"
+                                  >
+                                    <FilePdf size={12} /> PDF
+                                  </a>
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -332,43 +244,43 @@ export function TenureTimelineDrawer({
                 </div>
               </div>
 
-              {/* 2. GENERATED RISKLOCKER QUOTATIONS */}
+              {/* 2. GENERATED OFFICIAL RISKLOCKER QUOTATIONS */}
               <div className="bg-white border border-neutral-200 rounded-xl p-4 shadow-2xs space-y-3">
                 <div className="flex items-center justify-between border-b border-neutral-100 pb-2">
                   <h3 className="text-xs font-bold text-neutral-900 uppercase tracking-wider flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    2. Generated Risklocker Quotations
+                    2. Official Generated Risk-Locker Quotation PDFs
                   </h3>
                   <span className="text-[11px] text-neutral-400 font-medium">
-                    {data.generated_risklocker_quotations?.length || 0} Ready
+                    {data.generated_risklocker_quotations?.length || 0} Issued
                   </span>
                 </div>
 
-                {(!data.generated_risklocker_quotations || data.generated_risklocker_quotations.length === 0) ? (
-                  <div className="py-4 text-center text-xs text-neutral-400">
-                    No Risklocker quotation PDFs generated yet. Click &quot;+ Create RL Quote&quot; above to generate one.
+                {!data.generated_risklocker_quotations || data.generated_risklocker_quotations.length === 0 ? (
+                  <div className="py-4 text-center text-xs text-neutral-400 bg-neutral-50 rounded-lg">
+                    No official Risk-Locker quotation PDFs generated yet. Select a recommendation in the Comparison Matrix to issue one.
                   </div>
                 ) : (
                   <div className="space-y-2 pt-1">
                     {data.generated_risklocker_quotations.map((g: any) => (
                       <div
                         key={g.session_id}
-                        className="flex items-center justify-between p-2.5 bg-neutral-50/70 border border-neutral-200/80 rounded-lg text-xs"
+                        className="flex items-center justify-between p-3 bg-neutral-50/70 border border-neutral-200/80 rounded-xl text-xs"
                       >
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <FilePdf className="w-4 h-4 text-red-600" />
                           <span className="font-bold text-neutral-900 font-mono">{g.quotation_ref}</span>
-                          <span className="text-neutral-400">({g.company})</span>
-                          <span className="text-neutral-600 font-medium">RM {g.total_payable || "—"}</span>
+                          <span className="text-neutral-500">({g.company})</span>
+                          <span className="font-mono font-bold text-neutral-900">RM {g.total_payable || "—"}</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <a
                             href={`/api/sessions/${g.session_id}/pdf?download=true`}
                             target="_blank"
-                            rel="noreferrer"
-                            className="text-[11px] text-neutral-700 bg-white border border-neutral-200 px-2 py-1 rounded hover:bg-neutral-100 font-medium flex items-center gap-1"
+                            rel="noopener noreferrer"
+                            className="text-[11px] text-neutral-700 bg-white border border-neutral-200 px-2.5 py-1 rounded-md hover:bg-neutral-100 font-semibold flex items-center gap-1 transition-colors"
                           >
-                            <FilePdf className="w-3.5 h-3.5 text-neutral-600" /> Download PDF
+                            <FilePdf className="w-3.5 h-3.5 text-red-600" /> Download PDF
                           </a>
                         </div>
                       </div>
@@ -377,188 +289,12 @@ export function TenureTimelineDrawer({
                 )}
               </div>
 
-              {/* DATE MODULARITY & TENURE LIFECYCLE */}
+              {/* 3. AUDIT & CHRONOLOGICAL ACTIVITY LOG */}
               <div className="bg-white border border-neutral-200 rounded-xl p-4 shadow-2xs space-y-3">
                 <div className="flex items-center justify-between border-b border-neutral-100 pb-2">
                   <h3 className="text-xs font-bold text-neutral-900 uppercase tracking-wider flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                    Coverage Period &amp; Date Shifter
-                  </h3>
-                  <div className="flex items-center gap-1.5">
-                    {data.is_projected && (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-200">
-                        Projected Reminder
-                      </span>
-                    )}
-                    {(data.delay_days || 0) > 0 && (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-900">
-                        +{data.delay_days}d Late
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="p-3 bg-neutral-50/80 border border-neutral-200/80 rounded-lg text-xs space-y-3">
-                  <div className="flex items-center justify-between text-neutral-700">
-                    <span>
-                      Current Coverage: <strong className="font-mono text-neutral-900">{data.coverage_start_date ? new Date(data.coverage_start_date).toLocaleDateString("en-GB") : "—"}</strong> → <strong className="font-mono text-neutral-900">{data.coverage_end_date ? new Date(data.coverage_end_date).toLocaleDateString("en-GB") : "—"}</strong>
-                    </span>
-                    <span className="text-[11px] text-neutral-500">
-                      Cohort: <strong>{data.expiry_month}</strong>
-                    </span>
-                  </div>
-
-                  {/* Clean Side-by-side Date Inputs */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-neutral-600 mb-1">Coverage Start Date</label>
-                      <input
-                        type="date"
-                        value={startDateInput}
-                        onChange={(e) => setStartDateInput(e.target.value)}
-                        className="w-full text-xs h-8 px-2.5 border border-neutral-200 rounded-lg bg-white focus:outline-hidden focus:ring-1 focus:ring-neutral-900"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-neutral-600 mb-1">Coverage End Date</label>
-                      <input
-                        type="date"
-                        value={endDateInput}
-                        onChange={(e) => setEndDateInput(e.target.value)}
-                        className="w-full text-xs h-8 px-2.5 border border-neutral-200 rounded-lg bg-white focus:outline-hidden focus:ring-1 focus:ring-neutral-900"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end pt-1">
-                    <Button
-                      size="sm"
-                      disabled={shiftingDates || !startDateInput}
-                      onClick={handleUpdateDates}
-                      className="h-8 text-xs font-semibold px-4 bg-neutral-900 hover:bg-neutral-800 text-white cursor-pointer"
-                    >
-                      {shiftingDates ? "Updating Dates..." : "Update Dates"}
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Lifecycle Actions */}
-                <div className="flex items-center justify-between pt-1">
-                  <button
-                    type="button"
-                    disabled={lapsingTenure || data.status === "lapsed"}
-                    onClick={handleMarkLapsed}
-                    className="text-xs font-semibold text-red-600 hover:text-red-700 hover:underline disabled:opacity-50 cursor-pointer"
-                  >
-                    {data.status === "lapsed" ? "Policy Marked Lapsed" : "Customer Not Renewing / Mark Lapsed"}
-                  </button>
-                </div>
-              </div>
-
-              {/* 3. STATUS & OUTCOME RECORD */}
-              <div className="bg-white border border-neutral-200 rounded-xl p-4 shadow-2xs space-y-4">
-                <div className="flex items-center justify-between border-b border-neutral-100 pb-2">
-                  <h3 className="text-xs font-bold text-neutral-900 uppercase tracking-wider flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-purple-500"></span>
-                    3. Delivery Status &amp; Outcome
-                  </h3>
-                  <div className="flex items-center gap-2">
-                    {data.stage_updated_at && (
-                      <span className="text-[10px] text-neutral-400">
-                        Updated {new Date(data.stage_updated_at).toLocaleDateString("en-GB")}
-                      </span>
-                    )}
-                    <span className="text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-neutral-100 text-neutral-700">
-                      {stageVal}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <label className="block font-semibold text-neutral-700 mb-1">Tenure Stage</label>
-                    <select
-                      value={stageVal}
-                      onChange={(e) => setStageVal(e.target.value)}
-                      className="w-full h-8 px-2 rounded-lg border border-neutral-200 bg-white text-xs font-medium focus:ring-1 focus:ring-neutral-900 outline-none"
-                    >
-                      <option value="Quotations">Quotations (Ingestion &amp; Comparison)</option>
-                      <option value="Material to Client">Material to Client (Sent / Reviewing)</option>
-                      <option value="Close - Win">Close - Win (Policy Won &amp; Bound)</option>
-                      <option value="Issue Policy">Issue Policy (Final Policy Issued)</option>
-                      <option value="Close - Lose">Close - Lose (Lost to Competitor / Declined)</option>
-                    </select>
-                  </div>
-
-                  {(stageVal === "Close - Win" || stageVal === "Issue Policy") && (
-                    <>
-                      <div>
-                        <label className="block font-semibold text-neutral-700 mb-1">Won Premium (RM)</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={wonPremium}
-                          onChange={(e) => setWonPremium(e.target.value)}
-                          placeholder="e.g. 995.00"
-                          className="w-full h-8 px-2 rounded-lg border border-neutral-200 bg-white text-xs font-medium focus:ring-1 focus:ring-neutral-900 outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="block font-semibold text-neutral-700 mb-1">Winning Quotation Ref</label>
-                        <input
-                          type="text"
-                          value={winningRef}
-                          onChange={(e) => setWinningRef(e.target.value)}
-                          placeholder="e.g. RL260000101"
-                          className="w-full h-8 px-2 rounded-lg border border-neutral-200 bg-white text-xs font-medium focus:ring-1 focus:ring-neutral-900 outline-none"
-                        />
-                      </div>
-                    </>
-                  )}
-
-                  {stageVal === "Close - Lose" && (
-                    <div className="sm:col-span-2">
-                      <label className="block font-semibold text-neutral-700 mb-1">Miss Reason</label>
-                      <input
-                        type="text"
-                        value={missReason}
-                        onChange={(e) => setMissReason(e.target.value)}
-                        placeholder="e.g. Customer renewed direct / Competitor price cheaper by RM50"
-                        className="w-full h-8 px-2 rounded-lg border border-neutral-200 bg-white text-xs font-medium focus:ring-1 focus:ring-neutral-900 outline-none"
-                      />
-                    </div>
-                  )}
-
-                  <div className="sm:col-span-2">
-                    <label className="block font-semibold text-neutral-700 mb-1">Notes / Delivery Details</label>
-                    <textarea
-                      rows={2}
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value)}
-                      placeholder="e.g. Sent quote via WhatsApp on 15/06/2026. Customer requested STMB with windscreen."
-                      className="w-full p-2 rounded-lg border border-neutral-200 bg-white text-xs font-medium focus:ring-1 focus:ring-neutral-900 outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-2">
-                  <Button
-                    size="sm"
-                    disabled={savingStatus}
-                    onClick={handleSaveStatus}
-                    className="h-8 px-4 text-xs font-semibold"
-                  >
-                    {savingStatus ? "Saving..." : "Update Tenure Outcome"}
-                  </Button>
-                </div>
-              </div>
-
-              {/* 4. AUDIT & ACTIVITY TIMELINE */}
-              <div className="bg-white border border-neutral-200 rounded-xl p-4 shadow-2xs space-y-3">
-                <div className="flex items-center justify-between border-b border-neutral-100 pb-2">
-                  <h3 className="text-xs font-bold text-neutral-900 uppercase tracking-wider flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-neutral-400"></span>
-                    4. Chronological Activity Log
+                    <Clock className="w-4 h-4 text-neutral-500" />
+                    3. Chronological Audit &amp; Activity Log
                   </h3>
                   <span className="text-[11px] text-neutral-400 font-medium">
                     {data.activities?.length || 0} events
@@ -566,7 +302,7 @@ export function TenureTimelineDrawer({
                 </div>
 
                 <div className="space-y-2 pt-1">
-                  {(!data.activities || data.activities.length === 0) ? (
+                  {!data.activities || data.activities.length === 0 ? (
                     <div className="text-xs text-neutral-400 py-3 text-center bg-neutral-50/60 rounded-lg">
                       No activity entries recorded yet for this tenure.
                     </div>
@@ -575,21 +311,23 @@ export function TenureTimelineDrawer({
                       let timeStr = "";
                       if (act.created_at) {
                         try {
-                          timeStr = new Date(act.created_at).toLocaleString("en-US", {
+                          timeStr = new Date(act.created_at).toLocaleString("en-MY", {
                             year: "numeric",
                             month: "numeric",
                             day: "numeric",
                             hour: "numeric",
                             minute: "2-digit",
                             second: "2-digit",
-                            hour12: true,
                           });
                         } catch {
                           timeStr = act.created_at;
                         }
                       }
                       return (
-                        <div key={act.id} className="flex items-start gap-2.5 text-xs py-2 border-b border-neutral-100 last:border-none">
+                        <div
+                          key={act.id}
+                          className="flex items-start gap-2.5 text-xs py-2 border-b border-neutral-100 last:border-none"
+                        >
                           <div className="w-2 h-2 rounded-full bg-blue-500 mt-1.5 shrink-0" />
                           <div className="flex-1">
                             <p className="text-neutral-900 font-semibold text-xs leading-snug">{act.summary}</p>

@@ -52,7 +52,7 @@ from app.rendering.render_context import (
 )
 from app.services.template_assets import resolve_template_asset
 from app.services.template_revision_service import validate_template_config
-from app.services.workspace_service import BUSINESS_ROLES, generation_blockers
+from app.services.workspace_common import BUSINESS_ROLES, generation_blockers
 from app.storage.supabase import StorageError, SupabaseStorage
 from app.rendering.template_renderer import _balance_benefit_grid_elements, render_quotation_html
 
@@ -261,6 +261,8 @@ def _referenced_asset_ids(config: dict, cards: dict) -> set[str]:
             asset_ids.add(SYSTEM_DEFAULT_SLOTS["risklocker_logo"])
         elif eid in {"pay_bank_sub", "text_ul2w5ka", "bank_logo", "pay_bank_logo"}:
             asset_ids.add(SYSTEM_DEFAULT_SLOTS["bank_logo"])
+        elif eid in {"rc_b_qr_code", "qr_code", "qr"}:
+            asset_ids.add(SYSTEM_DEFAULT_SLOTS["qr_code"])
     for collection in cards.values():
         for card in collection:
             if card.get("asset_id"):

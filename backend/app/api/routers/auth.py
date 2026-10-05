@@ -10,7 +10,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, File, Form, Header, Query, Request, Response as FastAPIResponse, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, Header, Query, Request, Response as FastAPIResponse, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -172,6 +172,7 @@ from app.services.auth_service import (
     serialize_user,
     update_user,
 )
+from app.services.security_notification_service import send_login_alert
 from app.services.notification_service import (
     get_notifications,
     get_unread_count,
@@ -381,6 +382,7 @@ def auth_login(
     payload: LoginRequest,
     request: Request,
     response: FastAPIResponse,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     settings: Settings = Depends(settings_dep),
 ) -> dict:
@@ -395,6 +397,15 @@ def auth_login(
     )
     max_age = int((session.absolute_expires_at - session.last_activity_at).total_seconds())
     set_auth_cookies(response, settings, raw_token, max_age)
+
+    # Asynchronously dispatch security alert email via Resend
+    background_tasks.add_task(
+        send_login_alert,
+        user_email=user.email,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
     return {"user": serialize_user(user)}
 
 
@@ -429,7 +440,7 @@ def user_create(payload: UserCreateRequest, db: Session = Depends(get_db), user:
 @router.get("/users")
 def users_list(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     if user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value}:
-        raise AppError("You do not have permission to view users.", 403)
+        raise AppError("Only the master administrator can manage user accounts and staff roles.", 403)
     query = select(User).order_by(User.created_at.desc())
     if user.role == Role.ADMIN.value:
         query = query.where(User.role != Role.SUPER_ADMIN.value)
@@ -459,7 +470,7 @@ def users_update(user_id: str, payload: UserUpdateRequest, db: Session = Depends
 @router.post("/users/{user_id}/sessions/revoke")
 def user_sessions_revoke(user_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     if user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value}:
-        raise AppError("You do not have permission to revoke sessions.", 403)
+        raise AppError("Only the master administrator can manage user accounts and staff roles.", 403)
     target = db.get(User, user_id)
     if not target:
         raise AppError("User not found.", 404)

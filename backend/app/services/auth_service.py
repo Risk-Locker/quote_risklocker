@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import math
+import threading
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, text
@@ -22,6 +25,53 @@ from app.models.tables import AuthSession, User
 
 # Token collision retry limit
 MAX_SESSION_RETRIES = 3
+
+# Account lockout invariants (5 consecutive failed passwords -> 120s cooldown)
+LOCKOUT_THRESHOLD = 5
+LOCKOUT_BLOCK_SECONDS = 120
+LOCKOUT_WINDOW_SECONDS = 900  # 15 minutes failure window
+
+_lockout_lock = threading.Lock()
+_login_failures: dict[str, list[float]] = defaultdict(list)
+_lockout_until: dict[str, float] = {}
+
+
+def check_login_lockout(key: str) -> None:
+    """Raise AppError 429 if the given key (normalized email) is currently locked out."""
+    now = datetime.now(timezone.utc).timestamp()
+    with _lockout_lock:
+        until = _lockout_until.get(key)
+        if until is not None:
+            if until > now:
+                retry_after = max(1, math.ceil(until - now))
+                raise AppError(
+                    f"Too many failed login attempts. Account temporarily locked for 2 minutes. Try again in {retry_after} seconds.",
+                    status_code=429,
+                    headers={"Retry-After": str(retry_after)},
+                    extra={"retry_after": retry_after},
+                )
+            else:
+                _lockout_until.pop(key, None)
+                _login_failures.pop(key, None)
+
+
+def record_login_failure(key: str) -> int:
+    """Record a failed attempt. If threshold reached, set lockout and return retry_after seconds."""
+    now = datetime.now(timezone.utc).timestamp()
+    with _lockout_lock:
+        _login_failures[key] = [t for t in _login_failures[key] if now - t < LOCKOUT_WINDOW_SECONDS]
+        _login_failures[key].append(now)
+        if len(_login_failures[key]) >= LOCKOUT_THRESHOLD:
+            _lockout_until[key] = now + LOCKOUT_BLOCK_SECONDS
+            return LOCKOUT_BLOCK_SECONDS
+    return 0
+
+
+def reset_login_failures(key: str) -> None:
+    """Reset failure tracker on successful login."""
+    with _lockout_lock:
+        _lockout_until.pop(key, None)
+        _login_failures.pop(key, None)
 
 
 def _utcnow() -> datetime:
@@ -159,7 +209,7 @@ def _require_user_management_permission(actor: User, target: User | None = None)
     if actor.role == Role.SUPER_ADMIN.value:
         return
     if actor.role != Role.ADMIN.value:
-        raise AppError("You do not have permission to manage users.", 403)
+        raise AppError("You do not have permission to manage users. Only the master administrator can manage user accounts and staff roles.", 403)
     if target is None:
         return
     if target.role == Role.SUPER_ADMIN.value:
@@ -186,14 +236,25 @@ def login_with_password(
     ip_address: str | None,
 ) -> tuple[User, AuthSession, str]:
     normalized = _normalize_email(email)
+    check_login_lockout(normalized)
+
     user = db.scalar(select(User).where(User.email == normalized))
     if not user or not user.password_hash or not verify_password(password, user.password_hash):
+        retry_after = record_login_failure(normalized)
+        if retry_after > 0:
+            raise AppError(
+                f"Too many failed login attempts. Account temporarily locked for 2 minutes. Try again in {retry_after} seconds.",
+                status_code=429,
+                headers={"Retry-After": str(retry_after)},
+                extra={"retry_after": retry_after},
+            )
         raise AppError("Invalid email or password.", 401)
     if getattr(settings, "app_env", "test") == "production" and user.role == Role.DEV.value:
         raise AppError("Invalid email or password.", 401)
     if user.status != AccountStatus.ACTIVE.value:
         raise AppError("This account is not active.", 401)
 
+    reset_login_failures(normalized)
     session, raw_token = _create_session(db, settings, user.id, user_agent, ip_address)
     _audit(db, user.id, "login", "user", user.id, {"ip": ip_address, "ua": user_agent})
     db.commit()
