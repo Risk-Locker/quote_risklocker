@@ -501,6 +501,7 @@ def test_benefit_card_description_allows_three_lines_without_truncation():
             "cardStyle": "standard",
             "descSize": 8.5,
             "showDescription": True,
+            "textWrap": "truncate",
         },
         {
             "id": "grid2",
@@ -514,6 +515,7 @@ def test_benefit_card_description_allows_three_lines_without_truncation():
             "cardStyle": "standard",
             "descSize": 8.5,
             "showDescription": True,
+            "textWrap": "truncate",
         },
     ]
     render_context = {
@@ -704,5 +706,66 @@ def test_multi_row_specials_and_extras_no_overlap():
     assert expanded_height > 1123, f"Expected page height to auto-expand > 1123px, got {expanded_height}px"
 
 
+def test_benefit_card_title_wrap_and_desc_max_lines_options():
+    from app.rendering.template_renderer import render_quotation_html
 
+    render_context = {
+        "current_benefits": [
+            {
+                "label": "24 Hours Breakdown Towing & Accident Assistance Service With Long Title",
+                "description": "Comprehensive long description line one with details. Line two provides additional warranty terms. Line three clarifies towing limit. Line four includes zero deductible guarantee.",
+                "_showTitle": True,
+                "_showDescription": True,
+            }
+        ],
+        "available_addons": [],
+        "extras": [],
+    }
 
+    # Case 1: textWrap = "wrap" (2 rows clamp) and descMaxLines = 4
+    elements_wrap = [
+        {
+            "id": "grid1",
+            "type": "benefit-grid",
+            "gridKind": "current_benefits",
+            "x": 40,
+            "y": 444,
+            "w": 714,
+            "h": 100,
+            "columns": 3,
+            "textWrap": "wrap",
+            "descMaxLines": 4,
+            "showDescription": True,
+        }
+    ]
+    html_wrap = render_quotation_html(
+        {},
+        template_config={"canvas": {"width": 794, "height": 1123, "elements": elements_wrap}},
+        render_context=render_context,
+    )
+    assert "-webkit-line-clamp:2" in html_wrap  # title uses 2 rows
+    assert "-webkit-line-clamp:4" in html_wrap  # description allows 4 rows without truncation
+
+    # Case 2: textWrap = "multi" (multi-row wrap) and descMaxLines = 5
+    elements_multi = [
+        {
+            "id": "grid1",
+            "type": "benefit-grid",
+            "gridKind": "current_benefits",
+            "x": 40,
+            "y": 444,
+            "w": 714,
+            "h": 100,
+            "columns": 3,
+            "textWrap": "multi",
+            "descMaxLines": 5,
+            "showDescription": True,
+        }
+    ]
+    html_multi = render_quotation_html(
+        {},
+        template_config={"canvas": {"width": 794, "height": 1123, "elements": elements_multi}},
+        render_context=render_context,
+    )
+    assert "-webkit-line-clamp:5" in html_multi  # description allows 5 rows
+    assert "word-break:break-word;white-space:normal" in html_multi  # title wraps freely across rows without clamp

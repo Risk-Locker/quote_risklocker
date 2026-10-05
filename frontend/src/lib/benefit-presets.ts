@@ -32,13 +32,14 @@ export type BenefitCardStyle = {
   titleSize: number;
   titleWeight: "medium" | "semibold" | "bold";
   titleColor?: string;
-  textWrap: "truncate" | "wrap";
+  textWrap: "truncate" | "wrap" | "multi";
   valueBadgeStyle: "green" | "pill" | "subtle" | "red" | "hidden";
   coverageSize?: number;
   coverageColor?: string;
   descSize?: number;
   descWeight?: "normal" | "medium" | "semibold" | "bold";
   descColor?: string;
+  descMaxLines?: number; // max description rows: 1, 2, 3, 4, 5, or 0 (auto/unlimited)
   costSize?: number;
   costColor?: string;
   costBgColor?: string;
@@ -562,6 +563,7 @@ export function applyPresetToCanvasElement(elem: any, presetInput: string | Bene
     descSize: preset.descSize ?? 9,
     descWeight: preset.descWeight ?? "normal",
     descColor: preset.descColor ?? "#64748b",
+    descMaxLines: preset.descMaxLines ?? 3,
     costSize: preset.costSize ?? 9,
     costColor: preset.costColor ?? "#b91c1c",
     costBgColor: preset.costBgColor ?? "#fee2e2",

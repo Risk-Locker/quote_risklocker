@@ -3350,6 +3350,33 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
                           <option value="masonry">Masonry flow</option>
                         </Select>
                       </label>
+                      <label className="grid gap-1 text-xs font-bold uppercase">
+                        Title Wrap
+                        <Select
+                          value={(selected as any).textWrap || "wrap"}
+                          disabled={readOnly || Boolean(selected.locked)}
+                          onChange={(event) => updateElement(selected.id, { textWrap: event.target.value as any })}
+                        >
+                          <option value="truncate">1 Row (Truncate)</option>
+                          <option value="wrap">2 Rows (Wrap)</option>
+                          <option value="multi">Multi-Row</option>
+                        </Select>
+                      </label>
+                      <label className="grid gap-1 text-xs font-bold uppercase">
+                        Max Desc Rows
+                        <Select
+                          value={String((selected as any).descMaxLines ?? 3)}
+                          disabled={readOnly || Boolean(selected.locked)}
+                          onChange={(event) => updateElement(selected.id, { descMaxLines: Number(event.target.value) })}
+                        >
+                          <option value="1">1 Row</option>
+                          <option value="2">2 Rows</option>
+                          <option value="3">3 Rows</option>
+                          <option value="4">4 Rows</option>
+                          <option value="5">5 Rows</option>
+                          <option value="0">Auto (Unlimited)</option>
+                        </Select>
+                      </label>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <NumField label="Aspect" value={selected.packing?.aspectRatio ?? 1.45} disabled={readOnly || Boolean(selected.locked)} onChange={(value) => updateElement(selected.id, { packing: { ...(selected.packing || {}), aspectRatio: Math.max(0.1, value) } })} />

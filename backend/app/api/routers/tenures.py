@@ -307,22 +307,13 @@ def get_tenure_stage_summary(
         end_of_month = datetime(year, month, last_day, 23, 59, 59, tzinfo=timezone.utc)
         pattern = f"{year:04d}-{month:02d}"
         query = query.where(
-            or_(
-                InsuranceTenure.expiry_month == pattern,
-                InsuranceTenure.coverage_start_date.between(start_of_month, end_of_month),
-                InsuranceTenure.coverage_end_date.between(start_of_month, end_of_month),
-            )
+            InsuranceTenure.coverage_start_date.between(start_of_month, end_of_month)
         )
     elif year:
         start_of_year = datetime(year, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
         end_of_year = datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
-        pattern = f"{year:04d}-%"
         query = query.where(
-            or_(
-                InsuranceTenure.expiry_month.like(pattern),
-                InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year),
-                InsuranceTenure.coverage_end_date.between(start_of_year, end_of_year),
-            )
+            InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year)
         )
 
     rows = db.execute(query.group_by(InsuranceTenure.stage)).all()
@@ -381,6 +372,11 @@ def list_tenure_months(
             month_data[s_ym]["tenure_ids"].add(t_id)
             if veh:
                 month_data[s_ym]["vehicles"].add(veh)
+
+            if t_status == "hit":
+                month_data[s_ym]["hit"] += 1
+            elif t_status == "miss":
+                month_data[s_ym]["miss"] += 1
 
         # End / Expiry month
         e_ym = None
@@ -484,25 +480,20 @@ def list_tenures(
 
             query = query.where(
                 or_(
-                    InsuranceTenure.expiry_month == ym_pattern,
                     InsuranceTenure.coverage_start_date.between(start_of_month, end_of_month),
                     InsuranceTenure.coverage_end_date.between(start_of_month, end_of_month),
+                    InsuranceTenure.expiry_month == ym_pattern,
                 )
             )
         else:
-            query = query.where(InsuranceTenure.expiry_month == m_str)
+            query = query.where(InsuranceTenure.coverage_start_date.isnot(None))
 
     elif year and str(year) != "all":
         start_of_year = datetime(year, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
         end_of_year = datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
-        y_pattern = f"{year:04d}-%"
 
         query = query.where(
-            or_(
-                InsuranceTenure.expiry_month.like(y_pattern),
-                InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year),
-                InsuranceTenure.coverage_end_date.between(start_of_year, end_of_year),
-            )
+            InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year)
         )
 
     # 2. Category filtering: active (exclude Close - Lose & Others) vs lost vs all
@@ -963,14 +954,10 @@ def get_tenure_yoy_stats(
         else:
             all_active += 1
 
-        # Determine year(s)
+        # Determine year(s) - strictly based on deal start date
         years_for_item = set()
-        if exp_m and len(exp_m) >= 4 and exp_m[:4].isdigit():
-            years_for_item.add(exp_m[:4])
         if start_dt:
             years_for_item.add(str(start_dt.year))
-        if end_dt:
-            years_for_item.add(str(end_dt.year))
 
         for y_str in years_for_item:
             year_data[y_str]["tenure_ids"].add(t_id)

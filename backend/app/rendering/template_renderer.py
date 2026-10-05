@@ -584,10 +584,12 @@ def _dynamic_benefit_grid(
 
         # --- Short description row ---
         desc_weight = "700" if element.get("descWeight") == "bold" else ("600" if element.get("descWeight") == "semibold" else ("500" if element.get("descWeight") == "medium" else "400"))
-        desc_max_h = max(55.0, desc_fs * 5.0)
+        desc_max_lines = int(element.get("descMaxLines") or element.get("descLines") or 4)
+        clamp_css = f"-webkit-line-clamp:{desc_max_lines};display:-webkit-box;-webkit-box-orient:vertical;" if desc_max_lines > 0 else "display:block;"
+        desc_max_h = max(55.0, desc_fs * (desc_max_lines + 1.0)) if desc_max_lines > 0 else 999.0
         desc_html = (
-            f'<span style="display:block;font-size:{desc_fs}px;font-weight:{desc_weight};line-height:1.2;color:{desc_color};'
-            f'max-height:{desc_max_h}px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical">'
+            f'<span style="font-size:{desc_fs}px;font-weight:{desc_weight};line-height:1.2;color:{desc_color};'
+            f'max-height:{desc_max_h}px;overflow:hidden;{clamp_css}">'
             f'{desc_str}</span>'
             if (desc_str and not is_minimal and card.get("_showDescription", True)) else ""
         )
@@ -642,10 +644,18 @@ def _dynamic_benefit_grid(
         # Title font: shrink for long labels
         title_fs = lbl_fs - 1.0 if len(label_str) > 30 else (lbl_fs - 0.5 if len(label_str) > 18 else float(lbl_fs))
         title_margin = 1 if is_minimal else 3
+        text_wrap = str(element.get("textWrap") or "wrap")
+        if text_wrap == "truncate":
+            title_wrap_css = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;"
+        elif text_wrap == "multi":
+            title_wrap_css = "overflow:hidden;display:block;word-break:break-word;white-space:normal;"
+        else:
+            title_wrap_css = "overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word;white-space:normal;"
+
 
         title_html = (
-            f'<div style="display:block;font-size:{title_fs}px;font-weight:700;line-height:1.15;'
-            f'color:{title_color};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+            f'<div style="font-size:{title_fs}px;font-weight:700;line-height:1.15;'
+            f'color:{title_color};{title_wrap_css}'
             f'margin-bottom:{title_margin}px">{label_str}</div>'
             if card.get("_showGroup", True) else ""
         )
@@ -915,6 +925,7 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     qr_y = 210.0
     qr_h = (drivers_y - 8.0) - qr_y
     qr_center_y = qr_y + qr_h / 2.0
+    qr_size = min(90.0, max(70.0, qr_h - 16.0))
 
     current_cards = [c for c in list((render_context or {}).get("current_benefits") or []) if not _is_core_motor_cover(c)] if render_context else []
     addon_cards = list((render_context or {}).get("available_addons") or []) if render_context else []
@@ -948,20 +959,25 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     has_desc = grid1.get("showDescription") is not False if grid1 else True
     has_cov = grid1.get("showCoverage") is not False if grid1 else True
 
+    desc_max_lines = int(grid1.get("descMaxLines") or grid1.get("descLines") or 4) if grid1 else 4
+    text_wrap = str(grid1.get("textWrap") or "wrap") if grid1 else "wrap"
+    extra_title_h = 10.0 if text_wrap == "multi" else 0.0
+    extra_desc_h = max(0.0, (desc_max_lines - 4) * 12.0) if has_desc else 0.0
+
     default_row_height = (
         36.0 if is_minimal
         else (
-            max(78.0 if cols == 2 else 74.0, 44.0 + dynamic_icon_extra + (22.0 if has_desc else 0.0) + (8.0 if has_cov else 0.0))
+            max(78.0 if cols == 2 else 74.0, 44.0 + dynamic_icon_extra + (22.0 if has_desc else 0.0) + (8.0 if has_cov else 0.0)) + extra_title_h + extra_desc_h
             if has_desc
-            else max(50.0, 38.0 + dynamic_icon_extra + (8.0 if has_cov else 0.0))
+            else max(50.0, 38.0 + dynamic_icon_extra + (8.0 if has_cov else 0.0)) + extra_title_h
         )
     )
     addon_row_height = (
         36.0 if is_minimal
         else (
-            max(88.0 if cols == 2 else 84.0, 46.0 + dynamic_icon_extra + (8.0 if has_cov else 0.0) + (16.0 if has_desc else 0.0) + 14.0)
+            max(88.0 if cols == 2 else 84.0, 46.0 + dynamic_icon_extra + (8.0 if has_cov else 0.0) + (16.0 if has_desc else 0.0) + 14.0) + extra_title_h + extra_desc_h
             if has_desc
-            else max(64.0, 44.0 + dynamic_icon_extra + 14.0)
+            else max(64.0, 44.0 + dynamic_icon_extra + 14.0) + extra_title_h
         )
     )
     card_gap = 5.0
@@ -993,13 +1009,14 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
             e["h"] = qr_h
         elif eid == "rc_b_qr_code":
             e["x"] = 516.0
-            e["y"] = qr_center_y - 35.0
-            e["w"] = 70.0
-            e["h"] = 70.0
+            e["y"] = qr_center_y - (qr_size / 2.0)
+            e["w"] = qr_size
+            e["h"] = qr_size
         elif eid == "rc_b_qr_text":
-            e["x"] = 594.0
+            text_x = 516.0 + qr_size + 8.0
+            e["x"] = text_x
             e["y"] = qr_center_y - 27.0
-            e["w"] = 152.0
+            e["w"] = 746.0 - text_x
             e["h"] = 54.0
         elif eid == "rc_container_drivers":
             e["y"] = drivers_y

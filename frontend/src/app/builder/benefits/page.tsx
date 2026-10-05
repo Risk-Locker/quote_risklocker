@@ -2909,7 +2909,7 @@ ${aiMarkdownTable}`;
                               <ShieldCheck size={16} />
                             )}
                           </div>
-                          <span className="font-semibold text-xs text-[var(--rl-text-strong)] truncate">
+                          <span className="font-semibold text-xs text-[var(--rl-text-strong)] line-clamp-2 leading-snug break-words">
                             {concept.label}
                           </span>
                           {disabledConceptIdSet.has(concept.id) && (
@@ -2987,7 +2987,7 @@ ${aiMarkdownTable}`;
                         (() => {
                           const fallbackDesc = (offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null) || concept.description;
                           return fallbackDesc ? (
-                            <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] truncate" title={fallbackDesc}>
+                            <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] line-clamp-3 leading-snug break-words" title={fallbackDesc}>
                               {fallbackDesc}
                             </div>
                           ) : null;
@@ -3045,7 +3045,7 @@ ${aiMarkdownTable}`;
                                 <Sparkle size={16} />
                               )}
                             </div>
-                            <span className="font-semibold text-xs text-[var(--rl-text-strong)] truncate">
+                            <span className="font-semibold text-xs text-[var(--rl-text-strong)] line-clamp-2 leading-snug break-words">
                               {concept.label}
                             </span>
                             {disabledConceptIdSet.has(concept.id) && (
@@ -3154,7 +3154,7 @@ ${aiMarkdownTable}`;
                         (() => {
                           const fallbackDesc = (offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null) || concept.description;
                           return fallbackDesc ? (
-                            <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] truncate" title={fallbackDesc}>
+                            <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] line-clamp-3 leading-snug break-words" title={fallbackDesc}>
                               {fallbackDesc}
                             </div>
                           ) : null;
@@ -3294,7 +3294,7 @@ ${aiMarkdownTable}`;
                               <ShieldCheck size={16} />
                             )}
                           </div>
-                          <span className="font-semibold text-xs text-[var(--rl-text-strong)] truncate">
+                          <span className="font-semibold text-xs text-[var(--rl-text-strong)] line-clamp-2 leading-snug break-words">
                             {concept.label}
                           </span>
                           {disabledConceptIdSet.has(concept.id) && (
@@ -3372,7 +3372,7 @@ ${aiMarkdownTable}`;
                         (() => {
                           const fallbackDesc = (offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null) || concept.description;
                           return fallbackDesc ? (
-                            <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] truncate" title={fallbackDesc}>
+                            <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] line-clamp-3 leading-snug break-words" title={fallbackDesc}>
                               {fallbackDesc}
                             </div>
                           ) : null;
@@ -3430,7 +3430,7 @@ ${aiMarkdownTable}`;
                                 <Sparkle size={16} />
                               )}
                             </div>
-                            <span className="font-semibold text-xs text-[var(--rl-text-strong)] truncate">
+                            <span className="font-semibold text-xs text-[var(--rl-text-strong)] line-clamp-2 leading-snug break-words">
                               {concept.label}
                             </span>
                             {disabledConceptIdSet.has(concept.id) && (
@@ -3539,7 +3539,7 @@ ${aiMarkdownTable}`;
                         (() => {
                           const fallbackDesc = (offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null) || concept.description;
                           return fallbackDesc ? (
-                            <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] truncate" title={fallbackDesc}>
+                            <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] line-clamp-3 leading-snug break-words" title={fallbackDesc}>
                               {fallbackDesc}
                             </div>
                           ) : null;

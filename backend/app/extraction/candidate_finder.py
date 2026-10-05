@@ -90,14 +90,14 @@ DEFAULT_ALIASES = {
     "car_brand": ["make", "brand", "car"],
     "car_model": ["model", "vehicle model"],
     "engine_cc": ["engine cc", "capacity", "cubic capacity", "engine capacity", "keupayaan enjin", "cc", "motor capacity", "keupayaan motor", "electric motor", "motor output", "output", "kw", "watt"],
-    "excess_amount": ["excess amount", "excess all claims", "excess", "policy excess", "ekses", "ekses polisi", "lebihan"],
+    "excess_amount": ["excess amount", "excess all claims", "excess", "policy excess", "voluntary excess", "ekses", "ekses polisi", "ekses sukarela", "lebihan"],
     "compulsory_excess": ["compulsory excess", "ekses wajib", "ekses mandatori"],
     "valid_until": ["quotation validity", "tarikh sah quotation", "tarikh sah", "tempoh sah", "sah laku sehingga", "valid until", "validity period", "validity date", "validity", "this quotation will expire on", "quotation will expire on", "expire on", "expiry date", "tarikh luput", "sah sehingga"],
     "coverage_amount": ["sum insured", "coverage amount", "insured value", "market value", "agreed value", "sum covered", "jumlah diinsuranskan", "nilai yang dipersetujui"],
     "sum_insured": ["sum insured", "coverage amount", "insured value", "market value", "agreed value", "sum covered", "jumlah diinsuranskan", "nilai yang dipersetujui", "nilai pasaran"],
     "market_value": ["market value", "nilai pasaran", "agreed value", "sum insured", "jumlah diinsuranskan"],
-    "agreed_value": ["agreed value", "nilai yang dipersetujui", "sum insured", "jumlah diinsuranskan"],
-    "basic_premium": ["basic premium", "premium asas", "basic contribution", "sum covered basic"],
+    "agreed_value": ["agreed value", "nilai yang dipersetujui", "vehicle agreed value", "sum insured", "jumlah diinsuranskan"],
+    "basic_premium": ["basic premium", "premium asas", "basic contribution", "caruman asas", "sumbangan asas", "sum covered basic", "premium kenderaan", "caruman kenderaan", "basic tariff", "motor premium"],
     "gross_premium": ["gross premium", "premium kasar", "gross contribution", "jumlah premium kasar"],
     "service_tax": ["service tax", "cukai perkhidmatan", "sst", "cukai servis"],
     "stamp_duty": ["stamp duty", "duti setem"],
@@ -105,9 +105,9 @@ DEFAULT_ALIASES = {
     "total_amount": ["total payable", "total amount", "amount payable", "gross amount", "jumlah bayaran", "total / jumlah"],
     "optional_cover_amount": ["total optional cover amount", "total optional cover", "extra benefit", "manfaat tambahan", "optional cover amount"],
     "service_fee": ["service fee", "runner fee", "runner charge", "upah runner"],
-    "ncd_percent": ["ncd", "ncb", "no claim discount", "no claim bonus", "dtt", "diskaun tanpa tuntutan"],
+    "ncd_percent": ["ncd", "ncb", "no claim discount", "no claim bonus", "dtt", "diskaun tanpa tuntutan", "kadar ncd", "kadar dtt", "ncd / dtt", "ncb / dtt"],
     "windscreen": ["windscreen", "cermin hadapan"],
-    "valuation_type": ["valuation type", "valuation basis", "basis of sum insured", "type of sum insured", "basis of valuation", "agreed value", "market value"],
+    "valuation_type": ["valuation type", "valuation basis", "basis of sum insured", "type of sum insured", "basis of valuation", "agreed value", "vehicle agreed value", "market value"],
     }
 
 DEFAULT_VEHICLE_BRANDS = ("PROTON", "PERODUA", "HONDA", "TOYOTA", "NISSAN", "BMW", "MERCEDES", "MERCEDES-BENZ", "MAZDA", "MITSUBISHI", "KIA", "HYUNDAI")
@@ -331,9 +331,13 @@ def _semantic_label_map() -> list[tuple[str, str]]:
         ("engine no", "engine_no"),
         ("sum covered (rm)", "coverage_amount"),
         ("sum covered", "coverage_amount"),
+        ("vehicle agreed value", "coverage_amount"),
+        ("est. value incl. accessories & spare parts", "coverage_amount"),
         ("sum insured (agreed value)", "coverage_amount"),
         ("vehicle sum insured", "coverage_amount"),
         ("sum insured", "coverage_amount"),
+        ("jumlah diinsuranskan (nilai yang dipersetujui)", "coverage_amount"),
+        ("jumlah diinsuranskan", "coverage_amount"),
         ("cover type", "coverage_type"),
         ("coverage type", "coverage_type"),
         ("class of vehicle", "vehicle_class"),
@@ -342,25 +346,35 @@ def _semantic_label_map() -> list[tuple[str, str]]:
         ("product type", "product_name"),
         ("basic contribution", "basic_premium_vehicle"),
         ("basic premium", "basic_premium_vehicle"),
+        ("premium asas", "basic_premium_vehicle"),
+        ("sumbangan asas", "basic_premium_vehicle"),
         ("gross contribution", "premium"),
         ("gross premium", "premium"),
+        ("premium kasar", "premium"),
         ("total contribution payable", "total_amount"),
         ("total payable", "total_amount"),
         ("total / jumlah", "total_amount"),
         ("total", "total_amount"),
         ("stamp duty", "stamp_duty"),
+        ("duti setem", "stamp_duty"),
+        ("setem hasil", "stamp_duty"),
         ("sst", "service_tax"),
         ("service tax", "service_tax"),
+        ("cukai perkhidmatan", "service_tax"),
+        ("voluntary excess", "excess_amount"),
         ("excess all claims", "excess_amount"),
         ("excess amount", "excess_amount"),
+        ("*excess amount", "excess_amount"),
         ("policy excess", "excess_amount"),
-        ("compulsory excess", "compulsory_excess"),
-        ("ekses wajib", "compulsory_excess"),
-        ("ekses mandatori", "compulsory_excess"),
+        ("excess lebihan", "excess_amount"),
+        ("excess / lebihan", "excess_amount"),
         ("excess", "excess_amount"),
         ("lebihan", "excess_amount"),
         ("ekses", "excess_amount"),
         ("ekses polisi", "excess_amount"),
+        ("compulsory excess", "compulsory_excess"),
+        ("ekses wajib", "compulsory_excess"),
+        ("ekses mandatori", "compulsory_excess"),
     ]
 
 
@@ -394,9 +408,11 @@ def _add_semantic_label_values(text: str, page_text: list[dict], results: dict[s
         has_colon = ":" in line
         head = line.split(":", 1)[0].lower().strip(" :-") if has_colon else ""
         for label, field in label_map:
-            if field == "excess_amount" and any(k in head or k in normalized for k in ["compulsory", "wajib", "mandatori"]):
-                continue
-            if field == "compulsory_excess" and any(k in head or k in normalized for k in ["policy", "polisi"]):
+            if field == "excess_amount":
+                # Reject any line or label that belongs to instructional/narrative clauses
+                if any(k in head or k in normalized for k in ["compulsory", "wajib", "mandatori", "is applicable", "shall be borne", "under 21", "bawah 21", "provisional", "percubaan", "learner", "sementara", "if you", "increase to", "penalty", "in the event"]):
+                    continue
+            if field == "compulsory_excess" and any(k in head or k in normalized for k in ["policy", "polisi", "voluntary"]):
                 continue
             matched = False
             if has_colon:
@@ -405,6 +421,27 @@ def _add_semantic_label_values(text: str, page_text: list[dict], results: dict[s
                 matched = normalized == label or normalized.startswith(f"{label} ") or normalized.endswith(f" {label}") or normalized.endswith(label) or f" {label} " in normalized or f" {label}:" in normalized
             if matched:
                 value = _line_value(line, lines, index)
+                if field == "excess_amount":
+                    # Check if forward value is from a narrative disclaimer sentence
+                    narrative_fwd = False
+                    for fwd_line in lines[index : min(len(lines), index + 4)]:
+                        if any(k in fwd_line.lower() for k in ["is applicable", "under 21", "shall be borne", "provisional", "learner", "holding", "unnamed driver"]):
+                            narrative_fwd = True
+                            break
+                    # For inverted table layouts (e.g. Sompo: '0.00' \n 'RM' \n 'Voluntary Excess')
+                    prev_val = None
+                    for pi in range(index - 1, max(-1, index - 4), -1):
+                        p_line = lines[pi].strip()
+                        if p_line in ("RM", "MYR", ":"):
+                            continue
+                        m_prev = re.search(r"^\s*(?:RM|MYR)?\s*([\d,]+(?:\.\d{2})?)\s*(?:RM|MYR)?\s*$", p_line, re.IGNORECASE)
+                        if m_prev:
+                            prev_val = m_prev.group(1)
+                            break
+                    if narrative_fwd:
+                        value = prev_val or "0.00"
+                    elif prev_val is not None and (not value or value in ("400.00", "400")):
+                        value = prev_val
                 if field == "valid_until":
                     dates = _dates(value)
                     value = dates[0] if dates else value.replace("Until", "").strip(" ()")
@@ -488,8 +525,9 @@ def _add_contribution_rows(text: str, page_text: list[dict], results: dict[str, 
             if money_values:
                 _add_line_value(results, "compulsory_excess", money_values[0], "semantic_contribution_row", 0.94, line, text, page_text)
         elif "policy excess" in lower or "lebihan" in lower or "ekses" in lower or (lower.startswith("excess") and any(c.isdigit() for c in window)):
-            if money_values:
-                _add_line_value(results, "excess_amount", money_values[0], "semantic_contribution_row", 0.92, line, text, page_text)
+            if not any(k in lower or k in window.lower() for k in ["is applicable", "shall be borne", "under 21", "bawah 21", "provisional", "percubaan", "learner", "sementara", "if you", "increase to", "penalty", "in the event", "unnamed driver"]):
+                if money_values:
+                    _add_line_value(results, "excess_amount", money_values[0], "semantic_contribution_row", 0.92, line, text, page_text)
         if "total optional cover" in lower or "extra benefit" in lower or "manfaat tambahan" in lower:
             amount = row_amount(index)
             if amount:

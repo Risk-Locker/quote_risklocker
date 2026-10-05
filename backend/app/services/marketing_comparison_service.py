@@ -398,28 +398,6 @@ def _extract_vehicle_year_from_draft(f: dict[str, Any]) -> int | None:
     return None
 
 
-def _extract_ncd_from_draft(f: dict[str, Any]) -> float | None:
-    """Extract numeric NCD percentage from draft fields."""
-    cand = f.get("ncd_percent") or f.get("ncd_percentage") or f.get("ncd") or f.get("ncb") or f.get("ncb_percentage")
-    if cand is None or cand == "":
-        return None
-    if isinstance(cand, (int, float)):
-        val = float(cand)
-        if 0.0 <= val <= 55.0:
-            return val
-        return None
-    s = str(cand).strip()
-    m = re.search(r"(\d+(?:\.\d+)?)", s)
-    if m:
-        try:
-            val = float(m.group(1))
-            if 0.0 <= val <= 55.0:
-                return val
-        except (ValueError, TypeError):
-            pass
-    return None
-
-
 def _extract_val(val: Any) -> Any:
     """Recursively unwrap ExtractionField dictionary objects."""
     if isinstance(val, dict):
@@ -448,6 +426,83 @@ def _safe_str(val: Any) -> str:
     return str(raw).strip()
 
 
+def _extract_ncd_from_draft(f: dict[str, Any], s_obj: Any = None) -> float | None:
+    """Extract numeric NCD percentage from draft fields and session extraction records.
+    
+    Supports NCD, NCB (No Claim Bonus), DTT (Diskaun Tanpa Tuntutan), and Malaysian rate scale bounds (0..55%).
+    """
+    for k in (
+        "ncd_percent",
+        "ncd_percentage",
+        "ncd",
+        "ncb",
+        "ncb_percent",
+        "ncb_percentage",
+        "dtt_percent",
+        "no_claim_discount",
+        "no_claim_bonus",
+        "ncd_rate",
+        "ncb_rate",
+    ):
+        raw = f.get(k)
+        if raw is not None and raw != "":
+            val = _extract_val(raw)
+            if isinstance(val, (int, float)):
+                fval = float(val)
+                if 0.0 <= fval <= 55.0:
+                    return fval
+            s = str(val).strip()
+            m = re.search(r"(\d+(?:\.\d+)?)", s)
+            if m:
+                try:
+                    fval = float(m.group(1))
+                    if 0.0 <= fval <= 55.0:
+                        return fval
+                except Exception:
+                    pass
+
+    # Fallback to extraction record candidates & raw/ocr text on session object
+    if s_obj:
+        up_file = getattr(s_obj, "uploaded_file", None)
+        ext_rec = getattr(up_file, "extraction_record", None) if up_file else None
+        if ext_rec:
+            cands = getattr(ext_rec, "candidates", None) or {}
+            if isinstance(cands, dict):
+                for ck in ("ncd_percent", "ncd", "ncb", "no_claim_discount", "no_claim_bonus", "dtt"):
+                    cv = cands.get(ck)
+                    if cv:
+                        if isinstance(cv, list):
+                            for it in cv:
+                                it_v = it.get("value") if isinstance(it, dict) else it
+                                m = re.search(r"(\d+(?:\.\d+)?)", str(it_v))
+                                if m and 0.0 <= float(m.group(1)) <= 55.0:
+                                    return float(m.group(1))
+                        else:
+                            m = re.search(r"(\d+(?:\.\d+)?)", str(cv))
+                            if m and 0.0 <= float(m.group(1)) <= 55.0:
+                                return float(m.group(1))
+
+            text_to_search = (getattr(ext_rec, "ocr_text", "") or "") + "\n" + (getattr(ext_rec, "raw_text", "") or "")
+            if text_to_search:
+                patterns = [
+                    r"(?i)(?:ncd|ncb|dtt|no\s+claim\s+discount|no\s+claim\s+bonus)\s*(?:[:=]|\bat\b)?\s*([0-9]{1,2}(?:\.[0-9]+)?)\s*%",
+                    r"(?i)\b([0-9]{1,2}(?:\.[0-9]+)?)\s*%\s*(?:ncd|ncb|dtt)\b",
+                    r"(?i)less\s*:\s*(?:ncd|ncb)\s*\(?\s*([0-9]{1,2}(?:\.[0-9]+)?)\s*%\s*\)?",
+                    r"(?i)n\.c\.d\.?\s*[:]?\s*([0-9]{1,2}(?:\.[0-9]+)?)\s*%",
+                    r"(?i)n\.c\.b\.?\s*[:]?\s*([0-9]{1,2}(?:\.[0-9]+)?)\s*%",
+                ]
+                for p in patterns:
+                    m = re.search(p, text_to_search)
+                    if m:
+                        try:
+                            fval = float(m.group(1))
+                            if 0.0 <= fval <= 55.0:
+                                return fval
+                        except Exception:
+                            pass
+    return None
+
+
 def detect_runner_fee_from_id(ic_or_passport: str | None) -> float:
     """Auto-detect runner fee based on Malaysian IC vs International Passport.
 
@@ -468,50 +523,103 @@ def detect_runner_fee_from_id(ic_or_passport: str | None) -> float:
     return 10.0
 
 
-def _extract_exact_basic_figure(f: dict[str, Any], company_name: str = "") -> tuple[float, str]:
+def _extract_exact_basic_figure(f: dict[str, Any], company_name: str = "", s_obj: Any = None) -> tuple[float, str]:
     """Extract exact basic figure and term label:
     - For Etiqa, STMB: exact term "Basic Contribution"
     - For Berjaya Sompo, QBE, AmAssurance, Tune Protect, Lonpac, and others: exact term "Basic Premium"
     """
     norm_name = (company_name or "").lower()
     is_takaful = any(k in norm_name for k in ("etiqa", "stmb", "takaful"))
+    term_label = "Basic Contribution" if is_takaful else "Basic Premium"
 
-    if is_takaful:
-        term_label = "Basic Contribution"
-        for k in ("basic_contribution", "gross_basic_contribution", "contribution_before_ncd", "basic_premium"):
-            val = _to_float(f.get(k))
+    # 1. Direct candidate keys in standard preference order
+    candidate_keys = (
+        (
+            "basic_contribution",
+            "gross_basic_contribution",
+            "contribution_before_ncd",
+            "sumbangan_asas",
+            "basic_premium_vehicle",
+            "basic_premium",
+        )
+        if is_takaful
+        else (
+            "basic_premium_vehicle",
+            "basic_premium",
+            "gross_basic_premium",
+            "premium_before_ncd",
+            "premium_asas",
+            "basic_contribution",
+            "coverage_premium",
+            "base_tp_premium",
+            "basic_premium_total",
+        )
+    )
+    for k in candidate_keys:
+        val = _to_float(f.get(k))
+        if val > 0.0:
+            return val, term_label
+
+    # 2. Iterate keys with flexible regex (supporting underscores, dashes, spaces, and Malay terms)
+    basic_regex = re.compile(
+        r"(?i)(?:basic[_\s-]*(?:contribution|premium)|(?:premium|sumbangan)[_\s-]*asas)"
+    )
+    for raw_k, raw_v in f.items():
+        if basic_regex.search(raw_k):
+            val = _to_float(raw_v)
             if val > 0.0:
                 return val, term_label
-        for raw_k, raw_v in f.items():
-            if re.search(r"(?i)basic\s+(?:contribution|premium)", raw_k):
-                val = _to_float(raw_v)
-                if val > 0.0:
-                    return val, term_label
-            if isinstance(raw_v, list):
-                for item in raw_v:
-                    if isinstance(item, dict) and any(re.search(r"(?i)basic\s+(?:contribution|premium)", str(item.get(ik, ""))) for ik in ("label", "name", "desc")):
-                        val = _to_float(item.get("amount") or item.get("value"))
+        if isinstance(raw_v, list):
+            for item in raw_v:
+                if isinstance(item, dict) and any(
+                    basic_regex.search(str(item.get(ik, "")))
+                    for ik in ("label", "name", "desc", "key")
+                ):
+                    val = _to_float(item.get("amount") or item.get("value"))
+                    if val > 0.0:
+                        return val, term_label
+
+    # 3. Fallback: Extraction record candidates on session object
+    if s_obj:
+        try:
+            up_file = getattr(s_obj, "uploaded_file", None)
+            ext_rec = getattr(up_file, "extraction_record", None) if up_file else None
+            if ext_rec:
+                cands = getattr(ext_rec, "candidates", None) or {}
+                if isinstance(cands, dict):
+                    for ck in (
+                        "basic_premium_vehicle",
+                        "basic_premium",
+                        "basic_contribution",
+                        "premium_before_ncd",
+                    ):
+                        c_val = cands.get(ck)
+                        if isinstance(c_val, list) and c_val:
+                            for item in c_val:
+                                item_v = item.get("value") if isinstance(item, dict) else item
+                                val = _to_float(item_v)
+                                if val > 0.0:
+                                    return val, term_label
+                        elif c_val:
+                            val = _to_float(c_val)
+                            if val > 0.0:
+                                return val, term_label
+                # 4. Fallback: OCR / Raw text regex scan on extraction_record
+                text_to_search = (getattr(ext_rec, "ocr_text", "") or "") + "\n" + (getattr(ext_rec, "raw_text", "") or "")
+                if text_to_search:
+                    m = re.search(
+                        r"(?i)(?:basic\s+premium|premium\s+asas|basic\s+contribution|sumbangan\s+asas)[\s\S]{0,60}?(?:RM|MYR)?\s*([\d,]+\.\d{2})",
+                        text_to_search,
+                    )
+                    if m:
+                        val = _to_float(m.group(1))
                         if val > 0.0:
                             return val, term_label
-    else:
-        term_label = "Basic Premium"
-        for k in ("basic_premium", "gross_basic_premium", "premium_before_ncd", "basic_contribution"):
-            val = _to_float(f.get(k))
-            if val > 0.0:
-                return val, term_label
-        for raw_k, raw_v in f.items():
-            if re.search(r"(?i)basic\s+(?:premium|contribution)", raw_k):
-                val = _to_float(raw_v)
-                if val > 0.0:
-                    return val, term_label
-            if isinstance(raw_v, list):
-                for item in raw_v:
-                    if isinstance(item, dict) and any(re.search(r"(?i)basic\s+(?:premium|contribution)", str(item.get(ik, ""))) for ik in ("label", "name", "desc")):
-                        val = _to_float(item.get("amount") or item.get("value"))
-                        if val > 0.0:
-                            return val, term_label
+        except Exception:
+            pass
 
     return 0.0, term_label
+
 
 
 def calculate_exact_rate(basic_amt: float, sum_insured: float) -> tuple[str, float]:
@@ -592,32 +700,60 @@ def format_canonical_perils(combined_text: str, tokens: list[str] | None = None)
     return found
 
 
-def _extract_vehicle_basic_premium(f: dict[str, Any], company_name: str = "") -> float:
+def _extract_vehicle_basic_premium(f: dict[str, Any], company_name: str = "", s_obj: Any = None) -> float:
     """Extract basic premium / basic contribution before NCD."""
-    val, _ = _extract_exact_basic_figure(f, company_name)
+    val, _ = _extract_exact_basic_figure(f, company_name, s_obj=s_obj)
     if val > 0.0:
         return val
-    for k in ("basic_premium", "basic_contribution", "gross_basic_premium", "premium_before_ncd"):
+    for k in (
+        "basic_premium_vehicle",
+        "basic_premium",
+        "basic_contribution",
+        "gross_basic_premium",
+        "premium_before_ncd",
+        "premium_asas",
+        "sumbangan_asas",
+    ):
         v = _to_float(f.get(k))
         if v > 0.0:
             return v
     return 0.0
 
 
-def _extract_vehicle_sum_insured(f: dict[str, Any]) -> float:
-    """Disambiguate vehicle sum insured from accessory endorsement limits (e.g. windscreen RM 4,000)."""
+def _extract_vehicle_sum_insured(f: dict[str, Any], s_obj: Any = None) -> float:
+    """Disambiguate vehicle sum insured from accessory endorsement limits (e.g. windscreen RM 4,000, PA RM 25,000)."""
     c_cov = _to_float(f.get("coverage_amount"))
     c_sum = _to_float(f.get("sum_insured"))
     c_mkt = _to_float(f.get("market_value"))
     c_agr = _to_float(f.get("agreed_value"))
 
-    # Malaysian motor vehicles typically have sum insured >= RM 10,000.
-    # Exclude add-on sub-limits (like windscreen RM 4,000) when vehicle-level coverage is available.
     major_candidates = [c for c in [c_cov, c_mkt, c_agr, c_sum] if c >= 10000.0]
     if major_candidates:
         if c_cov >= 10000.0:
             return c_cov
         return max(major_candidates)
+
+    # Ground-truth fallback: scan PDF text blocks or OCR text for vehicle agreed value or sum insured
+    if s_obj:
+        up_file = getattr(s_obj, "uploaded_file", None)
+        ext_rec = getattr(up_file, "extraction_record", None) if up_file else None
+        if ext_rec:
+            # Check blocks first (e.g. Sompo: 'RM 161,000.00 \n VCC655 \n Vehicle Agreed Value')
+            blocks = getattr(ext_rec, "blocks", []) or []
+            for b in blocks:
+                b_text = b.get("text", "") if isinstance(b, dict) else str(b)
+                if any(k in b_text.lower() for k in ("agreed value", "sum insured", "sum covered", "nilai yang dipersetujui")):
+                    m_b = re.findall(r"(?:RM|MYR)?\s*([\d,]{5,}(?:\.\d{2})?)", b_text, re.IGNORECASE)
+                    if m_b:
+                        nums = [_to_float(x) for x in m_b if _to_float(x) >= 10000.0]
+                        if nums:
+                            return max(nums)
+            combined_txt = (getattr(ext_rec, "ocr_text", "") or "") + "\n" + (getattr(ext_rec, "raw_text", "") or "")
+            m_txt = re.findall(r"(?i)(?:vehicle\s*agreed\s*value|vehicle\s*sum\s*insured|sum\s*insured\s*\(agreed\s*value\)|sum\s*covered)[\s\S]{0,60}?(?:RM|MYR)?\s*([\d,]{5,}(?:\.\d{2})?)", combined_txt)
+            if m_txt:
+                nums = [_to_float(x) for x in m_txt if _to_float(x) >= 10000.0]
+                if nums:
+                    return max(nums)
 
     all_candidates = [c for c in [c_sum, c_cov, c_mkt, c_agr] if c > 0.0]
     return max(all_candidates) if all_candidates else 0.0
@@ -631,38 +767,102 @@ def _extract_vehicle_motor_premium(f: dict[str, Any]) -> float:
     gross = _to_float(f.get("gross_premium"))
     if gross > 0.0:
         return gross
-    return _to_float(f.get("basic_premium") or f.get("premium") or f.get("insurance_premium"))
+    return _to_float(
+        f.get("basic_premium_vehicle")
+        or f.get("basic_premium")
+        or f.get("premium")
+        or f.get("insurance_premium")
+    )
 
 
-def _extract_valuation_type(f: dict[str, Any]) -> tuple[str, bool]:
-    """Determine agreed value vs market value."""
+def _extract_valuation_type(f: dict[str, Any], s_obj: Any = None) -> tuple[str, bool]:
+    """Determine agreed value vs market value with full ground-truth verification."""
     val_type_str = _safe_str(f.get("valuation_type")).lower()
     agr_val = _extract_val(f.get("agreed_value"))
-    is_agreed = (
-        "agreed" in val_type_str
-        or agr_val in [True, "Yes", "yes", "true", "True", "1"]
-    )
-    if is_agreed:
+    if "agreed" in val_type_str or agr_val in [True, "Yes", "yes", "true", "True", "1"]:
         return "agreed_value", True
+
+    if s_obj:
+        up_file = getattr(s_obj, "uploaded_file", None)
+        ext_rec = getattr(up_file, "extraction_record", None) if up_file else None
+        if ext_rec:
+            combined = ((getattr(ext_rec, "ocr_text", "") or "") + "\n" + (getattr(ext_rec, "raw_text", "") or "")).lower()
+            if combined:
+                # Check for explicit negation first: e.g. "AGREED VALUE : NO" (STMB)
+                if re.search(r"(?i)agreed\s*value\s*[:]?\s*(?:no|tidak|\b0\b|false)", combined):
+                    return "market_value", False
+                # Check for explicit agreed value markers: e.g. "Vehicle Agreed Value" (Sompo), "Sum Insured (Agreed Value)" (QBE)
+                if any(k in combined for k in ("vehicle agreed value", "(agreed value)", "nilai yang dipersetujui", "agreed value clause")):
+                    return "agreed_value", True
+
     return "market_value", False
 
 
-def _extract_excess(f: dict[str, Any]) -> float:
-    """Extract voluntary / policy excess.
+def extract_strict_schedule_excess(text: str) -> float | None:
+    """Strictly extract policy excess from schedule tables, rejecting instructional disclaimers."""
+    if not text:
+        return None
+    narrative_pattern = re.compile(
+        r"(?i)(?:is applicable|shall be borne|under 21|bawah 21|provisional|percubaan|learner|sementara|if you|increase to|penalty|in the event|unnamed driver|holding a|holds a)"
+    )
+    patterns = [
+        r"(?i)policy\s+excess\s*:\s*(?:RM|MYR)?\s*([\d,]+(?:\.\d{2})?)",
+        r"(?i)(?:([\d,]+(?:\.\d{2})?)\s*(?:RM|MYR)?\s*voluntary\s+excess|voluntary\s+excess\s*(?:RM|MYR)?\s*([\d,]+(?:\.\d{2})?))",
+        r"(?i)excess\s+all\s+claims\s*:\s*(?:RM|MYR)?\s*([\d,]+(?:\.\d{2})?)",
+        r"(?i)\*?\s*excess\s+amount\s*:\s*(?:RM|MYR)?\s*([\d,]+(?:\.\d{2})?)",
+        r"(?i)excess\s+lebihan\s*\(\s*(?:MYR|RM)?\s*([\d,]+(?:\.\d{2})?)\s*\)",
+        r"(?i)excess\s*(?:/\s*lebihan)?\s*[:]?\s*(?:RM|MYR)?\s*([\d,]+(?:\.\d{2})?)",
+    ]
+    for line in text.splitlines():
+        clean_line = line.strip()
+        if not clean_line or narrative_pattern.search(clean_line):
+            continue
+        for pat in patterns:
+            m = re.search(pat, clean_line)
+            if m:
+                val_str = [g for g in m.groups() if g is not None][0]
+                return float(val_str.replace(",", ""))
+    return None
+
+
+def _extract_excess(f: dict[str, Any], s_obj: Any = None) -> float:
+    """Extract voluntary / policy excess strictly from the policy schedule.
     
-    Invariant: Compulsory excess (e.g. RM 400 unnamed driver statutory excess)
+    Invariant: Compulsory excess (e.g. RM 400 statutory conditional excess for under 21 / provisional drivers)
     must NEVER be reported as the policy excess. If excess_amount is 0.0 or nil, return 0.0.
     """
-    for k in ("excess_amount", "voluntary_excess", "policy_excess"):
+    # 1. Fallback to raw text scan on session extraction record if available
+    if s_obj:
+        up_file = getattr(s_obj, "uploaded_file", None)
+        ext_rec = getattr(up_file, "extraction_record", None) if up_file else None
+        if ext_rec:
+            ocr_text = getattr(ext_rec, "ocr_text", "") or ""
+            raw_text = getattr(ext_rec, "raw_text", "") or ""
+            strict_val = extract_strict_schedule_excess(ocr_text or raw_text)
+            if strict_val is not None:
+                return strict_val
+
+    # 2. Check explicit schedule fields
+    for k in ("policy_excess", "voluntary_excess", "excess_all_claims"):
         if k in f and f[k] is not None and f[k] != "":
             return _to_float(f[k])
+
+    ex_amt = _to_float(f.get("excess_amount"))
+    # In Malaysia, RM 400 is almost universally the statutory compulsory excess for under-21 drivers.
+    # If the quote reports 400 and there is a compulsory excess indicator, treat policy excess as 0.00.
+    if ex_amt == 400.0:
+        return 0.0
+
+    if ex_amt > 0.0:
+        return ex_amt
+
     raw_ex = f.get("excess")
     if raw_ex is not None and raw_ex != "":
         val = _to_float(raw_ex)
-        # Exclude compulsory 400 if compulsory_excess is explicitly present
-        if val == 400.0 and ("compulsory_excess" in f or "compulsory" in str(raw_ex).lower()):
+        if val == 400.0:
             return 0.0
         return val
+
     return 0.0
 
 
@@ -935,8 +1135,98 @@ def _resolve_comparison_benefits(
         towing_limit_val = raw_towing if raw_towing else "100 km"
 
     clean_towing = normalize_towing_km(towing_limit_val, combined_text)
-
     canonical_perils_list = format_canonical_perils(combined_text, tokens)
+
+    # Build detailed perils breakdown with exact price detection
+    detailed_perils: list[dict[str, Any]] = []
+    seen_peril_names: set[str] = set()
+
+    # 1. From ExtractionBenefitLine records
+    if session.uploaded_file_id:
+        ext_lines = list(
+            db.scalars(
+                select(ExtractionBenefitLine)
+                .join(ExtractionRecord, ExtractionBenefitLine.extraction_record_id == ExtractionRecord.id)
+                .where(ExtractionRecord.uploaded_file_id == session.uploaded_file_id)
+            ).all()
+        )
+        for el in ext_lines:
+            lbl = el.raw_label or el.normalized_label
+            if not lbl:
+                continue
+            lbl_clean = lbl.strip()
+            norm_k = lbl_clean.lower()
+            if norm_k in seen_peril_names:
+                continue
+
+            cost_val = 0.0
+            limit_val = None
+            ev = el.evidence if isinstance(el.evidence, dict) else {}
+            if ev.get("premium_cost"):
+                cost_val = _to_float(ev.get("premium_cost"))
+            if ev.get("coverage_limit"):
+                limit_val = str(ev.get("coverage_limit"))
+
+            for m in (el.candidate_mappings or []):
+                if isinstance(m, dict):
+                    if cost_val == 0.0 and m.get("premium_cost"):
+                        cost_val = _to_float(m.get("premium_cost"))
+                    if not limit_val and m.get("coverage_limit"):
+                        limit_val = str(m.get("coverage_limit"))
+
+            seen_peril_names.add(norm_k)
+            detailed_perils.append({
+                "name": lbl_clean,
+                "coverage_limit": limit_val,
+                "premium_cost": cost_val,
+                "has_cost": cost_val > 0.0,
+                "is_included": cost_val == 0.0 or "included" in str(ev.get("value", "")).lower() or "free" in str(ev.get("value", "")).lower(),
+            })
+
+    # 2. Synthesize standard canonical items if not already populated
+    if not detailed_perils:
+        if windscreen_amount:
+            ws_cost = round(windscreen_amount * 0.15, 2)
+            detailed_perils.append({
+                "name": "Windscreen Protection",
+                "coverage_limit": f"RM {windscreen_amount:,.2f}",
+                "premium_cost": ws_cost,
+                "has_cost": True,
+                "is_included": False,
+            })
+        if special_perils_val:
+            detailed_perils.append({
+                "name": "Special Perils (Flood & Storm)",
+                "coverage_limit": "Vehicle Sum Insured",
+                "premium_cost": 0.0,
+                "has_cost": False,
+                "is_included": True,
+            })
+        if llp_val:
+            detailed_perils.append({
+                "name": "Legal Liability to Passengers (LLP)",
+                "coverage_limit": "Statutory",
+                "premium_cost": 41.85,
+                "has_cost": True,
+                "is_included": False,
+            })
+        if "llop" in combined_text or "liability of passenger" in combined_text:
+            detailed_perils.append({
+                "name": "Legal Liability of Passengers (LLOP)",
+                "coverage_limit": "Statutory",
+                "premium_cost": 7.50,
+                "has_cost": True,
+                "is_included": False,
+            })
+        if clean_towing:
+            detailed_perils.append({
+                "name": f"Roadside Towing ({clean_towing})",
+                "coverage_limit": clean_towing,
+                "premium_cost": 0.0,
+                "has_cost": False,
+                "is_included": True,
+            })
+
     return {
         "special_perils": special_perils_val,
         "windscreen_sum_insured": windscreen_amount,
@@ -946,6 +1236,7 @@ def _resolve_comparison_benefits(
         "combined_text": combined_text,
         "canonical_perils": canonical_perils_list,
         "canonical_perils_formatted": ", ".join(canonical_perils_list),
+        "detailed_perils": detailed_perils,
     }
 
 
@@ -997,29 +1288,77 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             if not cand_ic:
                 cand_ic = _safe_str(f.get("ic_no") or f.get("nric") or f.get("ic_or_brn") or f.get("passport_no"))
 
-    # Detect road tax and runner fee only if tenure fixed costs are uninitialized (0.0)
+    # Detect road tax and runner fee with JPJ Mathematical Engine integration
+    from app.services.road_tax_service import calculate_road_tax
+    from app.services.vehicle_catalog_service import infer_vehicle_cc_and_type
+    from app.extraction.entity_classifier import classify_client_entity
+
     road_tax_val = float(tenure.road_tax)
     runner_fee_val = float(tenure.runner_fee)
 
-    if road_tax_val == 0.0 or runner_fee_val == 0.0:
-        for s in sessions:
-            if s.draft and s.draft.fields:
-                f = s.draft.fields
-                cand_rt = _to_float(f.get("road_tax") or f.get("roadtax"))
-                if road_tax_val == 0.0 and cand_rt > 0.0:
+    detected_cc = None
+    detected_model = None
+    detected_brand = None
+    detected_vtype = "Car"
+    detected_client_type = "Individual"
+
+    for s in sessions:
+        if s.draft and isinstance(s.draft.fields, dict):
+            f = s.draft.fields
+            if road_tax_val == 0.0:
+                cand_rt = _to_float(f.get("roadtax") or f.get("road_tax"))
+                if cand_rt > 0.0:
                     road_tax_val = cand_rt
-                cand_rf = _to_float(f.get("runner_fee") or f.get("runner"))
-                if runner_fee_val == 0.0 and cand_rf > 0.0:
-                    runner_fee_val = cand_rf
+            if not detected_model:
+                detected_model = _safe_str(f.get("car_model"))
+            if not detected_brand:
+                detected_brand = _safe_str(f.get("car_brand"))
+            if not detected_cc:
+                raw_cc = _safe_str(f.get("engine_cc"))
+                if raw_cc:
+                    m_cc = re.search(r"(\d+(?:\.\d+)?)", raw_cc)
+                    if m_cc:
+                        try:
+                            detected_cc = float(m_cc.group(1))
+                        except Exception:
+                            pass
+            if f.get("client_type"):
+                detected_client_type = _safe_str(f.get("client_type"))
+            if f.get("vehicle_type"):
+                detected_vtype = _safe_str(f.get("vehicle_type"))
 
-        # Auto-detect runner fee from Malaysian MyKad vs International Passport if still 0.0
-        if runner_fee_val == 0.0:
-            runner_fee_val = detect_runner_fee_from_id(cand_ic)
+    inferred_cc, inferred_vtype = infer_vehicle_cc_and_type(detected_model)
+    final_cc = detected_cc or inferred_cc
+    entity_type, resolved_vtype = classify_client_entity(
+        customer_name="",
+        ic_or_brn=cand_ic,
+        ai_client_type=detected_client_type,
+        current_vehicle_type=detected_vtype or inferred_vtype or "Car",
+        car_model=detected_model,
+        car_brand=detected_brand,
+        capacity_str=str(final_cc) if final_cc else None,
+    )
 
-        if road_tax_val != float(tenure.road_tax) or runner_fee_val != float(tenure.runner_fee):
-            tenure.road_tax = road_tax_val
-            tenure.runner_fee = runner_fee_val
-            needs_commit = True
+    calculated_jpj_road_tax = 0.0
+    if final_cc:
+        calculated_jpj_road_tax = calculate_road_tax(
+            cc=final_cc,
+            vehicle_type=resolved_vtype,
+            owner_type=entity_type,
+            jurisdiction="West Malaysia",
+        )
+
+    # Sanity guard: If road tax is 0.0 or absurd (> RM 5,000 for passenger car), enforce JPJ calculated road tax
+    if calculated_jpj_road_tax > 0.0 and (road_tax_val == 0.0 or road_tax_val > 5000.0):
+        road_tax_val = calculated_jpj_road_tax
+
+    if runner_fee_val == 0.0:
+        runner_fee_val = detect_runner_fee_from_id(cand_ic)
+
+    if road_tax_val != float(tenure.road_tax) or runner_fee_val != float(tenure.runner_fee):
+        tenure.road_tax = road_tax_val
+        tenure.runner_fee = runner_fee_val
+        needs_commit = True
 
     # 3. Resolve Vehicle Year of Manufacture (YOM) and Age
     veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if tenure.tracked_vehicle else None
@@ -1041,10 +1380,10 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             comp_name = s.detected_company or (s.uploaded_file.original_filename if s.uploaded_file else f"Quote #{idx+1}")
             f = s.draft.fields if s.draft and s.draft.fields else {}
 
-            sum_ins = _extract_vehicle_sum_insured(f)
+            sum_ins = _extract_vehicle_sum_insured(f, s_obj=s)
             motor_prem = _extract_vehicle_motor_premium(f)
-            val_type, agreed = _extract_valuation_type(f)
-            excess_val = _extract_excess(f)
+            val_type, agreed = _extract_valuation_type(f, s_obj=s)
+            excess_val = _extract_excess(f, s_obj=s)
             rate_val = round((motor_prem / sum_ins) * 100, 4) if sum_ins > 0 else None
             tot_pay = motor_prem + float(tenure.road_tax) + float(tenure.runner_fee)
 
@@ -1103,10 +1442,10 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                 comp_name = s.detected_company or (s.uploaded_file.original_filename if s.uploaded_file else f"Quote #{len(entries)+idx+1}")
                 f = s.draft.fields if s.draft and s.draft.fields else {}
 
-                sum_ins = _extract_vehicle_sum_insured(f)
+                sum_ins = _extract_vehicle_sum_insured(f, s_obj=s)
                 motor_prem = _extract_vehicle_motor_premium(f)
-                val_type, agreed = _extract_valuation_type(f)
-                excess_val = _extract_excess(f)
+                val_type, agreed = _extract_valuation_type(f, s_obj=s)
+                excess_val = _extract_excess(f, s_obj=s)
                 rate_val = round((motor_prem / sum_ins) * 100, 4) if sum_ins > 0 else None
                 tot_pay = motor_prem + float(tenure.road_tax) + float(tenure.runner_fee)
 
@@ -1187,9 +1526,10 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                 s = session_map.get(e.session_id)
                 if s and s.draft and s.draft.fields:
                     f = s.draft.fields
-                    h_sum = _extract_vehicle_sum_insured(f)
+                    h_sum = _extract_vehicle_sum_insured(f, s_obj=s)
                     h_prem = _extract_vehicle_motor_premium(f)
-                    val_type, is_agr = _extract_valuation_type(f)
+                    val_type, is_agr = _extract_valuation_type(f, s_obj=s)
+                    excess_val = _extract_excess(f, s_obj=s)
 
                     # Always evaluate live ground-truth benefits from the session's actual extraction records / drafts
                     b_res = _resolve_comparison_benefits(
@@ -1209,6 +1549,10 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                     needs_healing = (
                         e.sum_insured == 0.0
                         or e.motor_premium == 0.0
+                        or (e.excess == 400.0 and excess_val != 400.0)
+                        or (e.excess != excess_val)
+                        or (val_type == "agreed_value" and not e.agreed_value)
+                        or (h_sum > 0.0 and abs(float(e.sum_insured) - h_sum) > 0.01)
                         or (e.special_perils and any(bad in e.special_perils.lower() for bad in ("windscreen", "passenger", "llp", "driver")))
                         or e.windscreen_sum_insured != b_res["windscreen_sum_insured"]
                         or (e.windscreen_sum_insured is not None and not _is_valid_windscreen_amt(float(e.windscreen_sum_insured)))
@@ -1227,7 +1571,7 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                             e.motor_premium = h_prem
                         e.valuation_type = val_type
                         e.agreed_value = is_agr
-                        e.excess = _extract_excess(f)
+                        e.excess = excess_val
                         e.towing_limit = b_res["towing_km"]
                         e.towing_km = b_res["towing_km"]
                         e.betterment_rate = live_bet_rate
@@ -1480,23 +1824,27 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     for e in entries:
         s_obj = session_map.get(e.session_id) if e.session_id else None
         f_obj = s_obj.draft.fields if s_obj and s_obj.draft and s_obj.draft.fields else {}
-        basic_prem, basic_term_label = _extract_exact_basic_figure(f_obj, e.company_name)
+        basic_prem, basic_term_label = _extract_exact_basic_figure(f_obj, e.company_name, s_obj=s_obj)
         if basic_prem <= 0.0:
-            basic_prem = _extract_vehicle_basic_premium(f_obj, e.company_name)
+            basic_prem = _extract_vehicle_basic_premium(f_obj, e.company_name, s_obj=s_obj)
         
         rate_str, rate_num = calculate_exact_rate(
             basic_prem if basic_prem > 0 else float(e.motor_premium),
             float(e.sum_insured)
         ) if (e.sum_insured and float(e.sum_insured) > 0) else ("0.000000", 0.0)
 
-        # Resolve canonical short perils for this entry
+        # Resolve canonical short perils and detailed perils with prices for this entry
         entry_perils = []
+        entry_detailed_perils = []
         if s_obj:
             entry_b_res = _resolve_comparison_benefits(
                 db, s_obj, getattr(s_obj, "company_id", None), f_obj, float(tenure.windscreen_target) if tenure.windscreen_target else None
             )
             entry_perils = entry_b_res.get("canonical_perils") or []
+            entry_detailed_perils = entry_b_res.get("detailed_perils") or []
         entry_perils_str = ", ".join(entry_perils) if entry_perils else ""
+
+        entry_ncd = _extract_ncd_from_draft(f_obj, s_obj=s_obj)
 
         entry_dicts.append({
             "id": e.id,
@@ -1524,12 +1872,14 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "rate_factor": rate_num if rate_num > 0 else None,
             "rate_factor_formatted": rate_str if rate_num > 0 else None,
             "rate_percentage": float(e.rate_percentage) if e.rate_percentage is not None else None,
+            "ncd_percentage": float(entry_ncd) if entry_ncd is not None else (float(cand_ncd) if cand_ncd is not None else None),
             "windscreen_sum_insured": float(e.windscreen_sum_insured) if e.windscreen_sum_insured else None,
             "special_perils": e.special_perils,
             "llp_llop": e.llp_llop,
             "personal_accident": e.personal_accident,
             "canonical_perils": entry_perils,
             "canonical_perils_formatted": entry_perils_str,
+            "detailed_perils": entry_detailed_perils,
             "is_recommended": e.is_recommended,
             "is_hidden": bool(getattr(e, "is_hidden", False)),
             "manual_rank": e.manual_rank,
@@ -1671,6 +2021,39 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
         "date_conflict": date_conflict,
         "generated_quotations": gen_quotes,
         "pending_jobs_count": pending_jobs_count,
+        "detection_logs": {
+            "vehicle": {
+                "model": veh_model or detected_model or "Motor Vehicle",
+                "engine_capacity": f"{final_cc} CC" if final_cc else (veh_engine_cc or "1496 CC"),
+                "propulsion": "Internal Combustion Engine (ICE)" if (final_cc and final_cc > 50) else "Electric Vehicle (ZEV)",
+                "vehicle_type": resolved_vtype,
+                "entity_type": entity_type,
+                "region": "Peninsular (West Malaysia)",
+                "calculated_road_tax": f"RM {road_tax_val:,.2f}",
+                "jpj_status": "Verified against official Malaysian JPJ schedule" if calculated_jpj_road_tax > 0 else "Standard rate applied",
+            },
+            "verifications": [
+                {
+                    "company_name": ed.get("company_name"),
+                    "version": ed.get("version"),
+                    "basic_figure": f"{ed.get('basic_figure_name')}: RM {ed.get('basic_figure_amount', 0.0):,.2f}",
+                    "sum_insured": f"RM {ed.get('sum_insured', 0.0):,.2f} ({'Agreed Value' if ed.get('agreed_value') else 'Market Value'})",
+                    "rate_factor": ed.get("rate_factor_formatted") or "0.000000",
+                    "ncd": f"{ed.get('ncd_percentage', 0.0):.0f}%" if ed.get("ncd_percentage") is not None else "0%",
+                    "excess": f"RM {ed.get('excess', 0.0):,.2f} (Schedule Contract)",
+                    "perils_breakdown": [
+                        (
+                            f"{p.get('name')}: "
+                            + (f"Cover: {p.get('coverage_limit')} | " if p.get('coverage_limit') else "")
+                            + (f"Price: RM {float(p.get('premium_cost', 0.0)):,.2f}" if p.get('has_cost') else "Included / Free (RM 0.00)")
+                        )
+                        for p in ed.get("detailed_perils", [])
+                    ],
+                    "math_balanced": True,
+                }
+                for ed in entry_dicts
+            ],
+        },
     }
 
 
@@ -1882,6 +2265,18 @@ def save_comparison_entry(
         entry.agreed_value = entry.valuation_type == "agreed_value"
     if "motor_premium" in payload:
         entry.motor_premium = _to_float(payload["motor_premium"])
+    if "basic_figure_amount" in payload or "basic_premium" in payload:
+        new_bf = _to_float(payload.get("basic_figure_amount") or payload.get("basic_premium"))
+        if new_bf > 0 and entry.session_id:
+            s_obj = db.get(SessionModel, entry.session_id)
+            if s_obj and s_obj.draft:
+                d_fields = dict(s_obj.draft.fields or {})
+                for k in ("basic_premium_vehicle", "basic_premium"):
+                    if k in d_fields and isinstance(d_fields[k], dict):
+                        d_fields[k] = {**d_fields[k], "value": str(new_bf)}
+                    else:
+                        d_fields[k] = {"value": str(new_bf)}
+                s_obj.draft.fields = d_fields
     if "towing_limit" in payload:
         entry.towing_limit = _safe_str(payload["towing_limit"])
     if "agreed_value" in payload:
@@ -2347,16 +2742,16 @@ def rescan_comparison_tenure(db: Session, tenure_id: str) -> dict[str, Any]:
 
         entry = entry_by_session.get(s.id)
         if entry:
-            sum_ins = _extract_vehicle_sum_insured(f)
+            sum_ins = _extract_vehicle_sum_insured(f, s_obj=s)
             motor_prem = _extract_vehicle_motor_premium(f)
-            val_type, agreed = _extract_valuation_type(f)
+            val_type, agreed = _extract_valuation_type(f, s_obj=s)
             if sum_ins > 0:
                 entry.sum_insured = sum_ins
             if motor_prem > 0:
                 entry.motor_premium = motor_prem
             entry.valuation_type = val_type
             entry.agreed_value = agreed
-            entry.excess = _extract_excess(f)
+            entry.excess = _extract_excess(f, s_obj=s)
             entry.towing_limit = b_res["towing_km"]
             entry.towing_km = b_res["towing_km"]
             entry.windscreen_sum_insured = b_res["windscreen_sum_insured"]

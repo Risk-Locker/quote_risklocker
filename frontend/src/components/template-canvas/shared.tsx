@@ -79,6 +79,35 @@ export type CanvasElement = {
   textDensity?: "comfortable" | "normal" | "compact";
   layoutMode?: "normal" | "masonry";
   benefitPreset?: string;
+  textWrap?: "truncate" | "wrap" | "multi";
+  descMaxLines?: number;
+  shape?: string;
+  borderWidth?: number;
+  borderStyle?: string;
+  elevation?: string;
+  uniformHeight?: number;
+  iconSize?: number;
+  imageFit?: string;
+  iconPadShape?: string;
+  titleSize?: number;
+  titleWeight?: string;
+  titleColor?: string;
+  coverageSize?: number;
+  coverageColor?: string;
+  descSize?: number;
+  descWeight?: string;
+  descColor?: string;
+  costSize?: number;
+  costColor?: string;
+  costBgColor?: string;
+  bgColor?: string;
+  borderColor?: string;
+  textColor?: string;
+  accentColor?: string;
+  showDescription?: boolean;
+  showCoverage?: boolean;
+  showCost?: boolean;
+  sectionVisibility?: any;
   emptyState?: "hide" | "message";
   emptyMessage?: string;
   hideCoverage?: boolean;
@@ -865,11 +894,21 @@ export function CanvasElementView({
                       >
                         {showGroup && (
                           <div
-                            className="font-bold leading-snug text-[var(--rl-text-strong)] shrink-0 truncate"
+                            className={`font-bold leading-snug shrink-0 ${
+                              (element as any).textWrap === "truncate"
+                                ? "truncate"
+                                : (element as any).textWrap === "wrap"
+                                ? "line-clamp-2 leading-tight break-words"
+                                : "leading-tight break-words"
+                            }`}
                             style={{
                               fontSize: (element as any).titleSize || density.label,
                               marginBottom: 3,
                               color: (element as any).titleColor || (element as any).textColor || undefined,
+                              display: (element as any).textWrap === "truncate" ? "block" : "-webkit-box",
+                              WebkitLineClamp: (element as any).textWrap === "truncate" ? 1 : ((element as any).textWrap === "wrap" ? 2 : undefined),
+                              WebkitBoxOrient: "vertical",
+                              overflow: "hidden",
                             }}
                           >
                             {label}
@@ -928,6 +967,8 @@ export function CanvasElementView({
                               const customCostColor = (element as any).costColor;
                               const customCostBg = (element as any).costBgColor;
 
+                              const customDescMaxLines = (element as any).descMaxLines !== undefined ? Number((element as any).descMaxLines) : 3;
+
                               const hasVal = Boolean(val && !computedHideCoverage);
                               const hasCost = Boolean(costBadge && !computedHideCost);
 
@@ -966,11 +1007,22 @@ export function CanvasElementView({
                                   )}
                                   {desc && showDescription && (
                                     <span
-                                      className="line-clamp-2 leading-tight text-[var(--rl-text-muted)] mt-0.5"
+                                      className={`leading-tight mt-0.5 text-[var(--rl-text-muted)] ${
+                                        customDescMaxLines === 1 ? "line-clamp-1" :
+                                        customDescMaxLines === 2 ? "line-clamp-2" :
+                                        customDescMaxLines === 3 ? "line-clamp-3" :
+                                        customDescMaxLines === 4 ? "line-clamp-4" :
+                                        customDescMaxLines === 5 ? "line-clamp-5" :
+                                        customDescMaxLines === 0 ? "" : "line-clamp-3"
+                                      }`}
                                       style={{
                                         fontSize: customDescSize,
                                         fontWeight: customDescWeight ? (customDescWeight === "bold" ? 700 : customDescWeight === "semibold" ? 600 : customDescWeight === "medium" ? 500 : 400) : undefined,
                                         color: customDescColor || undefined,
+                                        display: customDescMaxLines === 0 ? "block" : "-webkit-box",
+                                        WebkitLineClamp: customDescMaxLines === 0 ? undefined : (customDescMaxLines || 3),
+                                        WebkitBoxOrient: "vertical",
+                                        overflow: "hidden",
                                       }}
                                     >
                                       {desc}
@@ -1143,11 +1195,21 @@ export function CanvasElementView({
                           >
                             {showGroup && (
                               <div
-                                className={`font-bold leading-tight truncate ${isDark ? "text-white" : "text-[var(--rl-text-strong)]"}`}
+                                className={`font-bold leading-tight ${
+                                  (element as any).textWrap === "truncate"
+                                    ? "truncate"
+                                    : (element as any).textWrap === "wrap"
+                                    ? "line-clamp-2 leading-tight break-words"
+                                    : "leading-tight break-words"
+                                } ${isDark ? "text-white" : "text-[var(--rl-text-strong)]"}`}
                                 style={{
                                   fontSize: isMinimal ? density.label - 0.5 : ((element as any).titleSize || density.label),
                                   marginBottom: isMinimal ? 1 : 3,
                                   color: (element as any).titleColor || (element as any).textColor || undefined,
+                                  display: (element as any).textWrap === "truncate" ? "block" : "-webkit-box",
+                                  WebkitLineClamp: (element as any).textWrap === "truncate" ? 1 : ((element as any).textWrap === "wrap" ? 2 : undefined),
+                                  WebkitBoxOrient: "vertical",
+                                  overflow: "hidden",
                                 }}
                               >
                                 {label}
@@ -1244,11 +1306,22 @@ export function CanvasElementView({
                                           )}
                                           {!isMinimal && desc && showDescription && (
                                             <span
-                                              className={`line-clamp-2 leading-tight mt-0.5 ${isDark ? "text-slate-400" : "text-[var(--rl-text-muted)]"}`}
+                                              className={`leading-tight mt-0.5 ${
+                                                ((element as any).descMaxLines === 1) ? "line-clamp-1" :
+                                                ((element as any).descMaxLines === 2) ? "line-clamp-2" :
+                                                ((element as any).descMaxLines === 3) ? "line-clamp-3" :
+                                                ((element as any).descMaxLines === 4) ? "line-clamp-4" :
+                                                ((element as any).descMaxLines === 5) ? "line-clamp-5" :
+                                                ((element as any).descMaxLines === 0) ? "" : "line-clamp-3"
+                                              } ${isDark ? "text-slate-400" : "text-[var(--rl-text-muted)]"}`}
                                               style={{ 
                                                 fontSize: customDescSize,
                                                 fontWeight: customDescWeight ? (customDescWeight === "bold" ? 700 : customDescWeight === "semibold" ? 600 : customDescWeight === "medium" ? 500 : 400) : undefined,
-                                                color: customDescColor || undefined 
+                                                color: customDescColor || undefined,
+                                                display: (element as any).descMaxLines === 0 ? "block" : "-webkit-box",
+                                                WebkitLineClamp: (element as any).descMaxLines === 0 ? undefined : ((element as any).descMaxLines || 3),
+                                                WebkitBoxOrient: "vertical",
+                                                overflow: "hidden",
                                               }}
                                             >
                                               {desc}
@@ -1606,6 +1679,7 @@ export function balanceBenefitGridElements(
   const qrY = 210;
   const qrH = (driversY - 8) - qrY;
   const qrCenterY = qrY + qrH / 2;
+  const qrSize = Math.min(90, Math.max(70, qrH - 16));
 
   const currentCards = benefitData?.current_benefits || [];
   const addonCards = benefitData?.available_addons || [];
@@ -1638,16 +1712,21 @@ export function balanceBenefitGridElements(
   const showDesc = (grid1 as any).showDescription !== false;
   const showCov = (grid1 as any).showCoverage !== false;
 
+  const descMaxLines = Number((grid1 as any).descMaxLines ?? 4);
+  const textWrap = (grid1 as any).textWrap ?? "wrap";
+  const extraTitleH = textWrap === "multi" ? 10 : 0;
+  const extraDescH = showDesc && descMaxLines > 4 ? (descMaxLines - 4) * 12 : 0;
+
   const defaultRowHeight = isMinimal
     ? 36
     : showDesc
-    ? Math.max(cols === 2 ? 78 : 74, 44 + dynamicIconExtra + (showDesc ? 22 : 0) + (showCov ? 8 : 0))
-    : Math.max(50, 38 + dynamicIconExtra + (showCov ? 8 : 0));
+    ? Math.max(cols === 2 ? 78 : 74, 44 + dynamicIconExtra + (showDesc ? 22 : 0) + (showCov ? 8 : 0)) + extraTitleH + extraDescH
+    : Math.max(50, 38 + dynamicIconExtra + (showCov ? 8 : 0)) + extraTitleH;
   const addonRowHeight = isMinimal
     ? 36
     : showDesc
-    ? Math.max(cols === 2 ? 88 : 84, 46 + dynamicIconExtra + (showCov ? 8 : 0) + (showDesc ? 16 : 0) + 14)
-    : Math.max(64, 44 + dynamicIconExtra + 14);
+    ? Math.max(cols === 2 ? 88 : 84, 46 + dynamicIconExtra + (showCov ? 8 : 0) + (showDesc ? 16 : 0) + 14) + extraTitleH + extraDescH
+    : Math.max(64, 44 + dynamicIconExtra + 14) + extraTitleH;
   const cardGap = 5;
 
   const adjustCommon = (e: CanvasElement): CanvasElement => {
@@ -1676,13 +1755,14 @@ export function balanceBenefitGridElements(
       e.h = qrH;
     } else if (e.id === "rc_b_qr_code") {
       e.x = 516;
-      e.y = qrCenterY - 35;
-      e.w = 70;
-      e.h = 70;
+      e.y = qrCenterY - qrSize / 2;
+      e.w = qrSize;
+      e.h = qrSize;
     } else if (e.id === "rc_b_qr_text") {
-      e.x = 594;
+      const textX = 516 + qrSize + 8;
+      e.x = textX;
       e.y = qrCenterY - 27;
-      e.w = 152;
+      e.w = 746 - textX;
       e.h = 54;
     } else if (e.id === "rc_container_drivers") {
       e.y = driversY;

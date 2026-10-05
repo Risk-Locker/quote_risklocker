@@ -664,6 +664,19 @@ export default function BenefitCardTemplatesPage() {
     // If all 5 components are switched off for this section
     const allHidden = !showAsset && !showTitle && !showCoverage && !showDescription && !showCost;
 
+    const descClampClass =
+      customStyle.descMaxLines === 1 ? "line-clamp-1" :
+      customStyle.descMaxLines === 2 ? "line-clamp-2" :
+      customStyle.descMaxLines === 3 ? "line-clamp-3" :
+      customStyle.descMaxLines === 4 ? "line-clamp-4" :
+      customStyle.descMaxLines === 5 ? "line-clamp-5" :
+      customStyle.descMaxLines === 0 ? "" : "line-clamp-4";
+
+    const titleWrapClass =
+      customStyle.textWrap === "truncate" ? "truncate" :
+      customStyle.textWrap === "wrap" ? "line-clamp-2 leading-tight break-words" :
+      "leading-tight break-words";
+
     if (allHidden) {
       return (
         <div
@@ -713,7 +726,7 @@ export default function BenefitCardTemplatesPage() {
                   fontWeight: customStyle.titleWeight === "bold" ? 700 : customStyle.titleWeight === "semibold" ? 600 : 500,
                   color: textColor,
                 }}
-                className={customStyle.textWrap === "truncate" ? "truncate" : "leading-tight"}
+                className={titleWrapClass}
                 title={benefit.label}
               >
                 {benefit.label}
@@ -787,7 +800,7 @@ export default function BenefitCardTemplatesPage() {
                     fontSize: `${descSize}px`,
                     fontWeight: customStyle.descWeight ? (customStyle.descWeight === "bold" ? 700 : customStyle.descWeight === "semibold" ? 600 : customStyle.descWeight === "medium" ? 500 : 400) : undefined,
                   }}
-                  className="leading-snug mt-0.5 line-clamp-4"
+                  className={`leading-snug mt-0.5 ${descClampClass}`}
                 >
                   {benefit.description}
                 </p>
@@ -845,7 +858,7 @@ export default function BenefitCardTemplatesPage() {
           {showTitle && (
             <h5
               style={{ fontSize: `${customStyle.titleSize}px`, color: textColor }}
-              className="font-bold truncate w-full"
+              className={`font-bold w-full ${titleWrapClass}`}
             >
               {benefit.label}
             </h5>
@@ -864,7 +877,7 @@ export default function BenefitCardTemplatesPage() {
                 fontSize: `${descSize}px`,
                 fontWeight: customStyle.descWeight ? (customStyle.descWeight === "bold" ? 700 : customStyle.descWeight === "semibold" ? 600 : customStyle.descWeight === "medium" ? 500 : 400) : undefined,
               }}
-              className="line-clamp-4 mt-1 w-full leading-snug"
+              className={`mt-1 w-full leading-snug ${descClampClass}`}
             >
               {benefit.description}
             </p>
@@ -1572,16 +1585,17 @@ export default function BenefitCardTemplatesPage() {
                       </div>
                     </div>
                     <div>
-                      <span className="block text-[11px] text-[var(--rl-text-muted)] mb-1">Text Wrap</span>
-                      <div className="grid grid-cols-2 gap-1">
+                      <span className="block text-[11px] text-[var(--rl-text-muted)] mb-1">Title Text Wrap</span>
+                      <div className="grid grid-cols-3 gap-1">
                         {[
-                          { key: "truncate", label: "1-Line" },
-                          { key: "wrap", label: "2-Lines" },
+                          { key: "truncate", label: "1 Row" },
+                          { key: "wrap", label: "2 Rows" },
+                          { key: "multi", label: "Multi-Row" },
                         ].map((item) => (
                           <button
                             key={item.key}
                             type="button"
-                            onClick={() => updateCustomStyle({ textWrap: item.key as "truncate" | "wrap" })}
+                            onClick={() => updateCustomStyle({ textWrap: item.key as any })}
                             className={`rounded border py-1 text-center font-medium ${
                               customStyle.textWrap === item.key
                                 ? "bg-[var(--rl-black)] text-white font-bold"
@@ -1751,6 +1765,32 @@ export default function BenefitCardTemplatesPage() {
                             }`}
                           >
                             {w.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="block text-[11px] text-[var(--rl-text-muted)] mb-1">Max Description Rows</span>
+                      <div className="grid grid-cols-6 gap-1">
+                        {[
+                          { key: 1, label: "1 Row" },
+                          { key: 2, label: "2 Rows" },
+                          { key: 3, label: "3 Rows" },
+                          { key: 4, label: "4 Rows" },
+                          { key: 5, label: "5 Rows" },
+                          { key: 0, label: "Auto" },
+                        ].map((item) => (
+                          <button
+                            key={item.key}
+                            type="button"
+                            onClick={() => updateCustomStyle({ descMaxLines: item.key })}
+                            className={`rounded border py-1 text-center font-medium ${
+                              (customStyle.descMaxLines ?? 4) === item.key
+                                ? "bg-[var(--rl-black)] text-white font-bold"
+                                : "bg-[var(--rl-bg)] border-[var(--rl-border)] hover:border-neutral-400"
+                            }`}
+                          >
+                            {item.label}
                           </button>
                         ))}
                       </div>

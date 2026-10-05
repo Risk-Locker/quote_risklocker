@@ -298,6 +298,212 @@ export function TenureTimelineLedger() {
   const [savingFieldId, setSavingFieldId] = useState<string | null>(null);
   const [savedFieldId, setSavedFieldId] = useState<string | null>(null);
 
+  // Miss outcome modal state
+  const [missModalTenure, setMissModalTenure] = useState<TenureRow | null>(null);
+  const [keepClientChoice, setKeepClientChoice] = useState<"keep" | "discard">("keep");
+  const [createNextYearDeal, setCreateNextYearDeal] = useState<boolean>(true);
+  const [externalInsurer, setExternalInsurer] = useState<string>("");
+  const [missReason, setMissReason] = useState<string>("");
+  const [savingMissOutcome, setSavingMissOutcome] = useState<boolean>(false);
+
+  const handleConfirmMiss = async () => {
+    if (!missModalTenure) return;
+    setSavingMissOutcome(true);
+    try {
+      const isDiscard = keepClientChoice === "discard";
+      const startDt = missModalTenure.coverage_start_date ? new Date(missModalTenure.coverage_start_date) : new Date();
+      const currentYear = startDt.getFullYear();
+      const targetYear = currentYear + 1;
+
+      // 1. Mark current tenure as Close - Lose / miss
+      const updatePayload: any = {
+        stage: "Close - Lose",
+        status: "miss",
+        is_discarded: isDiscard,
+      };
+      if (externalInsurer.trim()) {
+        updatePayload.loss_reason_category = externalInsurer.trim();
+        updatePayload.notes = `Customer chose ${externalInsurer.trim()} for ${currentYear}. ${missReason.trim()}`.trim();
+      } else if (missReason.trim()) {
+        updatePayload.notes = missReason.trim();
+      }
+
+      await api(`/tenures/${missModalTenure.id}/ledger-fields`, {
+        method: "PATCH",
+        body: JSON.stringify(updatePayload),
+      });
+
+      // 2. If keeping client and create next year deal is checked:
+      if (!isDiscard && createNextYearDeal) {
+        let nextStartStr = `${targetYear}-01-01`;
+        let nextEndStr = `${targetYear}-12-31`;
+
+        if (missModalTenure.coverage_end_date) {
+          const endDate = new Date(missModalTenure.coverage_end_date);
+          const nextStart = new Date(endDate);
+          nextStart.setDate(nextStart.getDate() + 1);
+          const nextEnd = new Date(nextStart);
+          nextEnd.setDate(nextEnd.getDate() + 364);
+          nextStartStr = nextStart.toISOString().split("T")[0];
+          nextEndStr = nextEnd.toISOString().split("T")[0];
+        }
+
+        await api("/tenures", {
+          method: "POST",
+          body: JSON.stringify({
+            vehicle_no: missModalTenure.vehicle_no,
+            customer_name: missModalTenure.customer_name,
+            coverage_start_date: nextStartStr,
+            coverage_end_date: nextEndStr,
+            chassis_no: missModalTenure.chassis_no || null,
+            car_model: missModalTenure.car_model || null,
+            engine_cc: missModalTenure.engine_cc || null,
+            notes: `Win-Back Renewal deal created for ${targetYear} after ${currentYear} miss.`,
+          }),
+        });
+      }
+
+      setMissModalTenure(null);
+      loadTenures();
+      loadStageSummary();
+      loadYoyStats();
+    } catch (err: any) {
+      alert("Failed to update deal: " + (err?.message || err));
+    } finally {
+      setSavingMissOutcome(false);
+    }
+  };
+
+  const renderPipelineProgress = (t: TenureRow) => {
+    const isHit = t.stage === "Close - Win";
+    const isMiss = t.stage === "Close - Lose";
+    const canHit = t.stage === "Issue Policy";
+
+    const linearStages = [
+      { id: "Quotations", label: "Quotations" },
+      { id: "Material to Client", label: "Material to Client" },
+      { id: "Issue Policy", label: "Issue Policy" },
+    ];
+
+    const currentIdx = linearStages.findIndex((s) => s.id === t.stage);
+
+    if (isHit) {
+      return (
+        <div className="flex items-center gap-1.5">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 text-[11px] font-bold shadow-2xs">
+            <CheckCircle size={13} weight="fill" className="text-emerald-700" />
+            <span>✓ HIT (Won)</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => patchTenureField(t.id, { stage: "Issue Policy", status: "draft" })}
+            className="text-[10px] text-neutral-400 hover:text-neutral-700 underline cursor-pointer"
+            title="Revert back to Issue Policy"
+          >
+            Revert
+          </button>
+        </div>
+      );
+    }
+
+    if (isMiss) {
+      return (
+        <div className="flex items-center gap-1.5">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-rose-100 text-rose-900 border border-rose-300 text-[11px] font-bold shadow-2xs">
+            <XCircle size={13} weight="fill" className="text-rose-700" />
+            <span>✕ MISS (Lost)</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => patchTenureField(t.id, { stage: "Quotations", status: "draft" })}
+            className="text-[10px] text-neutral-400 hover:text-neutral-700 underline cursor-pointer"
+            title="Reopen quote"
+          >
+            Reopen
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {/* Straight Arrow Progress Bar */}
+        <div className="inline-flex items-center bg-neutral-100/90 p-0.5 rounded border border-neutral-200 text-[10px] font-semibold">
+          {linearStages.map((st, idx) => {
+            const isActive = t.stage === st.id;
+            const isCompleted = currentIdx > idx;
+
+            return (
+              <React.Fragment key={st.id}>
+                <button
+                  type="button"
+                  onClick={() => patchTenureField(t.id, { stage: st.id })}
+                  className={`px-2 py-0.5 rounded transition-all cursor-pointer flex items-center gap-1 ${
+                    isActive
+                      ? "bg-white text-neutral-900 shadow-2xs font-bold border border-neutral-300/80"
+                      : isCompleted
+                      ? "text-emerald-700 hover:text-emerald-900 font-medium"
+                      : "text-neutral-400 hover:text-neutral-700"
+                  }`}
+                  title={`Step ${idx + 1}: Move to ${st.label}`}
+                >
+                  {isCompleted && <Check size={10} weight="bold" className="text-emerald-600 shrink-0" />}
+                  <span>{st.label}</span>
+                </button>
+                {idx < linearStages.length - 1 && (
+                  <span className="text-neutral-300 px-0.5 select-none font-bold">→</span>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
+
+        {/* HIT Button: Only clickable if Policy is Issued */}
+        {canHit ? (
+          <button
+            type="button"
+            onClick={() => patchTenureField(t.id, { stage: "Close - Win", status: "hit" })}
+            className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] shadow-2xs cursor-pointer transition-colors flex items-center gap-1"
+            title="Policy is issued! Click to mark this client as HIT"
+          >
+            <CheckCircle size={11} weight="bold" />
+            <span>Hit</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled
+            className="px-2 py-1 rounded bg-neutral-100 text-neutral-400 border border-neutral-200 text-[10px] font-medium cursor-not-allowed opacity-60 flex items-center gap-1"
+            title="Policy must be in 'Issue Policy' stage before marking as Hit"
+          >
+            <svg className="w-2.5 h-2.5 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+            <span>Hit</span>
+          </button>
+        )}
+
+        {/* MISS Button: Always accessible anytime */}
+        <button
+          type="button"
+          onClick={() => {
+            setMissModalTenure(t);
+            setKeepClientChoice("keep");
+            setCreateNextYearDeal(true);
+            setExternalInsurer("");
+            setMissReason("");
+          }}
+          className="px-2 py-1 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-900 border border-rose-200 hover:border-rose-300 font-bold text-[10px] cursor-pointer transition-colors flex items-center gap-0.5"
+          title="Deal lost / Miss (choose to keep client or drop)"
+        >
+          <XCircle size={11} weight="bold" />
+          <span>Miss</span>
+        </button>
+      </div>
+    );
+  };
+
   const monthScrollRef = useRef<HTMLDivElement>(null);
 
   // Load YoY stats
@@ -1338,7 +1544,7 @@ export function TenureTimelineLedger() {
                   <th className="py-3 px-3 min-w-[170px]">Coverage Period</th>
                   <th
                     onClick={() => handleSort("stage")}
-                    className="py-3 px-3 min-w-[140px] cursor-pointer hover:text-black transition-colors"
+                    className="py-3 px-3 min-w-[340px] cursor-pointer hover:text-black transition-colors"
                   >
                     <div className="flex items-center gap-1">
                       <span>Pipeline Stage</span>
@@ -1561,17 +1767,7 @@ export function TenureTimelineLedger() {
                           {/* 3. Pipeline Stage (Main Policy) */}
                           <td className="py-3 px-3">
                             <div className="flex items-center gap-1.5">
-                              <select
-                                value={mainTenure.stage || "Quotations"}
-                                onChange={(e) => patchTenureField(mainTenure.id, { stage: e.target.value })}
-                                className={`h-7 px-2 text-[11px] font-bold rounded border cursor-pointer transition-colors outline-none ${stageConf.badge}`}
-                              >
-                                {STAGE_ORDER.map((st) => (
-                                  <option key={st} value={st}>
-                                    {st}
-                                  </option>
-                                ))}
-                              </select>
+                              {renderPipelineProgress(mainTenure)}
                               <span
                                 className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold font-mono shrink-0 ${
                                   isOverdue
@@ -1813,17 +2009,7 @@ export function TenureTimelineLedger() {
 
                                             {/* Stage */}
                                             <td className="py-2.5 px-3">
-                                              <select
-                                                value={t.stage || "Quotations"}
-                                                onChange={(e) => patchTenureField(t.id, { stage: e.target.value })}
-                                                className={`h-6 px-1.5 text-[11px] font-bold rounded border cursor-pointer transition-colors outline-none ${tStageConf.badge}`}
-                                              >
-                                                {STAGE_ORDER.map((st) => (
-                                                  <option key={st} value={st}>
-                                                    {st}
-                                                  </option>
-                                                ))}
-                                              </select>
+                                              {renderPipelineProgress(t)}
                                             </td>
 
                                             {/* Fulfillment & Checklist */}
@@ -2530,6 +2716,143 @@ export function TenureTimelineLedger() {
         pics={pics}
         onSave={patchTenureField}
       />
+
+      {/* Modal for Miss / Client Outcome & Keep Client Workflow */}
+      {missModalTenure && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-[var(--rl-radius)] border border-neutral-200 shadow-xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-4 border-b border-neutral-100 bg-[#fbfbfd] flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-sm text-neutral-900">Mark Deal as Miss (Client Lost)</h3>
+                <p className="text-xs text-neutral-500 font-mono mt-0.5">
+                  {missModalTenure.vehicle_no} · {missModalTenure.customer_name}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMissModalTenure(null)}
+                className="text-neutral-400 hover:text-neutral-700 text-sm font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Step 1: Keep or Drop */}
+              <div>
+                <label className="text-xs font-bold text-neutral-800 block mb-2">
+                  Do you want to keep this client for next year&apos;s renewal?
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setKeepClientChoice("keep")}
+                    className={`p-3 rounded-lg border text-left text-xs transition-all cursor-pointer ${
+                      keepClientChoice === "keep"
+                        ? "border-emerald-500 bg-emerald-50/50 text-emerald-950 ring-1 ring-emerald-500"
+                        : "border-neutral-200 hover:bg-neutral-50 text-neutral-700"
+                    }`}
+                  >
+                    <div className="font-bold flex items-center gap-1.5">
+                      <CheckCircle size={14} weight="bold" className={keepClientChoice === "keep" ? "text-emerald-600" : "text-neutral-400"} />
+                      <span>Keep Client</span>
+                    </div>
+                    <p className="text-[11px] text-neutral-500 mt-1">
+                      Keep client profile and track next year&apos;s renewal win-back.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setKeepClientChoice("discard")}
+                    className={`p-3 rounded-lg border text-left text-xs transition-all cursor-pointer ${
+                      keepClientChoice === "discard"
+                        ? "border-rose-500 bg-rose-50/50 text-rose-950 ring-1 ring-rose-500"
+                        : "border-neutral-200 hover:bg-neutral-50 text-neutral-700"
+                    }`}
+                  >
+                    <div className="font-bold flex items-center gap-1.5">
+                      <XCircle size={14} weight="bold" className={keepClientChoice === "discard" ? "text-rose-600" : "text-neutral-400"} />
+                      <span>Drop / Discard</span>
+                    </div>
+                    <p className="text-[11px] text-neutral-500 mt-1">
+                      Client is dropped. Will NOT create next year&apos;s renewal deal.
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Step 2: Next Year Deal Notification & Checkbox (Only if Keeping Client) */}
+              {keepClientChoice === "keep" && (
+                <div className="p-3 bg-blue-50/60 border border-blue-200 rounded-lg space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-blue-950">
+                    <input
+                      type="checkbox"
+                      checked={createNextYearDeal}
+                      onChange={(e) => setCreateNextYearDeal(e.target.checked)}
+                      className="w-4 h-4 rounded text-blue-600 accent-blue-600 cursor-pointer"
+                    />
+                    <span>
+                      Create {missModalTenure.coverage_start_date ? new Date(missModalTenure.coverage_start_date).getFullYear() + 1 : "Next Year"} Renewal Ledger deal immediately
+                    </span>
+                  </label>
+                  <p className="text-[11px] text-blue-800 pl-6 leading-relaxed">
+                    When checked, {missModalTenure.vehicle_no} will be placed into next year&apos;s Renewal Ledger for future follow-up.
+                  </p>
+                </div>
+              )}
+
+              {/* Step 3: Current Year External Insurance Note */}
+              <div>
+                <label className="text-xs font-semibold text-neutral-700 block mb-1">
+                  Current year insurance used by customer <span className="text-neutral-400 font-normal">(optional)</span>:
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Etiqa, Allianz, Zurich, Tokio Marine..."
+                  value={externalInsurer}
+                  onChange={(e) => setExternalInsurer(e.target.value)}
+                  className="w-full h-8 px-3 text-xs rounded border border-neutral-300 focus:outline-none focus:border-neutral-900"
+                />
+                <p className="text-[10px] text-neutral-400 mt-0.5">
+                  If not known, you can leave this blank.
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-neutral-700 block mb-1">
+                  Notes / Reason for loss <span className="text-neutral-400 font-normal">(optional)</span>:
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Competitor price lower, renewed with bank..."
+                  value={missReason}
+                  onChange={(e) => setMissReason(e.target.value)}
+                  className="w-full h-8 px-3 text-xs rounded border border-neutral-300 focus:outline-none focus:border-neutral-900"
+                />
+              </div>
+            </div>
+
+            <div className="p-3 bg-neutral-50 border-t border-neutral-200 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setMissModalTenure(null)}
+                className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmMiss}
+                disabled={savingMissOutcome}
+                className="px-4 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                {savingMissOutcome ? "Saving..." : "Confirm Miss & Update"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
