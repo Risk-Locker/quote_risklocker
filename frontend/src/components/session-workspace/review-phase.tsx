@@ -1117,6 +1117,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       { id: "c4d540c072507abc", label: "bank_logo", url: "/template-assets/c4d540c072507abc" },
       { id: "91116a7dc3540d62", label: "all_driver_icon", url: "/template-assets/91116a7dc3540d62" },
       { id: "49e754a6faa949c2", label: "background", url: "/template-assets/49e754a6faa949c2" },
+      { id: "c3003185-0000-4000-8000-000000000001", label: "duitnow_payment_details", url: "/assets/duitnow_payment_details.png" },
     ];
     for (const sys of systemDefaults) {
       if (!list.some((a) => a.id === sys.id)) {

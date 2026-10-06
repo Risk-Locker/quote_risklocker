@@ -117,7 +117,7 @@ export interface StructuredSections {
   footer: SectionFooterConfig;
 }
 
-export function defaultHeaderConfig(): SectionHeaderConfig {
+export function defaultHeaderConfig(isV2 = false): SectionHeaderConfig {
   return {
     layout: "right_3_rows",
     rowsOrder: ["ref", "vehicle", "insurer"],
@@ -127,9 +127,9 @@ export function defaultHeaderConfig(): SectionHeaderConfig {
     insurerLabel: "Insurer: ",
     fontSize: 10.0,
     logoX: 40,
-    logoY: 8,
-    logoW: 72,
-    logoH: 74,
+    logoY: isV2 ? 20 : 8,
+    logoW: isV2 ? 32 : 72,
+    logoH: isV2 ? 40 : 74,
   };
 }
 
@@ -141,6 +141,7 @@ export const CANONICAL_VARIABLE_LABELS: Record<string, [string, string]> = {
   ncd_percent: ["NCD", ""],
   cover_period: ["Cover of Period", "保单期限"],
   valuation_type: ["Valuation Type", "估价方式"],
+  excess_amount: ["Policy Excess", "自负额"],
   coverage_amount: ["Vehicle Sum Insured", "车辆保额"],
 };
 
@@ -336,6 +337,75 @@ export function defaultRightContainers(): ContainerBlockConfig[] {
   ];
 }
 
+export function defaultRightContainersV2(): ContainerBlockConfig[] {
+  return [
+    {
+      id: "rc_container_payment",
+      title: "DuitNow QR & Payment Details",
+      layout: "column",
+      boxX: 584,
+      boxY: 94,
+      boxW: 170,
+      boxH: 236,
+      background: "#FFFFFF",
+      borderWidth: 1,
+      borderColor: "#E2E8F0",
+      borderRadius: 6,
+      padding: 3,
+      gap: 0,
+      blocks: [
+        {
+          id: "payment_account_details_img",
+          type: "image",
+          assetSlot: "duitnow_payment_details",
+          assetId: "c3003185-0000-4000-8000-000000000001",
+          imageWidth: 154,
+          imageHeight: 230,
+          imageFit: "contain",
+          order: 0,
+        },
+      ],
+    },
+    {
+      id: "rc_container_drivers",
+      title: "All Drivers Card",
+      layout: "column",
+      boxX: 584,
+      boxY: 336,
+      boxW: 170,
+      boxH: 42,
+      background: "#F8FAFC",
+      borderWidth: 1,
+      borderColor: "#E2E8F0",
+      borderRadius: 6,
+      padding: 4,
+      gap: 2,
+      blocks: [
+        {
+          id: "all_driver_title",
+          type: "text",
+          text: "All Drivers Included/全司机投保",
+          fontSize: 8.5,
+          fontWeight: "700",
+          color: "#0F172A",
+          textAlign: "center",
+          order: 0,
+        },
+        {
+          id: "all_driver_sub",
+          type: "text",
+          text: "Authorised Drivers Covered",
+          fontSize: 7.5,
+          fontWeight: "500",
+          color: "#64748B",
+          textAlign: "center",
+          order: 1,
+        },
+      ],
+    },
+  ];
+}
+
 /**
  * Parses existing canvas elements into structured section metadata.
  * If savedSections are already present in template configuration, they are merged or preserved.
@@ -344,6 +414,9 @@ export function extractSectionsFromCanvas(
   elements: CanvasElement[],
   savedSections?: StructuredSections | null
 ): StructuredSections {
+  const isV2 = elements.some(
+    (e) => e.id === "payment_account_details_img" || e.assetSlot === "duitnow_payment_details" || e.id === "val_excess"
+  );
   if (savedSections && savedSections.version === 1 && savedSections.section1?.vehicleFields?.length > 0) {
     const sanitizedFields: VehicleSpecFieldSlot[] = [];
     savedSections.section1.vehicleFields.forEach((f) => {
@@ -387,14 +460,16 @@ export function extractSectionsFromCanvas(
 
     return {
       version: 1,
-      header: savedSections.header || defaultHeaderConfig(),
+      header: savedSections.header || defaultHeaderConfig(isV2),
       section1: {
         ...savedSections.section1,
         vehicleFields: sanitizedFields.length > 0 ? sanitizedFields : [...DEFAULT_VEHICLE_FIELDS],
       },
-      rightContainers: savedSections.rightContainers && savedSections.rightContainers.length > 0
-        ? savedSections.rightContainers
-        : defaultRightContainers(),
+      rightContainers:
+        !savedSections.rightContainers ||
+        (isV2 && savedSections.rightContainers.some((c) => (c.boxW ?? 0) > 200))
+          ? (isV2 ? defaultRightContainersV2() : defaultRightContainers())
+          : savedSections.rightContainers,
       footer: savedSections.footer || {},
     };
   }
@@ -432,7 +507,7 @@ export function extractSectionsFromCanvas(
       valElem.variableId === "insurance_company" ||
       valElem.variableId === "quotation_reference" ||
       valElem.variableId === "vehicle_no" ||
-      (valElem.y || 0) < 130 ||
+      (valElem.y || 0) < 90 ||
       (valElem.x || 0) > 400
     ) {
       continue;
@@ -507,13 +582,13 @@ export function extractSectionsFromCanvas(
 
   return {
     version: 1,
-    header: savedSections?.header || defaultHeaderConfig(),
+    header: savedSections?.header || defaultHeaderConfig(isV2),
     section1: {
       vehicleFields: finalFields,
       headerTitleEn: "Coverage & Vehicle Information",
       headerTitleZh: "保障与车辆信息",
     },
-    rightContainers: defaultRightContainers(),
+    rightContainers: isV2 ? defaultRightContainersV2() : defaultRightContainers(),
     footer: {
       bankName,
       accountNo,
@@ -629,6 +704,7 @@ export function compileSectionsToCanvas(
     "grp_payment_card",
     "grp_qr_card",
     "grp_excess_card",
+    "payment_account_details_img",
   ]);
 
   const hasCustomRightContainers = Boolean(
@@ -663,7 +739,7 @@ export function compileSectionsToCanvas(
         rightContainerIds.has(e.id) ||
         e.id.startsWith("rc_") ||
         e.id.startsWith("rc_b_") ||
-        ((e.x || 0) >= 480 && (e.y || 0) >= 110 && (e.y || 0) <= 430 && e.id !== "quote_vehicle" && e.id !== "validity")
+        ((e.x || 0) >= 480 && (e.y || 0) >= 90 && (e.y || 0) <= 430 && e.id !== "quote_vehicle" && e.id !== "validity")
       ) {
         return false;
       }
@@ -894,6 +970,14 @@ export function compileSectionsToCanvas(
     }
   });
 
+  // Calculate dynamic vertical expansion based on row count
+  const isV2Layout = baseElements.some((e) => e.id === "payment_account_details_img" || e.id === "val_excess") ||
+    Boolean(sections.rightContainers?.some((c) => (c.boxY ?? 0) <= 100));
+  const baselineCount = isV2Layout ? 9 : 8;
+  const deltaY = hasDenseLayout
+    ? Math.max(0, (visibleFields.length - baselineCount) * rowH)
+    : Math.max(0, (totalRows - 9) * rowH);
+
   // In production mode (when simulated extras are not requested), append canonical premium_info_block
   if (simulatedCount === 0 && extrasMode !== "lump_sum" && hasDenseLayout) {
     const premiumY = startY + visibleFields.length * rowH;
@@ -902,7 +986,7 @@ export function compileSectionsToCanvas(
       type: "premium-info-block" as any,
       x: 52,
       y: premiumY,
-      w: 430,
+      w: isV2Layout ? 506 : 430,
       h: 130,
       z: 4,
       rowHeight: rowH,
@@ -910,17 +994,11 @@ export function compileSectionsToCanvas(
         extras: "EXTRAS / 附加项目",
         premium: "Insurance Premium / 保费",
         roadtax: "Roadtax / 路税",
-        runner: "Runner Fee / 服务费",
         total: "TOTAL PAYABLE",
       },
       locked: true,
     } as any);
   }
-
-  // Calculate dynamic vertical expansion based on row count
-  const deltaY = hasDenseLayout
-    ? Math.max(0, (visibleFields.length - 8) * rowH)
-    : Math.max(0, (totalRows - 9) * rowH);
 
   // Compile Right Containers
   const compiledRightBlocks: CanvasElement[] = [];
@@ -959,7 +1037,7 @@ export function compileSectionsToCanvas(
         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
         .filter((b) => b.visible !== false);
 
-      if (container.id === "rc_container_payment" || container.layout === "payment_grid") {
+      if (container.layout === "payment_grid" || (container.id === "rc_container_payment" && !container.layout)) {
         let currentY = boxY + padding;
         const blockW = boxW - padding * 2;
         const blockX = boxX + padding;
@@ -1079,10 +1157,11 @@ export function compileSectionsToCanvas(
           if (block.type === "image") {
             const h = block.imageHeight ?? 24;
             const w = Math.min(blockW, block.imageWidth ?? 100);
+            const imageX = blockX + Math.max(0, (blockW - w) / 2);
             compiledRightBlocks.push({
               id: block.id,
               type: "image",
-              x: blockX,
+              x: imageX,
               y: currentY,
               w,
               h,
@@ -1166,16 +1245,18 @@ export function compileSectionsToCanvas(
     terms: 1090,
   };
 
+  const hasLegacySpecials = remainingElements.some((e) => e.id === "specials_title");
+
   // Update Section 1 bounding box if present, and push all lower elements down by deltaY
   const updatedElements = remainingElements.map((elem) => {
     let nextElem = { ...elem };
     if (nextElem.id === "cov_table_bg" || nextElem.id === "group_specs_box") {
-      const baseH = hasDenseLayout ? 210 : Number((nextElem as any).baseline_h ?? nextElem.h ?? 246);
+      const baseH = Number((nextElem as any).baseline_h ?? nextElem.h ?? (isV2Layout ? 258 : 246));
       (nextElem as any).baseline_h = baseH;
       nextElem.h = baseH + deltaY;
     }
 
-    if (BASELINE_Y_MAP[nextElem.id] !== undefined) {
+    if (hasLegacySpecials && BASELINE_Y_MAP[nextElem.id] !== undefined) {
       nextElem.y = BASELINE_Y_MAP[nextElem.id] + deltaY;
     } else if ((nextElem.y || 0) >= (hasDenseLayout ? 380 : 400)) {
       const base = (nextElem as any).baseline_y ?? nextElem.y;
@@ -1194,33 +1275,59 @@ export function compileSectionsToCanvas(
       nextElem.text = "Recommended Add-On Upgrades :";
     }
 
-    // Top Header Realignment: Motor Insurance Quotation, Validity Until, Insurer Full Name
-    if (nextElem.id === "title") {
-      nextElem.x = 480;
-      nextElem.y = 16;
-      nextElem.w = 296;
-      nextElem.h = 24;
-      nextElem.style = { ...(nextElem.style || {}), textAlign: "right", fontSize: 16, fontWeight: "800", color: "#ed1c24" };
+    // Top Header Realignment
+    if (!isV2Layout) {
+      if (nextElem.id === "title") {
+        nextElem.x = 480;
+        nextElem.y = 16;
+        nextElem.w = 296;
+        nextElem.h = 24;
+        nextElem.style = { ...(nextElem.style || {}), textAlign: "right", fontSize: 16, fontWeight: "800", color: "#ed1c24" };
+      }
+      if (nextElem.id === "validity") {
+        nextElem.x = 480;
+        nextElem.y = 40;
+        nextElem.w = 296;
+        nextElem.h = 20;
+        nextElem.style = { ...(nextElem.style || {}), textAlign: "right", fontSize: 11, fontWeight: "600", color: "#475569" };
+      }
+      if (nextElem.id === "quote_vehicle") {
+        nextElem.x = 480;
+        nextElem.y = 96;
+        nextElem.w = 296;
+        nextElem.h = 28;
+        nextElem.style = { ...(nextElem.style || {}), textAlign: "right", fontSize: 16, fontWeight: "800" };
+      }
+    } else {
+      if (nextElem.id === "title_motor") {
+        nextElem.x = 78;
+        nextElem.y = 26;
+        nextElem.w = 150;
+        nextElem.h = 32;
+        nextElem.text = "Motor Insurance ";
+        nextElem.style = { ...(nextElem.style || {}), fontSize: 18, fontWeight: "800", color: "#0F172A", whiteSpace: "pre" };
+      }
+      if (nextElem.id === "title_quotation") {
+        nextElem.x = 232;
+        nextElem.y = 26;
+        nextElem.w = 100;
+        nextElem.h = 32;
+        nextElem.text = "Quotation";
+        nextElem.style = { ...(nextElem.style || {}), fontSize: 18, fontWeight: "800", color: "#ED1C24" };
+      }
+      if (nextElem.id === "header_rule") {
+        nextElem.x = 40;
+        nextElem.y = 78;
+        nextElem.w = 714;
+        nextElem.h = 1;
+      }
     }
-    if (nextElem.id === "validity") {
-      nextElem.x = 480;
-      nextElem.y = 40;
-      nextElem.w = 296;
-      nextElem.h = 20;
-      nextElem.style = { ...(nextElem.style || {}), textAlign: "right", fontSize: 11, fontWeight: "600", color: "#475569" };
-    }
-    if (nextElem.id === "quote_vehicle") {
-      nextElem.x = 480;
-      nextElem.y = 96;
-      nextElem.w = 296;
-      nextElem.h = 28;
-      nextElem.style = { ...(nextElem.style || {}), textAlign: "right", fontSize: 16, fontWeight: "800" };
-    }
+
     // Clean redundant center placeholder insurer_logo
     if (nextElem.id === "insurer_logo" && (nextElem.x || 0) > 180 && (nextElem.x || 0) < 450) {
       nextElem.visible = false;
     }
-    const header = sections.header || defaultHeaderConfig();
+    const header = sections.header || defaultHeaderConfig(isV2Layout);
     const rowsOrder = header.rowsOrder || ["ref", "vehicle", "insurer"];
     const headerFontSize = header.fontSize ?? 10.5;
     const isTopLeftInsurer = header.insurerPosition === "top_left";
@@ -1229,16 +1336,18 @@ export function compileSectionsToCanvas(
       ? rowsOrder.filter((r) => r !== "insurer")
       : rowsOrder;
 
+    const baseSlotY = isV2Layout ? 18 : 20;
+    const stepSlotY = isV2Layout ? 16 : 18;
     const rowSlotYMap: Record<string, number> = {};
     rightRowSlots.forEach((slot, idx) => {
-      rowSlotYMap[slot] = 20 + idx * 18;
+      rowSlotYMap[slot] = baseSlotY + idx * stepSlotY;
     });
 
     if (nextElem.id === "risklocker_logo") {
-      nextElem.x = header.logoX ?? 40;
-      nextElem.y = header.logoY ?? 12;
-      nextElem.w = header.logoW ?? 88;
-      nextElem.h = header.logoH ?? 70;
+      nextElem.x = 40;
+      nextElem.y = isV2Layout ? 20 : (header.logoY ?? 8);
+      nextElem.w = isV2Layout ? 32 : (header.logoW ?? 72);
+      nextElem.h = isV2Layout ? 40 : (header.logoH ?? 74);
     }
     if (nextElem.id === "ref_label") {
       const slotY = rowSlotYMap["ref"] ?? 20;

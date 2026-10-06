@@ -15,7 +15,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.tables import (
@@ -24,6 +24,7 @@ from app.models.tables import (
     QuotationActivity,
     QuotationDraft,
     Session as SessionModel,
+    TenureComparisonEntry,
     TrackedVehicle,
     VehicleOwnership,
     new_id,
@@ -190,23 +191,30 @@ def resolve_or_create_tenure(
 
     vehicle_id = veh.id if veh else new_id()
 
-    # 2. Query matching tenure for this vehicle
-    # Match within a +/- 35-day window around coverage start date
-    window_start = start_dt - timedelta(days=35)
-    window_end = start_dt + timedelta(days=35)
+    # 2. Query matching tenure for this vehicle: ONE locker per vehicle per calendar year
+    start_of_year = datetime(start_dt.year, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    end_of_year = datetime(start_dt.year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+
+    vehicle_match_clauses = [InsuranceTenure.tracked_vehicle_id == vehicle_id]
+    if norm_plate:
+        vehicle_match_clauses.append(InsuranceTenure.vehicle_no == norm_plate)
 
     existing_tenure = db.scalar(
         select(InsuranceTenure)
         .where(
-            InsuranceTenure.tracked_vehicle_id == vehicle_id,
-            InsuranceTenure.coverage_start_date >= window_start,
-            InsuranceTenure.coverage_start_date <= window_end,
+            or_(*vehicle_match_clauses),
+            InsuranceTenure.coverage_start_date >= start_of_year,
+            InsuranceTenure.coverage_start_date <= end_of_year,
+            InsuranceTenure.is_discarded == False,
         )
         .order_by(InsuranceTenure.created_at.desc())
         .limit(1)
     )
 
     if existing_tenure:
+        # Link vehicle id if missing
+        if veh and not existing_tenure.tracked_vehicle_id:
+            existing_tenure.tracked_vehicle_id = veh.id
         # If customer name is more informative in the new quote, update it
         if customer_name and len(customer_name.strip()) > len(existing_tenure.customer_name.strip()):
             existing_tenure.customer_name = customer_name.strip()
@@ -611,6 +619,96 @@ def mark_tenure_lapsed(
     return tenure
 
 
+def record_stage_timestamp(tenure: InsuranceTenure, stage: str) -> None:
+    """Record an ISO timestamp for a stage update into tenure.stage_history."""
+    now = datetime.now(timezone.utc)
+    history = dict(tenure.stage_history or {})
+    history[stage] = now.isoformat()
+    tenure.stage_history = history
+    tenure.stage_updated_at = now
+    tenure.last_activity_at = now
+
+
+def create_next_year_renewal_tenure(
+    db: Session,
+    tenure: InsuranceTenure,
+    user_id: str | None = None,
+) -> InsuranceTenure:
+    """Automatically create the next year's renewal tenure with an empty marketing comparison.
+
+    Triggers upon HIT (Close - Win).
+    """
+    # Check if an active next-year renewal already exists for this tenure
+    existing = db.scalar(
+        select(InsuranceTenure).where(
+            InsuranceTenure.previous_tenure_id == tenure.id,
+            InsuranceTenure.is_discarded == False,
+        )
+    )
+    if existing:
+        return existing
+
+    # Calculate next year's 1-year coverage window
+    start_date = tenure.coverage_end_date + timedelta(days=1)
+    end_date = start_date + timedelta(days=364)
+    expiry_month = end_date.strftime("%B")
+
+    now = datetime.now(timezone.utc)
+    next_tenure = InsuranceTenure(
+        id=new_id(),
+        tracked_vehicle_id=tenure.tracked_vehicle_id,
+        ownership_id=tenure.ownership_id,
+        vehicle_no=tenure.vehicle_no,
+        customer_name=tenure.customer_name,
+        customer_id=tenure.customer_id,
+        coverage_start_date=start_date,
+        coverage_end_date=end_date,
+        expiry_month=expiry_month,
+        status="draft",
+        stage="Quotations",
+        business_type="Renewal",
+        previous_tenure_id=tenure.id,
+        tenure_chain_id=tenure.tenure_chain_id,
+        road_tax=float(tenure.road_tax or 0.0),
+        runner_fee=float(tenure.runner_fee or 0.0),
+        pic_id=tenure.pic_id,
+        sub_agent_name=tenure.sub_agent_name,
+        created_by_id=user_id or tenure.created_by_id,
+        stage_history={"Quotations": now.isoformat()},
+        stage_updated_at=now,
+        last_activity_at=now,
+    )
+    db.add(next_tenure)
+    db.flush()
+    return next_tenure
+
+
+def remove_auto_created_next_year_tenure(db: Session, tenure: InsuranceTenure) -> bool:
+    """Delete an auto-created next-year renewal tenure if reverted or dropped, provided it has no user quotes."""
+    children = list(
+        db.scalars(
+            select(InsuranceTenure).where(
+                InsuranceTenure.previous_tenure_id == tenure.id
+            )
+        ).all()
+    )
+    removed = False
+    for child in children:
+        # Only delete if child is empty (no sessions, no comparison entries) and still in draft/Quotations
+        has_sessions = db.scalar(
+            select(func.count(SessionModel.id)).where(SessionModel.tenure_id == child.id)
+        ) or 0
+        has_entries = db.scalar(
+            select(func.count(TenureComparisonEntry.id)).where(TenureComparisonEntry.tenure_id == child.id)
+        ) or 0
+        if has_sessions == 0 and has_entries == 0 and child.status == "draft":
+            db.delete(child)
+            removed = True
+    if removed:
+        db.flush()
+    return removed
+
+
 def update_tenure_status(
     db: Session,
     tenure_id: str,
@@ -628,6 +726,7 @@ def update_tenure_status(
     if not tenure:
         raise ValueError(f"Tenure {tenure_id} not found")
 
+    old_status = tenure.status
     tenure.status = status
     if winning_company_id is not None:
         tenure.winning_company_id = winning_company_id
@@ -639,6 +738,18 @@ def update_tenure_status(
         tenure.miss_reason = miss_reason
     if notes is not None:
         tenure.notes = notes
+
+    if status == "hit":
+        tenure.stage = "Close - Win"
+        record_stage_timestamp(tenure, "Close - Win")
+        if not tenure.is_discarded:
+            create_next_year_renewal_tenure(db, tenure, user_id=user_id)
+    elif status == "miss":
+        tenure.stage = "Close - Lose"
+        record_stage_timestamp(tenure, "Close - Lose")
+        remove_auto_created_next_year_tenure(db, tenure)
+    elif old_status == "hit" and status != "hit":
+        remove_auto_created_next_year_tenure(db, tenure)
 
     # Log activity on active session if available
     active_sess = db.scalar(
@@ -663,3 +774,4 @@ def update_tenure_status(
 
     db.flush()
     return tenure
+

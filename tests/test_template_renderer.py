@@ -769,3 +769,29 @@ def test_benefit_card_title_wrap_and_desc_max_lines_options():
     )
     assert "-webkit-line-clamp:5" in html_multi  # description allows 5 rows
     assert "word-break:break-word;white-space:normal" in html_multi  # title wraps freely across rows without clamp
+
+
+def test_agency_bilingual_v2_renders_cleanly():
+    from app.services.master_template_service import _agency_bilingual_v2_config
+
+    config = _agency_bilingual_v2_config()
+    draft_fields = {
+        "customer_name": {"value": "Tan Ah Kow"},
+        "vehicle_no": {"value": "WYY 1234"},
+        "quotation_reference": {"value": "QT-9999-001"},
+        "insurance_company": {"value": "QBE Insurance"},
+        "valuation_type": {"value": "Agreed Value"},
+        "excess_amount": {"value": "300.00"},
+        "coverage_amount": {"value": "65,000.00"},
+    }
+    html = render_quotation_html(draft_fields, template_config=config)
+    assert "Motor Insurance " in html
+    assert "Quotation" in html
+    assert "QT-9999-001" in html
+    assert "Policy Excess / 自负额" in html
+    assert "RM 300.00" in html
+    assert "All Drivers Included/全司机投保" in html
+    assert "Authorised Drivers Covered" in html
+    # Ensure no missing asset indicator leaks into the rendered HTML
+    assert 'data-missing-asset="duitnow_payment_details"' not in html
+

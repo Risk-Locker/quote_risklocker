@@ -47,9 +47,9 @@ def test_variable_tenure_and_no_dummy_projections(db_session: Session):
 
 
 def test_overlapping_tenure_collision_superseding(db_session: Session):
-    # Existing tenure from Jan 2026 to Dec 2026
-    start_1 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    end_1 = datetime(2026, 12, 31, tzinfo=timezone.utc)
+    # Existing tenure from July 2025 to June 2026
+    start_1 = datetime(2025, 7, 1, tzinfo=timezone.utc)
+    end_1 = datetime(2026, 6, 30, tzinfo=timezone.utc)
 
     t1 = resolve_or_create_tenure(
         db_session,
@@ -61,9 +61,9 @@ def test_overlapping_tenure_collision_superseding(db_session: Session):
     db_session.commit()
     assert t1.is_hidden is False
 
-    # A new quotation arrives on same vehicle with overlapping date (e.g. 2026-06-01 to 2027-06-01)
-    start_2 = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    end_2 = datetime(2027, 6, 1, tzinfo=timezone.utc)
+    # A new quotation arrives on same vehicle in 2026 with overlapping date (e.g. 2026-03-01 to 2027-02-28)
+    start_2 = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    end_2 = datetime(2027, 2, 28, tzinfo=timezone.utc)
 
     t2 = resolve_or_create_tenure(
         db_session,

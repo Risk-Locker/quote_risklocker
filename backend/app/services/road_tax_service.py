@@ -328,16 +328,32 @@ def _normalize_jurisdiction(j: str | None) -> str:
 
 
 def calculate_road_tax(
-    cc: int | float | None,
+    cc: int | float | str | None,
     vehicle_type: str = "Car",
     owner_type: str = "Individual",
     jurisdiction: str = "West Malaysia",
     db: Session | None = None,
 ) -> float:
     """Calculate Malaysian road tax dynamically using active DB rules or standard JPJ schedules."""
-    if cc is None or cc <= 0:
+    if cc is None:
         return 0.0
-    engine_cc = round(cc)
+
+    numeric_cc = 0.0
+    if isinstance(cc, (int, float)):
+        numeric_cc = float(cc)
+    else:
+        m_num = re.search(r"[\d.]+", str(cc).strip())
+        if m_num:
+            try:
+                numeric_cc = float(m_num.group(0))
+            except ValueError:
+                return 0.0
+        else:
+            return 0.0
+
+    if numeric_cc <= 0.0:
+        return 0.0
+    engine_cc = round(numeric_cc)
     raw_vtype = (vehicle_type or "Car").strip()
     low_vtype = raw_vtype.lower()
     norm_owner = (owner_type or "Individual").strip().capitalize()
@@ -359,6 +375,21 @@ def calculate_road_tax(
         norm_vtype = "Car"
 
     norm_jur = _normalize_jurisdiction(jurisdiction)
+
+    # Auto-detect Electric Vehicle if capacity denotes kW/Watts or is typical EV rating (e.g. 9.4 kW = 9400 Watts)
+    is_ev_capacity = False
+    if isinstance(cc, str) and ("kw" in cc.lower() or "watt" in cc.lower()):
+        is_ev_capacity = True
+    elif isinstance(cc, (int, float)) and 0 < float(cc) <= 35.0:
+        is_ev_capacity = True
+
+    if is_ev_capacity and norm_vtype not in {"EVSaloonCar", "EVNonSaloonCar", "EVMotorcycle"}:
+        if norm_vtype in {"Motorcycle", "Bike"}:
+            norm_vtype = "EVMotorcycle"
+        elif norm_vtype == "NonSaloonCar":
+            norm_vtype = "EVNonSaloonCar"
+        else:
+            norm_vtype = "EVSaloonCar"
 
     # 1. Try resolving through active DB rules if Session provided
     if db is not None:

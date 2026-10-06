@@ -497,9 +497,10 @@ def extract_with_gemini_sync(
 
     candidate_models = [
         configured_model,
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
         "gemini-flash-latest",
-        "gemini-3.1-flash-lite-preview",
-        "gemini-2.5-flash",
+        "gemini-2.0-flash-lite",
     ]
     seen_models: set[str] = set()
     models_to_try = [m for m in candidate_models if m and not (m in seen_models or seen_models.add(m))]
@@ -532,6 +533,18 @@ def extract_with_gemini_sync(
                     continue
                 elif response.status_code == 429:
                     logger.warning("Gemini model %s returned rate-limit (429), rotating key or fallback.", m_name)
+                    next_key = pool.get_next_key()
+                    if next_key and next_key != api_key:
+                        api_key = next_key
+                    continue
+                elif response.status_code in (401, 403):
+                    logger.warning(
+                        "Gemini API returned %d (%s) on %s: %s. Google Cloud project access denied for this key.",
+                        response.status_code,
+                        "PERMISSION_DENIED" if response.status_code == 403 else "UNAUTHENTICATED",
+                        m_name,
+                        response.text[:200],
+                    )
                     next_key = pool.get_next_key()
                     if next_key and next_key != api_key:
                         api_key = next_key

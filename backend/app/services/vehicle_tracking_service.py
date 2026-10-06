@@ -25,21 +25,38 @@ def normalize_plate(plate: str | None) -> str:
 
 
 def parse_date_safe(date_str: str | None) -> datetime | None:
-    """Safely parse common date formats (DD-MM-YYYY, YYYY-MM-DD, DD/MM/YYYY)."""
+    """Safely parse common date formats (DD-MM-YYYY, YYYY-MM-DD, DD/MM/YYYY, YYYYMMDD)."""
     if not date_str:
         return None
     cleaned = date_str.strip()
-    for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%d %b %Y", "%d %B %Y", "%Y/%m/%d"):
+    for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%d %b %Y", "%d %B %Y", "%Y/%m/%d", "%Y%m%d"):
         try:
             return datetime.strptime(cleaned, fmt)
         except ValueError:
             continue
-    # Try finding 4-digit year and components via regex
+    # Try finding 4-digit year and components via regex (DD/MM/YYYY)
     m = re.search(r"(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})", cleaned)
     if m:
         try:
             d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
             return datetime(y, mo, d)
+        except Exception:
+            pass
+    # Try finding YYYY-MM-DD or YYYYMMDD in text
+    m_ymd = re.search(r"(\d{4})[-/.]?(\d{2})[-/.]?(\d{2})", cleaned)
+    if m_ymd:
+        try:
+            y, mo, d = int(m_ymd.group(1)), int(m_ymd.group(2)), int(m_ymd.group(3))
+            if 2000 <= y <= 2099 and 1 <= mo <= 12 and 1 <= d <= 31:
+                return datetime(y, mo, d)
+        except Exception:
+            pass
+    # Fallback: extract the first 4-digit year (e.g. 2025, 2026)
+    m_year = re.search(r"\b(20\d{2})\b", cleaned)
+    if m_year:
+        try:
+            y = int(m_year.group(1))
+            return datetime(y, 1, 1)
         except Exception:
             pass
     return None

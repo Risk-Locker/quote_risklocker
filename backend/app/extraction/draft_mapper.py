@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
+from typing import Any
 
 from app.extraction.candidate_finder import DRAFT_FIELDS, MONEY_FIELDS
 from app.extraction.conflict_detector import select_all
@@ -198,7 +199,9 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
         if val and str(val).strip():
             coverage_candidates.append(str(val).strip())
 
-    def _parse_money_flt(v: str) -> float:
+    def _parse_money_flt(v: Any) -> float:
+        if v is None:
+            return 0.0
         clean = re.sub(r"[^\d.]", "", str(v))
         try:
             return float(clean) if clean else 0.0
@@ -219,9 +222,9 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
             if alias in fields:
                 existing = fields[alias].get("value")
                 # Overwrite if empty or if existing is unrealistically small (< 1000) while best is realistic (>= 1000)
-                if not existing or (_parse_money_flt(str(existing)) < 1000.0 and _parse_money_flt(best_coverage_val) >= 1000.0):
-                    fields[alias]["value"] = str(best_coverage_val)
-                    fields[alias]["detected_value"] = str(best_coverage_val)
+                if not existing or (_parse_money_flt(existing) < 1000.0 and _parse_money_flt(best_coverage_val) >= 1000.0):
+                    fields[alias]["value"] = best_coverage_val
+                    fields[alias]["detected_value"] = best_coverage_val
                     fields[alias]["status"] = "ready"
                     fields[alias]["warnings"] = []
                     fields[alias]["message"] = ""
@@ -361,20 +364,30 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
 
     # Extract numeric CC or kW safely from raw string
     effective_cc = None
-    is_ev_vehicle = resolved_vtype in {"EVSaloonCar", "EVNonSaloonCar", "EVMotorcycle"} or "ev" in resolved_vtype.lower()
+    raw_cc_str = str(cc_val or "").strip().lower()
+    has_kw_token = "kw" in raw_cc_str or "watt" in raw_cc_str
+    is_ev_vehicle = resolved_vtype in {"EVSaloonCar", "EVNonSaloonCar", "EVMotorcycle"} or "ev" in resolved_vtype.lower() or has_kw_token
     if cc_val:
         cleaned_cc_str = re.sub(r"[^\d.]", "", str(cc_val)).strip()
         if cleaned_cc_str:
             try:
                 num_val = float(cleaned_cc_str)
-                if is_ev_vehicle:
-                    # EV: if >= 1000, value is in Watts -> convert to kW
+                # If explicit kW/Watt token, or numeric <= 35.0 with decimal (e.g. 9.4 kW = 9400 Watts), classify as EV
+                if num_val > 0 and (has_kw_token or (num_val <= 35.0 and ("." in cleaned_cc_str or num_val <= 25.0)) or is_ev_vehicle):
+                    is_ev_vehicle = True
+                    # EV: if >= 1000, value is in Watts -> convert to kW (e.g. 9400 W -> 9.4 kW)
                     kw = (num_val / 1000.0) if num_val >= 1000.0 else num_val
                     effective_cc = kw
                     disp_kw = f"{int(kw)}" if kw == int(kw) else f"{kw:.1f}"
                     if "engine_cc" in fields:
                         fields["engine_cc"]["value"] = f"{disp_kw} kW"
                         fields["engine_cc"]["status"] = "ready"
+                    if "vehicle_type" in fields and not str(fields["vehicle_type"].get("value", "")).lower().startswith("ev"):
+                        curr_vt = str(fields["vehicle_type"].get("value", "")).lower()
+                        if "motor" in curr_vt or "bike" in curr_vt:
+                            fields["vehicle_type"]["value"] = "EVMotorcycle"
+                        else:
+                            fields["vehicle_type"]["value"] = "EVSaloonCar"
                 else:
                     if 0.5 <= num_val <= 8.0:
                         # Litres format (e.g. 1.0 -> 998, 1.5 -> 1496)
@@ -452,6 +465,58 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
                                 extras_cost += num
                         except Exception:
                             pass
+
+        # Underwriting Sanity Check & BNM Derivation for basic_premium_vehicle
+        cov_amt = _parse_money_flt(fields.get("coverage_amount", {}).get("value") or 0)
+        ncd_pct = _parse_money_flt(fields.get("ncd_percent", {}).get("value") or 0)
+        bp_num = _parse_money_flt(bp_val)
+
+        # Sanity check: If bp_val is <= 50.0 or equals ncd_pct while vehicle sum insured is >= 10,000,
+        # it is a corrupt candidate (e.g. 25 RM NCD leak).
+        if cov_amt >= 10000.0 and (bp_num < 50.0 or (ncd_pct > 0 and abs(bp_num - ncd_pct) < 0.01)):
+            valid_cand = None
+            raw_bp_f = fields.get("basic_premium", {}).get("value") if isinstance(fields.get("basic_premium"), dict) else fields.get("basic_premium")
+            if raw_bp_f:
+                raw_bp_flt = _parse_money_flt(str(raw_bp_f))
+                if raw_bp_flt >= 50.0 and (ncd_pct == 0 or abs(raw_bp_flt - ncd_pct) >= 1.0):
+                    valid_cand = raw_bp_flt
+
+            if not valid_cand:
+                for c in candidates.get("basic_premium_vehicle", []):
+                    c_num = _parse_money_flt(c.value)
+                    if c_num >= 50.0 and (ncd_pct == 0 or abs(c_num - ncd_pct) >= 1.0):
+                        valid_cand = c_num
+                        break
+
+            if valid_cand:
+                bp_num = valid_cand
+            else:
+                gp_num = _parse_money_flt(gp_val)
+                if gp_num > 50.0 and 0.0 < ncd_pct < 100.0:
+                    derived_bp = (gp_num - float(extras_cost)) / (1.0 - ncd_pct / 100.0)
+                    if derived_bp >= 50.0:
+                        bp_num = derived_bp
+
+            if bp_num >= 50.0:
+                bp_str = f"{bp_num:.2f}"
+                if "basic_premium_vehicle" in fields:
+                    fields["basic_premium_vehicle"]["value"] = bp_str
+                    fields["basic_premium_vehicle"]["detected_value"] = bp_str
+                    fields["basic_premium_vehicle"]["status"] = "ready"
+                if "basic_premium" in fields:
+                    fields["basic_premium"]["value"] = bp_str
+                    fields["basic_premium"]["detected_value"] = bp_str
+                    fields["basic_premium"]["status"] = "ready"
+                bp_val = bp_str
+
+        if bp_num > 0.0 and cov_amt > 0.0:
+            rate_dec = (Decimal(str(bp_num)) / Decimal(str(cov_amt))).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+            fields["rate"] = {
+                "value": f"{rate_dec:.6f}",
+                "status": "ready",
+                "warnings": [],
+                "message": "",
+            }
 
         # If gross_premium and service_tax are extracted, calculate total net insurance premium
         if gp_val and st_val and "premium" in fields:

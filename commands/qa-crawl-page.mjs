@@ -11,17 +11,17 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 
 // Resolve playwright from frontend/node_modules
-const playwrightPath = path.resolve(repoRoot, 'frontend', 'node_modules', 'playwright');
+const playwrightPath = path.resolve(repoRoot, 'frontend', 'node_modules', 'playwright', 'index.mjs');
 let playwright;
 try {
-  playwright = await import(playwrightPath);
+  playwright = await import(pathToFileURL(playwrightPath).href);
 } catch (err) {
   console.error('[QA-CRAWL] Could not import Playwright from frontend/node_modules:', err.message);
   process.exit(1);

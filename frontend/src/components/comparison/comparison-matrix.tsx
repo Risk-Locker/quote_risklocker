@@ -1218,7 +1218,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                 RM {(entry.rounded_total_payable != null ? entry.rounded_total_payable : Math.ceil(entry.total_payable)).toFixed(2)}
               </p>
               <span className="text-[11px] text-[#6e6e73] font-medium block mt-0.5">
-                (Incl. RM {tenure.fixed_costs_total.toFixed(2)} Road Tax &amp; Runner)
+                (Incl. RM {tenure.fixed_costs_total.toFixed(2)} Roadtax &amp; Runner fee)
               </span>
             </div>
           </div>
@@ -1609,12 +1609,10 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         <div className="hidden print:block mb-6 border-b-2 border-[#1b1717] pb-4">
           <div className="flex items-start justify-between">
             <div>
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-xs font-black bg-[#1b1717] text-white px-2 py-0.5 rounded tracking-wider">
-                  RISK-LOCKER
-                </span>
+              <div className="flex items-center gap-2.5">
+                <img src="/assets/brand/logo-black.png" alt="Risk-Locker" className="h-6 w-auto object-contain" />
                 <h1 className="text-xl font-bold tracking-tight text-[#1b1717]">
-                  MOTOR QUOTATION COMPARISON REPORT
+                  MOTOR QUOTATION COMPARISON
                 </h1>
               </div>
               <p className="text-xs text-[#6e6e73] mt-1">
@@ -2271,23 +2269,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               ) : (
                 <div className="text-xs text-[#454545] space-y-1.5">
                   <div className="flex justify-between">
-                    <span className="text-[#6e6e73]">Road Tax:</span>
-                    <span className="font-mono font-medium text-[#1b1717]">RM {tenure.road_tax.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[#6e6e73]">Runner Fee:</span>
-                      {tenure.runner_fee_type === "passport" ? (
-                        <span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-bold rounded-md bg-amber-50 text-amber-800 border border-amber-200">
-                          Passport (RM 20)
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-bold rounded-md bg-neutral-100 text-neutral-700 border border-neutral-200">
-                          MyKad (RM 10)
-                        </span>
-                      )}
-                    </div>
-                    <span className="font-mono font-medium text-[#1b1717]">RM {tenure.runner_fee.toFixed(2)}</span>
+                    <span className="text-[#6e6e73]">Roadtax and Runner fee :</span>
+                    <span className="font-mono font-medium text-[#1b1717]">RM {(tenure.road_tax + tenure.runner_fee).toFixed(2)}</span>
                   </div>
                 </div>
               )}
@@ -3024,12 +3007,10 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                 {/* Snapshot Brand & Vehicle Header */}
                 <div className="flex items-start justify-between border-b-2 border-[#1b1717] pb-4">
                   <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-black bg-[#1b1717] text-white px-2.5 py-1 rounded-md tracking-widest">
-                        RISK-LOCKER
-                      </span>
+                    <div className="flex items-center gap-2.5">
+                      <img src="/assets/brand/logo-black.png" alt="Risk-Locker" className="h-7 w-auto object-contain" />
                       <h2 className="text-lg font-black tracking-tight text-[#1b1717]">
-                        MOTOR QUOTATION COMPARISON REPORT
+                        MOTOR QUOTATION COMPARISON
                       </h2>
                     </div>
                     <p className="text-xs text-[#6e6e73]">
@@ -3046,7 +3027,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                     <p className="font-bold text-xs text-[#1b1717]">{tenure.customer_name}</p>
                     <p className="text-[11px] text-[#6e6e73]">{tenure.vehicle_model} · {tenure.engine_cc}</p>
                     <p className="text-[10px] font-semibold text-[#6e6e73]">
-                      Road Tax: RM {tenure.road_tax.toFixed(2)} · Runner Fee: RM {tenure.runner_fee.toFixed(2)}
+                      Roadtax and Runner fee : RM {(tenure.road_tax + tenure.runner_fee).toFixed(2)}
                     </p>
                   </div>
                 </div>
@@ -3122,16 +3103,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                                 RM {card.total_payable.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
                               </span>
                             </div>
-                            {(card.rate_factor_formatted || (card.sum_insured > 0 && card.basic_figure_amount != null)) && (
-                              <div className="flex justify-between items-center text-[10px] text-neutral-500 pt-0.5">
-                                <span>Rate:</span>
-                                <span className="font-mono font-semibold">
-                                  {card.sum_insured > 0 && card.basic_figure_amount != null
-                                    ? (card.basic_figure_amount / card.sum_insured).toFixed(6)
-                                    : card.rate_factor_formatted}
-                                </span>
-                              </div>
-                            )}
+
                           </div>
 
                           {/* Benefit Highlights */}

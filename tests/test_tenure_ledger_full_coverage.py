@@ -97,7 +97,7 @@ def test_yoy_stats_car_and_period_counts(db_session: Session):
     y2027 = next((y for y in years if y["year"] == "2027"), None)
 
     assert y2027 is not None
-    # 3 total periods involved in 2027
-    assert y2027["total"] == 3
+    # 2 total tenures (1 locker per vehicle per calendar year invariant)
+    assert y2027["total"] == 2
     # 2 distinct cars (CAR 888, CAR 999)
     assert y2027["cars"] == 2

@@ -67,6 +67,24 @@ export function formatDateSafe(dateStr?: string | null): string {
   return dateStr;
 }
 
+export function formatDateTimeSafe(dateStr?: string | null): string {
+  if (!dateStr) return "—";
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleString("en-MY", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
 export interface MonthItem {
   month: string;
   total: number;
@@ -148,6 +166,7 @@ export interface TenureRow {
   superseded_by_tenure_id?: string | null;
   created_at?: string;
   is_main?: boolean;
+  stage_history?: Record<string, string>;
   stage_updated_at?: string;
   last_activity_at?: string | null;
   is_discarded?: boolean;
@@ -306,6 +325,16 @@ export function TenureTimelineLedger() {
   const [missReason, setMissReason] = useState<string>("");
   const [savingMissOutcome, setSavingMissOutcome] = useState<boolean>(false);
 
+  // Issue Policy confirmation modal state
+  const [issuePolicyModalTenure, setIssuePolicyModalTenure] = useState<TenureRow | null>(null);
+  const [selectedWinnerQuote, setSelectedWinnerQuote] = useState<string>("");
+  const [policyStartDate, setPolicyStartDate] = useState<string>("");
+  const [savingIssuePolicy, setSavingIssuePolicy] = useState<boolean>(false);
+
+  // Delete vehicle confirmation modal state
+  const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<{ id: string; vehicleNo: string; allIds: string[] } | null>(null);
+  const [deletingVehicle, setDeletingVehicle] = useState<boolean>(false);
+
   const handleConfirmMiss = async () => {
     if (!missModalTenure) return;
     setSavingMissOutcome(true);
@@ -387,10 +416,26 @@ export function TenureTimelineLedger() {
 
     const currentIdx = linearStages.findIndex((s) => s.id === t.stage);
 
+    const getStageTimestamp = (stId: string) => {
+      return t.stage_history?.[stId] || (t.stage === stId ? t.stage_updated_at : null);
+    };
+
+    const getStageTooltip = (stId: string, label: string) => {
+      const ts = getStageTimestamp(stId);
+      if (ts) {
+        return `${label}\nUpdated: ${formatDateTimeSafe(ts)}`;
+      }
+      return `${label}\nStatus: Not reached yet`;
+    };
+
     if (isHit) {
+      const hitTs = t.stage_history?.["Close - Win"] || t.stage_updated_at;
       return (
         <div className="flex items-center gap-1.5">
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 text-[11px] font-bold shadow-2xs">
+          <span
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 text-[11px] font-bold shadow-2xs cursor-help"
+            title={`✓ HIT (Won)\nUpdated: ${formatDateTimeSafe(hitTs)}`}
+          >
             <CheckCircle size={13} weight="fill" className="text-emerald-700" />
             <span>✓ HIT (Won)</span>
           </span>
@@ -398,7 +443,7 @@ export function TenureTimelineLedger() {
             type="button"
             onClick={() => patchTenureField(t.id, { stage: "Issue Policy", status: "draft" })}
             className="text-[10px] text-neutral-400 hover:text-neutral-700 underline cursor-pointer"
-            title="Revert back to Issue Policy"
+            title="Revert back to Issue Policy (will delete empty auto-created next-year renewal)"
           >
             Revert
           </button>
@@ -407,9 +452,13 @@ export function TenureTimelineLedger() {
     }
 
     if (isMiss) {
+      const missTs = t.stage_history?.["Close - Lose"] || t.stage_updated_at;
       return (
         <div className="flex items-center gap-1.5">
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-rose-100 text-rose-900 border border-rose-300 text-[11px] font-bold shadow-2xs">
+          <span
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-rose-100 text-rose-900 border border-rose-300 text-[11px] font-bold shadow-2xs cursor-help"
+            title={`✕ MISS (Lost)\nUpdated: ${formatDateTimeSafe(missTs)}`}
+          >
             <XCircle size={13} weight="fill" className="text-rose-700" />
             <span>✕ MISS (Lost)</span>
           </span>
@@ -432,12 +481,23 @@ export function TenureTimelineLedger() {
           {linearStages.map((st, idx) => {
             const isActive = t.stage === st.id;
             const isCompleted = currentIdx > idx;
+            const tooltipText = getStageTooltip(st.id, st.label);
 
             return (
               <React.Fragment key={st.id}>
                 <button
                   type="button"
-                  onClick={() => patchTenureField(t.id, { stage: st.id })}
+                  onClick={() => {
+                    if (st.id === "Issue Policy") {
+                      setIssuePolicyModalTenure(t);
+                      const firstQuote = t.sourced_quotes && t.sourced_quotes[0] ? t.sourced_quotes[0].company : "";
+                      setSelectedWinnerQuote(t.winning_company_id || firstQuote);
+                      const todayStr = new Date().toISOString().split("T")[0];
+                      setPolicyStartDate(todayStr);
+                    } else {
+                      patchTenureField(t.id, { stage: st.id });
+                    }
+                  }}
                   className={`px-2 py-0.5 rounded transition-all cursor-pointer flex items-center gap-1 ${
                     isActive
                       ? "bg-white text-neutral-900 shadow-2xs font-bold border border-neutral-300/80"
@@ -445,7 +505,7 @@ export function TenureTimelineLedger() {
                       ? "text-emerald-700 hover:text-emerald-900 font-medium"
                       : "text-neutral-400 hover:text-neutral-700"
                   }`}
-                  title={`Step ${idx + 1}: Move to ${st.label}`}
+                  title={tooltipText}
                 >
                   {isCompleted && <Check size={10} weight="bold" className="text-emerald-600 shrink-0" />}
                   <span>{st.label}</span>
@@ -464,7 +524,7 @@ export function TenureTimelineLedger() {
             type="button"
             onClick={() => patchTenureField(t.id, { stage: "Close - Win", status: "hit" })}
             className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] shadow-2xs cursor-pointer transition-colors flex items-center gap-1"
-            title="Policy is issued! Click to mark this client as HIT"
+            title="Policy is issued! Click to mark this client as HIT (creates next year renewal)"
           >
             <CheckCircle size={11} weight="bold" />
             <span>Hit</span>
@@ -690,6 +750,11 @@ export function TenureTimelineLedger() {
 
       // Trigger summary count refresh
       loadStageSummary();
+
+      // If stage, status, or discard changed, reload full tenures list so auto-created next-year renewal is shown/removed immediately
+      if (updates.stage || updates.status || updates.is_discarded !== undefined) {
+        loadTenures();
+      }
 
       // Show brief success check
       setSavedFieldId(tenureId);
@@ -1631,14 +1696,17 @@ export function TenureTimelineLedger() {
                                     ? "bg-neutral-900 text-white"
                                     : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
                                 }`}
-                                title={isVehicleExpanded ? "Collapse policy periods" : "Expand all policy periods"}
-                                aria-label={isVehicleExpanded ? "Collapse policy periods" : "Expand all policy periods"}
+                                title={isVehicleExpanded ? "Collapse deal details" : "Expand deal details"}
+                                aria-label={isVehicleExpanded ? "Collapse deal details" : "Expand deal details"}
                               >
                                 {isVehicleExpanded ? <CaretUp size={13} weight="bold" /> : <CaretDown size={13} weight="bold" />}
                               </button>
                               <button
                                 type="button"
-                                onClick={() => handleDeleteTenure(mainTenure.id, displayName)}
+                                onClick={() => {
+                                  const allIds = group.tenures.map((t) => t.id);
+                                  setDeleteConfirmTarget({ id: mainTenure.id, vehicleNo: displayName, allIds });
+                                }}
                                 className="flex size-6 items-center justify-center rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
                                 title={`Delete ${displayName}`}
                                 aria-label={`Delete ${displayName}`}
@@ -1657,21 +1725,6 @@ export function TenureTimelineLedger() {
                                   {displayName}
                                 </span>
                               </div>
-
-                              {/* Multi-Period Toggle Pill Badge */}
-                              <button
-                                type="button"
-                                onClick={() => toggleExpandVehicle(group.vehicle_no)}
-                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold border transition-colors cursor-pointer flex items-center gap-1 ${
-                                  hasMultiplePeriods
-                                    ? "bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300 shadow-2xs"
-                                    : "bg-neutral-100 text-neutral-600 border-neutral-200"
-                                }`}
-                                title={`This vehicle has ${group.tenures.length} policy period(s). Click to expand.`}
-                              >
-                                <span>{group.tenures.length} {group.tenures.length === 1 ? "Period" : "Periods"}</span>
-                                {isVehicleExpanded ? <CaretUp size={10} weight="bold" /> : <CaretDown size={10} weight="bold" />}
-                              </button>
 
                               {isChassis && (
                                 <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 font-sans text-[9px] font-bold shrink-0">
@@ -1753,9 +1806,15 @@ export function TenureTimelineLedger() {
                               </div>
                             )}
                             <div className="flex items-center gap-1.5 mt-1">
-                              <span className="text-[10px] text-neutral-500 font-medium">
-                                Exp: {mainTenure.expiry_month}
-                              </span>
+                              {(mainTenure.stage === "Issue Policy" || mainTenure.stage === "Close - Win") && mainTenure.expiry_month ? (
+                                <span className="text-[10px] text-neutral-500 font-medium font-mono">
+                                  Exp: {mainTenure.expiry_month}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-neutral-400 font-medium italic">
+                                  Confirmed on Policy Issue
+                                </span>
+                              )}
                               {mainTenure.is_main && (
                                 <span className="px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-800 text-[9px] font-bold border border-emerald-200 flex items-center gap-0.5">
                                   ★ Main
@@ -1918,166 +1977,123 @@ export function TenureTimelineLedger() {
                           </td>
                         </tr>
 
-                        {/* Inline Expandable Sub-panel: Serialized Policy Periods & Deal Details */}
+                        {/* Inline Expandable Sub-panel: Deal Intelligence & Remarks */}
                         {isVehicleExpanded && (
                           <tr className="bg-[#f9f9fb] border-b-2 border-neutral-300">
                             <td colSpan={7} className="p-4 whitespace-normal space-y-4">
-                              {/* Serialized Policy Periods Sub-table */}
+                              {/* Quotation Locker & Session Summary Card */}
                               <div className="bg-white rounded-xl border border-neutral-200 shadow-2xs overflow-hidden">
                                 <div className="px-4 py-2.5 bg-neutral-100/70 border-b border-neutral-200 flex items-center justify-between">
                                   <div className="flex items-center gap-2">
-                                    <CalendarBlank size={14} className="text-neutral-700" />
+                                    <Car size={14} className="text-neutral-700" />
                                     <span className="font-bold text-xs text-neutral-900 uppercase tracking-wider">
-                                      Serialized Policy Periods for {displayName} ({group.tenures.length} Periods)
+                                      Deal Locker: {displayName}
+                                    </span>
+                                    <span className="text-neutral-400">·</span>
+                                    <span className="text-xs font-medium text-neutral-600">
+                                      {group.customer_name}
                                     </span>
                                   </div>
-                                  <span className="text-[11px] text-neutral-500 font-medium">
-                                    ★ Marked &quot;Approved / Main&quot; policy appears in Calendar View
-                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    <Link
+                                      href={`/comparison?tenure_id=${mainTenure.id}` as Route}
+                                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold transition-colors shadow-2xs cursor-pointer"
+                                    >
+                                      <Columns className="w-3 h-3" />
+                                      <span>Open Comparison Matrix →</span>
+                                    </Link>
+                                    <button
+                                      type="button"
+                                      onClick={() => setActiveDrawerTenureId(mainTenure.id)}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-xs font-semibold transition-colors cursor-pointer border border-neutral-200"
+                                    >
+                                      <span>Timeline Logs</span>
+                                    </button>
+                                  </div>
                                 </div>
 
-                                <div className="overflow-x-auto">
-                                  <table className="w-full text-left text-xs whitespace-nowrap">
-                                    <thead className="bg-neutral-50/60 text-[10px] font-bold uppercase tracking-wider text-neutral-500 border-b border-neutral-200/60">
-                                      <tr>
-                                        <th className="py-2.5 px-3">Approved / Main Role</th>
-                                        <th className="py-2.5 px-3">Coverage Period</th>
-                                        <th className="py-2.5 px-3">Sourced Quotes</th>
-                                        <th className="py-2.5 px-3">Stage</th>
-                                        <th className="py-2.5 px-3">Fulfillment &amp; Checklist</th>
-                                        <th className="py-2.5 px-3 text-right">Actions</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-neutral-100">
-                                      {group.tenures.map((t) => {
-                                        const tStageConf = STAGE_CONFIGS[t.stage] || STAGE_CONFIGS.Quotations;
-                                        return (
-                                          <tr key={t.id} className={`hover:bg-neutral-50/60 transition-colors ${t.is_main ? "bg-amber-50/30" : ""}`}>
-                                            {/* Approved / Main Toggle */}
-                                            <td className="py-2.5 px-3">
-                                              {t.is_main ? (
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleSetMainTenure(t.id, group.vehicle_no)}
-                                                  className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold text-[11px] flex items-center gap-1 shadow-2xs cursor-pointer hover:bg-emerald-200 transition-colors"
-                                                  title="Currently marked as the Approved / Main policy for Calendar View"
-                                                >
-                                                  <CheckCircle size={13} weight="fill" className="text-emerald-700" />
-                                                  <span>★ Approved / Main</span>
-                                                </button>
-                                              ) : (
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleSetMainTenure(t.id, group.vehicle_no)}
-                                                  className="px-2.5 py-1 rounded-full bg-neutral-100 hover:bg-amber-100 text-neutral-600 hover:text-amber-900 border border-neutral-200 hover:border-amber-300 font-medium text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
-                                                  title="Click to set this period as the Approved / Main policy for Calendar View"
-                                                >
-                                                  <Clock size={12} className="text-neutral-400" />
-                                                  <span>Set as Main Policy</span>
-                                                </button>
-                                              )}
-                                            </td>
+                                <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+                                  {/* Confirmed Coverage Period or Pending Issue */}
+                                  <div>
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 mb-1">
+                                      Official Coverage Period
+                                    </div>
+                                    {mainTenure.stage === "Issue Policy" && mainTenure.coverage_start_date ? (
+                                      <div className="font-mono font-bold text-neutral-900 text-xs">
+                                        {formatDateSafe(mainTenure.coverage_start_date)} → {formatDateSafe(mainTenure.coverage_end_date)}
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-0.5 text-neutral-400">
+                                        <div className="text-xs font-medium text-neutral-500 flex items-center gap-1">
+                                          <span>—</span>
+                                          <span>Pending Issue</span>
+                                        </div>
+                                        <div className="text-[11px] italic text-neutral-400">
+                                          Confirmed on Policy Issue
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
 
-                                            {/* Coverage Period */}
-                                            <td className="py-2.5 px-3">
-                                              <div className="font-mono font-bold text-neutral-900 text-xs">
-                                                {formatDateSafe(t.coverage_start_date)} → {formatDateSafe(t.coverage_end_date)}
-                                              </div>
-                                              <div className="text-[10px] text-neutral-500 font-medium mt-0.5">
-                                                Expiry Cohort: {t.expiry_month}
-                                              </div>
-                                            </td>
+                                  {/* Sourced Quotes in this Locker */}
+                                  <div>
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 mb-1">
+                                      Sourced Quotes ({mainTenure.sourced_quotes.length})
+                                    </div>
+                                    {mainTenure.sourced_quotes.length === 0 ? (
+                                      <span className="text-neutral-400 italic text-xs">0 quotes compiled</span>
+                                    ) : (
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {mainTenure.sourced_quotes.map((q) => (
+                                          <span
+                                            key={q.session_id}
+                                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-neutral-100 text-neutral-800 text-[11px] font-medium border border-neutral-200/80"
+                                          >
+                                            <span className="font-bold">{q.company}</span>
+                                            {q.total_payable && (
+                                              <span className="font-mono text-neutral-900 font-bold">RM {q.total_payable}</span>
+                                            )}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
 
-                                            {/* Sourced Quotes */}
-                                            <td className="py-2.5 px-3">
-                                              {t.sourced_quotes.length === 0 ? (
-                                                <span className="text-neutral-400 italic text-[11px]">0 quotes</span>
-                                              ) : (
-                                                <div className="flex flex-wrap gap-1 max-w-[260px]">
-                                                  {t.sourced_quotes.map((q) => (
-                                                    <span
-                                                      key={q.session_id}
-                                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-800 text-[10px] font-medium border border-neutral-200/60"
-                                                    >
-                                                      <span className="font-bold">{q.company}</span>
-                                                      {q.total_payable && <span className="font-mono text-neutral-700 font-semibold">RM {q.total_payable}</span>}
-                                                    </span>
-                                                  ))}
-                                                </div>
-                                              )}
-                                            </td>
-
-                                            {/* Stage */}
-                                            <td className="py-2.5 px-3">
-                                              {renderPipelineProgress(t)}
-                                            </td>
-
-                                            {/* Fulfillment & Checklist */}
-                                            <td className="py-2.5 px-3">
-                                              <div className="flex items-center gap-3 text-xs">
-                                                <label className="flex items-center gap-1 text-[11px] font-medium text-neutral-700 cursor-pointer">
-                                                  <input
-                                                    type="checkbox"
-                                                    checked={Boolean(t.key_in_ucd)}
-                                                    onChange={(e) => patchTenureField(t.id, { key_in_ucd: e.target.checked })}
-                                                    className="w-3.5 h-3.5 accent-teal-600 rounded cursor-pointer"
-                                                  />
-                                                  <span>UCD</span>
-                                                </label>
-                                                <label className="flex items-center gap-1 text-[11px] font-medium text-neutral-700 cursor-pointer">
-                                                  <input
-                                                    type="checkbox"
-                                                    checked={Boolean(t.client_payment_received)}
-                                                    onChange={(e) => patchTenureField(t.id, { client_payment_received: e.target.checked })}
-                                                    className="w-3.5 h-3.5 accent-emerald-600 rounded cursor-pointer"
-                                                  />
-                                                  <span>Client Paid</span>
-                                                </label>
-                                                <label className="flex items-center gap-1 text-[11px] font-medium text-neutral-700 cursor-pointer">
-                                                  <input
-                                                    type="checkbox"
-                                                    checked={Boolean(t.agency_payment_done)}
-                                                    onChange={(e) => patchTenureField(t.id, { agency_payment_done: e.target.checked })}
-                                                    className="w-3.5 h-3.5 accent-blue-600 rounded cursor-pointer"
-                                                  />
-                                                  <span>Agency Paid</span>
-                                                </label>
-                                              </div>
-                                            </td>
-
-                                            {/* Period Actions */}
-                                            <td className="py-2.5 px-3 text-right">
-                                              <div className="flex items-center justify-end gap-1.5">
-                                                <Link
-                                                  href={`/comparison?tenure_id=${t.id}` as Route}
-                                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500 hover:bg-amber-600 text-slate-950 text-[11px] font-bold transition-colors shadow-2xs"
-                                                >
-                                                  <Columns className="w-3 h-3" />
-                                                  <span>Compare</span>
-                                                </Link>
-                                                <Button
-                                                  size="sm"
-                                                  variant="secondary"
-                                                  onClick={() => setActiveDrawerTenureId(t.id)}
-                                                  className="h-6 text-[11px] font-medium px-2"
-                                                >
-                                                  Timeline
-                                                </Button>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleDeleteTenure(t.id, displayName)}
-                                                  className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
-                                                  title="Delete this period"
-                                                >
-                                                  <Trash size={12} weight="bold" />
-                                                </button>
-                                              </div>
-                                            </td>
-                                          </tr>
-                                        );
-                                      })}
-                                    </tbody>
-                                  </table>
+                                  {/* Fulfillment Checklists */}
+                                  <div>
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 mb-1">
+                                      Fulfillment
+                                    </div>
+                                    <div className="flex items-center gap-3 text-xs">
+                                      <label className="flex items-center gap-1 text-[11px] font-medium text-neutral-700 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={Boolean(mainTenure.key_in_ucd)}
+                                          onChange={(e) => patchTenureField(mainTenure.id, { key_in_ucd: e.target.checked })}
+                                          className="w-3.5 h-3.5 accent-teal-600 rounded cursor-pointer"
+                                        />
+                                        <span>UCD</span>
+                                      </label>
+                                      <label className="flex items-center gap-1 text-[11px] font-medium text-neutral-700 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={Boolean(mainTenure.client_payment_received)}
+                                          onChange={(e) => patchTenureField(mainTenure.id, { client_payment_received: e.target.checked })}
+                                          className="w-3.5 h-3.5 accent-emerald-600 rounded cursor-pointer"
+                                        />
+                                        <span>Client Paid</span>
+                                      </label>
+                                      <label className="flex items-center gap-1 text-[11px] font-medium text-neutral-700 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={Boolean(mainTenure.agency_payment_done)}
+                                          onChange={(e) => patchTenureField(mainTenure.id, { agency_payment_done: e.target.checked })}
+                                          className="w-3.5 h-3.5 accent-blue-600 rounded cursor-pointer"
+                                        />
+                                        <span>Agency Paid</span>
+                                      </label>
+                                    </div>
+                                  </div>
                                 </div>
                               </div>
 
@@ -2643,9 +2659,15 @@ export function TenureTimelineLedger() {
 
                               <div className="flex items-center gap-2 text-xs text-neutral-500 flex-wrap">
                                 <span>Coverage:</span>
-                                <strong className="font-mono text-neutral-800">
-                                  {formatDateSafe(t.coverage_start_date)} – {formatDateSafe(t.coverage_end_date)}
-                                </strong>
+                                {t.stage === "Issue Policy" && t.coverage_start_date ? (
+                                  <strong className="font-mono text-neutral-800">
+                                    {formatDateSafe(t.coverage_start_date)} – {formatDateSafe(t.coverage_end_date)}
+                                  </strong>
+                                ) : (
+                                  <span className="italic text-neutral-400">
+                                    Pending Issue (Confirmed on Policy Issue)
+                                  </span>
+                                )}
                                 <span className="text-neutral-400">·</span>
                                 <span>{t.sourced_quotes.length} Quotes</span>
                                 {t.sub_agent_name && (
@@ -2848,6 +2870,202 @@ export function TenureTimelineLedger() {
                 className="px-4 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded shadow-xs cursor-pointer disabled:opacity-50"
               >
                 {savingMissOutcome ? "Saving..." : "Confirm Miss & Update"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal for Issue Policy Confirmation & Insurance Period Input */}
+      {issuePolicyModalTenure && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-[var(--rl-radius)] border border-neutral-200 shadow-xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-4 border-b border-neutral-100 bg-[#fbfbfd] flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-sm text-neutral-900">Confirm Policy Issuance</h3>
+                <p className="text-xs text-neutral-500 font-mono mt-0.5">
+                  {issuePolicyModalTenure.vehicle_no} · {issuePolicyModalTenure.customer_name}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIssuePolicyModalTenure(null)}
+                className="text-neutral-400 hover:text-neutral-700 text-sm font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Step 1: Confirm Winner */}
+              <div>
+                <label className="text-xs font-bold text-neutral-800 block mb-1">
+                  1. Confirmed Winning Quotation
+                </label>
+                <p className="text-[11px] text-neutral-500 mb-2">
+                  Select the quote that the customer confirmed:
+                </p>
+                {issuePolicyModalTenure.sourced_quotes.length === 0 ? (
+                  <div className="p-2.5 bg-neutral-50 rounded border border-neutral-200 text-xs text-neutral-500 italic">
+                    No quotes compiled yet.
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                    {issuePolicyModalTenure.sourced_quotes.map((q) => {
+                      const isSelected = selectedWinnerQuote === q.company;
+                      return (
+                        <button
+                          key={q.session_id}
+                          type="button"
+                          onClick={() => setSelectedWinnerQuote(q.company)}
+                          className={`w-full p-2.5 rounded border text-left text-xs transition-all cursor-pointer flex items-center justify-between ${
+                            isSelected
+                              ? "border-emerald-500 bg-emerald-50 text-emerald-950 font-bold ring-1 ring-emerald-500"
+                              : "border-neutral-200 hover:bg-neutral-50 text-neutral-700"
+                          }`}
+                        >
+                          <span>{q.company}</span>
+                          {q.total_payable && (
+                            <span className="font-mono text-neutral-900 font-bold">
+                              RM {q.total_payable}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Step 2: Input Insurance Period Start Date */}
+              <div>
+                <label className="text-xs font-bold text-neutral-800 block mb-1">
+                  2. Confirmed Insurance Period
+                </label>
+                <p className="text-[11px] text-neutral-500 mb-2">
+                  Enter the official policy start date (coverage automatically runs for 1 full year):
+                </p>
+                <input
+                  type="date"
+                  value={policyStartDate}
+                  onChange={(e) => setPolicyStartDate(e.target.value)}
+                  className="w-full h-9 px-3 text-xs rounded border border-neutral-300 focus:outline-none focus:border-neutral-900 font-mono"
+                />
+                {policyStartDate && (
+                  <div className="mt-2 p-2 bg-emerald-50 border border-emerald-200 rounded text-[11px] text-emerald-900 font-mono">
+                    Coverage: {policyStartDate} → {(() => {
+                      const d = new Date(policyStartDate);
+                      d.setDate(d.getDate() + 364);
+                      return d.toISOString().split("T")[0];
+                    })()}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="p-3 bg-neutral-50 border-t border-neutral-200 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIssuePolicyModalTenure(null)}
+                className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!policyStartDate) {
+                    alert("Please select an insurance start date.");
+                    return;
+                  }
+                  setSavingIssuePolicy(true);
+                  try {
+                    const startDt = new Date(policyStartDate);
+                    const endDt = new Date(startDt);
+                    endDt.setDate(endDt.getDate() + 364);
+                    const startStr = startDt.toISOString().split("T")[0];
+                    const endStr = endDt.toISOString().split("T")[0];
+
+                    await patchTenureField(issuePolicyModalTenure.id, {
+                      stage: "Issue Policy",
+                      coverage_start_date: startStr as any,
+                      coverage_end_date: endStr as any,
+                    });
+
+                    setIssuePolicyModalTenure(null);
+                    loadTenures();
+                    loadStageSummary();
+                  } catch (err: any) {
+                    alert("Failed to confirm issue policy: " + (err?.message || err));
+                  } finally {
+                    setSavingIssuePolicy(false);
+                  }
+                }}
+                disabled={savingIssuePolicy}
+                className="px-4 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                {savingIssuePolicy ? "Confirming..." : "Confirm & Issue Policy"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal for Delete Confirmation & 30-Day Trash Warning */}
+      {deleteConfirmTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-[var(--rl-radius)] border border-neutral-200 shadow-xl max-w-sm w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-4 border-b border-neutral-100 bg-[#fbfbfd] flex items-center justify-between">
+              <h3 className="font-bold text-sm text-neutral-900">Confirm Move to Trash</h3>
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmTarget(null)}
+                className="text-neutral-400 hover:text-neutral-700 text-sm font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-4 space-y-2 text-xs text-neutral-600">
+              <p>
+                Are you sure you want to delete <strong className="text-neutral-900">{deleteConfirmTarget.vehicleNo}</strong>?
+              </p>
+              <p className="text-[11px] text-neutral-600 bg-amber-50 p-2.5 rounded border border-amber-200 leading-relaxed">
+                This will delete the vehicle deal and move all associated quotation sessions, comparison matrices, and generated PDF records to Trash.
+                Items in Trash are retained for <strong>30 days</strong> before permanent deletion.
+              </p>
+            </div>
+            <div className="p-3 bg-neutral-50 border-t border-neutral-200 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmTarget(null)}
+                className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setDeletingVehicle(true);
+                  try {
+                    await api("/tenures/bulk", {
+                      method: "DELETE",
+                      body: JSON.stringify({ tenure_ids: deleteConfirmTarget.allIds }),
+                    });
+                    setDeleteConfirmTarget(null);
+                    loadTenures();
+                    loadStageSummary();
+                    loadMonths();
+                    loadYoyStats();
+                  } catch (err: any) {
+                    alert("Failed to delete deal: " + (err?.message || err));
+                  } finally {
+                    setDeletingVehicle(false);
+                  }
+                }}
+                disabled={deletingVehicle}
+                className="px-3.5 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                {deletingVehicle ? "Deleting..." : "Yes, Move to Trash"}
               </button>
             </div>
           </div>

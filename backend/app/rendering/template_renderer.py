@@ -190,6 +190,7 @@ SYSTEM_DEFAULT_SLOTS = {
     "all_driver_icon": "91116a7dc3540d62",
     "background": "49e754a6faa949c2",
     "qr_code": "9ca8e404c89dd905",
+    "duitnow_payment_details": "c3003185-0000-4000-8000-000000000001",
 }
 
 
@@ -252,6 +253,8 @@ def _image_html(
             slot = "all_driver_icon"
         elif eid in {"rc_b_qr_code", "qr_code", "qr"}:
             slot = "qr_code"
+        elif eid in {"rc_b_duitnow_img", "duitnow_img", "duitnow_card", "payment_account_details_img"}:
+            slot = "duitnow_payment_details"
 
     asset_id = str(element.get("assetId") or _asset_id_for_slot(config, slot, fields, db))
     if (not asset_id or asset_id == "None") and slot in SYSTEM_DEFAULT_SLOTS:
@@ -268,6 +271,8 @@ def _image_html(
             asset_id = SYSTEM_DEFAULT_SLOTS["bank_logo"]
         elif eid in {"rc_b_qr_code", "qr_code", "qr"}:
             asset_id = SYSTEM_DEFAULT_SLOTS["qr_code"]
+        elif eid in {"rc_b_duitnow_img", "duitnow_img", "duitnow_card", "payment_account_details_img"}:
+            asset_id = SYSTEM_DEFAULT_SLOTS["duitnow_payment_details"]
 
     if resolved_assets is not None:
         src = resolved_assets.get(asset_id, "")
@@ -859,8 +864,18 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
                         rt_display = f"{calc_rt:.2f}"
             except Exception:
                 pass
-    rows.append(("roadtax", str(labels.get("roadtax") or "Roadtax / 路税"), "", _format_value(rt_display, "RM ")))
-    rows.append(("runner", str(labels.get("runner") or "Runner Fee / 服务费"), "", _format_value(_value(fields, "service_fee"), "RM ")))
+    # Combine road tax and runner fee into a single combined line item (never show runner fee separately)
+    try:
+        clean_rt_num = float((rt_display or "0").replace(",", "").strip())
+    except (ValueError, TypeError):
+        clean_rt_num = 0.0
+    try:
+        clean_sf_num = float((_value(fields, "service_fee") or "0").replace(",", "").strip())
+    except (ValueError, TypeError):
+        clean_sf_num = 0.0
+    combined_rt_val = clean_rt_num + clean_sf_num
+    combined_rt_display = f"{combined_rt_val:.2f}" if combined_rt_val > 0 else (rt_display or "")
+    rows.append(("roadtax", str(labels.get("roadtax") or "Roadtax / 路税"), "", _format_value(combined_rt_display, "RM ")))
     total = (render_context or {}).get("total_premium_adjusted") or _value(fields, "total_premium_adjusted")
     if not total:
         disp_opts = (render_context or {}).get("display_options") or ((render_context or {}).get("draft") or {}).get("display_options") or {}

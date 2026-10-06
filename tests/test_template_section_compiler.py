@@ -416,5 +416,51 @@ def test_header_section_custom_order_and_top_left_insurer():
     assert tl_ins_val["y"] == 88.0
 
 
+def test_agency_bilingual_v2_section_extraction_and_compilation():
+    from app.services.master_template_service import _agency_bilingual_v2_config
 
+    v2_config = _agency_bilingual_v2_config()
+    v2_elements = v2_config["canvas"]["elements"]
 
+    # 1. Extract sections
+    sections = extract_sections_from_canvas(v2_elements)
+
+    # 2. Verify right containers are v2 defaults (2 containers: DuitNow image + Drivers)
+    right_containers = sections.get("rightContainers") or []
+    assert len(right_containers) == 2
+    assert right_containers[0]["id"] == "rc_container_payment"
+    assert right_containers[0]["blocks"][0]["id"] == "payment_account_details_img"
+    assert right_containers[0]["blocks"][0]["assetSlot"] == "duitnow_payment_details"
+
+    assert right_containers[1]["id"] == "rc_container_drivers"
+    assert any("全司机投保" in str(b.get("text", "")) for b in right_containers[1]["blocks"])
+
+    # 3. Verify left table vehicleFields contains excess_amount directly after valuation_type
+    fields = sections["section1"]["vehicleFields"]
+    var_ids = [f["variableId"] for f in fields]
+    assert "customer_name" in var_ids
+    assert "valuation_type" in var_ids
+    assert "excess_amount" in var_ids
+    assert "coverage_amount" in var_ids
+
+    val_type_idx = var_ids.index("valuation_type")
+    excess_idx = var_ids.index("excess_amount")
+    cov_amt_idx = var_ids.index("coverage_amount")
+    assert excess_idx == val_type_idx + 1
+    assert cov_amt_idx == excess_idx + 1
+
+    excess_field = fields[excess_idx]
+    assert excess_field["labelEn"] == "Policy Excess"
+    assert excess_field["labelZh"] == "自负额"
+
+    # 4. Compile sections to canvas and validate
+    compiled = compile_sections_to_canvas(sections, v2_elements)
+    assert len(compiled) > 0
+
+    full_config = {
+        "version": 7,
+        "page_profile": {"profile_key": "a4", "width": 794, "height": 1123, "unit": "px"},
+        "canvas": {"width": 794, "height": 1123, "elements": compiled},
+    }
+    validated = validate_template_config(full_config)
+    assert len(validated["canvas"]["elements"]) > 0

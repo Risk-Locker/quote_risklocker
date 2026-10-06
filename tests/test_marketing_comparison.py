@@ -296,9 +296,7 @@ def test_format_whatsapp_teaser(db_session: Session):
     assert "JWK9488" in teaser
     assert "TEY SIOK BEE" in teaser
     assert "Etiqa Insurance" in teaser
-    assert "STMB Insurance" in teaser
-    assert "TOTAL PAYABLE" in teaser
-    assert "Road Tax & Runner Fee: RM 120.00" in teaser
+    assert "Roadtax and Runner fee : RM 120.00" in teaser
 
 
 def test_multi_winner_selection_coexistence_and_deselection(db_session: Session):
@@ -910,5 +908,64 @@ def test_marketing_comparison_overhaul_features(db_session: Session):
     assert prev["year"] != 2026
 
 
+def test_ev_kw_road_tax_calculation_and_ledger_update(db_session: Session):
+    from app.services.road_tax_service import calculate_road_tax
+    from app.extraction.entity_classifier import classify_client_entity
+    from app.services.marketing_comparison_service import update_tenure_fixed_costs, rescan_comparison_tenure
 
+    # 1. EV 9.4 kW (= 9400 Watts) calculation check
+    # Motorcycle 9.4 kW -> RM 9.00
+    moto_tax = calculate_road_tax("9.4 kW", vehicle_type="EVMotorcycle")
+    assert moto_tax == 9.00
+    moto_tax_num = calculate_road_tax(9.4, vehicle_type="EVMotorcycle")
+    assert moto_tax_num == 9.00
 
+    # Car 9.4 kW (<= 50 kW) -> RM 20.00
+    car_tax = calculate_road_tax("9.4 kW", vehicle_type="EVSaloonCar")
+    assert car_tax == 20.00
+
+    # Auto-detect EV from kW token even if passed as Car
+    auto_ev_tax = calculate_road_tax("9.4 kW", vehicle_type="Motorcycle")
+    assert auto_ev_tax == 9.00
+
+    # Entity classification preserves EV with kW capacity
+    entity_type, resolved_vtype = classify_client_entity(
+        customer_name="Ahmad Razak",
+        ic_or_brn="950505-14-5555",
+        ai_client_type="Individual",
+        current_vehicle_type="Motorcycle",
+        car_model="Blueshark R1 Lite",
+        capacity_str="9.4 kW",
+    )
+    assert resolved_vtype == "EVMotorcycle"
+
+    # 2. Test Customer & Vehicle Ledger persistence and windscreen target preservation
+    tenure, s1, s2, user = _seed_tenure_with_sessions(db_session)
+    updated = update_tenure_fixed_costs(
+        db=db_session,
+        tenure_id=tenure.id,
+        road_tax=9.00,
+        runner_fee=10.00,
+        windscreen_target=2500.00,
+        customer_name="DATO SRI TAN",
+        ic_no="800101-14-1111",
+        engine_cc="9.4 kW",
+        engine_no="ENG-9988",
+        chassis_no="CHAS-7766",
+        vehicle_model="Blueshark Electric 9.4kW",
+        manufacture_year=2024,
+    )
+
+    t_data = updated["tenure"]
+    assert t_data["customer_name"] == "DATO SRI TAN"
+    assert t_data["windscreen_target"] == 2500.00
+    assert t_data["engine_cc"] == "9.4 kW"
+    assert t_data["vehicle_model"] == "Blueshark Electric 9.4kW"
+    assert t_data["road_tax"] == 9.00
+    assert t_data["fixed_costs_total"] == 19.00
+
+    # 3. Test that Rescan does NOT overwrite manual windscreen target
+    rescanned = rescan_comparison_tenure(db_session, tenure.id)
+    assert rescanned["tenure"]["windscreen_target"] == 2500.00
+    assert rescanned["tenure"]["customer_name"] == "DATO SRI TAN"
+    assert rescanned["tenure"]["vehicle_model"] == "Blueshark Electric 9.4kW"

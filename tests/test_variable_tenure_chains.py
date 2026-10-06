@@ -134,11 +134,12 @@ def test_auto_project_triggered_on_won_status(db_session: Session):
     )
     db_session.commit()
 
-    # Auto-projection on won status is disabled; no dummy upcoming tenure is generated
+    # Auto-renewal on hit creates next year's renewal tenure
     projected = db_session.query(InsuranceTenure).filter(
         InsuranceTenure.previous_tenure_id == t.id
     ).first()
-    assert projected is None
+    assert projected is not None
+    assert projected.status == "draft"
 
 
 def test_shift_tenure_dates_modular_sync(db_session: Session):

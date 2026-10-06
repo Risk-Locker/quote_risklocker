@@ -202,6 +202,7 @@ def classify_vehicle_ev_status(
     car_brand: str | None,
     car_model: str | None,
     capacity_str: str | None = None,
+    current_vehicle_type: str | None = None,
 ) -> Tuple[bool, str | None]:
     """
     Classify whether a vehicle is an Electric Vehicle (EV) and determine its EV category.
@@ -212,6 +213,7 @@ def classify_vehicle_ev_status(
     """
     text_comb = f"{car_brand or ''} {car_model or ''}".strip().upper()
     cap_text = (capacity_str or "").strip().upper()
+    curr_vt = (current_vehicle_type or "").strip().upper()
 
     if not text_comb and not cap_text:
         return False, None
@@ -229,14 +231,23 @@ def classify_vehicle_ev_status(
         return True, "EVNonSaloonCar"
 
     # 4. Check explicit EV indicators in model text or capacity text (e.g. "KW", "WATT")
-    has_ev_token = bool(_GENERIC_EV_INDICATORS.search(text_comb))
-    has_kw_token = "KW" in cap_text or "WATT" in cap_text
+    has_ev_token = bool(_GENERIC_EV_INDICATORS.search(text_comb)) or "EV" in curr_vt
+    has_kw_token = "KW" in cap_text or "WATT" in cap_text or bool(re.search(r"\b\d+(?:\.\d+)?\s*KW\b", cap_text)) or bool(re.search(r"\b\d+(?:\.\d+)?\s*KW\b", text_comb))
+    if not has_kw_token and cap_text:
+        m_num = re.search(r"^(\d+(?:\.\d+)?)$", cap_text)
+        if m_num:
+            try:
+                v_num = float(m_num.group(1))
+                if 0 < v_num <= 35.0:
+                    has_kw_token = True
+            except ValueError:
+                pass
 
     if has_ev_token or has_kw_token:
         # Determine body style: Non-Saloon vs Saloon vs Motorcycle
-        if "MOTOR" in text_comb or "BIKE" in text_comb or "SCOOTER" in text_comb:
+        if "MOTOR" in text_comb or "BIKE" in text_comb or "SCOOTER" in text_comb or "MOTOR" in curr_vt or "BIKE" in curr_vt:
             return True, "EVMotorcycle"
-        if is_non_saloon_model(text_comb):
+        if is_non_saloon_model(text_comb) or "SUV" in curr_vt or "MPV" in curr_vt:
             return True, "EVNonSaloonCar"
         return True, "EVSaloonCar"
 
@@ -269,7 +280,7 @@ def classify_client_entity(
     curr_vtype = (current_vehicle_type or "Car").strip()
 
     # Check EV status first
-    is_ev, ev_category = classify_vehicle_ev_status(car_brand, car_model, capacity_str)
+    is_ev, ev_category = classify_vehicle_ev_status(car_brand, car_model, capacity_str, current_vehicle_type)
     curr_vtype_lower = curr_vtype.lower()
     combined_vehicle_text = f"{car_brand or ''} {car_model or ''} {curr_vtype_lower}".lower()
 

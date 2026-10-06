@@ -17,7 +17,7 @@ const HOP_BY_HOP_HEADERS = new Set([
 ]);
 
 function configuredBackendOrigin(): URL {
-  const raw = process.env.BACKEND_API_ORIGIN || (process.env.NODE_ENV === "development" ? "http://127.0.0.1:8100" : "");
+  const raw = process.env.BACKEND_API_ORIGIN || "http://127.0.0.1:8100";
   if (!raw) throw new Error("BACKEND_API_ORIGIN is not configured.");
   const url = new URL(raw);
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.pathname !== "/") {

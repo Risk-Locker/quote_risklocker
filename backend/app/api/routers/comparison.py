@@ -28,6 +28,7 @@ from app.services.marketing_comparison_service import (
     select_winner_and_generate_draft,
     update_tenure_fixed_costs,
 )
+from app.services.insurance_tenure_service import record_stage_timestamp
 from app.services.upload_intake_service import create_queued_upload
 
 logger = logging.getLogger(__name__)
@@ -190,6 +191,12 @@ def get_whatsapp_teaser(
     """Generate executive Malaysian WhatsApp teaser text for client messaging."""
     try:
         teaser_text = format_whatsapp_teaser(db, tenure_id)
+        tenure = db.get(InsuranceTenure, tenure_id)
+        if tenure:
+            if tenure.stage in ("Quotations", "Prospecting", "draft", None):
+                tenure.stage = "Material to Client"
+            record_stage_timestamp(tenure, "Material to Client")
+            db.commit()
         return {"status": "success", "teaser_text": teaser_text}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -246,6 +253,9 @@ async def upload_comparison_quote(
         if queued.session:
             queued.session.tenure_id = tenure_id
             queued.session.is_tenure_active = True
+            if tenure.stage in ("Prospecting", "draft", None):
+                tenure.stage = "Quotations"
+            record_stage_timestamp(tenure, "Quotations")
             db.commit()
 
         return {
@@ -430,6 +440,10 @@ def patch_comparison_entry(
     # Re-rank after modification
     entries = list(db.scalars(select(TenureComparisonEntry).where(TenureComparisonEntry.tenure_id == tenure_id)).all())
     tenure = db.get(InsuranceTenure, tenure_id)
+    if tenure:
+        if tenure.stage in ("Prospecting", "draft", None):
+            tenure.stage = "Quotations"
+        record_stage_timestamp(tenure, "Quotations")
     rank_comparison_entries(
         entries,
         explicit_winning_company_id=tenure.winning_company_id if tenure else None,

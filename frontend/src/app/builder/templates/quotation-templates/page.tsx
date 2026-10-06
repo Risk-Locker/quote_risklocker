@@ -86,7 +86,7 @@ function pageProfile(template: TemplateRecord) {
 function resolveNodeImageUrl(node: CanvasNode, template: TemplateRecord): string | null {
   const isImageOrLogo =
     node.type === "image" ||
-    ["pay_holder", "text_ltaa394", "pay_bank_sub", "text_ul2w5ka", "pay_bank_logo", "bank_logo", "risklocker_logo", "qr_code_img", "rc_b_qr_code"].includes(node.id);
+    ["pay_holder", "text_ltaa394", "pay_bank_sub", "text_ul2w5ka", "pay_bank_logo", "bank_logo", "risklocker_logo", "qr_code_img", "rc_b_qr_code", "payment_account_details_img", "rc_b_duitnow_img", "duitnow_img", "duitnow_card"].includes(node.id);
   if (!isImageOrLogo) return null;
 
   const slot =
@@ -97,10 +97,15 @@ function resolveNodeImageUrl(node: CanvasNode, template: TemplateRecord): string
         ? "bank_logo"
         : node.id === "driver_icon"
           ? "all_driver_icon"
-          : node.id === "qr_code_img" || node.id === "rc_b_qr_code" || node.id === "qr_code"
-            ? "qr_code"
-            : "");
+          : node.id === "payment_account_details_img" || node.id === "rc_b_duitnow_img" || node.id === "duitnow_img" || node.id === "duitnow_card"
+            ? "duitnow_payment_details"
+            : node.id === "qr_code_img" || node.id === "rc_b_qr_code" || node.id === "qr_code"
+              ? "qr_code"
+              : "");
   const assetId = (node as any).assetId || (template.fixed_fields as any)?.assets?.[slot];
+  if (slot === "duitnow_payment_details" || node.id === "payment_account_details_img" || node.id === "rc_b_duitnow_img" || assetId === "c3003185-0000-4000-8000-000000000001") {
+    return "/assets/duitnow_payment_details.png";
+  }
   if (slot === "risklocker_logo" || assetId === "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f") {
     return "/api/business/assets/e9685e1f-ac95-410c-a2e9-eccb7ca35d5f/content?profile=ui";
   }

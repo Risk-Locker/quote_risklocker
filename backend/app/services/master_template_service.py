@@ -284,6 +284,141 @@ def _agency_bilingual_config() -> dict:
     return validate_template_config(config)
 
 
+def _agency_bilingual_v2_config() -> dict:
+    name = "Bilingual Agency Motor v2"
+    key = "agency_bilingual_v2"
+    height = 1123
+    config = new_v7_template_config(name)
+
+    NAVY = "#1E293B"
+    DARK = "#0F172A"
+    LABEL_COLOR = "#334155"
+    MUTED_COLOR = "#64748B"
+    BORDER_COLOR = "#E2E8F0"
+    RED_COLOR = "#ED1C24"
+    BG_LIGHT = "#F8FAFC"
+
+    elements = [
+        # 1. Page Background
+        _rectangle("page_bg", 0, 0, 794, height, 1, background="#FFFFFF", border=""),
+
+        # 2. Header (Single Row): Sleek Logo + Motor Insurance Quotation (Left) | Ref, Vehicle No, Insurer (Right)
+        _image("risklocker_logo", "risklocker_logo", 40, 20, 32, 40, 5),
+        _text("title_motor", "Motor Insurance ", 78, 26, 150, 32, 5, size=18, weight="800", color=DARK, locked=True),
+        _text("title_quotation", "Quotation", 232, 26, 100, 32, 5, size=18, weight="800", color=RED_COLOR, locked=True),
+
+        _text("ref_label", "Quotation Ref: ", 354, 18, 400, 16, 5, size=10, weight="500", color=MUTED_COLOR, align="right", visible=False),
+        _variable("ref_val", "quotation_reference", 354, 18, 400, 16, 5, size=10, weight="700", color=RED_COLOR, align="right", prefix="Quotation Ref: "),
+        _text("vehicle_no_label", "Vehicle No: ", 354, 34, 400, 16, 5, size=10, weight="500", color=MUTED_COLOR, align="right", visible=False),
+        _variable("vehicle_no_val", "vehicle_no", 354, 34, 400, 16, 5, size=10, weight="700", color=RED_COLOR, align="right", prefix="Vehicle No: "),
+        _text("header_insurer_label", "Insurer: ", 354, 50, 400, 18, 5, size=10, weight="500", color=MUTED_COLOR, align="right", visible=False),
+        _variable("header_insurer_name", "insurance_company", 354, 50, 400, 18, 5, size=10.5, weight="800", color=RED_COLOR, align="right", transform="uppercase", prefix="Insurer: "),
+        _line("header_rule", 40, 78, 714, 2, color=BORDER_COLOR, height=1),
+
+        # 3. Left Column: Coverage & Vehicle Information Card (x=40, w=530, y=94, h=284)
+        _rectangle("cov_header_bg", 40, 94, 530, 26, 2, background=NAVY, border="", radius=4, locked=True),
+        _text("cov_header_txt", "Coverage & Vehicle Information / 车辆及保单资料", 52, 99, 506, 16, 5, size=10, weight="700", color="#FFFFFF", locked=True),
+        _rectangle("cov_table_bg", 40, 120, 530, 258, 2, background="#FFFFFF", border=BORDER_COLOR, radius=4, locked=True),
+
+        # Row 1: Customer Name
+        _text("lbl_customer", "Customer / 客户姓名", 52, 124, 180, 14, 5, size=9.0, weight="600", color=LABEL_COLOR, locked=True),
+        _variable("val_customer", "customer_name", 236, 124, 320, 14, 5, size=9.5, weight="700", color=DARK, locked=True),
+
+        # Row 2: Coverage Type
+        _text("lbl_cov_type", "Coverage Type / 保单种类", 52, 138, 180, 14, 5, size=9.0, weight="600", color=LABEL_COLOR, locked=True),
+        _variable("val_cov_type", "coverage_type", 236, 138, 320, 14, 5, size=9.5, weight="700", color=DARK, locked=True),
+
+        # Row 3: Car Model
+        _text("lbl_car_model", "Car Model / 车型", 52, 152, 180, 14, 5, size=9.0, weight="600", color=LABEL_COLOR, locked=True),
+        _variable("val_car_model", "car_model", 236, 152, 320, 14, 5, size=9.5, weight="700", color=DARK, locked=True),
+
+        # Row 4: Vehicle Capacity
+        _text("lbl_engine_cc", "Engine Capacity/发动机排量 : ", 52, 166, 180, 14, 5, size=9.0, weight="600", color=LABEL_COLOR, locked=True),
+        _variable("val_engine_cc", "engine_cc", 236, 166, 320, 14, 5, size=9.5, weight="700", color=DARK, suffix="", locked=True),
+
+        # Row 5: NCD
+        _text("lbl_ncd", "NCD", 52, 180, 180, 14, 5, size=9.0, weight="600", color=LABEL_COLOR, locked=True),
+        _variable("val_ncd", "ncd_percent", 236, 180, 320, 14, 5, size=9.5, weight="700", color=DARK, suffix="%", locked=True),
+
+        # Row 6: Coverage Period
+        _text("lbl_period", "Cover of Period / 保单期限", 52, 194, 180, 14, 5, size=9.0, weight="600", color=LABEL_COLOR, locked=True),
+        _variable("val_period", "cover_period", 236, 194, 320, 14, 5, size=9.5, weight="700", color=DARK, locked=True),
+
+        # Row 7: Valuation Type
+        _text("lbl_valuation_type", "Valuation Type / 估价方式", 52, 208, 180, 14, 5, size=8.5, weight="600", color=LABEL_COLOR, locked=True),
+        _variable("val_valuation_type", "valuation_type", 236, 208, 320, 14, 5, size=9.5, weight="700", color=DARK, locked=True),
+
+        # Row 8: Policy Excess (Directly below Valuation Type)
+        _text("lbl_excess", "Policy Excess / 自负额", 52, 222, 180, 14, 5, size=8.5, weight="600", color=LABEL_COLOR, locked=True),
+        _variable("val_excess", "excess_amount", 236, 222, 320, 14, 5, size=9.5, weight="700", color=DARK, prefix="RM ", locked=True),
+
+        # Row 9: Vehicle Sum Insured
+        _text("lbl_sum_insured", "Vehicle Sum Insured / 车辆保额", 52, 236, 180, 14, 5, size=8.5, weight="600", color=LABEL_COLOR, locked=True),
+        _variable("val_sum_insured", "coverage_amount", 236, 236, 320, 14, 5, size=9.5, weight="700", color=DARK, prefix="RM ", locked=True),
+
+        # Dynamic Premium Block (Extras, Insurance Premium, Roadtax, Runner Fee, Total Premium)
+        {
+            "id": "premium_info_block",
+            "type": "premium-info-block",
+            "x": 52,
+            "y": 250,
+            "w": 506,
+            "h": 126,
+            "z": 5,
+            "locked": True,
+            "rowHeight": 14,
+            "labels": {
+                "premium": "Insurance Premium / 保费",
+                "roadtax": "Roadtax / 路税",
+                "runner": "Runner Fee / 服务费",
+                "total": "TOTAL PAYABLE",
+                "extras": "Extras / 附加项目",
+            },
+        },
+
+        # 4. Right Column: 2 Rows (Snug Width w=170, x=584 to 754 flush right, No Gas)
+        _layer_group("grp_payment_card", "DuitNow QR & Payment Details Card"),
+        _layer_group("grp_excess_card", "All Drivers Card"),
+
+        # Row 1: Dedicated DuitNow QR & Payment Details Card (x=584, y=94, w=170, h=236)
+        _rectangle("pay_card_bg", 584, 94, 170, 236, 2, background="#FFFFFF", border=BORDER_COLOR, radius=6, group_id="grp_payment_card"),
+        _image("payment_account_details_img", "duitnow_payment_details", 592, 97, 154, 230, 5, group_id="grp_payment_card"),
+
+        # Row 2: All Drivers Badge (x=584, y=336, w=170, h=42, centered text)
+        _rectangle("all_driver_bg", 584, 336, 170, 42, 2, background=BG_LIGHT, border=BORDER_COLOR, radius=6, group_id="grp_excess_card"),
+        _text("all_driver_title", "All Drivers Included/全司机投保", 588, 341, 162, 15, 5, size=8.5, weight="700", color=DARK, align="center", group_id="grp_excess_card"),
+        _text("all_driver_sub", "Authorised Drivers Covered", 588, 357, 162, 14, 5, size=7.5, weight="500", color=MUTED_COLOR, align="center", group_id="grp_excess_card"),
+
+        # 5. Section 2: Our Specials / 特别优惠 (Included Benefits Grid)
+        _rectangle("specials_header_bg", 40, 390, 714, 26, 2, background=NAVY, border="", radius=4, locked=True),
+        _text("specials_header_txt", "Our Specials / 特别优惠", 52, 395, 690, 16, 5, size=10.5, weight="700", color="#FFFFFF", locked=True),
+        _grid("current_benefits_grid", "current_benefits", 40, 420, 714, 330, 4, dense=True, locked=True),
+
+        # 6. Section 3: You May Add On / 可添加项目 (Available Add-ons Grid)
+        _rectangle("addons_header_bg", 40, 760, 714, 26, 2, background=NAVY, border="", radius=4, locked=True),
+        _text("addons_header_txt", "You May Add On (With Additional Charges) / 可添加项目 (额外收费)", 52, 765, 690, 16, 5, size=10.5, weight="700", color="#FFFFFF", locked=True),
+        _grid("available_addons_grid", "available_addons", 40, 790, 714, 268, 4, dense=True, locked=True),
+
+        # 7. Footer
+        _text("footer_terms", "*Terms & Conditions Apply | Quotation Validity: {valid_until}", 40, 1072, 714, 16, 5, size=8.5, weight="500", color=MUTED_COLOR),
+    ]
+
+    config.update({
+        "version": 7, "template_name": name, "v7_master_key": key, "is_default": False, "locked": False,
+        "assets": {
+            "risklocker_logo": "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f",
+            "duitnow_payment_details": "c3003185-0000-4000-8000-000000000001",
+        },
+        "page_profile": {
+            "profile_key": "a4", "name": "A4",
+            "width": 794, "height": height, "unit": "px", "safe_margins": {"top": 24, "right": 24, "bottom": 24, "left": 24},
+            "bleed": {}, "background_behavior": "clip",
+        },
+    })
+    config["canvas"] = {**config["canvas"], "width": 794, "height": height, "elements": elements}
+    return validate_template_config(config)
+
+
 def _agency_english_config() -> dict:
     name = "English Agency Motor"
     key = "agency_english"
@@ -411,24 +546,26 @@ def _agency_mandarin_config() -> dict:
 
 
 def master_template_specs() -> list[dict]:
-    # Canonical motor templates: Bilingual, English, and Mandarin presets
+    # Canonical motor templates: Bilingual, Bilingual v2, English, and Mandarin presets
     return [
         {"key": "agency_bilingual", "name": "Bilingual Agency Motor", "is_default": True, "config": _agency_bilingual_config()},
+        {"key": "agency_bilingual_v2", "name": "Bilingual Agency Motor v2", "is_default": False, "config": _agency_bilingual_v2_config()},
         {"key": "agency_english", "name": "English Agency Motor", "is_default": False, "config": _agency_english_config()},
         {"key": "agency_mandarin", "name": "Mandarin Agency Motor", "is_default": False, "config": _agency_mandarin_config()},
     ]
 
 
-def ensure_master_templates(db, user, *, apply: bool = False) -> dict:
-    """Create and publish missing canonical masters without overwriting a published revision."""
+def ensure_master_templates(db, user, *, apply: bool = False, force: bool = False, target_keys: list[str] | None = None) -> dict:
+    """Create and publish missing canonical masters without overwriting a published revision unless force is True."""
     templates = list(db.scalars(select(OutputTemplateConfig).where(OutputTemplateConfig.deleted_at.is_(None)).options(defer(OutputTemplateConfig.fixed_fields))).all())
     revisions = list(db.scalars(select(TemplateRevision).options(defer(TemplateRevision.config))).all())
     report = {"created": [], "published": [], "retained": [], "default_cleared": [], "apply": apply}
     by_key = {str((item.fixed_fields or {}).get("v7_master_key") or ""): item for item in templates}
-    for spec in master_template_specs():
+    specs = [s for s in master_template_specs() if target_keys is None or s["key"] in target_keys]
+    for spec in specs:
         current = by_key.get(spec["key"])
         published = [item for item in revisions if current and item.template_id == current.id and item.state == "published"]
-        if current and published:
+        if current and published and not force:
             report["retained"].append({"key": spec["key"], "template_id": current.id, "revision": max(item.revision_number for item in published)})
             continue
         if current is None:

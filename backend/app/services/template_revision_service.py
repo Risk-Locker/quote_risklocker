@@ -383,10 +383,18 @@ def _resolve_page_profile(db, page: dict) -> TemplatePageProfile:
     )
     if existing:
         if float(existing.width) != width or float(existing.height) != height or existing.unit != unit:
-            raise AppError("The selected page profile does not match this fixed page geometry.", 422)
-        if existing.status != "active":
+            custom_key = f"custom-{canonical_context_hash({'width': width, 'height': height, 'unit': unit})[:16]}"
+            custom_existing = next(
+                (profile for profile in _all_rows(db, TemplatePageProfile) if profile.profile_key == custom_key),
+                None,
+            )
+            if custom_existing:
+                return custom_existing
+            profile_key = custom_key
+        elif existing.status != "active":
             raise AppError("The selected page profile is not active.", 422)
-        return existing
+        else:
+            return existing
     profile = TemplatePageProfile(
         id=new_id(),
         profile_key=profile_key,

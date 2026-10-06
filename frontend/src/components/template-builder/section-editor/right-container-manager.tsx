@@ -679,6 +679,7 @@ export function RightContainerManager({
                           }
                           className="h-7 text-xs w-full"
                         >
+                          <option value="duitnow_payment_details">DuitNow Payment Details Card (duitnow_payment_details)</option>
                           <option value="bank_logo">Bank Logo (bank_logo)</option>
                           <option value="qr_code">Payment QR Code (qr_code)</option>
                           <option value="risklocker_logo">Risklocker Logo (risklocker_logo)</option>

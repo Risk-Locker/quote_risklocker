@@ -205,8 +205,117 @@ def _money(segment: str) -> list[str]:
     return [match.group(0) for match in re.finditer(MONEY_RE, segment)]
 
 
+def _to_money_flt(val: str | None) -> float:
+    if not val:
+        return 0.0
+    clean = re.sub(r"[^\d.]", "", val)
+    try:
+        return float(clean) if clean else 0.0
+    except ValueError:
+        return 0.0
+
+
 def _rm_money(segment: str) -> list[str]:
     return [match.group(0) for match in re.finditer(r"RM\s*\d{1,3}(?:,\d{3})*(?:\.\d{2})?", segment, re.IGNORECASE)]
+
+
+def _add_2d_spatial_candidates(
+    words: list[dict],
+    results: dict[str, list[CandidateValue]],
+    page_text: list[dict],
+) -> None:
+    """Extract tabular line items via 2D horizontal word coordinate alignment."""
+    if not words:
+        return
+
+    targets = [
+        ("basic_premium_vehicle", [["basic", "premium"], ["premium", "asas"], ["basic", "contribution"], ["caruman", "asas"], ["sumbangan", "asas"]], 50.0),
+        ("gross_premium", [["gross", "premium"], ["premium", "kasar"], ["gross", "contribution"]], 50.0),
+        ("total_amount", [["total", "payable"], ["total", "amount"], ["amount", "payable"], ["total", "/", "jumlah"], ["total", "contribution", "payable"]], 50.0),
+        ("optional_cover_amount", [["extra", "benefit"], ["manfaat", "tambahan"], ["total", "optional"]], 0.0),
+        ("service_tax", [["service", "tax"], ["cukai", "perkhidmatan"]], 0.0),
+        ("stamp_duty", [["stamp", "duty"], ["duti", "setem"], ["setem", "hasil"]], 0.0),
+        ("excess_amount", [["policy", "excess"], ["ekses", "polisi"], ["voluntary", "excess"], ["excess"]], 0.0),
+        ("compulsory_excess", [["compulsory", "excess"], ["ekses", "wajib"], ["ekses", "mandatori"]], 0.0),
+    ]
+
+    pages: dict[int, list[dict]] = {}
+    for w in words:
+        p = int(w.get("page", 1))
+        pages.setdefault(p, []).append(w)
+
+    for p, p_words in pages.items():
+        sorted_words = sorted(p_words, key=lambda x: (round(float(x.get("top", 0)), 1), float(x.get("x0", 0))))
+
+        for field, token_groups, min_amt in targets:
+            if results.get(field):
+                if any(c.source_method == "2d_spatial_alignment" for c in results[field]):
+                    continue
+            for group in token_groups:
+                found_for_field = False
+                for i, w in enumerate(sorted_words):
+                    first_tok = group[0]
+                    if str(w.get("text", "")).lower().strip(" :*") == first_tok:
+                        w_top = float(w.get("top", 0))
+                        matched = True
+                        last_x1 = float(w.get("x1", 0))
+                        for offset, tok in enumerate(group[1:], 1):
+                            if i + offset >= len(sorted_words):
+                                matched = False
+                                break
+                            next_w = sorted_words[i + offset]
+                            if abs(float(next_w.get("top", 0)) - w_top) > 5.0 or str(next_w.get("text", "")).lower().strip(" :*") != tok:
+                                matched = False
+                                break
+                            last_x1 = float(next_w.get("x1", 0))
+
+                        if matched:
+                            if field == "basic_premium_vehicle":
+                                if i > 0 and abs(float(sorted_words[i - 1].get("top", 0)) - w_top) <= 5.0:
+                                    prev_txt = str(sorted_words[i - 1].get("text", "")).lower()
+                                    if prev_txt in ("trailer", "treler"):
+                                        continue
+                            if field == "excess_amount":
+                                row_all_words = [
+                                    rw for rw in sorted_words
+                                    if abs(float(rw.get("top", 0)) - w_top) <= 5.0
+                                ]
+                                row_full_str = " ".join(str(rw.get("text", "")) for rw in row_all_words).lower()
+                                if any(k in row_full_str for k in ("compulsory", "wajib", "mandatori", "under 21", "bawah 21", "provisional")):
+                                    continue
+
+                            row_words = [
+                                rw for rw in sorted_words
+                                if abs(float(rw.get("top", 0)) - w_top) <= 5.0
+                                and float(rw.get("x0", 0)) >= last_x1 - 2.0
+                            ]
+                            row_str = " ".join(str(rw.get("text", "")) for rw in row_words)
+                            row_str_no_date = re.sub(DATE_RE, "", row_str)
+                            row_str_no_date = re.sub(r"\(\d+(?:\.\d+)?\s*%\)|\d+(?:\.\d+)?\s*%", "", row_str_no_date)
+                            m = re.findall(r"(?:RM\s*)?([\d,]+\.\d{2})", row_str_no_date)
+                            if m:
+                                for amt_str in reversed(m):
+                                    clean_val = amt_str.replace(",", "").strip()
+                                    try:
+                                        val = float(clean_val)
+                                        if val >= min_amt:
+                                            cand = CandidateValue(
+                                                field=field,
+                                                value=clean_val,
+                                                source_method="2d_spatial_alignment",
+                                                score=0.98,
+                                                page=p,
+                                                evidence=f"2D alignment ({' '.join(group)} -> {amt_str})",
+                                            )
+                                            results.setdefault(field, []).insert(0, cand)
+                                            found_for_field = True
+                                            break
+                                    except ValueError:
+                                        continue
+                        if found_for_field:
+                            break
+                if found_for_field:
+                    break
 
 
 def _clean_model(value: str) -> str:
@@ -462,14 +571,19 @@ def _add_contribution_rows(text: str, page_text: list[dict], results: dict[str, 
         line = lines[index]
         if "www." in line.lower() or "head office" in line.lower():
             return None
-        cleaned_line = re.sub(r"\(\d+(?:\.\d+)?\s*%\)", "", line)
+        cleaned_line = re.sub(DATE_RE, "", line)
+        cleaned_line = re.sub(r"\(\d+(?:\.\d+)?\s*%\)|\d+(?:\.\d+)?\s*%", "", cleaned_line)
         line_money = _money(cleaned_line)
         if line_money:
             return line_money[0]
-        for candidate in lines[index + 1 : index + 4]:
-            if candidate.strip().upper() == "RM":
+        for candidate in lines[index + 1 : min(len(lines), index + 4)]:
+            if candidate.strip().upper() in ("RM", "MYR", ":", "-"):
                 continue
-            cand_clean = re.sub(r"\(\d+(?:\.\d+)?\s*%\)", "", candidate)
+            cand_lower = candidate.lower()
+            if any(k in cand_lower for k in ("effective date", "tarikh berkuatkuasa", "date of issue", "period of", "tempoh", "validity")):
+                continue
+            cand_clean = re.sub(DATE_RE, "", candidate)
+            cand_clean = re.sub(r"\(\d+(?:\.\d+)?\s*%\)|\d+(?:\.\d+)?\s*%", "", cand_clean)
             values = _money(cand_clean)
             if values:
                 return values[0]
@@ -504,10 +618,23 @@ def _add_contribution_rows(text: str, page_text: list[dict], results: dict[str, 
             if amount:
                 _add_line_value(results, "premium", amount, "semantic_contribution_row", 0.99, line, text, page_text)
                 _add_line_value(results, "total_amount", amount, "semantic_contribution_row", 0.94, line, text, page_text)
-        elif lower.startswith("basic premium") or lower.startswith("premium asas") or (lower.startswith("premium") and not lower.startswith("premium kasar") and not lower.startswith("premium payable")):
-            amount = row_amount(index)
-            if amount:
-                _add_line_value(results, "basic_premium_vehicle", amount, "semantic_contribution_row", 0.95, line, text, page_text)
+        elif (
+            lower.startswith("basic premium")
+            or lower.startswith("premium asas")
+            or lower.startswith("basic contribution")
+            or lower.startswith("caruman asas")
+            or lower.startswith("sumbangan asas")
+            or (
+                lower.startswith("premium")
+                and not any(k in lower for k in ("kasar", "payable", "treler", "trailer", "rider", "driver", "ncd", "ncb", "dtt", "effective", "date", "tarikh"))
+            )
+        ):
+            if not any(k in lower for k in ("treler", "trailer", "rider", "driver")):
+                amount = row_amount(index)
+                if amount:
+                    amt_flt = _to_money_flt(amount)
+                    if amt_flt >= 50.0:
+                        _add_line_value(results, "basic_premium_vehicle", amount, "semantic_contribution_row", 0.95, line, text, page_text)
         if lower.startswith("gross contribution") or lower.startswith("gross premium") or lower.startswith("premium kasar"):
             amount = row_amount(index)
             if amount:
@@ -536,6 +663,37 @@ def _add_contribution_rows(text: str, page_text: list[dict], results: dict[str, 
             money_match = re.search(r"\((RM\s*[\d,]+(?:\.\d{2})?)\)", line, re.IGNORECASE)
             if money_match:
                 _add_line_value(results, "optional_cover_amount", money_match.group(1), "semantic_optional_cover", 0.9, line, text, page_text)
+
+    # BNM Underwriting Formula Mathematical Derivation / Verification:
+    # Gross Premium = (Basic Premium * (1 - NCD%)) + Extra Benefits
+    # Basic Premium = (Gross Premium - Extra Benefits) / (1 - NCD%)
+    try:
+        gp_cands = results.get("gross_premium")
+        ncd_cands = results.get("ncd_percent")
+        opt_cands = results.get("optional_cover_amount")
+        if gp_cands and ncd_cands:
+            gp_val = _to_money_flt(gp_cands[0].value)
+            ncd_pct = _to_money_flt(ncd_cands[0].value)
+            opt_val = _to_money_flt(opt_cands[0].value) if opt_cands else 0.0
+            if gp_val > 50.0 and 0.0 < ncd_pct < 100.0:
+                expected_bp = (gp_val - opt_val) / (1.0 - (ncd_pct / 100.0))
+                if expected_bp >= 50.0:
+                    bp_cands = results.get("basic_premium_vehicle", [])
+                    has_match = any(abs(_to_money_flt(c.value) - expected_bp) <= 1.0 for c in bp_cands)
+                    if not has_match or not bp_cands:
+                        bp_formatted = f"{expected_bp:.2f}"
+                        results["basic_premium_vehicle"].append(
+                            CandidateValue(
+                                field="basic_premium_vehicle",
+                                value=bp_formatted,
+                                source_method="bnm_formula_derivation",
+                                score=0.96,
+                                page=1,
+                                evidence=f"Derived from Gross ({gp_val:.2f}) - Extras ({opt_val:.2f}) / (1 - {ncd_pct}%)",
+                            )
+                        )
+    except Exception:
+        pass
 
 
 def _add_optional_covers(text: str, page_text: list[dict], results: dict[str, list[CandidateValue]]) -> None:
@@ -797,6 +955,8 @@ def find_candidates(
 
     _add_company_detection(source_filename, text, page_text, results, db_companies or [])
     _add_amgen_profile(text, page_text, results)
+    if words:
+        _add_2d_spatial_candidates(words, results, page_text)
     _add_semantic_label_values(text, page_text, results)
     _add_contribution_rows(text, page_text, results)
     _add_optional_covers(text, page_text, results)

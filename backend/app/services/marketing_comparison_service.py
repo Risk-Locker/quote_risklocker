@@ -532,6 +532,20 @@ def _extract_exact_basic_figure(f: dict[str, Any], company_name: str = "", s_obj
     is_takaful = any(k in norm_name for k in ("etiqa", "stmb", "takaful"))
     term_label = "Basic Contribution" if is_takaful else "Basic Premium"
 
+    cov_amt = _extract_vehicle_sum_insured(f, s_obj=s_obj)
+    ncd_pct = _to_float(f.get("ncd_percent"))
+
+    def is_valid_bp(amt: float) -> bool:
+        if amt <= 0.0:
+            return False
+        # If car sum insured is >= 10,000, basic premium cannot be < 50 RM or equal to NCD percent
+        if cov_amt >= 10000.0:
+            if amt < 50.0:
+                return False
+            if ncd_pct > 0.0 and abs(amt - ncd_pct) < 0.01:
+                return False
+        return True
+
     # 1. Direct candidate keys in standard preference order
     candidate_keys = (
         (
@@ -557,7 +571,7 @@ def _extract_exact_basic_figure(f: dict[str, Any], company_name: str = "", s_obj
     )
     for k in candidate_keys:
         val = _to_float(f.get(k))
-        if val > 0.0:
+        if is_valid_bp(val):
             return val, term_label
 
     # 2. Iterate keys with flexible regex (supporting underscores, dashes, spaces, and Malay terms)
@@ -567,7 +581,7 @@ def _extract_exact_basic_figure(f: dict[str, Any], company_name: str = "", s_obj
     for raw_k, raw_v in f.items():
         if basic_regex.search(raw_k):
             val = _to_float(raw_v)
-            if val > 0.0:
+            if is_valid_bp(val):
                 return val, term_label
         if isinstance(raw_v, list):
             for item in raw_v:
@@ -576,7 +590,7 @@ def _extract_exact_basic_figure(f: dict[str, Any], company_name: str = "", s_obj
                     for ik in ("label", "name", "desc", "key")
                 ):
                     val = _to_float(item.get("amount") or item.get("value"))
-                    if val > 0.0:
+                    if is_valid_bp(val):
                         return val, term_label
 
     # 3. Fallback: Extraction record candidates on session object
@@ -585,6 +599,30 @@ def _extract_exact_basic_figure(f: dict[str, Any], company_name: str = "", s_obj
             up_file = getattr(s_obj, "uploaded_file", None)
             ext_rec = getattr(up_file, "extraction_record", None) if up_file else None
             if ext_rec:
+                # 3a. 2D Spatial Words Alignment on extraction_record
+                words = getattr(ext_rec, "words", None) or []
+                if isinstance(words, list) and words:
+                    for w in words:
+                        t = str(w.get("text", "")).lower().strip(" :*")
+                        if t in ("basic", "premium asas", "caruman asas", "sumbangan asas"):
+                            w_top = float(w.get("top", 0))
+                            w_page = int(w.get("page", 1))
+                            row_words = [
+                                rw for rw in words
+                                if int(rw.get("page", 1)) == w_page
+                                and abs(float(rw.get("top", 0)) - w_top) <= 5.0
+                                and float(rw.get("x0", 0)) > float(w.get("x1", 0))
+                            ]
+                            row_str = " ".join(str(rw.get("text", "")) for rw in row_words)
+                            row_str_no_date = re.sub(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\b", "", row_str)
+                            row_str_no_date = re.sub(r"\(\d+(?:\.\d+)?\s*%\)|\d+(?:\.\d+)?\s*%", "", row_str_no_date)
+                            m = re.findall(r"[\d,]+\.\d{2}", row_str_no_date)
+                            if m:
+                                for amt_str in reversed(m):
+                                    spatial_val = _to_float(amt_str)
+                                    if is_valid_bp(spatial_val):
+                                        return spatial_val, term_label
+
                 cands = getattr(ext_rec, "candidates", None) or {}
                 if isinstance(cands, dict):
                     for ck in (
@@ -598,11 +636,11 @@ def _extract_exact_basic_figure(f: dict[str, Any], company_name: str = "", s_obj
                             for item in c_val:
                                 item_v = item.get("value") if isinstance(item, dict) else item
                                 val = _to_float(item_v)
-                                if val > 0.0:
+                                if is_valid_bp(val):
                                     return val, term_label
                         elif c_val:
                             val = _to_float(c_val)
-                            if val > 0.0:
+                            if is_valid_bp(val):
                                 return val, term_label
                 # 4. Fallback: OCR / Raw text regex scan on extraction_record
                 text_to_search = (getattr(ext_rec, "ocr_text", "") or "") + "\n" + (getattr(ext_rec, "raw_text", "") or "")
@@ -613,10 +651,30 @@ def _extract_exact_basic_figure(f: dict[str, Any], company_name: str = "", s_obj
                     )
                     if m:
                         val = _to_float(m.group(1))
-                        if val > 0.0:
+                        if is_valid_bp(val):
                             return val, term_label
         except Exception:
             pass
+
+    # 5. Fallback: BNM Motor Tariff Formula Derivation
+    # Basic Premium = (Gross Premium - Extras) / (1 - NCD%)
+    try:
+        gross_amt = _extract_vehicle_motor_premium(f)
+        if gross_amt > 50.0 and 0.0 < ncd_pct < 100.0:
+            extras_amt = _to_float(f.get("total_optional_cover_amount") or f.get("optional_cover_amount"))
+            if extras_amt <= 0.0:
+                benefits_list = f.get("detected_benefits") or f.get("benefits") or []
+                if isinstance(benefits_list, list):
+                    extras_amt = sum(
+                        _to_float(b.get("premium_cost") or b.get("cost"))
+                        for b in benefits_list
+                        if isinstance(b, dict) and bool(b.get("is_optional_cover", True))
+                    )
+            derived_bp = (gross_amt - extras_amt) / (1.0 - (ncd_pct / 100.0))
+            if is_valid_bp(derived_bp):
+                return round(derived_bp, 2), term_label
+    except Exception:
+        pass
 
     return 0.0, term_label
 
@@ -705,6 +763,8 @@ def _extract_vehicle_basic_premium(f: dict[str, Any], company_name: str = "", s_
     val, _ = _extract_exact_basic_figure(f, company_name, s_obj=s_obj)
     if val > 0.0:
         return val
+    cov_amt = _extract_vehicle_sum_insured(f, s_obj=s_obj)
+    ncd_pct = _to_float(f.get("ncd_percent"))
     for k in (
         "basic_premium_vehicle",
         "basic_premium",
@@ -716,6 +776,9 @@ def _extract_vehicle_basic_premium(f: dict[str, Any], company_name: str = "", s_
     ):
         v = _to_float(f.get(k))
         if v > 0.0:
+            if cov_amt >= 10000.0:
+                if v < 50.0 or (ncd_pct > 0.0 and abs(v - ncd_pct) < 0.01):
+                    continue
             return v
     return 0.0
 
@@ -874,7 +937,7 @@ def _is_valid_windscreen_amt(val: float | None) -> bool:
     """
     if val is None or val <= 0.0:
         return False
-    return 300.0 <= val <= 30000.0 and int(val) not in range(2020, 2035)
+    return 500.0 <= val <= 50000.0 and int(val) not in range(2020, 2035)
 
 
 def _resolve_comparison_benefits(
@@ -1007,7 +1070,7 @@ def _resolve_comparison_benefits(
                     break
                 # Check extracted value
                 if isinstance(el.extracted_value, dict):
-                    v = _to_float(el.extracted_value.get("value") or el.extracted_value.get("amount") or el.extracted_value.get("coverage_limit"))
+                    v = _to_float(el.extracted_value.get("coverage_limit") or el.extracted_value.get("limit") or el.extracted_value.get("sum_insured") or el.extracted_value.get("value") or el.extracted_value.get("amount"))
                     if _is_valid_windscreen_amt(v):
                         windscreen_amount = v
                         break
@@ -1026,7 +1089,7 @@ def _resolve_comparison_benefits(
             s_text = f"{s.label_override or ''} {s.selection_key or ''}".lower()
             if "windscreen" in s_text or "cermin" in s_text:
                 if isinstance(s.typed_value_override, dict):
-                    t_amt = _to_float(s.typed_value_override.get("amount") or s.typed_value_override.get("coverage") or s.typed_value_override.get("limit") or s.typed_value_override.get("value"))
+                    t_amt = _to_float(s.typed_value_override.get("coverage") or s.typed_value_override.get("coverage_limit") or s.typed_value_override.get("limit") or s.typed_value_override.get("sum_insured") or s.typed_value_override.get("amount") or s.typed_value_override.get("value"))
                     if _is_valid_windscreen_amt(t_amt):
                         windscreen_amount = t_amt
                         break
@@ -1301,6 +1364,8 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     detected_brand = None
     detected_vtype = "Car"
     detected_client_type = "Individual"
+    is_detected_ev = False
+    raw_capacity_token = None
 
     for s in sessions:
         if s.draft and isinstance(s.draft.fields, dict):
@@ -1315,11 +1380,21 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                 detected_brand = _safe_str(f.get("car_brand"))
             if not detected_cc:
                 raw_cc = _safe_str(f.get("engine_cc"))
+                if not raw_cc and tenure.tracked_vehicle:
+                    raw_cc = _safe_str(tenure.tracked_vehicle.engine_cc)
                 if raw_cc:
+                    raw_cc_lower = raw_cc.lower()
                     m_cc = re.search(r"(\d+(?:\.\d+)?)", raw_cc)
                     if m_cc:
                         try:
-                            detected_cc = float(m_cc.group(1))
+                            val_cc = float(m_cc.group(1))
+                            if "kw" in raw_cc_lower or "watt" in raw_cc_lower or (val_cc <= 35.0 and ("." in m_cc.group(1) or val_cc <= 25.0)):
+                                detected_cc = val_cc
+                                is_detected_ev = True
+                                raw_capacity_token = f"{val_cc} kW"
+                            else:
+                                detected_cc = val_cc
+                                raw_capacity_token = f"{val_cc} CC"
                         except Exception:
                             pass
             if f.get("client_type"):
@@ -1329,20 +1404,31 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
 
     inferred_cc, inferred_vtype = infer_vehicle_cc_and_type(detected_model)
     final_cc = detected_cc or inferred_cc
+    if final_cc and not raw_capacity_token:
+        raw_capacity_token = f"{final_cc} kW" if is_detected_ev else f"{final_cc} CC"
+
+    fallback_vtype = "Car"
+    if is_detected_ev:
+        comb_lower = f"{detected_vtype or ''} {inferred_vtype or ''} {detected_model or ''}".lower()
+        if "motor" in comb_lower or "bike" in comb_lower or "scooter" in comb_lower:
+            fallback_vtype = "EVMotorcycle"
+        else:
+            fallback_vtype = "EVSaloonCar"
+
     entity_type, resolved_vtype = classify_client_entity(
         customer_name="",
         ic_or_brn=cand_ic,
         ai_client_type=detected_client_type,
-        current_vehicle_type=detected_vtype or inferred_vtype or "Car",
+        current_vehicle_type=detected_vtype or inferred_vtype or fallback_vtype,
         car_model=detected_model,
         car_brand=detected_brand,
-        capacity_str=str(final_cc) if final_cc else None,
+        capacity_str=raw_capacity_token,
     )
 
     calculated_jpj_road_tax = 0.0
     if final_cc:
         calculated_jpj_road_tax = calculate_road_tax(
-            cc=final_cc,
+            cc=f"{final_cc} kW" if is_detected_ev else final_cc,
             vehicle_type=resolved_vtype,
             owner_type=entity_type,
             jurisdiction="West Malaysia",
@@ -1355,10 +1441,17 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     if runner_fee_val == 0.0:
         runner_fee_val = detect_runner_fee_from_id(cand_ic)
 
-    if road_tax_val != float(tenure.road_tax) or runner_fee_val != float(tenure.runner_fee):
+    if float(tenure.road_tax) == 0.0 and road_tax_val > 0.0:
         tenure.road_tax = road_tax_val
+        needs_commit = True
+    elif float(tenure.road_tax) > 0.0:
+        road_tax_val = float(tenure.road_tax)
+
+    if float(tenure.runner_fee) == 0.0 and runner_fee_val > 0.0:
         tenure.runner_fee = runner_fee_val
         needs_commit = True
+    elif float(tenure.runner_fee) > 0.0:
+        runner_fee_val = float(tenure.runner_fee)
 
     # 3. Resolve Vehicle Year of Manufacture (YOM) and Age
     veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if tenure.tracked_vehicle else None
@@ -1739,6 +1832,17 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                         veh_yom = int(_safe_str(raw_yom))
                     except (ValueError, TypeError):
                         pass
+
+    if veh_model:
+        from app.services.vehicle_simplifier_service import clean_vehicle_tokens_deterministic, CANONICAL_BRANDS
+        tb = tenure.tracked_vehicle.car_brand if tenure.tracked_vehicle else None
+        if tb and any(veh_model.upper().startswith(k) for k in CANONICAL_BRANDS.keys()):
+            pass_brand = None
+        else:
+            pass_brand = tb
+        _, _, simp_combined = clean_vehicle_tokens_deterministic(pass_brand, veh_model)
+        if simp_combined:
+            veh_model = simp_combined
     # 4. Resolve NCD and In-Flight Jobs
     cand_ncd: float | None = None
     if tenure.ncd_percentage is not None:
@@ -1987,7 +2091,7 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "phone": cust_phone,
             "email": cust_email,
             "address": cust_address,
-            "engine_cc": veh_engine_cc or "1496 CC",
+            "engine_cc": veh_engine_cc or ((f"{final_cc} kW" if is_detected_ev else f"{final_cc} CC") if final_cc else "1496 CC"),
             "engine_no": veh_engine_no,
             "chassis_no": veh_chassis_no,
             "manufacture_year": veh_yom or 2023,
@@ -2024,8 +2128,8 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
         "detection_logs": {
             "vehicle": {
                 "model": veh_model or detected_model or "Motor Vehicle",
-                "engine_capacity": f"{final_cc} CC" if final_cc else (veh_engine_cc or "1496 CC"),
-                "propulsion": "Internal Combustion Engine (ICE)" if (final_cc and final_cc > 50) else "Electric Vehicle (ZEV)",
+                "engine_capacity": (f"{final_cc} kW" if is_detected_ev else f"{final_cc} CC") if final_cc else (veh_engine_cc or "1496 CC"),
+                "propulsion": "Electric Vehicle (ZEV)" if is_detected_ev else "Internal Combustion Engine (ICE)",
                 "vehicle_type": resolved_vtype,
                 "entity_type": entity_type,
                 "region": "Peninsular (West Malaysia)",
@@ -2153,17 +2257,37 @@ def update_tenure_fixed_costs(
                                     f[ic_k] = cust.id_number
                     s.draft.fields = f
 
-    if tenure.tracked_vehicle:
+    tv = tenure.tracked_vehicle
+    if not tv and tenure.tracked_vehicle_id:
+        tv = db.get(TrackedVehicle, tenure.tracked_vehicle_id)
+        if tv:
+            tenure.tracked_vehicle = tv
+    if not tv and tenure.vehicle_no:
+        tv = db.scalar(select(TrackedVehicle).where(TrackedVehicle.vehicle_no == tenure.vehicle_no))
+        if not tv:
+            tv = TrackedVehicle(vehicle_no=tenure.vehicle_no)
+            db.add(tv)
+            db.flush()
+        tenure.tracked_vehicle = tv
+        tenure.tracked_vehicle_id = tv.id
+
+    if tv:
         if manufacture_year and manufacture_year > 1900:
-            tenure.tracked_vehicle.manufacture_year = manufacture_year
+            tv.manufacture_year = manufacture_year
         if engine_cc and engine_cc.strip():
-            tenure.tracked_vehicle.engine_cc = engine_cc.strip()
+            tv.engine_cc = engine_cc.strip()
         if vehicle_model and vehicle_model.strip():
-            tenure.tracked_vehicle.car_model = vehicle_model.strip()
+            tv.car_model = vehicle_model.strip()
+            from app.services.vehicle_simplifier_service import CANONICAL_BRANDS
+            v_upper = vehicle_model.strip().upper()
+            for k, b in CANONICAL_BRANDS.items():
+                if v_upper == k or v_upper.startswith(k + " "):
+                    tv.car_brand = b
+                    break
         if engine_no and engine_no.strip():
-            tenure.tracked_vehicle.engine_no = engine_no.strip()
+            tv.engine_no = engine_no.strip()
         if chassis_no and chassis_no.strip():
-            tenure.tracked_vehicle.chassis_no = chassis_no.strip()
+            tv.chassis_no = chassis_no.strip()
 
     # Date manipulation & synchronization
     dt_start = None
@@ -2204,18 +2328,40 @@ def update_tenure_fixed_costs(
                 f["coverage_start_date"] = dt_start.isoformat()
             if dt_end:
                 f["coverage_end_date"] = dt_end.isoformat()
-            if customer_name:
-                f["customer_name"] = customer_name.strip()
-            if ic_no:
-                f["ic_no"] = ic_no.strip()
-            if engine_cc:
-                f["engine_cc"] = engine_cc.strip()
-            if engine_no:
-                f["engine_number"] = engine_no.strip()
-            if chassis_no:
-                f["chassis_number"] = chassis_no.strip()
-            if vehicle_model:
-                f["car_model"] = vehicle_model.strip()
+            if customer_name and customer_name.strip():
+                for k in ["customer_name", "policyholder_name", "client_name"]:
+                    if k in f:
+                        if isinstance(f[k], dict):
+                            f[k] = {**f[k], "value": customer_name.strip()}
+                        else:
+                            f[k] = customer_name.strip()
+            if ic_no and ic_no.strip():
+                for k in ["customer_ic_no", "ic_no", "nric_no", "id_number"]:
+                    if k in f:
+                        if isinstance(f[k], dict):
+                            f[k] = {**f[k], "value": ic_no.strip()}
+                        else:
+                            f[k] = ic_no.strip()
+            if engine_cc and engine_cc.strip():
+                if isinstance(f.get("engine_cc"), dict):
+                    f["engine_cc"] = {**f["engine_cc"], "value": engine_cc.strip()}
+                else:
+                    f["engine_cc"] = engine_cc.strip()
+            if engine_no and engine_no.strip():
+                if isinstance(f.get("engine_number"), dict):
+                    f["engine_number"] = {**f["engine_number"], "value": engine_no.strip()}
+                else:
+                    f["engine_number"] = engine_no.strip()
+            if chassis_no and chassis_no.strip():
+                if isinstance(f.get("chassis_number"), dict):
+                    f["chassis_number"] = {**f["chassis_number"], "value": chassis_no.strip()}
+                else:
+                    f["chassis_number"] = chassis_no.strip()
+            if vehicle_model and vehicle_model.strip():
+                if isinstance(f.get("car_model"), dict):
+                    f["car_model"] = {**f["car_model"], "value": vehicle_model.strip()}
+                else:
+                    f["car_model"] = vehicle_model.strip()
             s.draft.fields = f
 
     # Update all comparison entries under this tenure
@@ -2228,6 +2374,9 @@ def update_tenure_fixed_costs(
         e.road_tax = road_tax
         e.runner_fee = float(tenure.runner_fee)
         e.total_payable = float(e.motor_premium) + road_tax + float(tenure.runner_fee)
+        if windscreen_target is not None and windscreen_target > 0:
+            if not e.windscreen_sum_insured or float(e.windscreen_sum_insured) <= 0.0:
+                e.windscreen_sum_insured = windscreen_target
 
     db.commit()
     return get_marketing_comparison(db, tenure_id)
@@ -2670,6 +2819,11 @@ def generate_quotation_for_entry(
             except Exception as e:
                 logger.warning("Could not pre-render PDF version synchronously: %s", e)
 
+    from app.services.insurance_tenure_service import record_stage_timestamp
+    if tenure.stage in ("Prospecting", "draft", None):
+        tenure.stage = "Quotations"
+    record_stage_timestamp(tenure, "Quotations")
+
     db.commit()
     return {
         "status": "success",
@@ -2777,8 +2931,40 @@ def rescan_comparison_tenure(db: Session, tenure_id: str) -> dict[str, Any]:
             if entry.sum_insured > 0:
                 entry.rate_percentage = round((float(entry.motor_premium) / float(entry.sum_insured)) * 100, 4)
 
-    if detected_ws:
+    if detected_ws and (not tenure.windscreen_target or float(tenure.windscreen_target) <= 0.0):
         tenure.windscreen_target = detected_ws
+
+    tv = tenure.tracked_vehicle
+    if not tv and tenure.tracked_vehicle_id:
+        tv = db.get(TrackedVehicle, tenure.tracked_vehicle_id)
+        if tv:
+            tenure.tracked_vehicle = tv
+    if not tv and tenure.vehicle_no:
+        tv = db.scalar(select(TrackedVehicle).where(TrackedVehicle.vehicle_no == tenure.vehicle_no))
+        if not tv:
+            tv = TrackedVehicle(vehicle_no=tenure.vehicle_no)
+            db.add(tv)
+            db.flush()
+        tenure.tracked_vehicle = tv
+        tenure.tracked_vehicle_id = tv.id
+
+    if tv:
+        for s in sessions:
+            if s.draft and isinstance(s.draft.fields, dict):
+                f = s.draft.fields
+                if not tv.car_model and f.get("car_model"):
+                    tv.car_model = _safe_str(f.get("car_model"))
+                if not tv.engine_cc and f.get("engine_cc"):
+                    tv.engine_cc = _safe_str(f.get("engine_cc"))
+                if not tv.chassis_no and (f.get("chassis_number") or f.get("chassis_no")):
+                    tv.chassis_no = _safe_str(f.get("chassis_number") or f.get("chassis_no"))
+                if not tv.engine_no and (f.get("engine_number") or f.get("engine_no")):
+                    tv.engine_no = _safe_str(f.get("engine_number") or f.get("engine_no"))
+                if not tv.manufacture_year and (f.get("manufacture_year") or f.get("yom")):
+                    try:
+                        tv.manufacture_year = int(_safe_str(f.get("manufacture_year") or f.get("yom")))
+                    except Exception:
+                        pass
 
     db.commit()
     return get_marketing_comparison(db, tenure_id)
@@ -2802,7 +2988,7 @@ def format_whatsapp_teaser(db: Session, tenure_id: str) -> str:
         f"👤 Customer: {customer}",
         f"🚘 Vehicle: {model} ({tenure['engine_cc']})",
         f"📅 Period: {period} | NCD: {ncd_str}",
-        f"🛣️ Road Tax & Runner Fee: RM {tenure['fixed_costs_total']:.2f}",
+        f"🛣️ Roadtax and Runner fee : RM {tenure['fixed_costs_total']:.2f}",
         "",
         "📋 *UNDERWRITER COMPARISON:*",
         "━━━━━━━━━━━━━━━━━━━━━━",

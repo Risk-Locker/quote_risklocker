@@ -19,6 +19,7 @@ CANONICAL_VARIABLE_LABELS: dict[str, tuple[str, str]] = {
     "ncd_percent": ("NCD", ""),
     "cover_period": ("Cover of Period", "保单期限"),
     "valuation_type": ("Valuation Type", "估价方式"),
+    "excess_amount": ("Policy Excess", "自负额"),
     "coverage_amount": ("Vehicle Sum Insured", "车辆保额"),
 }
 
@@ -34,7 +35,7 @@ DEFAULT_VEHICLE_FIELDS = [
 ]
 
 
-def default_header_config() -> dict[str, Any]:
+def default_header_config(is_v2: bool = False) -> dict[str, Any]:
     return {
         "layout": "right_3_rows",
         "rowsOrder": ["ref", "vehicle", "insurer"],
@@ -44,9 +45,9 @@ def default_header_config() -> dict[str, Any]:
         "insurerLabel": "Insurer: ",
         "fontSize": 10.0,
         "logoX": 40.0,
-        "logoY": 8.0,
-        "logoW": 72.0,
-        "logoH": 74.0,
+        "logoY": 20.0 if is_v2 else 8.0,
+        "logoW": 32.0 if is_v2 else 72.0,
+        "logoH": 40.0 if is_v2 else 74.0,
     }
 
 
@@ -194,8 +195,85 @@ def default_right_containers() -> list[dict[str, Any]]:
     ]
 
 
+def default_right_containers_v2() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": "rc_container_payment",
+            "title": "DuitNow QR & Payment Details",
+            "layout": "column",
+            "boxX": 584,
+            "boxY": 94,
+            "boxW": 170,
+            "boxH": 236,
+            "background": "#FFFFFF",
+            "borderWidth": 1,
+            "borderColor": "#E2E8F0",
+            "borderRadius": 6,
+            "padding": 3,
+            "gap": 0,
+            "blocks": [
+                {
+                    "id": "payment_account_details_img",
+                    "type": "image",
+                    "assetSlot": "duitnow_payment_details",
+                    "assetId": "c3003185-0000-4000-8000-000000000001",
+                    "imageWidth": 154,
+                    "imageHeight": 230,
+                    "imageFit": "contain",
+                    "order": 0,
+                },
+            ],
+        },
+        {
+            "id": "rc_container_drivers",
+            "title": "All Drivers Card",
+            "layout": "column",
+            "boxX": 584,
+            "boxY": 336,
+            "boxW": 170,
+            "boxH": 42,
+            "background": "#F8FAFC",
+            "borderWidth": 1,
+            "borderColor": "#E2E8F0",
+            "borderRadius": 6,
+            "padding": 4,
+            "gap": 2,
+            "blocks": [
+                {
+                    "id": "all_driver_title",
+                    "type": "text",
+                    "text": "All Drivers Included/全司机投保",
+                    "fontSize": 8.5,
+                    "fontWeight": "700",
+                    "color": "#0F172A",
+                    "textAlign": "center",
+                    "order": 0,
+                },
+                {
+                    "id": "all_driver_sub",
+                    "type": "text",
+                    "text": "Authorised Drivers Covered",
+                    "fontSize": 7.5,
+                    "fontWeight": "500",
+                    "color": "#64748B",
+                    "textAlign": "center",
+                    "order": 1,
+                },
+            ],
+        },
+    ]
+
+
 def extract_sections_from_canvas(elements: list[dict[str, Any]], saved_sections: dict[str, Any] | None = None) -> dict[str, Any]:
     """Extract structured section slots from canvas elements or return saved_sections."""
+    is_v2 = any(
+        e.get("id") == "payment_account_details_img"
+        or e.get("assetSlot") == "duitnow_payment_details"
+        or e.get("id") == "val_excess"
+        for e in elements
+    )
+    rc_default = default_right_containers_v2() if is_v2 else default_right_containers()
+
     if saved_sections and saved_sections.get("version") == 1 and saved_sections.get("section1", {}).get("vehicleFields"):
         res = deepcopy(saved_sections)
         # Sanitize saved vehicleFields: remove insurer_name and heal corrupted raw variable labels
@@ -213,11 +291,10 @@ def extract_sections_from_canvas(elements: list[dict[str, Any]], saved_sections:
                     f["labelZh"] = c_zh
             f["rowOrder"] = len(sanitized_fields)
             sanitized_fields.append(f)
-        res["section1"]["vehicleFields"] = sanitized_fields if sanitized_fields else deepcopy(DEFAULT_VEHICLE_FIELDS)
         if not res.get("header"):
-            res["header"] = default_header_config()
-        if not res.get("rightContainers"):
-            res["rightContainers"] = default_right_containers()
+            res["header"] = default_header_config(is_v2)
+        if not res.get("rightContainers") or (is_v2 and any(float(c.get("boxW") or 0) > 200 for c in res.get("rightContainers", []))):
+            res["rightContainers"] = rc_default
         return res
 
     value_elements = [
@@ -248,7 +325,7 @@ def extract_sections_from_canvas(elements: list[dict[str, Any]], saved_sections:
         if (
             raw_key in {"quote_vehicle", "validity", "header_insurer_name", "top_insurer_name", "ref_val", "vehicle_no_val", "header_insurer", "insurer_name"}
             or val_elem.get("variableId") in {"insurance_company", "quotation_reference", "vehicle_no"}
-            or float(val_elem.get("y", 0)) < 130
+            or float(val_elem.get("y", 0)) < 90
             or float(val_elem.get("x", 0)) > 400
         ):
             continue
@@ -296,13 +373,13 @@ def extract_sections_from_canvas(elements: list[dict[str, Any]], saved_sections:
 
     return {
         "version": 1,
-        "header": saved_sections.get("header") if saved_sections and saved_sections.get("header") else default_header_config(),
+        "header": saved_sections.get("header") if saved_sections and saved_sections.get("header") else default_header_config(is_v2),
         "section1": {
             "vehicleFields": final_fields,
             "headerTitleEn": "Coverage & Vehicle Information",
             "headerTitleZh": "保障与车辆信息",
         },
-        "rightContainers": default_right_containers(),
+        "rightContainers": rc_default,
         "footer": {
             "bankName": "Hong Leong Bank",
             "accountNo": "12300318500",
@@ -382,6 +459,7 @@ def compile_sections_to_canvas(
         "driver_icon", "driver_text", "rc_container_main",
         "rc_container_payment", "rc_container_qr", "rc_container_drivers",
         "grp_payment_card", "grp_qr_card", "grp_excess_card",
+        "payment_account_details_img",
     }
 
     right_containers = sections.get("rightContainers") or []
@@ -407,7 +485,7 @@ def compile_sections_to_canvas(
             continue
         if eid in right_container_ids or eid.startswith("rc_") or eid.startswith("rc_b_"):
             continue
-        if ex >= 480 and 110 <= ey <= 430 and eid not in {"quote_vehicle", "validity"}:
+        if ex >= 480 and 90 <= ey <= 430 and eid not in {"quote_vehicle", "validity"}:
             continue
         remaining.append(deepcopy(e))
 
@@ -569,6 +647,10 @@ def compile_sections_to_canvas(
                     })
                     current_render_row += 1
 
+    is_v2_layout = any(e.get("id") in {"payment_account_details_img", "val_excess"} for e in base_elements) or any(float(c.get("boxY", 0)) <= 100 for c in right_containers)
+    baseline_count = 9 if is_v2_layout else 8
+    delta_y = max(0.0, float(len(visible_fields) - baseline_count) * row_h) if has_dense_layout else max(0.0, float(total_rows - 9) * row_h)
+
     # In production mode (when simulated extras are not requested), append canonical premium_info_block
     if not has_itemized_extras and extras_mode != "lump_sum" and has_dense_layout:
         premium_y = start_y + (len(visible_fields) * row_h)
@@ -577,7 +659,7 @@ def compile_sections_to_canvas(
             "type": "premium-info-block",
             "x": 52.0,
             "y": premium_y,
-            "w": 430.0,
+            "w": 506.0 if is_v2_layout else 430.0,
             "h": 130.0,
             "z": 4,
             "rowHeight": row_h,
@@ -585,13 +667,10 @@ def compile_sections_to_canvas(
                 "extras": "EXTRAS / 附加项目",
                 "premium": "Insurance Premium / 保费",
                 "roadtax": "Roadtax / 路税",
-                "runner": "Runner Fee / 服务费",
                 "total": "TOTAL PAYABLE",
             },
             "locked": True,
         })
-
-    delta_y = max(0.0, float(len(visible_fields) - 8) * row_h) if has_dense_layout else max(0.0, float(total_rows - 9) * row_h)
 
     # Compile Right Containers
     compiled_right_blocks: list[dict[str, Any]] = []
@@ -629,7 +708,7 @@ def compile_sections_to_canvas(
             )
             visible_blocks = [b for b in blocks if b.get("visible", True) is not False]
 
-            if str(container.get("id")) == "rc_container_payment" or container.get("layout") == "payment_grid":
+            if container.get("layout") == "payment_grid" or (str(container.get("id")) == "rc_container_payment" and (not container.get("layout") or container.get("layout") == "payment_grid")):
                 curr_y = box_y + padding
                 b_w = box_w - (padding * 2)
                 b_x = box_x + padding
@@ -745,10 +824,11 @@ def compile_sections_to_canvas(
                     if b_type == "image":
                         h = float(b.get("imageHeight", 22))
                         w = min(b_w, float(b.get("imageWidth", 96)))
+                        img_x = b_x + max(0.0, (b_w - w) / 2.0)
                         compiled_right_blocks.append({
                             "id": str(b.get("id")),
                             "type": "image",
-                            "x": b_x,
+                            "x": img_x,
                             "y": curr_y,
                             "w": w,
                             "h": h,
@@ -828,14 +908,15 @@ def compile_sections_to_canvas(
         "terms": 1090.0,
     }
 
+    has_legacy_specials = any(e.get("id") == "specials_title" for e in remaining)
     terms_notice = sections.get("footer", {}).get("termsNotice")
     for elem in remaining:
         eid = str(elem.get("id", ""))
         if eid in ("cov_table_bg", "group_specs_box"):
-            elem["baseline_h"] = 210.0 if has_dense_layout else float(elem.get("baseline_h") or elem.get("h", 246.0))
+            elem["baseline_h"] = float(elem.get("baseline_h") or elem.get("h", 258.0 if is_v2_layout else 246.0))
             elem["h"] = elem["baseline_h"] + delta_y
 
-        if eid in baseline_y_map:
+        if has_legacy_specials and eid in baseline_y_map:
             elem["y"] = baseline_y_map[eid] + delta_y
         elif float(elem.get("y", 0) or 0) >= (380.0 if has_dense_layout else 400.0):
             elem["baseline_y"] = float(elem.get("baseline_y") or elem.get("y", 0))
@@ -850,45 +931,74 @@ def compile_sections_to_canvas(
             elem["text"] = "Recommended Add-On Upgrades :"
 
         # Top Header Realignment
-        if eid == "title":
-            elem["x"] = 480.0
-            elem["y"] = 16.0
-            elem["w"] = 296.0
-            elem["h"] = 24.0
-            elem_style = elem.get("style") or {}
-            elem_style.update({"textAlign": "right", "fontSize": 16, "fontWeight": "800", "color": "#ed1c24"})
-            elem["style"] = elem_style
-        elif eid == "validity":
-            elem["x"] = 480.0
-            elem["y"] = 40.0
-            elem["w"] = 296.0
-            elem["h"] = 20.0
-            elem_style = elem.get("style") or {}
-            elem_style.update({"textAlign": "right", "fontSize": 11, "fontWeight": "600", "color": "#475569"})
-            elem["style"] = elem_style
-        elif eid == "quote_vehicle":
-            elem["x"] = 480.0
-            elem["y"] = 96.0
-            elem["w"] = 296.0
-            elem["h"] = 28.0
-            elem_style = elem.get("style") or {}
-            elem_style.update({"textAlign": "right", "fontSize": 16, "fontWeight": "800"})
-            elem["style"] = elem_style
-        elif eid == "insurer_logo" and 180 < float(elem.get("x", 0) or 0) < 450:
+        if not is_v2_layout:
+            if eid == "title":
+                elem["x"] = 480.0
+                elem["y"] = 16.0
+                elem["w"] = 296.0
+                elem["h"] = 24.0
+                elem_style = elem.get("style") or {}
+                elem_style.update({"textAlign": "right", "fontSize": 16, "fontWeight": "800", "color": "#ed1c24"})
+                elem["style"] = elem_style
+            elif eid == "validity":
+                elem["x"] = 480.0
+                elem["y"] = 40.0
+                elem["w"] = 296.0
+                elem["h"] = 20.0
+                elem_style = elem.get("style") or {}
+                elem_style.update({"textAlign": "right", "fontSize": 11, "fontWeight": "600", "color": "#475569"})
+                elem["style"] = elem_style
+            elif eid == "quote_vehicle":
+                elem["x"] = 480.0
+                elem["y"] = 96.0
+                elem["w"] = 296.0
+                elem["h"] = 28.0
+                elem_style = elem.get("style") or {}
+                elem_style.update({"textAlign": "right", "fontSize": 16, "fontWeight": "800"})
+                elem["style"] = elem_style
+        else:
+            if eid == "title_motor":
+                elem["x"] = 78.0
+                elem["y"] = 26.0
+                elem["w"] = 150.0
+                elem["h"] = 32.0
+                elem["text"] = "Motor Insurance "
+                elem_style = elem.get("style") or {}
+                elem_style.update({"fontSize": 18, "fontWeight": "800", "color": "#0F172A", "whiteSpace": "pre"})
+                elem["style"] = elem_style
+            elif eid == "title_quotation":
+                elem["x"] = 232.0
+                elem["y"] = 26.0
+                elem["w"] = 100.0
+                elem["h"] = 32.0
+                elem["text"] = "Quotation"
+                elem_style = elem.get("style") or {}
+                elem_style.update({"fontSize": 18, "fontWeight": "800", "color": "#ED1C24"})
+                elem["style"] = elem_style
+            elif eid == "header_rule":
+                elem["x"] = 40.0
+                elem["y"] = 78.0
+                elem["w"] = 714.0
+                elem["h"] = 1.0
+
+        if eid == "insurer_logo" and 180 < float(elem.get("x", 0) or 0) < 450:
             elem["visible"] = False
-        header = sections.get("header") or default_header_config()
+
+        header = sections.get("header") or default_header_config(is_v2_layout)
         rows_order = header.get("rowsOrder") or ["ref", "vehicle", "insurer"]
         header_font_size = float(header.get("fontSize") or 10.5)
         is_top_left_insurer = header.get("insurerPosition") == "top_left"
 
         right_row_slots = [r for r in rows_order if r != "insurer"] if is_top_left_insurer else rows_order
-        row_slot_y_map = {slot: 20.0 + idx * 18.0 for idx, slot in enumerate(right_row_slots)}
+        base_slot_y = 18.0 if is_v2_layout else 20.0
+        step_slot_y = 16.0 if is_v2_layout else 18.0
+        row_slot_y_map = {slot: base_slot_y + idx * step_slot_y for idx, slot in enumerate(right_row_slots)}
 
         if eid == "risklocker_logo":
-            elem["x"] = float(header.get("logoX") or 40.0)
-            elem["y"] = float(header.get("logoY") or 12.0)
-            elem["w"] = float(header.get("logoW") or 88.0)
-            elem["h"] = float(header.get("logoH") or 70.0)
+            elem["x"] = 40.0
+            elem["y"] = 20.0 if is_v2_layout else float(header.get("logoY") or 8.0)
+            elem["w"] = 32.0 if is_v2_layout else float(header.get("logoW") or 72.0)
+            elem["h"] = 40.0 if is_v2_layout else float(header.get("logoH") or 74.0)
         elif eid == "ref_label":
             slot_y = row_slot_y_map.get("ref", 20.0)
             elem["visible"] = False

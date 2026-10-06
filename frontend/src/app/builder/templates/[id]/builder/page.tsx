@@ -1665,8 +1665,11 @@ export default function TemplateBuilderPage({ params }: { params: Promise<{ id: 
     const cleanConfig = clone(template.fixed_fields);
     if (cleanConfig.sections) {
       cleanConfig.canvas.elements = compileSectionsToCanvas(cleanConfig.sections, cleanConfig.canvas.elements, { simulatedExtrasCount: 0 });
-      const visibleCount = (cleanConfig.sections.section1?.vehicleFields || []).filter((f) => f.visible !== false).length;
-      const baseDeltaY = Math.max(0, (visibleCount - 9) * (cleanConfig.sections.section1?.rowHeight ?? 28));
+      const isV2 = cleanConfig.canvas.elements.some((e: any) => e.id === "payment_account_details_img" || e.id === "val_excess") ||
+        Boolean(cleanConfig.sections.rightContainers?.some((c: any) => (c.boxY ?? 0) <= 100));
+      const baselineCount = isV2 ? 9 : 8;
+      const visibleCount = (cleanConfig.sections.section1?.vehicleFields || []).filter((f: any) => f.visible !== false).length;
+      const baseDeltaY = Math.max(0, (visibleCount - baselineCount) * (cleanConfig.sections.section1?.rowHeight ?? 14));
       const newHeight = Math.max(1123, 1123 + baseDeltaY);
       cleanConfig.canvas.height = newHeight;
       if (cleanConfig.page_profile) {

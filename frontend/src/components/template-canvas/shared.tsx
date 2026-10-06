@@ -24,6 +24,7 @@ export type CanvasStyle = {
   padding?: number;
   boxShadow?: string;
   rotation?: number;
+  whiteSpace?: string;
 };
 
 export const FONT_LIBRARY = [
@@ -313,6 +314,7 @@ export const SYSTEM_SLOT_DEFAULTS: Record<string, string> = {
   qr_code: "9ca8e404c89dd905",
   all_driver_icon: "91116a7dc3540d62",
   background: "49e754a6faa949c2",
+  duitnow_payment_details: "c3003185-0000-4000-8000-000000000001",
 };
 
 export function CanvasElementView({
@@ -362,7 +364,7 @@ export function CanvasElementView({
   const eid = element.id || "";
   const isImageOrLogo =
     element.type === "image" ||
-    ["pay_holder", "text_ltaa394", "pay_bank_sub", "text_ul2w5ka", "pay_bank_logo", "bank_logo", "risklocker_logo", "qr_code", "rc_b_qr_code"].includes(eid);
+    ["pay_holder", "text_ltaa394", "pay_bank_sub", "text_ul2w5ka", "pay_bank_logo", "bank_logo", "risklocker_logo", "qr_code", "rc_b_qr_code", "payment_account_details_img", "rc_b_duitnow_img", "duitnow_img", "duitnow_card"].includes(eid);
 
   const slot =
     element.assetSlot ||
@@ -372,9 +374,11 @@ export function CanvasElementView({
         ? "bank_logo"
         : eid === "qr_code" || eid === "rc_b_qr_code"
           ? "qr_code"
-          : eid === "driver_icon"
-            ? "all_driver_icon"
-            : "");
+          : eid === "payment_account_details_img" || eid === "rc_b_duitnow_img" || eid === "duitnow_img" || eid === "duitnow_card"
+            ? "duitnow_payment_details"
+            : eid === "driver_icon"
+              ? "all_driver_icon"
+              : "");
 
   let assetId = element.assetId || (slot ? config?.assets?.[slot] : "");
   if ((!assetId || assetId === "None") && slot && SYSTEM_SLOT_DEFAULTS[slot]) {
@@ -391,6 +395,8 @@ export function CanvasElementView({
       assetId = SYSTEM_SLOT_DEFAULTS["bank_logo"];
     } else if (eid === "qr_code" || eid === "rc_b_qr_code") {
       assetId = SYSTEM_SLOT_DEFAULTS["qr_code"];
+    } else if (eid === "payment_account_details_img" || eid === "rc_b_duitnow_img") {
+      assetId = SYSTEM_SLOT_DEFAULTS["duitnow_payment_details"];
     }
   }
   const asset = assets.find((item) => item.id === assetId);
@@ -401,7 +407,9 @@ export function CanvasElementView({
         ? `/business/assets/${assetId}/content?profile=ui`
         : `/template-assets/${assetId}`
   ) : "");
-  if ((!resolvedUrl || resolvedUrl.includes("9ca8e404c89dd905") || resolvedUrl.includes("c2003185-0000-4000-8000-000000000001")) && (slot === "qr_code" || eid === "qr_code" || eid === "rc_b_qr_code" || assetId === "9ca8e404c89dd905" || assetId === "c2003185-0000-4000-8000-000000000001")) {
+  if (slot === "duitnow_payment_details" || eid === "payment_account_details_img" || eid === "rc_b_duitnow_img" || assetId === "c3003185-0000-4000-8000-000000000001") {
+    resolvedUrl = fileUrl("/assets/duitnow_payment_details.png");
+  } else if ((!resolvedUrl || resolvedUrl.includes("9ca8e404c89dd905") || resolvedUrl.includes("c2003185-0000-4000-8000-000000000001")) && (slot === "qr_code" || eid === "qr_code" || eid === "rc_b_qr_code" || assetId === "9ca8e404c89dd905" || assetId === "c2003185-0000-4000-8000-000000000001")) {
     resolvedUrl = fileUrl("/template-assets/9ca8e404c89dd905");
   } else if (!resolvedUrl && slot && SYSTEM_SLOT_DEFAULTS[slot]) {
     const fallbackId = SYSTEM_SLOT_DEFAULTS[slot];
@@ -464,7 +472,7 @@ export function CanvasElementView({
     transform: style.rotation ? `rotate(${style.rotation}deg)` : undefined,
     opacity: element.opacity ?? 1,
     overflow: element.type === "premium-info-block" || element.type === "benefit-grid" ? "visible" : "hidden",
-    whiteSpace: "pre-wrap",
+    whiteSpace: (style.whiteSpace as any) || "pre-wrap",
     display: isSpecial ? "flex" : undefined,
     flexDirection: isSpecial ? "column" : undefined,
     alignItems: isSpecial ? "center" : undefined,
@@ -506,6 +514,8 @@ export function CanvasElementView({
               <img className="h-full w-full object-contain object-left" src={fileUrl("/business/assets/e9685e1f-ac95-410c-a2e9-eccb7ca35d5f/content?profile=ui")} alt="Risklocker" />
             ) : slot === "bank_logo" ? (
               <img className="h-full w-full object-contain" src={fileUrl("/business/assets/2168eaee-3e56-4903-8c4f-841f01ff2407/content?profile=ui")} alt="Hong Leong Bank" />
+            ) : slot === "duitnow_payment_details" ? (
+              <img className="h-full w-full object-contain" src={fileUrl("/assets/duitnow_payment_details.png")} alt="DuitNow Payment Details" />
             ) : slot === "qr_code" ? (
               <img className="h-full w-full object-contain" src="/assets/qr.jpeg" alt="QR Code" />
             ) : slot === "insurer_logo" ? (
@@ -1486,11 +1496,11 @@ export function CanvasElementView({
           } else {
             total = variableValues?.total_premium_adjusted || variableValues?.total_amount || "";
           }
-          const displayPremium = pNum > 0 ? (pNum + extrasTotal).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : premium;
+          const combinedRoadtaxVal = rtNum + sfNum;
+          const displayRoadtax = combinedRoadtaxVal > 0 ? combinedRoadtaxVal.toFixed(2) : (roadtax || "");
           rows.push({ kind: "divider_dark", label: "", value: "" });
-          rows.push({ kind: "premium", label: labels.premium || "Coverage Premium / 保费", value: displayPremium ? `RM ${displayPremium}` : "" });
-          rows.push({ kind: "roadtax", label: labels.roadtax || "Roadtax", value: roadtax ? `RM ${roadtax}` : "" });
-          rows.push({ kind: "runner", label: labels.runner || "Runner Fee", value: runner ? `RM ${runner}` : "" });
+          rows.push({ kind: "premium", label: labels.premium || "Coverage Premium / 保费", value: premium ? `RM ${premium}` : "" });
+          rows.push({ kind: "roadtax", label: labels.roadtax || "Roadtax / 路税", value: displayRoadtax ? `RM ${displayRoadtax}` : "" });
           rows.push({ kind: "total", label: (labels as any).total_premium || labels.total || "Total Payable / 应付总额", value: total ? `RM ${total}` : "" });
           const rowHeight = Number(element.rowHeight) || 14;
           return (

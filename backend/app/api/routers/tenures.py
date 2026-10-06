@@ -112,6 +112,7 @@ class UpdateTenureLedgerRequest(BaseModel):
     runner_fee: float | None = None
     is_main: bool | None = None
     is_discarded: bool | None = None
+    status: str | None = None
     external_policy_start_date: str | None = None
     external_policy_end_date: str | None = None
 
@@ -677,7 +678,9 @@ def list_tenures(
             "tenure_chain_id": t.tenure_chain_id,
             "customer_id": t.customer_id,
             "customer_ic_no": t.customer.id_number if t.customer else None,
-            "is_discarded": bool(t.is_discarded),
+            "is_discarded": t.is_discarded,
+            "stage_history": t.stage_history or {},
+            "stage_updated_at": (t.stage_updated_at or t.updated_at or t.created_at).isoformat() if (t.stage_updated_at or t.updated_at or t.created_at) else None,
             "external_policy_start_date": t.external_policy_start_date.isoformat() if t.external_policy_start_date else None,
             "external_policy_end_date": t.external_policy_end_date.isoformat() if t.external_policy_end_date else None,
             "last_activity_at": (t.last_activity_at or t.updated_at or t.created_at).isoformat() if (t.last_activity_at or t.updated_at or t.created_at) else None,
@@ -705,13 +708,26 @@ def update_tenure_ledger_fields(
         raise HTTPException(status_code=404, detail="Tenure not found")
 
     now = datetime.now(timezone.utc)
+    old_stage = tenure.stage
+    old_status = tenure.status
+
     if payload.stage is not None and payload.stage != tenure.stage:
         tenure.stage = payload.stage
-        tenure.stage_updated_at = now
         if payload.stage == "Close - Win":
             tenure.status = "hit"
         elif payload.stage == "Close - Lose":
             tenure.status = "miss"
+        from app.services.insurance_tenure_service import record_stage_timestamp
+        record_stage_timestamp(tenure, payload.stage)
+
+    if payload.status is not None and payload.status != tenure.status:
+        tenure.status = payload.status
+        if payload.status == "hit" and tenure.stage != "Close - Win":
+            tenure.stage = "Close - Win"
+            from app.services.insurance_tenure_service import record_stage_timestamp
+            record_stage_timestamp(tenure, "Close - Win")
+        elif payload.status != "hit" and tenure.stage == "Close - Win":
+            tenure.stage = payload.stage if payload.stage else "Issue Policy"
 
     if payload.business_type is not None:
         tenure.business_type = payload.business_type
@@ -843,7 +859,7 @@ def update_tenure_ledger_fields(
     if payload.external_policy_start_date is not None:
         try:
             tenure.external_policy_start_date = (
-                datetime.strptime(payload.external_policy_start_date, "%Y-%m-%d").date()
+                datetime.strptime(payload.external_policy_start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
                 if payload.external_policy_start_date
                 else None
             )
@@ -852,7 +868,7 @@ def update_tenure_ledger_fields(
     if payload.external_policy_end_date is not None:
         try:
             tenure.external_policy_end_date = (
-                datetime.strptime(payload.external_policy_end_date, "%Y-%m-%d").date()
+                datetime.strptime(payload.external_policy_end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
                 if payload.external_policy_end_date
                 else None
             )
@@ -873,6 +889,22 @@ def update_tenure_ledger_fields(
                 ot_year = ot.coverage_start_date.year if ot.coverage_start_date else None
                 if ot_year == cohort_year:
                     ot.is_main = False
+
+    # Auto renewal lifecycle:
+    # 1. When marked HIT (Close - Win), auto-create the next year renewal tenure with empty comparison
+    from app.services.insurance_tenure_service import (
+        create_next_year_renewal_tenure,
+        remove_auto_created_next_year_tenure,
+    )
+    is_hit = (tenure.stage == "Close - Win" or tenure.status == "hit") and not tenure.is_discarded
+    was_hit = (old_stage == "Close - Win" or old_status == "hit")
+
+    if is_hit:
+        create_next_year_renewal_tenure(db, tenure, user_id=user.id)
+    elif was_hit and not is_hit:
+        remove_auto_created_next_year_tenure(db, tenure)
+    elif payload.is_discarded or tenure.stage == "Close - Lose" or tenure.status == "miss":
+        remove_auto_created_next_year_tenure(db, tenure)
 
     tenure.last_activity_at = now
     db.commit()

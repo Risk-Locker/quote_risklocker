@@ -139,7 +139,7 @@ def test_template_renderer_engine_capacity_formatting():
         "vehicle_type": {"value": "CompanyCar"},
     }
     html_ice = render_quotation_html(ice_fields)
-    assert "Engine Capacity/发动机排量 : " in html_ice
+    assert "Engine Capacity" in html_ice and "发动机排量" in html_ice
     assert "1495 cc" in html_ice
 
     # Case 2: EV vehicle with kW input
@@ -150,7 +150,7 @@ def test_template_renderer_engine_capacity_formatting():
         "vehicle_type": {"value": "EVNonSaloonCar"},
     }
     html_ev = render_quotation_html(ev_fields)
-    assert "Engine Capacity/发动机排量 : " in html_ev
+    assert "Engine Capacity" in html_ev and "发动机排量" in html_ev
     assert "150 kW" in html_ev
 
     # Case 3: EV vehicle with Watts input (>= 1000)

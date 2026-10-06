@@ -151,7 +151,9 @@ SYSTEM_ASSET_ALIASES: dict[str, str] = {
     "all_driver_icon": "91116a7dc3540d62",
     "background": "49e754a6faa949c2",
     "qr_code": "9ca8e404c89dd905",
+    "duitnow_payment_details": "c3003185-0000-4000-8000-000000000001",
 }
+
 
 
 def resolve_template_asset(db: Session | None, asset_id: str) -> Path | bytes:
@@ -217,6 +219,13 @@ def resolve_template_asset(db: Session | None, asset_id: str) -> Path | bytes:
             for path in root.iterdir() if root.exists() else []:
                 if path.is_file() and "driver" in path.name.lower():
                     return path.resolve()
+    elif asset_id in {"c3003185-0000-4000-8000-000000000001", "duitnow_payment_details", "duitnow_card", "duitnow_qr_details"}:
+        repo_asset = Path(__file__).resolve().parents[3] / "assets" / "DuitNow QR Payment Account Details.png"
+        if repo_asset.exists():
+            return repo_asset.resolve()
+        compat = compatibility_asset_root() / "DuitNow QR Payment Account Details.png"
+        if compat.exists():
+            return compat.resolve()
     elif asset_id in {"49e754a6faa949c2", "background"}:
         for root in (asset_root(), compatibility_asset_root()):
             for path in root.iterdir() if root.exists() else []:

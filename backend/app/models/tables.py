@@ -339,6 +339,7 @@ class InsuranceTenure(Base, TimestampMixin):
     client_preference_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     loss_reason_category: Mapped[str | None] = mapped_column(String(50), nullable=True)
     stage_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    stage_history: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default=text("'{}'"))
     created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     is_discarded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"), index=True)
     external_policy_start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

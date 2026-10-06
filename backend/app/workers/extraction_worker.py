@@ -379,7 +379,7 @@ def process_extraction_job(
         resolve_or_create_tenure,
     )
     from app.services.customer_account_service import resolve_or_create_customer
-    from app.services.vehicle_tracking_service import get_or_create_vehicle_tracking
+    from app.services.vehicle_tracking_service import get_or_create_vehicle_tracking, normalize_plate
 
     def _fval(k: str) -> str:
         item = (draft.fields or {}).get(k)
@@ -443,6 +443,30 @@ def process_extraction_job(
                 curr_opts["customer_discrepancies"] = discrepancies
                 draft.display_options = curr_opts
 
+    # AI Vehicle Brand & Model Simplification Job
+    from app.services.vehicle_simplifier_service import simplify_vehicle_name_with_ai
+    simp_brand, simp_model, simp_combined = simplify_vehicle_name_with_ai(raw_brand, raw_model)
+    effective_brand = simp_brand or raw_brand or None
+    effective_model = simp_model or raw_model or None
+
+    # Update draft fields with simplified human-readable vehicle name
+    if isinstance(draft.fields, dict):
+        if effective_brand:
+            if "car_brand" in draft.fields and isinstance(draft.fields["car_brand"], dict):
+                draft.fields["car_brand"]["value"] = effective_brand
+            else:
+                draft.fields["car_brand"] = effective_brand
+        if effective_model:
+            if "car_model" in draft.fields and isinstance(draft.fields["car_model"], dict):
+                draft.fields["car_model"]["value"] = effective_model
+            else:
+                draft.fields["car_model"] = effective_model
+        if simp_combined:
+            if "vehicle_model" in draft.fields and isinstance(draft.fields["vehicle_model"], dict):
+                draft.fields["vehicle_model"]["value"] = simp_combined
+            else:
+                draft.fields["vehicle_model"] = simp_combined
+
     # Vehicle Tracking & Full Spec Persistence
     veh, owner_alert = get_or_create_vehicle_tracking(
         db=db,
@@ -450,8 +474,8 @@ def process_extraction_job(
         customer_name=customer or "Valued Client",
         validity_date=cover_end or cover_start or None,
         session_id=session.id,
-        brand=raw_brand or None,
-        model=raw_model or None,
+        brand=effective_brand,
+        model=effective_model,
         chassis_no=raw_chassis or None,
         engine_no=raw_engine or None,
         customer_id=cust_account.id if cust_account else None,
@@ -466,10 +490,10 @@ def process_extraction_job(
             veh.chassis_no = raw_chassis
         if raw_engine and not veh.engine_no:
             veh.engine_no = raw_engine
-        if raw_brand and not veh.car_brand:
-            veh.car_brand = raw_brand
-        if raw_model and not veh.car_model:
-            veh.car_model = raw_model
+        if effective_brand:
+            veh.car_brand = effective_brand
+        if effective_model:
+            veh.car_model = effective_model
         if owner_alert:
             curr_opts = draft.display_options or {}
             curr_opts["owner_change_alert"] = owner_alert
