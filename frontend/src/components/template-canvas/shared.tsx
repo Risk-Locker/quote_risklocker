@@ -1080,12 +1080,14 @@ export function CanvasElementView({
                   const isMinimal = element.benefitPreset === "compact-minimal" || element.cardStyle === "minimal";
                   const isElevated = element.benefitPreset === "elevated-3d" || element.cardStyle === "soft";
                   const isGridTile = element.benefitPreset === "grid-tile" || element.cardStyle === "outlined";
+                  const cardRowH = (element as any).rowHeight || (element as any).targetRowHeight || 0;
 
                   return (
                     <div
                       className="grid w-full items-stretch"
                       style={{ 
                         gridTemplateColumns: `repeat(${numCols}, minmax(0, 1fr))`,
+                        gridAutoRows: cardRowH > 0 ? `${cardRowH}px` : undefined,
                         gap: density.gap 
                       }}
                     >
@@ -1191,7 +1193,12 @@ export function CanvasElementView({
                             }
 
                         const customIconSize = (element as any).iconSize ? Number((element as any).iconSize) : 0;
-                        const cardIconSize = customIconSize > 0 ? Math.min(60, Math.max(16, customIconSize)) : (isMinimal ? density.icon - 2 : density.icon);
+                        const cardIconSize = cardRowH > 0
+                          ? (cardRowH < 46 ? 14 : cardRowH < 64 ? 18 : 22)
+                          : (customIconSize > 0 ? Math.min(60, Math.max(16, customIconSize)) : (isMinimal ? density.icon - 2 : density.icon));
+                        const cardPadding = cardRowH > 0
+                          ? (cardRowH < 46 ? "2px 4px" : cardRowH < 64 ? "3px 5px" : "4px 6px")
+                          : (isMinimal ? "3px 5px" : density.padding);
                         const cardShape = (element as any).shape;
                         const cardRadius = cardShape === "racetrack" ? "999px" : cardShape === "soft" ? "12px" : cardShape === "oval" ? "24px / 14px" : cardShape === "square" ? "0px" : "6px";
                         const cardElevation = (element as any).elevation;
@@ -1204,10 +1211,17 @@ export function CanvasElementView({
                         const cardIconPad = (element as any).iconPadShape;
                         const iconPadRadius = cardIconPad === "circle" ? "999px" : cardIconPad === "box" ? "6px" : cardIconPad === "none" ? "0px" : (isGridTile ? "999px" : "4px");
 
+                        const cardTitleSize = cardRowH > 0
+                          ? (cardRowH < 46 ? 8.5 : cardRowH < 64 ? 9.0 : Math.min(10, (element as any).titleSize || density.label))
+                          : (isMinimal ? density.label - 0.5 : ((element as any).titleSize || density.label));
+                        const cardTitleClamp = cardRowH > 0
+                          ? (cardRowH < 50 ? 1 : (cardRowH < 68 ? 1 : 2))
+                          : ((element as any).textWrap === "truncate" ? 1 : ((element as any).textWrap === "wrap" ? 2 : undefined));
+
                         return (
                           <article
                             key={`benefit-card-${idx}`}
-                            className={`w-full h-full flex flex-col overflow-hidden transition-all ${
+                            className={`w-full flex flex-col overflow-hidden transition-all ${
                               isDark
                                 ? "border border-slate-700 bg-slate-900 shadow-xs"
                                 : isMinimal
@@ -1219,30 +1233,31 @@ export function CanvasElementView({
                                       : "border border-neutral-400 bg-white shadow-xs"
                             }`}
                             style={{
-                              padding: isMinimal ? "3px 5px" : density.padding,
+                              height: cardRowH > 0 ? `${cardRowH}px` : "100%",
+                              maxHeight: cardRowH > 0 ? `${cardRowH}px` : undefined,
+                              padding: cardPadding,
                               borderRadius: cardShape ? cardRadius : "6px",
                               boxShadow: cardElevation ? cardShadow : undefined,
                               backgroundColor: cardBg || undefined,
                               borderColor: cardBorderColor || undefined,
                               borderWidth: cardBorderWidth !== undefined ? `${cardBorderWidth}px` : undefined,
                               borderStyle: cardBorderStyle || undefined,
+                              boxSizing: "border-box",
                             }}
                           >
                             {showGroup && (
                               <div
                                 className={`font-bold leading-tight ${
-                                  (element as any).textWrap === "truncate"
+                                  cardTitleClamp === 1
                                     ? "truncate"
-                                    : (element as any).textWrap === "wrap"
-                                    ? "line-clamp-2 leading-tight break-words"
-                                    : "leading-tight break-words"
+                                    : "line-clamp-2 leading-tight break-words"
                                 } ${isDark ? "text-white" : "text-[var(--rl-text-strong)]"}`}
                                 style={{
-                                  fontSize: isMinimal ? density.label - 0.5 : ((element as any).titleSize || density.label),
-                                  marginBottom: isMinimal ? 1 : 3,
+                                  fontSize: cardTitleSize,
+                                  marginBottom: isMinimal || (cardRowH > 0 && cardRowH < 50) ? 1 : 3,
                                   color: (element as any).titleColor || (element as any).textColor || undefined,
-                                  display: (element as any).textWrap === "truncate" ? "block" : "-webkit-box",
-                                  WebkitLineClamp: (element as any).textWrap === "truncate" ? 1 : ((element as any).textWrap === "wrap" ? 2 : undefined),
+                                  display: cardTitleClamp === 1 ? "block" : "-webkit-box",
+                                  WebkitLineClamp: cardTitleClamp,
                                   WebkitBoxOrient: "vertical",
                                   overflow: "hidden",
                                 }}
@@ -1339,9 +1354,10 @@ export function CanvasElementView({
                                               )}
                                             </div>
                                           )}
-                                          {!isMinimal && desc && showDescription && (
+                                          {!isMinimal && desc && showDescription && (cardRowH <= 0 || cardRowH >= 46) && (
                                             <span
                                               className={`leading-tight mt-0.5 ${
+                                                cardRowH > 0 && cardRowH < 64 ? "line-clamp-1" :
                                                 ((element as any).descMaxLines === 1) ? "line-clamp-1" :
                                                 ((element as any).descMaxLines === 2) ? "line-clamp-2" :
                                                 ((element as any).descMaxLines === 3) ? "line-clamp-3" :
@@ -1350,11 +1366,11 @@ export function CanvasElementView({
                                                 ((element as any).descMaxLines === 0) ? "" : "line-clamp-3"
                                               } ${isDark ? "text-slate-400" : "text-[var(--rl-text-muted)]"}`}
                                               style={{ 
-                                                fontSize: customDescSize,
+                                                fontSize: cardRowH > 0 && cardRowH < 64 ? 7.5 : customDescSize,
                                                 fontWeight: customDescWeight ? (customDescWeight === "bold" ? 700 : customDescWeight === "semibold" ? 600 : customDescWeight === "medium" ? 500 : 400) : undefined,
                                                 color: customDescColor || undefined,
                                                 display: (element as any).descMaxLines === 0 ? "block" : "-webkit-box",
-                                                WebkitLineClamp: (element as any).descMaxLines === 0 ? undefined : ((element as any).descMaxLines || 3),
+                                                WebkitLineClamp: cardRowH > 0 && cardRowH < 64 ? 1 : ((element as any).descMaxLines === 0 ? undefined : ((element as any).descMaxLines || 3)),
                                                 WebkitBoxOrient: "vertical",
                                                 overflow: "hidden",
                                               }}
@@ -1533,15 +1549,35 @@ export function CanvasElementView({
             });
           }
 
+          const isV4 = Boolean(
+            (element as any).v4_mode ||
+            (element as any).isV4 ||
+            (config as any)?.v4_mode ||
+            (config as any)?.template_name?.toLowerCase?.()?.includes("v4") ||
+            (config as any)?.name?.toLowerCase?.()?.includes("v4") ||
+            (labels as any)?.v4_mode
+          );
+
           let displayPremium = premium ? `RM ${premium}` : "";
-          if (extrasMode === "none") {
+          if (isV4) {
+            const cleanTotalNum = parseFloat(String(total || "0").replace(/[^0-9.]/g, "")) || 0;
+            const v4PremiumVal = Math.max(0, cleanTotalNum - combinedRoadtaxVal);
+            displayPremium = v4PremiumVal > 0
+              ? `RM ${v4PremiumVal.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              : (premium ? `RM ${premium}` : "");
+          } else if (extrasMode === "none") {
             const totalPremNum = pNum + extrasTotal;
             displayPremium = totalPremNum > 0 ? `RM ${totalPremNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : (premium ? `RM ${premium}` : "");
           }
 
           rows.push({ kind: "premium", label: labels.premium || "Coverage Premium / 保费", value: displayPremium });
-          rows.push({ kind: "divider", label: "", value: "" });
+          if (!isV4) {
+            rows.push({ kind: "divider", label: "", value: "" });
+          }
           rows.push({ kind: "roadtax", label: labels.roadtax || "Roadtax and Runner Fee / 路税及服务费", value: displayRoadtax ? `RM ${displayRoadtax}` : "" });
+          if (isV4) {
+            rows.push({ kind: "divider", label: "", value: "" });
+          }
           rows.push({ kind: "total", label: (labels as any).total_premium || labels.total || "Total Payable / 应付总额", value: total ? `RM ${total}` : "" });
           const rowHeight = Number(element.rowHeight) || 14;
           return (
@@ -1567,10 +1603,12 @@ export function CanvasElementView({
                   row.kind === "total"
                     ? { fontSize: 11.5, fontWeight: 800, color: "#DC2626" }
                     : row.kind === "extra_lump"
-                      ? { fontSize: 10, fontWeight: 700, color: "#0F172A" }
+                      ? { fontSize: 10, fontWeight: 700, color: isV4 ? "#94A3B8" : "#0F172A" }
                       : row.kind === "extras_header"
                         ? { fontSize: 8.5, fontWeight: 700, color: "#DC2626" }
-                        : { fontSize: 9.5, fontWeight: 700, color: "#0F172A" };
+                        : row.kind === "extra"
+                          ? { fontSize: 9.5, fontWeight: 700, color: isV4 ? "#94A3B8" : "#0F172A" }
+                          : { fontSize: 9.5, fontWeight: 700, color: "#0F172A" };
                 if (row.kind === "extra") {
                   return (
                     <div key={`row-${index}`} className="flex items-center justify-between w-full pl-3" style={{ height: rowHeight }}>
@@ -1758,33 +1796,72 @@ export function balanceBenefitGridElements(
   const hdr2Bg = elements.find((e) => e.id === "addons_header_bg");
   const hdr2Txt = elements.find((e) => e.id === "addons_header_txt");
 
-  const hdrH = 26;
-  const gap = 8;
+  const footerElem = elements.find((e) => e.id === "footer_terms" || String(e.id || "").startsWith("footer") || String(e.id || "").startsWith("tc_"));
+  const footerY = footerElem ? Number(footerElem.y || 1068) : 1068;
+  const safeBottom = Math.max(yTop + 160, footerY - 14);
+  const availableH = safeBottom - yTop;
+
+  const hdrH = 24;
   const pad = 3;
-  const cols = Number(grid1.columns || 3);
+  const sectionGap = 8;
+  const cardGap = 4.5;
   const isMinimal = grid1.benefitPreset === "compact-minimal" || grid1.cardStyle === "minimal";
-  const customIconSize = Number((grid1 as any).iconSize || 0);
-  const dynamicIconExtra = customIconSize > 24 ? Math.max(0, customIconSize - 24) : 0;
 
-  const showDesc = (grid1 as any).showDescription !== false;
-  const showCov = (grid1 as any).showCoverage !== false;
+  const hasExtrasSection = extrasCards.length > 0 && extrasMode !== "none" && extrasMode !== "lump_sum";
 
-  const descMaxLines = Number((grid1 as any).descMaxLines ?? 4);
-  const textWrap = (grid1 as any).textWrap ?? "wrap";
-  const extraTitleH = textWrap === "multi" ? 10 : 0;
-  const extraDescH = showDesc && descMaxLines > 4 ? (descMaxLines - 4) * 12 : 0;
+  const items1 = (hasExtrasSection || extrasMode === "none" || extrasMode === "lump_sum") ? focCards : currentCards;
+  const itemsExt = extrasCards;
+  const items2 = addonCards;
 
-  const defaultRowHeight = isMinimal
-    ? 36
-    : showDesc
-    ? Math.max(cols === 2 ? 78 : 74, 44 + dynamicIconExtra + (showDesc ? 22 : 0) + (showCov ? 8 : 0)) + extraTitleH + extraDescH
-    : Math.max(50, 38 + dynamicIconExtra + (showCov ? 8 : 0)) + extraTitleH;
-  const addonRowHeight = isMinimal
-    ? 36
-    : showDesc
-    ? Math.max(cols === 2 ? 88 : 84, 46 + dynamicIconExtra + (showCov ? 8 : 0) + (showDesc ? 16 : 0) + 14) + extraTitleH + extraDescH
-    : Math.max(64, 44 + dynamicIconExtra + 14) + extraTitleH;
-  const cardGap = 5;
+  const n1 = items1.length;
+  const nExt = hasExtrasSection ? itemsExt.length : 0;
+  const n2 = items2.length;
+  const totalCards = n1 + nExt + n2;
+
+  const baseCols = Math.max(1, Number(grid1.columns || 3));
+  const effectiveCols = baseCols;
+  const extrasCols = nExt <= 2 ? Math.min(2, effectiveCols) : effectiveCols;
+
+  const rows1 = n1 > 0 ? Math.ceil(n1 / effectiveCols) : 0;
+  const rowsExt = hasExtrasSection && nExt > 0 ? Math.ceil(nExt / extrasCols) : 0;
+  const rows2 = n2 > 0 ? Math.ceil(n2 / effectiveCols) : 0;
+
+  const activeSections = (rows1 > 0 ? 1 : 0) + (rowsExt > 0 ? 1 : 0) + (rows2 > 0 ? 1 : 0);
+  const effectiveSections = Math.max(1, activeSections);
+  const totalRows = Math.max(1, rows1 + rowsExt + rows2);
+
+  const totalHeadersH = (effectiveSections * (hdrH + pad)) + (Math.max(0, effectiveSections - 1) * sectionGap);
+  const cardsAvailH = Math.max(60, availableH - totalHeadersH);
+  const totalRowGaps = (Math.max(0, rows1 - 1) + Math.max(0, rowsExt - 1) + Math.max(0, rows2 - 1)) * cardGap;
+  const pureCardsH = Math.max(40, cardsAvailH - totalRowGaps);
+
+  const rawRowH = Math.floor(pureCardsH / totalRows);
+  const targetRowH = isMinimal ? Math.min(38, Math.max(28, rawRowH)) : Math.min(74, Math.max(34, rawRowH));
+
+  const h1 = rows1 > 0 ? rows1 * targetRowH + Math.max(0, rows1 - 1) * cardGap : 0;
+  const hExt = rowsExt > 0 ? rowsExt * targetRowH + Math.max(0, rowsExt - 1) * cardGap : 0;
+  const h2 = rows2 > 0 ? rows2 * targetRowH + Math.max(0, rows2 - 1) * cardGap : 0;
+
+  // Strict magnetic positioning — each section starts strictly after the previous section ends!
+  let curY = yTop;
+
+  const yHdr1 = curY;
+  const yG1 = yHdr1 + hdrH + pad;
+  const bottom1 = yG1 + h1;
+  curY = bottom1 + sectionGap;
+
+  let yHdrExt = 0;
+  let yGExt = 0;
+  let bottomExt = 0;
+  if (hasExtrasSection && nExt > 0) {
+    yHdrExt = curY;
+    yGExt = yHdrExt + hdrH + pad;
+    bottomExt = yGExt + hExt;
+    curY = bottomExt + sectionGap;
+  }
+
+  const yHdr2 = curY;
+  const yG2 = yHdr2 + hdrH + pad;
 
   const adjustCommon = (e: CanvasElement): CanvasElement => {
     if (e.id === "cov_table_bg") {
@@ -1838,48 +1915,33 @@ export function balanceBenefitGridElements(
     return e;
   };
 
-  if (extrasCards.length > 0 && extrasMode !== "none" && extrasMode !== "lump_sum") {
-    const n1 = focCards.length;
-    const nExt = extrasCards.length;
-    const n2 = addonCards.length;
-
-    const extrasCols = nExt <= 2 ? Math.min(2, cols) : cols;
-    const rows1 = n1 > 0 ? Math.ceil(n1 / cols) : 0;
-    const rowsExt = nExt > 0 ? Math.ceil(nExt / extrasCols) : 0;
-    const rows2 = n2 > 0 ? Math.ceil(n2 / cols) : 0;
-
-    const h1 = rows1 > 0 ? rows1 * defaultRowHeight + Math.max(0, rows1 - 1) * cardGap : 40;
-    const hExt = rowsExt > 0 ? rowsExt * addonRowHeight + Math.max(0, rowsExt - 1) * cardGap : 40;
-    const h2 = rows2 > 0 ? rows2 * addonRowHeight + Math.max(0, rows2 - 1) * cardGap : 40;
-
-    const yG1 = yTop + hdrH + pad;
-    const yHExt = yG1 + h1 + gap;
-    const yGExt = yHExt + hdrH + pad;
-    const yH2 = yGExt + hExt + gap;
-    const yG2 = yH2 + hdrH + pad;
-
-    const gridBottom = yG2 + h2;
-    const footerShift = gridBottom > 1020 ? gridBottom + 24 - 1050 : 0;
-
-    const adjusted: CanvasElement[] = [];
-    for (const elem of elements) {
-      const e = adjustCommon({ ...elem });
-      if (e.id === "specials_header_bg" && hdr1Bg) {
-        e.y = yTop;
-        e.h = hdrH;
-      } else if (e.id === "specials_header_txt" && hdr1Txt) {
-        e.y = yTop + 5;
-      } else if (e.type === "benefit-grid" && e.gridKind === "current_benefits") {
-        e.y = yG1;
-        e.h = h1;
+  const adjusted: CanvasElement[] = [];
+  for (const elem of elements) {
+    const e = adjustCommon({ ...elem });
+    if (e.id === "specials_header_bg" && hdr1Bg) {
+      e.y = yHdr1;
+      e.h = hdrH;
+    } else if (e.id === "specials_header_txt" && hdr1Txt) {
+      e.y = yHdr1 + 5;
+    } else if (e.type === "benefit-grid" && e.gridKind === "current_benefits") {
+      e.y = yG1;
+      e.h = h1;
+      (e as any).rowHeight = targetRowH;
+      (e as any).columns = effectiveCols;
+      if (hasExtrasSection) {
         (e as any).excludeExtras = true;
-        adjusted.push(e);
-        // Insert Extras section
+      } else if (extrasMode === "none" || extrasMode === "lump_sum") {
+        (e as any).excludeExtras = true;
+      }
+      adjusted.push(e);
+
+      if (hasExtrasSection && nExt > 0) {
+        // Insert Purchased Extras section magnetically below Section 1
         adjusted.push({
           id: "extras_header_bg",
           type: "rectangle",
           x: grid1.x || 40,
-          y: yHExt,
+          y: yHdrExt,
           w: grid1.w || 714,
           h: hdrH,
           z: 2,
@@ -1890,7 +1952,7 @@ export function balanceBenefitGridElements(
           type: "text",
           text: "Purchased Extras & Add-ons / 已附加特别项目",
           x: (grid1.x || 40) + 12,
-          y: yHExt + 5,
+          y: yHdrExt + 5,
           w: (grid1.w || 714) - 24,
           h: 16,
           z: 5,
@@ -1907,66 +1969,23 @@ export function balanceBenefitGridElements(
           h: hExt,
           z: 4,
           columns: extrasCols,
+          rowHeight: targetRowH,
           emptyState: "hide",
         });
-        continue;
-      } else if (e.id === "addons_header_bg" && hdr2Bg) {
-        e.y = yH2;
-        e.h = hdrH;
-      } else if (e.id === "addons_header_txt" && hdr2Txt) {
-        e.y = yH2 + 5;
-      } else if (e.type === "benefit-grid" && e.gridKind === "available_addons") {
-        e.y = yG2;
-        e.h = h2;
-      } else if (footerShift > 0 && (Number(e.y || 0) >= 1050 || String(e.id || "").startsWith("footer") || String(e.id || "").startsWith("tc_"))) {
-        e.y = Number(e.y || 1068) + footerShift;
       }
-      adjusted.push(e);
-    }
-    return adjusted;
-  }
-
-  // Standard 2-section layout when no extras exist
-  const n1 = (extrasMode === "none" || extrasMode === "lump_sum") ? focCards.length : currentCards.length;
-  const n2 = addonCards.length;
-
-  const rows1 = n1 > 0 ? Math.ceil(n1 / cols) : 0;
-  const rows2 = n2 > 0 ? Math.ceil(n2 / cols) : 0;
-
-  const h1 = rows1 > 0 ? rows1 * defaultRowHeight + Math.max(0, rows1 - 1) * cardGap : 40;
-  const h2 = rows2 > 0 ? rows2 * addonRowHeight + Math.max(0, rows2 - 1) * cardGap : 40;
-
-  const yG1 = yTop + hdrH + pad;
-  const yH2 = yG1 + h1 + gap;
-  const yG2 = yH2 + hdrH + pad;
-
-  const gridBottom = yG2 + h2;
-  const footerShift = gridBottom > 1020 ? gridBottom + 24 - 1050 : 0;
-
-  return elements.map((elem) => {
-    const e = adjustCommon({ ...elem });
-    if (e.id === "specials_header_bg" && hdr1Bg) {
-      e.y = yTop;
-      e.h = hdrH;
-    } else if (e.id === "specials_header_txt" && hdr1Txt) {
-      e.y = yTop + 5;
-    } else if (e.type === "benefit-grid" && e.gridKind === "current_benefits") {
-      e.y = yG1;
-      e.h = h1;
-      if (extrasMode === "none" || extrasMode === "lump_sum") {
-        (e as any).excludeExtras = true;
-      }
+      continue;
     } else if (e.id === "addons_header_bg" && hdr2Bg) {
-      e.y = yH2;
+      e.y = yHdr2;
       e.h = hdrH;
     } else if (e.id === "addons_header_txt" && hdr2Txt) {
-      e.y = yH2 + 5;
+      e.y = yHdr2 + 5;
     } else if (e.type === "benefit-grid" && e.gridKind === "available_addons") {
       e.y = yG2;
       e.h = h2;
-    } else if (footerShift > 0 && (Number(e.y || 0) >= 1050 || String(e.id || "").startsWith("footer") || String(e.id || "").startsWith("tc_"))) {
-      e.y = Number(e.y || 1068) + footerShift;
+      (e as any).rowHeight = targetRowH;
+      (e as any).columns = effectiveCols;
     }
-    return e;
-  });
+    adjusted.push(e);
+  }
+  return adjusted;
 }

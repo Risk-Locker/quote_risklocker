@@ -342,7 +342,7 @@ def list_published_templates(db, user) -> list[dict]:
         if profile is None:
             continue
         template = templates[template_id]
-        is_default = bool((template.fixed_fields or {}).get("is_default")) or template.id == "3832df1d-f56e-4ce2-bc08-e9477dd7380c"
+        is_default = bool((template.fixed_fields or {}).get("is_default"))
         result.append({
             "template_id": template.id,
             "template_revision_id": revision.id,
@@ -353,7 +353,13 @@ def list_published_templates(db, user) -> list[dict]:
             "is_default": is_default,
             "config": revision.config,
         })
-    result.sort(key=lambda item: (not item.get("is_default", False), "v3" not in item["name"].lower(), item["name"].casefold(), item["template_id"]))
+    def _sort_key(item: dict) -> tuple:
+        name = item["name"].lower()
+        is_def = not item.get("is_default", False)
+        priority = 0 if "v4" in name else (1 if "v3" in name else 2)
+        return (is_def, priority, item["name"].casefold(), item["template_id"])
+
+    result.sort(key=_sort_key)
     return result
 
 

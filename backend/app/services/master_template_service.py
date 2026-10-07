@@ -581,6 +581,48 @@ def _agency_bilingual_v3_lump_sum_config() -> dict:
     return validate_template_config(config)
 
 
+def _agency_bilingual_v4_config() -> dict:
+    name = "Bilingual Agency Motor v4"
+    key = "agency_bilingual_v4"
+    config = deepcopy(_agency_bilingual_v3_config())
+    config["template_name"] = name
+    config["v7_master_key"] = key
+    config["is_default"] = True
+    config["v4_mode"] = True
+    for elem in config["canvas"]["elements"]:
+        if elem.get("id") == "premium_info_block" or elem.get("type") == "premium-info-block":
+            elem["v4_mode"] = True
+    return validate_template_config(config)
+
+
+def _agency_bilingual_v4_no_extras_config() -> dict:
+    name = "Bilingual Agency Motor v4 (No Extras)"
+    key = "agency_bilingual_v4_no_extras"
+    config = deepcopy(_agency_bilingual_v3_no_extras_config())
+    config["template_name"] = name
+    config["v7_master_key"] = key
+    config["is_default"] = False
+    config["v4_mode"] = True
+    for elem in config["canvas"]["elements"]:
+        if elem.get("id") == "premium_info_block" or elem.get("type") == "premium-info-block":
+            elem["v4_mode"] = True
+    return validate_template_config(config)
+
+
+def _agency_bilingual_v4_lump_sum_config() -> dict:
+    name = "Bilingual Agency Motor v4 (Lump Sum Extras)"
+    key = "agency_bilingual_v4_lump_sum"
+    config = deepcopy(_agency_bilingual_v3_lump_sum_config())
+    config["template_name"] = name
+    config["v7_master_key"] = key
+    config["is_default"] = False
+    config["v4_mode"] = True
+    for elem in config["canvas"]["elements"]:
+        if elem.get("id") == "premium_info_block" or elem.get("type") == "premium-info-block":
+            elem["v4_mode"] = True
+    return validate_template_config(config)
+
+
 def _agency_english_config() -> dict:
     name = "English Agency Motor"
     key = "agency_english"
@@ -708,13 +750,16 @@ def _agency_mandarin_config() -> dict:
 
 
 def master_template_specs() -> list[dict]:
-    # Canonical motor templates: Bilingual, Bilingual v2, Bilingual v3, Bilingual v3 No Extras, Bilingual v3 Lump Sum, English, and Mandarin presets
+    # Canonical motor templates: Bilingual, Bilingual v2, Bilingual v3, Bilingual v4, English, and Mandarin presets
     return [
         {"key": "agency_bilingual", "name": "Bilingual Agency Motor", "is_default": False, "config": _agency_bilingual_config()},
         {"key": "agency_bilingual_v2", "name": "Bilingual Agency Motor v2", "is_default": False, "config": _agency_bilingual_v2_config()},
-        {"key": "agency_bilingual_v3", "name": "Bilingual Agency Motor v3", "is_default": True, "config": _agency_bilingual_v3_config()},
+        {"key": "agency_bilingual_v3", "name": "Bilingual Agency Motor v3", "is_default": False, "config": _agency_bilingual_v3_config()},
         {"key": "agency_bilingual_v3_no_extras", "name": "Bilingual Agency Motor v3 (No Extras)", "is_default": False, "config": _agency_bilingual_v3_no_extras_config()},
         {"key": "agency_bilingual_v3_lump_sum", "name": "Bilingual Agency Motor v3 (Lump Sum Extras)", "is_default": False, "config": _agency_bilingual_v3_lump_sum_config()},
+        {"key": "agency_bilingual_v4", "name": "Bilingual Agency Motor v4", "is_default": True, "config": _agency_bilingual_v4_config()},
+        {"key": "agency_bilingual_v4_no_extras", "name": "Bilingual Agency Motor v4 (No Extras)", "is_default": False, "config": _agency_bilingual_v4_no_extras_config()},
+        {"key": "agency_bilingual_v4_lump_sum", "name": "Bilingual Agency Motor v4 (Lump Sum Extras)", "is_default": False, "config": _agency_bilingual_v4_lump_sum_config()},
         {"key": "agency_english", "name": "English Agency Motor", "is_default": False, "config": _agency_english_config()},
         {"key": "agency_mandarin", "name": "Mandarin Agency Motor", "is_default": False, "config": _agency_mandarin_config()},
     ]
@@ -754,7 +799,7 @@ def ensure_master_templates(db, user, *, apply: bool = False, force: bool = Fals
             publish_template_revision(db, user, current.id, base_revision=current.revision)
 
     if apply:
-        bilingual = by_key.get("agency_bilingual_v3") or by_key.get("agency_bilingual")
+        bilingual = by_key.get("agency_bilingual_v4") or by_key.get("agency_bilingual_v3") or by_key.get("agency_bilingual")
         for item in templates + list(by_key.values()):
             config = deepcopy(item.fixed_fields or {})
             wanted = bool(bilingual and item.id == bilingual.id)

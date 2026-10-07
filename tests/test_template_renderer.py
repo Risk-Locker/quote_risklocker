@@ -389,7 +389,7 @@ def test_balance_benefit_grid_three_section_expansion_and_no_overlap():
     )
     import re
     height_match = re.search(r"@page\s*\{\s*size:\s*\d+px\s*(\d+)px", html)
-    assert height_match and int(height_match.group(1)) > 1123
+    assert height_match and int(height_match.group(1)) == 1123
 
 
 def test_build_extras_uses_global_benefit_title_and_preserves_manual_override():
@@ -698,12 +698,12 @@ def test_multi_row_specials_and_extras_no_overlap():
         template_config={"canvas": {"width": 794, "height": 1123, "elements": raw_elements}},
         render_context=render_context,
     )
-    # Check that @page size height is expanded beyond 1123px
+    # Check that @page size height is strictly A4 standard 1123px
     import re
     page_match = re.search(r"@page\s*\{\s*size:\s*794px\s*(\d+)px", html)
     assert page_match is not None, "Could not find @page size in html"
-    expanded_height = int(page_match.group(1))
-    assert expanded_height > 1123, f"Expected page height to auto-expand > 1123px, got {expanded_height}px"
+    page_height = int(page_match.group(1))
+    assert page_height == 1123, f"Expected page height to be strict A4 1123px, got {page_height}px"
 
 
 def test_benefit_card_title_wrap_and_desc_max_lines_options():
@@ -794,4 +794,80 @@ def test_agency_bilingual_v2_renders_cleanly():
     assert "Authorised Drivers Covered" in html
     # Ensure no missing asset indicator leaks into the rendered HTML
     assert 'data-missing-asset="duitnow_payment_details"' not in html
+
+
+def test_agency_bilingual_v4_tight_gapless_layout_within_a4():
+    from app.services.master_template_service import _agency_bilingual_v4_config
+    from app.rendering.template_renderer import _balance_benefit_grid_elements, render_quotation_html
+
+    config = _agency_bilingual_v4_config()
+    draft_fields = {
+        "customer_name": {"value": "LOO KUOH YOON"},
+        "vehicle_no": {"value": "VCM66"},
+        "quotation_reference": {"value": "RL260000335"},
+        "insurance_company": {"value": "QBE INSURANCE (MALAYSIA) BERHAD"},
+        "coverage_amount": {"value": "74000.00"},
+        "engine_cc": {"value": "3498"},
+        "ncd_percent": {"value": "30.00"},
+        "cover_period": {"value": "21-10-2026 to 20-10-2027"},
+        "valuation_type": {"value": "Agreed Value"},
+        "excess_amount": {"value": "0.00"},
+        "premium": {"value": "2077.82"},
+        "roadtax": {"value": "4391.00"},
+        "total_amount": {"value": "7296.32"},
+    }
+    render_context = {
+        "current_benefits": [
+            {"label": "Emergency Towing Assistance", "description": "Unlimited breakdown roadside towing across Peninsular Malaysia", "cost_status": "included"},
+            {"label": "Betterment Waiver / Scale", "description": "0% betterment costs on accident repairs for all vehicles within 0 to 10 years old.", "cost_status": "included"},
+            {"label": "Legal Defense Costs", "description": "Reimburses court legal representation and defense fees up to RM2,000.", "cost_status": "included"},
+            {"label": "Compassionate Allowance (Total Loss / Theft)", "description": "Emergency cash payout upon vehicle flood loss or total loss.", "cost_status": "included"},
+            {"label": "Key Care & Replacement", "description": "Reimburses replacement and reprogramming of lost or stolen keys.", "cost_status": "included"},
+            {"label": "All Drivers Excess Waiver", "price": {"amount": 20.0}, "description": "Waives RM400 compulsory excess for unnamed licensed drivers.", "cost_status": "paid"},
+            {"label": "Legal Liability of Passengers (LLOP)", "price": {"amount": 7.50}, "description": "Protects against third-party claims caused by passenger negligence.", "cost_status": "paid"},
+            {"label": "Windscreen Damage", "coverage_limit": "RM 5,000.00", "price": {"amount": 750.00}, "description": "Covers windscreen, window glass and solar tint without losing NCD.", "cost_status": "paid"},
+            {"label": "Driver Passenger Protector Plan", "price": {"amount": 50.0}, "description": "Multi-plan personal accident rider for driver and passengers.", "cost_status": "paid"},
+        ],
+        "extras": [
+            {"label": "All Drivers Excess Waiver", "price": {"amount": 20.0}},
+            {"label": "Legal Liability of Passengers (LLOP)", "price": {"amount": 7.50}},
+            {"label": "Windscreen Damage", "coverage_limit": "RM 5,000.00", "price": {"amount": 750.00}},
+            {"label": "Driver Passenger Protector Plan", "price": {"amount": 50.0}},
+        ],
+        "available_addons": [
+            {"label": f"Addon {i}", "coverage_limit": f"RM {i*1000}", "description": f"Description for addon {i}", "price": {"amount": 50.0 + i * 10}}
+            for i in range(1, 10)
+        ],
+    }
+
+    raw_elements = config["canvas"]["elements"]
+    balanced = _balance_benefit_grid_elements(raw_elements, render_context)
+    by_id = {e["id"]: e for e in balanced}
+
+    # Verify tight row heights (50-54px instead of 74-84px)
+    g1 = by_id["current_benefits_grid"]
+    h_ext = by_id["extras_header_bg"]
+    grid_ext = by_id["extras_grid"]
+    h2 = by_id["addons_header_bg"]
+    g2 = by_id["available_addons_grid"]
+
+    # Gap between Specials grid bottom and Extras header must be exactly 8px (no 40-50px empty gap)
+    g1_bottom = float(g1["y"]) + float(g1["h"])
+    assert float(h_ext["y"]) - g1_bottom <= 10.0, f"Gap too wide: {float(h_ext['y']) - g1_bottom}px"
+
+    # Gap between Extras grid bottom and Addons header must be exactly 8px (no 40-50px empty gap)
+    ext_bottom = float(grid_ext["y"]) + float(grid_ext["h"])
+    assert float(h2["y"]) - ext_bottom <= 10.0, f"Gap too wide: {float(h2['y']) - ext_bottom}px"
+
+    # Total grid bottom must fit well within A4 (<= 950px, comfortably above footer at 1072px)
+    g2_bottom = float(g2["y"]) + float(g2["h"])
+    assert g2_bottom <= 950.0, f"Grid bottom {g2_bottom} exceeds 950px"
+
+    html = render_quotation_html(draft_fields, template_config=config, render_context=render_context)
+    import re
+    page_match = re.search(r"@page\s*\{\s*size:\s*794px\s*(\d+)px", html)
+    assert page_match is not None
+    assert int(page_match.group(1)) == 1123, "Page height must strictly be 1123px (A4)"
+    assert "transform: scale(" not in html, "Must not use transform scale on v4"
+
 

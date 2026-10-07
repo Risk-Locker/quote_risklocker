@@ -142,7 +142,7 @@ def _template_for_draft(db, draft: QuotationDraft) -> TemplateRevision | None:
     default_tmpl = next(
         (t for t in templates if bool((t.fixed_fields or {}).get("is_default"))),
         next(
-            (t for t in templates if (t.fixed_fields or {}).get("v7_master_key") == "agency_bilingual" or "bilingual" in t.name.lower()),
+            (t for t in templates if (t.fixed_fields or {}).get("v7_master_key") == "agency_bilingual_v4" or (t.fixed_fields or {}).get("v7_master_key") == "agency_bilingual_v3" or "bilingual" in t.name.lower()),
             None,
         ),
     )

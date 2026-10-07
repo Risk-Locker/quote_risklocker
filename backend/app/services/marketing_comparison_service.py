@@ -18,6 +18,7 @@ from collections import defaultdict
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.tables import (
     AccountStatus,
@@ -275,7 +276,16 @@ def normalize_towing_km(raw_towing: Any, combined_text: str = "") -> str:
 
     if any(k in val_str.lower() for k in ("unlimited", "24-hr unlimited", "24 hour unlimited", "tanpa had")):
         return "Unlimited"
-    if any(k in combined_text.lower() for k in ("unlimited towing", "24-hr unlimited", "24 hour unlimited", "motor pa plus 4", "driver plus plan 4", "driver plus 4", "tanpa had")):
+    
+    # Auto-detect unlimited towing based on specific purchased perils
+    unlimited_triggers = [
+        "unlimited towing", "24-hr unlimited", "24 hour unlimited", "tanpa had",
+        "motor pa plus", "driver plus plan 4", "driver plus 4", 
+        "private car 365 plan", "amdrive plus",
+        "oto 360", "e-assist smart driver", "sompo motor", 
+        "motor easy bundle plan", "autobuddy"
+    ]
+    if any(k in combined_text.lower() for k in unlimited_triggers):
         return "Unlimited"
 
     for text_source in (val_str, combined_text):
@@ -1786,7 +1796,9 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                         e.runner_fee = float(tenure.runner_fee)
                         e.total_payable = float(e.motor_premium) + e.road_tax + e.runner_fee
                         if e.sum_insured > 0.0:
-                            e.rate_percentage = round((float(e.motor_premium) / float(e.sum_insured)) * 100, 4)
+                            # Preserve manual basic premium rates if they exist
+                            if not e.is_manual or e.rate_percentage is None or float(e.rate_percentage) == 0.0:
+                                e.rate_percentage = round((float(e.motor_premium) / float(e.sum_insured)) * 100, 4)
                         needs_commit = True
                     else:
                         if abs(float(e.road_tax) - float(tenure.road_tax)) > 0.01 or abs(float(e.runner_fee) - float(tenure.runner_fee)) > 0.01:
@@ -2179,10 +2191,11 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
         basic_prem, basic_term_label = _extract_exact_basic_figure(f_obj, e.company_name, s_obj=s_obj)
         if basic_prem <= 0.0:
             basic_prem = _extract_vehicle_basic_premium(f_obj, e.company_name, s_obj=s_obj)
-        dyn_rate_factor = getattr(e, "rate_factor", None)
-        if basic_prem <= 0.0 and dyn_rate_factor and e.sum_insured:
-            basic_prem = round(float(e.sum_insured) * float(dyn_rate_factor), 2)
         
+        # Fallback to saved rate_percentage for manual portal entries
+        if basic_prem <= 0.0 and e.rate_percentage and float(e.rate_percentage) > 0 and e.sum_insured:
+            basic_prem = round(float(e.sum_insured) * (float(e.rate_percentage) / 100.0), 2)
+            
         rate_str, rate_num = calculate_exact_rate(
             basic_prem if basic_prem > 0 else float(e.motor_premium),
             float(e.sum_insured)
@@ -2743,6 +2756,7 @@ def save_comparison_entry(
                         else:
                             d_fields[k] = {"value": str(new_bf)}
                     s_obj.draft.fields = d_fields
+                    flag_modified(s_obj.draft, "fields")
     if "source_quotation_no" in payload and payload["source_quotation_no"]:
         clean_qno = _safe_str(payload["source_quotation_no"]).strip()
         if clean_qno:
@@ -2754,9 +2768,11 @@ def save_comparison_entry(
                         d_fields = dict(s_obj.draft.fields or {})
                         d_fields["quotation_no"] = {"value": clean_qno, "status": "ready", "message": ""}
                         s_obj.draft.fields = d_fields
+                        flag_modified(s_obj.draft, "fields")
                     s_obj.quotation_ref = clean_qno
     if "towing_limit" in payload:
         entry.towing_limit = _safe_str(payload["towing_limit"])
+        entry.towing_km = _safe_str(payload["towing_limit"])  # Overwrite cached towing_km too
     if "agreed_value" in payload:
         entry.agreed_value = bool(payload["agreed_value"])
         if entry.agreed_value:
@@ -2792,7 +2808,8 @@ def save_comparison_entry(
     entry.total_payable = float(entry.motor_premium) + entry.road_tax + entry.runner_fee
 
     if float(entry.sum_insured) > 0:
-        entry.rate_percentage = round((float(entry.motor_premium) / float(entry.sum_insured)) * 100, 4)
+        if not entry.is_manual or entry.rate_percentage is None or float(entry.rate_percentage) == 0.0 or ("basic_figure_amount" not in payload and "basic_premium" not in payload and "motor_premium" in payload):
+            entry.rate_percentage = round((float(entry.motor_premium) / float(entry.sum_insured)) * 100, 4)
 
     db.commit()
     return get_marketing_comparison(db, tenure_id)

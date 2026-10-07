@@ -1038,6 +1038,11 @@ def _apply_template_selection(db, draft: QuotationDraft, operation: dict) -> str
         draft.layout_override_template_id = None
         draft.layout_override_template_revision_id = None
         draft.layout_override_base_hash = None
+        if draft.uploaded_file:
+            draft.uploaded_file.template_id = revision.template_id
+        uploaded = db.get(UploadedFile, draft.uploaded_file_id) if draft.uploaded_file_id else None
+        if uploaded:
+            uploaded.template_id = revision.template_id
     return "template_revision_id"
 
 

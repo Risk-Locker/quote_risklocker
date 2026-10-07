@@ -339,6 +339,29 @@ export default function QuotationTemplatesPage() {
     }
   }
 
+  async function togglePublish(template: TemplateRecord) {
+    const isPublished = templateState(template) === "published" || templateState(template) === "compatibility";
+    setError("");
+    try {
+      if (isPublished) {
+        await api(`/business/templates/${template.id}/unpublish`, {
+          method: "POST",
+          body: JSON.stringify({}),
+        });
+        toast("Template unpublished successfully.", "success");
+      } else {
+        await api(`/business/templates/${template.id}/publish`, {
+          method: "POST",
+          body: JSON.stringify({ base_revision: template.revision }),
+        });
+        toast("Template published successfully.", "success");
+      }
+      await load();
+    } catch (reason) {
+      setError(apiErrorMessage(reason));
+    }
+  }
+
   async function handleRenameSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!pendingRename || !renameValue.trim()) return;
@@ -464,7 +487,7 @@ export default function QuotationTemplatesPage() {
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <h2 className="m-0 truncate text-[17px] font-bold text-[var(--rl-text-strong)]">{template.name}</h2>
+                            <h2 className="m-0 truncate text-[17px] font-bold text-[var(--rl-text-strong)]">{template.name.replace(/\.r\d+$/, "")}</h2>
                             {template.is_default ? (
                               <span className="inline-flex items-center gap-1 rounded bg-amber-50 border border-amber-300 px-1.5 py-0.5 text-[10px] font-bold text-amber-900 uppercase">
                                 <Star size={11} weight="fill" className="text-amber-500" /> Default
@@ -492,6 +515,14 @@ export default function QuotationTemplatesPage() {
                             title={template.is_default ? "Currently default template" : "Set as default quotation template"}
                           >
                             {template.is_default ? "Default" : "Set Default"}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            icon={<ShieldCheck size={14} />}
+                            onClick={() => togglePublish(template)}
+                          >
+                            {state === "published" || state === "compatibility" ? "Unpublish" : "Publish"}
                           </Button>
                           <Button variant="ghost" size="sm" icon={<Eye size={14} />} onClick={() => setPreview(template)}>Preview</Button>
                           <Button variant="secondary" size="sm" icon={<PencilSimple size={14} />} onClick={() => { setPendingRename(template); setRenameValue(template.name); }}>Rename</Button>

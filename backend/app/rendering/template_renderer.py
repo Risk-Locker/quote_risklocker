@@ -520,24 +520,50 @@ def _dynamic_benefit_grid(
         else:
             card_border_css = card_style_css
 
-        pad = 3 if is_minimal else density["padding"]
-        if custom_icon_size > 0:
-            icon_sz = min(60.0, max(16.0, custom_icon_size))
+        target_row_h = float(element.get("targetRowHeight") or 0)
+        if target_row_h > 0:
+            if target_row_h < 46.0:
+                pad = 2
+                icon_sz = min(16.0, max(12.0, target_row_h * 0.35))
+                lbl_fs = 8.5
+                val_fs = 8.5
+                desc_fs = 7.0
+            elif target_row_h < 64.0:
+                pad = 3
+                icon_sz = min(20.0, max(15.0, target_row_h * 0.35))
+                lbl_fs = 9.0
+                val_fs = 9.0
+                desc_fs = 7.5
+            else:
+                pad = 4
+                icon_sz = min(24.0, max(18.0, target_row_h * 0.35))
+                lbl_fs = min(10.0, (density["label"] - 0.5) if is_minimal else density["label"])
+                val_fs = min(10.0, density["value"])
+                desc_fs = min(8.0, density["desc"])
         else:
-            icon_sz = (density["icon"] - 2) if is_minimal else density["icon"]
+            pad = 3 if is_minimal else density["padding"]
+            if custom_icon_size > 0:
+                icon_sz = min(60.0, max(16.0, custom_icon_size))
+            else:
+                icon_sz = (density["icon"] - 2) if is_minimal else density["icon"]
+            lbl_fs = (density["label"] - 0.5) if is_minimal else density["label"]
+            val_fs = density["value"]
+            desc_fs = density["desc"]
 
         uniform_h = float(element.get("uniformHeight") or 0)
         h_style = f"min-height:{uniform_h}px;" if uniform_h > 0 else ""
 
-        lbl_fs = (density["label"] - 0.5) if is_minimal else density["label"]
         title_sz = element.get("titleSize")
         if title_sz is not None:
             try:
                 lbl_fs = float(title_sz)
             except (ValueError, TypeError):
                 pass
+        if target_row_h > 0 and target_row_h < 46.0:
+            lbl_fs = min(lbl_fs, 8.5)
+        elif target_row_h > 0 and target_row_h < 64.0:
+            lbl_fs = min(lbl_fs, 9.5)
 
-        val_fs = density["value"]
         cov_sz = element.get("coverageSize")
         if cov_sz is not None:
             try:
@@ -545,7 +571,6 @@ def _dynamic_benefit_grid(
             except (ValueError, TypeError):
                 pass
 
-        desc_fs = density["desc"]
         desc_sz = element.get("descSize")
         if desc_sz is not None:
             try:
@@ -608,13 +633,21 @@ def _dynamic_benefit_grid(
         # --- Short description row ---
         desc_weight = "700" if element.get("descWeight") == "bold" else ("600" if element.get("descWeight") == "semibold" else ("500" if element.get("descWeight") == "medium" else "400"))
         desc_max_lines = int(element.get("descMaxLines") or element.get("descLines") or 4)
+        if target_row_h > 0:
+            if target_row_h < 46.0:
+                desc_max_lines = 0
+            elif target_row_h < 64.0:
+                desc_max_lines = min(1, desc_max_lines)
+            else:
+                desc_max_lines = min(2, desc_max_lines)
+
         clamp_css = f"-webkit-line-clamp:{desc_max_lines};display:-webkit-box;-webkit-box-orient:vertical;" if desc_max_lines > 0 else "display:block;"
         desc_max_h = max(55.0, desc_fs * (desc_max_lines + 1.0)) if desc_max_lines > 0 else 999.0
         desc_html = (
             f'<span style="font-size:{desc_fs}px;font-weight:{desc_weight};line-height:1.2;color:{desc_color};'
             f'max-height:{desc_max_h}px;overflow:hidden;{clamp_css}">'
             f'{desc_str}</span>'
-            if (desc_str and not is_minimal and card.get("_showDescription", True)) else ""
+            if (desc_str and not is_minimal and desc_max_lines > 0 and card.get("_showDescription", True)) else ""
         )
 
         # --- Cost / price badge ---
@@ -628,7 +661,8 @@ def _dynamic_benefit_grid(
             elif card.get("detected_cost"):
                 p_val = card.get("detected_cost")
 
-            cost_fs = max(7.5, desc_fs - 0.5)
+            cost_fs = max(7.0, desc_fs - 0.5) if (target_row_h > 0 and target_row_h < 50.0) else max(7.5, desc_fs - 0.5)
+            badge_pad = "1px 3px" if (target_row_h > 0 and target_row_h < 50.0) else "1px 5px"
             cost_sz = element.get("costSize")
             if cost_sz is not None:
                 try:
@@ -659,22 +693,25 @@ def _dynamic_benefit_grid(
                             p_str = ""
                 if p_str:
                     price_badge = (
-                        f'<div style="margin-top:2px"><span style="display:inline-block;padding:1px 5px;border-radius:4px;'
+                        f'<div style="margin-top:2px"><span style="display:inline-block;padding:{badge_pad};border-radius:4px;'
                         f'font-size:{cost_fs}px;font-weight:700;line-height:1.2;white-space:nowrap;'
                         f'background:{badge_bg};color:{badge_fg};border:1px solid {badge_border}">{p_str}</span></div>'
                     )
 
         # Title font: shrink for long labels
         title_fs = lbl_fs - 1.0 if len(label_str) > 30 else (lbl_fs - 0.5 if len(label_str) > 18 else float(lbl_fs))
-        title_margin = 1 if is_minimal else 3
+        title_margin = 1 if (is_minimal or (target_row_h > 0 and target_row_h < 50.0)) else 3
         text_wrap = str(element.get("textWrap") or "wrap")
-        if text_wrap == "truncate":
+        if target_row_h > 0 and target_row_h < 46.0:
+            title_wrap_css = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;"
+        elif target_row_h > 0 and target_row_h < 64.0:
+            title_wrap_css = "overflow:hidden;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;word-break:break-word;white-space:normal;"
+        elif text_wrap == "truncate":
             title_wrap_css = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;"
         elif text_wrap == "multi":
             title_wrap_css = "overflow:hidden;display:block;word-break:break-word;white-space:normal;"
         else:
             title_wrap_css = "overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word;white-space:normal;"
-
 
         title_html = (
             f'<div style="font-size:{title_fs}px;font-weight:700;line-height:1.15;'
@@ -697,11 +734,12 @@ def _dynamic_benefit_grid(
             f'</div>'
         )
 
+        card_h_css = f"height:{target_row_h}px;max-height:{target_row_h}px;overflow:hidden;" if target_row_h > 0 else ""
         pos_style = f"position:absolute;left:{px:.8f}px;top:{py:.8f}px;width:{pw:.8f}px;height:{ph:.8f}px;" if extra_style == "" else extra_style
         return (
             f'<article data-benefit-card="1" data-card-scale="{scale:.12f}" '
             f'data-card-style="{escape(card_style_name)}" data-text-density="{escape(density_name)}" '
-            f'style="{pos_style}box-sizing:border-box">'
+            f'style="{pos_style}{card_h_css}box-sizing:border-box">'
             f'<div style="width:100%;height:100%;{h_style}display:flex;flex-direction:column;'
             f'padding:{pad}px;box-sizing:border-box;border-radius:{card_radius};{card_border_css};overflow:hidden">'
             f'{inner_html}'
@@ -716,6 +754,9 @@ def _dynamic_benefit_grid(
             ordered[i : i + col_count] for i in range(0, len(ordered), col_count)
         ]
 
+        target_row_h = float(element.get("targetRowHeight") or 0)
+        row_h_style = f"height:{target_row_h}px;max-height:{target_row_h}px;overflow:hidden;" if target_row_h > 0 else ""
+
         rows_html = []
         for row_cards in row_chunks:
             cards_html = []
@@ -728,15 +769,15 @@ def _dynamic_benefit_grid(
                         0,
                         0,
                         1.0,
-                        extra_style="flex:1;min-width:0;height:100%;display:flex;flex-direction:column;box-sizing:border-box;",
+                        extra_style=f"flex:1;min-width:0;height:100%;{row_h_style}display:flex;flex-direction:column;box-sizing:border-box;",
                     )
                 )
             # Pad partial row with empty flex items to ensure equal column widths
             for _ in range(col_count - len(row_cards)):
-                cards_html.append('<div style="flex:1;min-width:0;box-sizing:border-box;"></div>')
+                cards_html.append(f'<div style="flex:1;min-width:0;{row_h_style}box-sizing:border-box;"></div>')
 
             rows_html.append(
-                f'<div style="display:flex;flex-direction:row;gap:{gap}px;align-items:stretch;width:100%;box-sizing:border-box;">'
+                f'<div style="display:flex;flex-direction:row;gap:{gap}px;align-items:stretch;width:100%;{row_h_style}box-sizing:border-box;">'
                 f'{"".join(cards_html)}</div>'
             )
 
@@ -799,28 +840,98 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
     extras_mode = str(element.get("extras_mode") or (render_context or {}).get("extras_mode") or "itemized").lower()
     rows: list[tuple[str, str, str, str]] = []  # (kind, label, middle_val, right_val)
 
+    v4_mode = bool(element.get("v4_mode"))
+
+    # Calculate roadtax & runner fee early
+    rt_display = _value(fields, "roadtax")
+    if not rt_display and (fields or {}).get("engine_cc"):
+        from app.services.road_tax_service import calculate_road_tax
+        cc_raw = (fields or {}).get("engine_cc")
+        cc_val = cc_raw.get("value") if isinstance(cc_raw, dict) else cc_raw
+        if cc_val:
+            try:
+                clean_cc = float(re.sub(r"[^\d.]", "", str(cc_val)))
+                if clean_cc > 0:
+                    vtype_raw = (fields or {}).get("vehicle_type")
+                    vtype_val = vtype_raw.get("value") if isinstance(vtype_raw, dict) else vtype_raw
+                    ctype_raw = (fields or {}).get("client_type")
+                    ctype_val = ctype_raw.get("value") if isinstance(ctype_raw, dict) else ctype_raw
+                    cname_raw = (fields or {}).get("insured_name") or (fields or {}).get("customer_name")
+                    cname_val = cname_raw.get("value") if isinstance(cname_raw, dict) else cname_raw
+                    cmodel_raw = (fields or {}).get("car_model")
+                    cmodel_val = cmodel_raw.get("value") if isinstance(cmodel_raw, dict) else cmodel_raw
+                    cbrand_raw = (fields or {}).get("car_brand")
+                    cbrand_val = cbrand_raw.get("value") if isinstance(cbrand_raw, dict) else cbrand_raw
+                    from app.extraction.entity_classifier import classify_vehicle_ev_status, is_corporate_name
+                    is_corp = (
+                        str(ctype_val or "").lower() in {"company", "corporate", "business"}
+                        or "company" in str(vtype_val or "").lower()
+                        or is_corporate_name(str(cname_val or ""))
+                    )
+                    is_ev, ev_cat = classify_vehicle_ev_status(str(cbrand_val or ""), str(cmodel_val or ""), str(cc_val or ""))
+                    vtype_to_use = ev_cat if (is_ev and ev_cat) else str(vtype_val or "Car")
+                    calc_rt = calculate_road_tax(
+                        clean_cc,
+                        vtype_to_use,
+                        owner_type="Company" if is_corp else "Individual",
+                    )
+                    if calc_rt > 0:
+                        rt_display = f"{calc_rt:.2f}"
+            except Exception:
+                pass
+    try:
+        clean_rt_num = float((rt_display or "0").replace(",", "").strip())
+    except (ValueError, TypeError):
+        clean_rt_num = 0.0
+    try:
+        clean_sf_num = float((_value(fields, "service_fee") or "0").replace(",", "").strip())
+    except (ValueError, TypeError):
+        clean_sf_num = 0.0
+    combined_rt_val = clean_rt_num + clean_sf_num
+    combined_rt_display = f"{combined_rt_val:.2f}" if combined_rt_val > 0 else (rt_display or "")
+    rt_label = str(labels.get("roadtax") or "Roadtax and Runner Fee / 路税及服务费")
+
+    # Get total early
+    total = (render_context or {}).get("total_premium_adjusted") or _value(fields, "total_premium_adjusted")
+    if not total:
+        disp_opts = (render_context or {}).get("display_options") or ((render_context or {}).get("draft") or {}).get("display_options") or {}
+        round_tot = bool(disp_opts.get("round_total", False))
+        total = adjusted_total_text(fields, extras, round_total=round_tot) if extras else _value(fields, "total_amount")
+    if not total:
+        total = _value(fields, "total_amount")
+
+    def _get_v4_premium():
+        try:
+            total_num = float(re.sub(r"[^\d.]", "", str(total or "0")))
+            return f"{total_num - combined_rt_val:,.2f}"
+        except Exception:
+            return _value(fields, "premium")
+
     if extras_mode == "none":
         # Template 1: Remove extras completely; fold extras prices into Insurance Premium so left side adds up properly
-        extras_sum = Decimal("0")
-        for extra in extras:
-            raw_price = extra.get("price") or {}
-            amt = raw_price.get("amount") if isinstance(raw_price, dict) else raw_price
-            if amt is not None:
-                try:
-                    extras_sum += Decimal(re.sub(r"[^\d.]", "", str(amt)))
-                except Exception:
-                    pass
-        p_display = _value(fields, "insurance_premium_total")
-        if not p_display:
-            p_raw = _value(fields, "premium")
-            if p_raw and extras_sum > 0:
-                try:
-                    clean_p = Decimal(re.sub(r"[^\d.]", "", p_raw))
-                    p_display = f"{(clean_p + extras_sum):,.2f}"
-                except Exception:
+        if v4_mode:
+            p_display = _get_v4_premium()
+        else:
+            extras_sum = Decimal("0")
+            for extra in extras:
+                raw_price = extra.get("price") or {}
+                amt = raw_price.get("amount") if isinstance(raw_price, dict) else raw_price
+                if amt is not None:
+                    try:
+                        extras_sum += Decimal(re.sub(r"[^\d.]", "", str(amt)))
+                    except Exception:
+                        pass
+            p_display = _value(fields, "insurance_premium_total")
+            if not p_display:
+                p_raw = _value(fields, "premium")
+                if p_raw and extras_sum > 0:
+                    try:
+                        clean_p = Decimal(re.sub(r"[^\d.]", "", p_raw))
+                        p_display = f"{(clean_p + extras_sum):,.2f}"
+                    except Exception:
+                        p_display = p_raw
+                else:
                     p_display = p_raw
-            else:
-                p_display = p_raw
         rows.append(("premium", str(labels.get("premium") or "Insurance Premium / 保费"), "", _format_value(p_display, "RM ")))
 
     elif extras_mode == "lump_sum":
@@ -838,7 +949,8 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
             extras_hdr = str(labels.get("extras") or "Extras / 附加项目")
             formatted_lump = f"RM {extras_sum:,.2f}"
             rows.append(("extra_lump", extras_hdr, "", formatted_lump))
-        rows.append(("premium", str(labels.get("premium") or "Insurance Premium / 保费"), "", _format_value(_value(fields, "premium"), "RM ")))
+        p_val = _get_v4_premium() if v4_mode else _value(fields, "premium")
+        rows.append(("premium", str(labels.get("premium") or "Insurance Premium / 保费"), "", _format_value(p_val, "RM ")))
 
     else:
         # Standard itemized extras mode
@@ -889,65 +1001,17 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
                 else:
                     label = re.sub(r"(\bplan\s*\d+)\s*\(RM\s*[\d,.]+\)", r"\1", label, flags=re.I).strip()
                 rows.append(("extra", label, cov_limit, formatted_price))
-        rows.append(("premium", str(labels.get("premium") or "Insurance Premium / 保费"), "", _format_value(_value(fields, "premium"), "RM ")))
+        p_val = _get_v4_premium() if v4_mode else _value(fields, "premium")
+        rows.append(("premium", str(labels.get("premium") or "Insurance Premium / 保费"), "", _format_value(p_val, "RM ")))
 
-    rows.append(("divider", "", "", ""))
-    rt_display = _value(fields, "roadtax")
-    if not rt_display and (fields or {}).get("engine_cc"):
-        from app.services.road_tax_service import calculate_road_tax
-        cc_raw = (fields or {}).get("engine_cc")
-        cc_val = cc_raw.get("value") if isinstance(cc_raw, dict) else cc_raw
-        if cc_val:
-            try:
-                clean_cc = float(re.sub(r"[^\d.]", "", str(cc_val)))
-                if clean_cc > 0:
-                    vtype_raw = (fields or {}).get("vehicle_type")
-                    vtype_val = vtype_raw.get("value") if isinstance(vtype_raw, dict) else vtype_raw
-                    ctype_raw = (fields or {}).get("client_type")
-                    ctype_val = ctype_raw.get("value") if isinstance(ctype_raw, dict) else ctype_raw
-                    cname_raw = (fields or {}).get("insured_name") or (fields or {}).get("customer_name")
-                    cname_val = cname_raw.get("value") if isinstance(cname_raw, dict) else cname_raw
-                    cmodel_raw = (fields or {}).get("car_model")
-                    cmodel_val = cmodel_raw.get("value") if isinstance(cmodel_raw, dict) else cmodel_raw
-                    cbrand_raw = (fields or {}).get("car_brand")
-                    cbrand_val = cbrand_raw.get("value") if isinstance(cbrand_raw, dict) else cbrand_raw
-                    from app.extraction.entity_classifier import classify_vehicle_ev_status, is_corporate_name
-                    is_corp = (
-                        str(ctype_val or "").lower() in {"company", "corporate", "business"}
-                        or "company" in str(vtype_val or "").lower()
-                        or is_corporate_name(str(cname_val or ""))
-                    )
-                    is_ev, ev_cat = classify_vehicle_ev_status(str(cbrand_val or ""), str(cmodel_val or ""), str(cc_val or ""))
-                    vtype_to_use = ev_cat if (is_ev and ev_cat) else str(vtype_val or "Car")
-                    calc_rt = calculate_road_tax(
-                        clean_cc,
-                        vtype_to_use,
-                        owner_type="Company" if is_corp else "Individual",
-                    )
-                    if calc_rt > 0:
-                        rt_display = f"{calc_rt:.2f}"
-            except Exception:
-                pass
-    # Combine road tax and runner fee into a single combined line item (never show runner fee separately)
-    try:
-        clean_rt_num = float((rt_display or "0").replace(",", "").strip())
-    except (ValueError, TypeError):
-        clean_rt_num = 0.0
-    try:
-        clean_sf_num = float((_value(fields, "service_fee") or "0").replace(",", "").strip())
-    except (ValueError, TypeError):
-        clean_sf_num = 0.0
-    combined_rt_val = clean_rt_num + clean_sf_num
-    combined_rt_display = f"{combined_rt_val:.2f}" if combined_rt_val > 0 else (rt_display or "")
-    rt_label = str(labels.get("roadtax") or "Roadtax and Runner Fee / 路税及服务费")
+    if not v4_mode:
+        rows.append(("divider", "", "", ""))
+
     rows.append(("roadtax", rt_label, "", _format_value(combined_rt_display, "RM ")))
-    total = (render_context or {}).get("total_premium_adjusted") or _value(fields, "total_premium_adjusted")
-    if not total:
-        disp_opts = (render_context or {}).get("display_options") or ((render_context or {}).get("draft") or {}).get("display_options") or {}
-        round_tot = bool(disp_opts.get("round_total", False))
-        total = adjusted_total_text(fields, extras, round_total=round_tot) if extras else _value(fields, "total_amount")
-    if not total:
-        total = _value(fields, "total_amount")
+
+    if v4_mode:
+        rows.append(("divider", "", "", ""))
+
     rows.append(("total", str(labels.get("total") or "TOTAL PAYABLE"), "", _format_value(total, "RM ")))
     html: list[str] = []
     z = int(element.get("z") or 4)
@@ -963,14 +1027,14 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
             value_style = "font-size:13px;font-weight:800;color:#DC2626"
         elif kind == "extra_lump":
             label_style = "font-size:9.5px;font-weight:700;color:#DC2626"
-            value_style = "font-size:10px;font-weight:700;color:#0F172A"
+            value_style = f"font-size:10px;font-weight:700;color:{'#94A3B8' if v4_mode else '#0F172A'}"
         elif kind == "extras_header":
             label_style = "font-size:9px;font-weight:700;color:#DC2626;text-transform:uppercase;letter-spacing:0.5px"
             value_style = "font-size:9px;font-weight:700;color:#DC2626"
         elif kind == "extra":
             label_style = "font-size:9px;font-weight:600;color:#B91C1C;white-space:nowrap"
             limit_html = f'<span style="font-size:9px;font-weight:600;color:#B91C1C;margin-left:4px;white-space:nowrap">{escape(middle_val)}</span>' if middle_val else ""
-            value_style = "font-size:9.5px;font-weight:700;color:#0F172A;white-space:nowrap;text-align:right"
+            value_style = f"font-size:9.5px;font-weight:700;color:{'#94A3B8' if v4_mode else '#0F172A'};white-space:nowrap;text-align:right"
             html.append(
                 f'<div style="position:absolute;left:{x}px;top:{row_y}px;width:{width}px;height:{row_height}px;z-index:{z};'
                 f'display:flex;align-items:center;justify-content:space-between;box-sizing:border-box;padding-left:10px">'
@@ -1034,7 +1098,8 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     hdr2_bg = next((e for e in elements if e.get("id") == "addons_header_bg"), None)
     hdr2_txt = next((e for e in elements if e.get("id") == "addons_header_txt"), None)
 
-    hdr_h = 26.0
+    v4_mode = any(e.get("v4_mode") for e in elements) or bool((render_context or {}).get("v4_mode"))
+    hdr_h = 24.0 if v4_mode else 26.0
     gap = 8.0
     pad = 3.0
 
@@ -1054,23 +1119,90 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     extra_title_h = 10.0 if text_wrap == "multi" else 0.0
     extra_desc_h = max(0.0, (desc_max_lines - 4) * 12.0) if has_desc else 0.0
 
-    default_row_height = (
-        36.0 if is_minimal
-        else (
-            max(78.0 if cols == 2 else 74.0, 44.0 + dynamic_icon_extra + (22.0 if has_desc else 0.0) + (8.0 if has_cov else 0.0)) + extra_title_h + extra_desc_h
-            if has_desc
-            else max(50.0, 38.0 + dynamic_icon_extra + (8.0 if has_cov else 0.0)) + extra_title_h
+    footer_elem = next((e for e in elements if e.get("id") == "footer_terms" or str(e.get("id") or "").startswith("footer") or str(e.get("id") or "").startswith("tc_")), None)
+    footer_y = float(footer_elem.get("y") or 1068.0) if footer_elem else 1068.0
+    safe_bottom = max(y_top + 160.0, footer_y - 14.0)
+    available_h = safe_bottom - y_top
+
+    has_extras_section = len(extras_cards) > 0 and (extras_mode not in {"none", "lump_sum"})
+    items1 = foc_cards if (has_extras_section or extras_mode in {"none", "lump_sum"}) else current_cards
+    items_ext = extras_cards if has_extras_section else []
+    items2 = addon_cards
+
+    n1 = len(items1)
+    n_ext = len(items_ext)
+    n2 = len(items2)
+    total_cards = n1 + n_ext + n2
+
+    base_cols = max(1, int(grid1.get("columns") or 3))
+    effective_cols = base_cols
+    extras_cols = min(2, effective_cols) if n_ext <= 2 else effective_cols
+
+    rows1 = (n1 + effective_cols - 1) // effective_cols if n1 > 0 else 0
+    rows_ext = (n_ext + extras_cols - 1) // extras_cols if (has_extras_section and n_ext > 0) else 0
+    rows2 = (n2 + effective_cols - 1) // effective_cols if n2 > 0 else 0
+
+    active_sections = (1 if rows1 > 0 else 0) + (1 if rows_ext > 0 else 0) + (1 if rows2 > 0 else 0)
+    effective_sections = max(1, active_sections)
+    total_rows = max(1, rows1 + rows_ext + rows2)
+
+    card_gap = 4.5 if v4_mode else 5.0
+    total_headers_h = (effective_sections * (hdr_h + pad)) + (max(0, effective_sections - 1) * gap)
+    cards_avail_h = max(60.0, available_h - total_headers_h)
+    total_row_gaps = (max(0, rows1 - 1) + max(0, rows_ext - 1) + max(0, rows2 - 1)) * card_gap
+    pure_cards_h = max(40.0, cards_avail_h - total_row_gaps)
+
+    raw_row_h = pure_cards_h / float(total_rows)
+
+    if v4_mode:
+        target_row_h = min(38.0, max(28.0, raw_row_h)) if is_minimal else min(52.0, max(28.0, raw_row_h))
+        h1 = (rows1 * target_row_h + max(0, rows1 - 1) * card_gap) if rows1 > 0 else float(grid1.get("h") or 40.0)
+        h_ext = (rows_ext * target_row_h + max(0, rows_ext - 1) * card_gap) if (has_extras_section and rows_ext > 0) else 40.0
+        h2 = (rows2 * target_row_h + max(0, rows2 - 1) * card_gap) if rows2 > 0 else float(grid2.get("h") or 40.0)
+    else:
+        target_row_h = 0.0
+        default_row_height = (
+            36.0 if is_minimal
+            else (
+                max(74.0 if cols == 2 else 74.0, 44.0 + dynamic_icon_extra + (16.0 if has_desc else 0.0) + (8.0 if has_cov else 0.0)) + extra_title_h + extra_desc_h
+                if has_desc
+                else max(42.0, 34.0 + dynamic_icon_extra + (8.0 if has_cov else 0.0)) + extra_title_h
+            )
         )
-    )
-    addon_row_height = (
-        36.0 if is_minimal
-        else (
-            max(88.0 if cols == 2 else 84.0, 46.0 + dynamic_icon_extra + (8.0 if has_cov else 0.0) + (16.0 if has_desc else 0.0) + 14.0) + extra_title_h + extra_desc_h
-            if has_desc
-            else max(64.0, 44.0 + dynamic_icon_extra + 14.0) + extra_title_h
+        addon_row_height = (
+            36.0 if is_minimal
+            else (
+                max(84.0 if cols == 2 else 84.0, 38.0 + dynamic_icon_extra + (8.0 if has_cov else 0.0) + (12.0 if has_desc else 0.0) + 12.0) + extra_title_h + extra_desc_h
+                if has_desc
+                else max(50.0, 38.0 + dynamic_icon_extra + 12.0) + extra_title_h
+            )
         )
-    )
-    card_gap = 5.0
+        h1 = (rows1 * default_row_height + max(0, rows1 - 1) * card_gap) if rows1 > 0 else float(grid1.get("h") or 40.0)
+        h_ext = (rows_ext * addon_row_height + max(0, rows_ext - 1) * card_gap) if (has_extras_section and rows_ext > 0) else 40.0
+        h2 = (rows2 * addon_row_height + max(0, rows2 - 1) * card_gap) if rows2 > 0 else float(grid2.get("h") or 40.0)
+
+    # Magnetic sequential positioning — each section starts strictly after previous section ends
+    cur_y = y_top
+
+    y_hdr1 = cur_y
+    y_g1 = y_hdr1 + hdr_h + pad
+    bottom1 = y_g1 + h1
+    cur_y = bottom1 + gap
+
+    y_hdr_ext = 0.0
+    y_g_ext = 0.0
+    bottom_ext = 0.0
+    if has_extras_section and n_ext > 0:
+        y_hdr_ext = cur_y
+        y_g_ext = y_hdr_ext + hdr_h + pad
+        bottom_ext = y_g_ext + h_ext
+        cur_y = bottom_ext + gap
+
+    y_hdr2 = cur_y
+    y_g2 = y_hdr2 + hdr_h + pad
+    bottom2 = y_g2 + h2
+
+    footer_shift = ((bottom2 + 24.0 - 1050.0) if bottom2 > 1020.0 else 0.0) if not v4_mode else 0.0
 
     def _adjust_common(e: dict[str, Any]) -> dict[str, Any]:
         eid = e.get("id")
@@ -1123,50 +1255,31 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
             e["y"] = drivers_y + 48.0
         return e
 
-    if has_extras_section:
-        n1 = len(foc_cards)
-        n_ext = len(extras_cards)
-        n2 = len(addon_cards)
-
-        extras_cols = min(2, cols) if n_ext <= 2 else cols
-        rows1 = max(1, (n1 + cols - 1) // cols) if n1 > 0 else 0
-        rows_ext = max(1, (n_ext + extras_cols - 1) // extras_cols) if n_ext > 0 else 0
-        rows2 = max(1, (n2 + cols - 1) // cols) if n2 > 0 else 0
-
-        h1 = rows1 * default_row_height + max(0, rows1 - 1) * card_gap if rows1 > 0 else 40.0
-        h_ext = rows_ext * addon_row_height + max(0, rows_ext - 1) * card_gap if rows_ext > 0 else 40.0
-        h2 = rows2 * addon_row_height + max(0, rows2 - 1) * card_gap if rows2 > 0 else 40.0
-
-        y_g1 = y_top + hdr_h + pad
-        y_h_ext = y_g1 + h1 + gap
-        y_g_ext = y_h_ext + hdr_h + pad
-        y_h2 = y_g_ext + h_ext + gap
-        y_g2 = y_h2 + hdr_h + pad
-
-        grid_bottom = y_g2 + h2
-        footer_shift = grid_bottom + 24.0 - 1050.0 if grid_bottom > 1020.0 else 0.0
-
-        adjusted_elements = []
-        for elem in elements:
-            e = dict(elem)
-            eid = e.get("id")
-            e = _adjust_common(e)
-            if eid == "specials_header_bg" and hdr1_bg:
-                e["y"] = y_top
-                e["h"] = hdr_h
-            elif eid == "specials_header_txt" and hdr1_txt:
-                e["y"] = y_top + 5
-            elif e.get("type") == "benefit-grid" and e.get("gridKind") == "current_benefits":
-                e["y"] = y_g1
-                e["h"] = h1
+    adjusted_elements = []
+    for elem in elements:
+        e = dict(elem)
+        eid = e.get("id")
+        e = _adjust_common(e)
+        if eid == "specials_header_bg" and hdr1_bg:
+            e["y"] = y_hdr1
+            e["h"] = hdr_h
+        elif eid == "specials_header_txt" and hdr1_txt:
+            e["y"] = y_hdr1 + 5
+        elif e.get("type") == "benefit-grid" and e.get("gridKind") == "current_benefits":
+            e["y"] = y_g1
+            e["h"] = h1
+            e["columns"] = effective_cols
+            e["targetRowHeight"] = target_row_h
+            if has_extras_section or extras_mode in {"none", "lump_sum"}:
                 e["excludeExtras"] = True
-                adjusted_elements.append(e)
-                # Insert Extras section right after current_benefits_grid
+            adjusted_elements.append(e)
+
+            if has_extras_section and n_ext > 0:
                 adjusted_elements.append({
                     "id": "extras_header_bg",
                     "type": "rectangle",
                     "x": float(grid1.get("x") or 40),
-                    "y": y_h_ext,
+                    "y": y_hdr_ext,
                     "w": float(grid1.get("w") or 714),
                     "h": hdr_h,
                     "z": 2,
@@ -1177,7 +1290,7 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
                     "type": "text",
                     "text": "Purchased Extras & Add-ons / 已附加特别项目",
                     "x": float(grid1.get("x") or 40) + 12,
-                    "y": y_h_ext + 5,
+                    "y": y_hdr_ext + 5,
                     "w": float(grid1.get("w") or 714) - 24,
                     "h": 16,
                     "z": 5,
@@ -1194,63 +1307,21 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
                     "h": h_ext,
                     "z": 4,
                     "columns": extras_cols,
+                    "targetRowHeight": target_row_h,
                     "emptyState": "hide",
                 })
                 adjusted_elements.append(extras_elem)
-                continue
-            elif eid == "addons_header_bg" and hdr2_bg:
-                e["y"] = y_h2
-                e["h"] = hdr_h
-            elif eid == "addons_header_txt" and hdr2_txt:
-                e["y"] = y_h2 + 5
-            elif e.get("type") == "benefit-grid" and e.get("gridKind") == "available_addons":
-                e["y"] = y_g2
-                e["h"] = h2
-            elif footer_shift > 0.0 and (float(e.get("y") or 0) >= 1050.0 or str(eid or "").startswith("footer") or str(eid or "").startswith("tc_")):
-                e["y"] = float(e.get("y") or 1068.0) + footer_shift
-            adjusted_elements.append(e)
-        return adjusted_elements
-
-    # Standard 2-section layout when no extras exist
-    n1 = len(current_cards)
-    n2 = len(addon_cards)
-
-    rows1 = max(1, (n1 + cols - 1) // cols) if n1 > 0 else 0
-    rows2 = max(1, (n2 + cols - 1) // cols) if n2 > 0 else 0
-
-    h1 = rows1 * default_row_height + max(0, rows1 - 1) * card_gap if rows1 > 0 else 40.0
-    h2 = rows2 * addon_row_height + max(0, rows2 - 1) * card_gap if rows2 > 0 else 40.0
-
-    y_g1 = y_top + hdr_h + pad
-    y_h2 = y_g1 + h1 + gap
-    y_g2 = y_h2 + hdr_h + pad
-
-    grid_bottom = y_g2 + h2
-    footer_shift = grid_bottom + 24.0 - 1050.0 if grid_bottom > 1020.0 else 0.0
-
-    adjusted_elements = []
-    for elem in elements:
-        e = dict(elem)
-        eid = e.get("id")
-        e = _adjust_common(e)
-        if eid == "specials_header_bg" and hdr1_bg:
-            e["y"] = y_top
-            e["h"] = hdr_h
-        elif eid == "specials_header_txt" and hdr1_txt:
-            e["y"] = y_top + 5
-        elif e.get("type") == "benefit-grid" and e.get("gridKind") == "current_benefits":
-            e["y"] = y_g1
-            e["h"] = h1
-            if extras_mode in {"none", "lump_sum"}:
-                e["excludeExtras"] = True
+            continue
         elif eid == "addons_header_bg" and hdr2_bg:
-            e["y"] = y_h2
+            e["y"] = y_hdr2
             e["h"] = hdr_h
         elif eid == "addons_header_txt" and hdr2_txt:
-            e["y"] = y_h2 + 5
+            e["y"] = y_hdr2 + 5
         elif e.get("type") == "benefit-grid" and e.get("gridKind") == "available_addons":
             e["y"] = y_g2
             e["h"] = h2
+            e["columns"] = effective_cols
+            e["targetRowHeight"] = target_row_h
         elif footer_shift > 0.0 and (float(e.get("y") or 0) >= 1050.0 or str(eid or "").startswith("footer") or str(eid or "").startswith("tc_")):
             e["y"] = float(e.get("y") or 1068.0) + footer_shift
         adjusted_elements.append(e)
@@ -1478,6 +1549,15 @@ def render_quotation_html(
     width = int(canvas.get("width") or 794)
     height = int(canvas.get("height") or 1123)
     raw_elements = canvas.get("elements") or []
+    is_v4 = bool(
+        config.get("v4_mode")
+        or str(config.get("v7_master_key") or "").startswith("agency_bilingual_v4")
+        or any(e.get("v4_mode") for e in raw_elements)
+    )
+    if is_v4:
+        for elem in raw_elements:
+            if elem.get("id") == "premium_info_block" or elem.get("type") == "premium-info-block":
+                elem["v4_mode"] = True
     balanced = _balance_benefit_grid_elements(raw_elements, render_context)
     
     max_element_y = 0
@@ -1486,15 +1566,19 @@ def render_quotation_html(
         if elem_bottom > max_element_y:
             max_element_y = elem_bottom
             
-    # Auto-expand height only if elements strictly exceed A4 base height
-    if max_element_y + 30 > height:
-        height = int(max_element_y + 30)
+    scale_css = ""
+    inner_h = height
+    if not is_v4 and max_element_y + 30 > height:
+        scale = height / (max_element_y + 30)
+        scale_css = f"transform: scale({scale:.5f}); transform-origin: top center;"
+        inner_h = int(max_element_y + 30)
 
     elements = sorted(balanced, key=lambda item: int(item.get("z", 1)))
-    body = "".join(
+    body_content = "".join(
         _element_html(element, draft_fields, config, db, render_context, resolved_assets)
         for element in elements
     )
+    body = f'<div style="position:relative; width:{width}px; height:{inner_h}px; {scale_css}">{body_content}</div>'
     return f"""<!doctype html>
 <html lang="en">
 <head>

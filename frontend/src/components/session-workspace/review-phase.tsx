@@ -600,6 +600,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const promptedRef = useRef<Set<string>>(new Set());
 
   const [publishedTemplates, setPublishedTemplates] = useState<PublishedTemplateOption[]>([]);
+  const [selectedRevisionId, setSelectedRevisionId] = useState<string | null>(null);
   const [templatesLoading, setTemplatesLoading] = useState(true);
   const [templateError, setTemplateError] = useState<string | null>(null);
   const [templateImpact, setTemplateImpact] = useState<TemplateSelectionImpact | null>(null);
@@ -686,6 +687,14 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const canvasH = useMemo(() => {
     const baseHeight = previewTemplate?.config?.canvas?.height || 1123;
     if (!balancedElements.length) return baseHeight;
+    const isV4 = Boolean(
+      (previewTemplate?.config as any)?.v4_mode ||
+      String((previewTemplate?.config as any)?.v7_master_key || "").startsWith("agency_bilingual_v4") ||
+      balancedElements.some((e: any) => e.v4_mode)
+    );
+    if (isV4) {
+      return baseHeight;
+    }
     const maxElementBottom = Math.max(0, ...balancedElements.map((e: any) => (e.y || 0) + (e.h || 0)));
     return maxElementBottom + 30 > baseHeight ? maxElementBottom + 30 : baseHeight;
   }, [balancedElements, previewTemplate]);
@@ -846,18 +855,22 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
             const matching =
               (currentRevisionId ? list.find((item) => item.template_revision_id === currentRevisionId) : null) ||
               list.find((item) => item.is_default) ||
+              list.find((item) => item.name?.toLowerCase().includes("v4")) ||
               list.find((item) => item.name?.toLowerCase().includes("v3")) ||
               list[0];
-            if (matching.config && !previewTemplate) {
-              setPreviewTemplate({
-                template_id: matching.template_id,
-                template_revision_id: matching.template_revision_id,
-                revision_number: matching.revision_number,
-                config_hash: matching.config_hash,
-                source: "template_revision",
-                config: matching.config,
-                binding: { template_id: matching.template_id, template_revision_id: matching.template_revision_id, base_hash: matching.config_hash },
-              });
+            if (matching) {
+              setSelectedRevisionId(matching.template_revision_id);
+              if (matching.config && !previewTemplate) {
+                setPreviewTemplate({
+                  template_id: matching.template_id,
+                  template_revision_id: matching.template_revision_id,
+                  revision_number: matching.revision_number,
+                  config_hash: matching.config_hash,
+                  source: "template_revision",
+                  config: matching.config,
+                  binding: { template_id: matching.template_id, template_revision_id: matching.template_revision_id, base_hash: matching.config_hash },
+                });
+              }
             }
           }
         }
@@ -869,18 +882,57 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
   // Load template config for real-time live preview
   useEffect(() => {
+    if (!workspace) return;
+    const targetRevisionId = selectedRevisionId || workspace.pinned.template_revision_id;
+    if (!targetRevisionId) return;
+
+    if (workspace.layout_override && workspace.layout_binding?.template_revision_id === targetRevisionId) {
+      setPreviewTemplate({
+        template_id: workspace.layout_binding.template_id || "",
+        template_revision_id: workspace.layout_binding.template_revision_id || "",
+        revision_number: 0,
+        config_hash: workspace.layout_binding.base_hash || "",
+        source: "layout_override",
+        config: workspace.layout_override as any,
+        binding: workspace.layout_binding as any,
+      });
+      return;
+    }
+
+    const published = publishedTemplates.find((t) => t.template_revision_id === targetRevisionId);
+    if (published && published.config) {
+      setPreviewTemplate({
+        template_id: published.template_id,
+        template_revision_id: published.template_revision_id,
+        revision_number: published.revision_number,
+        config_hash: published.config_hash,
+        source: "template_revision",
+        config: published.config,
+        binding: { template_id: published.template_id, template_revision_id: published.template_revision_id, base_hash: published.config_hash },
+      });
+      return;
+    }
+
+    if (previewTemplate?.template_revision_id === targetRevisionId) {
+      return;
+    }
+
     let cancelled = false;
     setPreviewLoading(true);
     api<{ template: TemplatePayload | null }>(`/sessions/${id}/template-config`)
       .then((res) => {
-        if (!cancelled && res.template) setPreviewTemplate(res.template);
+        if (!cancelled && res.template) {
+          if (!selectedRevisionId || res.template.template_revision_id === selectedRevisionId) {
+            setPreviewTemplate(res.template);
+          }
+        }
       })
       .catch(() => undefined)
       .finally(() => {
         if (!cancelled) setPreviewLoading(false);
       });
     return () => { cancelled = true; };
-  }, [id, workspace?.pinned.template_revision_id]);
+  }, [id, selectedRevisionId, workspace?.pinned.template_revision_id, workspace?.layout_override, publishedTemplates]);
 
   async function selectTemplate(templateRevisionId: string) {
     setTemplateError(null);
@@ -911,6 +963,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     if (!option) {
       return;
     }
+    setSelectedRevisionId(option.template_revision_id);
     if (option.config) {
       setPreviewTemplate({
         template_id: option.template_id,
@@ -2221,7 +2274,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
               {templateCollapsed ? (
                 <div className="flex flex-wrap items-center justify-between text-xs text-[var(--rl-text-muted)] pt-2 border-t border-[var(--rl-border)]">
-                  <span>Template: <strong className="text-[var(--rl-text-strong)] font-semibold">{publishedTemplates.find((t) => t.template_revision_id === workspace.pinned.template_revision_id)?.name || "Master Template"}</strong></span>
+                  <span>Template: <strong className="text-[var(--rl-text-strong)] font-semibold">{publishedTemplates.find((t) => t.template_revision_id === (selectedRevisionId || workspace.pinned.template_revision_id))?.name?.replace(/\.r\d+$/, "") || "Master Template"}</strong></span>
                   <span>Insurer: <strong className="text-[var(--rl-text-strong)] font-semibold">{companyName || "Standard Motor"}</strong></span>
                 </div>
               ) : (
@@ -2229,13 +2282,13 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                   <label className="grid gap-1.5 text-xs font-semibold text-[var(--rl-text-strong)]">
                     Published template revision
                     <Select
-                      value={previewTemplate?.template_revision_id || workspace.pinned.template_revision_id || (publishedTemplates[0]?.template_revision_id ?? "")}
+                      value={selectedRevisionId || previewTemplate?.template_revision_id || workspace.pinned.template_revision_id || (publishedTemplates[0]?.template_revision_id ?? "")}
                       disabled={templatesLoading || !publishedTemplates.length}
                       onChange={(event) => selectTemplateDirectly(event.target.value)}
                     >
                       {publishedTemplates.map((option) => (
                         <option key={option.template_revision_id} value={option.template_revision_id}>
-                          {option.name} {option.is_default ? "★ (Default)" : ""} · r{option.revision_number} · {option.page_profile.name}
+                          {option.name.replace(/\.r\d+$/, "")}{option.is_default ? " (Default)" : ""}
                         </option>
                       ))}
                     </Select>

@@ -124,6 +124,7 @@ from app.models.tables import (
     OutputTemplateConfig,
     QuotationDraft,
     StorageConnection,
+    TemplateRevision,
     UploadedFile,
     User,
     VehicleBrand,
@@ -807,6 +808,32 @@ def business_publish_template(
 
 
 
+@router.post("/business/templates/{template_id}/unpublish")
+def business_unpublish_template(
+    template_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
+    template = db.get(OutputTemplateConfig, template_id)
+    if not template or template.deleted_at:
+        raise AppError("Template not found.", 404)
+    revisions = list(
+        db.scalars(
+            select(TemplateRevision).where(
+                TemplateRevision.template_id == template_id,
+                TemplateRevision.state.in_(["published", "compatibility"]),
+            )
+        ).all()
+    )
+    for rev in revisions:
+        rev.state = "draft"
+    db.commit()
+    return {"status": "ok", "template": serialize_template(template, db)}
+
+
+
+
 @router.get("/admin/templates")
 def admin_templates(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
@@ -816,7 +843,13 @@ def admin_templates(db: Session = Depends(get_db), user: User = Depends(current_
         ).all()
     )
     templates = serialize_templates_batch(db, items)
-    templates.sort(key=lambda item: (not item.get("is_default", False), item.get("name", "").casefold()))
+    def _admin_sort_key(item: dict) -> tuple:
+        name = item.get("name", "").lower()
+        is_def = not item.get("is_default", False)
+        priority = 0 if "v4" in name else (1 if "v3" in name else 2)
+        return (is_def, priority, name.casefold())
+
+    templates.sort(key=_admin_sort_key)
     return {"templates": templates}
 
 

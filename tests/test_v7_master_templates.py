@@ -22,6 +22,9 @@ def test_clean_insurer_independent_masters_are_defined():
         "agency_bilingual_v3",
         "agency_bilingual_v3_no_extras",
         "agency_bilingual_v3_lump_sum",
+        "agency_bilingual_v4",
+        "agency_bilingual_v4_no_extras",
+        "agency_bilingual_v4_lump_sum",
         "agency_english",
         "agency_mandarin",
     ]
@@ -31,11 +34,14 @@ def test_clean_insurer_independent_masters_are_defined():
         "Bilingual Agency Motor v3",
         "Bilingual Agency Motor v3 (No Extras)",
         "Bilingual Agency Motor v3 (Lump Sum Extras)",
+        "Bilingual Agency Motor v4",
+        "Bilingual Agency Motor v4 (No Extras)",
+        "Bilingual Agency Motor v4 (Lump Sum Extras)",
         "English Agency Motor",
         "Mandarin Agency Motor",
     ]
-    assert [item["is_default"] for item in specs] == [False, False, True, False, False, False, False]
-    assert [item["config"]["page_profile"]["height"] for item in specs] == [1123, 1123, 1123, 1123, 1123, 1123, 1123]
+    assert [item["is_default"] for item in specs] == [False, False, False, False, False, True, False, False, False, False]
+    assert [item["config"]["page_profile"]["height"] for item in specs] == [1123] * len(specs)
 
 
 def test_master_nodes_are_clean_bounded_and_publishable():
