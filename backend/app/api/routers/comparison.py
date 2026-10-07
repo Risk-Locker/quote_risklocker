@@ -23,6 +23,7 @@ from app.services.marketing_comparison_service import (
     generate_quotation_for_entry,
     get_marketing_comparison,
     rank_comparison_entries,
+    refresh_tenure_ledger,
     rescan_comparison_tenure,
     save_comparison_entry,
     select_winner_and_generate_draft,
@@ -68,6 +69,8 @@ class ComparisonEntryUpsertRequest(BaseModel):
     is_recommended: bool = False
     is_manual: bool = True
     notes: str | None = None
+    basic_figure_amount: float | None = None
+    source_quotation_no: str | None = None
 
 
 class SelectWinnerRequest(BaseModel):
@@ -89,6 +92,22 @@ def get_comparison(
     except Exception as e:
         logger.exception("Failed to retrieve marketing comparison for tenure %s: %s", tenure_id, e)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to load comparison")
+
+
+@router.post("/{tenure_id}/refresh-ledger")
+def refresh_ledger(
+    tenure_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Re-extract customer & vehicle ledger from uploaded quotations via recency waterfall, recalculating road tax dynamically."""
+    try:
+        return refresh_tenure_ledger(db, tenure_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.exception("Failed to refresh ledger for tenure %s: %s", tenure_id, e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to refresh ledger")
 
 
 @router.post("/{tenure_id}/fixed-costs")

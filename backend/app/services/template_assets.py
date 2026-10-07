@@ -152,6 +152,8 @@ SYSTEM_ASSET_ALIASES: dict[str, str] = {
     "background": "49e754a6faa949c2",
     "qr_code": "9ca8e404c89dd905",
     "duitnow_payment_details": "c3003185-0000-4000-8000-000000000001",
+    "bank_qr_layout": "c4003185-0000-4000-8000-000000000001",
+    "bank_qr_layout_dark": "c4003185-0000-4000-8000-000000000001",
 }
 
 
@@ -210,20 +212,11 @@ def resolve_template_asset(db: Session | None, asset_id: str) -> Path | bytes:
         compat = compatibility_asset_root() / "hongleongbanl.png"
         if compat.exists():
             return compat.resolve()
-    elif asset_id in {"c2003185-0000-4000-8000-000000000001", "qr_code", "payment_qr", "qr"}:
-        compat = compatibility_asset_root() / "qr.jpeg"
-        if compat.exists():
-            return compat.resolve()
-    elif asset_id in {"91116a7dc3540d62", "all_driver_icon"}:
-        for root in (asset_root(), compatibility_asset_root()):
-            for path in root.iterdir() if root.exists() else []:
-                if path.is_file() and "driver" in path.name.lower():
-                    return path.resolve()
-    elif asset_id in {"c3003185-0000-4000-8000-000000000001", "duitnow_payment_details", "duitnow_card", "duitnow_qr_details"}:
-        repo_asset = Path(__file__).resolve().parents[3] / "assets" / "DuitNow QR Payment Account Details.png"
+    elif asset_id in {"c2003185-0000-4000-8000-000000000001", "qr_code", "payment_qr", "qr", "c3003185-0000-4000-8000-000000000001", "duitnow_payment_details", "duitnow_card", "duitnow_qr_details", "c4003185-0000-4000-8000-000000000001", "bank_qr_layout", "bank_qr_layout_dark"}:
+        repo_asset = Path(__file__).resolve().parents[3] / "assets" / "bank_qr_layout_dark.jpg"
         if repo_asset.exists():
             return repo_asset.resolve()
-        compat = compatibility_asset_root() / "DuitNow QR Payment Account Details.png"
+        compat = compatibility_asset_root() / "bank_qr_layout_dark.jpg"
         if compat.exists():
             return compat.resolve()
     elif asset_id in {"49e754a6faa949c2", "background"}:

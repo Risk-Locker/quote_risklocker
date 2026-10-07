@@ -204,18 +204,32 @@ def revoke_user_sessions(db: Session, user_id: str, revoked_by: str | None = Non
 
 
 def _require_user_management_permission(actor: User, target: User | None = None) -> None:
-    """Only super_admin and admin may manage users. super_admin can manage anyone.
-    admin cannot delete themselves or the super_admin."""
+    """Super admin can manage anyone except deleting themselves.
+    Admin can manage admin, dev, and staff, but cannot manage super_admin or delete themselves.
+    Dev can manage/delete staff, but cannot modify or delete admin, super_admin, or dev.
+    Staff cannot manage any users."""
     if actor.role == Role.SUPER_ADMIN.value:
+        if target is not None and target.id == actor.id:
+            raise AppError("You cannot delete your own primary administrator account.", 403)
         return
-    if actor.role != Role.ADMIN.value:
-        raise AppError("You do not have permission to manage users. Only the master administrator can manage user accounts and staff roles.", 403)
-    if target is None:
+
+    if actor.role == Role.ADMIN.value:
+        if target is not None:
+            if target.role == Role.SUPER_ADMIN.value:
+                raise AppError("You do not have permission to manage the super administrator.", 403)
+            if target.id == actor.id:
+                raise AppError("You cannot modify your own account this way.", 403)
         return
-    if target.role == Role.SUPER_ADMIN.value:
-        raise AppError("You do not have permission to manage the super administrator.", 403)
-    if target.id == actor.id:
-        raise AppError("You cannot modify your own account this way.", 403)
+
+    if actor.role == Role.DEV.value:
+        if target is not None:
+            if target.role in {Role.SUPER_ADMIN.value, Role.ADMIN.value, Role.DEV.value}:
+                raise AppError("Developers cannot delete or modify administrators or developers.", 403)
+            if target.id == actor.id:
+                raise AppError("You cannot delete your own developer account.", 403)
+        return
+
+    raise AppError("You do not have permission to manage users. Only the master administrator, administrators, and developers can manage accounts.", 403)
 
 
 def _normalize_email(email: str | None) -> str:
@@ -287,6 +301,8 @@ def create_user(
         raise AppError("Invalid role.", 400)
     if role == Role.SUPER_ADMIN.value and actor.role != Role.SUPER_ADMIN.value:
         raise AppError("Only the super administrator can assign the super administrator role.", 403)
+    if actor.role == Role.DEV.value and role != Role.STAFF.value:
+        raise AppError("Developers can only create staff user accounts.", 403)
     if db.scalar(select(User).where(User.email == normalized)):
         raise AppError("A user with this email already exists.", 409)
 
@@ -330,6 +346,8 @@ def update_user(
         # Only super_admin can create/promote another super_admin.
         if role == Role.SUPER_ADMIN.value and actor.role != Role.SUPER_ADMIN.value:
             raise AppError("Only the super administrator can assign the super administrator role.", 403)
+        if actor.role == Role.DEV.value and role != Role.STAFF.value:
+            raise AppError("Developers can only assign the staff role.", 403)
         target.role = role
     if status is not None:
         if status not in {AccountStatus.ACTIVE.value, AccountStatus.INACTIVE.value}:
@@ -344,6 +362,22 @@ def update_user(
     _audit(db, actor.id, "update_user", "user", target.id, {"email": target.email, "role": target.role, "status": target.status})
     db.commit()
     return target
+
+
+def delete_user(db: Session, actor: User, target: User) -> None:
+    """Permanently delete a user account, revoking active sessions."""
+    _require_user_management_permission(actor, target)
+    revoke_user_sessions(db, target.id, actor.id)
+    _audit(
+        db,
+        actor.id,
+        "delete_user",
+        "user",
+        target.id,
+        {"email": target.email, "role": target.role, "name": target.name},
+    )
+    db.delete(target)
+    db.commit()
 
 
 def bootstrap_primary_admin(db: Session, email: str, password: str) -> User:

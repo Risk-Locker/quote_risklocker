@@ -103,8 +103,8 @@ function resolveNodeImageUrl(node: CanvasNode, template: TemplateRecord): string
               ? "qr_code"
               : "");
   const assetId = (node as any).assetId || (template.fixed_fields as any)?.assets?.[slot];
-  if (slot === "duitnow_payment_details" || node.id === "payment_account_details_img" || node.id === "rc_b_duitnow_img" || assetId === "c3003185-0000-4000-8000-000000000001") {
-    return "/assets/duitnow_payment_details.png";
+  if (slot === "duitnow_payment_details" || slot === "bank_qr_layout_dark" || slot === "bank_qr_layout" || node.id === "payment_account_details_img" || node.id === "rc_b_duitnow_img" || assetId === "c3003185-0000-4000-8000-000000000001" || assetId === "c4003185-0000-4000-8000-000000000001") {
+    return "/assets/bank_qr_layout_dark.jpg";
   }
   if (slot === "risklocker_logo" || assetId === "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f") {
     return "/api/business/assets/e9685e1f-ac95-410c-a2e9-eccb7ca35d5f/content?profile=ui";

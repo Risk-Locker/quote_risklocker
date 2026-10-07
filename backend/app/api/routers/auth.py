@@ -166,6 +166,7 @@ from app.services.trash_service import (
 from app.services.auth_service import (
     change_password,
     create_user,
+    delete_user,
     login_with_password,
     revoke_session,
     revoke_user_sessions,
@@ -439,10 +440,10 @@ def user_create(payload: UserCreateRequest, db: Session = Depends(get_db), user:
 
 @router.get("/users")
 def users_list(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    if user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value}:
-        raise AppError("Only the master administrator can manage user accounts and staff roles.", 403)
+    if user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value, Role.DEV.value}:
+        raise AppError("Only administrators and developers can manage user accounts.", 403)
     query = select(User).order_by(User.created_at.desc())
-    if user.role == Role.ADMIN.value:
+    if user.role in {Role.ADMIN.value, Role.DEV.value}:
         query = query.where(User.role != Role.SUPER_ADMIN.value)
     return {"users": [serialize_user(item) for item in db.scalars(query).all()]}
 
@@ -467,15 +468,27 @@ def users_update(user_id: str, payload: UserUpdateRequest, db: Session = Depends
 
 
 
+@router.delete("/users/{user_id}")
+def user_delete(user_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    target = db.get(User, user_id)
+    if not target:
+        raise AppError("User not found.", 404)
+    delete_user(db, user, target)
+    return {"deleted": True, "user_id": user_id}
+
+
+
 @router.post("/users/{user_id}/sessions/revoke")
 def user_sessions_revoke(user_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    if user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value}:
-        raise AppError("Only the master administrator can manage user accounts and staff roles.", 403)
+    if user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value, Role.DEV.value}:
+        raise AppError("Only administrators and developers can manage user accounts and staff roles.", 403)
     target = db.get(User, user_id)
     if not target:
         raise AppError("User not found.", 404)
     if user.role == Role.ADMIN.value and target.role == Role.SUPER_ADMIN.value:
         raise AppError("You do not have permission to revoke the super administrator's sessions.", 403)
+    if user.role == Role.DEV.value and target.role in {Role.SUPER_ADMIN.value, Role.ADMIN.value, Role.DEV.value}:
+        raise AppError("Developers cannot revoke sessions for administrators or developers.", 403)
     return {"revoked_sessions": revoke_user_sessions(db, target.id, user.id)}
 
 

@@ -7,6 +7,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -115,19 +116,19 @@ def _http_client(*, user: User | None = None, db: MemoryDb | None = None):
 
 
 def test_bulk_upload_limit_default():
-    db = MemoryDb()
+    db: Any = MemoryDb()
     assert get_bulk_upload_limit(db) == 10
 
 
 def test_bulk_upload_limit_set_and_get():
-    db = MemoryDb()
+    db: Any = MemoryDb()
     user = _admin_user()
     set_bulk_upload_limit(db, user, 8)
     assert get_bulk_upload_limit(db) == 8
 
 
 def test_bulk_upload_limit_minimum_validation():
-    db = MemoryDb()
+    db: Any = MemoryDb()
     user = _admin_user()
     with pytest.raises(Exception) as exc_info:
         set_bulk_upload_limit(db, user, 2)
@@ -176,3 +177,15 @@ def test_staff_cannot_change_upload_limits():
 
     res = staff_client.post("/admin/settings/upload-limits", json={"max_bulk_upload_files": 6})
     assert res.status_code == 403
+
+
+def test_gemini_probe_endpoint():
+    db = MemoryDb()
+    client = _http_client(user=_admin_user(), db=db)
+    res = client.post("/settings/gemini/probe")
+    assert res.status_code == 200
+    data = res.json()
+    assert "gemini" in data
+    assert "status" in data["gemini"]
+    assert "rpm_limit" in data["gemini"]
+    assert "rpd_limit" in data["gemini"]

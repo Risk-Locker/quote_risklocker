@@ -36,6 +36,7 @@ interface SessionItem {
   created_by?: string;
   created_by_email?: string;
   last_edited_by?: string | null;
+  last_edited_by_email?: string | null;
   last_edited_at?: string | null;
   uploaded_file_id?: string | null;
   draft_id?: string | null;
@@ -345,10 +346,19 @@ export default function SessionsPage() {
                         {s.insured_name || "Unassigned Customer"}
                       </p>
 
-                      <div className="flex items-center gap-2 text-[11px] text-neutral-400 mt-0.5">
-                        <span>Uploaded: {formatDate(s.created_at)}</span>
-                        {s.created_by && <span>· By {s.created_by}</span>}
-                        {s.last_edited_by && <span>· Edited by {s.last_edited_by}</span>}
+                      <div className="flex items-center gap-2 flex-wrap text-[11px] mt-1.5">
+                        <span className="inline-flex items-center gap-1.5 bg-neutral-100/90 border border-neutral-200 px-2 py-0.5 rounded text-neutral-700">
+                          <span className="text-[10px] uppercase font-bold text-neutral-400 tracking-wider">Uploaded</span>
+                          <span className="font-semibold text-neutral-900">{s.created_by_email || s.created_by || "System"}</span>
+                          <span className="text-neutral-400 font-mono text-[10px]">({formatDate(s.created_at)})</span>
+                        </span>
+                        {s.last_edited_by_email || s.last_edited_by ? (
+                          <span className="inline-flex items-center gap-1.5 bg-amber-50/90 border border-amber-200 px-2 py-0.5 rounded text-amber-900">
+                            <span className="text-[10px] uppercase font-bold text-amber-700 tracking-wider">Last Edited</span>
+                            <span className="font-bold text-amber-950">{s.last_edited_by_email || s.last_edited_by}</span>
+                            {s.last_edited_at && <span className="text-amber-700 font-mono text-[10px]">({formatDate(s.last_edited_at)})</span>}
+                          </span>
+                        ) : null}
                       </div>
                     </div>
                   </div>

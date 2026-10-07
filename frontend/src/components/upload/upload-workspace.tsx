@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { Route } from "next";
 import {
+  ArrowsClockwise,
   ArrowSquareOut,
   CheckCircle,
   CircleNotch,
@@ -16,14 +17,16 @@ import {
   Sparkle,
   Trash,
   Upload,
+  Warning,
   WarningCircle,
+  WarningOctagon,
   X,
   Plus,
 } from "@phosphor-icons/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { GeminiQuotaInfoButton } from "@/components/gemini-quota-meter";
+import { GeminiQuotaInfoButton, type GeminiQuota } from "@/components/gemini-quota-meter";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 
@@ -37,15 +40,7 @@ type UploadLimits = {
   max_source_pdf_bytes: number;
   max_upload_bytes?: number;
   max_bulk_upload_files?: number;
-  gemini?: {
-    active: boolean;
-    model: string;
-    key_count: number;
-    rpm_per_key: number;
-    rpd_per_key: number;
-    total_rpd: number;
-    message: string;
-  };
+  gemini?: GeminiQuota;
 };
 
 type UploadResult = { session_id: string; job_id: string; uploaded_file_id: string; created: boolean };
@@ -174,6 +169,22 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
       cancelRequested.current = true;
     };
   }, []);
+
+  const [probingGemini, setProbingGemini] = useState(false);
+
+  async function handleProbeGemini() {
+    setProbingGemini(true);
+    try {
+      const res = await api<{ gemini: GeminiQuota }>("/settings/gemini/probe", { method: "POST" });
+      if (res?.gemini) {
+        setLimits((prev) => (prev ? { ...prev, gemini: res.gemini } : prev));
+      }
+    } catch (err) {
+      console.error("Gemini probe failed:", err);
+    } finally {
+      setProbingGemini(false);
+    }
+  }
 
   // --------------------------------------------------------------------------
   // Single Upload Handlers
@@ -739,39 +750,197 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
       </header>
 
       {/* AI Engine Status Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-white p-4 shadow-xs">
-        <div className="flex items-center gap-3">
-          <span
-            className={`grid size-9 place-items-center rounded-[var(--rl-radius-sm)] ${
-              gemini?.active ? "bg-[var(--rl-black)] text-white" : "bg-gray-100 text-gray-500"
-            }`}
-          >
-            <Sparkle size={18} weight="fill" />
-          </span>
-          <div>
-            <div className="flex items-center gap-2">
-              <p className="text-sm font-bold text-[var(--rl-text-strong)]">
-                {gemini?.active ? "Gemini AI Multimodal Engine" : "Gemini AI Engine"}
-              </p>
-              <Badge variant={gemini?.active ? "success" : "default"}>
-                {gemini?.active ? "Ready" : "Offline"}
-              </Badge>
+      {gemini?.status === "denied" || gemini?.last_error_code === 403 ? (
+        <div className="rounded-[var(--rl-radius)] border border-rose-200 bg-rose-50/80 p-4 shadow-xs">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <span className="grid size-9 shrink-0 place-items-center rounded-[var(--rl-radius-sm)] bg-rose-600 text-white shadow-xs">
+                <WarningOctagon size={20} weight="fill" />
+              </span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-bold text-rose-950">
+                    Gemini AI Multimodal Engine · Access Denied (HTTP 403)
+                  </p>
+                  <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-semibold text-white">
+                    Project Access Denied
+                  </span>
+                </div>
+                <p className="mt-1 font-mono text-xs font-semibold text-rose-900 break-words">
+                  Google API: &ldquo;{gemini.last_error || "Your project has been denied access. Please contact support."}&rdquo;
+                </p>
+                <p className="mt-1 text-xs text-rose-800/90 leading-relaxed">
+                  Google has restricted or suspended this Google Cloud project. Quotation uploads are safely falling back to <strong>offline deterministic regex parsing</strong>.
+                </p>
+              </div>
             </div>
-            <p className="text-xs text-[var(--rl-text-muted)] mt-0.5">
-              {gemini?.active
-                ? `Active Model: ${gemini.model} · ${gemini.key_count} Key${
-                    gemini.key_count > 1 ? "s" : ""
-                  } · Quota: ${gemini.rpm_per_key} RPM / ${gemini.total_rpd.toLocaleString()} RPD`
-                : "No GEMINI_API_KEY set in .env. Uploads will use offline fallback extraction."}
-            </p>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={handleProbeGemini}
+                disabled={probingGemini}
+                className="text-xs border-rose-300 bg-white hover:bg-rose-100 text-rose-900 gap-1.5"
+              >
+                <ArrowsClockwise size={13} className={probingGemini ? "animate-spin" : ""} />
+                {probingGemini ? "Testing live key..." : "Test Connection"}
+              </Button>
+              <a
+                href="https://aistudio.google.com/apikey"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-[var(--rl-radius-sm)] px-2.5 py-1.5 shadow-xs transition-colors"
+              >
+                Get Free Key
+                <ArrowSquareOut size={12} />
+              </a>
+              <a
+                href="https://console.cloud.google.com/billing"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs font-semibold bg-white border border-rose-300 hover:bg-rose-100 text-rose-900 rounded-[var(--rl-radius-sm)] px-2.5 py-1.5 shadow-xs transition-colors"
+              >
+                Cloud Billing
+                <ArrowSquareOut size={12} />
+              </a>
+            </div>
           </div>
         </div>
-        {gemini?.active ? (
-          <span className="text-xs font-semibold text-[var(--rl-text-muted)]">
-            Auto-Extraction Enabled
-          </span>
-        ) : null}
-      </div>
+      ) : gemini?.status === "rate_limited" || gemini?.last_error_code === 429 ? (
+        <div className="rounded-[var(--rl-radius)] border border-amber-200 bg-amber-50/80 p-4 shadow-xs">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <span className="grid size-9 shrink-0 place-items-center rounded-[var(--rl-radius-sm)] bg-amber-600 text-white shadow-xs">
+                <Warning size={20} weight="fill" />
+              </span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-bold text-amber-950">
+                    Gemini AI Multimodal Engine · Rate Limited (HTTP 429)
+                  </p>
+                  <span className="rounded-full bg-amber-600 px-2 py-0.5 text-[10px] font-semibold text-white">
+                    Rate Limited
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-amber-900/90 leading-relaxed">
+                  Daily free quota (1,500 RPD) or minute rate limit (15 RPM) reached. Offline regex fallback is active until reset.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={handleProbeGemini}
+                disabled={probingGemini}
+                className="text-xs border-amber-300 bg-white hover:bg-amber-100 text-amber-900 gap-1.5"
+              >
+                <ArrowsClockwise size={13} className={probingGemini ? "animate-spin" : ""} />
+                {probingGemini ? "Probing..." : "Re-Check Quota"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-white p-4 shadow-xs">
+          <div className="flex items-center gap-3">
+            <span
+              className={`grid size-9 place-items-center rounded-[var(--rl-radius-sm)] ${
+                gemini?.active
+                  ? "bg-emerald-600 text-white shadow-xs"
+                  : (gemini?.key_count ?? 0) > 0
+                  ? "bg-amber-100 text-amber-700"
+                  : "bg-gray-100 text-gray-500"
+              }`}
+            >
+              <Sparkle size={18} weight="fill" />
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-bold text-[var(--rl-text-strong)]">
+                  {gemini?.active ? "Gemini AI Multimodal Engine" : "Gemini AI Engine"}
+                </p>
+                <Badge
+                  variant={
+                    gemini?.active
+                      ? "success"
+                      : (gemini?.key_count ?? 0) > 0
+                      ? "warning"
+                      : "default"
+                  }
+                >
+                  {gemini?.active
+                    ? gemini?.status_label || "Ready · Active"
+                    : (gemini?.key_count ?? 0) > 0
+                    ? gemini?.status_label || "Needs Check"
+                    : "Offline"}
+                </Badge>
+              </div>
+              <p className="text-xs text-[var(--rl-text-muted)] mt-0.5">
+                {gemini?.active
+                  ? `Active Model: ${gemini.model} · ${gemini.key_count ?? 1} Key${
+                      (gemini.key_count ?? 1) > 1 ? "s" : ""
+                    } in Pool · Daily Quota: ${(gemini.rpd_remaining ?? 440).toLocaleString()} / ${(gemini.rpd_limit ?? 440).toLocaleString()} RPD`
+                  : (gemini?.key_count ?? 0) > 0
+                  ? `Configured with ${gemini?.key_count ?? 1} key${(gemini?.key_count ?? 1) > 1 ? "s" : ""}. Click 'Test Key' to verify live connection.`
+                  : "No Gemini API key configured. Add a key in Settings or .env to enable high-speed AI extraction."}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {(gemini?.key_count ?? 0) > 0 ? (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleProbeGemini}
+                  disabled={probingGemini}
+                  className="text-xs gap-1.5 text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                >
+                  <ArrowsClockwise size={13} className={probingGemini ? "animate-spin" : ""} />
+                  {probingGemini ? "Testing..." : "Test Key"}
+                </Button>
+                {gemini?.active ? (
+                  <span className="text-xs font-semibold text-emerald-600 flex items-center gap-1">
+                    <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Auto-Extraction Enabled
+                  </span>
+                ) : (
+                  <Link
+                    href={"/settings/ai-engine" as Route}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-[var(--rl-primary)] hover:underline"
+                  >
+                    Manage Keys
+                    <ArrowSquareOut size={12} />
+                  </Link>
+                )}
+              </>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Link
+                  href={"/settings/ai-engine" as Route}
+                  className="inline-flex items-center gap-1 rounded-[var(--rl-radius-sm)] bg-[var(--rl-primary)] px-2.5 py-1.5 text-xs font-medium text-white shadow-xs hover:bg-[var(--rl-primary-hover)] transition-colors"
+                >
+                  Add Key in Settings
+                  <ArrowSquareOut size={12} />
+                </Link>
+                <a
+                  href="https://aistudio.google.com/apikey"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] hover:underline"
+                >
+                  Get Free Key
+                  <ArrowSquareOut size={12} />
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ================================================================== */}
       {/* MODE 1: SINGLE UPLOAD (Original Workflow)                          */}

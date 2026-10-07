@@ -22,8 +22,8 @@ import {
 interface VehicleFieldsManagerProps {
   fields: VehicleSpecFieldSlot[];
   onChange: (updatedFields: VehicleSpecFieldSlot[]) => void;
-  extrasDisplayMode?: "itemized" | "lump_sum";
-  onExtrasDisplayModeChange?: (mode: "itemized" | "lump_sum") => void;
+  extrasDisplayMode?: "itemized" | "lump_sum" | "none";
+  onExtrasDisplayModeChange?: (mode: "itemized" | "lump_sum" | "none") => void;
 }
 
 export function VehicleFieldsManager({
@@ -463,7 +463,7 @@ export function VehicleFieldsManager({
                       <div className="flex items-center justify-between">
                         <span className="font-bold text-red-900">Dynamic Extras Format</span>
                         <span className="text-[10px] px-1.5 py-0.5 font-bold uppercase rounded bg-red-200/70 text-red-800">
-                          {extrasDisplayMode === "lump_sum" ? "Lump Sum" : "Itemized"}
+                          {extrasDisplayMode === "none" ? "No Extras" : (extrasDisplayMode === "lump_sum" ? "Lump Sum" : "Itemized")}
                         </span>
                       </div>
                       <p className="text-[10px] text-red-700 mt-0.5">
@@ -472,20 +472,20 @@ export function VehicleFieldsManager({
                     </div>
                   </div>
 
-                  {/* 2-Option Display Mode Toggle */}
-                  <div className="grid grid-cols-2 gap-1.5 p-1 bg-red-100/70 rounded-md border border-red-200">
+                  {/* 3-Option Display Mode Toggle */}
+                  <div className="grid grid-cols-3 gap-1.5 p-1 bg-red-100/70 rounded-md border border-red-200">
                     <button
                       type="button"
                       onClick={() => onExtrasDisplayModeChange?.("itemized")}
                       className={`px-2 py-1.5 text-xs font-semibold rounded transition-all text-left flex flex-col gap-0.5 ${
-                        extrasDisplayMode !== "lump_sum"
+                        extrasDisplayMode === "itemized" || !extrasDisplayMode
                           ? "bg-white text-red-950 shadow-xs font-bold border border-red-200"
                           : "text-red-800 hover:bg-white/50"
                       }`}
                     >
                       <span className="flex items-center gap-1">
                         <span>📑</span>
-                        <span>Itemized List</span>
+                        <span>Itemized</span>
                       </span>
                       <span className="text-[9.5px] opacity-75 font-normal">
                         Extras : <br />
@@ -504,10 +504,30 @@ export function VehicleFieldsManager({
                     >
                       <span className="flex items-center gap-1">
                         <span>💵</span>
-                        <span>Lump Sum Total</span>
+                        <span>Lump Sum</span>
                       </span>
                       <span className="text-[9.5px] opacity-75 font-normal">
-                        Extras : RM 300
+                        Extras : <br />
+                        RM 300
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => onExtrasDisplayModeChange?.("none")}
+                      className={`px-2 py-1.5 text-xs font-semibold rounded transition-all text-left flex flex-col gap-0.5 ${
+                        extrasDisplayMode === "none"
+                          ? "bg-white text-red-950 shadow-xs font-bold border border-red-200"
+                          : "text-red-800 hover:bg-white/50"
+                      }`}
+                    >
+                      <span className="flex items-center gap-1">
+                        <span>🚫</span>
+                        <span>No Extras</span>
+                      </span>
+                      <span className="text-[9.5px] opacity-75 font-normal">
+                        Folded in <br />
+                        Premium
                       </span>
                     </button>
                   </div>

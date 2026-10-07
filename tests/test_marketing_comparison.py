@@ -969,3 +969,195 @@ def test_ev_kw_road_tax_calculation_and_ledger_update(db_session: Session):
     assert rescanned["tenure"]["windscreen_target"] == 2500.00
     assert rescanned["tenure"]["customer_name"] == "DATO SRI TAN"
     assert rescanned["tenure"]["vehicle_model"] == "Blueshark Electric 9.4kW"
+
+
+def test_extract_source_quotation_no():
+    """Verify source quotation extraction extracts true underwriter quotation references and rejects internal RL26 sequence."""
+    from app.services.marketing_comparison_service import _extract_source_quotation_no
+
+    # 1. Draft fields containing quotation_no
+    assert _extract_source_quotation_no(None, {"quotation_no": "QM12351901"}) == "QM12351901"
+    assert _extract_source_quotation_no(None, {"quotation_number": "FL22026M-00867209-001"}) == "FL22026M-00867209-001"
+    assert _extract_source_quotation_no(None, {"quote_no": {"value": "MPA-25-49-00274660"}}) == "MPA-25-49-00274660"
+
+    # 2. Reject internal RL26 reference numbers
+    assert _extract_source_quotation_no(None, {"quotation_no": "RL260000315"}) is None
+    assert _extract_source_quotation_no(None, {"quotation_no": "RL-2026-999"}) is None
+
+
+def test_refresh_tenure_ledger_and_plate_undetected_chassis_tracking(db_session: Session):
+    """Verify refresh_tenure_ledger recalculates EV roadtax dynamically, resolves plate undetected to N/A, and tracks by chassis."""
+    from app.services.marketing_comparison_service import refresh_tenure_ledger, get_marketing_comparison
+    from app.models.tables import User, UploadedFile, QuotationDraft, Session as SessionModel, InsuranceTenure, TrackedVehicle
+
+    user = User(email="ref_test@risklocker.com", password_hash="pw", role="agent")
+    db_session.add(user)
+    db_session.flush()
+
+    tv = TrackedVehicle(vehicle_no="UNREGISTERED", chassis_no="LRW3F7ET6SC548056")
+    db_session.add(tv)
+    db_session.flush()
+
+    # Tenure created without plate number (unregistered / new car)
+    tenure = InsuranceTenure(
+        tracked_vehicle_id=tv.id,
+        vehicle_no="UNREGISTERED",
+        customer_name="CHENG TECK KIONG",
+        coverage_start_date=datetime(2026, 6, 4, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 6, 3, tzinfo=timezone.utc),
+        expiry_month="JUN",
+        status="active",
+        road_tax=60.00,  # Old stale value
+        runner_fee=10.00,
+    )
+    db_session.add(tenure)
+    db_session.flush()
+
+    file_id = new_id()
+    draft = QuotationDraft(
+        owner_id=user.id,
+        uploaded_file_id=file_id,
+        fields={
+            "customer_name": "CHENG TECK KIONG",
+            "ic_no": "841204-01-5885",
+            "car_model": "Tesla Model 3 Performance",
+            "car_brand": "Tesla",
+            "engine_cc": "9.4 kW",
+            "chassis_number": "LRW3F7ET6SC548056",
+            "engine_number": "LRW3F7ET6SC548056",
+            "manufacture_year": "2025",
+            "quotation_no": "FL22026M-00867209-001",
+            "sum_insured": 250000.0,
+            "motor_premium": 3200.0,
+            "total_payable": 3230.0,
+        },
+    )
+    db_session.add(draft)
+    db_session.flush()
+
+    sess = SessionModel(
+        owner_id=user.id,
+        uploaded_file_id=file_id,
+        draft_id=draft.id,
+        tenure_id=tenure.id,
+        detected_company="Tune Protect",
+        is_tenure_active=True,
+    )
+    db_session.add(sess)
+    db_session.commit()
+
+    # 1. Calling refresh_tenure_ledger forces full re-calculation
+    refreshed = refresh_tenure_ledger(db_session, tenure.id)
+    t = refreshed["tenure"]
+
+    # Plate undetected handled with N/A and tracked by chassis
+    assert t["vehicle_no"] == "N/A"
+    assert t["is_plate_undetected"] is True
+    assert t["tracking_by_chassis"] is True
+    assert t["chassis_no"] == "LRW3F7ET6SC548056"
+
+    # EV road tax dynamically calculated: for 9.4 kW EV Saloon Car -> RM 20.00
+    assert t["road_tax"] == 20.00
+    assert t["runner_fee"] == 10.00
+    assert t["fixed_costs_total"] == 30.00  # Roadtax + Runner fee = RM 30.00 (NOT 60.00)
+
+    # Quotation ref populated with true underwriter reference
+    assert len(refreshed["entries"]) == 1
+    entry = refreshed["entries"][0]
+    assert entry["source_quotation_no"] == "FL22026M-00867209-001"
+    assert entry["quotation_ref"] == "FL22026M-00867209-001"
+
+
+def test_insurer_aware_quotation_extraction_across_insurers():
+    """Verify smart quotation extractor catches Berjaya Sompo, AmGen, QBE, Etiqa, Lonpac, Tune, STMB and rejects dates/stopwords."""
+    from app.services.marketing_comparison_service import _extract_source_quotation_no, _is_valid_extracted_qno
+
+    # Strict validator checks
+    assert _is_valid_extracted_qno("QM12390133") is True
+    assert _is_valid_extracted_qno("QC590226-001") is True
+    assert _is_valid_extracted_qno("MPA-21-49-00175224") is True
+    assert _is_valid_extracted_qno("FL22026M-00867209-001") is True
+    assert _is_valid_extracted_qno("QJV26040103JHR") is True
+    assert _is_valid_extracted_qno("1000191773") is True
+    assert _is_valid_extracted_qno("QF2328664-001") is True
+
+    # Rejection of invalid candidates
+    assert _is_valid_extracted_qno("04-04-2025") is False
+    assert _is_valid_extracted_qno("2026-05-07") is False
+    assert _is_valid_extracted_qno("Liberty") is False
+    assert _is_valid_extracted_qno("Insured") is False
+    assert _is_valid_extracted_qno("TAKAFUL") is False
+    assert _is_valid_extracted_qno("RL260000315") is False
+
+    # Berjaya Sompo: number printed above 'Quotation no.'
+    class DummyExtractionRecord:
+        def __init__(self, text):
+            self.raw_text = text
+            self.ocr_text = ""
+
+    class DummySession:
+        def __init__(self, text):
+            self.uploaded_file = type("DummyFile", (), {"extraction_record": DummyExtractionRecord(text)})()
+            self.draft = type("Draft", (), {"fields": {}})()
+            self.quotation_ref = None
+
+    qno = _extract_source_quotation_no(DummySession("QM12390133\nQuotation no.\n07-05-2026\nIssued date\nMOTOR QUOTATION"))
+    assert qno == "QM12390133"
+
+    # AmGen: fused 'Quotation Ref No.QC590226-001'
+    assert _extract_source_quotation_no(DummySession("QUOTATION\nQuotation Ref No.QC590226-001\nAmGeneral Insurance Berhad")) == "QC590226-001"
+
+
+def test_save_comparison_entry_dynamic_rating_and_quotation_sync(db_session: Session):
+    """Verify save_comparison_entry dynamically updates rate_factor and synchronizes quotation_ref."""
+    from app.services.marketing_comparison_service import save_comparison_entry, get_marketing_comparison
+
+    veh = TrackedVehicle(vehicle_no="ANY368", car_model="Tesla Model 3", manufacture_year=2024)
+    db_session.add(veh)
+    db_session.flush()
+
+    tenure = InsuranceTenure(
+        tracked_vehicle_id=veh.id,
+        vehicle_no="ANY368",
+        customer_name="Cheng Teck Kiong",
+        coverage_start_date=datetime(2026, 6, 4, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 6, 3, tzinfo=timezone.utc),
+        expiry_month="2027-06",
+        status="draft",
+        road_tax=20.0,
+        runner_fee=10.0,
+    )
+    db_session.add(tenure)
+    db_session.flush()
+
+    entry = TenureComparisonEntry(
+        tenure_id=tenure.id,
+        company_name="Berjaya Sompo",
+        sum_insured=199000.0,
+        motor_premium=4483.21,
+        road_tax=20.0,
+        runner_fee=10.0,
+        total_payable=4513.21,
+        is_manual=True,
+    )
+    db_session.add(entry)
+    db_session.commit()
+
+    # Save with basic_figure_amount and source_quotation_no
+    res = save_comparison_entry(db_session, tenure.id, {
+        "id": entry.id,
+        "sum_insured": 199000.0,
+        "motor_premium": 4483.21,
+        "basic_figure_amount": 5436.88,
+        "source_quotation_no": "QM12390133",
+    })
+
+    updated_entries = res["entries"]
+    assert len(updated_entries) == 1
+    e = updated_entries[0]
+    assert e["basic_figure_amount"] == 5436.88
+    # 5436.88 / 199000 = 0.027321
+    assert round(e["rate_factor"], 6) == 0.027321
+    assert e["source_quotation_no"] == "QM12390133"
+    assert e["quotation_ref"] == "QM12390133"
+

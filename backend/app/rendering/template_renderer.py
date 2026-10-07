@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from decimal import Decimal
 from html import escape
@@ -105,10 +106,26 @@ def _variable_value(fields: dict, config: dict[str, Any], variable_id: str | Non
             val = _value(fields, variable.get("field") or variable_id)
             if not val and (variable_id in {"excess_amount", "excess", "compulsory_excess"} or variable.get("field") in {"excess_amount", "excess", "compulsory_excess"}):
                 return "0.00"
+            if not val and (variable_id in {"authorized_driver", "authorised_driver"} or variable.get("field") in {"authorized_driver", "authorised_driver"}):
+                try:
+                    fstr = json.dumps(fields, default=str).lower()
+                    if "named driver" in fstr or "named_driver" in fstr:
+                        return "Named Driver"
+                except Exception:
+                    pass
+                return "All Driver"
             return val
     val = _value(fields, variable_id)
     if not val and variable_id in {"excess_amount", "excess", "compulsory_excess"}:
         return "0.00"
+    if not val and variable_id in {"authorized_driver", "authorised_driver"}:
+        try:
+            fstr = json.dumps(fields, default=str).lower()
+            if "named driver" in fstr or "named_driver" in fstr:
+                return "Named Driver"
+        except Exception:
+            pass
+        return "All Driver"
     return val
 
 
@@ -189,8 +206,10 @@ SYSTEM_DEFAULT_SLOTS = {
     "bank_logo": "2168eaee-3e56-4903-8c4f-841f01ff2407",
     "all_driver_icon": "91116a7dc3540d62",
     "background": "49e754a6faa949c2",
-    "qr_code": "9ca8e404c89dd905",
-    "duitnow_payment_details": "c3003185-0000-4000-8000-000000000001",
+    "qr_code": "c4003185-0000-4000-8000-000000000001",
+    "duitnow_payment_details": "c4003185-0000-4000-8000-000000000001",
+    "bank_qr_layout": "c4003185-0000-4000-8000-000000000001",
+    "bank_qr_layout_dark": "c4003185-0000-4000-8000-000000000001",
 }
 
 
@@ -251,10 +270,8 @@ def _image_html(
             slot = "bank_logo"
         elif eid in {"driver_icon", "all_driver_icon"}:
             slot = "all_driver_icon"
-        elif eid in {"rc_b_qr_code", "qr_code", "qr"}:
-            slot = "qr_code"
-        elif eid in {"rc_b_duitnow_img", "duitnow_img", "duitnow_card", "payment_account_details_img"}:
-            slot = "duitnow_payment_details"
+        elif eid in {"rc_b_qr_code", "qr_code", "qr", "bank_qr_layout", "bank_qr_layout_dark", "rc_b_duitnow_img", "duitnow_img", "duitnow_card", "payment_account_details_img"}:
+            slot = "bank_qr_layout_dark"
 
     asset_id = str(element.get("assetId") or _asset_id_for_slot(config, slot, fields, db))
     if (not asset_id or asset_id == "None") and slot in SYSTEM_DEFAULT_SLOTS:
@@ -349,7 +366,8 @@ def _dynamic_benefit_grid(
         cards = [c for c in current if _is_paid_extra(c)]
     else:
         current = [c for c in list(render_context.get("current_benefits") or []) if not _is_core_motor_cover(c)]
-        if element.get("excludeExtras"):
+        extras_mode = str(element.get("extras_mode") or (render_context or {}).get("extras_mode") or "").lower()
+        if element.get("excludeExtras") or extras_mode in {"none", "lump_sum"}:
             cards = [c for c in current if not _is_paid_extra(c)]
         else:
             cards = current
@@ -778,55 +796,101 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
     row_height = float(element.get("rowHeight") or 14)
     labels = element.get("labels") or {}
     extras = list((render_context or {}).get("extras") or [])
+    extras_mode = str(element.get("extras_mode") or (render_context or {}).get("extras_mode") or "itemized").lower()
     rows: list[tuple[str, str, str, str]] = []  # (kind, label, middle_val, right_val)
-    if extras:
-        extras_hdr = str(labels.get("extras") or "Extras / 附加项目")
-        rows.append(("extras_header", extras_hdr, "", ""))
+
+    if extras_mode == "none":
+        # Template 1: Remove extras completely; fold extras prices into Insurance Premium so left side adds up properly
+        extras_sum = Decimal("0")
         for extra in extras:
             raw_price = extra.get("price") or {}
             amt = raw_price.get("amount") if isinstance(raw_price, dict) else raw_price
             if amt is not None:
                 try:
-                    num = Decimal(str(amt))
-                    formatted_price = f"RM {num:,.2f}"
-                except Exception:
-                    formatted_price = format_money_amount(raw_price)
-            else:
-                formatted_price = format_money_amount(raw_price)
-            show_cov = extra.get("show_coverage", True)
-            disp_ovr = extra.get("display_overrides") or {}
-            if disp_ovr.get("enabled") and disp_ovr.get("showCoverage") is False:
-                show_cov = False
-            elif disp_ovr.get("showCoverage") is False:
-                show_cov = False
-
-            is_plan = bool(re.search(r"\b(plan|tier|level|package|option)\s*\d+\b", str(extra.get("label") or "") + " " + str(extra.get("coverage_limit") or ""), re.I))
-            cov_limit = str(extra.get("coverage_limit") or "") if show_cov else ""
-            if cov_limit and is_plan:
-                clean_cov = re.sub(r"[()]", "", cov_limit).replace("RM", "").strip()
-                try:
-                    num_cov = float(clean_cov.replace(",", ""))
-                    if num_cov < 100:
-                        cov_limit = ""
+                    extras_sum += Decimal(re.sub(r"[^\d.]", "", str(amt)))
                 except Exception:
                     pass
-            if cov_limit:
-                clean_cov = re.sub(r"[()]", "", cov_limit).replace("RM", "").strip()
+        p_display = _value(fields, "insurance_premium_total")
+        if not p_display:
+            p_raw = _value(fields, "premium")
+            if p_raw and extras_sum > 0:
                 try:
-                    num_cov = float(clean_cov.replace(",", ""))
-                    if num_cov >= 100 or "RM" in str(extra.get("coverage_limit") or ""):
-                        cov_limit = f"(RM {int(num_cov):,})" if num_cov == int(num_cov) else f"(RM {num_cov:,.2f})"
-                    else:
-                        cov_limit = ""
+                    clean_p = Decimal(re.sub(r"[^\d.]", "", str(p_raw)))
+                    p_display = f"{(clean_p + extras_sum):,.2f}"
                 except Exception:
-                    cov_limit = f"({cov_limit.strip()})" if not cov_limit.startswith("(") else cov_limit
-            label = str(extra.get("label") or "")
-            if not show_cov:
-                label = re.sub(r"\s*\(RM\s*[\d,.]+\)", "", label, flags=re.I).strip()
+                    p_display = p_raw
             else:
-                label = re.sub(r"(\bplan\s*\d+)\s*\(RM\s*[\d,.]+\)", r"\1", label, flags=re.I).strip()
-            rows.append(("extra", label, cov_limit, formatted_price))
-    rows.append(("premium", str(labels.get("premium") or "Insurance Premium / 保费"), "", _format_value(_value(fields, "premium"), "RM ")))
+                p_display = p_raw
+        rows.append(("premium", str(labels.get("premium") or "Insurance Premium / 保费"), "", _format_value(p_display, "RM ")))
+
+    elif extras_mode == "lump_sum":
+        # Template 2: Single lump sum row: Extras RM XXX (no itemized benefit lines below)
+        if extras:
+            extras_sum = Decimal("0")
+            for extra in extras:
+                raw_price = extra.get("price") or {}
+                amt = raw_price.get("amount") if isinstance(raw_price, dict) else raw_price
+                if amt is not None:
+                    try:
+                        extras_sum += Decimal(re.sub(r"[^\d.]", "", str(amt)))
+                    except Exception:
+                        pass
+            extras_hdr = str(labels.get("extras") or "Extras / 附加项目")
+            formatted_lump = f"RM {extras_sum:,.2f}"
+            rows.append(("extra_lump", extras_hdr, "", formatted_lump))
+        rows.append(("premium", str(labels.get("premium") or "Insurance Premium / 保费"), "", _format_value(_value(fields, "premium"), "RM ")))
+
+    else:
+        # Standard itemized extras mode
+        if extras:
+            extras_hdr = str(labels.get("extras") or "Extras / 附加项目")
+            rows.append(("extras_header", extras_hdr, "", ""))
+            for extra in extras:
+                raw_price = extra.get("price") or {}
+                amt = raw_price.get("amount") if isinstance(raw_price, dict) else raw_price
+                if amt is not None:
+                    try:
+                        num = Decimal(str(amt))
+                        formatted_price = f"RM {num:,.2f}"
+                    except Exception:
+                        formatted_price = format_money_amount(raw_price)
+                else:
+                    formatted_price = format_money_amount(raw_price)
+                show_cov = extra.get("show_coverage", True)
+                disp_ovr = extra.get("display_overrides") or {}
+                if disp_ovr.get("enabled") and disp_ovr.get("showCoverage") is False:
+                    show_cov = False
+                elif disp_ovr.get("showCoverage") is False:
+                    show_cov = False
+
+                is_plan = bool(re.search(r"\b(plan|tier|level|package|option)\s*\d+\b", str(extra.get("label") or "") + " " + str(extra.get("coverage_limit") or ""), re.I))
+                cov_limit = str(extra.get("coverage_limit") or "") if show_cov else ""
+                if cov_limit and is_plan:
+                    clean_cov = re.sub(r"[()]", "", cov_limit).replace("RM", "").strip()
+                    try:
+                        num_cov = float(clean_cov.replace(",", ""))
+                        if num_cov < 100:
+                            cov_limit = ""
+                    except Exception:
+                        pass
+                if cov_limit:
+                    clean_cov = re.sub(r"[()]", "", cov_limit).replace("RM", "").strip()
+                    try:
+                        num_cov = float(clean_cov.replace(",", ""))
+                        if num_cov >= 100 or "RM" in str(extra.get("coverage_limit") or ""):
+                            cov_limit = f"(RM {int(num_cov):,})" if num_cov == int(num_cov) else f"(RM {num_cov:,.2f})"
+                        else:
+                            cov_limit = ""
+                    except Exception:
+                        cov_limit = f"({cov_limit.strip()})" if not cov_limit.startswith("(") else cov_limit
+                label = str(extra.get("label") or "")
+                if not show_cov:
+                    label = re.sub(r"\s*\(RM\s*[\d,.]+\)", "", label, flags=re.I).strip()
+                else:
+                    label = re.sub(r"(\bplan\s*\d+)\s*\(RM\s*[\d,.]+\)", r"\1", label, flags=re.I).strip()
+                rows.append(("extra", label, cov_limit, formatted_price))
+        rows.append(("premium", str(labels.get("premium") or "Insurance Premium / 保费"), "", _format_value(_value(fields, "premium"), "RM ")))
+
     rows.append(("divider", "", "", ""))
     rt_display = _value(fields, "roadtax")
     if not rt_display and (fields or {}).get("engine_cc"):
@@ -875,7 +939,8 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
         clean_sf_num = 0.0
     combined_rt_val = clean_rt_num + clean_sf_num
     combined_rt_display = f"{combined_rt_val:.2f}" if combined_rt_val > 0 else (rt_display or "")
-    rows.append(("roadtax", str(labels.get("roadtax") or "Roadtax / 路税"), "", _format_value(combined_rt_display, "RM ")))
+    rt_label = str(labels.get("roadtax") or "Roadtax and Runner Fee / 路税及服务费")
+    rows.append(("roadtax", rt_label, "", _format_value(combined_rt_display, "RM ")))
     total = (render_context or {}).get("total_premium_adjusted") or _value(fields, "total_premium_adjusted")
     if not total:
         disp_opts = (render_context or {}).get("display_options") or ((render_context or {}).get("draft") or {}).get("display_options") or {}
@@ -896,6 +961,9 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
         if kind == "total":
             label_style = "font-size:11px;font-weight:800;color:#0F172A"
             value_style = "font-size:13px;font-weight:800;color:#DC2626"
+        elif kind == "extra_lump":
+            label_style = "font-size:9.5px;font-weight:700;color:#DC2626"
+            value_style = "font-size:10px;font-weight:700;color:#0F172A"
         elif kind == "extras_header":
             label_style = "font-size:9px;font-weight:700;color:#DC2626;text-transform:uppercase;letter-spacing:0.5px"
             value_style = "font-size:9px;font-weight:700;color:#DC2626"
@@ -928,11 +996,18 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     """Dynamically balance the heights of coverage card, right containers, and benefit grids."""
     extras = list((render_context or {}).get("extras") or []) if render_context else []
     pib_elem = next((e for e in elements if e.get("id") == "premium_info_block" or e.get("type") == "premium-info-block"), None)
+    extras_mode = str((pib_elem or {}).get("extras_mode") or (render_context or {}).get("extras_mode") or "itemized").lower()
     pib_y = float(pib_elem.get("y") or 276.0) if pib_elem else 276.0
-    total_pib_rows = (len(extras) + 6) if extras else 5
+    if extras_mode == "none":
+        total_pib_rows = 5
+    elif extras_mode == "lump_sum":
+        total_pib_rows = 6 if extras else 5
+    else:
+        total_pib_rows = (len(extras) + 6) if extras else 5
     content_bottom = pib_y + (total_pib_rows * 14.0)
-    card_bottom = max(370.0, content_bottom + 10.0)
-    cov_table_y = 160.0
+    card_bottom = max(380.0, content_bottom + 12.0)
+    cov_elem = next((e for e in elements if e.get("id") == "cov_table_bg"), None)
+    cov_table_y = float(cov_elem.get("y") or 120.0) if cov_elem else 120.0
     cov_table_h = card_bottom - cov_table_y
     y_top = card_bottom + 10.0
     drivers_h = 74.0
@@ -963,7 +1038,7 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     gap = 8.0
     pad = 3.0
 
-    has_extras_section = len(extras_cards) > 0
+    has_extras_section = len(extras_cards) > 0 and (extras_mode not in {"none", "lump_sum"})
 
     cols = max(1, int(grid1.get("columns") or 3)) if grid1 else 3
     is_minimal = bool(grid1 and (grid1.get("benefitPreset") == "compact-minimal" or grid1.get("cardStyle") == "minimal"))
@@ -1001,6 +1076,8 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
         eid = e.get("id")
         if eid == "cov_table_bg":
             e["h"] = cov_table_h
+        elif eid == "payment_account_details_img" and not any(x.get("id") == "all_driver_bg" for x in elements):
+            e["h"] = card_bottom - float(e.get("y") or 94.0)
         elif eid == "premium_info_block" or e.get("type") == "premium-info-block":
             e["h"] = total_pib_rows * 14.0
         elif eid == "rc_container_payment":
@@ -1164,6 +1241,8 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
         elif e.get("type") == "benefit-grid" and e.get("gridKind") == "current_benefits":
             e["y"] = y_g1
             e["h"] = h1
+            if extras_mode in {"none", "lump_sum"}:
+                e["excludeExtras"] = True
         elif eid == "addons_header_bg" and hdr2_bg:
             e["y"] = y_h2
             e["h"] = hdr_h

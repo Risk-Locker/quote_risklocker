@@ -14,7 +14,17 @@ from app.auth.rbac import can_view_owner_record
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.models.enums import RecordStatus, Role, StorageStatus
-from app.models.tables import Batch, CorrectionMemory, InsuranceCompany, OutputTemplateConfig, QuotationDraft, TemplateGroup, TrashRecord, UploadedFile
+from app.models.tables import (
+    Batch,
+    CorrectionMemory,
+    InsuranceCompany,
+    OutputTemplateConfig,
+    QuotationDraft,
+    Session as SessionModel,
+    TemplateGroup,
+    TrashRecord,
+    UploadedFile,
+)
 from app.services.template_config import normalize_template_config, review_schema_for
 from app.services.admin_service import get_runner_fee_default
 
@@ -28,7 +38,10 @@ def get_accessible_draft(db: Session, user, draft_id: str) -> QuotationDraft:
         .where(QuotationDraft.id == draft_id)
         .options(
             selectinload(QuotationDraft.uploaded_file).selectinload(UploadedFile.extraction_record),
+            selectinload(QuotationDraft.uploaded_file).selectinload(UploadedFile.owner),
             selectinload(QuotationDraft.versions),
+            selectinload(QuotationDraft.reviewer),
+            selectinload(QuotationDraft.owner),
         )
     )
     if not draft or draft.deleted_at:
@@ -140,6 +153,10 @@ def serialize_draft(draft: QuotationDraft, db: Session | None = None) -> dict:
     source_pdf_url = f"/uploaded-files/{uploaded.id}/content" if uploaded and (source_available or source_archived) else ""
     selected_template_id = draft.uploaded_file.template_id if draft.uploaded_file else None
     config = _draft_template_config(draft, db)
+    uploader_email = draft.uploaded_file.owner.email if draft.uploaded_file and draft.uploaded_file.owner else (draft.owner.email if draft.owner else None)
+    uploader_name = draft.uploaded_file.owner.name if draft.uploaded_file and draft.uploaded_file.owner else (draft.owner.name if draft.owner else None)
+    reviewer_email = draft.reviewer.email if draft.reviewer else None
+    reviewer_name = draft.reviewer.name if draft.reviewer else None
     return {
         "id": draft.id,
         "uploaded_file_id": draft.uploaded_file_id,
@@ -159,6 +176,12 @@ def serialize_draft(draft: QuotationDraft, db: Session | None = None) -> dict:
         "selected_template_id": selected_template_id,
         "runner_fee_default": get_runner_fee_default(db) if db else 20.0,
         "review_schema": review_schema_for(config, None),
+        "reviewed_at": draft.reviewed_at.isoformat() if draft.reviewed_at else None,
+        "reviewed_by_id": draft.reviewed_by,
+        "reviewed_by_email": reviewer_email,
+        "reviewed_by_name": reviewer_name,
+        "uploader_email": uploader_email,
+        "uploader_name": uploader_name,
         "versions": [
             {
                 "id": version.id,
@@ -214,6 +237,12 @@ def update_draft_fields(
     draft.reviewed_by = user.id
     if draft.uploaded_file:
         draft.uploaded_file.status = draft.status
+
+    linked_session = db.scalar(select(SessionModel).where(SessionModel.draft_id == draft.id))
+    if linked_session:
+        linked_session.last_edited_by_id = user.id
+        linked_session.last_edited_at = datetime.now(timezone.utc)
+
     db.commit()
     db.refresh(draft)
     return draft

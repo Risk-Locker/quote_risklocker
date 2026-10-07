@@ -779,9 +779,13 @@ def session_field_evidence(
 @router.get("/sessions/{session_id}/template-config")
 def session_template_config(
     session_id: str,
+    response: FastAPIResponse,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
     try:
         return {"template": get_workspace_template_config(db, user, session_id)}
     except AppError as err:
@@ -862,8 +866,9 @@ def session_extract_gemini(
     if not gemini_res:
         keys_pool = get_key_pool()
         if not keys_pool.get_all_keys():
-            raise AppError("No GEMINI_API_KEY set in .env. Add your free Google AI Studio key to enable AI extraction.", 400)
-        raise AppError("Gemini AI extraction attempt failed or returned empty result. Check your API key or network.", 502)
+            raise AppError("No Gemini API key configured. Add a key in Settings or .env to enable AI extraction.", 400)
+        err = keys_pool.get_last_error_message() or "Empty result returned"
+        raise AppError(f"Gemini AI extraction failed: {err}", 502)
 
     # Apply extracted fields to draft
     fields = dict(draft.fields or {})

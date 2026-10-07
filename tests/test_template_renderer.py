@@ -230,7 +230,7 @@ def test_premium_info_block_renders_roadtax_chinese_and_clean_extras():
         ),
         render_context=render_context,
     )
-    assert "Roadtax / 路税" in html
+    assert "Roadtax and Runner Fee / 路税及服务费" in html
     assert "Windscreen" in html
     assert "(RM 2,650)" in html
     assert "Legal Liability to Passengers (LLTP)" in html

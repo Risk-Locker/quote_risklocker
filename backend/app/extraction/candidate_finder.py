@@ -18,6 +18,7 @@ DRAFT_FIELDS = [
     "client_type",
     "ic_or_brn",
     "representative_name",
+    "quotation_no",
     "issue_date",
     "valid_until",
     "vehicle_no",
@@ -34,6 +35,7 @@ DRAFT_FIELDS = [
     "cover_period",
     "coverage_type",
     "valuation_type",
+    "authorized_driver",
     "coverage_amount",
     "sum_insured",
     "market_value",
@@ -108,6 +110,7 @@ DEFAULT_ALIASES = {
     "ncd_percent": ["ncd", "ncb", "no claim discount", "no claim bonus", "dtt", "diskaun tanpa tuntutan", "kadar ncd", "kadar dtt", "ncd / dtt", "ncb / dtt"],
     "windscreen": ["windscreen", "cermin hadapan"],
     "valuation_type": ["valuation type", "valuation basis", "basis of sum insured", "type of sum insured", "basis of valuation", "agreed value", "vehicle agreed value", "market value"],
+    "quotation_no": ["quotation no", "quotation number", "quote no", "quote number", "no sebutharga", "sebutharga no", "no sebut harga", "no. sebutharga", "proposal no", "schedule no"],
     }
 
 DEFAULT_VEHICLE_BRANDS = ("PROTON", "PERODUA", "HONDA", "TOYOTA", "NISSAN", "BMW", "MERCEDES", "MERCEDES-BENZ", "MAZDA", "MITSUBISHI", "KIA", "HYUNDAI")
@@ -560,6 +563,13 @@ def _add_semantic_label_values(text: str, page_text: list[dict], results: dict[s
                 if field == "vehicle_no":
                     # Ignore values like '-UNREGISTERED-' or currency-like tokens
                     if "unregistered" in value.lower() or value.upper().startswith("RM"):
+                        continue
+                if field == "quotation_no":
+                    clean_q = re.sub(r"^[\s:\-]+", "", value).strip()
+                    m_q = re.search(r"([A-Za-z0-9][A-Za-z0-9\-_/]{4,35})", clean_q)
+                    if m_q and not clean_q.upper().startswith("RL26") and not clean_q.upper().startswith("RL-"):
+                        value = m_q.group(1).strip()
+                    else:
                         continue
                 if value:
                     _add_line_value(results, field, value, "semantic_label_value", 0.94, line, text, page_text)
@@ -1026,6 +1036,44 @@ def find_candidates(
         for match in re.finditer(rf"(?i){re.escape(label)}[^\dRM]{{0,25}}(?P<money>{money_pattern})", text):
             _add(results, field, match.group("money"), "label_money", 0.84, text, match.start(), match.end(), page_text)
 
+    # Underwriter quotation number pattern extraction (insurer-specific & multi-line aware)
+    _qno_stopwords = {
+        "INSURED", "LIBERTY", "TAKAFUL", "POLICYHOLDER", "TOTAL", "PREMIUM",
+        "VEHICLE", "DATE", "TIME", "PAGE", "HTTPS", "HTTP", "WWW", "REGISTRATION",
+        "MOTOR", "SCHEDULE", "PROPOSAL", "GENERAL", "INSURANCE", "BERHAD", "COMPANY",
+    }
+    def _is_valid_candidate_qno(c: str) -> bool:
+        if not c or len(c.strip()) < 4:
+            return False
+        cu = c.strip().upper()
+        if cu.startswith("RL26") or cu.startswith("RL-") or any(cu.startswith(b) for b in _qno_stopwords):
+            return False
+        if re.match(r"^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}$", c.strip()):
+            return False
+        return any(ch.isdigit() for ch in c)
+
+    # 1. Specialized insurer patterns
+    q_patterns = [
+        (r"\b(QM\d{8})\b", "sompo_quotation_no", 0.96),
+        (r"\b(QF\d{7,8}(?:-\d{3})?)\b", "stmb_quotation_no", 0.95),
+        (r"qno=(QF\d{7,8}(?:-\d{3})?)", "stmb_url_quotation_no", 0.95),
+        (r"\b(FL\d{5,}[A-Z0-9-]*)\b", "etiqa_quotation_no", 0.95),
+        (r"\b(MPA-\d{2}-\d{2}-\d{6,8})\b", "qbe_quotation_no", 0.95),
+        (r"Quotation\s*Ref(?:\s*No\.?|\s*No|\.?)[:\s]*([A-Z0-9-]{6,30})", "amgen_quotation_no", 0.95),
+        (r"\b([Q][BCD]\d{6}(?:-\d{1,3})?)\b", "amgen_code_quotation_no", 0.93),
+        (r"\b(QJV[A-Z0-9]+)\b", "lonpac_quotation_no", 0.95),
+        (r"\b(QT-[A-Z0-9]{7,12})\b", "tune_quotation_no", 0.95),
+        (r"Quotation\s*No\.?\s*[:\-]?\s*(Q\d{6,})", "tune_code_quotation_no", 0.93),
+        (r"\b(1000\d{6})\b", "tune_numeric_quotation_no", 0.92),
+        (r"\b([A-Za-z0-9][A-Za-z0-9\-_/]{5,25})\s*\r?\n\s*Quotation\s*no\.?", "preceding_quotation_no", 0.94),
+        (r"(?i)\b(?:quotation\s*(?:no\.?|number|#)?|quote\s*(?:no\.?|number|#)?|no\.?\s*sebutharga|sebutharga\s*no\.?)\s*(?:\r?\n\s*no\.?\s*(?:quotation|sebut\s*harga))?\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\-_/]{4,35})", "generic_quotation_no", 0.90),
+    ]
+    for q_pat, q_src, q_score in q_patterns:
+        for match in re.finditer(q_pat, text, re.I):
+            cand_q = match.group(1).strip()
+            if _is_valid_candidate_qno(cand_q):
+                _add(results, "quotation_no", cand_q, q_src, q_score, text, match.start(), match.end(), page_text)
+
     date_pattern = DATE_RE
     dates = list(re.finditer(date_pattern, text))
     for match in dates:
@@ -1070,5 +1118,13 @@ def find_candidates(
         _add_static(results, "valuation_type", "Agreed Value", "pattern_agreed_value_phrase", 0.92, text, text, page_text)
     elif re.search(r"(?i)\b(?:sum\s*insured|coverage)\s*\(\s*market\s*value\s*\)", text) or re.search(r"(?i)\bmarket\s*value\s*(?:basis|scheme)", text):
         _add_static(results, "valuation_type", "Market Value", "pattern_market_value_phrase", 0.92, text, text, page_text)
+
+    # Authorized Driver detection (All Driver vs Named Driver)
+    if re.search(r"(?i)\b(?:named\s*driver|named\s*drivers\s*only|driver(?:s)?\s*named|specified\s*driver)\b", text):
+        _add_static(results, "authorized_driver", "Named Driver", "pattern_named_driver", 0.96, text, text, page_text)
+    elif re.search(r"(?i)\b(?:all\s*driver(?:s)?|any\s*driver(?:s)?|all\s*authorized\s*driver(?:s)?|unnamed\s*driver(?:s)?|全司机)\b", text):
+        _add_static(results, "authorized_driver", "All Driver", "pattern_all_driver", 0.96, text, text, page_text)
+    else:
+        _add_static(results, "authorized_driver", "All Driver", "default_all_driver", 0.90, text, text, page_text)
 
     return dict(results)

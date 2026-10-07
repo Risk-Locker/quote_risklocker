@@ -80,6 +80,7 @@ VARIABLES = [
     {"id": "coverage_type", "label": "Coverage Type", "type": "text", "source": "field", "field": "coverage_type"},
     {"id": "cover_period", "label": "Cover Period", "type": "date", "source": "field", "field": "cover_period"},
     {"id": "valuation_type", "label": "Valuation Type", "type": "text", "source": "field", "field": "valuation_type"},
+    {"id": "authorized_driver", "label": "Authorised Driver", "type": "text", "source": "field", "field": "authorized_driver"},
     {"id": "car_model", "label": "Car Model", "type": "text", "source": "field", "field": "car_model"},
     {"id": "engine_cc", "label": "Vehicle CC / Capacity", "type": "text", "source": "field", "field": "engine_cc"},
     {"id": "ncd_percent", "label": "NCD", "type": "percent", "source": "field", "field": "ncd_percent"},

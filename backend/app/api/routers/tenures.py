@@ -26,6 +26,7 @@ from app.models.tables import (
 from app.services.customer_account_service import resolve_or_create_customer
 from app.services.insurance_tenure_service import (
     auto_project_next_renewal,
+    ensure_next_year_renewal_tenures,
     get_tenure_timeline,
     mark_tenure_lapsed,
     resolve_or_create_tenure,
@@ -450,7 +451,15 @@ def list_tenures(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Retrieve customer-vehicle tenures for the Motor Renewal Ledger with search and filters."""
+    # Auto-ensure next-year renewals are synced when requested for upcoming year
+    if year and str(year) != "all":
+        try:
+            target_yr = int(year)
+            if target_yr >= 2027:
+                ensure_next_year_renewal_tenures(db, target_year=target_yr, user_id=user.id)
+        except (ValueError, TypeError):
+            pass
+
     query = select(InsuranceTenure).where(InsuranceTenure.is_projected == False)
 
     if not show_hidden:
@@ -569,6 +578,7 @@ def list_tenures(
             selectinload(InsuranceTenure.winning_company),
             selectinload(InsuranceTenure.customer),
             selectinload(InsuranceTenure.tracked_vehicle),
+            selectinload(InsuranceTenure.created_by),
         )
         .offset(offset)
         .limit(ps)
@@ -685,6 +695,9 @@ def list_tenures(
             "external_policy_end_date": t.external_policy_end_date.isoformat() if t.external_policy_end_date else None,
             "last_activity_at": (t.last_activity_at or t.updated_at or t.created_at).isoformat() if (t.last_activity_at or t.updated_at or t.created_at) else None,
             "created_at": t.created_at.isoformat(),
+            "created_by_id": t.created_by_id,
+            "created_by_email": t.created_by.email if t.created_by else None,
+            "created_by_name": t.created_by.name if t.created_by else None,
         })
 
     return {
@@ -950,6 +963,8 @@ def get_tenure_yoy_stats(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Retrieve year-over-year tenure statistics (counts, cars, growth, active vs lost)."""
+    ensure_next_year_renewal_tenures(db, target_year=2027, user_id=user.id)
+
     stmt = select(
         InsuranceTenure.id,
         InsuranceTenure.vehicle_no,
@@ -1026,6 +1041,22 @@ def get_tenure_yoy_stats(
             "active": all_active,
             "lost": all_lost,
         },
+    }
+
+
+@router.post("/sync-next-year-renewals")
+def sync_next_year_renewals(
+    target_year: int = Query(default=2027, ge=2024, le=2035),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Admin endpoint to ensure next-year renewals are synced for all active vehicles."""
+    created = ensure_next_year_renewal_tenures(db, target_year=target_year, user_id=user.id)
+    return {
+        "status": "success",
+        "target_year": target_year,
+        "created_count": len(created),
+        "created_ids": [t.id for t in created],
     }
 
 

@@ -402,6 +402,14 @@ The repository root holds only `AGENTS.md`, `README.md`, config files, and the d
 - Global Navigation Invariant: All external comparison links, session review links, and PDF downloads enforce `target="_blank" rel="noopener noreferrer"`.
 - Tests: `tests/test_enterprise_comparison_and_ledger.py` (819 hermetic tests green).
 
+## Canonical Quotation Master Templates v3 Derivatives (No Extras & Lump Sum)
+
+- Cloned from `agency_bilingual_v3` with zero-gap single-page A4 geometry (794 x 1123px):
+  - `agency_bilingual_v3_no_extras`: Completely omits extras text and bottom benefit cards grid; folds extras price into Insurance Premium (`insurance_premium_total = base premium + extras`) so left side arithmetically equals Total Payable while saving vertical space.
+  - `agency_bilingual_v3_lump_sum`: Displays single summary line on the left side (`Extras / 附加项目: RM XXX`) with distinct base premium; completely omits bottom extras benefit cards grid.
+- Backend & Frontend parity: `master_template_service.py`, `template_renderer.py`, `template_section_compiler.py`, `frontend/src/components/template-canvas/shared.tsx`, `template-section-compiler.ts`, `vehicle-fields-manager.tsx`.
+- Seeding & Verification: `commands/publish-v3-derivative-templates.py` (idempotently seeds and publishes both templates to PostgreSQL), `tests/test_v7_master_templates.py`.
+
 - Start every repository task at [START-HERE.md](START-HERE.md).
 - Use [PROJECT-DIAGRAM.md](PROJECT-DIAGRAM.md) for the complete visual workflow and system overview.
 - Use [generated/CODEBASE-MAP.md](generated/CODEBASE-MAP.md) to locate routes, symbols, migrations, tests, and commands.

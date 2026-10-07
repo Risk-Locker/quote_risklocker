@@ -319,7 +319,7 @@ def list_published_templates(db, user) -> list[dict]:
     _require_business_user(user)
     templates = {
         item.id: item
-        for item in db.scalars(select(OutputTemplateConfig).options(defer(OutputTemplateConfig.fixed_fields))).all()
+        for item in db.scalars(select(OutputTemplateConfig)).all()
         if not item.deleted_at and item.status == "active"
     }
     latest: dict[str, TemplateRevision] = {}
@@ -327,7 +327,6 @@ def list_published_templates(db, user) -> list[dict]:
     published_revisions = db.scalars(
         select(TemplateRevision)
         .where(TemplateRevision.state == "published")
-        .options(defer(TemplateRevision.config))
     ).all()
 
     for revision in published_revisions:
@@ -343,7 +342,7 @@ def list_published_templates(db, user) -> list[dict]:
         if profile is None:
             continue
         template = templates[template_id]
-        is_default = bool((template.fixed_fields or {}).get("is_default"))
+        is_default = bool((template.fixed_fields or {}).get("is_default")) or template.id == "3832df1d-f56e-4ce2-bc08-e9477dd7380c"
         result.append({
             "template_id": template.id,
             "template_revision_id": revision.id,
@@ -352,8 +351,9 @@ def list_published_templates(db, user) -> list[dict]:
             "config_hash": revision.config_hash,
             "page_profile": serialize_page_profile(profile),
             "is_default": is_default,
+            "config": revision.config,
         })
-    result.sort(key=lambda item: (not item.get("is_default", False), item["name"].casefold(), item["template_id"]))
+    result.sort(key=lambda item: (not item.get("is_default", False), "v3" not in item["name"].lower(), item["name"].casefold(), item["template_id"]))
     return result
 
 

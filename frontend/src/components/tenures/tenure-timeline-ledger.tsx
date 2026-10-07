@@ -172,6 +172,9 @@ export interface TenureRow {
   is_discarded?: boolean;
   external_policy_start_date?: string | null;
   external_policy_end_date?: string | null;
+  created_by_id?: string | null;
+  created_by_email?: string | null;
+  created_by_name?: string | null;
 }
 
 export interface StageSummary {
@@ -920,9 +923,10 @@ export function TenureTimelineLedger() {
     });
   }, [selectedYear, months, currentYear]);
 
-  // Year items to show in year switcher (strictly dynamic from actual uploaded policies + current year)
+  // Year items to show in year switcher (strictly dynamic from actual uploaded policies + current year + next renewal year)
   const availableYears = useMemo(() => {
-    const yearsSet = new Set<string>([currentYear]);
+    const nextYear = (parseInt(currentYear, 10) + 1).toString();
+    const yearsSet = new Set<string>([currentYear, nextYear]);
     yoyStats.forEach((s) => {
       if (s.year) yearsSet.add(s.year);
     });
@@ -1767,6 +1771,12 @@ export function TenureTimelineLedger() {
                                 {group.manufacture_year ? ` · YOM ${group.manufacture_year}` : ""}
                               </div>
                             )}
+                            {mainTenure.created_by_email && (
+                              <div className="text-[10px] text-neutral-400 font-medium mt-0.5 truncate max-w-[210px] flex items-center gap-1">
+                                <span>By:</span>
+                                <span className="text-neutral-600 font-semibold">{mainTenure.created_by_email}</span>
+                              </div>
+                            )}
                           </td>
 
                           {/* 2. Coverage Period (Main Policy) */}
@@ -1993,6 +2003,14 @@ export function TenureTimelineLedger() {
                                     <span className="text-xs font-medium text-neutral-600">
                                       {group.customer_name}
                                     </span>
+                                    {mainTenure.created_by_email && (
+                                      <>
+                                        <span className="text-neutral-400">·</span>
+                                        <span className="text-[10px] font-medium text-neutral-500 bg-neutral-200/80 px-1.5 py-0.5 rounded">
+                                          By {mainTenure.created_by_email}
+                                        </span>
+                                      </>
+                                    )}
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <Link

@@ -203,7 +203,16 @@ export function resolveVariableValue(
       }
     }
   }
-  if (!raw) return null;
+  if (!raw) {
+    if (variableId === "authorized_driver" || variableId === "authorised_driver") {
+      const allText = JSON.stringify(variableValues || {}).toLowerCase();
+      if (allText.includes("named driver") || allText.includes("named_driver")) {
+        return "Named Driver";
+      }
+      return "All Driver";
+    }
+    return null;
+  }
 
   if (variableId === "insurance_company" || variableId === "company_name" || variableId === "insurer_name") {
     return getOfficialInsurerName(raw);
@@ -315,6 +324,8 @@ export const SYSTEM_SLOT_DEFAULTS: Record<string, string> = {
   all_driver_icon: "91116a7dc3540d62",
   background: "49e754a6faa949c2",
   duitnow_payment_details: "c3003185-0000-4000-8000-000000000001",
+  bank_qr_layout_dark: "c4003185-0000-4000-8000-000000000001",
+  bank_qr_layout: "c4003185-0000-4000-8000-000000000001",
 };
 
 export function CanvasElementView({
@@ -396,7 +407,9 @@ export function CanvasElementView({
     } else if (eid === "qr_code" || eid === "rc_b_qr_code") {
       assetId = SYSTEM_SLOT_DEFAULTS["qr_code"];
     } else if (eid === "payment_account_details_img" || eid === "rc_b_duitnow_img") {
-      assetId = SYSTEM_SLOT_DEFAULTS["duitnow_payment_details"];
+      assetId = slot === "bank_qr_layout_dark" || slot === "bank_qr_layout"
+        ? SYSTEM_SLOT_DEFAULTS["bank_qr_layout_dark"]
+        : SYSTEM_SLOT_DEFAULTS["duitnow_payment_details"];
     }
   }
   const asset = assets.find((item) => item.id === assetId);
@@ -407,10 +420,21 @@ export function CanvasElementView({
         ? `/business/assets/${assetId}/content?profile=ui`
         : `/template-assets/${assetId}`
   ) : "");
-  if (slot === "duitnow_payment_details" || eid === "payment_account_details_img" || eid === "rc_b_duitnow_img" || assetId === "c3003185-0000-4000-8000-000000000001") {
-    resolvedUrl = fileUrl("/assets/duitnow_payment_details.png");
-  } else if ((!resolvedUrl || resolvedUrl.includes("9ca8e404c89dd905") || resolvedUrl.includes("c2003185-0000-4000-8000-000000000001")) && (slot === "qr_code" || eid === "qr_code" || eid === "rc_b_qr_code" || assetId === "9ca8e404c89dd905" || assetId === "c2003185-0000-4000-8000-000000000001")) {
-    resolvedUrl = fileUrl("/template-assets/9ca8e404c89dd905");
+  if (
+    slot === "bank_qr_layout_dark" ||
+    slot === "bank_qr_layout" ||
+    slot === "duitnow_payment_details" ||
+    slot === "qr_code" ||
+    eid === "payment_account_details_img" ||
+    eid === "rc_b_duitnow_img" ||
+    eid === "qr_code" ||
+    eid === "rc_b_qr_code" ||
+    assetId === "c4003185-0000-4000-8000-000000000001" ||
+    assetId === "c3003185-0000-4000-8000-000000000001" ||
+    assetId === "9ca8e404c89dd905" ||
+    assetId === "c2003185-0000-4000-8000-000000000001"
+  ) {
+    resolvedUrl = fileUrl("/assets/bank_qr_layout_dark.jpg");
   } else if (!resolvedUrl && slot && SYSTEM_SLOT_DEFAULTS[slot]) {
     const fallbackId = SYSTEM_SLOT_DEFAULTS[slot];
     resolvedUrl = `/business/assets/${fallbackId}/content?profile=ui`;
@@ -514,10 +538,8 @@ export function CanvasElementView({
               <img className="h-full w-full object-contain object-left" src={fileUrl("/business/assets/e9685e1f-ac95-410c-a2e9-eccb7ca35d5f/content?profile=ui")} alt="Risklocker" />
             ) : slot === "bank_logo" ? (
               <img className="h-full w-full object-contain" src={fileUrl("/business/assets/2168eaee-3e56-4903-8c4f-841f01ff2407/content?profile=ui")} alt="Hong Leong Bank" />
-            ) : slot === "duitnow_payment_details" ? (
-              <img className="h-full w-full object-contain" src={fileUrl("/assets/duitnow_payment_details.png")} alt="DuitNow Payment Details" />
-            ) : slot === "qr_code" ? (
-              <img className="h-full w-full object-contain" src="/assets/qr.jpeg" alt="QR Code" />
+            ) : slot === "duitnow_payment_details" || slot === "bank_qr_layout_dark" || slot === "bank_qr_layout" || slot === "qr_code" ? (
+              <img className="h-full w-full object-contain" src={fileUrl("/assets/bank_qr_layout_dark.jpg")} alt="Bank QR Details" />
             ) : slot === "insurer_logo" ? (
               <span className="text-slate-800 font-bold text-[11px]">{getOfficialInsurerName(variableValues?.insurance_company || variableValues?.insurance_name)}</span>
             ) : (
@@ -561,6 +583,9 @@ export function CanvasElementView({
           let raw = resolveVariableValue(variableValues, element.variableId);
           if (raw === null && (element.variableId === "excess_amount" || element.variableId === "excess" || element.variableId === "compulsory_excess")) {
             raw = "0.00";
+          }
+          if (raw === null && (element.variableId === "authorized_driver" || element.variableId === "authorised_driver")) {
+            raw = "All Driver";
           }
           if (element.variableId === "engine_cc" && raw !== null) {
             const vType = String(variableValues?.vehicle_type || "").toUpperCase();
@@ -654,7 +679,7 @@ export function CanvasElementView({
                 ? benefitData.available_addons || []
                 : isExtras
                   ? currentCards.filter(checkPaid)
-                  : (element as any).excludeExtras
+                  : ((element as any).excludeExtras || (element as any).extras_mode === "none" || (element as any).extras_mode === "lump_sum")
                     ? currentCards.filter((b: any) => !checkPaid(b))
                     : currentCards)
             : [];
@@ -1356,6 +1381,7 @@ export function CanvasElementView({
       {element.type === "premium-info-block" ? (
         (() => {
           const extras = benefitData?.extras || [];
+          const extrasMode = String((element as any).extras_mode || (element as any).extrasMode || "itemized").toLowerCase();
           const fmtMoney = (price?: { amount?: number | string; currency?: string; value?: number | string }) => {
             const amount = price?.amount ?? price?.value;
             if (amount === undefined || amount === null || amount === "") return "";
@@ -1364,7 +1390,7 @@ export function CanvasElementView({
           };
           const labels = element.labels || {};
           const rows: Array<{ kind: string; label: string; limit?: string; value: string }> = [];
-          if (extras.length > 0) {
+          if (extrasMode === "itemized" && extras.length > 0) {
             rows.push({ kind: "extras_header", label: labels.extras || "Extras / 附加项目", value: "" });
             extras.forEach((extra) => {
               const dispOvr = (extra as any)?.display_overrides;
@@ -1498,9 +1524,24 @@ export function CanvasElementView({
           }
           const combinedRoadtaxVal = rtNum + sfNum;
           const displayRoadtax = combinedRoadtaxVal > 0 ? combinedRoadtaxVal.toFixed(2) : (roadtax || "");
-          rows.push({ kind: "divider_dark", label: "", value: "" });
-          rows.push({ kind: "premium", label: labels.premium || "Coverage Premium / 保费", value: premium ? `RM ${premium}` : "" });
-          rows.push({ kind: "roadtax", label: labels.roadtax || "Roadtax / 路税", value: displayRoadtax ? `RM ${displayRoadtax}` : "" });
+
+          if (extrasMode === "lump_sum" && extrasTotal > 0) {
+            rows.push({
+              kind: "extra_lump",
+              label: labels.extras || "Extras / 附加项目",
+              value: `RM ${extrasTotal.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+            });
+          }
+
+          let displayPremium = premium ? `RM ${premium}` : "";
+          if (extrasMode === "none") {
+            const totalPremNum = pNum + extrasTotal;
+            displayPremium = totalPremNum > 0 ? `RM ${totalPremNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : (premium ? `RM ${premium}` : "");
+          }
+
+          rows.push({ kind: "premium", label: labels.premium || "Coverage Premium / 保费", value: displayPremium });
+          rows.push({ kind: "divider", label: "", value: "" });
+          rows.push({ kind: "roadtax", label: labels.roadtax || "Roadtax and Runner Fee / 路税及服务费", value: displayRoadtax ? `RM ${displayRoadtax}` : "" });
           rows.push({ kind: "total", label: (labels as any).total_premium || labels.total || "Total Payable / 应付总额", value: total ? `RM ${total}` : "" });
           const rowHeight = Number(element.rowHeight) || 14;
           return (
@@ -1515,17 +1556,21 @@ export function CanvasElementView({
                 const labelStyle =
                   row.kind === "total"
                     ? { fontSize: 10.5, fontWeight: 800, color: "#0F172A" }
-                    : row.kind === "extras_header"
-                      ? { fontSize: 8.5, fontWeight: 700, color: "#DC2626", textTransform: "uppercase" as const, letterSpacing: "0.5px" }
-                      : row.kind === "extra"
-                        ? { fontSize: 9, fontWeight: 600, color: "#B91C1C" }
-                        : { fontSize: 9, fontWeight: 600, color: "#334155" };
+                    : row.kind === "extra_lump"
+                      ? { fontSize: 9.5, fontWeight: 700, color: "#DC2626" }
+                      : row.kind === "extras_header"
+                        ? { fontSize: 8.5, fontWeight: 700, color: "#DC2626", textTransform: "uppercase" as const, letterSpacing: "0.5px" }
+                        : row.kind === "extra"
+                          ? { fontSize: 9, fontWeight: 600, color: "#B91C1C" }
+                          : { fontSize: 9, fontWeight: 600, color: "#334155" };
                 const valueStyle =
                   row.kind === "total"
                     ? { fontSize: 11.5, fontWeight: 800, color: "#DC2626" }
-                    : row.kind === "extras_header"
-                      ? { fontSize: 8.5, fontWeight: 700, color: "#DC2626" }
-                      : { fontSize: 9.5, fontWeight: 700, color: "#0F172A" };
+                    : row.kind === "extra_lump"
+                      ? { fontSize: 10, fontWeight: 700, color: "#0F172A" }
+                      : row.kind === "extras_header"
+                        ? { fontSize: 8.5, fontWeight: 700, color: "#DC2626" }
+                        : { fontSize: 9.5, fontWeight: 700, color: "#0F172A" };
                 if (row.kind === "extra") {
                   return (
                     <div key={`row-${index}`} className="flex items-center justify-between w-full pl-3" style={{ height: rowHeight }}>
@@ -1677,11 +1722,13 @@ export function balanceBenefitGridElements(
 ): CanvasElement[] {
   const extras = benefitData?.extras || [];
   const pibElem = elements.find((e) => e.id === "premium_info_block" || e.type === "premium-info-block");
+  const extrasMode = String((pibElem as any)?.extras_mode || (pibElem as any)?.extrasMode || "itemized").toLowerCase();
   const pibY = pibElem ? Number(pibElem.y || 276) : 276;
-  const totalPibRows = extras.length > 0 ? extras.length + 6 : 5;
+  const totalPibRows = extrasMode === "none" ? 5 : (extrasMode === "lump_sum" ? (extras.length > 0 ? 6 : 5) : (extras.length > 0 ? extras.length + 6 : 5));
   const contentBottom = pibY + (totalPibRows * 14);
-  const cardBottom = Math.max(370, contentBottom + 10);
-  const covTableY = 160;
+  const cardBottom = Math.max(380, contentBottom + 12);
+  const covElem = elements.find((e) => e.id === "cov_table_bg");
+  const covTableY = covElem ? Number(covElem.y || 120) : 120;
   const covTableH = cardBottom - covTableY;
   const yTop = cardBottom + 10;
   const driversH = 74;
@@ -1742,6 +1789,8 @@ export function balanceBenefitGridElements(
   const adjustCommon = (e: CanvasElement): CanvasElement => {
     if (e.id === "cov_table_bg") {
       e.h = covTableH;
+    } else if (e.id === "payment_account_details_img" && !elements.some((x) => x.id === "all_driver_bg")) {
+      e.h = cardBottom - Number(e.y || 94);
     } else if (e.id === "premium_info_block" || e.type === "premium-info-block") {
       e.h = totalPibRows * 14;
     } else if (e.id === "rc_container_payment") {
@@ -1789,7 +1838,7 @@ export function balanceBenefitGridElements(
     return e;
   };
 
-  if (extrasCards.length > 0) {
+  if (extrasCards.length > 0 && extrasMode !== "none" && extrasMode !== "lump_sum") {
     const n1 = focCards.length;
     const nExt = extrasCards.length;
     const n2 = addonCards.length;
@@ -1878,7 +1927,7 @@ export function balanceBenefitGridElements(
   }
 
   // Standard 2-section layout when no extras exist
-  const n1 = currentCards.length;
+  const n1 = (extrasMode === "none" || extrasMode === "lump_sum") ? focCards.length : currentCards.length;
   const n2 = addonCards.length;
 
   const rows1 = n1 > 0 ? Math.ceil(n1 / cols) : 0;
@@ -1904,6 +1953,9 @@ export function balanceBenefitGridElements(
     } else if (e.type === "benefit-grid" && e.gridKind === "current_benefits") {
       e.y = yG1;
       e.h = h1;
+      if (extrasMode === "none" || extrasMode === "lump_sum") {
+        (e as any).excludeExtras = true;
+      }
     } else if (e.id === "addons_header_bg" && hdr2Bg) {
       e.y = yH2;
       e.h = hdrH;

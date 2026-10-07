@@ -84,6 +84,18 @@ export function ReviewHeader({
             <span className="text-xs text-[var(--rl-text-muted)] font-mono">
               {formValues.vehicle_no || "Draft"} · {formValues.customer_name || "Client"}
             </span>
+            {workspace.created_by_email || workspace.created_by ? (
+              <span className="inline-flex items-center gap-1 rounded bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-700 border border-neutral-200">
+                <span className="text-neutral-400">Uploaded:</span>
+                <span className="font-semibold text-neutral-900">{workspace.created_by_email || workspace.created_by}</span>
+              </span>
+            ) : null}
+            {workspace.last_edited_by_email || workspace.last_edited_by ? (
+              <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-900 border border-amber-200">
+                <span className="text-amber-600">Last edited:</span>
+                <span className="font-bold text-amber-950">{workspace.last_edited_by_email || workspace.last_edited_by}</span>
+              </span>
+            ) : null}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">

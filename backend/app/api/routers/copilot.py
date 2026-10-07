@@ -476,15 +476,25 @@ def settings_ai_context(
 
     return {
         "gemini": {
-            "active": quota["keys_count"] > 0,
-            "model": getattr(settings, "gemini_model", "gemini-3.5-flash") or "gemini-3.5-flash",
+            "active": quota.get("active", False),
+            "status": quota.get("status", "offline"),
+            "status_label": quota.get("status_label", "Offline"),
+            "status_color": quota.get("status_color", "gray"),
+            "model": getattr(settings, "gemini_model", "gemini-3.1-flash-lite-preview") or "gemini-3.1-flash-lite-preview",
             "key_count": quota["keys_count"],
+            "keys_count": quota["keys_count"],
             "rpm_limit": quota["rpm_limit"],
             "rpm_used": quota["rpm_used"],
+            "rpm_remaining": quota["rpm_remaining"],
             "rpd_limit": quota["rpd_limit"],
             "rpd_used": quota["rpd_used"],
             "rpd_remaining": quota["rpd_remaining"],
             "percent_rpd_remaining": quota["percent_rpd_remaining"],
+            "tokens_total": quota.get("tokens_total", 0),
+            "last_error": quota.get("last_error"),
+            "last_error_code": quota.get("last_error_code"),
+            "last_error_at": quota.get("last_error_at"),
+            "troubleshooting": quota.get("troubleshooting", {}),
         },
         "summary_stats": {
             "active_companies_count": len(companies),

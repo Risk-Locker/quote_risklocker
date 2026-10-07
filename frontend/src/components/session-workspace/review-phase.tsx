@@ -843,7 +843,11 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
           setPublishedTemplates(list);
           if (list.length > 0) {
             const currentRevisionId = workspace?.pinned.template_revision_id;
-            const matching = list.find((item) => item.template_revision_id === currentRevisionId) || list[0];
+            const matching =
+              (currentRevisionId ? list.find((item) => item.template_revision_id === currentRevisionId) : null) ||
+              list.find((item) => item.is_default) ||
+              list.find((item) => item.name?.toLowerCase().includes("v3")) ||
+              list[0];
             if (matching.config && !previewTemplate) {
               setPreviewTemplate({
                 template_id: matching.template_id,
@@ -1117,7 +1121,8 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       { id: "c4d540c072507abc", label: "bank_logo", url: "/template-assets/c4d540c072507abc" },
       { id: "91116a7dc3540d62", label: "all_driver_icon", url: "/template-assets/91116a7dc3540d62" },
       { id: "49e754a6faa949c2", label: "background", url: "/template-assets/49e754a6faa949c2" },
-      { id: "c3003185-0000-4000-8000-000000000001", label: "duitnow_payment_details", url: "/assets/duitnow_payment_details.png" },
+      { id: "c3003185-0000-4000-8000-000000000001", label: "duitnow_payment_details", url: "/assets/bank_qr_layout_dark.jpg" },
+      { id: "c4003185-0000-4000-8000-000000000001", label: "bank_qr_layout_dark", url: "/assets/bank_qr_layout_dark.jpg" },
     ];
     for (const sys of systemDefaults) {
       if (!list.some((a) => a.id === sys.id)) {
@@ -1305,6 +1310,18 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     if (vUntil) {
       fields["valid_until"] = vUntil;
       fields["quotation_validity"] = vUntil;
+    }
+
+    // Authorized Driver aliases
+    const authDriver = formValues["authorized_driver"] || fields["authorized_driver"] || "";
+    if (authDriver) {
+      fields["authorized_driver"] = authDriver;
+      fields["authorised_driver"] = authDriver;
+    } else {
+      const allText = JSON.stringify(fields).toLowerCase();
+      const resolvedDriver = (allText.includes("named driver") || allText.includes("named_driver")) ? "Named Driver" : "All Driver";
+      fields["authorized_driver"] = resolvedDriver;
+      fields["authorised_driver"] = resolvedDriver;
     }
 
     fields["total_amount"] = effTotal;
@@ -2212,7 +2229,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                   <label className="grid gap-1.5 text-xs font-semibold text-[var(--rl-text-strong)]">
                     Published template revision
                     <Select
-                      value={workspace.pinned.template_revision_id || (publishedTemplates[0]?.template_revision_id ?? "")}
+                      value={previewTemplate?.template_revision_id || workspace.pinned.template_revision_id || (publishedTemplates[0]?.template_revision_id ?? "")}
                       disabled={templatesLoading || !publishedTemplates.length}
                       onChange={(event) => selectTemplateDirectly(event.target.value)}
                     >

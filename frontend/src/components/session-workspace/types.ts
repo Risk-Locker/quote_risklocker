@@ -58,6 +58,12 @@ export type WorkspaceSnapshot = {
   revision: number;
   status: string;
   is_test?: boolean;
+  created_by?: string | null;
+  created_by_email?: string | null;
+  created_at?: string | null;
+  last_edited_by?: string | null;
+  last_edited_by_email?: string | null;
+  last_edited_at?: string | null;
   fields: Record<string, WorkspaceField>;
   benefits: Array<Record<string, unknown> & { id: string; selection_key: string; label?: string | null; state: string; cost_status: string }>;
   benefit_cards: {

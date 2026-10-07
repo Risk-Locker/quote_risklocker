@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from copy import deepcopy
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, defer
@@ -667,7 +668,7 @@ def set_runner_fee_default(db: Session, user, amount: float) -> float:
     return amount
 
 
-def get_bulk_upload_limit(db: Session) -> int:
+def get_bulk_upload_limit(db: Session | Any) -> int:
     setting = db.get(AppSetting, "bulk_upload_limit")
     if not setting or not isinstance(setting.value, dict):
         return 10
@@ -679,7 +680,7 @@ def get_bulk_upload_limit(db: Session) -> int:
         return 10
 
 
-def set_bulk_upload_limit(db: Session, user, limit: int) -> int:
+def set_bulk_upload_limit(db: Session | Any, user: Any, limit: int) -> int:
     require_admin(user)
     if limit < 3:
         raise AppError("Bulk upload limit cannot be less than 3 PDFs.", 400)

@@ -636,7 +636,7 @@ def create_next_year_renewal_tenure(
 ) -> InsuranceTenure:
     """Automatically create the next year's renewal tenure with an empty marketing comparison.
 
-    Triggers upon HIT (Close - Win).
+    Triggers upon next-year roll-forward or HIT (Close - Win).
     """
     # Check if an active next-year renewal already exists for this tenure
     existing = db.scalar(
@@ -649,9 +649,35 @@ def create_next_year_renewal_tenure(
         return existing
 
     # Calculate next year's 1-year coverage window
-    start_date = tenure.coverage_end_date + timedelta(days=1)
+    if tenure.coverage_end_date:
+        start_date = tenure.coverage_end_date + timedelta(days=1)
+    elif tenure.coverage_start_date:
+        start_date = tenure.coverage_start_date + timedelta(days=365)
+    else:
+        start_date = datetime.now(timezone.utc)
+
+    if start_date.tzinfo is None:
+        start_date = start_date.replace(tzinfo=timezone.utc)
+
     end_date = start_date + timedelta(days=364)
-    expiry_month = end_date.strftime("%B")
+    if end_date.tzinfo is None:
+        end_date = end_date.replace(tzinfo=timezone.utc)
+    expiry_month = end_date.strftime("%Y-%m")
+
+    # Check if vehicle already has an active tenure covering this start_date window
+    vehicle_match = db.scalar(
+        select(InsuranceTenure).where(
+            InsuranceTenure.vehicle_no == tenure.vehicle_no,
+            InsuranceTenure.coverage_start_date >= start_date - timedelta(days=60),
+            InsuranceTenure.coverage_start_date <= start_date + timedelta(days=60),
+            InsuranceTenure.is_discarded == False,
+        )
+    )
+    if vehicle_match:
+        if not vehicle_match.previous_tenure_id:
+            vehicle_match.previous_tenure_id = tenure.id
+            db.flush()
+        return vehicle_match
 
     now = datetime.now(timezone.utc)
     next_tenure = InsuranceTenure(
@@ -674,6 +700,10 @@ def create_next_year_renewal_tenure(
         pic_id=tenure.pic_id,
         sub_agent_name=tenure.sub_agent_name,
         created_by_id=user_id or tenure.created_by_id,
+        is_main=True,
+        is_projected=False,
+        is_discarded=False,
+        is_hidden=False,
         stage_history={"Quotations": now.isoformat()},
         stage_updated_at=now,
         last_activity_at=now,
@@ -681,6 +711,66 @@ def create_next_year_renewal_tenure(
     db.add(next_tenure)
     db.flush()
     return next_tenure
+
+
+def ensure_next_year_renewal_tenures(
+    db: Session,
+    target_year: int = 2027,
+    user_id: str | None = None,
+) -> list[InsuranceTenure]:
+    """Ensure all active non-dropped and non-missed vehicles have a next-year renewal tenure."""
+    target_cutoff = datetime(target_year, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    target_end_cutoff = datetime(target_year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+
+    # 1. Gather all vehicles that ALREADY have an active tenure in target_year
+    existing_in_target = set(
+        db.scalars(
+            select(InsuranceTenure.vehicle_no).where(
+                InsuranceTenure.coverage_start_date.between(target_cutoff, target_end_cutoff),
+                InsuranceTenure.is_discarded == False,
+            )
+        ).all()
+    )
+
+    # 2. Query all active tenures before target_cutoff that are not missed and not dropped
+    candidates = list(
+        db.scalars(
+            select(InsuranceTenure).where(
+                InsuranceTenure.coverage_start_date < target_cutoff,
+                InsuranceTenure.is_discarded == False,
+                InsuranceTenure.is_projected == False,
+                InsuranceTenure.status != "miss",
+                ~InsuranceTenure.stage.in_(["Close - Lose", "Others"]),
+            ).order_by(InsuranceTenure.coverage_start_date.desc())
+        ).all()
+    )
+
+    # Group candidates by vehicle_no and take the latest active tenure
+    latest_by_vehicle: dict[str, InsuranceTenure] = {}
+    for t in candidates:
+        v_no = (t.vehicle_no or "").strip().upper()
+        if not v_no or v_no in ("UNPLATED", "UNKNOWN"):
+            chassis = (getattr(t.tracked_vehicle, "chassis_no", None) or "").strip().upper()
+            if chassis:
+                v_no = chassis
+            else:
+                continue
+        if v_no not in latest_by_vehicle:
+            latest_by_vehicle[v_no] = t
+
+    created_tenures: list[InsuranceTenure] = []
+    for v_no, prev_tenure in latest_by_vehicle.items():
+        if v_no in existing_in_target:
+            continue
+        new_t = create_next_year_renewal_tenure(db, prev_tenure, user_id=user_id)
+        created_tenures.append(new_t)
+        existing_in_target.add(v_no)
+
+    if created_tenures:
+        db.flush()
+
+    return created_tenures
+
 
 
 def remove_auto_created_next_year_tenure(db: Session, tenure: InsuranceTenure) -> bool:

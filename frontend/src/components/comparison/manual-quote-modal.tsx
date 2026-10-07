@@ -64,6 +64,13 @@ export function ManualQuoteModal({
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Advanced Breakdown & Rating States
+  const [isAdvancedExpanded, setIsAdvancedExpanded] = useState(false);
+  const [basicFigureAmount, setBasicFigureAmount] = useState("");
+  const [basicFigureName, setBasicFigureName] = useState("Basic Premium");
+  const [netRateFactor, setNetRateFactor] = useState("");
+  const [sourceQuotationNo, setSourceQuotationNo] = useState("");
+
   // Upload States
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -77,7 +84,8 @@ export function ManualQuoteModal({
     if (initialData) {
       setActiveTab("manual");
       setCompanyName(initialData.company_name || "AmAssurance");
-      setSumInsured(initialData.sum_insured ? String(initialData.sum_insured) : "");
+      const siStr = initialData.sum_insured ? String(initialData.sum_insured) : "";
+      setSumInsured(siStr);
       setValuationType(initialData.valuation_type || "agreed_value");
       setMotorPremium(initialData.motor_premium ? String(initialData.motor_premium) : "");
       setTowingLimit(initialData.towing_limit || "Unlimited");
@@ -88,6 +96,19 @@ export function ManualQuoteModal({
       setSpecialPerils(initialData.special_perils || "");
       setLlpLlop(initialData.llp_llop || "");
       setNotes(initialData.notes || "");
+
+      // Breakdown & Rating fields
+      const bfVal = initialData.basic_figure_amount != null ? String(initialData.basic_figure_amount) : "";
+      setBasicFigureAmount(bfVal);
+      setBasicFigureName(initialData.basic_figure_name || (initialData.is_takaful ? "Basic Contribution" : "Basic Premium"));
+      if (initialData.rate_factor != null) {
+        setNetRateFactor(Number(initialData.rate_factor).toFixed(6));
+      } else if (initialData.sum_insured > 0 && initialData.basic_figure_amount != null) {
+        setNetRateFactor((Number(initialData.basic_figure_amount) / Number(initialData.sum_insured)).toFixed(6));
+      } else {
+        setNetRateFactor("");
+      }
+      setSourceQuotationNo(initialData.source_quotation_no || initialData.quotation_ref || "");
     } else {
       setActiveTab(tenureId ? "upload" : "manual");
       setCompanyName("AmAssurance");
@@ -103,11 +124,45 @@ export function ManualQuoteModal({
       setSpecialPerils("");
       setLlpLlop("");
       setNotes("");
+      setBasicFigureAmount("");
+      setBasicFigureName("Basic Premium");
+      setNetRateFactor("");
+      setSourceQuotationNo("");
+      setIsAdvancedExpanded(false);
       setUploadFile(null);
       setUploadError("");
       setUploadProgress("");
     }
   }, [initialData, isOpen, tenureId]);
+
+  // Dynamic Mathematical Rate & Sum Insured Coupling
+  const handleSumInsuredChange = (newSiStr: string) => {
+    setSumInsured(newSiStr);
+    const newSi = parseFloat(newSiStr);
+    const currentBf = parseFloat(basicFigureAmount);
+    if (!isNaN(newSi) && newSi > 0 && !isNaN(currentBf) && currentBf > 0) {
+      setNetRateFactor((currentBf / newSi).toFixed(6));
+    }
+  };
+
+  const handleRateFactorChange = (newRateStr: string) => {
+    setNetRateFactor(newRateStr);
+    const newRate = parseFloat(newRateStr);
+    const currentSi = parseFloat(sumInsured);
+    // When rate changes, sum insured remains constant, and basic figure dynamically updates
+    if (!isNaN(newRate) && newRate > 0 && !isNaN(currentSi) && currentSi > 0) {
+      setBasicFigureAmount((currentSi * newRate).toFixed(2));
+    }
+  };
+
+  const handleBasicFigureChange = (newBfStr: string) => {
+    setBasicFigureAmount(newBfStr);
+    const newBf = parseFloat(newBfStr);
+    const currentSi = parseFloat(sumInsured);
+    if (!isNaN(newBf) && newBf > 0 && !isNaN(currentSi) && currentSi > 0) {
+      setNetRateFactor((newBf / currentSi).toFixed(6));
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -130,6 +185,8 @@ export function ManualQuoteModal({
         special_perils: specialPerils || null,
         llp_llop: llpLlop || null,
         notes: notes || null,
+        basic_figure_amount: basicFigureAmount ? parseFloat(basicFigureAmount) : undefined,
+        source_quotation_no: sourceQuotationNo ? sourceQuotationNo.trim() : undefined,
         is_manual: true,
       });
       onClose();
@@ -525,7 +582,7 @@ export function ManualQuoteModal({
                   required
                   placeholder="e.g. 85000"
                   value={sumInsured}
-                  onChange={(e) => setSumInsured(e.target.value)}
+                  onChange={(e) => handleSumInsuredChange(e.target.value)}
                   className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm font-mono text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
                 />
               </div>
@@ -677,6 +734,221 @@ export function ManualQuoteModal({
                 />
                 <span>Waiver of Betterment</span>
               </label>
+            </div>
+
+            {/* Expandable Advanced Breakdown, Rating & PDF Detection Audit */}
+            <div className="pt-2 border-t border-[#e5e5ea]">
+              <button
+                type="button"
+                onClick={() => setIsAdvancedExpanded(!isAdvancedExpanded)}
+                className="w-full flex items-center justify-between py-2 px-3 rounded-lg bg-[#f5f5f7] hover:bg-neutral-200 text-xs font-bold text-[#1b1717] transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-2">
+                  <FileText size={16} weight="bold" className="text-[#6e6e73]" />
+                  <span>Advanced Breakdown, Rating &amp; Detection Audit</span>
+                </div>
+                <span className="text-xs text-[#6e6e73] font-mono">
+                  {isAdvancedExpanded ? "▲ Collapse" : "▼ Expand to View & Edit"}
+                </span>
+              </button>
+
+              {isAdvancedExpanded && (
+                <div className="mt-3 p-3.5 rounded-xl bg-neutral-50 border border-[#e5e5ea] space-y-4 text-xs">
+                  {/* 1. Dynamic Rating & Tariff Math */}
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between border-b border-[#e5e5ea] pb-1">
+                      <span className="font-bold text-[#1b1717] uppercase tracking-wider text-[11px]">
+                        Dynamic Rating &amp; Tariff Math
+                      </span>
+                      <span className="text-[10px] text-[#6e6e73]">
+                        Auto-calculates rate factor and basic premium
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2.5">
+                      <div>
+                        <label className="block text-[10px] font-bold text-[#6e6e73] uppercase mb-1">
+                          {basicFigureName || "Basic Premium"} (RM)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={basicFigureAmount}
+                          onChange={(e) => handleBasicFigureChange(e.target.value)}
+                          placeholder="e.g. 5436.88"
+                          className="w-full rounded-md border border-[#e5e5ea] bg-white px-2 py-1.5 text-xs font-mono font-bold text-[#1b1717] focus:outline-none focus:ring-1 focus:ring-[#1b1717]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-[#6e6e73] uppercase mb-1">
+                          Sum Insured (RM)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={sumInsured}
+                          onChange={(e) => handleSumInsuredChange(e.target.value)}
+                          placeholder="e.g. 199000"
+                          className="w-full rounded-md border border-[#e5e5ea] bg-white px-2 py-1.5 text-xs font-mono font-bold text-[#1b1717] focus:outline-none focus:ring-1 focus:ring-[#1b1717]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-[#6e6e73] uppercase mb-1">
+                          Net Rate Factor (6 dec)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.000001"
+                          value={netRateFactor}
+                          onChange={(e) => handleRateFactorChange(e.target.value)}
+                          placeholder="e.g. 0.027321"
+                          className="w-full rounded-md border border-[#e5e5ea] bg-white px-2 py-1.5 text-xs font-mono font-bold text-[#1b1717] focus:outline-none focus:ring-1 focus:ring-[#1b1717]"
+                        />
+                        {netRateFactor && parseFloat(netRateFactor) > 0 && (
+                          <span className="text-[10px] text-[#6e6e73] block mt-0.5 font-mono">
+                            Rate: {(parseFloat(netRateFactor) * 100).toFixed(4)}%
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 2. Underwriting & Betterment Attributes */}
+                  <div className="space-y-2 pt-1 border-t border-[#e5e5ea]">
+                    <div className="flex items-center justify-between border-b border-[#e5e5ea] pb-1">
+                      <span className="font-bold text-[#1b1717] uppercase tracking-wider text-[11px]">
+                        Underwriting &amp; Betterment Rules
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      <div className="p-2 rounded-lg bg-white border border-[#e5e5ea]">
+                        <span className="text-[10px] text-[#6e6e73] block">Vehicle Age</span>
+                        <span className="font-bold text-[#1b1717]">
+                          {initialData?.vehicle_age != null ? `${initialData.vehicle_age} Years` : "—"}
+                        </span>
+                      </div>
+
+                      <div className="p-2 rounded-lg bg-white border border-[#e5e5ea]">
+                        <span className="text-[10px] text-[#6e6e73] block">Betterment Scale</span>
+                        <span className="font-bold text-[#1b1717]">
+                          {initialData?.betterment_rate != null ? `${initialData.betterment_rate}%` : (initialData?.betterment_display || "0%")}
+                        </span>
+                      </div>
+
+                      <div className="p-2 rounded-lg bg-white border border-[#e5e5ea]">
+                        <span className="text-[10px] text-[#6e6e73] block">Waiver Status</span>
+                        <span className={`font-bold ${waiverBetterment ? "text-emerald-700" : "text-amber-700"}`}>
+                          {waiverBetterment ? "Waived (0% Co-pay)" : "Standard Tariff Co-pay"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 3. Quotation Reference & Raw PDF Detection Audit */}
+                  <div className="space-y-2 pt-1 border-t border-[#e5e5ea]">
+                    <div className="flex items-center justify-between border-b border-[#e5e5ea] pb-1">
+                      <span className="font-bold text-[#1b1717] uppercase tracking-wider text-[11px]">
+                        Insurer Quotation Ref &amp; Detection Audit
+                      </span>
+                      <span className="text-[10px] text-[#6e6e73]">
+                        Verified from uploaded insurer schedule
+                      </span>
+                    </div>
+
+                    {/* Quotation Reference Input */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-[#6e6e73] uppercase mb-1">
+                        Insurer Quotation Reference No.
+                      </label>
+                      <input
+                        type="text"
+                        value={sourceQuotationNo}
+                        onChange={(e) => setSourceQuotationNo(e.target.value)}
+                        placeholder="e.g. QM12390133, FL22026M-00867209-001, QC590226-001"
+                        className="w-full rounded-md border border-[#e5e5ea] bg-white px-2.5 py-1.5 text-xs font-mono font-bold text-[#1b1717] focus:outline-none focus:ring-1 focus:ring-[#1b1717]"
+                      />
+                    </div>
+
+                    {/* Customer & Policyholder Info */}
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="p-2 rounded-lg bg-white border border-[#e5e5ea]">
+                        <span className="text-[10px] text-[#6e6e73] block">Customer Name</span>
+                        <span className="font-semibold text-[#1b1717] truncate block" title={initialData?.customer_name || "—"}>
+                          {initialData?.customer_name || "—"}
+                        </span>
+                      </div>
+
+                      <div className="p-2 rounded-lg bg-white border border-[#e5e5ea]">
+                        <span className="text-[10px] text-[#6e6e73] block">IC / Business Reg No.</span>
+                        <span className="font-semibold text-[#1b1717]">
+                          {initialData?.ic_or_brn || "—"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Customer Address */}
+                    {initialData?.customer_address && (
+                      <div className="p-2 rounded-lg bg-white border border-[#e5e5ea]">
+                        <span className="text-[10px] text-[#6e6e73] block">Customer Address</span>
+                        <span className="text-[11px] text-[#1b1717] whitespace-pre-line">
+                          {initialData.customer_address}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Detected Perils & Benefits List */}
+                    {initialData?.detailed_perils && initialData.detailed_perils.length > 0 && (
+                      <div className="p-2 rounded-lg bg-white border border-[#e5e5ea] space-y-1">
+                        <span className="text-[10px] text-[#6e6e73] font-bold uppercase block">
+                          Detected Riders &amp; Perils ({initialData.detailed_perils.length})
+                        </span>
+                        <div className="space-y-1 max-h-36 overflow-y-auto">
+                          {initialData.detailed_perils.map((dp: any, idx: number) => (
+                            <div key={idx} className="flex items-center justify-between text-[11px] py-0.5 border-b border-neutral-100 last:border-0">
+                              <span className="text-[#1b1717] font-medium">{dp.name}</span>
+                              <div className="flex items-center gap-2">
+                                {dp.coverage_limit && (
+                                  <span className="text-[10px] text-[#6e6e73] font-mono">
+                                    {String(dp.coverage_limit)}
+                                  </span>
+                                )}
+                                <span className="font-mono text-[#1b1717]">
+                                  {dp.premium_cost ? `RM ${Number(dp.premium_cost).toFixed(2)}` : "Included"}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Auxiliary Vehicle Specs */}
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      <div className="p-1.5 rounded bg-white border border-[#e5e5ea]">
+                        <span className="text-[10px] text-[#6e6e73] block">Chassis No.</span>
+                        <span className="font-mono text-[11px] font-semibold text-[#1b1717] truncate block" title={initialData?.chassis_no || "—"}>
+                          {initialData?.chassis_no || "—"}
+                        </span>
+                      </div>
+                      <div className="p-1.5 rounded bg-white border border-[#e5e5ea]">
+                        <span className="text-[10px] text-[#6e6e73] block">Engine No.</span>
+                        <span className="font-mono text-[11px] font-semibold text-[#1b1717] truncate block" title={initialData?.engine_no || "—"}>
+                          {initialData?.engine_no || "—"}
+                        </span>
+                      </div>
+                      <div className="p-1.5 rounded bg-white border border-[#e5e5ea]">
+                        <span className="text-[10px] text-[#6e6e73] block">Capacity / Unit</span>
+                        <span className="font-mono text-[11px] font-semibold text-[#1b1717]">
+                          {initialData?.engine_cc || "—"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Actions */}

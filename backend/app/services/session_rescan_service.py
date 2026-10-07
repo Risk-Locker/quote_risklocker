@@ -382,7 +382,6 @@ def rescan_session(
         # Reset draft metadata
         draft.product_id = None
         draft.package_id = None
-        draft.package_selection_ids = []
         draft.scalar_decisions = {}
         draft.warnings = []
 
@@ -398,6 +397,9 @@ def rescan_session(
 
     engine_used = "native"
     run_ai = (engine == "ai")
+    full: dict[str, Any] = {}
+    draft_data: dict[str, Any] = {}
+    draft_fields: dict[str, Any] = {}
 
     # Native extraction execution if AI not explicitly forced
     if not run_ai:
@@ -406,7 +408,7 @@ def rescan_session(
             source_path.write_bytes(source_bytes)
             native_result = extract_with_limits(
                 source_path,
-                enhanced_reading=bool(target_uploaded.enhanced_reading),
+                enhanced_reading=target_uploaded.enhanced_reading,
                 source_filename=target_uploaded.original_filename,
                 prompt_override=prompt_override,
                 **context,
@@ -462,7 +464,8 @@ def rescan_session(
             keys_pool = get_key_pool()
             if not keys_pool.get_all_keys():
                 raise AppError("No GEMINI_API_KEY configured. Please check your environment.", 400)
-            raise AppError("AI extraction failed or returned an empty result.", 502)
+            err = keys_pool.get_last_error_message() or "AI extraction failed or returned an empty result."
+            raise AppError(f"Gemini AI extraction failed: {err}", 502)
 
         # Ensure extraction record exists
         rec = db.scalar(select(ExtractionRecord).where(ExtractionRecord.uploaded_file_id == target_uploaded.id))

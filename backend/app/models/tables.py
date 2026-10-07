@@ -617,6 +617,7 @@ class UploadedFile(Base, TimestampMixin, SoftDeleteMixin):
     batch: Mapped[Batch] = relationship(back_populates="files")
     extraction_record: Mapped["ExtractionRecord"] = relationship(back_populates="uploaded_file", uselist=False)
     draft: Mapped["QuotationDraft"] = relationship(back_populates="uploaded_file", uselist=False)
+    owner: Mapped["User"] = relationship(foreign_keys=[owner_id])
 
 
 class ExtractionRecord(Base, TimestampMixin):
@@ -670,6 +671,8 @@ class QuotationDraft(Base, TimestampMixin, SoftDeleteMixin):
 
     uploaded_file: Mapped[UploadedFile] = relationship(back_populates="draft")
     versions: Mapped[list["GeneratedPdfVersion"]] = relationship(back_populates="draft")
+    reviewer: Mapped["User | None"] = relationship(foreign_keys=[reviewed_by])
+    owner: Mapped["User"] = relationship(foreign_keys=[owner_id])
 
 
 class GeneratedPdfVersion(Base, TimestampMixin):

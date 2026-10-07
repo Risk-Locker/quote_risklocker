@@ -425,7 +425,7 @@ def compile_sections_to_canvas(
     extras_mode = sections.get("section1", {}).get("extrasDisplayMode", "itemized")
     simulated_count = max(0, min(simulated_extras_count, len(SAMPLE_SIMULATED_EXTRAS)))
     has_itemized_extras = (extras_mode == "itemized" and simulated_count > 0)
-    extra_rows_count = 1 if extras_mode == "lump_sum" else ((1 + simulated_count) if has_itemized_extras else 0)
+    extra_rows_count = 0 if extras_mode == "none" else (1 if extras_mode == "lump_sum" else ((1 + simulated_count) if has_itemized_extras else 0))
     total_rows = len(visible_fields) + extra_rows_count
 
     has_cov_table = any(e.get("id") == "cov_table_bg" for e in base_elements)
@@ -647,12 +647,13 @@ def compile_sections_to_canvas(
                     })
                     current_render_row += 1
 
+    has_val_authorized_driver = any(e.get("id") == "val_authorized_driver" for e in base_elements)
     is_v2_layout = any(e.get("id") in {"payment_account_details_img", "val_excess"} for e in base_elements) or any(float(c.get("boxY", 0)) <= 100 for c in right_containers)
-    baseline_count = 9 if is_v2_layout else 8
+    baseline_count = 10 if has_val_authorized_driver else (9 if is_v2_layout else 8)
     delta_y = max(0.0, float(len(visible_fields) - baseline_count) * row_h) if has_dense_layout else max(0.0, float(total_rows - 9) * row_h)
 
     # In production mode (when simulated extras are not requested), append canonical premium_info_block
-    if not has_itemized_extras and extras_mode != "lump_sum" and has_dense_layout:
+    if not has_itemized_extras and has_dense_layout:
         premium_y = start_y + (len(visible_fields) * row_h)
         compiled_rows.append({
             "id": "premium_info_block",
@@ -663,10 +664,12 @@ def compile_sections_to_canvas(
             "h": 130.0,
             "z": 4,
             "rowHeight": row_h,
+            "extras_mode": extras_mode,
             "labels": {
                 "extras": "EXTRAS / 附加项目",
                 "premium": "Insurance Premium / 保费",
-                "roadtax": "Roadtax / 路税",
+                "roadtax": "Roadtax and Runner Fee / 路税及服务费",
+                "runner": "Runner Fee / 服务费",
                 "total": "TOTAL PAYABLE",
             },
             "locked": True,

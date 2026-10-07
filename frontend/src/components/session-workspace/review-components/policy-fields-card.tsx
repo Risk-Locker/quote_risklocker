@@ -37,6 +37,7 @@ export const FORM_FIELDS: FormField[] = [
   { name: "coverage_type", label: "Coverage type", kind: "text" },
   { name: "cover_period", label: "Cover period", kind: "text" },
   { name: "valuation_type", label: "Valuation Type", kind: "valuation_type" },
+  { name: "authorized_driver", label: "Authorized Driver", kind: "text" },
   { name: "valid_until", label: "Quotation validity", kind: "text" },
   { name: "excess_amount", label: "Excess amount", kind: "money" },
   { name: "compulsory_excess", label: "Compulsory excess", kind: "money" },

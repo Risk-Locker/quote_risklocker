@@ -16,7 +16,7 @@ from typing import Any
 
 from collections import defaultdict
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.tables import (
@@ -940,6 +940,19 @@ def _is_valid_windscreen_amt(val: float | None) -> bool:
     return 500.0 <= val <= 50000.0 and int(val) not in range(2020, 2035)
 
 
+def _extract_windscreen_from_draft(f: dict[str, Any]) -> float | None:
+    """Extract numeric windscreen coverage sum insured directly from draft fields."""
+    if not f or not isinstance(f, dict):
+        return None
+    for k in ("windscreen", "windscreen_sum_insured", "windscreen_coverage", "cermin"):
+        v = f.get(k)
+        raw = v.get("value") if isinstance(v, dict) else v
+        amt = _to_float(raw)
+        if amt > 0.0 and _is_valid_windscreen_amt(amt):
+            return amt
+    return None
+
+
 def _resolve_comparison_benefits(
     db: Session,
     session: SessionModel,
@@ -1303,6 +1316,91 @@ def _resolve_comparison_benefits(
     }
 
 
+def _is_valid_extracted_qno(candidate: str | None) -> bool:
+    """Strict validator for insurer quotation numbers: rejects dates, internal codes, and common headers."""
+    if not candidate:
+        return False
+    cand = candidate.strip()
+    if len(cand) < 4:
+        return False
+    cu = cand.upper()
+    if cu.startswith("RL26") or cu.startswith("RL-"):
+        return False
+    _stopwords = {
+        "INSURED", "LIBERTY", "TAKAFUL", "POLICYHOLDER", "TOTAL", "PREMIUM",
+        "VEHICLE", "DATE", "TIME", "PAGE", "HTTPS", "HTTP", "WWW", "REGISTRATION",
+        "MOTOR", "SCHEDULE", "PROPOSAL", "GENERAL", "INSURANCE", "BERHAD", "COMPANY"
+    }
+    if any(cu.startswith(w) for w in _stopwords):
+        return False
+    # Reject pure dates (e.g. 04-04-2025 or 2026-05-07)
+    if re.match(r"^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}$", cand):
+        return False
+    return any(c.isdigit() for c in cand)
+
+
+def _extract_source_quotation_no(session: SessionModel | Any | None = None, draft_fields: dict[str, Any] | None = None) -> str | None:
+    """
+    Extract the underwriter's exact quotation reference from the uploaded PDF/draft.
+    Prioritizes quotation_no / quotation_number / quote_no from draft fields,
+    falling back to regex over raw extraction text / OCR text if not yet indexed in fields.
+    NEVER returns internal RiskLocker references (RL26...) or pure dates or generic words.
+    """
+    if not session and not draft_fields:
+        return None
+
+    fields = draft_fields or (session.draft.fields if session and session.draft and isinstance(session.draft.fields, dict) else {})
+
+    for key in ("quotation_no", "quotation_number", "quote_no", "quote_number", "source_quotation_no", "schedule_no", "policy_no"):
+        val = fields.get(key)
+        raw_val = val.get("value") if isinstance(val, dict) else val
+        if raw_val and str(raw_val).strip():
+            clean = str(raw_val).strip()
+            if _is_valid_extracted_qno(clean):
+                return clean
+
+    # Check extraction record raw_text or ocr_text if available
+    if session and session.uploaded_file and getattr(session.uploaded_file, "extraction_record", None):
+        er = session.uploaded_file.extraction_record
+        text_corpus = (er.raw_text or "") + "\n" + (er.ocr_text or "")
+        if text_corpus:
+            patterns = [
+                # Berjaya Sompo: QM followed by 8 digits
+                r"\b(QM\d{8})\b",
+                # STMB / Takaful: QF followed by 7-8 digits and optional sub-quote
+                r"\b(QF\d{7,8}(?:-\d{3})?)\b",
+                r"qno=(QF\d{7,8}(?:-\d{3})?)",
+                # Etiqa: FL followed by year/digits (e.g. FL22026M-00867209-001)
+                r"\b(FL\d{5,}[A-Z0-9-]*)\b",
+                # QBE: MPA-XX-XX-XXXXXX
+                r"\b(MPA-\d{2}-\d{2}-\d{6,8})\b",
+                # AmGen / Liberty: Quotation Ref No.QC590226-001 or code tokens
+                r"Quotation\s*Ref(?:\s*No\.?|\s*No|\.?)[:\s]*([A-Z0-9-]{6,30})",
+                r"\b([Q][BCD]\d{6}(?:-\d{1,3})?)\b",
+                # Lonpac: QJV...
+                r"\b(QJV[A-Z0-9]+)\b",
+                # Tune: QT-... or numeric quote no
+                r"\b(QT-[A-Z0-9]{7,12})\b",
+                r"Quotation\s*No\.?\s*[:\-]?\s*(Q\d{6,})",
+                r"\b(1000\d{6})\b",
+                # Sompo layout: code placed directly before 'Quotation no.'
+                r"\b([A-Za-z0-9][A-Za-z0-9\-_/]{5,25})\s*\r?\n\s*Quotation\s*no\.?",
+                # Multi-line bilingual label formats
+                r"(?i)\b(?:quotation\s*(?:no\.?|number|#)?|quote\s*(?:no\.?|number|#)?|no\.?\s*sebutharga|sebutharga\s*no\.?)\s*(?:\r?\n\s*no\.?\s*(?:quotation|sebut\s*harga))?\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\-_/]{4,35})",
+                r"(?i)\b(?:proposal\s*(?:no\.?|number|#)?|schedule\s*(?:no\.?|number|#)?)\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\-_/]{4,35})\b",
+            ]
+            for pat in patterns:
+                m = re.search(pat, text_corpus, re.I)
+                if m:
+                    candidate = m.group(1).strip()
+                    if _is_valid_extracted_qno(candidate):
+                        if session.draft and isinstance(session.draft.fields, dict):
+                            session.draft.fields["quotation_no"] = {"value": candidate, "status": "ready", "message": ""}
+                        return candidate
+
+    return None
+
+
 def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     """Retrieve or auto-hydrate the full marketing comparison matrix for an insurance tenure.
     
@@ -1343,9 +1441,15 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     )
     session_map = {s.id: s for s in sessions}
 
+    sessions_desc = sorted(
+        sessions,
+        key=lambda s: s.created_at or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+
     # Gather candidate customer IC / passport for runner fee detection
     cand_ic = ""
-    for s in sessions:
+    for s in sessions_desc:
         if s.draft and isinstance(s.draft.fields, dict):
             f = s.draft.fields
             if not cand_ic:
@@ -1367,7 +1471,7 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     is_detected_ev = False
     raw_capacity_token = None
 
-    for s in sessions:
+    for s in sessions_desc:
         if s.draft and isinstance(s.draft.fields, dict):
             f = s.draft.fields
             if road_tax_val == 0.0:
@@ -1375,11 +1479,11 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                 if cand_rt > 0.0:
                     road_tax_val = cand_rt
             if not detected_model:
-                detected_model = _safe_str(f.get("car_model"))
+                detected_model = _safe_str(f.get("car_model") or f.get("vehicle_model"))
             if not detected_brand:
-                detected_brand = _safe_str(f.get("car_brand"))
+                detected_brand = _safe_str(f.get("car_brand") or f.get("make"))
             if not detected_cc:
-                raw_cc = _safe_str(f.get("engine_cc"))
+                raw_cc = _safe_str(f.get("engine_cc") or f.get("capacity"))
                 if not raw_cc and tenure.tracked_vehicle:
                     raw_cc = _safe_str(tenure.tracked_vehicle.engine_cc)
                 if raw_cc:
@@ -1397,9 +1501,9 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                                 raw_capacity_token = f"{val_cc} CC"
                         except Exception:
                             pass
-            if f.get("client_type"):
+            if f.get("client_type") and not detected_client_type:
                 detected_client_type = _safe_str(f.get("client_type"))
-            if f.get("vehicle_type"):
+            if f.get("vehicle_type") and not detected_vtype:
                 detected_vtype = _safe_str(f.get("vehicle_type"))
 
     inferred_cc, inferred_vtype = infer_vehicle_cc_and_type(detected_model)
@@ -1407,11 +1511,18 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     if final_cc and not raw_capacity_token:
         raw_capacity_token = f"{final_cc} kW" if is_detected_ev else f"{final_cc} CC"
 
+    comb_lower = f"{detected_vtype or ''} {inferred_vtype or ''} {detected_model or ''} {detected_brand or ''}".lower()
+    is_ev_brand = any(b in comb_lower for b in ["tesla", "byd", "zeekr", "xpeng", "nio", "ora", "taycan", "smart #", "ioniq", "ev6"])
+    if is_ev_brand:
+        is_detected_ev = True
+
     fallback_vtype = "Car"
     if is_detected_ev:
-        comb_lower = f"{detected_vtype or ''} {inferred_vtype or ''} {detected_model or ''}".lower()
-        if "motor" in comb_lower or "bike" in comb_lower or "scooter" in comb_lower:
+        is_bike = any(w in comb_lower for w in ["motorcycle", "motorbike", "bike", "scooter", "moped", "kapcai", "2-wheeler", "two-wheeler"]) and not any(c in comb_lower for c in ["car", "saloon", "sedan", "tesla", "suv", "mpv", "wagon", "hatchback"])
+        if is_bike:
             fallback_vtype = "EVMotorcycle"
+        elif any(s in comb_lower for s in ["suv", "mpv", "non-saloon", "nonsaloon", "4x4"]):
+            fallback_vtype = "EVNonSaloonCar"
         else:
             fallback_vtype = "EVSaloonCar"
 
@@ -1434,24 +1545,21 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             jurisdiction="West Malaysia",
         )
 
-    # Sanity guard: If road tax is 0.0 or absurd (> RM 5,000 for passenger car), enforce JPJ calculated road tax
-    if calculated_jpj_road_tax > 0.0 and (road_tax_val == 0.0 or road_tax_val > 5000.0):
-        road_tax_val = calculated_jpj_road_tax
-
-    if runner_fee_val == 0.0:
-        runner_fee_val = detect_runner_fee_from_id(cand_ic)
-
-    if float(tenure.road_tax) == 0.0 and road_tax_val > 0.0:
-        tenure.road_tax = road_tax_val
-        needs_commit = True
-    elif float(tenure.road_tax) > 0.0:
+    if float(tenure.road_tax) > 0.0:
         road_tax_val = float(tenure.road_tax)
-
-    if float(tenure.runner_fee) == 0.0 and runner_fee_val > 0.0:
-        tenure.runner_fee = runner_fee_val
+    elif calculated_jpj_road_tax > 0.0:
+        road_tax_val = calculated_jpj_road_tax
+        tenure.road_tax = calculated_jpj_road_tax
         needs_commit = True
-    elif float(tenure.runner_fee) > 0.0:
+
+    if float(tenure.runner_fee) > 0.0:
         runner_fee_val = float(tenure.runner_fee)
+    else:
+        calc_runner = detect_runner_fee_from_id(cand_ic)
+        if calc_runner > 0.0:
+            runner_fee_val = calc_runner
+            tenure.runner_fee = calc_runner
+            needs_commit = True
 
     # 3. Resolve Vehicle Year of Manufacture (YOM) and Age
     veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if tenure.tracked_vehicle else None
@@ -1680,6 +1788,12 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                         if e.sum_insured > 0.0:
                             e.rate_percentage = round((float(e.motor_premium) / float(e.sum_insured)) * 100, 4)
                         needs_commit = True
+                    else:
+                        if abs(float(e.road_tax) - float(tenure.road_tax)) > 0.01 or abs(float(e.runner_fee) - float(tenure.runner_fee)) > 0.01:
+                            e.road_tax = float(tenure.road_tax)
+                            e.runner_fee = float(tenure.runner_fee)
+                            e.total_payable = float(e.motor_premium) + e.road_tax + e.runner_fee
+                            needs_commit = True
 
     # 5. Apply 4-tier Best Deal ranking
     rank_comparison_entries(
@@ -1696,8 +1810,24 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
         company_counts[key] += 1
         e.version = company_counts[key]
 
-    # Auto-detect Windscreen Target into tenure if not set or 0
-    if not tenure.windscreen_target or float(tenure.windscreen_target) <= 0.0:
+    # Detect Windscreen Target from latest uploaded quotes
+    latest_ws = None
+    for s in sessions_desc:
+        if s.draft and isinstance(s.draft.fields, dict):
+            ws_c = _extract_windscreen_from_draft(s.draft.fields)
+            if ws_c and _is_valid_windscreen_amt(ws_c):
+                latest_ws = float(ws_c)
+                break
+            b_cand = _resolve_comparison_benefits(db, s, getattr(s, "company_id", None), s.draft.fields, None)
+            if b_cand.get("windscreen_sum_insured") and _is_valid_windscreen_amt(b_cand["windscreen_sum_insured"]):
+                latest_ws = float(b_cand["windscreen_sum_insured"])
+                break
+
+    if latest_ws and latest_ws > 0.0:
+        if abs(float(tenure.windscreen_target or 0.0) - latest_ws) > 0.01:
+            tenure.windscreen_target = latest_ws
+            needs_commit = True
+    elif not tenure.windscreen_target or float(tenure.windscreen_target) <= 0.0:
         for e in entries:
             if e.windscreen_sum_insured and float(e.windscreen_sum_insured) > 0.0:
                 tenure.windscreen_target = float(e.windscreen_sum_insured)
@@ -1708,20 +1838,28 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
         db.commit()
 
 
-    # 3. Retrieve Previous Policy (Strictly prior calendar year e.g. 2025 for 2026 tenure)
+    # 3. Retrieve Previous Policy (Strictly prior calendar year e.g. 2026 for 2027 tenure)
     current_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now().year
     year_start_date = datetime(current_year, 1, 1).date() if isinstance(tenure.coverage_start_date, datetime) else date(current_year, 1, 1)
 
-    prev_tenure = db.scalar(
-        select(InsuranceTenure)
-        .where(
-            InsuranceTenure.tracked_vehicle_id == tenure.tracked_vehicle_id,
-            InsuranceTenure.id != tenure.id,
-            InsuranceTenure.coverage_start_date < year_start_date,
+    prev_tenure = None
+    if tenure.previous_tenure_id:
+        prev_tenure = db.get(InsuranceTenure, tenure.previous_tenure_id)
+
+    if not prev_tenure:
+        prev_tenure = db.scalar(
+            select(InsuranceTenure)
+            .where(
+                or_(
+                    InsuranceTenure.tracked_vehicle_id == tenure.tracked_vehicle_id,
+                    InsuranceTenure.vehicle_no == tenure.vehicle_no,
+                ),
+                InsuranceTenure.id != tenure.id,
+                InsuranceTenure.coverage_start_date < year_start_date,
+            )
+            .order_by(InsuranceTenure.coverage_start_date.desc())
+            .limit(1)
         )
-        .order_by(InsuranceTenure.coverage_start_date.desc())
-        .limit(1)
-    )
 
     prev_policy_data = None
     if prev_tenure:
@@ -1733,32 +1871,57 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             ).all()
         )
         best_prev = prev_entries[0] if prev_entries else None
-        
+
         # Extract canonical perils from previous policy session if available
         prev_perils: list[str] = []
+        best_prev_sess = None
         if best_prev and best_prev.session_id:
-            p_sess = db.get(SessionModel, best_prev.session_id)
-            if p_sess:
-                p_f = p_sess.draft.fields if p_sess.draft and isinstance(p_sess.draft.fields, dict) else {}
-                p_res = _resolve_comparison_benefits(
-                    db, p_sess, getattr(p_sess, "company_id", None), p_f, None
-                )
-                prev_perils = p_res.get("canonical_perils") or []
-        
+            best_prev_sess = db.get(SessionModel, best_prev.session_id)
+        elif not best_prev:
+            # Fallback to the latest active session under prev_tenure
+            best_prev_sess = db.scalars(
+                select(SessionModel)
+                .options(selectinload(SessionModel.draft))
+                .where(SessionModel.tenure_id == prev_tenure.id, SessionModel.status != "trash")
+                .order_by(SessionModel.created_at.desc())
+            ).first()
+
+        prev_sum_ins = float(best_prev.sum_insured) if best_prev else 0.0
+        prev_motor_prem = float(prev_tenure.won_premium) if prev_tenure.won_premium is not None else (float(best_prev.motor_premium) if best_prev else 0.0)
+        prev_company = (prev_tenure.winning_company.name if prev_tenure.winning_company else None) or (best_prev.company_name if best_prev else None)
+
+        if best_prev_sess:
+            p_f = best_prev_sess.draft.fields if best_prev_sess.draft and isinstance(best_prev_sess.draft.fields, dict) else {}
+            p_res = _resolve_comparison_benefits(
+                db, best_prev_sess, getattr(best_prev_sess, "company_id", None), p_f, None
+            )
+            prev_perils = p_res.get("canonical_perils") or []
+            if not prev_company:
+                prev_company = best_prev_sess.detected_company
+            if prev_sum_ins <= 0.0:
+                prev_sum_ins = _extract_vehicle_sum_insured(p_f, s_obj=best_prev_sess)
+            if prev_motor_prem <= 0.0:
+                prev_motor_prem = _extract_vehicle_motor_premium(p_f)
+
         prev_perils_str = ", ".join(prev_perils) if prev_perils else "Standard Policy Coverage"
 
         prev_policy_data = {
             "id": prev_tenure.id,
-            "year": prev_tenure.coverage_start_date.year,
-            "period": f"{prev_tenure.coverage_start_date.strftime('%d/%m/%Y')} - {prev_tenure.coverage_end_date.strftime('%d/%m/%Y')}",
-            "insurer": (prev_tenure.winning_company.name if prev_tenure.winning_company else None) or (best_prev.company_name if best_prev else "Previous Insurer"),
-            "sum_insured": float(best_prev.sum_insured) if best_prev else 0.0,
-            "insurance_premium": float(prev_tenure.won_premium) if prev_tenure.won_premium is not None else (float(best_prev.motor_premium) if best_prev else 0.0),
+            "year": prev_tenure.coverage_start_date.year if prev_tenure.coverage_start_date else (current_year - 1),
+            "period": f"{prev_tenure.coverage_start_date.strftime('%d/%m/%Y')} - {prev_tenure.coverage_end_date.strftime('%d/%m/%Y')}" if (prev_tenure.coverage_start_date and prev_tenure.coverage_end_date) else f"{current_year - 1}",
+            "insurer": prev_company or "Previous Insurer",
+            "sum_insured": prev_sum_ins,
+            "insurance_premium": prev_motor_prem,
             "perils": prev_perils_str,
-            "model": tenure.tracked_vehicle.car_model if tenure.tracked_vehicle else "Standard Model",
-            "yom": getattr(tenure.tracked_vehicle, "manufacture_year", None) or 2023,
-            "sub_agent": tenure.sub_agent_name or "RM_01_EugeneLee",
+            "model": (tenure.tracked_vehicle.car_model if tenure.tracked_vehicle else None) or (prev_tenure.tracked_vehicle.car_model if prev_tenure.tracked_vehicle else "Standard Model"),
+            "yom": getattr(tenure.tracked_vehicle, "manufacture_year", None) or getattr(prev_tenure.tracked_vehicle, "manufacture_year", None) or 2023,
+            "sub_agent": tenure.sub_agent_name or prev_tenure.sub_agent_name or "",
         }
+
+        # Carry over NCD percentage if not yet set on current tenure
+        if tenure.ncd_percentage is None and prev_tenure.ncd_percentage is not None:
+            tenure.ncd_percentage = prev_tenure.ncd_percentage
+            needs_commit = True
 
     # 4. Formulate Recommended Sum Insured matrix
     # 4. Formulate Recommended Sum Insured matrix (genuine underwriter figures only)
@@ -1771,67 +1934,150 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                 rec_sum_insured[clean_c] = float(e.sum_insured)
 
     # Aggregate customer & vehicle metadata from linked sessions and master records
-    linked_sessions = list(reversed(sessions))
+    # Strict Waterfall re-extraction: newest PDF first (sessions_desc)
+    waterfall_cust_name = ""
+    waterfall_ic = ""
+    waterfall_phone = ""
+    waterfall_email = ""
+    waterfall_address = ""
+    waterfall_plate = ""
+    waterfall_model = ""
+    waterfall_brand = ""
+    waterfall_engine_no = ""
+    waterfall_chassis_no = ""
+    waterfall_engine_cc = ""
+    waterfall_yom = None
 
-    cust_ic = ""
-    cust_phone = ""
-    cust_email = ""
-    cust_address = ""
-    veh_engine_no = ""
-    veh_chassis_no = ""
-    veh_yom = None
-    veh_seating = ""
-    veh_engine_cc = ""
-    veh_model = ""
-
-    if tenure.customer:
-        cust_ic = tenure.customer.id_number or ""
-        cust_phone = tenure.customer.phone or ""
-        cust_email = tenure.customer.email or ""
-        cust_address = tenure.customer.address or ""
-
-    if tenure.tracked_vehicle:
-        veh_engine_no = tenure.tracked_vehicle.engine_no or ""
-        veh_chassis_no = tenure.tracked_vehicle.chassis_no or ""
-        veh_engine_cc = tenure.tracked_vehicle.engine_cc or ""
-        veh_model = tenure.tracked_vehicle.car_model or ""
-        veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None)
-
-    for s in linked_sessions:
+    for s in sessions_desc:
         if s.draft and isinstance(s.draft.fields, dict):
             f = s.draft.fields
-            if not cust_ic or cust_ic.upper().startswith("PENDING-"):
+            if not waterfall_cust_name:
+                cand_nm = _safe_str(f.get("customer_name") or f.get("insured_name") or f.get("client_name"))
+                if cand_nm and not cand_nm.upper().startswith("UNSPECIFIED"):
+                    waterfall_cust_name = cand_nm
+            if not waterfall_ic or waterfall_ic.upper().startswith("PENDING-"):
                 cand_id = _safe_str(f.get("ic_no") or f.get("nric") or f.get("ic_or_brn") or f.get("passport_no"))
                 if cand_id and not cand_id.upper().startswith("PENDING-"):
                     from app.services.identity_normalization_service import normalize_government_id
                     norm_id, id_t = normalize_government_id(cand_id)
                     if id_t in ("nric", "brn_new", "brn_old", "passport"):
-                        cust_ic = norm_id
-                        if tenure.customer and (not tenure.customer.id_number or tenure.customer.id_number.startswith("PENDING-")):
-                            tenure.customer.id_number = norm_id
-                            tenure.customer.id_type = id_t
-                            needs_commit = True
-            if not cust_phone:
-                cust_phone = _safe_str(f.get("phone_number") or f.get("contact_no") or f.get("mobile"))
-            if not cust_email:
-                cust_email = _safe_str(f.get("email"))
-            if not cust_address:
-                cust_address = _safe_str(f.get("address") or f.get("location"))
-            if not veh_engine_no:
-                veh_engine_no = _safe_str(f.get("engine_number") or f.get("engine_no"))
-            if not veh_chassis_no:
-                veh_chassis_no = _safe_str(f.get("chassis_number") or f.get("chassis_no") or f.get("vin"))
-            if not veh_engine_cc:
-                veh_engine_cc = _safe_str(f.get("engine_cc") or f.get("capacity"))
-            if not veh_model:
-                veh_model = _safe_str(f.get("car_model") or f.get("vehicle_model"))
-            if not veh_yom:
-                raw_yom = f.get("manufacture_year") or f.get("year_of_manufacture") or f.get("yom")
+                        waterfall_ic = norm_id
+            if not waterfall_phone:
+                p = _safe_str(f.get("phone_number") or f.get("contact_no") or f.get("mobile"))
+                if p:
+                    waterfall_phone = p
+            if not waterfall_email:
+                em = _safe_str(f.get("email"))
+                if em:
+                    waterfall_email = em
+            if not waterfall_address:
+                addr = _safe_str(f.get("address") or f.get("location"))
+                if addr:
+                    waterfall_address = addr
+            if not waterfall_plate:
+                raw_p = _safe_str(f.get("vehicle_no") or f.get("vehicle_number") or f.get("reg_no"))
+                clean_p = re.sub(r"\s+", "", raw_p.upper())
+                if clean_p and clean_p not in ("UNREGISTERED", "NEW", "UNKNOWN", "N/A", "PENDING", "-", "--"):
+                    if not clean_p.startswith("RM") and not re.fullmatch(r"20\d{2}|19\d{2}", clean_p):
+                        waterfall_plate = raw_p.strip().upper()
+            if not waterfall_model:
+                m = _safe_str(f.get("car_model") or f.get("vehicle_model"))
+                if m:
+                    waterfall_model = m
+            if not waterfall_brand:
+                b = _safe_str(f.get("car_brand") or f.get("make"))
+                if b:
+                    waterfall_brand = b
+            if not waterfall_engine_no:
+                eno = _safe_str(f.get("engine_number") or f.get("engine_no"))
+                if eno:
+                    waterfall_engine_no = eno
+            if not waterfall_chassis_no:
+                chn = _safe_str(f.get("chassis_number") or f.get("chassis_no") or f.get("vin"))
+                if chn:
+                    waterfall_chassis_no = chn
+            if not waterfall_engine_cc:
+                ecc = _safe_str(f.get("engine_cc") or f.get("capacity"))
+                if ecc:
+                    waterfall_engine_cc = ecc
+            if not waterfall_yom:
+                raw_yom = f.get("manufacture_year") or f.get("year_of_manufacture") or f.get("yom") or f.get("vehicle_year")
                 if raw_yom:
                     try:
-                        veh_yom = int(_safe_str(raw_yom))
+                        y_int = int(re.sub(r"[^\d]", "", str(raw_yom))[:4])
+                        if 1980 <= y_int <= 2035:
+                            waterfall_yom = y_int
                     except (ValueError, TypeError):
                         pass
+
+    # Fallback to existing tenure records only if missing across ALL uploaded sessions
+    cust_name = waterfall_cust_name or tenure.customer_name or (tenure.customer.canonical_name if tenure.customer else "")
+    cust_ic = waterfall_ic or (tenure.customer.id_number if tenure.customer else "")
+    cust_phone = waterfall_phone or (tenure.customer.phone if tenure.customer else "")
+    cust_email = waterfall_email or (tenure.customer.email if tenure.customer else "")
+    cust_address = waterfall_address or (tenure.customer.address if tenure.customer else "")
+
+    veh_plate = waterfall_plate or tenure.vehicle_no or (tenure.tracked_vehicle.vehicle_no if tenure.tracked_vehicle else "")
+    veh_model = waterfall_model or (tenure.tracked_vehicle.car_model if tenure.tracked_vehicle else "")
+    veh_engine_no = waterfall_engine_no or (tenure.tracked_vehicle.engine_no if tenure.tracked_vehicle else "")
+    veh_chassis_no = waterfall_chassis_no or (tenure.tracked_vehicle.chassis_no if tenure.tracked_vehicle else "")
+    veh_engine_cc = waterfall_engine_cc or (tenure.tracked_vehicle.engine_cc if tenure.tracked_vehicle else "")
+    veh_yom = waterfall_yom or (getattr(tenure.tracked_vehicle, "manufacture_year", None) if tenure.tracked_vehicle else None)
+    veh_seating = "5"
+
+    clean_final_plate = re.sub(r"\s+", "", (veh_plate or "").upper())
+    is_plate_undetected = (
+        not veh_plate
+        or clean_final_plate in ("UNREGISTERED", "NEW", "UNKNOWN", "N/A", "PENDING", "-", "--", "")
+        or clean_final_plate.startswith("RM")
+    )
+    final_plate_display = "N/A" if is_plate_undetected else veh_plate.strip().upper()
+    tracking_by_chassis = bool(is_plate_undetected and veh_chassis_no)
+
+    if cust_name and tenure.customer_name != cust_name:
+        tenure.customer_name = cust_name
+        if tenure.customer:
+            tenure.customer.canonical_name = cust_name
+        needs_commit = True
+    if cust_ic and tenure.customer and tenure.customer.id_number != cust_ic:
+        tenure.customer.id_number = cust_ic
+        needs_commit = True
+    if cust_phone and tenure.customer and not tenure.customer.phone:
+        tenure.customer.phone = cust_phone
+        needs_commit = True
+    if cust_email and tenure.customer and not tenure.customer.email:
+        tenure.customer.email = cust_email
+        needs_commit = True
+    if cust_address and tenure.customer and not tenure.customer.address:
+        tenure.customer.address = cust_address
+        needs_commit = True
+
+    if final_plate_display != "N/A" and tenure.vehicle_no != final_plate_display:
+        tenure.vehicle_no = final_plate_display
+        needs_commit = True
+
+    if tenure.tracked_vehicle:
+        if veh_model and tenure.tracked_vehicle.car_model != veh_model:
+            tenure.tracked_vehicle.car_model = veh_model
+            needs_commit = True
+        if waterfall_brand and tenure.tracked_vehicle.car_brand != waterfall_brand:
+            tenure.tracked_vehicle.car_brand = waterfall_brand
+            needs_commit = True
+        if veh_engine_no and tenure.tracked_vehicle.engine_no != veh_engine_no:
+            tenure.tracked_vehicle.engine_no = veh_engine_no
+            needs_commit = True
+        if veh_chassis_no and tenure.tracked_vehicle.chassis_no != veh_chassis_no:
+            tenure.tracked_vehicle.chassis_no = veh_chassis_no
+            needs_commit = True
+        if veh_engine_cc and tenure.tracked_vehicle.engine_cc != veh_engine_cc:
+            tenure.tracked_vehicle.engine_cc = veh_engine_cc
+            needs_commit = True
+        if veh_yom and getattr(tenure.tracked_vehicle, "manufacture_year", None) != veh_yom:
+            tenure.tracked_vehicle.manufacture_year = veh_yom
+            needs_commit = True
+        if final_plate_display != "N/A" and tenure.tracked_vehicle.vehicle_no != final_plate_display:
+            tenure.tracked_vehicle.vehicle_no = final_plate_display
+            needs_commit = True
 
     if veh_model:
         from app.services.vehicle_simplifier_service import clean_vehicle_tokens_deterministic, CANONICAL_BRANDS
@@ -1931,6 +2177,9 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
         basic_prem, basic_term_label = _extract_exact_basic_figure(f_obj, e.company_name, s_obj=s_obj)
         if basic_prem <= 0.0:
             basic_prem = _extract_vehicle_basic_premium(f_obj, e.company_name, s_obj=s_obj)
+        dyn_rate_factor = getattr(e, "rate_factor", None)
+        if basic_prem <= 0.0 and dyn_rate_factor and e.sum_insured:
+            basic_prem = round(float(e.sum_insured) * float(dyn_rate_factor), 2)
         
         rate_str, rate_num = calculate_exact_rate(
             basic_prem if basic_prem > 0 else float(e.motor_premium),
@@ -1949,6 +2198,7 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
         entry_perils_str = ", ".join(entry_perils) if entry_perils else ""
 
         entry_ncd = _extract_ncd_from_draft(f_obj, s_obj=s_obj)
+        source_quote_no = _extract_source_quotation_no(s_obj, f_obj)
 
         entry_dicts.append({
             "id": e.id,
@@ -1993,7 +2243,45 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "is_manual": e.is_manual,
             "sort_order": e.sort_order,
             "notes": e.notes,
-            "quotation_ref": s_obj.quotation_ref if s_obj else None,
+            "customer_name": (
+                (f_obj.get("customer_name", {}).get("value") if isinstance(f_obj.get("customer_name"), dict) else f_obj.get("customer_name"))
+                if f_obj else None
+            ),
+            "customer_address": (
+                (f_obj.get("customer_address", {}).get("value") if isinstance(f_obj.get("customer_address"), dict) else (f_obj.get("address", {}).get("value") if isinstance(f_obj.get("address"), dict) else f_obj.get("customer_address") or f_obj.get("address")))
+                if f_obj else None
+            ),
+            "ic_or_brn": (
+                (f_obj.get("ic_or_brn", {}).get("value") if isinstance(f_obj.get("ic_or_brn"), dict) else (f_obj.get("ic_no", {}).get("value") if isinstance(f_obj.get("ic_no"), dict) else f_obj.get("ic_or_brn") or f_obj.get("ic_no")))
+                if f_obj else None
+            ),
+            "vehicle_no": (
+                (f_obj.get("vehicle_no", {}).get("value") if isinstance(f_obj.get("vehicle_no"), dict) else f_obj.get("vehicle_no"))
+                if f_obj else None
+            ),
+            "engine_no": (
+                (f_obj.get("engine_no", {}).get("value") if isinstance(f_obj.get("engine_no"), dict) else f_obj.get("engine_no"))
+                if f_obj else None
+            ),
+            "chassis_no": (
+                (f_obj.get("chassis_no", {}).get("value") if isinstance(f_obj.get("chassis_no"), dict) else f_obj.get("chassis_no"))
+                if f_obj else None
+            ),
+            "vehicle_year": (
+                (f_obj.get("vehicle_year", {}).get("value") if isinstance(f_obj.get("vehicle_year"), dict) else f_obj.get("vehicle_year"))
+                if f_obj else None
+            ),
+            "engine_cc": (
+                (f_obj.get("engine_cc", {}).get("value") if isinstance(f_obj.get("engine_cc"), dict) else f_obj.get("engine_cc"))
+                if f_obj else None
+            ),
+            "vehicle_age": veh_age,
+            "quotation_ref": source_quote_no or (
+                s_obj.quotation_ref
+                if (s_obj and s_obj.quotation_ref and not s_obj.quotation_ref.strip().upper().startswith("RL26") and not s_obj.quotation_ref.strip().upper().startswith("RL-"))
+                else getattr(e, "quotation_ref", None)
+            ),
+            "source_quotation_no": source_quote_no or getattr(e, "quotation_ref", None),
             "is_takaful": "contribution" in basic_term_label.lower() or "takaful" in e.company_name.lower(),
         })
 
@@ -2080,7 +2368,9 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     return {
         "tenure": {
             "id": tenure.id,
-            "vehicle_no": tenure.vehicle_no,
+            "vehicle_no": final_plate_display,
+            "is_plate_undetected": is_plate_undetected,
+            "tracking_by_chassis": tracking_by_chassis,
             "customer_name": tenure.customer_name,
             "ic_no": cust_ic,
             "formatted_ic": nric_details.get("formatted", cust_ic) if nric_details.get("valid") else cust_ic,
@@ -2382,6 +2672,27 @@ def update_tenure_fixed_costs(
     return get_marketing_comparison(db, tenure_id)
 
 
+def refresh_tenure_ledger(db: Session, tenure_id: str) -> dict[str, Any]:
+    """
+    Explicitly re-extract and refresh customer and vehicle ledger information
+    from all uploaded quotations under this tenure using a strict newest-to-oldest
+    waterfall cascade.
+    Recalculates road tax dynamically using official JPJ schedules (ZEV EV vs ICE),
+    updates runner fee, updates windscreen target, syncs comparison entries,
+    and returns the freshly updated marketing comparison payload.
+    """
+    tenure = db.get(InsuranceTenure, tenure_id)
+    if not tenure:
+        raise ValueError(f"Tenure {tenure_id} not found")
+
+    # In explicit refresh, force recalculation of road tax, runner fee, and ledger from latest quotes
+    tenure.road_tax = 0.0
+    tenure.runner_fee = 0.0
+    db.commit()
+
+    return get_marketing_comparison(db, tenure_id)
+
+
 
 def save_comparison_entry(
     db: Session,
@@ -2416,16 +2727,32 @@ def save_comparison_entry(
         entry.motor_premium = _to_float(payload["motor_premium"])
     if "basic_figure_amount" in payload or "basic_premium" in payload:
         new_bf = _to_float(payload.get("basic_figure_amount") or payload.get("basic_premium"))
-        if new_bf > 0 and entry.session_id:
-            s_obj = db.get(SessionModel, entry.session_id)
-            if s_obj and s_obj.draft:
-                d_fields = dict(s_obj.draft.fields or {})
-                for k in ("basic_premium_vehicle", "basic_premium"):
-                    if k in d_fields and isinstance(d_fields[k], dict):
-                        d_fields[k] = {**d_fields[k], "value": str(new_bf)}
-                    else:
-                        d_fields[k] = {"value": str(new_bf)}
-                s_obj.draft.fields = d_fields
+        if new_bf > 0:
+            if entry.sum_insured > 0:
+                setattr(entry, "rate_factor", round(new_bf / entry.sum_insured, 6))
+                entry.rate_percentage = round((new_bf / entry.sum_insured) * 100, 4)
+            if entry.session_id:
+                s_obj = db.get(SessionModel, entry.session_id)
+                if s_obj and s_obj.draft:
+                    d_fields = dict(s_obj.draft.fields or {})
+                    for k in ("basic_premium_vehicle", "basic_premium"):
+                        if k in d_fields and isinstance(d_fields[k], dict):
+                            d_fields[k] = {**d_fields[k], "value": str(new_bf)}
+                        else:
+                            d_fields[k] = {"value": str(new_bf)}
+                    s_obj.draft.fields = d_fields
+    if "source_quotation_no" in payload and payload["source_quotation_no"]:
+        clean_qno = _safe_str(payload["source_quotation_no"]).strip()
+        if clean_qno:
+            setattr(entry, "quotation_ref", clean_qno)
+            if entry.session_id:
+                s_obj = db.get(SessionModel, entry.session_id)
+                if s_obj:
+                    if s_obj.draft:
+                        d_fields = dict(s_obj.draft.fields or {})
+                        d_fields["quotation_no"] = {"value": clean_qno, "status": "ready", "message": ""}
+                        s_obj.draft.fields = d_fields
+                    s_obj.quotation_ref = clean_qno
     if "towing_limit" in payload:
         entry.towing_limit = _safe_str(payload["towing_limit"])
     if "agreed_value" in payload:

@@ -107,6 +107,7 @@ from app.extraction.company_resolution import build_companies_payload, resolve_c
 from app.db.session import get_db
 from app.models.enums import AccountStatus, Role, StorageStatus
 from app.models.tables import (
+    AppSetting,
     AuditEvent,
     CompanyAlias,
     FieldAlias,
@@ -859,30 +860,175 @@ def settings_limits(
 ) -> dict:
     from app.extraction.gemini_extractor import get_key_pool
     pool = get_key_pool()
+    pool.sync_accounts(db=db)
     stats = pool.get_quota_stats()
-    count = stats["keys_count"]
     bulk_limit = get_bulk_upload_limit(db)
     return {
         "max_upload_files": 1,
         "max_bulk_upload_files": bulk_limit,
         "max_upload_bytes": settings.max_upload_bytes,
         "max_source_pdf_bytes": settings.max_source_pdf_bytes,
-        "gemini": {
-            "active": bool(count > 0),
-            "model": getattr(settings, "gemini_model", "gemini-3.5-flash") or "gemini-3.5-flash",
-            "key_count": count,
-            "rpm_limit": stats["rpm_limit"],
-            "rpm_used": stats["rpm_used"],
-            "rpm_remaining": stats["rpm_remaining"],
-            "rpd_limit": stats["rpd_limit"],
-            "rpd_used": stats["rpd_used"],
-            "rpd_remaining": stats["rpd_remaining"],
-            "percent_rpd_remaining": stats["percent_rpd_remaining"],
-            "rpm_per_key": 15,
-            "rpd_per_key": 1500,
-            "total_rpd": stats["rpd_limit"],
-            "message": f"Connected ({count} key{'s' if count > 1 else ''} in pool, {stats['rpd_remaining']:,} / {stats['rpd_limit']:,} RPD remaining today)" if count else "No GEMINI_API_KEY set in .env",
+        "gemini": stats,
+    }
+
+
+@router.post("/settings/gemini/probe")
+def settings_gemini_probe(
+    payload: dict | None = Body(None),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.extraction.gemini_extractor import get_key_pool
+    pool = get_key_pool()
+    pool.sync_accounts(db=db)
+    account_idx = payload.get("account_index") if payload and isinstance(payload, dict) else None
+    target_model = getattr(settings, "gemini_model", None) or "gemini-3.1-flash-lite-preview"
+    result = pool.probe(force=True, model=target_model, account_index=account_idx)
+    return {"gemini": result}
+
+
+@router.post("/settings/gemini/switch-account")
+def settings_gemini_switch_account(
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    from app.extraction.gemini_extractor import get_key_pool
+    pool = get_key_pool()
+    pool.sync_accounts(db=db)
+    raw_idx = payload.get("account_index")
+    if raw_idx is None:
+        raise AppError("account_index is required.", 400)
+    try:
+        idx = int(raw_idx)
+    except (ValueError, TypeError):
+        raise AppError("account_index must be an integer.", 400)
+    success = pool.switch_active_account(idx)
+    if not success:
+        raise AppError(f"Invalid account index {idx}.", 400)
+    return {"ok": True, "active_account_index": idx, "gemini": pool.get_quota_stats()}
+
+
+@router.post("/settings/gemini/keys")
+def settings_gemini_add_key(
+    payload: dict,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    import uuid
+    from app.extraction.gemini_extractor import get_key_pool
+
+    raw_key = (payload.get("key") or "").strip()
+    label = (payload.get("label") or "").strip()
+
+    if not raw_key:
+        raise AppError("API key is required.", 400)
+    if len(raw_key) < 30 or not raw_key.startswith("AIzaSy"):
+        raise AppError("Invalid Google Gemini API key format. Keys start with 'AIzaSy' and are at least 35 characters.", 400)
+
+    pool = get_key_pool()
+    pool.sync_accounts(db=db)
+
+    # Check for duplicates across .env and existing manual keys
+    for acc in pool.get_accounts():
+        if acc.key == raw_key:
+            raise AppError(f"This API key is already configured as '{acc.label}'.", 400)
+
+    # Check maximum accounts capacity (e.g. 6)
+    if len(pool.get_accounts()) >= getattr(settings, "gemini_max_accounts", 6):
+        raise AppError(f"Maximum limit of {settings.gemini_max_accounts} accounts reached. Remove an existing key first.", 400)
+
+    # LIVE PROBE GATE: Probe key against Google Generative Language API before saving!
+    target_model = getattr(settings, "gemini_model", None) or "gemini-3.1-flash-lite-preview"
+    probe_res = pool.probe_single_key(raw_key, model=target_model)
+
+    if not probe_res.get("ok"):
+        err = probe_res.get("error") or "Verification failed"
+        status_code = probe_res.get("status_code", 400)
+        raise AppError(
+            f"Google Gemini API rejected this key (HTTP {status_code}): {err}. Key was not added to the pool.",
+            400,
+        )
+
+    # Key is 100% valid! Persist into AppSetting in Postgres
+    setting = db.get(AppSetting, "gemini_manual_api_keys")
+    if not setting:
+        setting = AppSetting(key="gemini_manual_api_keys", value={"keys": []})
+        db.add(setting)
+
+    current_val = dict(setting.value) if isinstance(setting.value, dict) else {}
+    keys_list = list(current_val.get("keys", []))
+
+    new_id = str(uuid.uuid4())
+    account_num = len(pool.get_accounts()) + 1
+    new_account = {
+        "id": new_id,
+        "key": raw_key,
+        "label": label or f"Account {account_num} (Manual)",
+        "added_at": datetime.now(timezone.utc).isoformat(),
+        "last_status": "ready",
+        "last_probed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    keys_list.append(new_account)
+    current_val["keys"] = keys_list
+    setting.value = current_val
+
+    db.commit()
+    db.refresh(setting)
+
+    # Hot reload into in-memory manager
+    pool.sync_accounts(db=db)
+
+    return {
+        "ok": True,
+        "message": f"API Key verified live with Google ({probe_res.get('latency_ms', 0)}ms). Account added to pool.",
+        "account": {
+            "id": new_id,
+            "label": new_account["label"],
+            "masked_key": raw_key[:6] + "..." + raw_key[-4:],
+            "status": "ready",
         },
+        "gemini": pool.get_quota_stats(),
+    }
+
+
+@router.delete("/settings/gemini/keys/{key_id}")
+def settings_gemini_delete_key(
+    key_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    from app.extraction.gemini_extractor import get_key_pool
+
+    setting = db.get(AppSetting, "gemini_manual_api_keys")
+    if not setting or not isinstance(setting.value, dict):
+        raise AppError("No manual keys configured.", 404)
+
+    current_val = dict(setting.value)
+    keys_list = list(current_val.get("keys", []))
+    initial_len = len(keys_list)
+    keys_list = [k for k in keys_list if k.get("id") != key_id]
+
+    if len(keys_list) == initial_len:
+        raise AppError("API key not found or it is defined in .env (cannot delete .env keys from UI).", 404)
+
+    current_val["keys"] = keys_list
+    setting.value = current_val
+    db.commit()
+    db.refresh(setting)
+
+    pool = get_key_pool()
+    pool.sync_accounts(db=db)
+
+    return {
+        "ok": True,
+        "message": "API key successfully removed from pool.",
+        "gemini": pool.get_quota_stats(),
     }
 
 

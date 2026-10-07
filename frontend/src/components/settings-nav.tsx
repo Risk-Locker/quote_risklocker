@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 
 const items: Array<{ href: Route; label: string }> = [
   { href: "/settings/users" as Route, label: "Users" },
+  { href: "/settings/ai-engine" as Route, label: "Gemini AI Fleet" },
   { href: "/settings/system-checks" as Route, label: "System Checks" },
   { href: "/settings/storage" as Route, label: "Storage" },
 ];

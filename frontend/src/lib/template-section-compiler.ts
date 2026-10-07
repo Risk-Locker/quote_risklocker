@@ -84,7 +84,7 @@ export interface Section1Config {
   boxY?: number;
   boxW?: number;
   rowHeight?: number;
-  extrasDisplayMode?: "itemized" | "lump_sum";
+  extrasDisplayMode?: "itemized" | "lump_sum" | "none";
 }
 
 export interface SectionHeaderConfig {
@@ -170,6 +170,7 @@ export const AVAILABLE_VARIABLES: VariableDescriptor[] = [
   { variableId: "coverage_type", labelEn: "Coverage Type", labelZh: "保单种类", category: "policy" },
   { variableId: "cover_period", labelEn: "Cover of Period", labelZh: "保单期限", category: "policy" },
   { variableId: "valuation_type", labelEn: "Valuation Type", labelZh: "估价方式", category: "policy" },
+  { variableId: "authorized_driver", labelEn: "Authorised Driver", labelZh: "授权驾驶人", category: "policy" },
   { variableId: "valid_until", labelEn: "Validity Date", labelZh: "报价有效期", category: "policy" },
 
   { variableId: "coverage_amount", labelEn: "Vehicle Sum Insured", labelZh: "车辆保额", category: "pricing", defaultPrefix: "RM " },
@@ -648,7 +649,7 @@ export function compileSectionsToCanvas(
   const extrasMode = sections.section1.extrasDisplayMode ?? "itemized";
   const simulatedCount = Math.max(0, Math.min(options?.simulatedExtrasCount ?? 0, SAMPLE_SIMULATED_EXTRAS.length));
   const itemizedItemCount = Math.max(1, simulatedCount);
-  const extraRowsCount = extrasMode === "lump_sum" ? 1 : (1 + itemizedItemCount);
+  const extraRowsCount = extrasMode === "none" ? 0 : (extrasMode === "lump_sum" ? 1 : (1 + itemizedItemCount));
   const totalRows = visibleFields.length + extraRowsCount;
 
   const firstLabel = baseElements.find((e) => (e.id.startsWith("label_") || e.id.startsWith("lbl_")) && !e.id.includes("sim_extra"));
@@ -971,15 +972,16 @@ export function compileSectionsToCanvas(
   });
 
   // Calculate dynamic vertical expansion based on row count
+  const hasValAuthorizedDriver = baseElements.some((e) => e.id === "val_authorized_driver");
   const isV2Layout = baseElements.some((e) => e.id === "payment_account_details_img" || e.id === "val_excess") ||
     Boolean(sections.rightContainers?.some((c) => (c.boxY ?? 0) <= 100));
-  const baselineCount = isV2Layout ? 9 : 8;
+  const baselineCount = hasValAuthorizedDriver ? 10 : (isV2Layout ? 9 : 8);
   const deltaY = hasDenseLayout
     ? Math.max(0, (visibleFields.length - baselineCount) * rowH)
     : Math.max(0, (totalRows - 9) * rowH);
 
   // In production mode (when simulated extras are not requested), append canonical premium_info_block
-  if (simulatedCount === 0 && extrasMode !== "lump_sum" && hasDenseLayout) {
+  if (simulatedCount === 0 && hasDenseLayout) {
     const premiumY = startY + visibleFields.length * rowH;
     compiledRows.push({
       id: "premium_info_block",
@@ -990,10 +992,12 @@ export function compileSectionsToCanvas(
       h: 130,
       z: 4,
       rowHeight: rowH,
+      extras_mode: extrasMode,
       labels: {
         extras: "EXTRAS / 附加项目",
         premium: "Insurance Premium / 保费",
-        roadtax: "Roadtax / 路税",
+        roadtax: "Roadtax and Runner Fee / 路税及服务费",
+        runner: "Runner Fee / 服务费",
         total: "TOTAL PAYABLE",
       },
       locked: true,

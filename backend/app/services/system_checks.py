@@ -57,34 +57,38 @@ def playwright_ready() -> tuple[bool, str]:
     return False, "Install Chromium for PDF rendering: python -m playwright install chromium"
 
 
-def check_gemini_api(settings: Settings) -> tuple[str, str]:
-    keys = settings.gemini_api_keys
-    if not keys:
-        return "Needs Setup", "No GEMINI_API_KEY set in .env (offline regex fallback active)."
+def check_gemini_api(settings: Settings, db: Session | None = None) -> tuple[str, str]:
+    from app.extraction.gemini_extractor import get_key_pool
 
-    model = settings.gemini_model or "gemini-3.5-flash"
-    if model in {"gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-flash-lite"}:
-        model = "gemini-3.5-flash"
-    count = len(keys)
-    masked = [f"{k[:6]}...{k[-4:]}" if len(k) > 10 else "***" for k in keys]
+    pool = get_key_pool()
+    if db is not None:
+        pool.sync_accounts(db=db)
+    accounts = pool.get_accounts()
+    if not accounts:
+        return "Needs Setup", "No Gemini API keys configured in .env or Settings (offline regex fallback active)."
+
+    stats = pool.probe(force=False)
+    count = len(accounts)
+    masked = [acc.masked_key for acc in accounts]
     pool_desc = f"{count} key{'s' if count > 1 else ''} in pool ({', '.join(masked)})"
 
-    try:
-        import httpx
+    status = stats.get("status")
+    model = settings.gemini_model or "gemini-3.1-flash-lite-preview"
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}?key={keys[0]}"
-        with httpx.Client(timeout=4.0) as client:
-            resp = client.get(url)
-            if resp.status_code == 200:
-                return "Ready", f"Connected to {model} Free Tier · {pool_desc}"
-            elif resp.status_code == 400:
-                return "Needs Setup", f"Invalid API key or project configuration for {model} · {pool_desc}"
-            elif resp.status_code == 429:
-                return "Ready", f"Rate limited on key 1 (pool will auto-failover to backup keys) · {pool_desc}"
-            else:
-                return "Needs Setup", f"Gemini API returned HTTP {resp.status_code} · {pool_desc}"
-    except Exception as exc:
-        return "Unavailable", f"Could not reach Google Gemini API ({exc.__class__.__name__}) · {pool_desc}"
+    if status in ("ready", "untested"):
+        return "Ready", f"Connected to {model} · Live Verified · {pool_desc}"
+    elif status == "cooling_rpm":
+        return "Ready", f"Cooling (10 RPM limit) · Automatic failover active · {pool_desc}"
+    elif status == "denied":
+        err = stats.get("last_error") or "Your project has been denied access."
+        return "Needs Setup", f"Google API returned HTTP 403 (Project Denied Access): {err} · {pool_desc}"
+    elif status == "exhausted_rpd":
+        return "Needs Setup", f"Daily safety quota reached (440 RPD) · {pool_desc}"
+    elif status == "invalid_key":
+        return "Needs Setup", f"Invalid API key or project configuration for {model} · {pool_desc}"
+    else:
+        err = stats.get("last_error") or "Unknown status"
+        return "Needs Setup", f"Gemini API check: {err} · {pool_desc}"
 
 
 def get_system_checks(settings: Settings, db: Session) -> list[dict]:
@@ -103,7 +107,7 @@ def get_system_checks(settings: Settings, db: Session) -> list[dict]:
         )
 
     # Gemini AI Extraction Check
-    gemini_status, gemini_msg = check_gemini_api(settings)
+    gemini_status, gemini_msg = check_gemini_api(settings, db=db)
     checks.append(
         {
             "name": "Gemini AI Multimodal Extraction",

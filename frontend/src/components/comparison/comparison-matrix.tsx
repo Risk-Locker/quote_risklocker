@@ -57,6 +57,8 @@ interface ComparisonMatrixProps {
 interface TenureSpec {
   id: string;
   vehicle_no: string;
+  is_plate_undetected?: boolean;
+  tracking_by_chassis?: boolean;
   customer_name: string;
   ic_no?: string;
   formatted_ic?: string;
@@ -128,8 +130,18 @@ interface ComparisonEntry {
   uploaded_at?: string;
   notes: string | null;
   quotation_ref?: string | null;
+  source_quotation_no?: string | null;
   is_takaful?: boolean;
   ncd_percentage?: number | null;
+  customer_name?: string | null;
+  customer_address?: string | null;
+  ic_or_brn?: string | null;
+  vehicle_no?: string | null;
+  engine_no?: string | null;
+  chassis_no?: string | null;
+  vehicle_year?: string | null;
+  engine_cc?: string | null;
+  vehicle_age?: number | null;
   detailed_perils?: Array<{
     name: string;
     coverage_limit?: string | number | null;
@@ -336,11 +348,12 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
 
   // Edit state for Fixed Costs & Customer/Vehicle Specs
   const [editingFixedCosts, setEditingFixedCosts] = useState(false);
+  const [refreshingLedger, setRefreshingLedger] = useState(false);
   const [customerNameInput, setCustomerNameInput] = useState("");
   const [icNoInput, setIcNoInput] = useState("");
   const [roadTaxInput, setRoadTaxInput] = useState("70");
   const [runnerFeeInput, setRunnerFeeInput] = useState("50");
-  const [windscreenInput, setWindscreenInput] = useState("1700");
+  const [windscreenInput, setWindscreenInput] = useState("");
   const [engineCcInput, setEngineCcInput] = useState("");
   const [engineNoInput, setEngineNoInput] = useState("");
   const [chassisNoInput, setChassisNoInput] = useState("");
@@ -407,7 +420,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     setIcNoInput(tenure.ic_no || "");
     setRoadTaxInput(String(tenure.road_tax));
     setRunnerFeeInput(String(tenure.runner_fee));
-    setWindscreenInput(String(tenure.windscreen_target || "1700"));
+    setWindscreenInput(tenure.windscreen_target ? String(tenure.windscreen_target) : "");
     setEngineCcInput(tenure.engine_cc || "");
     setEngineNoInput(tenure.engine_no || "");
     setChassisNoInput(tenure.chassis_no || "");
@@ -418,6 +431,24 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     }
     if (tenure.coverage_end_date) {
       setEndDateInput(tenure.coverage_end_date.split("T")[0]);
+    }
+  };
+
+  const handleRefreshLedger = async () => {
+    if (!tenureId) return;
+    try {
+      setRefreshingLedger(true);
+      const res = await api<any>(`/comparison/${tenureId}/refresh-ledger`, {
+        method: "POST",
+      });
+      setData(res);
+      if (res.tenure) {
+        populateEditInputs(res.tenure);
+      }
+    } catch (err: any) {
+      alert("Failed to refresh ledger: " + (err.message || String(err)));
+    } finally {
+      setRefreshingLedger(false);
     }
   };
 
@@ -1164,13 +1195,21 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               )}
             </div>
 
-            {/* Row 4: Valuation */}
-            <div className="mt-2 pt-1 border-t border-[#e5e5ea]/80 flex items-center justify-between">
-              <span className="text-xs text-[#6e6e73] font-medium">
-                {entry.valuation_type === "agreed_value" ? "Agreed Value 约定价" : "Market Value 市价"}
-              </span>
-              <span className="font-mono text-[10px] text-[#8e8e93]">
-                {entry.valuation_type === "agreed_value" ? "[A]" : "[M]"}
+            {/* Row 4: Valuation & Quotation Reference */}
+            <div className="mt-2 pt-1 border-t border-[#e5e5ea]/80 flex items-center justify-between gap-1.5">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-xs text-[#6e6e73] font-medium">
+                  {entry.valuation_type === "agreed_value" ? "Agreed Value 约定价" : "Market Value 市价"}
+                </span>
+                <span className="font-mono text-[10px] text-[#8e8e93]">
+                  {entry.valuation_type === "agreed_value" ? "[A]" : "[M]"}
+                </span>
+              </div>
+              <span
+                className="font-mono text-[10px] text-[#6e6e73] truncate max-w-[130px] shrink-0"
+                title={entry.source_quotation_no || entry.quotation_ref || undefined}
+              >
+                Ref: {entry.source_quotation_no || entry.quotation_ref || "—"}
               </span>
             </div>
           </div>
@@ -1336,136 +1375,6 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               </div>
             )}
 
-            {/* Collapsible Underwriter Breakdown & Basic Figure */}
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={() =>
-                  setExpandedBreakdownId((prev) => ({
-                    ...prev,
-                    [entry.id]: !prev[entry.id],
-                  }))
-                }
-                className="w-full flex items-center justify-between py-1.5 px-2 rounded-lg bg-[#f5f5f7] hover:bg-neutral-200 text-[11px] font-bold text-[#1b1717] transition-colors cursor-pointer"
-              >
-                <span>{entry.basic_figure_name || (entry.is_takaful ? "Basic Contribution" : "Basic Premium")} &amp; Breakdown</span>
-                <span className="text-xs text-[#6e6e73] font-mono">
-                  {expandedBreakdownId[entry.id] ? "▲ Hide" : "▼ Show"}
-                </span>
-              </button>
-
-              {expandedBreakdownId[entry.id] && (
-                <div className="mt-2 p-2.5 rounded-xl bg-neutral-50 border border-[#e5e5ea] space-y-2 text-xs">
-                  {/* Basic Contribution / Basic Premium with Inline Edit */}
-                  <div className="flex items-center justify-between">
-                    <span className="text-[#6e6e73] font-medium">
-                      {entry.basic_figure_name || (entry.is_takaful ? "Basic Contribution" : "Basic Premium")}:
-                    </span>
-                    {editingBasicFigureEntryId === entry.id ? (
-                      <div className="flex items-center gap-1">
-                        <span className="text-xs text-[#6e6e73]">RM</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={basicFigureInput}
-                          onChange={(e) => setBasicFigureInput(e.target.value)}
-                          className="w-20 px-1.5 py-0.5 text-xs font-mono font-bold bg-white border border-[#1b1717] rounded focus:outline-none"
-                          autoFocus
-                        />
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            const val = parseFloat(basicFigureInput);
-                            if (!isNaN(val)) {
-                              try {
-                                await api(`/comparison/${tenureId}/entries/${entry.id}`, {
-                                  method: "PATCH",
-                                  body: JSON.stringify({ basic_figure_amount: val }),
-                                });
-                                await fetchComparison(true);
-                              } catch (err: any) {
-                                alert("Failed to update figure: " + err.message);
-                              }
-                            }
-                            setEditingBasicFigureEntryId(null);
-                          }}
-                          className="px-1.5 py-0.5 text-[10px] font-bold bg-[#1b1717] text-white rounded hover:bg-neutral-800 cursor-pointer"
-                        >
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingBasicFigureEntryId(null)}
-                          className="px-1 py-0.5 text-[10px] text-[#6e6e73] hover:text-[#1b1717] cursor-pointer"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono font-bold text-[#1b1717]">
-                          RM {(entry.basic_figure_amount || 0).toFixed(2)}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingBasicFigureEntryId(entry.id);
-                            setBasicFigureInput(String(entry.basic_figure_amount || ""));
-                          }}
-                          className="text-[10px] text-[#6e6e73] hover:text-[#1b1717] underline cursor-pointer"
-                          title="Edit basic figure to correct OCR typos"
-                        >
-                          Edit
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Sum Insured */}
-                  <div className="flex items-center justify-between">
-                    <span className="text-[#6e6e73] font-medium">Sum Insured:</span>
-                    <span className="font-mono font-bold text-[#1b1717]">
-                      RM {entry.sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-
-                  {/* Net Rate Factor: 6 decimals (Basic Figure ÷ Sum Insured) */}
-                  <div className="flex items-center justify-between">
-                    <span className="text-[#6e6e73] font-medium">Net Rate Factor:</span>
-                    <span
-                      className="font-mono font-bold text-[#1b1717]"
-                      title={`${entry.basic_figure_name || "Basic Figure"} RM ${(entry.basic_figure_amount || 0).toFixed(2)} ÷ RM ${entry.sum_insured.toFixed(2)}`}
-                    >
-                      {entry.sum_insured > 0 && entry.basic_figure_amount != null
-                        ? (entry.basic_figure_amount / entry.sum_insured).toFixed(6)
-                        : entry.rate_factor_formatted || "—"}
-                    </span>
-                  </div>
-
-                  {/* Betterment Rule Analysis */}
-                  <div className="pt-1.5 border-t border-[#e5e5ea]/80 text-[11px] text-[#6e6e73] space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span>Vehicle Age:</span>
-                      <span className="font-semibold text-[#1b1717]">
-                        {data?.vehicle_age != null ? `${data.vehicle_age} Years` : "—"}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>Betterment Scale:</span>
-                      <span className="font-semibold text-[#1b1717]">
-                        {entry.betterment_rate != null ? `${entry.betterment_rate}%` : (entry.betterment_display || "—")}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>Waiver Status:</span>
-                      <span className={`font-semibold ${entry.waiver_betterment ? "text-emerald-700" : "text-amber-700"}`}>
-                        {entry.waiver_betterment ? "Waived (0% Co-pay)" : "Standard Tariff Co-pay"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
         </div>
 
@@ -1621,7 +1530,9 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             </div>
             <div className="text-right text-xs space-y-0.5">
               <p className="font-mono font-bold text-sm text-[#1b1717]">
-                {tenure.vehicle_no || tenure.chassis_no || "Unregistered Vehicle"}
+                {tenure.is_plate_undetected || tenure.vehicle_no === "N/A"
+                  ? `N/A · Chassis: ${tenure.chassis_no || "N/A"}`
+                  : (tenure.vehicle_no || tenure.chassis_no || "Unregistered Vehicle")}
               </p>
               <p className="font-semibold text-[#454545]">{tenure.customer_name} {tenure.ic_no ? `(${tenure.ic_no})` : ""}</p>
               <p className="text-[#6e6e73]">{tenure.vehicle_model} · {tenure.engine_cc}</p>
@@ -1919,9 +1830,21 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       <div className="rounded-2xl border border-[#e5e5ea] bg-white p-5 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-3 flex-wrap">
-            <span className="rounded-lg bg-[#f5f5f7] px-3 py-1 font-mono text-sm font-bold text-[#1b1717] border border-[#e5e5ea]">
-              {tenure.vehicle_no}
-            </span>
+            {tenure.is_plate_undetected || tenure.vehicle_no === "N/A" ? (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="rounded-lg bg-neutral-100 px-3 py-1 font-mono text-sm font-bold text-neutral-600 border border-neutral-300">
+                  N/A
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
+                  <span className="size-2 rounded-full bg-amber-500 animate-pulse" />
+                  <span>Plate Undetected · Tracking by Chassis: {tenure.chassis_no || "N/A"}</span>
+                </span>
+              </div>
+            ) : (
+              <span className="rounded-lg bg-[#f5f5f7] px-3 py-1 font-mono text-sm font-bold text-[#1b1717] border border-[#e5e5ea]">
+                {tenure.vehicle_no}
+              </span>
+            )}
             <h1 className="text-xl font-bold tracking-tight text-[#1b1717]">
               {tenure.customer_name}
             </h1>
@@ -2112,19 +2035,34 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             <span className="text-xs font-bold uppercase tracking-wider text-[#1b1717]">
               Customer &amp; Vehicle Ledger
             </span>
-            <button
-              type="button"
-              onClick={() => {
-                if (!editingFixedCosts && data?.tenure) {
-                  populateEditInputs(data.tenure);
-                }
-                setEditingFixedCosts(!editingFixedCosts);
-              }}
-              className="rounded p-1 text-[#454545] hover:text-[#1b1717] hover:bg-neutral-200 transition-colors no-print print:hidden"
-              title="Edit customer, vehicle & fixed charges"
-            >
-              <PencilSimple size={15} weight="bold" />
-            </button>
+            <div className="flex items-center gap-1.5 no-print print:hidden">
+              <button
+                type="button"
+                onClick={handleRefreshLedger}
+                disabled={refreshingLedger}
+                className="rounded p-1 text-[#454545] hover:text-[#1b1717] hover:bg-neutral-200 transition-colors disabled:opacity-50 cursor-pointer"
+                title="Re-extract customer & vehicle data from latest uploaded quotes and recalculate road tax"
+              >
+                <ArrowsClockwise
+                  size={15}
+                  weight="bold"
+                  className={refreshingLedger ? "animate-spin text-[#1b1717]" : ""}
+                />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!editingFixedCosts && data?.tenure) {
+                    populateEditInputs(data.tenure);
+                  }
+                  setEditingFixedCosts(!editingFixedCosts);
+                }}
+                className="rounded p-1 text-[#454545] hover:text-[#1b1717] hover:bg-neutral-200 transition-colors cursor-pointer"
+                title="Edit customer, vehicle & fixed charges"
+              >
+                <PencilSimple size={15} weight="bold" />
+              </button>
+            </div>
           </div>
 
           <div className="p-4 space-y-4 text-xs divide-y divide-[#e5e5ea]">
@@ -2365,6 +2303,16 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                 </div>
               ) : (
                 <div className="space-y-1.5 text-xs text-[#454545]">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[#6e6e73]">Registration No:</span>
+                    {tenure.is_plate_undetected || tenure.vehicle_no === "N/A" ? (
+                      <span className="font-mono font-bold text-[11px] text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                        N/A (Undetected)
+                      </span>
+                    ) : (
+                      <span className="font-mono font-bold text-[#1b1717]">{tenure.vehicle_no}</span>
+                    )}
+                  </div>
                   <div className="flex justify-between">
                     <span className="text-[#6e6e73]">Model:</span>
                     <span className="font-semibold text-[#1b1717]">{tenure.vehicle_model}</span>
@@ -2395,7 +2343,9 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                   <div className="flex justify-between">
                     <span className="text-[#6e6e73]">Target Windscreen:</span>
                     <span className="font-mono font-bold text-[#1b1717]">
-                      RM {tenure.windscreen_target ? tenure.windscreen_target.toLocaleString() : "1,700.00"}
+                      {tenure.windscreen_target && tenure.windscreen_target > 0
+                        ? `RM ${tenure.windscreen_target.toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
+                        : "None (RM 0.00)"}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -2481,45 +2431,125 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               );
             })}
 
-            {/* Empty State Banner when no quotes are linked yet */}
+            {/* Empty State: Marketing Comparison Table with Previous Policy Baseline */}
             {companyGroups.length === 0 && (
-              <div className="flex-1 min-w-[340px] max-w-[560px] p-8 rounded-2xl border-2 border-dashed border-[#e5e5ea] bg-white text-center flex flex-col items-center justify-center gap-4">
-                <div className="size-14 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center">
-                  <Columns size={28} weight="duotone" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-[#1b1717]">
-                    {isCompilingBatch || (data?.pending_jobs_count && data.pending_jobs_count > 0)
-                      ? "Extracting Quotation Documents..."
-                      : "No Insurer Quotes Added Yet"}
-                  </h3>
-                  <p className="text-xs text-[#6e6e73] max-w-sm mt-1 leading-relaxed">
-                    {isCompilingBatch || (data?.pending_jobs_count && data.pending_jobs_count > 0)
-                      ? "Our extraction pipeline is reading underwriter PDFs, extracting sums insured, motor premiums, and benefit riders. This matrix will refresh automatically."
-                      : `No quotation PDFs are linked to ${tenure.vehicle_no}. Upload underwriter quotation PDFs or enter manual portal figures to begin side-by-side comparison.`}
-                  </p>
-                </div>
+              <>
+                {/* 1. Previous Policy Baseline Reference Column */}
+                {previous_policy ? (
+                  <div className="w-[285px] shrink-0 rounded-2xl border-2 border-dashed border-neutral-300 bg-neutral-50/50 p-4 shadow-2xs flex flex-col justify-between relative">
+                    <div>
+                      {/* Top Baseline Header */}
+                      <div className="flex items-center justify-between pb-2.5 border-b border-neutral-200 mb-3">
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-bold uppercase tracking-wider text-neutral-900">
+                              Previous Policy
+                            </span>
+                            <span className="px-1.5 py-0.2 rounded bg-neutral-200 text-neutral-700 text-[9px] font-bold">
+                              {previous_policy.year || (tenure.coverage_start_date ? new Date(tenure.coverage_start_date).getFullYear() - 1 : "Prior Year")}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-neutral-500 mt-0.5">Baseline Reference</p>
+                        </div>
+                        {previous_policy.insurer && (
+                          <span className="rounded bg-white px-2 py-0.5 text-xs font-bold text-neutral-900 border border-neutral-200 shadow-2xs">
+                            {previous_policy.insurer}
+                          </span>
+                        )}
+                      </div>
 
-                <div className="flex items-center gap-2 pt-2">
-                  <Button
-                    type="button"
-                    onClick={() => router.push(`/upload/marketing-comparison?tenure_id=${tenureId}` as Route)}
-                    className="bg-[#1b1717] hover:bg-black text-white text-xs font-bold px-4 py-2 rounded-xl"
-                  >
-                    <Plus size={14} weight="bold" className="mr-1.5" />
-                    Upload Quotation PDFs
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => fetchComparison()}
-                    className="text-xs font-semibold px-3 py-2 rounded-xl"
-                  >
-                    <ArrowsClockwise size={14} weight="bold" className="mr-1" />
-                    Refresh
-                  </Button>
+                      {/* Policy Specifications & Figures */}
+                      <div className="space-y-2 text-xs">
+                        <div className="flex justify-between py-1 border-b border-neutral-200/60">
+                          <span className="text-neutral-500">Sum Insured:</span>
+                          <span className="font-mono font-bold text-neutral-900">
+                            {previous_policy.sum_insured
+                              ? `RM ${previous_policy.sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
+                              : "—"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between py-1 border-b border-neutral-200/60">
+                          <span className="text-neutral-500">Premium Paid:</span>
+                          <span className="font-mono font-bold text-emerald-700">
+                            {previous_policy.insurance_premium
+                              ? `RM ${previous_policy.insurance_premium.toFixed(2)}`
+                              : "—"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between py-1 border-b border-neutral-200/60">
+                          <span className="text-neutral-500">Fixed Costs:</span>
+                          <span className="font-mono font-medium text-neutral-700">
+                            RM {(tenure.road_tax + tenure.runner_fee).toFixed(2)} (Tax + Runner)
+                          </span>
+                        </div>
+                        <div className="flex justify-between py-1 border-b border-neutral-200/60">
+                          <span className="text-neutral-500">Vehicle / Model:</span>
+                          <span className="font-medium text-neutral-800 text-right truncate max-w-[150px]">
+                            {previous_policy.yom || tenure.manufacture_year || ""} {previous_policy.model || tenure.vehicle_model}
+                          </span>
+                        </div>
+                        <div className="flex justify-between py-1 border-b border-neutral-200/60">
+                          <span className="text-neutral-500">Period:</span>
+                          <span className="font-mono text-[11px] text-neutral-600">
+                            {previous_policy.period}
+                          </span>
+                        </div>
+                        <div className="pt-1">
+                          <span className="text-neutral-500 block text-[11px] mb-1">Included Perils:</span>
+                          <span className="inline-block bg-white border border-neutral-200 rounded px-2 py-1 text-[11px] text-neutral-700 font-medium">
+                            {previous_policy.perils || "Standard Policy Coverage"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-neutral-200 text-center">
+                      <span className="text-[10px] text-neutral-400 font-medium">
+                        ✓ Prior policy loaded from database
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* 2. Upload Underwriter Quotations Dropzone & Action Card */}
+                <div className="flex-1 min-w-[340px] max-w-[540px] p-8 rounded-2xl border-2 border-dashed border-[#e5e5ea] bg-white text-center flex flex-col items-center justify-center gap-4">
+                  <div className="size-14 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                    <Columns size={28} weight="duotone" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-[#1b1717]">
+                      {isCompilingBatch || (data?.pending_jobs_count && data.pending_jobs_count > 0)
+                        ? "Extracting Quotation Documents..."
+                        : `${tenure.coverage_start_date ? new Date(tenure.coverage_start_date).getFullYear() : "2027"} Renewal Intake Workspace`}
+                    </h3>
+                    <p className="text-xs text-[#6e6e73] max-w-sm mt-1 leading-relaxed">
+                      {isCompilingBatch || (data?.pending_jobs_count && data.pending_jobs_count > 0)
+                        ? "Our extraction pipeline is reading underwriter PDFs, extracting sums insured, motor premiums, and benefit riders. This matrix will refresh automatically."
+                        : `Showing previous year policy details as baseline for ${tenure.vehicle_no}. Upload incoming underwriter quotation PDFs or enter portal quotes manually.`}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-2">
+                    <Button
+                      type="button"
+                      onClick={() => router.push(`/upload/marketing-comparison?tenure_id=${tenureId}` as Route)}
+                      className="bg-[#1b1717] hover:bg-black text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer"
+                    >
+                      <Plus size={14} weight="bold" className="mr-1.5" />
+                      Upload Quotation PDFs
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => fetchComparison()}
+                      className="text-xs font-semibold px-3 py-2 rounded-xl cursor-pointer"
+                    >
+                      <ArrowsClockwise size={14} weight="bold" className="mr-1" />
+                      Refresh
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              </>
             )}
 
             {/* "+ Add Insurer Quote" Action Card */}
@@ -3021,7 +3051,9 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                   <div className="text-right space-y-0.5">
                     <div className="inline-block bg-[#f5f5f7] border border-[#e5e5ea] px-3 py-1 rounded-lg">
                       <span className="font-mono font-bold text-base text-[#1b1717]">
-                        {tenure.vehicle_no || tenure.chassis_no || "Unregistered Vehicle"}
+                        {tenure.is_plate_undetected || tenure.vehicle_no === "N/A"
+                          ? `N/A · Chassis: ${tenure.chassis_no || "N/A"}`
+                          : (tenure.vehicle_no || tenure.chassis_no || "Unregistered Vehicle")}
                       </span>
                     </div>
                     <p className="font-bold text-xs text-[#1b1717]">{tenure.customer_name}</p>
@@ -3170,9 +3202,10 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                         <div className="pt-3 mt-3 border-t border-neutral-200 text-center">
                           <span className="text-[10px] font-mono text-neutral-400">
                             Ref:{" "}
-                            {card.quotation_ref ||
-                              card.notes ||
-                              (card.session_id ? `ID: ${card.session_id.slice(0, 8)}` : "N/A")}
+                            {card.source_quotation_no ||
+                              (card.quotation_ref && !card.quotation_ref.startsWith("RL")
+                                ? card.quotation_ref
+                                : card.notes || (card.session_id ? `ID: ${card.session_id.slice(0, 8)}` : "N/A"))}
                           </span>
                         </div>
                       </div>
@@ -3337,7 +3370,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           setEditingEntry(null);
         }}
         onSave={handleSaveEntry}
-        initialData={editingEntry}
+        initialData={editingEntry ? { ...editingEntry, vehicle_age: editingEntry.vehicle_age ?? data?.vehicle_age } : null}
         tenureId={tenureId}
         tenureStartDate={tenure?.coverage_start_date}
         onUploadSuccess={() => fetchComparison()}

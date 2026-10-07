@@ -118,12 +118,19 @@ def get_workspace_template_config(db, user, session_id: str) -> dict:
                 el["assetId"] = "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f"
                 el["assetSlot"] = "risklocker_logo"
                 el["type"] = "image"
+            elif slot in {"qr_code", "duitnow_payment_details", "bank_qr_layout", "bank_qr_layout_dark"} or eid in {"qr_code", "duitnow_img", "rc_b_duitnow_img", "payment_account_details_img", "rc_b_qr_code"}:
+                el["type"] = "image"
+                el["assetSlot"] = "bank_qr_layout_dark"
+                el["assetId"] = "c4003185-0000-4000-8000-000000000001"
             elif slot == "bank_logo" or eid in {"bank_logo", "pay_bank_logo"}:
                 el["assetId"] = "2168eaee-3e56-4903-8c4f-841f01ff2407"
                 el["assetSlot"] = "bank_logo"
                 el["type"] = "image"
                 if el.get("text") is not None:
                     el["text"] = None
+
+        # Filter out legacy overlapping driver card under QR if present
+        canvas["elements"] = [el for el in canvas["elements"] if el.get("id") != "rc_b_driver_card"]
 
     return {
         "template_id": revision.template_id,
