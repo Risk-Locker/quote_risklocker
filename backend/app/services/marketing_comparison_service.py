@@ -1916,6 +1916,8 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "model": (tenure.tracked_vehicle.car_model if tenure.tracked_vehicle else None) or (prev_tenure.tracked_vehicle.car_model if prev_tenure.tracked_vehicle else "Standard Model"),
             "yom": getattr(tenure.tracked_vehicle, "manufacture_year", None) or getattr(prev_tenure.tracked_vehicle, "manufacture_year", None) or 2023,
             "sub_agent": tenure.sub_agent_name or prev_tenure.sub_agent_name or "",
+            "windscreen": float(best_prev.windscreen_sum_insured) if best_prev and best_prev.windscreen_sum_insured else None,
+            "towing": best_prev.towing_km or best_prev.towing_limit if best_prev else "Unlimited",
         }
 
         # Carry over NCD percentage if not yet set on current tenure

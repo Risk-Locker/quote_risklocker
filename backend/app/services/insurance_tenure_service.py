@@ -768,6 +768,7 @@ def ensure_next_year_renewal_tenures(
 
     if created_tenures:
         db.flush()
+        db.commit()
 
     return created_tenures
 

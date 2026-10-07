@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, ArrowsClockwise, ArrowCounterClockwise, Trash } from "@phosphor-icons/react";
+import { Plus, ArrowsClockwise, ArrowCounterClockwise, Trash, PencilSimple } from "@phosphor-icons/react";
 import { SettingsNav } from "@/components/settings-nav";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
@@ -10,13 +10,14 @@ import { Select } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Dialog } from "@/components/ui/dialog";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 
-type User = { id: string; name?: string | null; email: string; role: string; status: string };
+type User = { id: string; name?: string | null; email: string; role: string; status: string; is_online?: boolean };
 
 export default function SettingsUsersPage() {
   const { user: currentUser } = useAuth();
@@ -27,6 +28,7 @@ export default function SettingsUsersPage() {
   const [role, setRole] = useState("staff");
   const [error, setError] = useState("");
   const [targetUserToDelete, setTargetUserToDelete] = useState<User | null>(null);
+  const [targetUserToEdit, setTargetUserToEdit] = useState<User | null>(null);
   const [deleting, setDeleting] = useState(false);
   const { toast } = useToast();
 
@@ -86,6 +88,18 @@ export default function SettingsUsersPage() {
   };
 
   const isDev = currentUser?.role === "dev";
+
+  const getEditRestriction = (targetUser: User): string | null => {
+    if (isDev) {
+      if (targetUser.role !== "staff" && targetUser.id !== currentUser?.id) {
+        return "Protected: Developers may only modify staff accounts";
+      }
+    }
+    if (currentUser?.role === "admin" && targetUser.role === "super_admin") {
+      return "Protected: Administrators cannot modify Super Admin accounts";
+    }
+    return null;
+  };
 
   const getDeleteRestriction = (targetUser: User): string | null => {
     if (targetUser.id === currentUser?.id) {
@@ -173,10 +187,42 @@ export default function SettingsUsersPage() {
                           <Badge variant={roleVariant(u.role)}>{u.role}</Badge>
                         </td>
                         <td className="px-4 py-2.5 text-[14px]">
-                          <Badge variant={u.status === "active" ? "success" : "default"}>{u.status}</Badge>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={u.status === "active" ? "success" : "default"}>{u.status}</Badge>
+                            {u.is_online && (
+                              <span className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--rl-green)]">
+                                <span className="w-2 h-2 rounded-full bg-[var(--rl-green)] animate-pulse" />
+                                Online
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-4 py-2.5 text-[14px]">
                           <div className="flex items-center gap-2">
+                            {!getEditRestriction(u) ? (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                icon={<PencilSimple size={14} weight="bold" />}
+                                onClick={() => setTargetUserToEdit(u)}
+                              >
+                                Edit
+                              </Button>
+                            ) : (
+                              <Tooltip content={getEditRestriction(u)!}>
+                                <span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled
+                                    icon={<PencilSimple size={14} weight="bold" />}
+                                    className="opacity-40 cursor-not-allowed"
+                                  >
+                                    Edit
+                                  </Button>
+                                </span>
+                              </Tooltip>
+                            )}
                             <Button
                               variant="secondary"
                               size="sm"
@@ -230,6 +276,120 @@ export default function SettingsUsersPage() {
         loading={deleting}
         onConfirm={handleDeleteUser}
       />
+
+      <EditUserDialog 
+        user={targetUserToEdit} 
+        open={Boolean(targetUserToEdit)} 
+        onOpenChange={(open) => !open && setTargetUserToEdit(null)}
+        onSave={load}
+        isDev={isDev}
+      />
     </AppShell>
+  );
+}
+
+function EditUserDialog({ 
+  user, 
+  open, 
+  onOpenChange, 
+  onSave, 
+  isDev 
+}: { 
+  user: User | null; 
+  open: boolean; 
+  onOpenChange: (open: boolean) => void; 
+  onSave: () => void;
+  isDev: boolean;
+}) {
+  const [name, setName] = useState("");
+  const [role, setRole] = useState("staff");
+  const [status, setStatus] = useState("active");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (user && open) {
+      setName(user.name || "");
+      setRole(user.role);
+      setStatus(user.status);
+      setPassword("");
+      setError("");
+    }
+  }, [user, open]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user) return;
+    setSaving(true);
+    setError("");
+    try {
+      const payload: any = { role, status };
+      if (name.trim() !== (user.name || "")) payload.name = name.trim() || null;
+      if (password) payload.password = password;
+      
+      await api(`/users/${user.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+      toast("User updated.", "success");
+      onSave();
+      onOpenChange(false);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const readOnlyRole = isDev && (user?.role === "admin" || user?.role === "super_admin");
+
+  return (
+    <Dialog 
+      open={open}
+      onOpenChange={onOpenChange}
+      title={`Edit User: ${user?.email || ""}`}
+      description="Update roles, names, and passwords. Changing password revokes active sessions."
+    >
+      <form onSubmit={handleSubmit} className="grid gap-4 mt-2">
+        {error && <div className="text-[13px] text-[var(--rl-red)] font-medium bg-[var(--rl-red-light)] px-3 py-2 rounded-[var(--rl-radius-sm)]">{error}</div>}
+        
+        <div className="grid gap-1.5">
+          <label className="text-[13px] font-semibold text-[var(--rl-text-strong)]">Staff Name</label>
+          <Input placeholder="e.g. Nina or Alex" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+
+        <div className="grid gap-1.5">
+          <label className="text-[13px] font-semibold text-[var(--rl-text-strong)]">Role</label>
+          <Select value={role} onChange={(e) => setRole(e.target.value)} disabled={readOnlyRole}>
+            <option value="staff">Staff</option>
+            {(!isDev || role === "dev") && <option value="dev">Dev</option>}
+            {(!isDev || role === "admin") && <option value="admin">Admin</option>}
+            {role === "super_admin" && <option value="super_admin">Super Admin</option>}
+          </Select>
+          {readOnlyRole && <p className="text-[12px] text-[var(--rl-text-muted)] italic">Developers cannot modify administrator roles.</p>}
+        </div>
+
+        <div className="grid gap-1.5">
+          <label className="text-[13px] font-semibold text-[var(--rl-text-strong)]">Status</label>
+          <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </Select>
+        </div>
+
+        <div className="grid gap-1.5">
+          <label className="text-[13px] font-semibold text-[var(--rl-text-strong)]">New Password (optional)</label>
+          <Input type="password" placeholder="Min 8 characters to change" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} />
+          {password && <span className="text-[12px] text-[var(--rl-text-muted)] italic">Changing password will instantly revoke all active sessions.</span>}
+        </div>
+
+        <div className="flex justify-end gap-2 mt-4">
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button type="submit" loading={saving}>Save Changes</Button>
+        </div>
+      </form>
+    </Dialog>
   );
 }

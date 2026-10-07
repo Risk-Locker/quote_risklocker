@@ -71,8 +71,8 @@ export default function SettingsAiEnginePage() {
       setValidationError("Please paste an API key.");
       return;
     }
-    if (!trimmedKey.startsWith("AIzaSy") || trimmedKey.length < 30) {
-      setValidationError("Invalid key format. Google Gemini API keys start with 'AIzaSy' and are at least 35 characters.");
+    if (trimmedKey.length < 20) {
+      setValidationError("Invalid key format. Google API keys are at least 20 characters.");
       return;
     }
 
@@ -302,7 +302,7 @@ export default function SettingsAiEnginePage() {
                     type={showKey ? "text" : "password"}
                     value={newKey}
                     onChange={(e) => setNewKey(e.target.value)}
-                    placeholder="AIzaSy..."
+                    placeholder="Paste Gemini API key (e.g. AIzaSy... or AQ...)"
                     className="font-mono text-xs pr-10"
                     disabled={validating}
                   />

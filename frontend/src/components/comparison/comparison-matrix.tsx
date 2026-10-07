@@ -354,6 +354,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [roadTaxInput, setRoadTaxInput] = useState("70");
   const [runnerFeeInput, setRunnerFeeInput] = useState("50");
   const [windscreenInput, setWindscreenInput] = useState("");
+  const [currentPolicyDiscount, setCurrentPolicyDiscount] = useState<number>(0);
+  const [previousPolicyDiscount, setPreviousPolicyDiscount] = useState<number>(0);
   const [engineCcInput, setEngineCcInput] = useState("");
   const [engineNoInput, setEngineNoInput] = useState("");
   const [chassisNoInput, setChassisNoInput] = useState("");
@@ -2431,87 +2433,126 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               );
             })}
 
-            {/* Empty State: Marketing Comparison Table with Previous Policy Baseline */}
-            {companyGroups.length === 0 && (
-              <>
-                {/* 1. Previous Policy Baseline Reference Column */}
-                {previous_policy ? (
-                  <div className="w-[285px] shrink-0 rounded-2xl border-2 border-dashed border-neutral-300 bg-neutral-50/50 p-4 shadow-2xs flex flex-col justify-between relative">
+            {/* Previous Policy Baseline Reference Column (Always visible on right) */}
+            {previous_policy ? (
+              <div className="w-[285px] shrink-0 rounded-2xl border-2 border-dashed border-neutral-300 bg-neutral-50/50 p-4 shadow-2xs flex flex-col justify-between relative">
+                <div>
+                  {/* Top Baseline Header */}
+                  <div className="flex items-center justify-between pb-2.5 border-b border-neutral-200 mb-3">
                     <div>
-                      {/* Top Baseline Header */}
-                      <div className="flex items-center justify-between pb-2.5 border-b border-neutral-200 mb-3">
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-bold uppercase tracking-wider text-neutral-900">
-                              Previous Policy
-                            </span>
-                            <span className="px-1.5 py-0.2 rounded bg-neutral-200 text-neutral-700 text-[9px] font-bold">
-                              {previous_policy.year || (tenure.coverage_start_date ? new Date(tenure.coverage_start_date).getFullYear() - 1 : "Prior Year")}
-                            </span>
-                          </div>
-                          <p className="text-[10px] text-neutral-500 mt-0.5">Baseline Reference</p>
-                        </div>
-                        {previous_policy.insurer && (
-                          <span className="rounded bg-white px-2 py-0.5 text-xs font-bold text-neutral-900 border border-neutral-200 shadow-2xs">
-                            {previous_policy.insurer}
-                          </span>
-                        )}
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold uppercase tracking-wider text-neutral-900">
+                          Previous Policy
+                        </span>
+                        <span className="px-1.5 py-0.2 rounded bg-neutral-200 text-neutral-700 text-[9px] font-bold">
+                          {previous_policy.year || (tenure.coverage_start_date ? new Date(tenure.coverage_start_date).getFullYear() - 1 : "Prior Year")}
+                        </span>
                       </div>
-
-                      {/* Policy Specifications & Figures */}
-                      <div className="space-y-2 text-xs">
-                        <div className="flex justify-between py-1 border-b border-neutral-200/60">
-                          <span className="text-neutral-500">Sum Insured:</span>
-                          <span className="font-mono font-bold text-neutral-900">
-                            {previous_policy.sum_insured
-                              ? `RM ${previous_policy.sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
-                              : "—"}
-                          </span>
-                        </div>
-                        <div className="flex justify-between py-1 border-b border-neutral-200/60">
-                          <span className="text-neutral-500">Premium Paid:</span>
-                          <span className="font-mono font-bold text-emerald-700">
-                            {previous_policy.insurance_premium
-                              ? `RM ${previous_policy.insurance_premium.toFixed(2)}`
-                              : "—"}
-                          </span>
-                        </div>
-                        <div className="flex justify-between py-1 border-b border-neutral-200/60">
-                          <span className="text-neutral-500">Fixed Costs:</span>
-                          <span className="font-mono font-medium text-neutral-700">
-                            RM {(tenure.road_tax + tenure.runner_fee).toFixed(2)} (Tax + Runner)
-                          </span>
-                        </div>
-                        <div className="flex justify-between py-1 border-b border-neutral-200/60">
-                          <span className="text-neutral-500">Vehicle / Model:</span>
-                          <span className="font-medium text-neutral-800 text-right truncate max-w-[150px]">
-                            {previous_policy.yom || tenure.manufacture_year || ""} {previous_policy.model || tenure.vehicle_model}
-                          </span>
-                        </div>
-                        <div className="flex justify-between py-1 border-b border-neutral-200/60">
-                          <span className="text-neutral-500">Period:</span>
-                          <span className="font-mono text-[11px] text-neutral-600">
-                            {previous_policy.period}
-                          </span>
-                        </div>
-                        <div className="pt-1">
-                          <span className="text-neutral-500 block text-[11px] mb-1">Included Perils:</span>
-                          <span className="inline-block bg-white border border-neutral-200 rounded px-2 py-1 text-[11px] text-neutral-700 font-medium">
-                            {previous_policy.perils || "Standard Policy Coverage"}
-                          </span>
-                        </div>
-                      </div>
+                      <p className="text-[10px] text-neutral-500 mt-0.5">Baseline Reference</p>
                     </div>
+                    {previous_policy.insurer && (
+                      <span className="rounded bg-white px-2 py-0.5 text-xs font-bold text-neutral-900 border border-neutral-200 shadow-2xs">
+                        {previous_policy.insurer}
+                      </span>
+                    )}
+                  </div>
 
-                    <div className="mt-4 pt-3 border-t border-neutral-200 text-center">
-                      <span className="text-[10px] text-neutral-400 font-medium">
-                        ✓ Prior policy loaded from database
+                  {/* Policy Specifications & Figures */}
+                  <div className="space-y-2 text-xs">
+                    <div className="flex justify-between py-1 border-b border-neutral-200/60">
+                      <span className="text-neutral-500">Sum Insured:</span>
+                      <span className="font-mono font-bold text-neutral-900">
+                        {previous_policy.sum_insured
+                          ? `RM ${previous_policy.sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
+                          : "—"}
                       </span>
                     </div>
+                    <div className="flex justify-between py-1 border-b border-neutral-200/60">
+                      <span className="text-neutral-500">Premium Paid:</span>
+                      <span className="font-mono font-bold text-emerald-700">
+                        {previous_policy.insurance_premium
+                          ? `RM ${previous_policy.insurance_premium.toFixed(2)}`
+                          : "—"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-neutral-200/60">
+                      <span className="text-neutral-500">Fixed Costs:</span>
+                      <span className="font-mono font-medium text-neutral-700">
+                        RM {(tenure.road_tax + tenure.runner_fee).toFixed(2)} (Tax + Runner)
+                      </span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-neutral-200/60">
+                      <span className="text-neutral-500">Model:</span>
+                      <span className="font-medium text-neutral-800 text-right truncate max-w-[150px]">
+                        {previous_policy.model || tenure.vehicle_model}
+                      </span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-neutral-200/60">
+                      <span className="text-neutral-500">YOM:</span>
+                      <span className="font-medium text-neutral-800 text-right">
+                        {previous_policy.yom || tenure.manufacture_year || ""}
+                      </span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-neutral-200/60">
+                      <span className="text-neutral-500">Period:</span>
+                      <span className="font-mono text-[11px] text-neutral-600">
+                        {previous_policy.period}
+                      </span>
+                    </div>
+                    <div className="pt-1">
+                      <span className="text-neutral-500 block text-[11px] mb-1">Included Perils:</span>
+                      <span className="inline-block bg-white border border-neutral-200 rounded px-2 py-1 text-[11px] text-neutral-700 font-medium w-full">
+                        {previous_policy.perils || "Standard Policy Coverage"}
+                      </span>
+                      <div className="mt-2 space-y-1">
+                        <div className="flex justify-between text-[11px]">
+                          <span className="text-neutral-500">Windscreen:</span>
+                          <span className="font-mono font-medium text-neutral-800">
+                            {previous_policy.windscreen ? `RM ${previous_policy.windscreen.toLocaleString("en-MY", { minimumFractionDigits: 2 })}` : "—"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-[11px]">
+                          <span className="text-neutral-500">Towing:</span>
+                          <span className="font-mono font-medium text-neutral-800">
+                            {formatBenefitCoverage(previous_policy.towing || "Unlimited", "KM")}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center text-[11px] mt-1.5">
+                          <span className="text-neutral-500">Discount (%):</span>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={previousPolicyDiscount || ""}
+                            onChange={(e) => setPreviousPolicyDiscount(Number(e.target.value))}
+                            className="w-16 h-6 px-1.5 border border-neutral-300 rounded text-right font-mono outline-none focus:border-[#1b1717]"
+                            placeholder="0"
+                          />
+                        </div>
+                        {previousPolicyDiscount > 0 && previous_policy.insurance_premium ? (
+                          <div className="flex justify-between text-[11px] font-bold mt-1 text-emerald-700 bg-emerald-50 px-1.5 py-1 rounded">
+                            <span>Final Payable:</span>
+                            <span className="font-mono">
+                              RM {(previous_policy.insurance_premium * (1 - previousPolicyDiscount / 100)).toFixed(2)}
+                            </span>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
                   </div>
-                ) : null}
+                </div>
 
-                {/* 2. Upload Underwriter Quotations Dropzone & Action Card */}
+                <div className="mt-4 pt-3 border-t border-neutral-200 text-center">
+                  <span className="text-[10px] text-neutral-400 font-medium">
+                    ✓ Prior policy loaded from database
+                  </span>
+                </div>
+              </div>
+            ) : null}
+
+            {/* Empty State: Marketing Comparison Table Dropzone */}
+            {companyGroups.length === 0 && (
+              <>
                 <div className="flex-1 min-w-[340px] max-w-[540px] p-8 rounded-2xl border-2 border-dashed border-[#e5e5ea] bg-white text-center flex flex-col items-center justify-center gap-4">
                   <div className="size-14 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center">
                     <Columns size={28} weight="duotone" />
@@ -2623,10 +2664,50 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                         {currentPolicyWinner.canonical_perils_formatted || "Standard Policy Coverage"}
                       </span>
                     </div>
+                    <div className="mt-2 space-y-1">
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-[#6e6e73]">Windscreen:</span>
+                        <span className="font-mono font-medium text-[#1b1717]">
+                          {currentPolicyWinner.windscreen_sum_insured ? `RM ${currentPolicyWinner.windscreen_sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}` : "—"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-[#6e6e73]">Towing:</span>
+                        <span className="font-mono font-medium text-[#1b1717]">
+                          {formatBenefitCoverage(currentPolicyWinner.towing_km || currentPolicyWinner.towing_limit || "Unlimited", "KM")}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-[11px] mt-1.5">
+                        <span className="text-[#6e6e73]">Discount (%):</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={currentPolicyDiscount || ""}
+                          onChange={(e) => setCurrentPolicyDiscount(Number(e.target.value))}
+                          className="w-16 h-6 px-1.5 border border-[#e5e5ea] rounded text-right font-mono outline-none focus:border-[#1b1717]"
+                          placeholder="0"
+                        />
+                      </div>
+                      {currentPolicyDiscount > 0 ? (
+                        <div className="flex justify-between text-[11px] font-bold mt-1 text-emerald-700 bg-emerald-50 px-1.5 py-1 rounded">
+                          <span>Final Payable:</span>
+                          <span className="font-mono">
+                            RM {((currentPolicyWinner.rounded_total_payable != null ? currentPolicyWinner.rounded_total_payable : currentPolicyWinner.total_payable) * (1 - currentPolicyDiscount / 100)).toFixed(2)}
+                          </span>
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="flex justify-between pt-1">
+                      <span className="text-[#6e6e73]">Model:</span>
+                      <span className="font-medium text-[#1b1717] text-right truncate max-w-[150px]">
+                        {tenure.vehicle_model}
+                      </span>
+                    </div>
                     <div className="flex justify-between">
-                      <span className="text-[#6e6e73]">YOM / Model:</span>
-                      <span className="font-medium text-[#1b1717]">
-                        {tenure.manufacture_year || ""} {tenure.vehicle_model}
+                      <span className="text-[#6e6e73]">YOM:</span>
+                      <span className="font-medium text-[#1b1717] text-right">
+                        {tenure.manufacture_year || ""}
                       </span>
                     </div>
                   </div>
@@ -2639,94 +2720,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             );
           })()}
 
-          {/* Previous Policy Card (Strict DB prior calendar year, zero gibberish fallbacks) */}
-          {(() => {
-            const currentYear = tenure.coverage_start_date ? new Date(tenure.coverage_start_date).getFullYear() : new Date().getFullYear();
-            const prevYear = previous_policy?.year || currentYear - 1;
-            return (
-              <div className="rounded-2xl border border-[#e5e5ea] bg-white p-4 shadow-sm">
-                <div className="flex items-center justify-between border-b border-[#e5e5ea] pb-2.5 mb-3">
-                  <span className="text-xs font-bold uppercase tracking-wider text-[#1b1717]">
-                    Previous Policy ({prevYear})
-                  </span>
-                  {previous_policy?.insurer && (
-                    <span className="rounded bg-[#f5f5f7] px-2 py-0.5 text-xs font-bold text-[#1b1717] border border-[#e5e5ea]">
-                      {previous_policy.insurer}
-                    </span>
-                  )}
-                </div>
 
-                {previous_policy ? (
-                  <div className="space-y-2 text-xs text-[#454545]">
-                    <div className="flex justify-between">
-                      <span className="text-[#6e6e73]">Sum Insured:</span>
-                      <span className="font-mono font-bold text-[#1b1717]">
-                        {previous_policy.sum_insured
-                          ? `RM ${previous_policy.sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
-                          : "—"}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[#6e6e73]">Premium Paid:</span>
-                      <span className="font-mono font-bold text-emerald-700">
-                        {previous_policy.insurance_premium
-                          ? `RM ${previous_policy.insurance_premium.toFixed(2)}`
-                          : "—"}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-start gap-2">
-                      <span className="text-[#6e6e73] shrink-0">Included Perils:</span>
-                      <span className="font-medium text-[#1b1717] text-right">
-                        {previous_policy.perils || "Standard Policy Coverage"}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[#6e6e73]">YOM / Model:</span>
-                      <span className="font-medium text-[#1b1717]">
-                        {previous_policy.yom || ""} {previous_policy.model || tenure.vehicle_model}
-                      </span>
-                    </div>
-                    <div className="pt-2 border-t border-[#e5e5ea] flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => prevPolicyFileInputRef.current?.click()}
-                        disabled={isUploadingPrevPolicy}
-                        className="text-[11px] font-semibold text-[#6e6e73] hover:text-[#1b1717] flex items-center gap-1 cursor-pointer"
-                      >
-                        <CloudArrowUp size={13} weight="bold" />
-                        <span>{isUploadingPrevPolicy ? "Uploading..." : `Replace ${prevYear} PDF`}</span>
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-center py-4 text-xs text-[#6e6e73] space-y-2">
-                    <p>No {prevYear} policy record found in database.</p>
-                    <button
-                      type="button"
-                      onClick={() => prevPolicyFileInputRef.current?.click()}
-                      disabled={isUploadingPrevPolicy}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e5e5ea] bg-[#f5f5f7] hover:bg-[#e5e5ea] text-xs font-bold text-[#1b1717] transition-colors cursor-pointer"
-                    >
-                      <CloudArrowUp size={15} weight="bold" />
-                      <span>{isUploadingPrevPolicy ? "Uploading..." : `Upload ${prevYear} PDF`}</span>
-                    </button>
-                    <p className="text-[10px] text-neutral-400">Upload previous schedule/quote to compare past terms</p>
-                  </div>
-                )}
-
-                <input
-                  type="file"
-                  ref={prevPolicyFileInputRef}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleUploadPreviousPolicy(file);
-                  }}
-                  accept=".pdf"
-                  className="hidden"
-                />
-              </div>
-            );
-          })()}
 
           {/* Recommended Sum Insured / Valuation Matrix */}
           <div className="rounded-2xl border border-[#e5e5ea] bg-white p-4 shadow-sm">

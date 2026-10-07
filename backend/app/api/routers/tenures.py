@@ -452,11 +452,9 @@ def list_tenures(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     # Auto-ensure next-year renewals are synced when requested for upcoming year
-    if year and str(year) != "all":
+    if year and year >= 2027:
         try:
-            target_yr = int(year)
-            if target_yr >= 2027:
-                ensure_next_year_renewal_tenures(db, target_year=target_yr, user_id=user.id)
+            ensure_next_year_renewal_tenures(db, target_year=year, user_id=user.id)
         except (ValueError, TypeError):
             pass
 

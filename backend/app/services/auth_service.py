@@ -92,7 +92,7 @@ def _audit(db: Session, actor_id: str | None, action: str, entity_type: str, ent
     )
 
 
-def serialize_user(user: User) -> dict:
+def serialize_user(user: User, is_online: bool = False) -> dict:
     name = user.name or (user.email.split("@")[0].capitalize() if user.email else "Staff")
     return {
         "id": user.id,
@@ -100,6 +100,7 @@ def serialize_user(user: User) -> dict:
         "email": user.email,
         "role": user.role,
         "status": user.status,
+        "is_online": is_online,
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "updated_at": user.updated_at.isoformat() if user.updated_at else None,
     }
@@ -357,6 +358,7 @@ def update_user(
         if len(password) < 8:
             raise AppError("Password must be at least 8 characters.", 400)
         target.password_hash = hash_password(password)
+        revoke_user_sessions(db, target.id, actor.id)
     db.commit()
     db.refresh(target)
     _audit(db, actor.id, "update_user", "user", target.id, {"email": target.email, "role": target.role, "status": target.status})

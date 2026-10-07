@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from threading import Lock
@@ -108,6 +108,7 @@ from app.db.session import get_db
 from app.models.enums import AccountStatus, Role, StorageStatus
 from app.models.tables import (
     AuditEvent,
+    AuthSession,
     CompanyAlias,
     FieldAlias,
     BusinessAsset,
@@ -128,6 +129,7 @@ from app.models.tables import (
     User,
     VehicleBrand,
     VehicleModel,
+    utcnow,
 )
 from app.services.admin_service import (
     copy_template,
@@ -442,10 +444,27 @@ def user_create(payload: UserCreateRequest, db: Session = Depends(get_db), user:
 def users_list(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     if user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value, Role.DEV.value}:
         raise AppError("Only administrators and developers can manage user accounts.", 403)
-    query = select(User).order_by(User.created_at.desc())
+        
+    five_mins_ago = utcnow() - timedelta(minutes=5)
+    
+    active_session_subq = (
+        select(AuthSession.user_id)
+        .where(
+            AuthSession.last_activity_at >= five_mins_ago,
+            AuthSession.revoked_at.is_(None)
+        )
+        .group_by(AuthSession.user_id)
+    ).subquery()
+
+    query = select(User, active_session_subq.c.user_id.is_not(None).label('is_online')).outerjoin(
+        active_session_subq, User.id == active_session_subq.c.user_id
+    ).order_by(User.created_at.desc())
+
     if user.role in {Role.ADMIN.value, Role.DEV.value}:
         query = query.where(User.role != Role.SUPER_ADMIN.value)
-    return {"users": [serialize_user(item) for item in db.scalars(query).all()]}
+        
+    results = db.execute(query).all()
+    return {"users": [serialize_user(u, is_online=bool(is_online)) for u, is_online in results]}
 
 
 

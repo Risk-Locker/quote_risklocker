@@ -927,8 +927,8 @@ def settings_gemini_add_key(
 
     if not raw_key:
         raise AppError("API key is required.", 400)
-    if len(raw_key) < 30 or not raw_key.startswith("AIzaSy"):
-        raise AppError("Invalid Google Gemini API key format. Keys start with 'AIzaSy' and are at least 35 characters.", 400)
+    if len(raw_key) < 20:
+        raise AppError("Invalid API key format. Key must be at least 20 characters.", 400)
 
     pool = get_key_pool()
     pool.sync_accounts(db=db)

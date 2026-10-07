@@ -815,7 +815,7 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
             p_raw = _value(fields, "premium")
             if p_raw and extras_sum > 0:
                 try:
-                    clean_p = Decimal(re.sub(r"[^\d.]", "", str(p_raw)))
+                    clean_p = Decimal(re.sub(r"[^\d.]", "", p_raw))
                     p_display = f"{(clean_p + extras_sum):,.2f}"
                 except Exception:
                     p_display = p_raw

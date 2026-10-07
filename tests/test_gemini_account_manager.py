@@ -251,3 +251,21 @@ def test_settings_add_and_delete_manual_key():
     assert del_res.status_code == 200
     assert del_res.json()["ok"] is True
     assert len(db.get(AppSetting, "gemini_manual_api_keys").value["keys"]) == 0
+
+
+def test_settings_add_aq_prefix_manual_key():
+    """Verify modern Google AI Studio keys starting with 'AQ.' pass formatting validation and probe."""
+    db = MemoryDb()
+    client = _http_client(user=_admin_user(), db=db)
+
+    aq_key = "AQ.Ab8ManualAccountTestKey123456789012"
+    res = client.post(
+        "/settings/gemini/keys",
+        json={"key": aq_key, "label": "Account AQ Test"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["ok"] is True
+    assert "Account added to pool" in data["message"]
+    assert data["account"]["masked_key"].startswith("AQ.Ab8")
+
