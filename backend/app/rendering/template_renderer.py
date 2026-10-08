@@ -829,7 +829,7 @@ def render_quotation_html(
         or str(config.get("v7_master_key") or "").startswith("agency_bilingual_v4")
         or any(e.get("v4_mode") for e in raw_elements)
         or "v4" in str(config.get("template_name") or config.get("name") or "").lower()
-        or "v4" in str(template_name or "").lower()
+        or "v4" in (template_name or "").lower()
     )
     if is_v4:
         render_context["v4_mode"] = True
