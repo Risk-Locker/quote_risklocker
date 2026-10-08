@@ -116,7 +116,7 @@ export default function TemplateBuilderPage({
           valid_until: "14 Days",
         }));
         setSessions(mapped);
-        setActiveSessionId(mapped[0]?.id || null);
+        setActiveSessionId(null);
       }
     } catch (err: any) {
       toast(`Failed to load template: ${err.message}`, "error");
@@ -558,7 +558,7 @@ export default function TemplateBuilderPage({
           elements: compiled,
         },
       };
-      await api(`/admin/templates/${template.id}`, {
+      const saveRes = await api<{ template: TemplateRecord }>(`/admin/templates/${template.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           base_revision: template.revision,
@@ -569,9 +569,10 @@ export default function TemplateBuilderPage({
       });
 
       // Publish
+      const currentRev = saveRes.template?.revision ?? template.revision;
       const pubRes = await api<{ template_revision: { revision_number: number } }>(
         `/business/templates/${template.id}/publish`,
-        { method: "POST", body: "{}" }
+        { method: "POST", body: JSON.stringify({ base_revision: currentRev }) }
       );
 
       toast(

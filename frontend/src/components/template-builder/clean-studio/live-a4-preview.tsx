@@ -168,16 +168,16 @@ export function LiveA4Preview({
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-[10px] text-slate-300 font-semibold shrink-0">Session:</span>
           <select
-            value={activeSession?.id || ""}
+            value={activeSessionId || ""}
             onChange={(e) => onSelectSession(e.target.value)}
             className="bg-slate-900 text-white text-[11px] font-medium rounded border border-slate-700 px-2 py-0.5 max-w-[200px] truncate focus:outline-hidden"
           >
+            <option value="">Synthetic Stress Test</option>
             {sessions.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.vehicle_no || "Blank"} · {s.insurance_company || "Insurer"}
               </option>
             ))}
-            {!sessions.length && <option value="">ANY 368 · Berjaya Sompo</option>}
           </select>
         </div>
         

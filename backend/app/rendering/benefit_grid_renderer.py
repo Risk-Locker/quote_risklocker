@@ -121,10 +121,13 @@ def _dynamic_benefit_grid(
     layout = pack_fixed_grid(len(ordered), bounds, spec)
     if not ordered:
         empty_message = escape(str(element.get("emptyMessage") or "")) if layout.empty_state == "message" else ""
+        z_index = int(element.get("z") or 4)
+        if z_index < 2:
+            z_index = 4
         return (
             f'<div data-grid-kind="{escape(kind)}" data-grid-empty="{escape(layout.empty_state or "hide")}" '
             f'style="position:absolute;left:{bounds.x}px;top:{bounds.y}px;width:{bounds.width}px;height:{bounds.height}px;'
-            f'overflow:hidden;display:flex;align-items:center;justify-content:center;text-align:center">{empty_message}</div>'
+            f'overflow:hidden;display:flex;align-items:center;justify-content:center;text-align:center;z-index:{z_index};">{empty_message}</div>'
         )
     card_style_name = str(element.get("cardStyle") or "standard")
     density_name = str(element.get("textDensity") or "compact")
@@ -486,10 +489,13 @@ def _dynamic_benefit_grid(
             )
 
         warning = escape(layout.warning or "")
+        z_index = int(element.get("z") or 4)
+        if z_index < 2:
+            z_index = 4
         return (
             f'<section data-grid-kind="{escape(kind)}" data-density-warning="{warning}" '
             f'style="position:absolute;left:{bounds.x:.8f}px;top:{bounds.y:.8f}px;'
-            f'width:{bounds.width:.8f}px;display:flex;flex-direction:column;gap:{gap}px;">'
+            f'width:{bounds.width:.8f}px;display:flex;flex-direction:column;gap:{gap}px;z-index:{z_index};">'
             f'{"".join(rows_html)}</section>'
         )
 
@@ -523,9 +529,12 @@ def _dynamic_benefit_grid(
             f'font-size:10px;font-weight:800;line-height:1;padding:4px 8px;border-radius:4px;'
             f'white-space:nowrap">{plan_label}</span></div>'
         )
+    z_index = int(element.get("z") or 4)
+    if z_index < 2:
+        z_index = 4
     return (
         f'<section data-grid-kind="{escape(kind)}" data-density-warning="{warning}" '
-        f'style="position:absolute;left:0;top:0;width:100%;height:100%;overflow:hidden">'
+        f'style="position:absolute;left:0;top:0;width:100%;height:100%;overflow:hidden;z-index:{z_index};">'
         f'{"".join(borders)}{"".join(output)}</section>'
     )
 

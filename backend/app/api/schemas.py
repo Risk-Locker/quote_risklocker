@@ -451,7 +451,7 @@ class PackagePlanItemsRequest(StrictRequest):
 
 
 class TemplatePublishRequest(StrictRequest):
-    base_revision: int = Field(ge=1)
+    base_revision: int | None = Field(default=None, ge=1)
 
 
 class TemplateGroupSaveRequest(BaseModel):

@@ -432,7 +432,7 @@ def _canonical_page(profile: TemplatePageProfile) -> dict:
     }
 
 
-def publish_template_revision(db, user, template_id: str, *, base_revision: int) -> TemplateRevision:
+def publish_template_revision(db, user, template_id: str, *, base_revision: int | None = None) -> TemplateRevision:
     """Publish one validated immutable snapshot under an optimistic row lock."""
     _require_business_user(user)
     template = db.scalar(
@@ -442,7 +442,7 @@ def publish_template_revision(db, user, template_id: str, *, base_revision: int)
     )
     if template is None or template.id != template_id or template.deleted_at:
         raise AppError("Template not found.", 404)
-    if template.revision != base_revision:
+    if base_revision is not None and template.revision != base_revision:
         raise AppError("This template changed elsewhere. Reload before publishing.", 409)
     try:
         config = normalize_template_config(template.fixed_fields, template.name)
