@@ -382,6 +382,10 @@ class GeminiAccountManager:
                 acc.status = "model_not_found"
                 acc.status_label = "Model Deprecated (404)"
                 acc.status_color = "amber"
+            elif status_code == 504:
+                acc.status = "timeout"
+                acc.status_label = "Timeout (504)"
+                acc.status_color = "amber"
             else:
                 acc.status = "error"
                 acc.status_label = f"Error ({status_code})"
@@ -409,7 +413,7 @@ class GeminiAccountManager:
 
         start_t = time.time()
         try:
-            with httpx.Client(timeout=6.0, http2=False) as client:
+            with httpx.Client(timeout=httpx.Timeout(25.0, connect=10.0), http2=False) as client:
                 res = client.post(url, json=test_payload)
                 latency_ms = int((time.time() - start_t) * 1000)
                 if res.status_code == 200:
@@ -433,6 +437,15 @@ class GeminiAccountManager:
                         "latency_ms": latency_ms,
                         "model": target_model,
                     }
+        except httpx.TimeoutException:
+            latency_ms = int((time.time() - start_t) * 1000)
+            return {
+                "ok": False,
+                "status_code": 504,
+                "error": "Gemini API request timed out (>25s)",
+                "latency_ms": latency_ms,
+                "model": target_model,
+            }
         except Exception as exc:
             latency_ms = int((time.time() - start_t) * 1000)
             return {
