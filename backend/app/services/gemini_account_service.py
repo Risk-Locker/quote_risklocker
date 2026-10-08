@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Sequence
 
+import httpx
+
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)

@@ -121,7 +121,7 @@ def test_list_tenure_months_and_tenures(client: TestClient, db_session: Session)
     assert res_list.status_code == 200
     items = res_list.json()["items"]
     assert len(items) == 1
-    assert items[0]["vehicle_no"] == "JWK 9488"
+    assert items[0]["vehicle_no"] == "JWK9488"
     assert items[0]["customer_name"] == "TEY SIOK BEE"
 
     # 3. GET /api/tenures filtered by search
@@ -129,7 +129,7 @@ def test_list_tenure_months_and_tenures(client: TestClient, db_session: Session)
     assert res_search.status_code == 200
     search_items = res_search.json()["items"]
     assert len(search_items) >= 1
-    assert all(item["vehicle_no"] == "VDM 3321" for item in search_items)
+    assert all(item["vehicle_no"] == "VDM3321" for item in search_items)
 
 
 def test_tenure_quote_generation_and_status(client: TestClient, db_session: Session):

@@ -15,6 +15,8 @@ import {
   Trash,
   TreeStructure,
 } from "@phosphor-icons/react";
+import { api } from "@/lib/api";
+import { useToast } from "@/components/ui/toast";
 import type {
   CompanySummary as Company,
   BenefitProfile,
@@ -104,6 +106,47 @@ export function BenefitsStepNavigator({
   fileUrl,
   handleCreateNewProfile,
 }: BenefitsStepNavigatorProps) {
+  const [tpoSurcharge, setTpoSurcharge] = React.useState<number>(100);
+  const [loadingTpo, setLoadingTpo] = React.useState<boolean>(false);
+  const [savingTpo, setSavingTpo] = React.useState<boolean>(false);
+  const { toast } = useToast();
+
+  React.useEffect(() => {
+    let active = true;
+    async function loadSurcharge() {
+      try {
+        setLoadingTpo(true);
+        const res = await api<{ amount: number }>("/business/settings/tpo-surcharge");
+        if (active && res && typeof res.amount === "number") {
+          setTpoSurcharge(res.amount);
+        }
+      } catch (e) {
+        // use default
+      } finally {
+        if (active) setLoadingTpo(false);
+      }
+    }
+    loadSurcharge();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function handleSaveTpo() {
+    try {
+      setSavingTpo(true);
+      await api("/business/settings/tpo-surcharge", {
+        method: "POST",
+        body: JSON.stringify({ amount: tpoSurcharge }),
+      });
+      toast("TPO surcharge updated successfully.", "success");
+    } catch (err: any) {
+      toast(err.message || "Failed to update TPO surcharge", "error");
+    } finally {
+      setSavingTpo(false);
+    }
+  }
+
   return (
     <div className="mt-4 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3.5 space-y-3.5">
       {/* Row 1: Insurance companies (Full-width, scalable for many companies) */}
@@ -438,6 +481,32 @@ export function BenefitsStepNavigator({
                   );
                 })}
               </div>
+
+              {builderCoverageFilter === "tpo" && (
+                <div className="flex items-center gap-1.5 ml-1 pl-2 border-l border-[var(--rl-border)] bg-amber-50/70 dark:bg-amber-950/20 px-2 py-0.5 rounded border border-amber-200">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                    Surcharge:
+                  </span>
+                  <span className="text-xs font-bold text-amber-950">RM</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={5}
+                    value={tpoSurcharge}
+                    onChange={(e) => setTpoSurcharge(parseFloat(e.target.value) || 0)}
+                    className="w-16 rounded border border-amber-300 bg-white px-1.5 py-0.5 text-xs font-bold text-neutral-900 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="h-6 text-[10px] px-2 py-0 border-amber-300 bg-white hover:bg-amber-100 text-amber-900"
+                    onClick={handleSaveTpo}
+                    loading={savingTpo}
+                  >
+                    Save
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
 

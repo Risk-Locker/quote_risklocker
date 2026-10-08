@@ -21,6 +21,7 @@ from app.models.tables import (
     QuotationActivity,
     QuotationDraft,
     Session as SessionModel,
+    TrackedVehicle,
     User,
 )
 from app.services.customer_account_service import resolve_or_create_customer
@@ -805,9 +806,25 @@ def update_tenure_ledger_fields(
     if payload.runner_fee is not None:
         tenure.runner_fee = payload.runner_fee
     if payload.vehicle_no is not None and payload.vehicle_no.strip():
-        tenure.vehicle_no = payload.vehicle_no.strip().upper()
+        clean_v = payload.vehicle_no.replace(" ", "").upper()
+        tenure.vehicle_no = clean_v
         if tenure.tracked_vehicle:
-            tenure.tracked_vehicle.vehicle_no = tenure.vehicle_no
+            tv_clean = (tenure.tracked_vehicle.vehicle_no or "").replace(" ", "").upper()
+            if tv_clean != clean_v:
+                existing_veh = db.scalar(
+                    select(TrackedVehicle).where(
+                        or_(
+                            TrackedVehicle.vehicle_no == clean_v,
+                            func.replace(TrackedVehicle.vehicle_no, " ", "") == clean_v,
+                        ),
+                        TrackedVehicle.id != tenure.tracked_vehicle.id,
+                    )
+                )
+                if existing_veh:
+                    tenure.tracked_vehicle = existing_veh
+                    tenure.tracked_vehicle_id = existing_veh.id
+                else:
+                    tenure.tracked_vehicle.vehicle_no = clean_v
 
     if tenure.tracked_vehicle:
         if payload.chassis_no is not None:

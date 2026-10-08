@@ -525,6 +525,92 @@ export function PolicyFieldsCard({
                   </span>
                   {field.kind === "vehicle_type" ? (
                     <div className="grid gap-1.5">
+                      {/* Usage Scope Segmented Toggle: Private vs Commercial */}
+                      <div className="flex items-center gap-1 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-0.5 text-xs">
+                        {[
+                          { id: "Individual", label: "👤 Private", isCommercial: false },
+                          { id: "Company", label: "🏢 Commercial / Company", isCommercial: true },
+                        ].map((usage) => {
+                          const currentVtype = String(formValues[field.name] || "");
+                          const currentClientType = String(formValues["client_type"] || "");
+                          const isCurrentlyCompany =
+                            currentClientType.toLowerCase().includes("company") ||
+                            currentVtype.toLowerCase().includes("company");
+                          const active = usage.isCommercial ? isCurrentlyCompany : !isCurrentlyCompany;
+                          return (
+                            <button
+                              key={usage.id}
+                              type="button"
+                              onClick={() => {
+                                if (usage.isCommercial && !isCurrentlyCompany) {
+                                  // Switch to Commercial
+                                  const newVtype =
+                                    currentVtype === "Car"
+                                      ? "CompanyCar"
+                                      : currentVtype === "Motorcycle"
+                                      ? "CompanyMotorcycle"
+                                      : currentVtype;
+                                  setFormValues((v) => ({ ...v, [field.name]: newVtype, client_type: "Company" }));
+                                  commitFieldDirectly(field.name, newVtype);
+                                  commitFieldDirectly("client_type", "Company");
+
+                                  // Auto-sync Commercial product package
+                                  const companyProds = companyWorkspace?.products || [];
+                                  const commProd = companyProds.find((p: any) =>
+                                    /commercial.*car|company.*car|corporate/i.test(p.name || "")
+                                  );
+                                  if (commProd && workspace?.pinned.company_id) {
+                                    pinCatalog(workspace.pinned.company_id as string, commProd.id);
+                                    setSyncHighlight({
+                                      field: "product_package",
+                                      prev: "Private Package",
+                                      next: formatProductLabel(commProd.name),
+                                      timestamp: Date.now(),
+                                    });
+                                  }
+                                } else if (!usage.isCommercial && isCurrentlyCompany) {
+                                  // Switch to Private
+                                  const newVtype =
+                                    currentVtype === "CompanyCar"
+                                      ? "Car"
+                                      : currentVtype === "CompanyMotorcycle"
+                                      ? "Motorcycle"
+                                      : currentVtype;
+                                  setFormValues((v) => ({ ...v, [field.name]: newVtype, client_type: "Individual" }));
+                                  commitFieldDirectly(field.name, newVtype);
+                                  commitFieldDirectly("client_type", "Individual");
+
+                                  // Auto-sync Private product package
+                                  const companyProds = companyWorkspace?.products || [];
+                                  const privProd = companyProds.find(
+                                    (p: any) =>
+                                      /private.*car.*comprehensive|auto365.*lite|auto365.*plus|sompo motor|private car/i.test(
+                                        p.name || ""
+                                      ) && !/commercial|company/i.test(p.name || "")
+                                  );
+                                  if (privProd && workspace?.pinned.company_id) {
+                                    pinCatalog(workspace.pinned.company_id as string, privProd.id);
+                                    setSyncHighlight({
+                                      field: "product_package",
+                                      prev: "Commercial Package",
+                                      next: formatProductLabel(privProd.name),
+                                      timestamp: Date.now(),
+                                    });
+                                  }
+                                }
+                              }}
+                              className={`flex-1 py-1 text-center font-bold text-[11px] rounded-[3px] transition-all ${
+                                active
+                                  ? "bg-[var(--rl-black)] text-white shadow-xs"
+                                  : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                              }`}
+                            >
+                              {usage.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+
                       {/* Engine Type Segmented Toggle */}
                       <div className="flex items-center gap-1 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-0.5 text-xs">
                         {(["ICE", "EV"] as const).map((eng) => {
@@ -822,14 +908,6 @@ export function PolicyFieldsCard({
                               vtype = "NonSaloonCar";
                               setFormValues((v) => ({ ...v, vehicle_type: "NonSaloonCar" }));
                               commitFieldDirectly("vehicle_type", "NonSaloonCar");
-                            } else if (isCorp && (vtype === "Car" || vtype.toLowerCase().includes("saloon"))) {
-                              vtype = "CompanyCar";
-                              setFormValues((v) => ({ ...v, vehicle_type: "CompanyCar", client_type: "Company" }));
-                              commitFieldDirectly("vehicle_type", "CompanyCar");
-                              commitFieldDirectly("client_type", "Company");
-                            } else if (isCorp && !formValues["client_type"]) {
-                              setFormValues((v) => ({ ...v, client_type: "Company" }));
-                              commitFieldDirectly("client_type", "Company");
                             }
 
                             const isEV = vtype.startsWith("EV");

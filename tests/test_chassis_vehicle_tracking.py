@@ -75,5 +75,5 @@ def test_plate_assigned_to_previously_unplated_car(db_session: Session):
 
     # Resolves to same vehicle and updates vehicle_no to the real plate!
     assert veh1.id == veh2.id
-    assert veh2.vehicle_no == "WXY 8888"
+    assert veh2.vehicle_no == "WXY8888"
     assert veh2.chassis_no == "PL1S70XXXX12345"

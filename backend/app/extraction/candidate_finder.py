@@ -115,7 +115,19 @@ DEFAULT_ALIASES = {
 
 DEFAULT_VEHICLE_BRANDS = ("PROTON", "PERODUA", "HONDA", "TOYOTA", "NISSAN", "BMW", "MERCEDES", "MERCEDES-BENZ", "MAZDA", "MITSUBISHI", "KIA", "HYUNDAI")
 DEFAULT_VEHICLE_MODELS = ("SAGA BLM", "SAGA", "BLM", "WAJA", "MYVI", "AXIA", "ATIVA", "BEZZA", "ALZA", "VIVA", "VIOS", "CITY", "CIVIC", "ACCORD", "CAMRY", "HILUX")
-CANONICAL_COVERAGE_TYPES = ["COMPREHENSIVE", "THIRD PARTY", "THIRD PARTY FIRE AND THEFT", "PRIVATE CAR", "MOTOR TAKAFUL"]
+CANONICAL_COVERAGE_TYPES = [
+    "THIRD PARTY FIRE AND THEFT",
+    "THIRD PARTY FIRE & THEFT",
+    "THIRD PARTY ONLY",
+    "THIRD PARTY",
+    "MMIP",
+    "MALAYSIAN MOTOR INSURANCE POOL",
+    "COVER NOTE",
+    "COVERNOTE",
+    "COMPREHENSIVE",
+    "PRIVATE CAR",
+    "MOTOR TAKAFUL",
+]
 DATE_RE = r"\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b"
 MONEY_RE = r"(?:RM\s*)?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})?"
 
@@ -164,12 +176,26 @@ def _add(results: dict[str, list[CandidateValue]], field: str, value: str | None
         cleaned = ncd_match.group(0) if ncd_match else cleaned
     if field == "coverage_type":
         cleaned = cleaned.replace("Cover Type", "").replace("Jenis Perlindungan", "").strip(" :/-")
-        matched_cov = None
-        for item in CANONICAL_COVERAGE_TYPES:
-            if item in cleaned.upper():
-                matched_cov = item.title() if item != "COMPREHENSIVE" else "Comprehensive"
-                break
-        cleaned = matched_cov or ("Comprehensive" if not cleaned or "PERLINDUNGAN" in cleaned.upper() else cleaned)
+        upper_c = cleaned.upper()
+        if any(k in upper_c for k in ["MMIP", "MALAYSIAN MOTOR INSURANCE POOL", "COVER NOTE", "COVERNOTE", "THIRD PARTY ONLY", "THIRD PARTY"]):
+            if "FIRE" in upper_c or "THEFT" in upper_c:
+                cleaned = "Third Party Fire & Theft"
+            else:
+                cleaned = "Third Party"
+        else:
+            matched_cov = None
+            for item in CANONICAL_COVERAGE_TYPES:
+                if item in upper_c:
+                    if item in {"THIRD PARTY ONLY", "THIRD PARTY", "MMIP", "MALAYSIAN MOTOR INSURANCE POOL", "COVER NOTE", "COVERNOTE"}:
+                        matched_cov = "Third Party"
+                    elif item in {"THIRD PARTY FIRE AND THEFT", "THIRD PARTY FIRE & THEFT"}:
+                        matched_cov = "Third Party Fire & Theft"
+                    elif item == "COMPREHENSIVE":
+                        matched_cov = "Comprehensive"
+                    else:
+                        matched_cov = item.title()
+                    break
+            cleaned = matched_cov or ("Comprehensive" if not cleaned or "PERLINDUNGAN" in upper_c else cleaned)
     if field == "engine_cc":
         kw_match = re.search(r"\b\d{1,4}(?:\.\d+)?\s*(?:KW|KILOWATT)\b|\b\d{4,6}\s*(?:W|WATT)\b", cleaned, re.IGNORECASE)
         if kw_match:
@@ -758,7 +784,15 @@ def _add_messy_compact_text(
     for coverage in CANONICAL_COVERAGE_TYPES:
         token = re.sub(r"[^A-Z0-9]", "", coverage)
         if token and token in compact:
-            _add_static(results, "coverage_type", coverage.title() if coverage != "COMPREHENSIVE" else "Comprehensive", "messy_compact_window", 0.82, coverage, text, page_text)
+            if coverage in {"THIRD PARTY ONLY", "THIRD PARTY", "MMIP", "MALAYSIAN MOTOR INSURANCE POOL", "COVER NOTE", "COVERNOTE"}:
+                cov_val = "Third Party"
+            elif coverage in {"THIRD PARTY FIRE AND THEFT", "THIRD PARTY FIRE & THEFT"}:
+                cov_val = "Third Party Fire & Theft"
+            elif coverage == "COMPREHENSIVE":
+                cov_val = "Comprehensive"
+            else:
+                cov_val = coverage.title()
+            _add_static(results, "coverage_type", cov_val, "messy_compact_window", 0.82, coverage, text, page_text)
             break
     cc_match = re.search(r"(?P<cc>\d{3,5})(?:CC|C\.C|L)", compact)
     if cc_match:

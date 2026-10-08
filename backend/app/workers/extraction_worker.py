@@ -268,6 +268,45 @@ def process_extraction_job(
         except (TypeError, ValueError):
             pass
 
+    # Configurable Third Party Only (TPO) Extra Premium Surcharge
+    cov_val = str((fields.get("coverage_type") or {}).get("value") or "").strip().lower()
+    fn_val = str(uploaded.original_filename or "").lower()
+    is_tpo = (
+        cov_val in ("third party", "third party only", "third_party")
+        or "mmip" in fn_val
+        or "covernote" in fn_val
+        or "cover note" in fn_val
+    )
+    if is_tpo:
+        if not cov_val or "third" not in cov_val:
+            fields["coverage_type"] = {"value": "Third Party", "status": "ready", "message": ""}
+        tpo_setting = db.get(AppSetting, "tpo_extra_premium")
+        surcharge = 100.0
+        if tpo_setting and isinstance(tpo_setting.value, dict):
+            try:
+                surcharge = float(tpo_setting.value.get("amount", 100.0))
+            except (ValueError, TypeError):
+                surcharge = 100.0
+        if surcharge > 0:
+            premium_f = fields.get("premium")
+            if isinstance(premium_f, dict) and premium_f.get("value"):
+                try:
+                    curr_p = float(str(premium_f["value"]).replace(",", ""))
+                    new_p = curr_p + surcharge
+                    premium_f["value"] = f"{new_p:.2f}"
+                    fields["premium"] = premium_f
+                except (ValueError, TypeError):
+                    pass
+            tot_f = fields.get("total_amount")
+            if isinstance(tot_f, dict) and tot_f.get("value"):
+                try:
+                    curr_tot = float(str(tot_f["value"]).replace(",", ""))
+                    new_tot = curr_tot + surcharge
+                    tot_f["value"] = f"{new_tot:.2f}"
+                    fields["total_amount"] = tot_f
+                except (ValueError, TypeError):
+                    pass
+
     # Strictly preserve internal system quotation reference (never overwrite from PDF)
     existing_qref = (draft.fields or {}).get("quotation_reference") or session.quotation_ref
     qref_val = existing_qref.get("value") if isinstance(existing_qref, dict) else existing_qref

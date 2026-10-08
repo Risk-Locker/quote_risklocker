@@ -78,7 +78,7 @@ def test_log_activity_and_status_changes(db_session: Session):
     db_session.commit()
 
     assert act1.id is not None
-    assert act1.vehicle_no == "WXY 9988"
+    assert act1.vehicle_no == "WXY9988"
     assert act1.customer_name == "John Doe"
     assert act1.sent_to_client is False
     assert s.tracked_vehicle_id is not None

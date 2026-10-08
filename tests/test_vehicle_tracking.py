@@ -46,10 +46,10 @@ def db_session():
 
 
 def test_normalize_plate():
-    assert normalize_plate("jmc 8218") == "JMC 8218"
-    assert normalize_plate("  w  1234  a  ") == "W 1234 A"
-    assert normalize_plate("ABC-1234") == "ABC 1234"
-    assert normalize_plate("vba_4567") == "VBA 4567"
+    assert normalize_plate("jmc 8218") == "JMC8218"
+    assert normalize_plate("  w  1234  a  ") == "W1234A"
+    assert normalize_plate("ABC-1234") == "ABC1234"
+    assert normalize_plate("vba_4567") == "VBA4567"
     assert normalize_plate("") == ""
     assert normalize_plate(None) == ""
 
@@ -93,7 +93,7 @@ def test_vehicle_tracking_and_sequential_ownership(db_session: Session):
     db_session.commit()
 
     assert veh is not None
-    assert veh.vehicle_no == "JMC 8218"
+    assert veh.vehicle_no == "JMC8218"
     assert veh.current_owner_name == "Sadik"
     assert veh.car_brand == "HONDA"
     assert alert is None
@@ -191,7 +191,7 @@ def test_vehicle_tracking_and_sequential_ownership(db_session: Session):
     # 5. Check full vehicle history API helper
     history = get_vehicle_history(db_session, "JMC 8218")
     assert history["found"] is True
-    assert history["vehicle"]["vehicle_no"] == "JMC 8218"
+    assert history["vehicle"]["vehicle_no"] == "JMC8218"
     assert history["vehicle"]["current_owner_name"] == "Alice Tan"
     assert len(history["ownerships"]) == 3
     assert history["ownerships"][0]["sequence_label"] == "1st Owner"
@@ -295,7 +295,7 @@ def test_deal_cycle_superseding_and_policy_renewals(db_session: Session):
     # 6. Check upcoming renewals service helper
     renewals = get_upcoming_renewals(db_session, days_ahead=400)
     assert len(renewals) >= 1
-    found_renewal = next((r for r in renewals if r["vehicle_no"] == "VQL 5852"), None)
+    found_renewal = next((r for r in renewals if r["vehicle_no"] == "VQL5852"), None)
     assert found_renewal is not None
     assert found_renewal["customer_name"] == "John Doe"
     assert found_renewal["policy_status"] == "active"
@@ -398,7 +398,7 @@ def test_vehicle_ownership_conflict_and_resolution(db_session: Session):
     conflict = check_vehicle_ownership_conflict(db_session, s2.id)
     assert conflict["has_conflict"] is True
     assert conflict["resolved"] is False
-    assert conflict["vehicle_no"] == "JJC 9250"
+    assert conflict["vehicle_no"] == "JJC9250"
     assert conflict["previous_owner"] == "LIM KEE"
     assert conflict["new_customer"] == "AHMAD BIN ISMAIL"
     assert conflict["new_session_ref"] == "RL260000088"

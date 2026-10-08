@@ -96,7 +96,7 @@ def test_backfill_preview_and_targeted_backfill(db_session: Session):
 
     s1_item = next(it for it in prev["sessions"] if it["session_id"] == s1.id)
     assert s1_item["is_ready"] is True
-    assert s1_item["normalized_plate"] == "ABC 1234"
+    assert s1_item["normalized_plate"] == "ABC1234"
     assert s1_item["customer_name"] == "Alice Wong"
 
     s2_item = next(it for it in prev["sessions"] if it["session_id"] == s2.id)

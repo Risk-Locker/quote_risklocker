@@ -245,3 +245,30 @@ def test_comparison_upload_quote_api(client: TestClient, db_session: Session, mo
     assert sess.tenure_id == tenure.id
 
 
+def test_comparison_handles_whitespace_mismatch_without_unique_violation(client: TestClient, db_session: Session):
+    """Ensure comparison endpoint never fails with UniqueViolation when vehicle_no has space variation."""
+    vehicle = TrackedVehicle(vehicle_no="JDR 2263", car_model="MAZDA T3500")
+    db_session.add(vehicle)
+    db_session.flush()
+
+    tenure = InsuranceTenure(
+        tracked_vehicle_id=vehicle.id,
+        vehicle_no="JDR2263",
+        customer_name="TEST CLIENT",
+        coverage_start_date=datetime(2026, 9, 28, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 9, 27, tzinfo=timezone.utc),
+        expiry_month="2027-09",
+        status="draft",
+        road_tax=200.0,
+        runner_fee=10.0,
+    )
+    db_session.add(tenure)
+    db_session.commit()
+
+    res = client.get(f"/api/comparison/{tenure.id}")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["tenure"] is not None
+    assert data["tenure"]["id"] == tenure.id
+
+

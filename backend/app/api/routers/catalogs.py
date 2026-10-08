@@ -12,6 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, File, Form, Header, Query, Request, Response as FastAPIResponse, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse, Response
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
@@ -1007,6 +1008,47 @@ def business_coverage_type_retire(
 ) -> Response:
     retire_coverage_type(db, user, coverage_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+class TpoSurchargeUpdateRequest(BaseModel):
+    amount: float = Field(..., ge=0.0)
+
+
+@router.get("/business/settings/tpo-surcharge")
+def get_tpo_surcharge(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.models.tables import CoverageType, AppSetting
+    tpo_cov = db.scalar(select(CoverageType).where(CoverageType.coverage_key == "third_party"))
+    amount = float(tpo_cov.extra_premium_amount) if tpo_cov else 100.00
+    setting = db.scalar(select(AppSetting).where(AppSetting.key == "tpo_extra_premium"))
+    if setting and isinstance(setting.value, dict) and "amount" in setting.value:
+        try:
+            amount = float(setting.value["amount"])
+        except Exception:
+            pass
+    return {"amount": amount, "currency": "MYR", "enabled": True}
+
+
+@router.post("/business/settings/tpo-surcharge")
+def update_tpo_surcharge(
+    payload: TpoSurchargeUpdateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.models.tables import CoverageType, AppSetting
+    tpo_cov = db.scalar(select(CoverageType).where(CoverageType.coverage_key == "third_party"))
+    if tpo_cov:
+        tpo_cov.extra_premium_amount = payload.amount
+    setting = db.scalar(select(AppSetting).where(AppSetting.key == "tpo_extra_premium"))
+    if setting:
+        setting.value = {"amount": payload.amount, "currency": "MYR", "enabled": True}
+    else:
+        db.add(AppSetting(key="tpo_extra_premium", value={"amount": payload.amount, "currency": "MYR", "enabled": True}))
+    db.commit()
+    return {"success": True, "amount": payload.amount, "currency": "MYR"}
+
 
 
 

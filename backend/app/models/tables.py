@@ -291,7 +291,7 @@ class PersonInCharge(Base, TimestampMixin):
     tenures: Mapped[list["InsuranceTenure"]] = relationship(back_populates="pic")
 
 
-class InsuranceTenure(Base, TimestampMixin):
+class InsuranceTenure(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "insurance_tenures"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
@@ -951,6 +951,7 @@ class CoverageType(Base, TimestampMixin):
     coverage_key: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    extra_premium_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0.00, server_default=text("0.00"))
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="active", index=True)
 
 

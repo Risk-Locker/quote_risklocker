@@ -35,7 +35,7 @@ def test_variable_tenure_and_no_dummy_projections(db_session: Session):
     )
     db_session.commit()
 
-    assert t1.vehicle_no == "VAA 1234"
+    assert t1.vehicle_no == "VAA1234"
     assert t1.coverage_start_date.date() == start_dt.date()
     assert t1.coverage_end_date.date() == end_dt.date()
     assert t1.is_hidden is False

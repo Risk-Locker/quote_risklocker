@@ -2118,7 +2118,7 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
         or clean_final_plate in ("UNREGISTERED", "NEW", "UNKNOWN", "N/A", "PENDING", "-", "--", "")
         or clean_final_plate.startswith("RM")
     )
-    final_plate_display = "N/A" if is_plate_undetected else veh_plate.strip().upper()
+    final_plate_display = "N/A" if is_plate_undetected else clean_final_plate
     tracking_by_chassis = bool(is_plate_undetected and veh_chassis_no)
 
     if cust_name and tenure.customer_name != cust_name:
@@ -2162,8 +2162,22 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
         if veh_yom and getattr(tenure.tracked_vehicle, "manufacture_year", None) != veh_yom:
             tenure.tracked_vehicle.manufacture_year = veh_yom
             needs_commit = True
-        if final_plate_display != "N/A" and tenure.tracked_vehicle.vehicle_no != final_plate_display:
-            tenure.tracked_vehicle.vehicle_no = final_plate_display
+        tv_clean = re.sub(r"\s+", "", (tenure.tracked_vehicle.vehicle_no or "").upper())
+        if final_plate_display != "N/A" and tv_clean != clean_final_plate:
+            existing_other_veh = db.scalar(
+                select(TrackedVehicle).where(
+                    or_(
+                        TrackedVehicle.vehicle_no == final_plate_display,
+                        func.replace(TrackedVehicle.vehicle_no, " ", "") == clean_final_plate,
+                    ),
+                    TrackedVehicle.id != tenure.tracked_vehicle.id,
+                )
+            )
+            if existing_other_veh:
+                tenure.tracked_vehicle = existing_other_veh
+                tenure.tracked_vehicle_id = existing_other_veh.id
+            else:
+                tenure.tracked_vehicle.vehicle_no = final_plate_display
             needs_commit = True
 
     if veh_model:

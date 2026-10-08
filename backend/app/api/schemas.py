@@ -285,6 +285,7 @@ class CoverageTypeSaveRequest(StrictRequest):
     coverage_key: str | None = Field(default=None, max_length=160)
     name: str = Field(min_length=1, max_length=255)
     sort_order: int = Field(default=0, ge=0)
+    extra_premium_amount: float = Field(default=0.0, ge=0.0)
     status: str = "active"
 
 

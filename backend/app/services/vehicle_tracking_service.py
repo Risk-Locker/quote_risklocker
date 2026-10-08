@@ -6,22 +6,17 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.tables import Session as SessionModel, TrackedVehicle, VehicleOwnership, new_id
 
 
 def normalize_plate(plate: str | None) -> str:
-    """Normalize vehicle registration plate to standard uppercase with single space."""
+    """Normalize vehicle registration plate to standard uppercase compact format without spaces."""
     if not plate:
         return ""
-    cleaned = re.sub(r"[-_.]+", " ", plate.strip().upper())
-    cleaned = re.sub(r"[^A-Za-z0-9\s]", "", cleaned)
-    cleaned = re.sub(r"([A-Z]+)(\d+)", r"\1 \2", cleaned)
-    cleaned = re.sub(r"(\d+)([A-Z]+)", r"\1 \2", cleaned)
-    parts = cleaned.split()
-    return " ".join(parts)
+    return re.sub(r"[^A-Za-z0-9]", "", plate.strip().upper())
 
 
 def parse_date_safe(date_str: str | None) -> datetime | None:
@@ -70,23 +65,21 @@ def is_valid_malaysian_plate(plate: str | None) -> bool:
     norm = normalize_plate(plate)
     if not norm:
         return False
-    upper = norm.upper()
     bad_keywords = (
         "RM", "TRAILER", "VEHICLE", "MAKE", "UNREGISTERED",
         "UNKNOWN", "CHASSIS", "ENGINE", "POLICY", "PREMIUM",
         "TOTAL", "INSURER", "YEAR", "MODEL", "COVER", "AMOUNT",
     )
     for kw in bad_keywords:
-        if kw in upper.split() or upper.startswith(f"{kw} ") or upper in ("VEHICLEMAKE", "UNREGISTERED"):
+        if kw in norm:
             return False
-    has_letter = bool(re.search(r"[A-Z]", upper))
-    has_digit = bool(re.search(r"\d", upper))
+    has_letter = bool(re.search(r"[A-Z]", norm))
+    has_digit = bool(re.search(r"\d", norm))
     if not (has_letter and has_digit):
         return False
-    clean_no_space = upper.replace(" ", "")
-    if len(clean_no_space) < 3 or len(clean_no_space) > 10:
+    if len(norm) < 3 or len(norm) > 10:
         return False
-    return bool(re.match(r"^[A-Z]{1,3}\s*\d{1,4}\s*[A-Z]?$", norm)) or bool(re.match(r"^[A-Z]+\s*\d+$", norm))
+    return bool(re.match(r"^[A-Z]{1,3}\d{1,4}[A-Z]?$", norm)) or bool(re.match(r"^[A-Z]+\d+$", norm))
 
 
 def is_same_customer(name1: str | None, name2: str | None) -> bool:
@@ -154,7 +147,17 @@ def get_or_create_vehicle_tracking(
     if is_valid_malaysian_plate(vehicle_no):
         norm_plate = normalize_plate(vehicle_no)
         if norm_plate:
-            veh = db.scalar(select(TrackedVehicle).where(TrackedVehicle.vehicle_no == norm_plate))
+            clean_input = re.sub(r"\s+", "", vehicle_no.upper())
+            veh = db.scalar(
+                select(TrackedVehicle).where(
+                    or_(
+                        TrackedVehicle.vehicle_no == norm_plate,
+                        func.replace(TrackedVehicle.vehicle_no, " ", "") == clean_input,
+                    )
+                )
+            )
+            if veh and veh.vehicle_no != norm_plate:
+                veh.vehicle_no = norm_plate
             if not veh and norm_chassis:
                 veh = db.scalar(select(TrackedVehicle).where(TrackedVehicle.chassis_no == norm_chassis))
                 if veh:

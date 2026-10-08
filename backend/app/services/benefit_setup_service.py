@@ -74,13 +74,16 @@ def _serialize_hierarchy(item) -> dict:
         if isinstance(item, VehicleSubcategory)
         else item.coverage_key
     )
-    return {
+    res = {
         "id": item.id,
         "key": key,
         "name": item.name,
         "sort_order": item.sort_order,
         "status": item.status,
     }
+    if isinstance(item, CoverageType):
+        res["extra_premium_amount"] = float(getattr(item, "extra_premium_amount", 0.0) or 0.0)
+    return res
 
 
 def _paged(db, model, search_fields: tuple[str, ...], *, extra_predicates: list | None, search: str, page: int, page_size: int, order_field: str) -> dict:
@@ -299,6 +302,15 @@ def save_coverage_type(db, user, payload: dict) -> dict:
         item.coverage_key = proposed_key
     item.name = payload["name"].strip()
     item.sort_order = max(0, int(payload.get("sort_order") or 0))
+    if "extra_premium_amount" in payload and payload["extra_premium_amount"] is not None:
+        item.extra_premium_amount = float(payload["extra_premium_amount"])
+        if item.coverage_key == "third_party":
+            from app.models.tables import AppSetting
+            setting = db.scalar(select(AppSetting).where(AppSetting.key == "tpo_extra_premium"))
+            if setting:
+                setting.value = {"amount": float(item.extra_premium_amount), "currency": "MYR", "enabled": True}
+            else:
+                db.add(AppSetting(key="tpo_extra_premium", value={"amount": float(item.extra_premium_amount), "currency": "MYR", "enabled": True}))
     item.status = payload.get("status", "active")
     if item.status not in STATUSES:
         raise AppError("Coverage type status is invalid.", 422)

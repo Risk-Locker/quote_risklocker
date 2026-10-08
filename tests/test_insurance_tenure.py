@@ -95,7 +95,7 @@ def test_resolve_or_create_tenure(db_session: Session):
         end_date="07/09/2027",
     )
     assert t1.id is not None
-    assert t1.vehicle_no == "JWK 9488"
+    assert t1.vehicle_no == "JWK9488"
     assert t1.customer_name == "TEY SIOK BEE"
     assert t1.expiry_month == "2027-09"
 
@@ -236,7 +236,7 @@ def test_tenure_timeline_and_status_update(db_session: Session):
     # Verify timeline output
     timeline = get_tenure_timeline(db_session, tenure.id)
     assert timeline is not None
-    assert timeline["vehicle_no"] == "JWK 9488"
+    assert timeline["vehicle_no"] == "JWK9488"
     assert "STMB" in timeline["sourced_quotes_by_company"]
     assert len(timeline["generated_risklocker_quotations"]) == 1
     assert timeline["generated_risklocker_quotations"][0]["quotation_ref"] == "RL260000101"
