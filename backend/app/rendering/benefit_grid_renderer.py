@@ -375,9 +375,9 @@ def _dynamic_benefit_grid(
                             p_str = ""
                 if p_str:
                     price_badge = (
-                        f'<div style="margin-top:2px"><span style="display:inline-block;padding:{badge_pad};border-radius:4px;'
-                        f'font-size:{cost_fs}px;font-weight:700;line-height:1.2;white-space:nowrap;'
-                        f'background:{badge_bg};color:{badge_fg};border:1px solid {badge_border}">{p_str}</span></div>'
+                        f'<span style="display:inline-block;padding:{badge_pad};border-radius:4px;'
+                        f'font-size:{cost_fs}px;font-weight:700;line-height:1.2;white-space:nowrap;flex-shrink:0;'
+                        f'background:{badge_bg};color:{badge_fg};border:1px solid {badge_border}">{p_str}</span>'
                     )
 
         # Title font: shrink for long labels
@@ -397,7 +397,7 @@ def _dynamic_benefit_grid(
         if text_wrap == "truncate":
             title_wrap_css = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;"
         else:
-            title_wrap_css = "word-break:break-word;white-space:normal;display:block;"
+            title_wrap_css = "-webkit-line-clamp:2;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;white-space:normal;"
 
         title_html = (
             f'<div style="font-size:{title_fs}px;font-weight:700;line-height:1.15;'
@@ -406,6 +406,15 @@ def _dynamic_benefit_grid(
             if card.get("_showGroup", True) else ""
         )
 
+        coverage_and_price_html = ""
+        if coverage_html or price_badge:
+            coverage_and_price_html = (
+                f'<div style="display:flex;align-items:center;justify-content:space-between;gap:4px;min-width:0">'
+                f'{coverage_html if coverage_html else "<span></span>"}'
+                f'{price_badge if price_badge else "<span></span>"}'
+                f'</div>'
+            )
+
         inner_html = (
             # Title row (full width)
             f'{title_html}'
@@ -413,9 +422,8 @@ def _dynamic_benefit_grid(
             f'<div style="display:flex;gap:5px;align-items:flex-start">'
             f'{image_html}'
             f'<div style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:flex-start;gap:1px;overflow:hidden">'
-            f'{coverage_html}'
+            f'{coverage_and_price_html}'
             f'{desc_html}'
-            f'{price_badge}'
             f'</div>'
             f'</div>'
         )
@@ -678,16 +686,25 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
                 highest = h
         return highest
 
-    # 1. Evaluate max height ONCE across all benefits based on configuration
-    target_row_h_default = _get_max_height(items1, default_row_height)
-    target_row_h_addons = _get_max_height(items_ext + items2, addon_row_height)
-    
+    # 1. Evaluate row heights: proportional dynamic auto-fit when height constrained
+    uncompressed_needed_h = (rows1 * default_row_height) + (rows_ext * addon_row_height) + (rows2 * addon_row_height)
     if uniform_h > 0:
         target_row_h_default = uniform_h
         target_row_h_addons = uniform_h
-    elif custom_icon_sz > 24 or custom_title_sz > 10:
-        target_row_h_default = max(min_card_needed, target_row_h_default)
-        target_row_h_addons = max(min_card_needed, target_row_h_addons)
+    elif (footer_elem is not None) and (uncompressed_needed_h > pure_cards_h or total_rows >= 6):
+        # Dynamic proportional fitting: scale cards to fit available height smoothly without overflow
+        target_row_h = min(38.0, max(28.0, raw_row_h)) if is_minimal else min(74.0, max(46.0, raw_row_h))
+        if custom_icon_sz > 24 or custom_title_sz > 10:
+            target_row_h = max(min_card_needed, target_row_h)
+        target_row_h = round(target_row_h, 2)
+        target_row_h_default = target_row_h
+        target_row_h_addons = target_row_h
+    else:
+        target_row_h_default = _get_max_height(items1, default_row_height)
+        target_row_h_addons = _get_max_height(items_ext + items2, addon_row_height)
+        if custom_icon_sz > 24 or custom_title_sz > 10:
+            target_row_h_default = max(min_card_needed, target_row_h_default)
+            target_row_h_addons = max(min_card_needed, target_row_h_addons)
 
     # 2. Section heights are simple multiples (rows * max_height)
     h1 = (rows1 * target_row_h_default + max(0, rows1 - 1) * card_gap) if rows1 > 0 else 0.0

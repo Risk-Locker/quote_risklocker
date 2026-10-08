@@ -661,6 +661,8 @@ export function compileBlockTreeToCanvasElements(tree: BlockTree): CanvasElement
         h: 268,
         z: 4,
         columns: addGrid.columns || 3,
+        autoFourCol: true,
+        adaptiveColumns: true,
         locked: true,
       } as any);
     }

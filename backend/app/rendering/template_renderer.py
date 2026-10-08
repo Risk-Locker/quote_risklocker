@@ -779,7 +779,16 @@ def _element_html(
                 f'</div>'
             )
         value = _format_value(_variable_value(fields, config, var_id), str(element.get("prefix") or ""), str(element.get("suffix") or ""))
-        return f'<div style="{_style(element)}">{escape(value)}</div>'
+        base_style = _style(element)
+        if var_id in {"car_model", "customer_name", "insured_name"} and float(element.get("h", 0) or 0) <= 18.0:
+            val_len = len(str(value or ""))
+            fs_override = ""
+            if val_len > 42:
+                fs_override = ";font-size:8px"
+            elif val_len > 32:
+                fs_override = ";font-size:8.5px"
+            return f'<div style="{base_style}{fs_override};white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{escape(value)}">{escape(value)}</div>'
+        return f'<div style="{base_style}">{escape(value)}</div>'
     if element_type == "special":
         return _special_html(element, config)
     if element_type == "benefit-section":

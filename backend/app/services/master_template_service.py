@@ -55,7 +55,7 @@ def _line(node_id: str, x: float, y: float, w: float, z: int, *, color: str = RE
     return res
 
 
-def _grid(node_id: str, kind: str, x: float, y: float, w: float, h: float, z: int, *, dense: bool = False, locked: bool = False) -> dict:
+def _grid(node_id: str, kind: str, x: float, y: float, w: float, h: float, z: int, *, dense: bool = False, locked: bool = False, auto_four_col: bool = False) -> dict:
     res = {
         "id": node_id, "type": "benefit-grid", "gridKind": kind, "x": x, "y": y, "w": w, "h": h, "z": z,
         "layoutMode": "masonry", "columns": 3,
@@ -66,6 +66,9 @@ def _grid(node_id: str, kind: str, x: float, y: float, w: float, h: float, z: in
         },
         "cardStyle": "outlined" if dense else "standard", "textDensity": "compact" if dense else "normal", "emptyState": "hide",
     }
+    if auto_four_col or kind == "available_addons":
+        res["autoFourCol"] = True
+        res["adaptiveColumns"] = True
     if locked: res["locked"] = True
     return res
 

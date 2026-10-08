@@ -194,8 +194,8 @@ def test_dense_quotation_auto_fit_zero_scale_and_multiline_title():
     by_id = {e.get("id"): e for e in balanced}
     g2 = by_id["available_addons_grid"]
     bottom2 = float(g2["y"]) + float(g2["h"])
-    # 7 rows uncompressed will naturally exceed the safe_bottom (1058.0px)
-    assert bottom2 > 1058.0, f"Expected Section 3 bottom > 1058.0 with uniform height, got {bottom2}"
+    # 7 rows auto-fitted must strictly fit within safe_bottom (1058.0px) on A4 canvas
+    assert bottom2 <= 1058.0, f"Expected Section 3 bottom <= 1058.0 with dynamic auto-fit, got {bottom2}"
 
     html = render_quotation_html(
         {},
