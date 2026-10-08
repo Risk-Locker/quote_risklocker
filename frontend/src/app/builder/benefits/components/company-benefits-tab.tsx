@@ -259,6 +259,7 @@ export function CompanyBenefitsTab({
                       <td className="px-4 py-3 align-top">
                         <div className="space-y-1">
                           <Input
+                            maxLength={120}
                             value={baselineDescription ?? ""}
                             onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateConfigBaseline(c.id, e.target.value)}
                             placeholder={c.description || "Enter insurer baseline short description..."}

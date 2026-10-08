@@ -20,6 +20,7 @@ External chat tools cannot be forced to follow repository instructions. Give the
 | General orientation or unclear scope | `docs/core/STATE.md`, `docs/domain/PROJECT-CONTEXT.md`, `docs/architecture/STRUCTURE.md` | `docs/generated/CODEBASE-MAP.md` |
 | SaaS Architecture, Data Integrity & Scalability | `docs/domain/SAAS-BLUEPRINT.md`, `docs/architecture/ARCHITECTURE.md` | models, migrations, services, API contracts |
 | Visual whole-project overview | `docs/domain/PROJECT-DIAGRAM.md` | linked topic documents and implementation files |
+| Product design intent, personas, UX philosophy | `docs/domain/DESIGN-INTENT.md` | `docs/domain/PROJECT-CONTEXT.md`, `docs/architecture/DESIGN-SYSTEM.md` |
 | Product behavior, roles, workflow, accuracy | `docs/domain/BUSINESS-RULES.md` | relevant routes, services, tests |
 | Frontend, UX, accessibility, template editor | `docs/architecture/DESIGN-SYSTEM.md`, `docs/architecture/STRUCTURE.md` | relevant Next.js routes and components |
 | Backend, API, authentication, authorization | `docs/architecture/ARCHITECTURE.md`, `docs/architecture/API-CONTRACT.md` | routes, services, RBAC, tests |
@@ -33,7 +34,7 @@ External chat tools cannot be forced to follow repository instructions. Give the
 | Commit, push, publish branch, or deploy pre-flight | `docs/architecture/TESTING.md`, `docs/core/INSTRUCTIONS.md` | `AGENTS.md`, `.github/workflows/deploy.yml` |
 | How the owner talks / how to interpret him | `docs/core/INSTRUCTIONS.md` | `AGENTS.md` interaction rules |
 | Recent work, active snapshot | `docs/core/STATE.md` | files cited in the latest entries |
-| Historical work & past decisions archive | `docs/history/MEMORY-2026-08.md` | historical entries by date |
+| Historical work & past decisions archive | `docs/history/MEMORY-2026-08.md`, `docs/history/CHANGELOG-V6-V26.md` | historical entries by date / version |
 | Skill selection | `docs/core/SKILLS.md` | the selected skill instructions |
 
 ## 3. Documentation Registry (3-Tier Structure)
@@ -63,6 +64,7 @@ External chat tools cannot be forced to follow repository instructions. Give the
 | Document | Purpose | Update when |
 | :--- | :--- | :--- |
 | `docs/domain/BUSINESS-RULES.md` | Mandatory business rules & security invariants | Business logic, compliance, or workflow rules change |
+| `docs/domain/DESIGN-INTENT.md` | Product philosophy, staff/customer personas & UX invariants | UX philosophy, user expectations, or design contracts change |
 | `docs/domain/SAAS-BLUEPRINT.md` | North Star SaaS blueprint, relational integrity & enterprise standards | Multi-tenancy, entity relations, or API contract standards change |
 | `docs/domain/PROJECT-CONTEXT.md` | Product vision, user roles, supported workflows | Product scope or target user requirements change |
 | `docs/domain/PROJECT-DIAGRAM.md` | Visual user workflow & system boundary diagram | Major user flows or system integrations change |
@@ -79,6 +81,7 @@ External chat tools cannot be forced to follow repository instructions. Give the
 | Document | Purpose | Update when |
 | :--- | :--- | :--- |
 | `docs/history/MEMORY-YYYY-MM.md` | Monthly archive of past interaction log entries | Monthly or when `docs/core/STATE.md` is rotated |
+| `docs/history/CHANGELOG-V6-V26.md` | Historical architectural additions and versioned changelogs (v6-v26) | Historical archive reference |
 | `docs/generated/CODEBASE-MAP.md` | AST-generated symbol, route, and line map | Run `python commands/update-code-map.py --write` |
 
 ## 4. Documentation Maintenance Rules

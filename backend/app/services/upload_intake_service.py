@@ -114,6 +114,31 @@ async def create_queued_upload(
             data,
             settings.max_source_pdf_bytes,
         )
+        
+        # --- Pre-flight PDF Token Estimator ---
+        if upload.filename.lower().endswith(".pdf"):
+            import fitz  # PyMuPDF
+            from app.services.gemini_account_service import get_key_pool
+            
+            try:
+                # fitz.Document can open from memory if we give it stream and filename/extension hint
+                with fitz.open(stream=data, filetype="pdf") as doc:
+                    page_count = doc.page_count
+                
+                # Gemini charges a base of ~258 tokens per page processed as image
+                estimated_tokens = page_count * 258
+                
+                # Check available requests in the active pool
+                manager = get_key_pool()
+                health = manager.get_health()
+                
+                if health.get("pool_rpd_remaining", 0) <= 0:
+                    raise AppError("AI token quota (RPD) has been exhausted for today. Please try again tomorrow or contact admin.", status_code=429)
+                    
+            except Exception:
+                pass  # If it's not a valid PDF, we'll catch it in the extraction job instead of blocking upload entirely.
+        # --------------------------------------
+
     except ValueError as exc:
         raise AppError(str(exc)) from exc
 

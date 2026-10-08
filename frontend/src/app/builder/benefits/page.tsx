@@ -419,6 +419,7 @@ function BenefitsPageContent() {
   const [condTargetId, setCondTargetId] = useState("");
   const [condActionType, setCondActionType] = useState<"replace_description" | "hide_target">("replace_description");
   const [condReplacement, setCondReplacement] = useState("");
+  const [condReplacementTitle, setCondReplacementTitle] = useState("");
 
   // Tab 4: Matrix and AI sync states
   const [matrixData, setMatrixData] = useState<CompanyMatrixData | null>(null);
@@ -629,6 +630,7 @@ function BenefitsPageContent() {
           target_concept_id: condTargetId,
           action_type: condActionType,
           replacement_description: condActionType === "hide_target" ? (condReplacement.trim() || "[Hidden by condition rule]") : condReplacement.trim(),
+          replacement_title: condActionType === "hide_target" ? null : (condReplacementTitle.trim() || null),
           is_active: true,
         }),
       });
@@ -639,6 +641,7 @@ function BenefitsPageContent() {
       setCondTargetId("");
       setCondActionType("replace_description");
       setCondReplacement("");
+      setCondReplacementTitle("");
       await loadCompanyConditions(selectedCompanyId, selectedProfileId);
       const profRes = await api<{ profiles: BenefitProfile[] }>("/business/benefit-profiles");
       if (mountedRef.current) setProfiles(profRes.profiles || []);
@@ -647,7 +650,7 @@ function BenefitsPageContent() {
     } finally {
       if (mountedRef.current) setConditionSaving(false);
     }
-  }, [selectedCompanyId, selectedProfileId, condFormName, condTriggerId, condPlanFilter, condTargetId, condActionType, condReplacement, loadCompanyConditions]);
+  }, [selectedCompanyId, selectedProfileId, condFormName, condTriggerId, condPlanFilter, condTargetId, condActionType, condReplacement, condReplacementTitle, loadCompanyConditions]);
 
   const deleteCompanyCondition = useCallback(async (conditionId: string) => {
     if (!selectedCompanyId) return;
@@ -3841,6 +3844,8 @@ ${aiMarkdownTable}`;
         setCondActionType={setCondActionType}
         condReplacement={condReplacement}
         setCondReplacement={setCondReplacement}
+        condReplacementTitle={condReplacementTitle}
+        setCondReplacementTitle={setCondReplacementTitle}
         saveCompanyCondition={saveCompanyCondition}
         conditionSaving={conditionSaving}
         cloneModalOpen={cloneModalOpen}

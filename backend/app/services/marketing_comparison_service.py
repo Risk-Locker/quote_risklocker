@@ -45,6 +45,7 @@ from app.models.tables import (
     new_id,
 )
 from app.services.customer_account_service import resolve_or_create_customer
+from app.services.benefit_evaluation_engine import BenefitEvaluationEngine, EvaluatedBenefit
 
 logger = logging.getLogger(__name__)
 
@@ -1162,21 +1163,6 @@ def _resolve_comparison_benefits(
     # --- TOWING ---
     towing_limit_val: str | None = None
     target_comp_id = company_id or getattr(session, "company_id", None)
-    if target_comp_id:
-        conditions = list(
-            db.scalars(
-                select(CompanyBenefitCondition).where(
-                    CompanyBenefitCondition.company_id == target_comp_id,
-                    CompanyBenefitCondition.is_active == True,
-                )
-            ).all()
-        )
-        for cond in conditions:
-            filter_text = (cond.trigger_plan_filter or "").strip().lower()
-            if filter_text and filter_text in combined_text:
-                if cond.replacement_description:
-                    towing_limit_val = cond.replacement_description.strip()
-                    break
 
     # Grounding from CatalogOfferings in draft catalog revision
     if not towing_limit_val and session and getattr(session, "draft", None) and getattr(session.draft, "catalog_revision_id", None):
@@ -1312,6 +1298,79 @@ def _resolve_comparison_benefits(
                 "has_cost": False,
                 "is_included": True,
             })
+
+    # --- 3. Unified Benefit Evaluation Engine ---
+    plan_name = str(f.get("plan_name") or f.get("product_name") or f.get("product_tier") or combined_text)
+    
+    base_benefits = []
+    if windscreen_amount:
+        base_benefits.append(EvaluatedBenefit(concept_id="windscreen", display_title="Windscreen Protection", display_description=f"RM {windscreen_amount:,.2f}"))
+    if special_perils_val:
+        base_benefits.append(EvaluatedBenefit(concept_id="special_perils", display_title="Special Perils (Flood & Storm)", display_description=special_perils_val))
+    if llp_val:
+        base_benefits.append(EvaluatedBenefit(concept_id="llp", display_title="Legal Liability to Passengers (LLP)", display_description=llp_val))
+    if clean_towing:
+        base_benefits.append(EvaluatedBenefit(concept_id="towing", display_title="Roadside Towing", display_description=clean_towing))
+        
+    target_comp_id = company_id or getattr(session, "company_id", None)
+    
+    if target_comp_id and base_benefits:
+        evaluated = BenefitEvaluationEngine.evaluate_benefits_for_plan(
+            db=db,
+            company_id=target_comp_id,
+            profile_id=None,
+            base_benefits=base_benefits,
+            plan_name=plan_name
+        )
+        
+        # Apply the evaluated results back to scalars
+        eval_map = {b.concept_id: b for b in evaluated if not b.is_hidden}
+        
+        if "windscreen" not in eval_map:
+            windscreen_amount = None
+        
+        if "special_perils" not in eval_map:
+            special_perils_val = None
+        else:
+            if eval_map["special_perils"].is_modified:
+                special_perils_val = eval_map["special_perils"].display_description
+                
+        if "llp" not in eval_map:
+            llp_val = None
+        else:
+            if eval_map["llp"].is_modified:
+                llp_val = eval_map["llp"].display_description
+                
+        if "towing" not in eval_map:
+            clean_towing = None
+        else:
+            if eval_map["towing"].is_modified:
+                clean_towing = eval_map["towing"].display_description
+                
+        # Update detailed_perils based on engine overrides
+        for dp in detailed_perils:
+            n_lower = dp["name"].lower()
+            if "towing" in n_lower:
+                if "towing" not in eval_map:
+                    dp["name"] = "HIDDEN"
+                elif eval_map["towing"].is_modified:
+                    dp["name"] = eval_map["towing"].display_title if eval_map["towing"].display_title != "Roadside Towing" else dp["name"]
+                    dp["coverage_limit"] = eval_map["towing"].display_description
+            elif "special peril" in n_lower or "flood" in n_lower:
+                if "special_perils" not in eval_map:
+                    dp["name"] = "HIDDEN"
+                elif eval_map["special_perils"].is_modified:
+                    dp["name"] = eval_map["special_perils"].display_title if eval_map["special_perils"].display_title != "Special Perils (Flood & Storm)" else dp["name"]
+                    dp["coverage_limit"] = eval_map["special_perils"].display_description
+            elif "llp" in n_lower or "liability to passenger" in n_lower:
+                if "llp" not in eval_map:
+                    dp["name"] = "HIDDEN"
+                elif eval_map["llp"].is_modified:
+                    dp["name"] = eval_map["llp"].display_title if eval_map["llp"].display_title != "Legal Liability to Passengers (LLP)" else dp["name"]
+                    dp["coverage_limit"] = eval_map["llp"].display_description
+
+        # Remove hidden perils
+        detailed_perils = [dp for dp in detailed_perils if dp["name"] != "HIDDEN"]
 
     return {
         "special_perils": special_perils_val,

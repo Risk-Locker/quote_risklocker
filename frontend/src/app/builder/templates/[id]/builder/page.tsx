@@ -66,6 +66,7 @@ export default function TemplateBuilderPage({
   const [savedFingerprint, setSavedFingerprint] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [isBenefitEditorOpen, setIsBenefitEditorOpen] = useState(false);
 
   const dirty = useMemo(() => {
     return JSON.stringify(tree) !== savedFingerprint;
@@ -635,6 +636,14 @@ export default function TemplateBuilderPage({
               </span>
             )}
           </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<Sparkle size={14} weight="bold" className="text-amber-500" />}
+            onClick={() => setIsBenefitEditorOpen(true)}
+          >
+            Benefit Templates
+          </Button>
 
           <Button
             variant="secondary"
@@ -708,6 +717,28 @@ export default function TemplateBuilderPage({
           onDeleteSection={handleDeleteSection}
         />
       </div>
+
+      {/* Docked Benefit Editor Drawer */}
+      {isBenefitEditorOpen && (
+        <div className="fixed inset-y-0 right-0 w-[90vw] max-w-[1400px] bg-slate-50 shadow-2xl z-50 border-l border-slate-200 flex flex-col transform transition-transform duration-300">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-white">
+            <h2 className="font-bold text-slate-800 flex items-center gap-2">
+              <Sparkle className="text-amber-500" size={18} weight="fill" /> 
+              Benefit Templates Designer
+            </h2>
+            <Button variant="ghost" size="sm" onClick={() => setIsBenefitEditorOpen(false)}>
+              Close & Return to Quotation Builder
+            </Button>
+          </div>
+          <div className="flex-1 overflow-hidden bg-slate-100 relative">
+            <iframe 
+              src="/builder/templates/benefit-templates?docked=true" 
+              className="absolute inset-0 w-full h-full border-0"
+              title="Benefit Templates Editor"
+            />
+          </div>
+        </div>
+      )}
     </main>
   );
 }

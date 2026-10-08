@@ -55,6 +55,8 @@ export interface BenefitsDialogsProps {
   setCondActionType: (action: "replace_description" | "hide_target") => void;
   condReplacement: string;
   setCondReplacement: (val: string) => void;
+  condReplacementTitle: string;
+  setCondReplacementTitle: (val: string) => void;
   saveCompanyCondition: () => void;
   conditionSaving: boolean;
   cloneModalOpen: boolean;
@@ -110,6 +112,8 @@ export function BenefitsDialogs({
   setCondActionType,
   condReplacement,
   setCondReplacement,
+  condReplacementTitle,
+  setCondReplacementTitle,
   saveCompanyCondition,
   conditionSaving,
   cloneModalOpen,
@@ -395,6 +399,7 @@ export function BenefitsDialogs({
                   Rule Name *
                 </label>
                 <Input
+                  maxLength={60}
                   value={condFormName}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCondFormName(e.target.value)}
                   placeholder="e.g. DPP -> Unlimited Towing Upgrade"
@@ -425,6 +430,7 @@ export function BenefitsDialogs({
                   Trigger Plan Filter (Optional)
                 </label>
                 <Input
+                  maxLength={50}
                   value={condPlanFilter}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCondPlanFilter(e.target.value)}
                   placeholder="e.g. Plan B, or leave blank for any plan / purchase"
@@ -484,10 +490,32 @@ export function BenefitsDialogs({
 
               {condActionType === "replace_description" ? (
                 <div>
-                  <label className="block font-semibold text-[var(--rl-text-strong)] mb-1">
-                    Upgraded / Replacement Description *
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-semibold text-[var(--rl-text-strong)]">
+                      Upgraded / Replacement Title (Optional)
+                    </label>
+                    <span className="text-[10px] text-[var(--rl-text-muted)] font-mono">
+                      {condReplacementTitle.length}/50
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    maxLength={50}
+                    value={condReplacementTitle}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCondReplacementTitle(e.target.value)}
+                    placeholder="e.g. Towing Plan Extended"
+                    className="w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] px-3 py-2 text-xs text-[var(--rl-text-strong)] focus:outline-none mb-3"
+                  />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-semibold text-[var(--rl-text-strong)]">
+                      Upgraded / Replacement Description *
+                    </label>
+                    <span className="text-[10px] text-[var(--rl-text-muted)] font-mono">
+                      {condReplacement.length}/120
+                    </span>
+                  </div>
                   <textarea
+                    maxLength={120}
                     value={condReplacement}
                     onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setCondReplacement(e.target.value)}
                     placeholder="e.g. Unlimited towing distance within Malaysia"

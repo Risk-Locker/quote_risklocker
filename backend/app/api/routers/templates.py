@@ -98,6 +98,7 @@ from app.api.schemas import (
     QuotationStatusUpdateRequest,
     BackfillConfirmRequest,
     VehicleOwnershipResolutionRequest,
+    TemplateLivePreviewRequest,
 )
 from app.auth.cookies import clear_auth_cookies, set_auth_cookies
 from app.auth.rbac import can_view_owner_record, require_role
@@ -1025,4 +1026,379 @@ def preview_html(
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+_BENEFIT_ARTWORK_CACHE: dict[str, str] | None = None
+
+_MOCK_CARD_KEYS: dict[str, str] = {
+    "Panel Workmanship Warranty": "repair-workmanship-warranty",
+    "Emergency Towing Assistance": "towing",
+    "Legal Defense Costs": "legal-costs-defense",
+    "All Drivers Excess Waiver": "all-drivers",
+    "Key Care Protection": "key-replacement",
+    "Legal Liability of Passengers": "legal-liability-of-passengers",
+    "Legal Liability to Passengers": "legal-liability-to-passengers",
+    "Flood & Special Perils": "special-perils",
+    "Windscreen Protection": "windscreen",
+    "Driver & Passenger PA": "driver-passenger-protector",
+    "Compensation Repair (CART)": "repair-allowance",
+    "Cart 14 Days": "repair-allowance",
+    "Waiver of Betterment": "betterment-protection",
+    "Strike, Riot & Civil Commotion": "strike-riot-civil-commotion",
+    "Road Tax Courier Service": "document-replacement",
+    "Vehicle Accessories Protection": "vehicle-accessories",
+    "Car Spray Repainting": "repaint-spray-paint",
+    "Personal Accident Extended": "driver-passenger-protector",
+    "Child Seat Replacement": "child-car-seat",
+    "Tire Replacement Cover": "side-mirror-protection",
+    "Rim Damage Protection": "side-mirror-protection",
+    "Medical Expenses Allowance": "medical-expenses",
+    "Ambulance Fee Reimbursement": "ambulance-fees",
+}
+
+
+def _get_benefit_artwork_data_uris() -> dict[str, str]:
+    global _BENEFIT_ARTWORK_CACHE
+    if _BENEFIT_ARTWORK_CACHE is not None:
+        return _BENEFIT_ARTWORK_CACHE
+
+    import base64
+    from pathlib import Path
+
+    art: dict[str, str] = {}
+    base_dir = Path(__file__).resolve().parents[4] / "assets" / "benefits"
+
+    # 1. First load 2D assets (compact, crisp, fast)
+    p_2d = base_dir / "global_benefits_2d_assets_v2_new"
+    if p_2d.exists():
+        for f in p_2d.glob("*.*"):
+            if f.suffix.lower() in (".jpg", ".jpeg", ".png"):
+                mime = "image/png" if f.suffix.lower() == ".png" else "image/jpeg"
+                try:
+                    data = f.read_bytes()
+                    b64 = f"data:{mime};base64," + base64.b64encode(data).decode("ascii")
+                    stem = f.stem.lower()
+                    clean = stem.split("_", 1)[-1] if "_" in stem else stem
+                    clean_spaced = clean.replace("-", " ").strip()
+                    clean_dashed = clean.replace(" ", "-").strip()
+                    art[clean_spaced] = b64
+                    art[clean_dashed] = b64
+                    art[f"preview-{clean_dashed}"] = b64
+                except Exception:
+                    pass
+
+    # 2. Add high-res PNG benefit files as fallback/complement
+    if base_dir.exists():
+        for f in base_dir.glob("*.png"):
+            try:
+                data = f.read_bytes()
+                b64 = "data:image/png;base64," + base64.b64encode(data).decode("ascii")
+                stem = f.stem.lower().strip()
+                art[stem] = b64
+                art[stem.replace(" ", "-")] = b64
+                art[f"preview-{stem.replace(' ', '-')}"] = b64
+            except Exception:
+                pass
+
+    # 3. Add canonical aliases & keywords
+    synonyms = {
+        "towing": ["towing", "emergency roadside assistance"],
+        "windscreen": ["windscreen", "windscreen coverage"],
+        "special-perils": ["special perils", "flood coverage  flood damage protection", "first loss flood"],
+        "flood": ["special perils", "flood coverage  flood damage protection"],
+        "workmanship": ["repair workmanship warranty", "repair-workmanship-warranty"],
+        "betterment": ["betterment-protection", "waiver of betterment", "betterment protection"],
+        "key-replacement": ["key-replacement", "key replacement  key care", "key care"],
+        "key-care": ["key-replacement", "key replacement  key care"],
+        "all-drivers": ["all-drivers", "all drivers coverage"],
+        "driver-passenger-protector": ["driver-passenger-protector", "driver and passenger protection plan", "personal accident"],
+        "pa": ["driver-passenger-protector", "personal accident"],
+        "cart": ["repair allowance", "repair-allowance", "courtesy car or replacement car"],
+        "strike-riot": ["strike-riot-civil-commotion", "strike, riot and civil commotion"],
+        "ambulance": ["ambulance-fees", "ambulance fees"],
+        "medical": ["medical-expenses", "medical expenses"],
+        "child-seat": ["child-car-seat", "child car seat coverage"],
+        "legal-passengers": ["legal-liability-of-passengers", "legal liability of passengers"],
+        "legal-liability-to-passengers": ["legal-liability-to-passengers", "legal liability to passengers"],
+        "legal-costs-defense": ["legal-costs-defense", "legal defense"],
+        "accessories": ["vehicle-accessories", "vehicle accessories"],
+        "spray": ["repaint-spray-paint", "whole car spray painting or new coat of paint"],
+    }
+    for alias, targets in synonyms.items():
+        for target in targets:
+            if target in art:
+                art[alias] = art[target]
+                art[alias.replace("-", " ")] = art[target]
+                art[f"preview-{alias}"] = art[target]
+                break
+
+    _BENEFIT_ARTWORK_CACHE = art
+    return _BENEFIT_ARTWORK_CACHE
+
+
+def _build_preview_profile_data(
+    load_profile: str,
+    insurer_name: str = "BERJAYA SOMPO INSURANCE BERHAD",
+    include_purchased_perils: bool = True,
+) -> tuple[dict, dict]:
+    """Constructs realistic preview data for template builder stress test profiles."""
+    if load_profile == "minimum":
+        foc_cards = [
+            {"id": "b1", "label": "Panel Workmanship Warranty", "coverage_limit": "12 Months", "short_description": "Repair guarantee at panel workshops."},
+            {"id": "b2", "label": "Emergency Towing Assistance", "coverage_limit": "Unlimited", "short_description": "24/7 unlimited breakdown towing."},
+        ]
+        if include_purchased_perils:
+            extras_cards = [
+                {"id": "e1", "label": "Flood & Special Perils", "coverage_limit": "RM 85,000", "price": {"amount": 250.0}, "is_extra": True, "cost_status": "paid", "short_description": "Full natural disaster flood, storm, and landslide cover."},
+                {"id": "e2", "label": "Windscreen Protection", "coverage_limit": "RM 2,000", "price": {"amount": 150.0}, "is_extra": True, "cost_status": "paid", "short_description": "Front & rear glass replacement without NCD loss."},
+            ]
+            addon_cards = [
+                {"id": "a1", "label": "Driver & Passenger PA", "price": {"amount": 150.0}, "short_description": "Accidental medical reimbursement and disability cover."},
+                {"id": "a2", "label": "Cart 14 Days", "price": {"amount": 150.0}, "short_description": "Compensation for assessed repair time."},
+            ]
+        else:
+            extras_cards = []
+            addon_cards = [
+                {"id": "a1", "label": "Flood & Special Perils", "price": {"amount": 250.0}, "short_description": "Flood, storm, landslide and typhoon."},
+                {"id": "a2", "label": "Windscreen Protection", "price": {"amount": 150.0}, "short_description": "Front & rear glass replacement."},
+            ]
+    elif load_profile == "high":
+        foc_cards = [
+            {"id": "b1", "label": "Panel Workmanship Warranty", "coverage_limit": "12 Months", "short_description": "Repair guarantee at panel workshops."},
+            {"id": "b2", "label": "Emergency Towing Assistance", "coverage_limit": "Unlimited", "short_description": "24/7 unlimited breakdown towing."},
+            {"id": "b3", "label": "Legal Defense Costs", "coverage_limit": "RM 2,000", "short_description": "Legal fees protection up to RM 2,000."},
+            {"id": "b4", "label": "All Drivers Excess Waiver", "coverage_limit": "Included", "short_description": "Waives RM400 compulsory excess."},
+            {"id": "b5", "label": "Key Care Protection", "coverage_limit": "RM 1,500", "short_description": "Key replacement reimbursement."},
+            {"id": "b6", "label": "Legal Liability of Passengers", "coverage_limit": "Included", "short_description": "Third party negligence cover."},
+        ]
+        if include_purchased_perils:
+            extras_cards = [
+                {"id": "e1", "label": "Flood & Special Perils", "coverage_limit": "RM 199,000", "price": {"amount": 350.0}, "is_extra": True, "cost_status": "paid", "short_description": "Full natural disaster flood, storm, and landslide cover."},
+                {"id": "e2", "label": "Windscreen Protection", "coverage_limit": "RM 4,000", "price": {"amount": 150.0}, "is_extra": True, "cost_status": "paid", "short_description": "Front & rear glass replacement without NCD loss."},
+                {"id": "e3", "label": "Driver & Passenger PA", "coverage_limit": "RM 20,000", "price": {"amount": 150.0}, "is_extra": True, "cost_status": "paid", "short_description": "Medical reimbursement and disability cover."},
+                {"id": "e4", "label": "Compensation Repair (CART)", "coverage_limit": "14 Days", "price": {"amount": 200.0}, "is_extra": True, "cost_status": "paid", "short_description": "Daily allowance during repair."},
+                {"id": "e5", "label": "Waiver of Betterment", "coverage_limit": "Included", "price": {"amount": 120.0}, "is_extra": True, "cost_status": "paid", "short_description": "No deduction for new parts."},
+                {"id": "e6", "label": "Strike, Riot & Civil Commotion", "coverage_limit": "Included", "price": {"amount": 90.0}, "is_extra": True, "cost_status": "paid", "short_description": "Damage from civil commotion."},
+            ]
+            addon_cards = [
+                {"id": "a1", "label": "Road Tax Courier Service", "price": {"amount": 25.0}, "short_description": "Express door-to-door delivery."},
+                {"id": "a2", "label": "Vehicle Accessories Protection", "price": {"amount": 120.0}, "short_description": "In-car dashcam and audio system."},
+                {"id": "a3", "label": "Car Spray Repainting", "price": {"amount": 250.0}, "short_description": "Full body repainting benefit."},
+                {"id": "a4", "label": "Personal Accident Extended", "price": {"amount": 180.0}, "short_description": "Extended family passenger cover."},
+                {"id": "a5", "label": "Child Seat Replacement", "price": {"amount": 100.0}, "short_description": "Child safety restraint replacement."},
+                {"id": "a6", "label": "Tire Replacement Cover", "price": {"amount": 90.0}, "short_description": "Puncture and blowout road hazard."},
+                {"id": "a7", "label": "Rim Damage Protection", "price": {"amount": 110.0}, "short_description": "Alloy wheel rim impact protection."},
+                {"id": "a8", "label": "Medical Expenses Allowance", "price": {"amount": 130.0}, "short_description": "Accident hospitalization daily cash."},
+                {"id": "a9", "label": "Ambulance Fee Reimbursement", "price": {"amount": 70.0}, "short_description": "Emergency ambulance charges cover."},
+            ]
+        else:
+            extras_cards = []
+            addon_cards = [
+                {"id": "a1", "label": "Flood & Special Perils", "price": {"amount": 350.0}, "short_description": "Flood, storm, landslide and typhoon."},
+                {"id": "a2", "label": "Windscreen Protection", "price": {"amount": 150.0}, "short_description": "Front & rear glass replacement."},
+                {"id": "a3", "label": "Driver & Passenger PA", "price": {"amount": 150.0}, "short_description": "Personal accident cover."},
+                {"id": "a4", "label": "Compensation Repair (CART)", "price": {"amount": 200.0}, "short_description": "Daily allowance during repair."},
+                {"id": "a5", "label": "Waiver of Betterment", "price": {"amount": 120.0}, "short_description": "No deduction for new parts."},
+                {"id": "a6", "label": "Strike, Riot & Civil Commotion", "price": {"amount": 90.0}, "short_description": "Damage from civil commotion."},
+            ]
+    else:  # "medium"
+        foc_cards = [
+            {"id": "b1", "label": "Panel Workmanship Warranty", "coverage_limit": "12 Months", "short_description": "Repair guarantee at panel workshops."},
+            {"id": "b2", "label": "Emergency Towing Assistance", "coverage_limit": "Unlimited", "short_description": "24/7 unlimited breakdown towing."},
+            {"id": "b3", "label": "Key Care Protection", "coverage_limit": "RM 1,500", "short_description": "Reimbursement for lost or damaged vehicle keys."},
+            {"id": "b4", "label": "All Drivers Excess Waiver", "coverage_limit": "Included", "short_description": "Waives RM400 compulsory excess."},
+        ]
+        if include_purchased_perils:
+            extras_cards = [
+                {"id": "e1", "label": "Flood & Special Perils", "coverage_limit": "RM 199,000", "price": {"amount": 350.0}, "is_extra": True, "cost_status": "paid", "short_description": "Full natural disaster flood, storm, and landslide cover."},
+                {"id": "e2", "label": "Windscreen Protection", "coverage_limit": "RM 4,000", "price": {"amount": 150.0}, "is_extra": True, "cost_status": "paid", "short_description": "Front & rear glass replacement without NCD loss."},
+                {"id": "e3", "label": "Driver & Passenger PA", "coverage_limit": "RM 20,000", "price": {"amount": 150.0}, "is_extra": True, "cost_status": "paid", "short_description": "Accidental medical reimbursement and disability cover."},
+            ]
+            addon_cards = [
+                {"id": "a1", "label": "Cart 14 Days", "price": {"amount": 150.0}, "short_description": "Compensation for assessed repair time."},
+                {"id": "a2", "label": "Legal Liability to Passengers", "price": {"amount": 45.0}, "short_description": "Negligence claims cover for passengers."},
+                {"id": "a3", "label": "Waiver of Betterment", "price": {"amount": 120.0}, "short_description": "No deduction for new parts."},
+                {"id": "a4", "label": "Strike, Riot & Civil Commotion", "price": {"amount": 90.0}, "short_description": "Damage from civil commotion."},
+            ]
+        else:
+            extras_cards = []
+            addon_cards = [
+                {"id": "a1", "label": "Flood & Special Perils", "price": {"amount": 350.0}, "short_description": "Flood, storm, landslide and typhoon."},
+                {"id": "a2", "label": "Windscreen Protection", "price": {"amount": 150.0}, "short_description": "Front & rear glass replacement."},
+                {"id": "a3", "label": "Driver & Passenger PA", "price": {"amount": 150.0}, "short_description": "Accidental medical reimbursement and disability cover."},
+                {"id": "a4", "label": "Cart 14 Days", "price": {"amount": 150.0}, "short_description": "Compensation for assessed repair time."},
+                {"id": "a5", "label": "Waiver of Betterment", "price": {"amount": 120.0}, "short_description": "No deduction for new parts."},
+            ]
+
+    def _enrich_card(card: dict) -> dict:
+        lbl = str(card.get("label") or "")
+        key = _MOCK_CARD_KEYS.get(lbl, lbl.lower().replace(" ", "-"))
+        c = dict(card)
+        c.setdefault("concept_key", key)
+        c.setdefault("asset_id", f"preview-{key}")
+        if "short_description" in c and "description" not in c:
+            c["description"] = c["short_description"]
+        return c
+
+    foc_cards = [_enrich_card(c) for c in foc_cards]
+    extras_cards = [_enrich_card(c) for c in extras_cards]
+    addon_cards = [_enrich_card(c) for c in addon_cards]
+
+    extras_data = [
+        {
+            "id": c["id"],
+            "label": c["label"],
+            "concept_key": c.get("concept_key"),
+            "asset_id": c.get("asset_id"),
+            "coverage_limit": c.get("coverage_limit", ""),
+            "price": c.get("price", {}),
+            "show_coverage": True,
+        }
+        for c in extras_cards
+    ]
+
+    render_context = {
+        "current_benefits": foc_cards + extras_cards,
+        "available_addons": addon_cards,
+        "extras": extras_data,
+        "extras_mode": "itemized",
+    }
+    draft_fields = {
+        "quotation_reference": {"value": "RL260000313"},
+        "customer_name": {"value": "CHENG TECK KIONG"},
+        "vehicle_no": {"value": "ANY 368"},
+        "car_model": {"value": "Tesla Model 3 Performance"},
+        "insurance_company": {"value": insurer_name},
+        "coverage_type": {"value": "Comprehensive"},
+        "cover_period": {"value": "04-06-2026 to 03-06-2027"},
+        "engine_cc": {"value": "9.4 kW"},
+        "ncd_percent": {"value": "25.00%"},
+        "valuation_type": {"value": "Market Value"},
+        "authorized_driver": {"value": "All Driver"},
+        "excess_amount": {"value": "RM 0.00"},
+        "coverage_amount": {"value": "RM 199,000.00"},
+        "premium": {"value": "3,758.21"},
+        "roadtax": {"value": "20.00"},
+        "service_fee": {"value": "10.00"},
+        "total_amount": {"value": "4,423.21" if extras_cards else "3,788.21"},
+        "valid_until": {"value": "14 Days"},
+    }
+    return draft_fields, render_context
+
+
+@router.post("/admin/templates/preview-render")
+def admin_template_preview_render(
+    payload: TemplateLivePreviewRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.rendering.template_renderer import render_quotation_html
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
+    draft_fields, render_context = _build_preview_profile_data(
+        payload.load_profile,
+        include_purchased_perils=payload.include_purchased_perils,
+    )
+    insurer = "BERJAYA SOMPO INSURANCE BERHAD"
+
+    if payload.session_id:
+        try:
+            from app.services.workspace_snapshot_service import build_workspace_snapshot
+            snap = build_workspace_snapshot(db, user, payload.session_id)
+            if snap:
+                for k, v in (snap.get("fields") or {}).items():
+                    if isinstance(v, dict) and "value" in v:
+                        draft_fields[k] = v
+                if draft_fields.get("insurance_company", {}).get("value"):
+                    insurer = str(draft_fields["insurance_company"]["value"])
+
+                bc = snap.get("benefit_cards") or {}
+                snap_extras = list(snap.get("extras") or [])
+                curr_benefits = list(bc.get("current_benefits") or [])
+                avail_addons = list(bc.get("available_addons") or [])
+
+                if not payload.include_purchased_perils:
+                    from app.rendering.template_renderer import _is_paid_extra
+                    snap_extras = []
+                    curr_benefits = [c for c in curr_benefits if not _is_paid_extra(c)]
+
+                if curr_benefits or avail_addons or snap_extras:
+                    render_context["current_benefits"] = curr_benefits
+                    render_context["available_addons"] = avail_addons
+                    render_context["extras"] = snap_extras
+                    render_context["display_options"] = snap.get("display_options") or {}
+                    render_context["total_premium_adjusted"] = snap.get("total_premium_adjusted")
+        except Exception:
+            pass
+
+    import copy
+    tmpl_config = copy.deepcopy(payload.template_config or {})
+    tmpl_name = str(tmpl_config.get("name") or "")
+
+    if payload.template_id:
+        tmpl = db.query(OutputTemplateConfig).filter_by(id=payload.template_id).first()
+        if tmpl and tmpl.fixed_fields:
+            if not tmpl_config:
+                tmpl_config = copy.deepcopy(tmpl.fixed_fields)
+            if not tmpl_name:
+                tmpl_name = tmpl.name
+
+    if not tmpl_config:
+        default_t = db.query(OutputTemplateConfig).filter(OutputTemplateConfig.name.ilike("%v4%")).first()
+        if default_t and default_t.fixed_fields:
+            tmpl_config = copy.deepcopy(default_t.fixed_fields)
+            tmpl_name = default_t.name
+
+    if payload.benefit_preset_config and isinstance(payload.benefit_preset_config, dict):
+        canvas = tmpl_config.setdefault("canvas", {})
+        elems = canvas.setdefault("elements", [])
+        for el in elems:
+            if el.get("type") == "benefit-grid":
+                for k in [
+                    "layoutMode", "columns", "cardStyle", "textDensity",
+                    "iconSize", "shape", "elevation", "borderWidth", "borderStyle",
+                    "imageFit", "iconPadShape", "titleSize", "titleWeight", "titleColor",
+                    "textWrap", "valueBadgeStyle", "coverageSize", "coverageColor",
+                    "descSize", "descWeight", "descColor", "descMaxLines",
+                    "costSize", "costColor", "costBgColor",
+                    "bgColor", "borderColor", "textColor", "accentColor",
+                    "rowHeight", "uniformHeight", "sectionVisibility",
+                    "showDescription", "showCoverage", "showCost", "benefitPreset"
+                ]:
+                    if k in payload.benefit_preset_config:
+                        el[k] = payload.benefit_preset_config[k]
+        render_context["benefit_preset_config"] = payload.benefit_preset_config
+
+    if tmpl_config and "extras_mode" in tmpl_config:
+        render_context["extras_mode"] = str(tmpl_config["extras_mode"]).lower()
+
+    if not tmpl_name:
+        tmpl_name = "Bilingual Agency Motor v4"
+
+    resolved_assets = dict(_get_benefit_artwork_data_uris())
+
+    if payload.session_id:
+        try:
+            from app.services.global_benefit_profile_service import get_active_visual_profile_asset_map
+            from app.rendering.template_renderer import asset_data_uri
+            vp_map = get_active_visual_profile_asset_map(db)
+            for c_id, a_id in (vp_map or {}).items():
+                if a_id and a_id not in resolved_assets:
+                    uri = asset_data_uri(db, a_id)
+                    if uri:
+                        resolved_assets[a_id] = uri
+                        resolved_assets[c_id] = uri
+        except Exception:
+            pass
+
+    html = render_quotation_html(
+        draft_fields=draft_fields,
+        template_name=tmpl_name,
+        template_config=tmpl_config,
+        insurer_name=insurer,
+        db=db,
+        render_context=render_context,
+        resolved_assets=resolved_assets,
+    )
+    return {"html": html}
+
 

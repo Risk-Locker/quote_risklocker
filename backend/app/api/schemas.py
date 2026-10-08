@@ -373,6 +373,7 @@ class CompanyBenefitConditionSaveRequest(StrictRequest):
     target_concept_id: str
     action_type: str = Field(default="replace_description", max_length=50)
     replacement_description: str | None = Field(default=None, max_length=1000)
+    replacement_title: str | None = Field(default=None, max_length=255)
     is_active: bool = True
 
 
@@ -691,6 +692,17 @@ class VehicleOwnershipResolutionRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
     resolution_type: str = Field(pattern=r"^(car_sold_new_owner|old_quote_mistake|pending_verification)$")
     notes: str | None = None
+
+
+class TemplateLivePreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    template_config: dict[str, Any] = Field(default_factory=dict)
+    template_id: str | None = None
+    session_id: str | None = None
+    load_profile: Literal["minimum", "medium", "high"] = "medium"
+    include_purchased_perils: bool = True
+    benefit_preset_config: dict[str, Any] | None = None
+
 
 
 

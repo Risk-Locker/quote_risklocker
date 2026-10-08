@@ -49,6 +49,7 @@ export const FONT_LIBRARY = [
 ] as const;
 
 export type CanvasElement = {
+  componentRole?: string;
   id: string;
   type: string;
   x: number;
@@ -379,15 +380,15 @@ export function CanvasElementView({
 
   const slot =
     element.assetSlot ||
-    (eid === "risklocker_logo" || eid === "pay_holder" || eid === "text_ltaa394"
+    ((element.componentRole === "risklocker_logo" || eid === "risklocker_logo") || (element.componentRole === "pay_holder" || eid === "pay_holder") || (element.componentRole === "text_ltaa394" || eid === "text_ltaa394")
       ? "risklocker_logo"
-      : eid === "bank_logo" || eid === "pay_bank_logo" || eid === "pay_bank_sub" || eid === "text_ul2w5ka"
+      : (element.componentRole === "bank_logo" || eid === "bank_logo") || (element.componentRole === "pay_bank_logo" || eid === "pay_bank_logo") || (element.componentRole === "pay_bank_sub" || eid === "pay_bank_sub") || (element.componentRole === "text_ul2w5ka" || eid === "text_ul2w5ka")
         ? "bank_logo"
-        : eid === "qr_code" || eid === "rc_b_qr_code"
+        : (element.componentRole === "qr_code" || eid === "qr_code") || (element.componentRole === "rc_b_qr_code" || eid === "rc_b_qr_code")
           ? "qr_code"
-          : eid === "payment_account_details_img" || eid === "rc_b_duitnow_img" || eid === "duitnow_img" || eid === "duitnow_card"
+          : (element.componentRole === "payment_account_details_img" || eid === "payment_account_details_img") || (element.componentRole === "rc_b_duitnow_img" || eid === "rc_b_duitnow_img") || (element.componentRole === "duitnow_img" || eid === "duitnow_img") || (element.componentRole === "duitnow_card" || eid === "duitnow_card")
             ? "duitnow_payment_details"
-            : eid === "driver_icon"
+            : (element.componentRole === "driver_icon" || eid === "driver_icon")
               ? "all_driver_icon"
               : "");
 
@@ -400,13 +401,13 @@ export function CanvasElementView({
       assetId = SYSTEM_SLOT_DEFAULTS[slot];
     } else if (SYSTEM_SLOT_DEFAULTS[eid]) {
       assetId = SYSTEM_SLOT_DEFAULTS[eid];
-    } else if (eid === "pay_holder" || eid === "text_ltaa394") {
+    } else if ((element.componentRole === "pay_holder" || eid === "pay_holder") || (element.componentRole === "text_ltaa394" || eid === "text_ltaa394")) {
       assetId = SYSTEM_SLOT_DEFAULTS["risklocker_logo"];
-    } else if (eid === "pay_bank_logo" || eid === "pay_bank_sub" || eid === "text_ul2w5ka") {
+    } else if ((element.componentRole === "pay_bank_logo" || eid === "pay_bank_logo") || (element.componentRole === "pay_bank_sub" || eid === "pay_bank_sub") || (element.componentRole === "text_ul2w5ka" || eid === "text_ul2w5ka")) {
       assetId = SYSTEM_SLOT_DEFAULTS["bank_logo"];
-    } else if (eid === "qr_code" || eid === "rc_b_qr_code") {
+    } else if ((element.componentRole === "qr_code" || eid === "qr_code") || (element.componentRole === "rc_b_qr_code" || eid === "rc_b_qr_code")) {
       assetId = SYSTEM_SLOT_DEFAULTS["qr_code"];
-    } else if (eid === "payment_account_details_img" || eid === "rc_b_duitnow_img") {
+    } else if ((element.componentRole === "payment_account_details_img" || eid === "payment_account_details_img") || (element.componentRole === "rc_b_duitnow_img" || eid === "rc_b_duitnow_img")) {
       assetId = slot === "bank_qr_layout_dark" || slot === "bank_qr_layout"
         ? SYSTEM_SLOT_DEFAULTS["bank_qr_layout_dark"]
         : SYSTEM_SLOT_DEFAULTS["duitnow_payment_details"];
@@ -425,10 +426,10 @@ export function CanvasElementView({
     slot === "bank_qr_layout" ||
     slot === "duitnow_payment_details" ||
     slot === "qr_code" ||
-    eid === "payment_account_details_img" ||
-    eid === "rc_b_duitnow_img" ||
-    eid === "qr_code" ||
-    eid === "rc_b_qr_code" ||
+    (element.componentRole === "payment_account_details_img" || eid === "payment_account_details_img") ||
+    (element.componentRole === "rc_b_duitnow_img" || eid === "rc_b_duitnow_img") ||
+    (element.componentRole === "qr_code" || eid === "qr_code") ||
+    (element.componentRole === "rc_b_qr_code" || eid === "rc_b_qr_code") ||
     assetId === "c4003185-0000-4000-8000-000000000001" ||
     assetId === "c3003185-0000-4000-8000-000000000001" ||
     assetId === "9ca8e404c89dd905" ||
@@ -531,7 +532,7 @@ export function CanvasElementView({
     >
       {isImageOrLogo ? (
         resolvedUrl ? (
-          <img className={`h-full w-full object-contain ${eid === "risklocker_logo" || slot === "risklocker_logo" ? "object-left" : ""}`} src={fileUrl(resolvedUrl)} alt="" />
+          <img className={`h-full w-full object-contain ${(element.componentRole === "risklocker_logo" || eid === "risklocker_logo") || slot === "risklocker_logo" ? "object-left" : ""}`} src={fileUrl(resolvedUrl)} alt="" />
         ) : slot ? (
           <div className="flex h-full w-full items-center justify-center rounded border border-dashed border-gray-200 bg-gray-50/60 p-1 text-center font-bold text-gray-500 text-[10px]">
             {slot === "risklocker_logo" ? (
@@ -556,17 +557,17 @@ export function CanvasElementView({
       ) : element.type === "text" && !isImageOrLogo ? (
         (() => {
           let text = element.text || "";
-          if (element.id === "lbl_engine_cc" || text.includes("Vehicle CC / 引擎容量") || (text.includes("Engine Capacity") && !text.includes("发动机排量"))) {
+          if ((element.componentRole === "lbl_engine_cc" || element.id === "lbl_engine_cc") || text.includes("Vehicle CC / 引擎容量") || (text.includes("Engine Capacity") && !text.includes("发动机排量"))) {
             text = "Engine Capacity / 发动机排量";
           }
-          if (element.id === "specials_title" || text.includes("Featured Standard Benefits") || text.includes("Featured standard") || text.includes("Our Specials")) {
+          if ((element.componentRole === "specials_title" || element.id === "specials_title") || text.includes("Featured Standard Benefits") || text.includes("Featured standard") || text.includes("Our Specials")) {
             const shortName = getInsurerShortName(variableValues?.insurance_company || variableValues?.insurance_name || "QBE");
             text = `${shortName} Free Added Coverage`;
           }
-          if (element.id === "extras_title" || text.includes("Purchased Add-Ons & Extras") || text.includes("Purchased Addons and Extras")) {
+          if ((element.componentRole === "extras_title" || element.id === "extras_title") || text.includes("Purchased Add-Ons & Extras") || text.includes("Purchased Addons and Extras")) {
             text = "Included Optional Add-On";
           }
-          if (element.id === "addons_title" || text.includes("You May Add On")) {
+          if ((element.componentRole === "addons_title" || element.id === "addons_title") || text.includes("You May Add On")) {
             text = "Recommended Add-On Upgrades :";
           }
           if (text.includes("{") && variableValues) {
@@ -612,13 +613,13 @@ export function CanvasElementView({
               </span>
             );
           }
-          if ((eid === "ref_val" || eid === "vehicle_no_val" || eid === "header_insurer_name") && element.style?.textAlign === "right") {
+          if (((element.componentRole === "ref_val" || eid === "ref_val") || (element.componentRole === "vehicle_no_val" || eid === "vehicle_no_val") || (element.componentRole === "header_insurer_name" || eid === "header_insurer_name")) && element.style?.textAlign === "right") {
             const prefix = element.prefix || "";
-            const isInsurer = eid === "header_insurer_name";
+            const isInsurer = (element.componentRole === "header_insurer_name" || eid === "header_insurer_name");
             let val = raw !== null ? formatVariableValue(raw, "", element.suffix || "") : "";
-            if (!val && eid === "ref_val") val = "RL260000341";
-            else if (!val && eid === "vehicle_no_val") val = "JXS2820";
-            else if (!val && eid === "header_insurer_name") val = "QBE INSURANCE (MALAYSIA) BERHAD";
+            if (!val && (element.componentRole === "ref_val" || eid === "ref_val")) val = "RL260000341";
+            else if (!val && (element.componentRole === "vehicle_no_val" || eid === "vehicle_no_val")) val = "JXS2820";
+            else if (!val && (element.componentRole === "header_insurer_name" || eid === "header_insurer_name")) val = "QBE INSURANCE (MALAYSIA) BERHAD";
             return (
               <div className="w-full h-full flex items-center justify-end text-right overflow-hidden whitespace-nowrap">
                 <span className="text-[10px] font-medium text-slate-500 mr-1 shrink-0">{prefix}</span>
@@ -1081,13 +1082,23 @@ export function CanvasElementView({
                   const isElevated = element.benefitPreset === "elevated-3d" || element.cardStyle === "soft";
                   const isGridTile = element.benefitPreset === "grid-tile" || element.cardStyle === "outlined";
                   const cardRowH = (element as any).rowHeight || (element as any).targetRowHeight || 0;
+                  const customIconSize = (element as any).iconSize ? Number((element as any).iconSize) : 0;
+                  const customTitleSize = (element as any).titleSize ? Number((element as any).titleSize) : 0;
+                  const minCardNeeded = Math.max(
+                    28,
+                    customIconSize > 0 ? customIconSize + 18 : 28,
+                    customTitleSize > 0 ? customTitleSize + 28 : 28
+                  );
+                  const effectiveCardRowH = cardRowH > 0
+                    ? ((element as any).uniformHeight ? (element as any).uniformHeight : (customIconSize > 24 || customTitleSize > 10 ? Math.max(cardRowH, minCardNeeded) : cardRowH))
+                    : 0;
 
                   return (
                     <div
                       className="grid w-full items-stretch"
                       style={{ 
                         gridTemplateColumns: `repeat(${numCols}, minmax(0, 1fr))`,
-                        gridAutoRows: cardRowH > 0 ? `${cardRowH}px` : undefined,
+                        gridAutoRows: effectiveCardRowH > 0 ? `${effectiveCardRowH}px` : undefined,
                         gap: density.gap 
                       }}
                     >
@@ -1193,9 +1204,11 @@ export function CanvasElementView({
                             }
 
                         const customIconSize = (element as any).iconSize ? Number((element as any).iconSize) : 0;
-                        const cardIconSize = cardRowH > 0
-                          ? (cardRowH < 46 ? 14 : cardRowH < 64 ? 18 : 22)
-                          : (customIconSize > 0 ? Math.min(60, Math.max(16, customIconSize)) : (isMinimal ? density.icon - 2 : density.icon));
+                        const cardIconSize = customIconSize > 0
+                          ? Math.min(60, Math.max(14, customIconSize))
+                          : (cardRowH > 0
+                            ? (cardRowH < 46 ? 14 : cardRowH < 64 ? 18 : 22)
+                            : (isMinimal ? density.icon - 2 : density.icon));
                         const cardPadding = cardRowH > 0
                           ? (cardRowH < 46 ? "2px 4px" : cardRowH < 64 ? "3px 5px" : "4px 6px")
                           : (isMinimal ? "3px 5px" : density.padding);
@@ -1211,12 +1224,14 @@ export function CanvasElementView({
                         const cardIconPad = (element as any).iconPadShape;
                         const iconPadRadius = cardIconPad === "circle" ? "999px" : cardIconPad === "box" ? "6px" : cardIconPad === "none" ? "0px" : (isGridTile ? "999px" : "4px");
 
-                        const cardTitleSize = cardRowH > 0
-                          ? (cardRowH < 46 ? 8.5 : cardRowH < 64 ? 9.0 : Math.min(10, (element as any).titleSize || density.label))
-                          : (isMinimal ? density.label - 0.5 : ((element as any).titleSize || density.label));
-                        const cardTitleClamp = cardRowH > 0
-                          ? (cardRowH < 50 ? 1 : (cardRowH < 68 ? 1 : 2))
-                          : ((element as any).textWrap === "truncate" ? 1 : ((element as any).textWrap === "wrap" ? 2 : undefined));
+                        const cardTitleSize = (element as any).titleSize
+                          ? Number((element as any).titleSize)
+                          : (cardRowH > 0
+                            ? (cardRowH < 46 ? 8.5 : cardRowH < 64 ? 9.0 : Math.min(10, density.label))
+                            : (isMinimal ? density.label - 0.5 : density.label));
+                        const cardTitleClamp = (element as any).textWrap === "truncate"
+                          ? 1
+                          : ((element as any).textWrap === "multi" ? 3 : (cardRowH > 0 && cardRowH < 50 ? 1 : 2));
 
                         return (
                           <article
@@ -1233,8 +1248,8 @@ export function CanvasElementView({
                                       : "border border-neutral-400 bg-white shadow-xs"
                             }`}
                             style={{
-                              height: cardRowH > 0 ? `${cardRowH}px` : "100%",
-                              maxHeight: cardRowH > 0 ? `${cardRowH}px` : undefined,
+                              height: effectiveCardRowH > 0 ? `${effectiveCardRowH}px` : (cardRowH > 0 ? `${cardRowH}px` : "100%"),
+                              maxHeight: effectiveCardRowH > 0 ? `${effectiveCardRowH}px` : (cardRowH > 0 ? `${cardRowH}px` : undefined),
                               padding: cardPadding,
                               borderRadius: cardShape ? cardRadius : "6px",
                               boxShadow: cardElevation ? cardShadow : undefined,
@@ -1408,7 +1423,9 @@ export function CanvasElementView({
           const rows: Array<{ kind: string; label: string; limit?: string; value: string }> = [];
           if (extrasMode === "itemized" && extras.length > 0) {
             rows.push({ kind: "extras_header", label: labels.extras || "Extras / 附加项目", value: "" });
-            extras.forEach((extra) => {
+            const displayExtras = extras.slice(0, 3);
+            const overflowExtras = extras.slice(3);
+            displayExtras.forEach((extra) => {
               const dispOvr = (extra as any)?.display_overrides;
               const showCov = (extra as any)?.show_coverage !== false &&
                 !(dispOvr?.enabled && dispOvr?.showCoverage === false) &&
@@ -1437,6 +1454,24 @@ export function CanvasElementView({
                 value: fmtMoney(extra?.price),
               });
             });
+            if (overflowExtras.length > 0) {
+              let overflowSum = 0;
+              overflowExtras.forEach((extra: any) => {
+                const rawPrice = extra?.price;
+                const amt = rawPrice?.amount ?? rawPrice?.value ?? rawPrice;
+                if (amt !== undefined && amt !== null && amt !== "") {
+                  const num = typeof amt === "string" ? Number(amt.replace(/[^0-9.]/g, "")) : Number(amt);
+                  if (Number.isFinite(num)) {
+                    overflowSum += num;
+                  }
+                }
+              });
+              rows.push({
+                kind: "extra",
+                label: `+ ${overflowExtras.length} more...`,
+                value: overflowSum > 0 ? `RM ${overflowSum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "",
+              });
+            }
           }
           const premium = variableValues?.premium || "";
           let roadtax = variableValues?.roadtax || "";
@@ -1759,13 +1794,13 @@ export function balanceBenefitGridElements(
   },
 ): CanvasElement[] {
   const extras = benefitData?.extras || [];
-  const pibElem = elements.find((e) => e.id === "premium_info_block" || e.type === "premium-info-block");
+  const pibElem = elements.find((e) => (e.componentRole === "premium_info_block" || e.id === "premium_info_block") || e.type === "premium-info-block");
   const extrasMode = String((pibElem as any)?.extras_mode || (pibElem as any)?.extrasMode || "itemized").toLowerCase();
   const pibY = pibElem ? Number(pibElem.y || 276) : 276;
   const totalPibRows = extrasMode === "none" ? 5 : (extrasMode === "lump_sum" ? (extras.length > 0 ? 6 : 5) : (extras.length > 0 ? extras.length + 6 : 5));
   const contentBottom = pibY + (totalPibRows * 14);
   const cardBottom = Math.max(380, contentBottom + 12);
-  const covElem = elements.find((e) => e.id === "cov_table_bg");
+  const covElem = elements.find((e) => (e.componentRole === "cov_table_bg" || e.id === "cov_table_bg"));
   const covTableY = covElem ? Number(covElem.y || 120) : 120;
   const covTableH = cardBottom - covTableY;
   const yTop = cardBottom + 10;
@@ -1791,12 +1826,12 @@ export function balanceBenefitGridElements(
   const grid2 = elements.find((e) => e.type === "benefit-grid" && e.gridKind === "available_addons");
   if (!grid1 || !grid2) return elements;
 
-  const hdr1Bg = elements.find((e) => e.id === "specials_header_bg");
-  const hdr1Txt = elements.find((e) => e.id === "specials_header_txt");
-  const hdr2Bg = elements.find((e) => e.id === "addons_header_bg");
-  const hdr2Txt = elements.find((e) => e.id === "addons_header_txt");
+  const hdr1Bg = elements.find((e) => (e.componentRole === "specials_header_bg" || e.id === "specials_header_bg"));
+  const hdr1Txt = elements.find((e) => (e.componentRole === "specials_header_txt" || e.id === "specials_header_txt"));
+  const hdr2Bg = elements.find((e) => (e.componentRole === "addons_header_bg" || e.id === "addons_header_bg"));
+  const hdr2Txt = elements.find((e) => (e.componentRole === "addons_header_txt" || e.id === "addons_header_txt"));
 
-  const footerElem = elements.find((e) => e.id === "footer_terms" || String(e.id || "").startsWith("footer") || String(e.id || "").startsWith("tc_"));
+  const footerElem = elements.find((e) => (e.componentRole === "footer_terms" || e.id === "footer_terms") || String(e.id || "").startsWith("footer") || String(e.id || "").startsWith("tc_"));
   const footerY = footerElem ? Number(footerElem.y || 1068) : 1068;
   const safeBottom = Math.max(yTop + 160, footerY - 14);
   const availableH = safeBottom - yTop;
@@ -1807,9 +1842,9 @@ export function balanceBenefitGridElements(
   const cardGap = 4.5;
   const isMinimal = grid1.benefitPreset === "compact-minimal" || grid1.cardStyle === "minimal";
 
-  const hasExtrasSection = extrasCards.length > 0 && extrasMode !== "none" && extrasMode !== "lump_sum";
+  const hasExtrasSection = extrasCards.length > 0;
 
-  const items1 = (hasExtrasSection || extrasMode === "none" || extrasMode === "lump_sum") ? focCards : currentCards;
+  const items1 = hasExtrasSection ? focCards : currentCards;
   const itemsExt = extrasCards;
   const items2 = addonCards;
 
@@ -1835,8 +1870,17 @@ export function balanceBenefitGridElements(
   const totalRowGaps = (Math.max(0, rows1 - 1) + Math.max(0, rowsExt - 1) + Math.max(0, rows2 - 1)) * cardGap;
   const pureCardsH = Math.max(40, cardsAvailH - totalRowGaps);
 
+  const customIconSz = Number((grid1 as any)?.iconSize || (grid2 as any)?.iconSize || 0);
+  const customTitleSz = Number((grid1 as any)?.titleSize || (grid2 as any)?.titleSize || 0);
+  const uniformH = Number((grid1 as any)?.uniformHeight || (grid1 as any)?.rowHeight || 0);
+  const minCardNeeded = Math.max(28, customIconSz > 0 ? customIconSz + 18 : 28, customTitleSz > 0 ? customTitleSz + 28 : 28);
   const rawRowH = Math.floor(pureCardsH / totalRows);
-  const targetRowH = isMinimal ? Math.min(38, Math.max(28, rawRowH)) : Math.min(74, Math.max(34, rawRowH));
+  let targetRowH = isMinimal ? Math.min(38, Math.max(28, rawRowH)) : Math.min(74, Math.max(34, rawRowH));
+  if (uniformH > 0) {
+    targetRowH = uniformH;
+  } else if (customIconSz > 24 || customTitleSz > 10) {
+    targetRowH = Math.max(minCardNeeded, targetRowH);
+  }
 
   const h1 = rows1 > 0 ? rows1 * targetRowH + Math.max(0, rows1 - 1) * cardGap : 0;
   const hExt = rowsExt > 0 ? rowsExt * targetRowH + Math.max(0, rowsExt - 1) * cardGap : 0;
@@ -1864,52 +1908,52 @@ export function balanceBenefitGridElements(
   const yG2 = yHdr2 + hdrH + pad;
 
   const adjustCommon = (e: CanvasElement): CanvasElement => {
-    if (e.id === "cov_table_bg") {
+    if ((e.componentRole === "cov_table_bg" || e.id === "cov_table_bg")) {
       e.h = covTableH;
-    } else if (e.id === "payment_account_details_img" && !elements.some((x) => x.id === "all_driver_bg")) {
+    } else if ((e.componentRole === "payment_account_details_img" || e.id === "payment_account_details_img") && !elements.some((x) => (x.componentRole === "all_driver_bg" || x.id === "all_driver_bg"))) {
       e.h = cardBottom - Number(e.y || 94);
-    } else if (e.id === "premium_info_block" || e.type === "premium-info-block") {
+    } else if ((e.componentRole === "premium_info_block" || e.id === "premium_info_block") || e.type === "premium-info-block") {
       e.h = totalPibRows * 14;
-    } else if (e.id === "rc_container_payment") {
+    } else if ((e.componentRole === "rc_container_payment" || e.id === "rc_container_payment")) {
       e.y = 134;
       e.h = 68;
-    } else if (e.id === "rc_b_pay_title") {
+    } else if ((e.componentRole === "rc_b_pay_title" || e.id === "rc_b_pay_title")) {
       e.y = 143;
       e.h = 14;
-    } else if (e.id === "rc_b_pay_details") {
+    } else if ((e.componentRole === "rc_b_pay_details" || e.id === "rc_b_pay_details")) {
       e.x = 517;
       e.y = 160;
       e.w = 150;
       e.h = 28;
-    } else if (e.id === "rc_b_bank_logo") {
+    } else if ((e.componentRole === "rc_b_bank_logo" || e.id === "rc_b_bank_logo")) {
       e.x = 672;
       e.y = 160;
       e.w = 72;
       e.h = 28;
-    } else if (e.id === "rc_container_qr") {
+    } else if ((e.componentRole === "rc_container_qr" || e.id === "rc_container_qr")) {
       e.y = qrY;
       e.h = qrH;
-    } else if (e.id === "rc_b_qr_code") {
+    } else if ((e.componentRole === "rc_b_qr_code" || e.id === "rc_b_qr_code")) {
       e.x = 516;
       e.y = qrCenterY - qrSize / 2;
       e.w = qrSize;
       e.h = qrSize;
-    } else if (e.id === "rc_b_qr_text") {
+    } else if ((e.componentRole === "rc_b_qr_text" || e.id === "rc_b_qr_text")) {
       const textX = 516 + qrSize + 8;
       e.x = textX;
       e.y = qrCenterY - 27;
       e.w = 746 - textX;
       e.h = 54;
-    } else if (e.id === "rc_container_drivers") {
+    } else if ((e.componentRole === "rc_container_drivers" || e.id === "rc_container_drivers")) {
       e.y = driversY;
       e.h = driversH;
-    } else if (e.id === "rc_b_driver_title") {
+    } else if ((e.componentRole === "rc_b_driver_title" || e.id === "rc_b_driver_title")) {
       e.y = driversY + 8;
-    } else if (e.id === "rc_b_driver_sub") {
+    } else if ((e.componentRole === "rc_b_driver_sub" || e.id === "rc_b_driver_sub")) {
       e.y = driversY + 24;
-    } else if (e.id === "rc_b_driver_divider") {
+    } else if ((e.componentRole === "rc_b_driver_divider" || e.id === "rc_b_driver_divider")) {
       e.y = driversY + 42;
-    } else if (e.id === "rc_b_excess_val") {
+    } else if ((e.componentRole === "rc_b_excess_val" || e.id === "rc_b_excess_val")) {
       e.y = driversY + 48;
     }
     return e;
@@ -1918,10 +1962,10 @@ export function balanceBenefitGridElements(
   const adjusted: CanvasElement[] = [];
   for (const elem of elements) {
     const e = adjustCommon({ ...elem });
-    if (e.id === "specials_header_bg" && hdr1Bg) {
+    if ((e.componentRole === "specials_header_bg" || e.id === "specials_header_bg") && hdr1Bg) {
       e.y = yHdr1;
       e.h = hdrH;
-    } else if (e.id === "specials_header_txt" && hdr1Txt) {
+    } else if ((e.componentRole === "specials_header_txt" || e.id === "specials_header_txt") && hdr1Txt) {
       e.y = yHdr1 + 5;
     } else if (e.type === "benefit-grid" && e.gridKind === "current_benefits") {
       e.y = yG1;
@@ -1929,8 +1973,6 @@ export function balanceBenefitGridElements(
       (e as any).rowHeight = targetRowH;
       (e as any).columns = effectiveCols;
       if (hasExtrasSection) {
-        (e as any).excludeExtras = true;
-      } else if (extrasMode === "none" || extrasMode === "lump_sum") {
         (e as any).excludeExtras = true;
       }
       adjusted.push(e);
@@ -1974,10 +2016,10 @@ export function balanceBenefitGridElements(
         });
       }
       continue;
-    } else if (e.id === "addons_header_bg" && hdr2Bg) {
+    } else if ((e.componentRole === "addons_header_bg" || e.id === "addons_header_bg") && hdr2Bg) {
       e.y = yHdr2;
       e.h = hdrH;
-    } else if (e.id === "addons_header_txt" && hdr2Txt) {
+    } else if ((e.componentRole === "addons_header_txt" || e.id === "addons_header_txt") && hdr2Txt) {
       e.y = yHdr2 + 5;
     } else if (e.type === "benefit-grid" && e.gridKind === "available_addons") {
       e.y = yG2;

@@ -5,16 +5,22 @@ import type { Route } from "next";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ArrowSquareOut,
+  CheckCircle,
   CopySimple,
   Eye,
   FilePdf,
   FilePlus,
   Lock,
   MagnifyingGlass,
+  MagnifyingGlassMinus,
+  MagnifyingGlassPlus,
   PencilSimple,
   ShieldCheck,
+  Sparkle,
   Star,
   Trash,
+  XCircle,
 } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
 import { BuilderNav } from "@/components/builder-nav";
@@ -150,14 +156,14 @@ const SAMPLE_VAR_VALUES: Record<string, string> = {
   service_fee: "RM 50.00",
 };
 
-function TemplateThumbnail({ template, large = false }: { template: TemplateRecord; large?: boolean }) {
+function TemplateThumbnail({ template }: { template: TemplateRecord }) {
   const page = pageProfile(template);
   const elements = (template.fixed_fields.canvas?.elements || []).filter((item) => item.type !== "layer-group");
   const textNodes = elements.filter((item) => (item.type === "text" || item.type === "variable") && !LOGO_TEXT_IDS.has(item.id));
   const shapeNodes = elements.filter((item) => !["text", "variable", "layer-group"].includes(item.type) || LOGO_TEXT_IDS.has(item.id));
 
   return (
-    <div className={`grid place-items-center bg-[#f1f1f4] ${large ? "h-[68vh] p-8" : "h-[300px] p-4"}`}>
+    <div className="grid place-items-center bg-[#f1f1f4] h-[300px] p-4">
       <svg viewBox={`0 0 ${page.width} ${page.height}`} className="h-full max-w-full bg-white shadow-md rounded-sm" role="img" aria-label={`Preview of ${template.name}`}>
         <rect x="0" y="0" width={page.width} height={page.height} fill="white" />
         {shapeNodes.map((node) => {
@@ -180,19 +186,28 @@ function TemplateThumbnail({ template, large = false }: { template: TemplateReco
             if ((node as any).assetSlot === "background") return null;
           }
           if (node.type === "benefit-grid") {
-            // Render simulated benefit cards inside the grid area
             const cols = 3;
-            const cardGap = 8;
+            const cardGap = 6;
             const cardW = (node.w - (cardGap * (cols - 1))) / cols;
-            const cardH = Math.min(54, (node.h - 16) / 2);
+            const cardH = 34;
             const sampleBenefits = node.gridKind === "available_addons"
-              ? ["Flood & Storm (Special Perils)", "Windscreen Protection (RM 1,000)", "Legal Liability to Passengers", "24hr Roadside Assist"]
-              : ["24 Hours Free Towing (300km)", "Key Care Protection (RM 1,500)", "All Authorized Drivers Covered", "Flood Evacuation Support"];
+              ? [
+                  { label: "CART 14 Days", dot: "#3B82F6", sub: "RM 150" },
+                  { label: "Legal Liability (LLTP)", dot: "#3B82F6", sub: "RM 45" },
+                  { label: "Waiver of Betterment", dot: "#3B82F6", sub: "RM 120" },
+                  { label: "Strike & Riot (SRCC)", dot: "#3B82F6", sub: "RM 90" },
+                ]
+              : [
+                  { label: "24h Unlimited Towing", dot: "#10B981", sub: "FOC" },
+                  { label: "Panel Repair Warranty", dot: "#10B981", sub: "12M" },
+                  { label: "All Drivers Waiver", dot: "#10B981", sub: "Included" },
+                  { label: "Key Care Protection", dot: "#10B981", sub: "RM 1,500" },
+                ];
 
             return (
               <g key={node.id}>
-                <rect x={node.x} y={node.y} width={node.w} height={node.h} fill="#FAFAFA" stroke="#E2E8F0" strokeWidth={1} rx={4} />
-                {sampleBenefits.slice(0, 6).map((bText, bIdx) => {
+                <rect x={node.x} y={node.y} width={node.w} height={node.h} fill="#F8FAFC" stroke="#E2E8F0" strokeWidth={1} rx={4} />
+                {sampleBenefits.map((item, bIdx) => {
                   const col = bIdx % cols;
                   const row = Math.floor(bIdx / cols);
                   const bx = node.x + 4 + col * (cardW + cardGap);
@@ -200,10 +215,13 @@ function TemplateThumbnail({ template, large = false }: { template: TemplateReco
                   if (by + cardH > node.y + node.h) return null;
                   return (
                     <g key={`b_${node.id}_${bIdx}`}>
-                      <rect x={bx} y={by} width={cardW - 8} height={cardH} fill="#FFFFFF" stroke="#E2E8F0" strokeWidth={1} rx={4} />
-                      <circle cx={bx + 10} cy={by + cardH / 2} r={4} fill="#10B981" />
-                      <text x={bx + 20} y={by + cardH / 2 + 3} fontSize={7.5} fontWeight={600} fill="#1E293B">
-                        {bText.slice(0, 24)}
+                      <rect x={bx} y={by} width={cardW - 8} height={cardH} fill="#FFFFFF" stroke="#E2E8F0" strokeWidth={1} rx={3} />
+                      <circle cx={bx + 8} cy={by + cardH / 2} r={3} fill={item.dot} />
+                      <text x={bx + 16} y={by + cardH / 2 - 2} fontSize={6.5} fontWeight={600} fill="#1E293B">
+                        {item.label}
+                      </text>
+                      <text x={bx + 16} y={by + cardH / 2 + 8} fontSize={5.5} fontWeight={500} fill="#64748B">
+                        {item.sub}
                       </text>
                     </g>
                   );
@@ -248,6 +266,248 @@ function TemplateThumbnail({ template, large = false }: { template: TemplateReco
         })}
       </svg>
     </div>
+  );
+}
+
+function TemplateLivePreviewModal({
+  template,
+  onClose,
+}: {
+  template: TemplateRecord | null;
+  onClose: () => void;
+}) {
+  const [loadProfile, setLoadProfile] = useState<"minimum" | "medium" | "high">("medium");
+  const [includePurchasedPerils, setIncludePurchasedPerils] = useState(true);
+  const [selectedSessionId, setSelectedSessionId] = useState<string>("");
+  const [sessions, setSessions] = useState<Array<{ id: string; vehicle_plate?: string; insured_name?: string; vehicle_model?: string; quotation_ref?: string }>>([]);
+  const [zoom, setZoom] = useState(0.68);
+  const [previewHtml, setPreviewHtml] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api<{ sessions?: any[] }>("/sessions?page=1&page_size=25")
+      .then((res) => {
+        if (!cancelled && res.sessions) {
+          setSessions(res.sessions);
+        }
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    const currentTemplate = template;
+    if (!currentTemplate) return;
+    let cancelled = false;
+
+    async function fetchRender() {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await api<{ html: string }>("/admin/templates/preview-render", {
+          method: "POST",
+          body: JSON.stringify({
+            template_config: {
+              ...(currentTemplate?.fixed_fields || {}),
+              name: currentTemplate?.name,
+              template_id: currentTemplate?.id,
+            },
+            session_id: selectedSessionId || undefined,
+            load_profile: loadProfile,
+            include_purchased_perils: includePurchasedPerils,
+          }),
+        });
+        if (!cancelled) {
+          setPreviewHtml(res.html);
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setError(err.message || "Failed to render preview");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    fetchRender();
+    return () => { cancelled = true; };
+  }, [template, loadProfile, includePurchasedPerils, selectedSessionId]);
+
+  function handleOpenInNewTab() {
+    if (!previewHtml) return;
+    const blob = new Blob([previewHtml], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+  }
+
+  if (!template) return null;
+  const page = pageProfile(template);
+
+  return (
+    <Dialog
+      open={Boolean(template)}
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      title={template.name || "Template preview"}
+      description={`${page.name} (${Math.round(page.width)} × ${Math.round(page.height)} ${page.unit}) · ${templateState(template)} · 1:1 Engine Parity with Review Phase`}
+      maxWidth="full"
+      className="max-w-6xl max-h-[92vh] flex flex-col p-0 overflow-hidden"
+    >
+      <div className="flex flex-col h-[82vh] overflow-hidden bg-slate-950">
+        {/* Top Control Bar */}
+        <div className="p-3 border-b border-slate-800 bg-slate-900 shrink-0 flex flex-wrap items-center justify-between gap-3 text-white">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            {/* Session / Data source picker */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-400 font-medium">Source:</span>
+              <select
+                aria-label="Preview Data Source"
+                value={selectedSessionId}
+                onChange={(e) => setSelectedSessionId(e.target.value)}
+                className="bg-slate-800 text-slate-100 border border-slate-700 rounded px-2 py-1 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              >
+                <option value="">Stress Profile: {loadProfile.toUpperCase()}</option>
+                {sessions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    Vehicle: {s.vehicle_plate || "—"} · {s.insured_name || "Customer"} ({s.vehicle_model || "Car"})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Profile Picker (only if no session selected) */}
+            {!selectedSessionId && (
+              <div className="flex items-center gap-1 bg-slate-800 p-0.5 rounded border border-slate-700">
+                {(["minimum", "medium", "high"] as const).map((prof) => (
+                  <button
+                    key={prof}
+                    type="button"
+                    onClick={() => setLoadProfile(prof)}
+                    className={`px-2 py-0.5 rounded text-[11px] font-bold capitalize transition-colors ${
+                      loadProfile === prof
+                        ? "bg-emerald-600 text-white shadow-xs"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    {prof}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Purchased Perils & Add-ons toggle */}
+            <button
+              type="button"
+              onClick={() => setIncludePurchasedPerils((prev) => !prev)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-bold border transition-colors ${
+                includePurchasedPerils
+                  ? "bg-emerald-950/80 border-emerald-500 text-emerald-300 hover:bg-emerald-900"
+                  : "bg-slate-800 border-slate-600 text-slate-300 hover:bg-slate-700"
+              }`}
+              title="Toggle customer purchased perils and extras"
+            >
+              {includePurchasedPerils ? (
+                <>
+                  <CheckCircle size={14} weight="fill" className="text-emerald-400" />
+                  <span>Purchased Add-Ons: Active</span>
+                </>
+              ) : (
+                <>
+                  <XCircle size={14} weight="fill" className="text-slate-400" />
+                  <span>Purchased Add-Ons: Excluded (No Perils)</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Right Toolbar: Zoom + HTML View */}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 bg-slate-800 rounded p-0.5 border border-slate-700">
+              <button
+                type="button"
+                onClick={() => setZoom((z) => Math.max(0.35, z - 0.05))}
+                className="p-1 rounded text-slate-400 hover:text-white"
+                title="Zoom Out"
+              >
+                <MagnifyingGlassMinus size={14} weight="bold" />
+              </button>
+              <span className="text-[10.5px] font-mono text-slate-300 w-10 text-center font-bold">
+                {Math.round(zoom * 100)}%
+              </span>
+              <button
+                type="button"
+                onClick={() => setZoom((z) => Math.min(1.2, z + 0.05))}
+                className="p-1 rounded text-slate-400 hover:text-white"
+                title="Zoom In"
+              >
+                <MagnifyingGlassPlus size={14} weight="bold" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setZoom(0.68)}
+                className="px-1.5 py-0.5 text-[10px] font-bold text-slate-400 hover:text-white transition-colors"
+                title="Reset Zoom to Fit"
+              >
+                Fit
+              </button>
+            </div>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<ArrowSquareOut size={14} weight="bold" />}
+              onClick={handleOpenInNewTab}
+              disabled={!previewHtml}
+              className="bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700 text-xs"
+            >
+              Open HTML
+            </Button>
+          </div>
+        </div>
+
+        {/* Viewport Area */}
+        <div className="flex-1 overflow-auto p-6 flex justify-center items-start bg-slate-900 relative">
+          <div
+            style={{
+              width: "794px",
+              height: "1123px",
+              transform: `scale(${zoom})`,
+              transformOrigin: "top center",
+            }}
+            className="bg-white shadow-2xl relative shrink-0 overflow-hidden rounded-xs border border-slate-700"
+          >
+            {loading && !previewHtml && (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/95 gap-3">
+                <div className="w-9 h-9 rounded-full border-3 border-emerald-500 border-t-transparent animate-spin" />
+                <span className="text-xs font-bold text-slate-700">Rendering authentic A4 quotation...</span>
+                <span className="text-[11px] text-slate-500">Matching Review Phase & PDF engine 1:1</span>
+              </div>
+            )}
+
+            {error && !previewHtml && (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white p-8 text-center">
+                <span className="text-sm font-bold text-red-600 mb-1">Preview Generation Failed</span>
+                <span className="text-xs text-slate-500 mb-4 max-w-md">{error}</span>
+                <Button variant="primary" size="sm" onClick={() => setSelectedSessionId((s) => s)}>
+                  Retry Render
+                </Button>
+              </div>
+            )}
+
+            {previewHtml && (
+              <iframe
+                srcDoc={previewHtml}
+                title={`Authentic Preview of ${template.name}`}
+                className="w-[794px] h-[1123px] border-0 select-auto pointer-events-auto bg-white"
+              />
+            )}
+          </div>
+        </div>
+      </div>
+    </Dialog>
   );
 }
 
@@ -571,7 +831,7 @@ export default function QuotationTemplatesPage() {
         </form>
       </Dialog>
 
-      <Dialog open={Boolean(preview)} onOpenChange={(open) => { if (!open) setPreview(null); }} title={preview?.name || "Template preview"} description={preview ? `${pageProfile(preview).name} · ${templateState(preview)}` : undefined}>{preview ? <TemplateThumbnail template={preview} large /> : null}</Dialog>
+      <TemplateLivePreviewModal template={preview} onClose={() => setPreview(null)} />
 
       {pendingRetire ? <ConfirmDialog open onOpenChange={(open) => { if (!open) setPendingRetire(null); }} title={`Retire “${pendingRetire.name}”?`} message="Pinned quotations keep their immutable published revision. This working template disappears from new selection." confirmLabel="Retire template" onConfirm={retireTemplate} /> : null}
 

@@ -36,3 +36,4 @@ mcp_config.json
 company_based/
 .claude/
 *.rar
+*.sqlite

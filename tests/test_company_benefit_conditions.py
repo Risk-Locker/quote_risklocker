@@ -599,3 +599,42 @@ def test_hide_target_condition_suppresses_target_card():
     assert len(res_active["current_benefits"]) == 1
     assert res_active["current_benefits"][0]["label"] == "Unlimited Towing Upgrade"
 
+
+def test_benefit_evaluation_engine_character_bounds():
+    from app.services.benefit_evaluation_engine import (
+        BenefitEvaluationEngine,
+        EvaluatedBenefit,
+        MAX_TITLE_LENGTH,
+        MAX_DESCRIPTION_LENGTH,
+    )
+
+    base = [
+        EvaluatedBenefit(
+            concept_id="c-towing",
+            display_title="Towing " * 20,
+            display_description="Very long towing description that exceeds standard card limits " * 5,
+        )
+    ]
+
+    class MockDb:
+        def execute(self, query):
+            class MockResult:
+                def scalars(self):
+                    class MockScalars:
+                        def all(self):
+                            return []
+                    return MockScalars()
+            return MockResult()
+
+    evaluated = BenefitEvaluationEngine.evaluate_benefits_for_plan(
+        db=MockDb(),
+        company_id="comp-1",
+        profile_id=None,
+        base_benefits=base,
+        plan_name="Comprehensive",
+    )
+    assert len(evaluated) == 1
+    assert len(evaluated[0].display_title) <= MAX_TITLE_LENGTH
+    assert len(evaluated[0].display_description) <= MAX_DESCRIPTION_LENGTH
+
+

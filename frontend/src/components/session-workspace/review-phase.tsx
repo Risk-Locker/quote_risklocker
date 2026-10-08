@@ -687,14 +687,6 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const canvasH = useMemo(() => {
     const baseHeight = previewTemplate?.config?.canvas?.height || 1123;
     if (!balancedElements.length) return baseHeight;
-    const isV4 = Boolean(
-      (previewTemplate?.config as any)?.v4_mode ||
-      String((previewTemplate?.config as any)?.v7_master_key || "").startsWith("agency_bilingual_v4") ||
-      balancedElements.some((e: any) => e.v4_mode)
-    );
-    if (isV4) {
-      return baseHeight;
-    }
     const maxElementBottom = Math.max(0, ...balancedElements.map((e: any) => (e.y || 0) + (e.h || 0)));
     return maxElementBottom + 30 > baseHeight ? maxElementBottom + 30 : baseHeight;
   }, [balancedElements, previewTemplate]);

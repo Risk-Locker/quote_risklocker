@@ -5,7 +5,10 @@ import type { Route } from "next";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowCounterClockwise,
+  ArrowSquareOut,
   Article,
+  Cards,
+  CheckCircle,
   CopySimple,
   CurrencyCircleDollar,
   Eye,
@@ -14,6 +17,8 @@ import {
   FloppyDisk,
   ImageSquare,
   Info,
+  MagnifyingGlassMinus,
+  MagnifyingGlassPlus,
   PaintBrush,
   Plus,
   ShieldCheck,
@@ -21,6 +26,7 @@ import {
   Star,
   TextT,
   Trash,
+  XCircle,
 } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
 import { BuilderNav } from "@/components/builder-nav";
@@ -76,6 +82,84 @@ export default function BenefitCardTemplatesPage() {
 
   // Active section tab in the 3-section 5-component control panel
   const [activeSectionTab, setActiveSectionTab] = useState<BenefitSectionKey>("default");
+
+  // Right Column View Mode
+  const [viewMode, setViewMode] = useState<"document" | "studio">("document");
+
+  // Live Final Customer A4 PDF Quotation Preview State
+  const [docLoadProfile, setDocLoadProfile] = useState<"minimum" | "medium" | "high">("high");
+  const [docIncludePerils, setDocIncludePerils] = useState<boolean>(true);
+  const [docSelectedSessionId, setDocSelectedSessionId] = useState<string>("");
+  const [docTemplates, setDocTemplates] = useState<Array<{ id: string; name: string }>>([]);
+  const [docSelectedTemplateId, setDocSelectedTemplateId] = useState<string>("");
+  const [docSessions, setDocSessions] = useState<Array<{ id: string; vehicle_plate?: string; insured_name?: string; vehicle_model?: string }>>([]);
+  const [docZoom, setDocZoom] = useState<number>(0.65);
+  const [docHtml, setDocHtml] = useState<string>("");
+  const [docLoading, setDocLoading] = useState<boolean>(false);
+  const [docError, setDocError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api<{ sessions?: any[] }>("/sessions?page=1&page_size=25")
+      .then((res) => {
+        if (!cancelled && res.sessions) setDocSessions(res.sessions);
+      })
+      .catch(() => undefined);
+
+    api<{ templates?: any[] }>("/admin/templates")
+      .then((res) => {
+        if (!cancelled && res.templates) {
+          const list = res.templates.filter((t: any) => !t.name.includes("Copy"));
+          setDocTemplates(list);
+          const v4 = list.find((t: any) => t.name.includes("v4") && !t.name.includes("No Extras")) || list[0];
+          if (v4) setDocSelectedTemplateId(v4.id);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setDocLoading(true);
+      setDocError(null);
+      try {
+        const res = await api<{ html: string }>("/admin/templates/preview-render", {
+          method: "POST",
+          body: JSON.stringify({
+            template_id: docSelectedTemplateId || undefined,
+            session_id: docSelectedSessionId || undefined,
+            load_profile: docLoadProfile,
+            include_purchased_perils: docIncludePerils,
+            benefit_preset_config: customStyle,
+          }),
+        });
+        if (!cancelled) {
+          setDocHtml(res.html);
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setDocError(err.message || "Failed to render A4 preview");
+        }
+      } finally {
+        if (!cancelled) setDocLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [customStyle, docLoadProfile, docIncludePerils, docSelectedSessionId, docSelectedTemplateId]);
+
+  const handleOpenDocInNewTab = useCallback(() => {
+    if (!docHtml) return;
+    const blob = new Blob([docHtml], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+  }, [docHtml]);
 
   // Real Global Benefits for Live Asset Preview
   const [globalBenefits, setGlobalBenefits] = useState<GlobalBenefit[]>([]);
@@ -1011,10 +1095,14 @@ export default function BenefitCardTemplatesPage() {
 
   const isCurrentSystemModified = customStyle.is_system_modified || (!customStyle.is_custom && typeof window !== "undefined" && Boolean(localStorage.getItem("risklocker_benefit_preset_overrides")?.includes(customStyle.id)));
 
-  return (
-    <AppShell>
-      <section className="grid gap-6">
+  const isDocked = typeof window !== "undefined" && window.location.search.includes("docked=true");
+
+  const content = (
+    <>
+      <section className={`grid gap-6 ${isDocked ? 'p-2' : ''}`}>
         {/* Top Header */}
+        {/* Top Header */}
+        {!isDocked ? (
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--rl-red)]">Builder</p>
@@ -1052,10 +1140,44 @@ export default function BenefitCardTemplatesPage() {
             </Button>
           </div>
         </header>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-2 p-2 bg-slate-100 rounded border border-slate-200">
+             <div className="flex items-center gap-2">
+               {saveStatus === "saving" ? (
+                 <span className="flex items-center gap-1.5 rounded-full bg-amber-50 border border-amber-200 px-2.5 py-1 text-[11px] font-bold text-amber-700 animate-pulse shadow-2xs">
+                   <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                   <span>Saving changes...</span>
+                 </span>
+               ) : saveStatus === "saved" ? (
+                 <span className="flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-2.5 py-1 text-[11px] font-bold text-emerald-700 shadow-2xs">
+                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                   <span>All changes saved</span>
+                 </span>
+               ) : null}
+             </div>
+             <div className="flex items-center gap-2">
+               {isCurrentSystemModified && (
+                 <Button variant="secondary" size="sm" icon={<ArrowCounterClockwise size={14} />} onClick={resetCurrentPreset}>
+                   Reset
+                 </Button>
+               )}
+               <Button variant="secondary" size="sm" icon={<FloppyDisk size={14} />} onClick={saveCurrentPreset}>
+                 Save Changes
+               </Button>
+               <Button variant="secondary" size="sm" icon={<CopySimple size={14} />} onClick={saveAsNewBenefitPreset}>
+                 Save as New
+               </Button>
+               <Button size="sm" icon={<Star size={14} weight="fill" />} onClick={setAsDefaultBenefitPreset}>
+                 Set as Default
+               </Button>
+             </div>
+          </div>
+        )}
 
-        <BuilderNav />
+        {!isDocked && <BuilderNav />}
 
         {/* Top Subtabs Navigation: Quotation Templates vs Benefit Templates */}
+        {!isDocked && (
         <div className="flex items-center gap-2 border-b border-[var(--rl-border)] pb-2">
           <Link
             href={"/builder/templates/quotation-templates" as Route}
@@ -1076,6 +1198,7 @@ export default function BenefitCardTemplatesPage() {
             </span>
           </Link>
         </div>
+        )}
 
         {/* BENEFIT CARD COMPONENT TEMPLATES DESIGNER */}
         <div className="space-y-6">
@@ -1953,186 +2076,397 @@ export default function BenefitCardTemplatesPage() {
               </div>
             </div>
 
-            {/* Right Column (7 cols): Live Dynamic Benefit Cards Grid Preview */}
-            <div className="lg:col-span-7 space-y-5 lg:sticky lg:top-6 lg:self-start max-h-[calc(100vh-3rem)] overflow-y-auto pr-1">
-              <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm space-y-4">
-                <div className="flex flex-wrap items-center justify-between border-b border-[var(--rl-border)] pb-3 gap-2">
-                  <div>
-                    <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">
-                      Live Benefit Cards Template Preview
-                    </h3>
-                    <p className="text-xs text-[var(--rl-text-muted)]">
-                      Visualizing with: <span className="font-semibold text-[var(--rl-text-strong)]">{customStyle.name}</span>
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="rounded bg-red-50 border border-red-200 px-2 py-0.5 text-xs font-bold text-[var(--rl-red)] uppercase">
-                      {customStyle.layout.toUpperCase()}
-                    </span>
-                    <span className="rounded bg-[var(--rl-bg)] border border-[var(--rl-border)] px-2 py-0.5 text-xs font-bold text-[var(--rl-text-strong)]">
-                      {customStyle.shape.toUpperCase()} · {customStyle.iconSize}px ICON
-                    </span>
-                  </div>
+            {/* Right Column (7 cols): Live Dynamic Benefit Cards & A4 Quotation Preview Studio */}
+            <div className="lg:col-span-7 space-y-4 lg:sticky lg:top-6 lg:self-start max-h-[calc(100vh-3rem)] overflow-y-auto pr-1">
+              {/* View Mode Switcher Header */}
+              <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-3 shadow-xs flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-md border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("document")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold transition-all ${
+                      viewMode === "document"
+                        ? "bg-slate-900 text-white shadow-xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <FilePdf size={15} weight="bold" className={viewMode === "document" ? "text-red-400" : ""} />
+                    <span>Final Customer A4 PDF Document</span>
+                    <span className="ml-1 text-[9.5px] bg-red-600 text-white px-1.5 py-0.2 rounded font-mono font-bold">1:1 Engine</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("studio")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold transition-all ${
+                      viewMode === "studio"
+                        ? "bg-slate-900 text-white shadow-xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <Cards size={15} weight="bold" />
+                    <span>Card Components Studio</span>
+                  </button>
                 </div>
 
-                {/* Section 1: Default Benefits (4 items) */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                      <span className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-strong)]">
-                        Section 1: Default Benefits (FOC)
-                      </span>
-                    </div>
-                    <span className="text-[11px] text-[var(--rl-text-muted)]">
-                      {previewItems.filter((i) => i.sectionKind === "default").length} cards
-                    </span>
-                  </div>
-
-                  {customStyle.layout === "masonry" ? (
-                    <div style={{ columnCount: 2, columnGap: "12px" }}>
-                      {previewItems.filter((i) => i.sectionKind === "default").map((b) => renderBenefitCardPreview(b))}
-                    </div>
-                  ) : (
-                    <div className={`grid gap-3 ${customStyle.layout === "tile" ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3" : "grid-cols-1 sm:grid-cols-2"}`}>
-                      {previewItems.filter((i) => i.sectionKind === "default").map((b) => renderBenefitCardPreview(b))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Section 2: Added Add-ons (2 items) */}
-                <div className="border-t border-[var(--rl-border)] pt-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full bg-amber-500" />
-                      <span className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-strong)]">
-                        Section 2: Added Add-ons (Selected Extras)
-                      </span>
-                    </div>
-                    <span className="text-[11px] text-[var(--rl-text-muted)]">
-                      {previewItems.filter((i) => i.sectionKind === "addedAddons").length} cards
-                    </span>
-                  </div>
-
-                  {customStyle.layout === "masonry" ? (
-                    <div style={{ columnCount: 2, columnGap: "12px" }}>
-                      {previewItems.filter((i) => i.sectionKind === "addedAddons").map((b) => renderBenefitCardPreview(b))}
-                    </div>
-                  ) : (
-                    <div className={`grid gap-3 ${customStyle.layout === "tile" ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3" : "grid-cols-1 sm:grid-cols-2"}`}>
-                      {previewItems.filter((i) => i.sectionKind === "addedAddons").map((b) => renderBenefitCardPreview(b))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Section 3: Available Optional Add-ons (2 items) */}
-                <div className="border-t border-[var(--rl-border)] pt-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full bg-sky-500" />
-                      <span className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-strong)]">
-                        Section 3: Add-on Section (Available Endorsements)
-                      </span>
-                    </div>
-                    <span className="text-[11px] text-[var(--rl-text-muted)]">
-                      {previewItems.filter((i) => i.sectionKind === "optionalAddons").length} cards
-                    </span>
-                  </div>
-
-                  {customStyle.layout === "masonry" ? (
-                    <div style={{ columnCount: 2, columnGap: "12px" }}>
-                      {previewItems.filter((i) => i.sectionKind === "optionalAddons").map((b) => renderBenefitCardPreview(b))}
-                    </div>
-                  ) : (
-                    <div className={`grid gap-3 ${customStyle.layout === "tile" ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3" : "grid-cols-1 sm:grid-cols-2"}`}>
-                      {previewItems.filter((i) => i.sectionKind === "optionalAddons").map((b) => renderBenefitCardPreview(b))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Quotation Canvas Integration Visualizer */}
-              <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
-                    Quotation A4 Layout Integration
-                  </h4>
-                  <span className="text-[11px] text-[var(--rl-text-muted)]">
-                    Live dynamic preview in quotation benefit slot · {customStyle.iconSize}px icon
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-[11px] font-semibold text-[var(--rl-text-muted)]">Active Preset:</span>
+                  <span className="font-bold text-[var(--rl-text-strong)] bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                    {customStyle.name}
+                  </span>
+                  <span className="font-mono text-xs font-bold text-emerald-600">
+                    {customStyle.iconSize}px icon · {customStyle.titleSize}px title
                   </span>
                 </div>
+              </div>
 
-                <div className="rounded-[var(--rl-radius-sm)] border border-dashed border-[var(--rl-red)] bg-[#fafafc] p-4">
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-red)]">
-                      Your Benefits (Dynamic Slot · 3-Section Sync)
-                    </span>
-                    <span className="text-[10px] text-[var(--rl-text-muted)]">A4 Canvas Bounding Box</span>
+              {/* View Mode 1: Authentic Final A4 PDF Quotation View */}
+              {viewMode === "document" && (
+                <div className="rounded-[var(--rl-radius)] border border-slate-800 bg-slate-950 overflow-hidden shadow-xl flex flex-col">
+                  {/* Document Controls Top Bar */}
+                  <div className="p-3 border-b border-slate-800 bg-slate-900 flex flex-wrap items-center justify-between gap-2.5 text-white">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      {/* Stress Profile Selector */}
+                      <div className="flex items-center gap-1 bg-slate-800 p-0.5 rounded border border-slate-700">
+                        <span className="text-slate-400 px-1.5 font-bold text-[10.5px]">LOAD:</span>
+                        {(["minimum", "medium", "high"] as const).map((prof) => (
+                          <button
+                            key={prof}
+                            type="button"
+                            onClick={() => { setDocSelectedSessionId(""); setDocLoadProfile(prof); }}
+                            className={`px-2 py-0.5 rounded text-[11px] font-bold capitalize transition-colors ${
+                              !docSelectedSessionId && docLoadProfile === prof
+                                ? "bg-emerald-600 text-white shadow-xs"
+                                : "text-slate-400 hover:text-slate-200"
+                            }`}
+                            title={prof === "high" ? "Max Benefits Stress Test (6 Specials + 6 Extras + 9 Add-ons)" : undefined}
+                          >
+                            {prof === "high" ? "Max Benefits" : prof}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Real Customer Session Picker */}
+                      {docSessions.length > 0 && (
+                        <select
+                          aria-label="Preview Data Source"
+                          value={docSelectedSessionId}
+                          onChange={(e) => setDocSelectedSessionId(e.target.value)}
+                          className="bg-slate-800 text-slate-100 border border-slate-700 rounded px-2 py-1 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-500 max-w-[200px] truncate"
+                        >
+                          <option value="">Stress Test Data Profile</option>
+                          {docSessions.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.vehicle_plate || "—"} · {s.insured_name || "Customer"}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+
+                      {/* Template Picker */}
+                      {docTemplates.length > 0 && (
+                        <select
+                          aria-label="Target Quotation Template"
+                          value={docSelectedTemplateId}
+                          onChange={(e) => setDocSelectedTemplateId(e.target.value)}
+                          className="bg-slate-800 text-slate-100 border border-slate-700 rounded px-2 py-1 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-500 max-w-[190px] truncate"
+                        >
+                          {docTemplates.map((t) => (
+                            <option key={t.id} value={t.id}>{t.name}</option>
+                          ))}
+                        </select>
+                      )}
+
+                      {/* Purchased Perils Toggle */}
+                      <button
+                        type="button"
+                        onClick={() => setDocIncludePerils((prev) => !prev)}
+                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-bold border transition-colors ${
+                          docIncludePerils
+                            ? "bg-emerald-950/80 border-emerald-500 text-emerald-300 hover:bg-emerald-900"
+                            : "bg-slate-800 border-slate-600 text-slate-300 hover:bg-slate-700"
+                        }`}
+                        title="Toggle customer perils and paid add-ons"
+                      >
+                        {docIncludePerils ? (
+                          <>
+                            <CheckCircle size={14} weight="fill" className="text-emerald-400" />
+                            <span>Perils: Active</span>
+                          </>
+                        ) : (
+                          <>
+                            <XCircle size={14} weight="fill" className="text-slate-400" />
+                            <span>No Perils</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Right Toolbar: Zoom & Open HTML */}
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1 bg-slate-800 rounded p-0.5 border border-slate-700">
+                        <button
+                          type="button"
+                          onClick={() => setDocZoom((z) => Math.max(0.35, z - 0.05))}
+                          className="p-1 rounded text-slate-400 hover:text-white"
+                          title="Zoom Out"
+                        >
+                          <MagnifyingGlassMinus size={14} weight="bold" />
+                        </button>
+                        <span className="text-[10.5px] font-mono text-slate-300 w-10 text-center font-bold">
+                          {Math.round(docZoom * 100)}%
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setDocZoom((z) => Math.min(1.2, z + 0.05))}
+                          className="p-1 rounded text-slate-400 hover:text-white"
+                          title="Zoom In"
+                        >
+                          <MagnifyingGlassPlus size={14} weight="bold" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDocZoom(0.65)}
+                          className="px-1.5 py-0.5 text-[10px] font-bold text-slate-400 hover:text-white transition-colors"
+                          title="Reset Zoom to Fit"
+                        >
+                          Fit
+                        </button>
+                      </div>
+
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon={<ArrowSquareOut size={14} weight="bold" />}
+                        onClick={handleOpenDocInNewTab}
+                        disabled={!docHtml}
+                        className="bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700 text-xs"
+                      >
+                        Open HTML
+                      </Button>
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2.5">
-                    {previewItems.slice(0, 4).map((benefit) => {
-                      const secVis = activeVisibility[benefit.sectionKind];
-                      return (
-                        <div
-                          key={`canvas-${benefit.id}`}
-                          style={{
-                            borderRadius: getCardRadius(customStyle.shape),
-                            boxShadow: getCardShadow(customStyle.elevation),
-                            backgroundColor: customStyle.bgColor,
-                            borderColor: customStyle.borderColor,
-                            borderWidth: `${customStyle.borderWidth}px`,
-                            borderStyle: customStyle.borderStyle,
-                          }}
-                          className="flex items-start gap-2.5 p-2.5 text-xs shadow-xs"
-                        >
-                          {secVis.showAsset && (
-                            <div
-                              style={{ width: `${customStyle.iconSize}px`, height: `${customStyle.iconSize}px` }}
-                              className="grid place-items-center rounded bg-neutral-100 border border-neutral-200 shrink-0 overflow-hidden"
-                            >
-                              {benefit.asset_url ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                  src={fileUrl(benefit.asset_url)}
-                                  alt={benefit.label}
-                                  style={{ width: "100%", height: "100%", objectFit: customStyle.imageFit }}
-                                />
-                              ) : (
-                                <ShieldCheck size={customStyle.iconSize * 0.55} className="text-[var(--rl-black)]" />
-                              )}
-                            </div>
-                          )}
-                          <div className="min-w-0 flex-1">
-                            {secVis.showTitle && (
-                              <div className="flex items-center justify-between gap-1">
-                                <span className="text-xs font-bold text-[var(--rl-text-strong)] truncate">
-                                  {benefit.label}
-                                </span>
-                                {secVis.showCost && (
-                                  <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1 shrink-0">
-                                    {benefit.cost}
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                            {secVis.showCoverage && (
-                              <span className="text-[11px] font-bold text-[var(--rl-red)] block truncate mt-0.5">
-                                {benefit.coverage}
-                              </span>
-                            )}
-                            {secVis.showDescription && (
-                              <p className="text-[9.5px] text-neutral-500 truncate leading-snug">
-                                {benefit.description}
-                              </p>
-                            )}
-                          </div>
+                  {/* Document Viewport Area */}
+                  <div className="p-4 flex justify-center items-start bg-slate-900 relative min-h-[720px] overflow-auto">
+                    <div
+                      style={{
+                        width: "794px",
+                        height: "1123px",
+                        transform: `scale(${docZoom})`,
+                        transformOrigin: "top center",
+                      }}
+                      className="bg-white shadow-2xl relative shrink-0 overflow-hidden rounded-xs border border-slate-700"
+                    >
+                      {docLoading && !docHtml && (
+                        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/95 gap-3">
+                          <div className="w-9 h-9 rounded-full border-3 border-emerald-500 border-t-transparent animate-spin" />
+                          <span className="text-xs font-bold text-slate-700">Rendering customer A4 quotation with {customStyle.name}...</span>
                         </div>
-                      );
-                    })}
+                      )}
+
+                      {docError && !docHtml && (
+                        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white p-8 text-center">
+                          <span className="text-sm font-bold text-red-600 mb-1">Preview Generation Failed</span>
+                          <span className="text-xs text-slate-500 mb-4 max-w-md">{docError}</span>
+                        </div>
+                      )}
+
+                      {docHtml && (
+                        <iframe
+                          srcDoc={docHtml}
+                          title="Authentic Customer PDF Quotation Preview"
+                          className="w-[794px] h-[1123px] border-0 select-auto pointer-events-auto bg-white"
+                        />
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
+
+              {/* View Mode 2: Card Components Studio */}
+              {viewMode === "studio" && (
+                <>
+                  <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm space-y-4">
+                    <div className="flex flex-wrap items-center justify-between border-b border-[var(--rl-border)] pb-3 gap-2">
+                      <div>
+                        <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">
+                          Live Benefit Cards Template Preview
+                        </h3>
+                        <p className="text-xs text-[var(--rl-text-muted)]">
+                          Visualizing with: <span className="font-semibold text-[var(--rl-text-strong)]">{customStyle.name}</span>
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="rounded bg-red-50 border border-red-200 px-2 py-0.5 text-xs font-bold text-[var(--rl-red)] uppercase">
+                          {customStyle.layout.toUpperCase()}
+                        </span>
+                        <span className="rounded bg-[var(--rl-bg)] border border-[var(--rl-border)] px-2 py-0.5 text-xs font-bold text-[var(--rl-text-strong)]">
+                          {customStyle.shape.toUpperCase()} · {customStyle.iconSize}px ICON
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Section 1: Default Benefits (4 items) */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                          <span className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-strong)]">
+                            Section 1: Default Benefits (FOC)
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-[var(--rl-text-muted)]">
+                          {previewItems.filter((i) => i.sectionKind === "default").length} cards
+                        </span>
+                      </div>
+
+                      {customStyle.layout === "masonry" ? (
+                        <div style={{ columnCount: 2, columnGap: "12px" }}>
+                          {previewItems.filter((i) => i.sectionKind === "default").map((b) => renderBenefitCardPreview(b))}
+                        </div>
+                      ) : (
+                        <div className={`grid gap-3 ${customStyle.layout === "tile" ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3" : "grid-cols-1 sm:grid-cols-2"}`}>
+                          {previewItems.filter((i) => i.sectionKind === "default").map((b) => renderBenefitCardPreview(b))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Section 2: Added Add-ons (2 items) */}
+                    <div className="border-t border-[var(--rl-border)] pt-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="h-2 w-2 rounded-full bg-amber-500" />
+                          <span className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-strong)]">
+                            Section 2: Added Add-ons (Selected Extras)
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-[var(--rl-text-muted)]">
+                          {previewItems.filter((i) => i.sectionKind === "addedAddons").length} cards
+                        </span>
+                      </div>
+
+                      {customStyle.layout === "masonry" ? (
+                        <div style={{ columnCount: 2, columnGap: "12px" }}>
+                          {previewItems.filter((i) => i.sectionKind === "addedAddons").map((b) => renderBenefitCardPreview(b))}
+                        </div>
+                      ) : (
+                        <div className={`grid gap-3 ${customStyle.layout === "tile" ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3" : "grid-cols-1 sm:grid-cols-2"}`}>
+                          {previewItems.filter((i) => i.sectionKind === "addedAddons").map((b) => renderBenefitCardPreview(b))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Section 3: Available Optional Add-ons (2 items) */}
+                    <div className="border-t border-[var(--rl-border)] pt-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="h-2 w-2 rounded-full bg-sky-500" />
+                          <span className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-strong)]">
+                            Section 3: Add-on Section (Available Endorsements)
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-[var(--rl-text-muted)]">
+                          {previewItems.filter((i) => i.sectionKind === "optionalAddons").length} cards
+                        </span>
+                      </div>
+
+                      {customStyle.layout === "masonry" ? (
+                        <div style={{ columnCount: 2, columnGap: "12px" }}>
+                          {previewItems.filter((i) => i.sectionKind === "optionalAddons").map((b) => renderBenefitCardPreview(b))}
+                        </div>
+                      ) : (
+                        <div className={`grid gap-3 ${customStyle.layout === "tile" ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3" : "grid-cols-1 sm:grid-cols-2"}`}>
+                          {previewItems.filter((i) => i.sectionKind === "optionalAddons").map((b) => renderBenefitCardPreview(b))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Quotation Canvas Integration Visualizer */}
+                  <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
+                        Quotation A4 Layout Integration
+                      </h4>
+                      <span className="text-[11px] text-[var(--rl-text-muted)]">
+                        Live dynamic preview in quotation benefit slot · {customStyle.iconSize}px icon
+                      </span>
+                    </div>
+
+                    <div className="rounded-[var(--rl-radius-sm)] border border-dashed border-[var(--rl-red)] bg-[#fafafc] p-4">
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-red)]">
+                          Your Benefits (Dynamic Slot · 3-Section Sync)
+                        </span>
+                        <span className="text-[10px] text-[var(--rl-text-muted)]">A4 Canvas Bounding Box</span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2.5">
+                        {previewItems.slice(0, 4).map((benefit) => {
+                          const secVis = activeVisibility[benefit.sectionKind];
+                          return (
+                            <div
+                              key={`canvas-${benefit.id}`}
+                              style={{
+                                borderRadius: getCardRadius(customStyle.shape),
+                                boxShadow: getCardShadow(customStyle.elevation),
+                                backgroundColor: customStyle.bgColor,
+                                borderColor: customStyle.borderColor,
+                                borderWidth: `${customStyle.borderWidth}px`,
+                                borderStyle: customStyle.borderStyle,
+                              }}
+                              className="flex items-start gap-2.5 p-2.5 text-xs shadow-xs"
+                            >
+                              {secVis.showAsset && (
+                                <div
+                                  style={{ width: `${customStyle.iconSize}px`, height: `${customStyle.iconSize}px` }}
+                                  className="grid place-items-center rounded bg-neutral-100 border border-neutral-200 shrink-0 overflow-hidden"
+                                >
+                                  {benefit.asset_url ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={fileUrl(benefit.asset_url)}
+                                      alt={benefit.label}
+                                      style={{ width: "100%", height: "100%", objectFit: customStyle.imageFit }}
+                                    />
+                                  ) : (
+                                    <ShieldCheck size={customStyle.iconSize * 0.55} className="text-[var(--rl-black)]" />
+                                  )}
+                                </div>
+                              )}
+                              <div className="min-w-0 flex-1">
+                                {secVis.showTitle && (
+                                  <div className="flex items-center justify-between gap-1">
+                                    <span className="text-xs font-bold text-[var(--rl-text-strong)] truncate">
+                                      {benefit.label}
+                                    </span>
+                                    {secVis.showCost && (
+                                      <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1 shrink-0">
+                                        {benefit.cost}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                                {secVis.showCoverage && (
+                                  <span className="text-[11px] font-bold text-[var(--rl-red)] block truncate mt-0.5">
+                                    {benefit.coverage}
+                                  </span>
+                                )}
+                                {secVis.showDescription && (
+                                  <p className="text-[9.5px] text-neutral-500 truncate leading-snug">
+                                    {benefit.description}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -2149,6 +2483,16 @@ export default function BenefitCardTemplatesPage() {
           onConfirm={() => deleteCustomPreset(pendingDeletePreset)}
         />
       ) : null}
+    </>
+  );
+
+  if (isDocked) {
+    return <div className="bg-white min-h-screen text-slate-900">{content}</div>;
+  }
+
+  return (
+    <AppShell>
+      {content}
     </AppShell>
   );
 }

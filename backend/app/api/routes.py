@@ -102,6 +102,7 @@ from app.api.schemas import (
     QuotationStatusUpdateRequest,
     BackfillConfirmRequest,
     VehicleOwnershipResolutionRequest,
+    TemplateLivePreviewRequest,
 )
 from app.auth.cookies import clear_auth_cookies, set_auth_cookies
 from app.auth.rbac import can_view_owner_record, require_role

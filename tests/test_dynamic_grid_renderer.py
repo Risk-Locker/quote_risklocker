@@ -127,3 +127,23 @@ def test_frozen_render_never_falls_back_to_a_live_asset_lookup(monkeypatch):
     value["canvas"]["elements"] = [{"id": "logo", "type": "image", "assetId": "missing", "x": 0, "y": 0, "w": 10, "h": 10}]
     html = render_quotation_html({}, template_config=value, render_context={}, resolved_assets={})
     assert "<img" not in html
+
+
+def test_layout_balancer_caps_itemized_extras_at_four_rows():
+    from app.rendering.benefit_grid_renderer import _balance_benefit_grid_elements
+
+    elements = [
+        {"id": "premium_info_block", "type": "premium-info-block", "y": 276.0, "extras_mode": "itemized"},
+        {"id": "cov_table_bg", "y": 120.0},
+        {"id": "specials_header_bg"}, {"id": "specials_header_txt"},
+        {"id": "addons_header_bg"}, {"id": "addons_header_txt"},
+        {"type": "benefit-grid", "gridKind": "current_benefits", "y": 400.0, "h": 200.0},
+        {"type": "benefit-grid", "gridKind": "available_addons", "y": 620.0, "h": 200.0},
+    ]
+    # 10 extras
+    extras = [{"id": f"e{i}", "label": f"Extra {i}"} for i in range(10)]
+    balanced = _balance_benefit_grid_elements(elements, {"extras": extras, "extras_mode": "itemized"})
+    cov = next(e for e in balanced if e.get("id") == "cov_table_bg")
+    # With cap at 3 itemized + 1 overflow row: total_pib_rows = 10, card_bottom = 428.0, h = 308.0
+    assert cov["h"] == 308.0
+

@@ -1309,6 +1309,7 @@ class CompanyBenefitCondition(Base, TimestampMixin):
     target_concept_id: Mapped[str] = mapped_column(ForeignKey("benefit_concepts.id", ondelete="CASCADE"), nullable=False, index=True)
     action_type: Mapped[str] = mapped_column(String(50), nullable=False, default="replace_description")
     replacement_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    replacement_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     company: Mapped["InsuranceCompany"] = relationship()

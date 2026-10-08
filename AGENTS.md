@@ -40,7 +40,7 @@ This file plus the whole `docs/` folder is a portable agent brain. Copy `AGENTS.
     - Validate solely with single-file typecheck (`npx tsc --noEmit` or IDE diagnostics on the touched file).
     - Deliver instantaneous turnaround (5–10 seconds).
   - 🛡️ **Deep Track (Features, Schema, API, Refactor, Deploy)**:
-    - Mandatory Implementation Plan Gate: NEVER touch, edit, or create multi-file feature code or configuration files without first creating an `implementation_plan.md` artifact and waiting for explicit user approval.
+    - Mandatory Implementation Plan Gate: NEVER touch, edit, or create multi-file feature code or configuration files without first creating an `implementation_plan.md` artifact and waiting for explicit user approval. **Every implementation plan MUST explicitly specify and recommend which AI model (e.g. Gemini 3.8 Flash for fast styling/docs, Gemini 3.1 Pro for deep backend refactoring) should be used for each phase of the plan.**
     - Enforce the 4 Agent Council Roles: Mentor (architecture & UI placement), Anti-Slop Builder (helper reuse, no bloat), QA Gauntlet (exhaustive Playwright testing), and Janitor (debris cleanup).
     - Full 6/6 pre-deploy gate (`.\commands\verify-deploy-gate.ps1`) before committing, pushing, or completing major milestones.
 - **Hermetic Test Suite Invariant**: All tests in `tests/` must be 100% hermetic (using in-memory SQLite engines or mocks). Tests must NEVER attempt live network database connections (`SessionLocal()`), so tests run safely in CI without mutating or depending on production data.
