@@ -1321,12 +1321,11 @@ def admin_template_preview_render(
                     snap_extras = []
                     curr_benefits = [c for c in curr_benefits if not _is_paid_extra(c)]
 
-                if curr_benefits or avail_addons or snap_extras:
-                    render_context["current_benefits"] = curr_benefits
-                    render_context["available_addons"] = avail_addons
-                    render_context["extras"] = snap_extras
-                    render_context["display_options"] = snap.get("display_options") or {}
-                    render_context["total_premium_adjusted"] = snap.get("total_premium_adjusted")
+                render_context["current_benefits"] = curr_benefits
+                render_context["available_addons"] = avail_addons
+                render_context["extras"] = snap_extras
+                render_context["display_options"] = snap.get("display_options") or {}
+                render_context["total_premium_adjusted"] = snap.get("total_premium_adjusted")
         except Exception:
             pass
 

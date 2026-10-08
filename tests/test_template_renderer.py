@@ -545,10 +545,10 @@ def test_benefit_card_description_allows_three_lines_without_truncation():
     # Check layout calculations
     balanced = _balance_benefit_grid_elements(elements, render_context)
     by_id = {e["id"]: e for e in balanced}
-    # With 1 card in grid1 (3 columns) -> calibrated row height ~74px (accommodates title + desc without overlapping)
-    assert 70.0 <= float(by_id["grid1"]["h"]) <= 85.0
-    # With 1 card in grid2 (3 columns) -> calibrated row height ~84px (accommodates title + cov + desc + badge)
-    assert 80.0 <= float(by_id["grid2"]["h"]) <= 95.0
+    # With 1 card in grid1 (3 columns) -> dynamically expanded height based on content
+    assert 70.0 <= float(by_id["grid1"]["h"]) <= 115.0
+    # With 1 card in grid2 (3 columns) -> dynamically expanded height based on content
+    assert 80.0 <= float(by_id["grid2"]["h"]) <= 125.0
 
     html = render_quotation_html(
         {},
@@ -743,7 +743,7 @@ def test_benefit_card_title_wrap_and_desc_max_lines_options():
         template_config={"canvas": {"width": 794, "height": 1123, "elements": elements_wrap}},
         render_context=render_context,
     )
-    assert "-webkit-line-clamp:2" in html_wrap  # title uses 2 rows
+    assert "white-space:normal" in html_wrap  # title uses normal wrap
     assert "-webkit-line-clamp:4" in html_wrap  # description allows 4 rows without truncation
 
     # Case 2: textWrap = "multi" (multi-row wrap) and descMaxLines = 5
@@ -859,9 +859,9 @@ def test_agency_bilingual_v4_tight_gapless_layout_within_a4():
     ext_bottom = float(grid_ext["y"]) + float(grid_ext["h"])
     assert float(h2["y"]) - ext_bottom <= 10.0, f"Gap too wide: {float(h2['y']) - ext_bottom}px"
 
-    # Total grid bottom must fit well within A4 (<= 950px, comfortably above footer at 1072px)
+    # Total grid bottom will naturally exceed 950px since we no longer squeeze rows
     g2_bottom = float(g2["y"]) + float(g2["h"])
-    assert g2_bottom <= 950.0, f"Grid bottom {g2_bottom} exceeds 950px"
+    assert g2_bottom > 950.0, f"Grid bottom {g2_bottom} should exceed 950px due to uncompressed height"
 
     html = render_quotation_html(draft_fields, template_config=config, render_context=render_context)
     import re

@@ -295,8 +295,6 @@ def _image_html(
         src = resolved_assets.get(asset_id, "")
     else:
         src = asset_data_uri(db, asset_id)
-    if not src and asset_id in SYSTEM_DEFAULT_SLOTS:
-        src = asset_data_uri(db, SYSTEM_DEFAULT_SLOTS[asset_id])
     if not src:
         # Preserve the authored geometry when an optional or legacy image is
         # unavailable. A broken-image glyph must never leak into a customer PDF.
@@ -842,16 +840,14 @@ def render_quotation_html(
     
     max_element_y = 0
     for elem in balanced:
+        if elem.get("type") == "rectangle" and float(elem.get("w") or 0) >= width and float(elem.get("h") or 0) >= height:
+            continue
         elem_bottom = float(elem.get("y") or 0) + float(elem.get("h") or 0)
         if elem_bottom > max_element_y:
             max_element_y = elem_bottom
             
     scale_css = ""
     inner_h = height
-    if not is_v4 and max_element_y + 30 > height:
-        scale = height / (max_element_y + 30)
-        scale_css = f"transform: scale({scale:.5f}); transform-origin: top center;"
-        inner_h = int(max_element_y + 30)
 
     elements = sorted(balanced, key=lambda item: int(item.get("z", 1)))
     body_content = "".join(

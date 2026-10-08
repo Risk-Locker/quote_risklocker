@@ -83,6 +83,23 @@ class LapseTenureRequest(BaseModel):
     reason: str | None = Field(None, description="Reason for lapse e.g. Customer sold vehicle, Competitor, Unreachable")
 
 
+import re
+from pydantic import field_validator
+
+def _parse_flexible_float(v: any) -> float | None:
+    if v is None or v == "":
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).lower()
+    if any(k in s for k in ("included", "free", "yes", "na", "n/a", "nil", "none")):
+        return 0.0
+    s = re.sub(r'[^\d\.\-]', '', str(v))
+    try:
+        return float(s) if s else 0.0
+    except Exception:
+        return 0.0
+
 class UpdateTenureLedgerRequest(BaseModel):
     stage: str | None = None
     business_type: str | None = None
@@ -113,6 +130,10 @@ class UpdateTenureLedgerRequest(BaseModel):
     runner_fee: float | None = None
     is_main: bool | None = None
     is_discarded: bool | None = None
+
+    @field_validator("won_premium", "road_tax", "runner_fee", mode="before")
+    def parse_floats(cls, v):
+        return _parse_flexible_float(v)
     status: str | None = None
     external_policy_start_date: str | None = None
     external_policy_end_date: str | None = None

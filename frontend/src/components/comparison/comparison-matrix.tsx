@@ -2183,7 +2183,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                   <div>
                     <label className="text-[11px] font-semibold text-[#454545] block mb-1">Road Tax (RM)</label>
                     <input
-                      type="number"
+                      type="text"
                       step="0.01"
                       value={roadTaxInput}
                       onChange={(e) => setRoadTaxInput(e.target.value)}
@@ -2198,7 +2198,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                       </span>
                     </div>
                     <input
-                      type="number"
+                      type="text"
                       step="0.01"
                       value={runnerFeeInput}
                       onChange={(e) => setRunnerFeeInput(e.target.value)}
@@ -2235,7 +2235,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                   <div>
                     <label className="text-[11px] font-semibold text-[#454545] block mb-1">Year of Make (YOM)</label>
                     <input
-                      type="number"
+                      type="text"
                       value={manufactureYearInput}
                       onChange={(e) => setManufactureYearInput(e.target.value)}
                       placeholder="e.g. 2020"
@@ -2273,7 +2273,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                   <div>
                     <label className="text-[11px] font-semibold text-[#454545] block mb-1">Windscreen Target (RM)</label>
                     <input
-                      type="number"
+                      type="text"
                       value={windscreenInput}
                       onChange={(e) => setWindscreenInput(e.target.value)}
                       className="w-full rounded px-2.5 py-1.5 text-xs font-mono border border-[#e5e5ea] bg-white text-[#1b1717]"
@@ -2520,7 +2520,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                         <div className="flex justify-between items-center text-[11px] mt-1.5">
                           <span className="text-neutral-500">Discount (%):</span>
                           <input
-                            type="number"
+                            type="text"
                             min="0"
                             max="100"
                             value={previousPolicyDiscount || ""}
@@ -2680,7 +2680,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                       <div className="flex justify-between items-center text-[11px] mt-1.5">
                         <span className="text-[#6e6e73]">Discount (%):</span>
                         <input
-                          type="number"
+                          type="text"
                           min="0"
                           max="100"
                           value={currentPolicyDiscount || ""}

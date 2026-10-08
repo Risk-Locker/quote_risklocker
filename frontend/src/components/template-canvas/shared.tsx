@@ -1224,14 +1224,15 @@ export function CanvasElementView({
                         const cardIconPad = (element as any).iconPadShape;
                         const iconPadRadius = cardIconPad === "circle" ? "999px" : cardIconPad === "box" ? "6px" : cardIconPad === "none" ? "0px" : (isGridTile ? "999px" : "4px");
 
-                        const cardTitleSize = (element as any).titleSize
-                          ? Number((element as any).titleSize)
-                          : (cardRowH > 0
-                            ? (cardRowH < 46 ? 8.5 : cardRowH < 64 ? 9.0 : Math.min(10, density.label))
-                            : (isMinimal ? density.label - 0.5 : density.label));
-                        const cardTitleClamp = (element as any).textWrap === "truncate"
-                          ? 1
-                          : ((element as any).textWrap === "multi" ? 3 : (cardRowH > 0 && cardRowH < 50 ? 1 : 2));
+                        const customTitleSize = (element as any).titleSize ? Number((element as any).titleSize) : 0;
+                        const cardTitleSize = customTitleSize > 0
+                          ? (label.length > 28 ? customTitleSize - 1.0 : (label.length > 18 ? customTitleSize - 0.5 : customTitleSize))
+                          : (label.length > 28
+                            ? 8.5
+                            : (label.length > 18
+                              ? 9.0
+                              : (cardRowH > 0 && cardRowH < 46 ? 9.5 : Math.min(10, density.label))));
+                        const cardTitleClamp = (element as any).textWrap === "truncate" ? 1 : 0;
 
                         return (
                           <article
@@ -1265,16 +1266,13 @@ export function CanvasElementView({
                                 className={`font-bold leading-tight ${
                                   cardTitleClamp === 1
                                     ? "truncate"
-                                    : "line-clamp-2 leading-tight break-words"
+                                    : "leading-tight break-words"
                                 } ${isDark ? "text-white" : "text-[var(--rl-text-strong)]"}`}
                                 style={{
                                   fontSize: cardTitleSize,
-                                  marginBottom: isMinimal || (cardRowH > 0 && cardRowH < 50) ? 1 : 3,
+                                  marginBottom: isMinimal ? 1 : 2,
                                   color: (element as any).titleColor || (element as any).textColor || undefined,
-                                  display: cardTitleClamp === 1 ? "block" : "-webkit-box",
-                                  WebkitLineClamp: cardTitleClamp,
-                                  WebkitBoxOrient: "vertical",
-                                  overflow: "hidden",
+                                  display: "block",
                                 }}
                               >
                                 {label}
@@ -1372,20 +1370,14 @@ export function CanvasElementView({
                                           {!isMinimal && desc && showDescription && (cardRowH <= 0 || cardRowH >= 46) && (
                                             <span
                                               className={`leading-tight mt-0.5 ${
-                                                cardRowH > 0 && cardRowH < 64 ? "line-clamp-1" :
-                                                ((element as any).descMaxLines === 1) ? "line-clamp-1" :
-                                                ((element as any).descMaxLines === 2) ? "line-clamp-2" :
-                                                ((element as any).descMaxLines === 3) ? "line-clamp-3" :
-                                                ((element as any).descMaxLines === 4) ? "line-clamp-4" :
-                                                ((element as any).descMaxLines === 5) ? "line-clamp-5" :
-                                                ((element as any).descMaxLines === 0) ? "" : "line-clamp-3"
+                                                (element as any).descMaxLines > 0 ? `line-clamp-${(element as any).descMaxLines}` : ""
                                               } ${isDark ? "text-slate-400" : "text-[var(--rl-text-muted)]"}`}
                                               style={{ 
-                                                fontSize: cardRowH > 0 && cardRowH < 64 ? 7.5 : customDescSize,
+                                                fontSize: customDescSize,
                                                 fontWeight: customDescWeight ? (customDescWeight === "bold" ? 700 : customDescWeight === "semibold" ? 600 : customDescWeight === "medium" ? 500 : 400) : undefined,
                                                 color: customDescColor || undefined,
-                                                display: (element as any).descMaxLines === 0 ? "block" : "-webkit-box",
-                                                WebkitLineClamp: cardRowH > 0 && cardRowH < 64 ? 1 : ((element as any).descMaxLines === 0 ? undefined : ((element as any).descMaxLines || 3)),
+                                                display: (element as any).descMaxLines > 0 ? "-webkit-box" : "block",
+                                                WebkitLineClamp: (element as any).descMaxLines > 0 ? (element as any).descMaxLines : undefined,
                                                 WebkitBoxOrient: "vertical",
                                                 overflow: "hidden",
                                               }}
@@ -1857,9 +1849,13 @@ export function balanceBenefitGridElements(
   const effectiveCols = baseCols;
   const extrasCols = nExt <= 2 ? Math.min(2, effectiveCols) : effectiveCols;
 
+  const grid2Cols = Number(grid2.columns || 0);
+  const autoPackAddons4Col = Boolean((grid2 as any)?.autoFourCol || (grid2 as any)?.adaptiveColumns) && n2 >= 9;
+  const addonsCols = autoPackAddons4Col ? 4 : (grid2Cols > 0 ? grid2Cols : effectiveCols);
+
   const rows1 = n1 > 0 ? Math.ceil(n1 / effectiveCols) : 0;
   const rowsExt = hasExtrasSection && nExt > 0 ? Math.ceil(nExt / extrasCols) : 0;
-  const rows2 = n2 > 0 ? Math.ceil(n2 / effectiveCols) : 0;
+  const rows2 = n2 > 0 ? Math.ceil(n2 / addonsCols) : 0;
 
   const activeSections = (rows1 > 0 ? 1 : 0) + (rowsExt > 0 ? 1 : 0) + (rows2 > 0 ? 1 : 0);
   const effectiveSections = Math.max(1, activeSections);
@@ -1874,13 +1870,14 @@ export function balanceBenefitGridElements(
   const customTitleSz = Number((grid1 as any)?.titleSize || (grid2 as any)?.titleSize || 0);
   const uniformH = Number((grid1 as any)?.uniformHeight || (grid1 as any)?.rowHeight || 0);
   const minCardNeeded = Math.max(28, customIconSz > 0 ? customIconSz + 18 : 28, customTitleSz > 0 ? customTitleSz + 28 : 28);
-  const rawRowH = Math.floor(pureCardsH / totalRows);
-  let targetRowH = isMinimal ? Math.min(38, Math.max(28, rawRowH)) : Math.min(74, Math.max(34, rawRowH));
+  const rawRowH = pureCardsH / totalRows;
+  let targetRowH = isMinimal ? Math.min(38, Math.max(28, rawRowH)) : Math.min(74, Math.max(46, rawRowH));
   if (uniformH > 0) {
     targetRowH = uniformH;
   } else if (customIconSz > 24 || customTitleSz > 10) {
     targetRowH = Math.max(minCardNeeded, targetRowH);
   }
+  targetRowH = Math.round(targetRowH * 100) / 100;
 
   const h1 = rows1 > 0 ? rows1 * targetRowH + Math.max(0, rows1 - 1) * cardGap : 0;
   const hExt = rowsExt > 0 ? rowsExt * targetRowH + Math.max(0, rowsExt - 1) * cardGap : 0;
@@ -2025,7 +2022,7 @@ export function balanceBenefitGridElements(
       e.y = yG2;
       e.h = h2;
       (e as any).rowHeight = targetRowH;
-      (e as any).columns = effectiveCols;
+      (e as any).columns = addonsCols;
     }
     adjusted.push(e);
   }

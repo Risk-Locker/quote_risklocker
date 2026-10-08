@@ -58,6 +58,7 @@ External chat tools cannot be forced to follow repository instructions. Give the
 | `docs/architecture/STRUCTURE.md` | Curated repository guide & ownership map | File or directory additions / deletions occur |
 | `docs/architecture/TESTING.md` | Test strategy, test suites & CI/CD gates | Coverage expectations or test commands change |
 | `docs/architecture/REFERENCES.md` | Asset policy & runtime reference boundaries | Asset paths or storage rules change |
+| `docs/architecture/DYNAMIC-AUTO-FIT-PLAN.md` | Dynamic benefit auto-fit & multi-line title layout plan | Layout engine formulas or benefit grid scaling rules change |
 
 
 ### Tier 3: Domain & Business Specs (`docs/domain/`)

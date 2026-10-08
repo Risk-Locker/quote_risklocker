@@ -25,6 +25,7 @@ from app.services.marketing_comparison_service import (
     rank_comparison_entries,
     refresh_tenure_ledger,
     rescan_comparison_tenure,
+    reset_comparison_entry_to_detected,
     save_comparison_entry,
     select_winner_and_generate_draft,
     update_tenure_fixed_costs,
@@ -36,6 +37,31 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/comparison", tags=["marketing-comparison"])
 
+
+import re
+from pydantic import field_validator
+
+def _parse_flexible_float(v: any) -> float | None:
+    if v is None or v == "":
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).lower()
+    if any(k in s for k in ("included", "free", "yes", "na", "n/a", "nil", "none")):
+        return 0.0
+    s = re.sub(r'[^\d\.\-]', '', str(v))
+    try:
+        return float(s) if s else 0.0
+    except Exception:
+        return 0.0
+
+def _parse_flexible_bool(v: any) -> bool:
+    if isinstance(v, bool):
+        return v
+    if v is None:
+        return False
+    s = str(v).lower()
+    return "yes" in s or "true" in s or "included" in s or "1" in s or "on" in s
 
 class FixedCostsUpdateRequest(BaseModel):
     road_tax: float = Field(0.0, description="Road tax amount in MYR")
@@ -51,6 +77,10 @@ class FixedCostsUpdateRequest(BaseModel):
     chassis_no: str | None = Field(None, description="Chassis / VIN number")
     vehicle_model: str | None = Field(None, description="Vehicle make and model")
     manufacture_year: int | None = Field(None, description="Vehicle year of manufacture (e.g. 2020)")
+
+    @field_validator("road_tax", "runner_fee", "windscreen_target", "ncd_percentage", mode="before")
+    def parse_floats(cls, v):
+        return _parse_flexible_float(v)
 
 
 class ComparisonEntryUpsertRequest(BaseModel):
@@ -71,6 +101,14 @@ class ComparisonEntryUpsertRequest(BaseModel):
     notes: str | None = None
     basic_figure_amount: float | None = None
     source_quotation_no: str | None = None
+
+    @field_validator("sum_insured", "motor_premium", "excess", "windscreen_sum_insured", "basic_figure_amount", mode="before")
+    def parse_floats(cls, v):
+        return _parse_flexible_float(v)
+
+    @field_validator("agreed_value", "waiver_betterment", "is_recommended", "is_manual", mode="before")
+    def parse_bools(cls, v):
+        return _parse_flexible_bool(v)
 
 
 class SelectWinnerRequest(BaseModel):
@@ -176,6 +214,23 @@ def delete_entry(
     except Exception as e:
         logger.exception("Failed to delete entry %s in tenure %s: %s", entry_id, tenure_id, e)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete entry")
+
+
+@router.post("/{tenure_id}/entry/{entry_id}/reset")
+def reset_entry(
+    tenure_id: str,
+    entry_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Reset a manual override back to original AI detected values for a specific entry."""
+    try:
+        return reset_comparison_entry_to_detected(db, tenure_id, entry_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.exception("Failed to reset entry %s in tenure %s: %s", entry_id, tenure_id, e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to reset entry")
 
 
 @router.post("/{tenure_id}/winner")

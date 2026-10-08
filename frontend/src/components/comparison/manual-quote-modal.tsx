@@ -164,6 +164,20 @@ export function ManualQuoteModal({
     }
   };
 
+  const handleReset = async () => {
+    if (!tenureId || !initialData?.id || initialData.is_manual) return;
+    try {
+      setSaving(true);
+      await api(`/comparison/${tenureId}/entry/${initialData.id}/reset`, { method: "POST" });
+      onClose();
+      if (onUploadSuccess) onUploadSuccess();
+    } catch (err: any) {
+      alert("Failed to reset entry: " + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   const handleManualSubmit = async (e: React.FormEvent) => {
@@ -577,7 +591,7 @@ export function ManualQuoteModal({
                   Sum Insured (RM)
                 </label>
                 <input
-                  type="number"
+                  type="text"
                   step="0.01"
                   required
                   placeholder="e.g. 85000"
@@ -611,7 +625,7 @@ export function ManualQuoteModal({
                 Gross Motor Premium (RM)
               </label>
               <input
-                type="number"
+                type="text"
                 step="0.01"
                 required
                 placeholder="e.g. 1850.50"
@@ -644,7 +658,7 @@ export function ManualQuoteModal({
                   Excess (RM)
                 </label>
                 <input
-                  type="number"
+                  type="text"
                   step="0.01"
                   placeholder="0.00"
                   value={excess}
@@ -661,7 +675,7 @@ export function ManualQuoteModal({
                   Windscreen Coverage (RM)
                 </label>
                 <input
-                  type="number"
+                  type="text"
                   step="0.01"
                   placeholder="e.g. 1500"
                   value={windscreen}
@@ -771,7 +785,7 @@ export function ManualQuoteModal({
                           {basicFigureName || "Basic Premium"} (RM)
                         </label>
                         <input
-                          type="number"
+                          type="text"
                           step="0.01"
                           value={basicFigureAmount}
                           onChange={(e) => handleBasicFigureChange(e.target.value)}
@@ -785,7 +799,7 @@ export function ManualQuoteModal({
                           Sum Insured (RM)
                         </label>
                         <input
-                          type="number"
+                          type="text"
                           step="0.01"
                           value={sumInsured}
                           onChange={(e) => handleSumInsuredChange(e.target.value)}
@@ -799,7 +813,7 @@ export function ManualQuoteModal({
                           Net Rate Factor (6 dec)
                         </label>
                         <input
-                          type="number"
+                          type="text"
                           step="0.000001"
                           value={netRateFactor}
                           onChange={(e) => handleRateFactorChange(e.target.value)}
@@ -962,6 +976,18 @@ export function ManualQuoteModal({
               >
                 Cancel
               </Button>
+              {initialData && !initialData.is_manual && tenureId && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleReset}
+                  disabled={saving}
+                  className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                >
+                  Reset to Detected
+                </Button>
+              )}
               <Button
                 type="submit"
                 variant="primary"

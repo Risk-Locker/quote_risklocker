@@ -147,3 +147,69 @@ def test_layout_balancer_caps_itemized_extras_at_four_rows():
     # With cap at 3 itemized + 1 overflow row: total_pib_rows = 10, card_bottom = 428.0, h = 308.0
     assert cov["h"] == 308.0
 
+
+def test_dense_quotation_auto_fit_zero_scale_and_multiline_title():
+    """Verify high-density quotation (7 rows: 3 FOC + 6 Extras + 11 Addons) fits in A4 without scale shrinkage."""
+    from app.rendering.benefit_grid_renderer import _balance_benefit_grid_elements
+
+    elements = [
+        {"id": "cov_table_bg", "y": 120.0, "h": 296.0},
+        {"id": "premium_info_block", "type": "premium-info-block", "y": 276.0, "h": 140.0},
+        {"id": "specials_header_bg", "type": "rectangle", "x": 40, "y": 414, "w": 714, "h": 24},
+        {"id": "specials_header_txt", "type": "text", "x": 52, "y": 419, "w": 690, "h": 16},
+        {"id": "current_benefits_grid", "type": "benefit-grid", "gridKind": "current_benefits", "x": 40, "y": 441, "w": 714, "h": 80, "columns": 3, "showDescription": True},
+        {"id": "addons_header_bg", "type": "rectangle", "x": 40, "y": 550, "w": 714, "h": 24},
+        {"id": "addons_header_txt", "type": "text", "x": 52, "y": 555, "w": 690, "h": 16},
+        {"id": "available_addons_grid", "type": "benefit-grid", "gridKind": "available_addons", "x": 40, "y": 580, "w": 714, "h": 268, "columns": 3, "showDescription": True},
+        {"id": "footer_tc_text", "type": "text", "x": 40, "y": 1072, "w": 714, "h": 20, "text": "*Terms & Conditions Apply"},
+    ]
+
+    context = {
+        "current_benefits": [
+            {"label": "Emergency Towing", "description": "24/7 accident towing", "cost_status": "included"},
+            {"label": "24/7 Roadside Assist", "description": "On-site minor repairs", "cost_status": "included"},
+            {"label": "Accident Flood Relief", "description": "Allowance up to RM 1,500", "cost_status": "included"},
+            {"label": "Waiver of Compulsory Excess for Unnamed Drivers", "price": {"amount": 0}, "description": "No compulsory excess", "cost_status": "paid"},
+            {"label": "Windscreen Coverage", "price": {"amount": 150}, "description": "Window repair", "cost_status": "paid"},
+            {"label": "Special Perils", "price": {"amount": 200}, "description": "Flood & storm", "cost_status": "paid"},
+            {"label": "Legal Liability to Passengers", "price": {"amount": 56.70}, "description": "Passenger protection", "cost_status": "paid"},
+            {"label": "Legal Liability of Passengers", "price": {"amount": 7.50}, "description": "Negligence protection", "cost_status": "paid"},
+            {"label": "Key Care Cover", "price": {"amount": 30}, "description": "Key replacement", "cost_status": "paid"},
+        ],
+        "extras": [
+            {"label": "Waiver of Compulsory Excess for Unnamed Drivers", "price": {"amount": 0}},
+            {"label": "Windscreen Coverage", "price": {"amount": 150}},
+            {"label": "Special Perils", "price": {"amount": 200}},
+            {"label": "Legal Liability to Passengers", "price": {"amount": 56.70}},
+            {"label": "Legal Liability of Passengers", "price": {"amount": 7.50}},
+            {"label": "Key Care Cover", "price": {"amount": 30}},
+        ],
+        "available_addons": [
+            {"label": f"Addon Benefit {i}", "coverage_limit": f"RM {i*1000}", "description": f"Description text {i}", "price": {"amount": 50 + i * 10}}
+            for i in range(1, 12)
+        ],
+    }
+
+    balanced = _balance_benefit_grid_elements(elements, context)
+    by_id = {e.get("id"): e for e in balanced}
+    g2 = by_id["available_addons_grid"]
+    bottom2 = float(g2["y"]) + float(g2["h"])
+    # 7 rows uncompressed will naturally exceed the safe_bottom (1058.0px)
+    assert bottom2 > 1058.0, f"Expected Section 3 bottom > 1058.0 with uniform height, got {bottom2}"
+
+    html = render_quotation_html(
+        {},
+        template_config={"canvas": {"width": 794, "height": 1123, "elements": elements}},
+        render_context=context,
+    )
+    # Zero scaling applied (scale factor is 1.0)
+    assert "transform: scale(" not in html
+    # Long title is rendered without truncation
+    assert "Waiver of Compulsory Excess for Unnamed Drivers" in html
+    # Title wraps naturally without rigid clamping
+    assert "white-space:normal" in html
+    # All 11 addons are rendered
+    for i in range(1, 12):
+        assert f"Addon Benefit {i}" in html
+
+

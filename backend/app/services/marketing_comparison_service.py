@@ -1299,6 +1299,20 @@ def _resolve_comparison_benefits(
                 "is_included": True,
             })
 
+    # Bypass normalization for manual overrides
+    t_f = f.get("towing", {})
+    if isinstance(t_f, dict) and t_f.get("status") == "manual_override":
+        clean_towing = str(t_f.get("value") or "")
+    sp_f = f.get("special_perils", {})
+    if isinstance(sp_f, dict) and sp_f.get("status") == "manual_override":
+        special_perils_val = str(sp_f.get("value") or "")
+    llp_f = f.get("llp_llop", {})
+    if isinstance(llp_f, dict) and llp_f.get("status") == "manual_override":
+        llp_val = str(llp_f.get("value") or "")
+    ws_f = f.get("windscreen", {})
+    if isinstance(ws_f, dict) and ws_f.get("status") == "manual_override":
+        windscreen_amount = _to_float(ws_f)
+
     # --- 3. Unified Benefit Evaluation Engine ---
     plan_name = str(f.get("plan_name") or f.get("product_name") or f.get("product_tier") or combined_text)
     
@@ -2861,6 +2875,27 @@ def save_comparison_entry(
     if "is_recommended" in payload:
         entry.is_recommended = bool(payload["is_recommended"])
 
+    if entry.session_id:
+        s_obj = db.get(SessionModel, entry.session_id)
+        if s_obj and s_obj.draft:
+            d_fields = dict(s_obj.draft.fields or {})
+            if "company_name" in payload: d_fields["insurer_name"] = {"value": _safe_str(payload["company_name"]), "status": "manual_override"}
+            if "sum_insured" in payload: d_fields["sum_insured"] = {"value": str(_to_float(payload["sum_insured"])), "status": "manual_override"}
+            if "agreed_value" in payload: d_fields["valuation_type"] = {"value": "Agreed Value" if payload["agreed_value"] else "Market Value", "status": "manual_override"}
+            elif "valuation_type" in payload: d_fields["valuation_type"] = {"value": "Agreed Value" if payload["valuation_type"] == "agreed_value" else "Market Value", "status": "manual_override"}
+            if "motor_premium" in payload: d_fields["premium_due"] = {"value": str(_to_float(payload["motor_premium"])), "status": "manual_override"}
+            if "towing_limit" in payload: d_fields["towing"] = {"value": _safe_str(payload["towing_limit"]), "status": "manual_override"}
+            if "waiver_betterment" in payload: d_fields["waiver_of_betterment"] = {"value": "Included" if payload["waiver_betterment"] else "Not Included", "status": "manual_override"}
+            if "excess" in payload: d_fields["excess"] = {"value": str(_to_float(payload["excess"])), "status": "manual_override"}
+            if "windscreen_sum_insured" in payload:
+                ws_val = _to_float(payload["windscreen_sum_insured"])
+                d_fields["windscreen"] = {"value": str(ws_val) if ws_val > 0 else "", "status": "manual_override"}
+            if "special_perils" in payload: d_fields["special_perils"] = {"value": _safe_str(payload["special_perils"]), "status": "manual_override"}
+            if "llp_llop" in payload: d_fields["llp_llop"] = {"value": _safe_str(payload["llp_llop"]), "status": "manual_override"}
+            
+            s_obj.draft.fields = d_fields
+            flag_modified(s_obj.draft, "fields")
+
     # Recompute fixed costs and total payable
     entry.road_tax = float(tenure.road_tax)
     entry.runner_fee = float(tenure.runner_fee)
@@ -3427,3 +3462,46 @@ def format_whatsapp_teaser(db: Session, tenure_id: str) -> str:
 
     return "\n".join(lines)
 
+def reset_comparison_entry_to_detected(db: Session, tenure_id: str, entry_id: str) -> dict[str, Any]:
+    """Reset a manual override back to original AI detected values for a specific entry."""
+    tenure = db.get(InsuranceTenure, tenure_id)
+    if not tenure:
+        raise ValueError("Tenure not found")
+        
+    entry = db.get(TenureComparisonEntry, entry_id)
+    if not entry or entry.tenure_id != tenure_id:
+        raise ValueError("Entry not found")
+        
+    if not entry.session_id:
+        raise ValueError("Manual entries without an uploaded file cannot be reset to detected values.")
+        
+    session = db.get(SessionModel, entry.session_id)
+    if not session or not session.uploaded_file_id:
+        raise ValueError("Original session or file not found")
+        
+    # Get original extraction record
+    from app.models.tables import ExtractionRecord
+    extraction = db.query(ExtractionRecord).filter(ExtractionRecord.uploaded_file_id == session.uploaded_file_id).first()
+    if not extraction or not extraction.candidates:
+        raise ValueError("No original AI extraction record found to reset to.")
+        
+    # Overwrite the mutable draft with the immutable extraction candidates
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.models.tables import QuotationDraft
+    if session.draft:
+        session.draft.fields = dict(extraction.candidates)
+        flag_modified(session.draft, "fields")
+    else:
+        session.draft = QuotationDraft(
+            fields=dict(extraction.candidates),
+            original_draft=dict(extraction.candidates),
+            display_options={},
+        )
+        db.add(session.draft)
+        
+    # Delete the current entry so get_marketing_comparison auto-hydrates a fresh one
+    db.delete(entry)
+    db.commit()
+    
+    # Return refreshed comparison
+    return get_marketing_comparison(db, tenure_id)

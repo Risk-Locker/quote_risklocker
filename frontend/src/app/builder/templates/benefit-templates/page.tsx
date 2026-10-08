@@ -2403,66 +2403,34 @@ export default function BenefitCardTemplatesPage() {
                       </div>
 
                       <div className="grid grid-cols-2 gap-2.5">
-                        {previewItems.slice(0, 4).map((benefit) => {
-                          const secVis = activeVisibility[benefit.sectionKind];
-                          return (
-                            <div
-                              key={`canvas-${benefit.id}`}
-                              style={{
-                                borderRadius: getCardRadius(customStyle.shape),
-                                boxShadow: getCardShadow(customStyle.elevation),
-                                backgroundColor: customStyle.bgColor,
-                                borderColor: customStyle.borderColor,
-                                borderWidth: `${customStyle.borderWidth}px`,
-                                borderStyle: customStyle.borderStyle,
-                              }}
-                              className="flex items-start gap-2.5 p-2.5 text-xs shadow-xs"
-                            >
-                              {secVis.showAsset && (
-                                <div
-                                  style={{ width: `${customStyle.iconSize}px`, height: `${customStyle.iconSize}px` }}
-                                  className="grid place-items-center rounded bg-neutral-100 border border-neutral-200 shrink-0 overflow-hidden"
-                                >
-                                  {benefit.asset_url ? (
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img
-                                      src={fileUrl(benefit.asset_url)}
-                                      alt={benefit.label}
-                                      style={{ width: "100%", height: "100%", objectFit: customStyle.imageFit }}
-                                    />
-                                  ) : (
-                                    <ShieldCheck size={customStyle.iconSize * 0.55} className="text-[var(--rl-black)]" />
-                                  )}
-                                </div>
-                              )}
-                              <div className="min-w-0 flex-1">
-                                {secVis.showTitle && (
-                                  <div className="flex items-center justify-between gap-1">
-                                    <span className="text-xs font-bold text-[var(--rl-text-strong)] truncate">
-                                      {benefit.label}
-                                    </span>
-                                    {secVis.showCost && (
-                                      <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1 shrink-0">
-                                        {benefit.cost}
-                                      </span>
-                                    )}
-                                  </div>
-                                )}
-                                {secVis.showCoverage && (
-                                  <span className="text-[11px] font-bold text-[var(--rl-red)] block truncate mt-0.5">
-                                    {benefit.coverage}
-                                  </span>
-                                )}
-                                {secVis.showDescription && (
-                                  <p className="text-[9.5px] text-neutral-500 truncate leading-snug">
-                                    {benefit.description}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
+                        {previewItems.filter((i) => i.sectionKind === "default").map((b) => renderBenefitCardPreview(b))}
                       </div>
+
+                      {previewItems.filter((i) => i.sectionKind === "addedAddons").length > 0 && (
+                        <>
+                          <div className="mt-4 mb-2 flex items-center justify-between">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-red)]">
+                              Purchased Extras & Add-ons
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2.5">
+                            {previewItems.filter((i) => i.sectionKind === "addedAddons").map((b) => renderBenefitCardPreview(b))}
+                          </div>
+                        </>
+                      )}
+
+                      {previewItems.filter((i) => i.sectionKind === "optionalAddons").length > 0 && (
+                        <>
+                          <div className="mt-4 mb-2 flex items-center justify-between">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-red)]">
+                              You May Also Add On
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2.5">
+                            {previewItems.filter((i) => i.sectionKind === "optionalAddons").map((b) => renderBenefitCardPreview(b))}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 </>

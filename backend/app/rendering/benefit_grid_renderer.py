@@ -320,13 +320,8 @@ def _dynamic_benefit_grid(
         # --- Short description row ---
         desc_weight = "700" if element.get("descWeight") == "bold" else ("600" if element.get("descWeight") == "semibold" else ("500" if element.get("descWeight") == "medium" else "400"))
         desc_max_lines = int(element.get("descMaxLines") or element.get("descLines") or 4)
-        if target_row_h > 0:
-            if target_row_h < 46.0:
-                desc_max_lines = 0
-            elif target_row_h < 64.0:
-                desc_max_lines = min(1, desc_max_lines)
-            else:
-                desc_max_lines = min(2, desc_max_lines)
+        if desc_max_lines <= 0:
+            desc_max_lines = 4
 
         clamp_css = f"-webkit-line-clamp:{desc_max_lines};display:-webkit-box;-webkit-box-orient:vertical;" if desc_max_lines > 0 else "display:block;"
         desc_max_h = max(55.0, desc_fs * (desc_max_lines + 1.0)) if desc_max_lines > 0 else 999.0
@@ -386,19 +381,23 @@ def _dynamic_benefit_grid(
                     )
 
         # Title font: shrink for long labels
-        title_fs = lbl_fs - 1.0 if len(label_str) > 30 else (lbl_fs - 0.5 if len(label_str) > 18 else float(lbl_fs))
-        title_margin = 1 if (is_minimal or (target_row_h > 0 and target_row_h < 50.0)) else 3
-        text_wrap = str(element.get("textWrap") or "wrap")
-        if target_row_h > 0 and target_row_h < 46.0:
-            title_wrap_css = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;"
-        elif target_row_h > 0 and target_row_h < 64.0:
-            title_wrap_css = "overflow:hidden;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;word-break:break-word;white-space:normal;"
-        elif text_wrap == "truncate":
-            title_wrap_css = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;"
-        elif text_wrap == "multi":
-            title_wrap_css = "overflow:hidden;display:block;word-break:break-word;white-space:normal;"
+        custom_title_size = float(element.get("titleSize") or 0)
+        if custom_title_size > 0:
+            title_fs = custom_title_size - 1.0 if len(label_str) > 28 else (custom_title_size - 0.5 if len(label_str) > 18 else custom_title_size)
         else:
-            title_wrap_css = "overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word;white-space:normal;"
+            if len(label_str) > 28:
+                title_fs = 8.5
+            elif len(label_str) > 18:
+                title_fs = 9.0
+            else:
+                title_fs = min(10.0, max(9.5, float(lbl_fs))) if target_row_h >= 46.0 else float(lbl_fs)
+
+        title_margin = 1 if is_minimal else 2
+        text_wrap = str(element.get("textWrap") or "wrap")
+        if text_wrap == "truncate":
+            title_wrap_css = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;"
+        else:
+            title_wrap_css = "word-break:break-word;white-space:normal;display:block;"
 
         title_html = (
             f'<div style="font-size:{title_fs}px;font-weight:700;line-height:1.15;'
@@ -570,7 +569,7 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     hdr2_txt = next((e for e in elements if e.get("id") == "addons_header_txt"), None)
 
     v4_mode = any(e.get("v4_mode") for e in elements) or bool((render_context or {}).get("v4_mode"))
-    hdr_h = 24.0 if v4_mode else 26.0
+    hdr_h = 24.0
     gap = 8.0
     pad = 3.0
 
@@ -611,15 +610,19 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     effective_cols = base_cols
     extras_cols = min(2, effective_cols) if n_ext <= 2 else effective_cols
 
+    grid2_cols = int(grid2.get("columns") or 0) if grid2 else 0
+    auto_pack_addons_4col = bool(grid2 and (grid2.get("autoFourCol") or grid2.get("adaptiveColumns"))) and n2 >= 9
+    addons_cols = 4 if auto_pack_addons_4col else (grid2_cols if grid2_cols > 0 else effective_cols)
+
     rows1 = (n1 + effective_cols - 1) // effective_cols if n1 > 0 else 0
     rows_ext = (n_ext + extras_cols - 1) // extras_cols if (has_extras_section and n_ext > 0) else 0
-    rows2 = (n2 + effective_cols - 1) // effective_cols if n2 > 0 else 0
+    rows2 = (n2 + addons_cols - 1) // addons_cols if n2 > 0 else 0
 
     active_sections = (1 if rows1 > 0 else 0) + (1 if rows_ext > 0 else 0) + (1 if rows2 > 0 else 0)
     effective_sections = max(1, active_sections)
     total_rows = max(1, rows1 + rows_ext + rows2)
 
-    card_gap = 4.5 if v4_mode else 5.0
+    card_gap = 4.5
     total_headers_h = (effective_sections * (hdr_h + pad)) + (max(0, effective_sections - 1) * gap)
     cards_avail_h = max(60.0, available_h - total_headers_h)
     total_row_gaps = (max(0, rows1 - 1) + max(0, rows_ext - 1) + max(0, rows2 - 1)) * card_gap
@@ -627,45 +630,69 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
 
     raw_row_h = pure_cards_h / float(total_rows)
 
-    if v4_mode:
-        custom_icon_sz = float(grid1.get("iconSize") or 0) if grid1 else 0.0
-        custom_title_sz = float(grid1.get("titleSize") or 0) if grid1 else 0.0
-        uniform_h = float(grid1.get("uniformHeight") or grid1.get("rowHeight") or 0) if grid1 else 0.0
-        min_card_needed = max(
-            28.0,
-            (custom_icon_sz + 18.0) if custom_icon_sz > 0 else 28.0,
-            (custom_title_sz + desc_sz + 20.0) if custom_title_sz > 0 else 28.0,
+    custom_icon_sz = float(grid1.get("iconSize") or 0) if grid1 else 0.0
+    custom_title_sz = float(grid1.get("titleSize") or 0) if grid1 else 0.0
+    uniform_h = float(grid1.get("uniformHeight") or grid1.get("rowHeight") or 0) if grid1 else 0.0
+    
+    min_card_needed = max(
+        28.0,
+        (custom_icon_sz + 46.0 if custom_icon_sz > 24 else custom_icon_sz + 18.0) if custom_icon_sz > 0 else 28.0,
+        (custom_title_sz + desc_sz + 20.0) if custom_title_sz > 0 else 28.0,
+    )
+
+    default_row_height = (
+        36.0 if is_minimal
+        else (
+            max(74.0 if cols == 2 else 74.0, 44.0 + dynamic_icon_extra + (16.0 if has_desc else 0.0) + (8.0 if has_cov else 0.0)) + extra_title_h + extra_desc_h
+            if has_desc
+            else max(42.0, 34.0 + dynamic_icon_extra + (8.0 if has_cov else 0.0)) + extra_title_h
         )
-        if uniform_h > 0:
-            target_row_h = uniform_h
-        elif custom_icon_sz > 24 or custom_title_sz > 10:
-            target_row_h = max(min_card_needed, raw_row_h)
-        else:
-            target_row_h = min(38.0, max(28.0, raw_row_h)) if is_minimal else min(52.0, max(28.0, raw_row_h))
-        h1 = (rows1 * target_row_h + max(0, rows1 - 1) * card_gap) if rows1 > 0 else float(grid1.get("h") or 40.0)
-        h_ext = (rows_ext * target_row_h + max(0, rows_ext - 1) * card_gap) if (has_extras_section and rows_ext > 0) else 40.0
-        h2 = (rows2 * target_row_h + max(0, rows2 - 1) * card_gap) if rows2 > 0 else float(grid2.get("h") or 40.0)
-    else:
-        target_row_h = 0.0
-        default_row_height = (
-            36.0 if is_minimal
-            else (
-                max(74.0 if cols == 2 else 74.0, 44.0 + dynamic_icon_extra + (16.0 if has_desc else 0.0) + (8.0 if has_cov else 0.0)) + extra_title_h + extra_desc_h
-                if has_desc
-                else max(42.0, 34.0 + dynamic_icon_extra + (8.0 if has_cov else 0.0)) + extra_title_h
-            )
+    )
+
+    addon_row_height = (
+        36.0 if is_minimal
+        else (
+            max(84.0 if cols == 2 else 84.0, 38.0 + dynamic_icon_extra + (8.0 if has_cov else 0.0) + (12.0 if has_desc else 0.0) + 12.0) + extra_title_h + extra_desc_h
+            if has_desc
+            else max(50.0, 38.0 + dynamic_icon_extra + 12.0) + extra_title_h
         )
-        addon_row_height = (
-            36.0 if is_minimal
-            else (
-                max(84.0 if cols == 2 else 84.0, 38.0 + dynamic_icon_extra + (8.0 if has_cov else 0.0) + (12.0 if has_desc else 0.0) + 12.0) + extra_title_h + extra_desc_h
-                if has_desc
-                else max(50.0, 38.0 + dynamic_icon_extra + 12.0) + extra_title_h
-            )
-        )
-        h1 = (rows1 * default_row_height + max(0, rows1 - 1) * card_gap) if rows1 > 0 else 0.0
-        h_ext = (rows_ext * addon_row_height + max(0, rows_ext - 1) * card_gap) if (has_extras_section and rows_ext > 0) else 0.0
-        h2 = (rows2 * addon_row_height + max(0, rows2 - 1) * card_gap) if rows2 > 0 else 0.0
+    )
+
+    def _get_max_height(card_list, base_row_h):
+        if not card_list: return base_row_h
+        highest = base_row_h
+        for c in card_list:
+            t = str(c.get("label") or "")
+            d = str(c.get("description") or "") if has_desc else ""
+            t_lines = max(1, len(t) // 22 + (1 if len(t) % 22 > 0 else 0)) if t else 0
+            d_lines = max(1, len(d) // 38 + (1 if len(d) % 38 > 0 else 0)) if d else 0
+            if desc_max_lines > 0:
+                d_lines = min(d_lines, desc_max_lines)
+            
+            h = base_row_h
+            h += max(0, t_lines - 1) * 11.0
+            if has_desc:
+                h += max(0, d_lines - 1) * 10.0
+                
+            if h > highest:
+                highest = h
+        return highest
+
+    # 1. Evaluate max height ONCE across all benefits based on configuration
+    target_row_h_default = _get_max_height(items1, default_row_height)
+    target_row_h_addons = _get_max_height(items_ext + items2, addon_row_height)
+    
+    if uniform_h > 0:
+        target_row_h_default = uniform_h
+        target_row_h_addons = uniform_h
+    elif custom_icon_sz > 24 or custom_title_sz > 10:
+        target_row_h_default = max(min_card_needed, target_row_h_default)
+        target_row_h_addons = max(min_card_needed, target_row_h_addons)
+
+    # 2. Section heights are simple multiples (rows * max_height)
+    h1 = (rows1 * target_row_h_default + max(0, rows1 - 1) * card_gap) if rows1 > 0 else 0.0
+    h_ext = (rows_ext * target_row_h_addons + max(0, rows_ext - 1) * card_gap) if (has_extras_section and rows_ext > 0) else 0.0
+    h2 = (rows2 * target_row_h_addons + max(0, rows2 - 1) * card_gap) if rows2 > 0 else 0.0
 
     # Magnetic sequential positioning — each section starts strictly after previous section ends
     cur_y = y_top
@@ -696,7 +723,7 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
         y_g2 = y_hdr2 + hdr_h + pad
         bottom2 = y_g2 + h2
 
-    footer_shift = ((bottom2 + 24.0 - 1050.0) if bottom2 > 1020.0 else 0.0) if not v4_mode else 0.0
+    footer_shift = max(0.0, (bottom2 + 14.0) - footer_y)
 
     def _adjust_common(e: dict[str, Any]) -> dict[str, Any]:
         eid = e.get("id")
@@ -770,7 +797,7 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
             e["y"] = y_g1
             e["h"] = h1
             e["columns"] = effective_cols
-            e["targetRowHeight"] = target_row_h
+            e["targetRowHeight"] = target_row_h_default
             if has_extras_section:
                 e["excludeExtras"] = True
             adjusted_elements.append(e)
@@ -808,7 +835,7 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
                     "h": h_ext,
                     "z": 4,
                     "columns": extras_cols,
-                    "targetRowHeight": target_row_h,
+                    "targetRowHeight": target_row_h_addons,
                     "emptyState": "hide",
                 })
                 adjusted_elements.append(extras_elem)
@@ -828,8 +855,8 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
         elif e.get("type") == "benefit-grid" and e.get("gridKind") == "available_addons":
             e["y"] = y_g2
             e["h"] = h2
-            e["columns"] = effective_cols
-            e["targetRowHeight"] = target_row_h
+            e["columns"] = addons_cols
+            e["targetRowHeight"] = target_row_h_addons
         elif footer_shift > 0.0 and (float(e.get("y") or 0) >= 1050.0 or str(eid or "").startswith("footer") or str(eid or "").startswith("tc_")):
             e["y"] = float(e.get("y") or 1068.0) + footer_shift
         adjusted_elements.append(e)
