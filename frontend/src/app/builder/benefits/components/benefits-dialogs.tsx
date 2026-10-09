@@ -12,6 +12,7 @@ import type {
   ConceptSummary as Concept,
   BenefitProfile,
 } from "@/types/benefits";
+import { BenefitCombobox } from "./benefit-combobox";
 
 export interface BenefitsDialogsProps {
   dialog: "config" | "clone" | "bundle" | null;
@@ -41,6 +42,7 @@ export interface BenefitsDialogsProps {
   aiDiffResult: any;
   conditionDialog: boolean;
   setConditionDialog: (open: boolean) => void;
+  editingConditionId: string | null;
   selectedCompany: Company | null;
   condFormName: string;
   setCondFormName: (val: string) => void;
@@ -98,6 +100,7 @@ export function BenefitsDialogs({
   aiDiffResult,
   conditionDialog,
   setConditionDialog,
+  editingConditionId,
   selectedCompany,
   condFormName,
   setCondFormName,
@@ -386,7 +389,7 @@ export function BenefitsDialogs({
         <Dialog
           open={conditionDialog}
           onOpenChange={setConditionDialog}
-          title="New Dynamic Benefit Condition Rule"
+          title={editingConditionId ? "Edit Dynamic Benefit Condition Rule" : "New Dynamic Benefit Condition Rule"}
         >
           <div className="max-w-lg p-6 space-y-4 text-xs">
             <p className="text-[var(--rl-text-muted)]">
@@ -411,18 +414,12 @@ export function BenefitsDialogs({
                 <label className="block font-semibold text-[var(--rl-text-strong)] mb-1">
                   When this Trigger Benefit is Active / Purchased *
                 </label>
-                <select
+                <BenefitCombobox
+                  concepts={concepts}
                   value={condTriggerId}
-                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCondTriggerId(e.target.value)}
-                  className="w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-2 text-xs text-[var(--rl-text-strong)] focus:outline-none"
-                >
-                  <option value="">-- Select Trigger Benefit --</option>
-                  {concepts.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.label} ({c.concept_key})
-                    </option>
-                  ))}
-                </select>
+                  onChange={setCondTriggerId}
+                  placeholder="-- Search & Select Trigger Benefit --"
+                />
               </div>
 
               <div>
@@ -442,18 +439,12 @@ export function BenefitsDialogs({
                 <label className="block font-semibold text-[var(--rl-text-strong)] mb-1">
                   Target Benefit to Modify *
                 </label>
-                <select
+                <BenefitCombobox
+                  concepts={concepts}
                   value={condTargetId}
-                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCondTargetId(e.target.value)}
-                  className="w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-2 text-xs text-[var(--rl-text-strong)] focus:outline-none"
-                >
-                  <option value="">-- Select Target Benefit --</option>
-                  {concepts.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.label} ({c.concept_key})
-                    </option>
-                  ))}
-                </select>
+                  onChange={setCondTargetId}
+                  placeholder="-- Search & Select Target Benefit --"
+                />
               </div>
 
               <div>
@@ -554,7 +545,9 @@ export function BenefitsDialogs({
                 }
                 className="bg-[var(--rl-black)] text-white shadow-sm font-semibold"
               >
-                {conditionSaving ? "Saving Rule..." : "Create Condition Rule"}
+                {conditionSaving
+                  ? (editingConditionId ? "Updating Rule..." : "Saving Rule...")
+                  : (editingConditionId ? "Save Changes" : "Create Condition Rule")}
               </Button>
             </div>
           </div>

@@ -93,6 +93,7 @@ def list_company_conditions(db, user, company_id: str, profile_id: str | None = 
             "target_concept_id": c.target_concept_id,
             "action_type": getattr(c, "action_type", "replace_description") or "replace_description",
             "replacement_description": c.replacement_description,
+            "replacement_title": getattr(c, "replacement_title", None),
             "is_active": c.is_active,
             "created_at": c.created_at.isoformat() if c.created_at else None,
             "updated_at": c.updated_at.isoformat() if c.updated_at else None,
@@ -146,6 +147,12 @@ def save_company_condition(db, user, company_id: str, payload: dict, profile_id:
     else:
         trigger_plan_filter = None
 
+    replacement_title = payload.get("replacement_title")
+    if isinstance(replacement_title, str):
+        replacement_title = replacement_title.strip() or None
+    else:
+        replacement_title = None
+
     is_active = bool(payload.get("is_active", True))
 
     cond_id = payload.get("id")
@@ -165,6 +172,7 @@ def save_company_condition(db, user, company_id: str, payload: dict, profile_id:
         cond.target_concept_id = target_concept_id
         cond.action_type = action_type
         cond.replacement_description = replacement_desc
+        cond.replacement_title = replacement_title
         cond.is_active = is_active
         cond.updated_at = utcnow()
     else:
@@ -178,6 +186,7 @@ def save_company_condition(db, user, company_id: str, payload: dict, profile_id:
             target_concept_id=target_concept_id,
             action_type=action_type,
             replacement_description=replacement_desc,
+            replacement_title=replacement_title,
             is_active=is_active,
             created_at=utcnow(),
             updated_at=utcnow(),
@@ -197,6 +206,7 @@ def save_company_condition(db, user, company_id: str, payload: dict, profile_id:
         "target_concept_id": cond.target_concept_id,
         "action_type": cond.action_type,
         "replacement_description": cond.replacement_description,
+        "replacement_title": cond.replacement_title,
         "is_active": cond.is_active,
     }
 

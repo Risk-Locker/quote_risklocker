@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import {
+  ArrowsClockwise,
   EyeSlash,
   Info,
   Lightning,
@@ -11,6 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageLoading } from "@/components/ui/page-loading";
 import {
   BenefitProfile,
@@ -27,8 +30,10 @@ interface BenefitConditionsTabProps {
   conditionsLoading: boolean;
   concepts: Concept[];
   onOpenAddConditionDialog: () => void;
+  onEditCondition: (cond: CompanyBenefitCondition) => void;
   onQuickCreateUnlimitedTowingRule: () => void;
   onDeleteCondition: (condId: string) => void;
+  onRefreshConcepts?: () => void;
 }
 
 export function BenefitConditionsTab({
@@ -39,9 +44,12 @@ export function BenefitConditionsTab({
   conditionsLoading,
   concepts,
   onOpenAddConditionDialog,
+  onEditCondition,
   onQuickCreateUnlimitedTowingRule,
   onDeleteCondition,
+  onRefreshConcepts,
 }: BenefitConditionsTabProps) {
+  const [deletingCondId, setDeletingCondId] = useState<string | null>(null);
   return (
     <div className="space-y-6">
       {isProfileArchived && (
@@ -79,14 +87,28 @@ export function BenefitConditionsTab({
           </p>
         </div>
 
-        <Button
-          size="sm"
-          onClick={onOpenAddConditionDialog}
-          className="gap-1.5 bg-[var(--rl-black)] text-white shadow-sm font-semibold"
-        >
-          <Plus size={14} weight="bold" />
-          <span>Add Conditional Rule</span>
-        </Button>
+        <div className="flex items-center gap-2">
+          {onRefreshConcepts && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={onRefreshConcepts}
+              className="gap-1.5 bg-white border border-[var(--rl-border)] text-[var(--rl-text-strong)] shadow-xs font-semibold"
+              title="Refresh benefit concepts library"
+            >
+              <ArrowsClockwise size={14} weight="bold" />
+              <span>Refresh Benefits</span>
+            </Button>
+          )}
+          <Button
+            size="sm"
+            onClick={onOpenAddConditionDialog}
+            className="gap-1.5 bg-[var(--rl-black)] text-white shadow-sm font-semibold"
+          >
+            <Plus size={14} weight="bold" />
+            <span>Add Conditional Rule</span>
+          </Button>
+        </div>
       </div>
 
       {/* Conditions Table or Empty State */}
@@ -216,22 +238,43 @@ export function BenefitConditionsTab({
                             Automatically hides target benefit from quotation cards
                           </div>
                         ) : (
-                          <div className="rounded border border-blue-200 bg-blue-50/70 p-2 text-blue-950 font-medium text-[11px] leading-snug">
-                            &quot;{cond.replacement_description}&quot;
+                          <div className="rounded border border-blue-200 bg-blue-50/70 p-2 text-blue-950 font-medium text-[11px] leading-snug space-y-1">
+                            {cond.replacement_title && (
+                              <div className="font-bold text-blue-900 flex items-center gap-1">
+                                <span className="text-[10px] uppercase tracking-wider text-blue-600 font-semibold">Title:</span>
+                                <span>{cond.replacement_title}</span>
+                              </div>
+                            )}
+                            <div className="text-[11px] leading-snug">
+                              &quot;{cond.replacement_description}&quot;
+                            </div>
                           </div>
                         )}
                       </td>
 
                       <td className="px-4 py-3.5 align-middle text-center">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => onDeleteCondition(cond.id)}
-                          className="h-7 w-7 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
-                          title="Delete Rule"
-                        >
-                          <Trash size={13} />
-                        </Button>
+                        <div className="flex items-center justify-center gap-1">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            disabled={isProfileArchived}
+                            onClick={() => onEditCondition(cond)}
+                            className="h-7 w-7 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-200"
+                            title="Edit Rule"
+                          >
+                            <PencilSimple size={13} weight="bold" />
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            disabled={isProfileArchived}
+                            onClick={() => setDeletingCondId(cond.id)}
+                            className="h-7 w-7 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                            title="Delete Rule"
+                          >
+                            <Trash size={13} />
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -241,6 +284,21 @@ export function BenefitConditionsTab({
           </div>
         </Card>
       )}
+
+      {/* Confirmation Dialog for Deleting Condition */}
+      <ConfirmDialog
+        open={Boolean(deletingCondId)}
+        onOpenChange={(open) => !open && setDeletingCondId(null)}
+        title="Delete Conditional Rule"
+        message="Are you sure you want to delete this conditional rule? Quotes will no longer apply this automatic benefit upgrade or suppression."
+        confirmLabel="Delete Rule"
+        onConfirm={() => {
+          if (deletingCondId) {
+            onDeleteCondition(deletingCondId);
+            setDeletingCondId(null);
+          }
+        }}
+      />
     </div>
   );
 }

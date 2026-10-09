@@ -543,7 +543,7 @@ def test_money_edits_normalize_to_rm_and_recompute_total():
     assert draft.fields["roadtax"]["value"] == "90.00"
     assert draft.fields["total_amount"]["value"] == "1344.50"
     assert draft.fields["total_amount"]["status"] == "ready"
-    assert draft.scalar_decisions["total_amount"]["decision"] == "edit"
+    assert draft.scalar_decisions["total_amount"]["decision"] == "confirm"
 
 
 def test_invalid_money_and_date_edits_are_rejected_without_committing():

@@ -91,8 +91,8 @@ frontend/src/
 │   ├── insights/                    # Teams-style calendar, Hit/Miss ledger, CRM client dossiers
 │   ├── upload/                      # Single & bulk intake with Test Upload sandbox toggle
 │   └── builder/
-│       ├── benefits/                # 4-Tab Benefits Cockpit (Company, Catalogs, Rules, Matrix)
-│       ├── global-benefits/         # Global 63-concept visual asset assignment & review
+│       ├── benefits/                # 4-Tab Benefits Cockpit (Company, Catalogs, Conditions, Matrix, BenefitCombobox)
+│       ├── global-benefits/         # Global 63-concept visual asset assignment & drag-and-drop artwork upload
 │       ├── templates/               # Quotation master template designer & preset manager
 │       └── uploads/                 # Bulk upload intake limit configuration
 ├── components/

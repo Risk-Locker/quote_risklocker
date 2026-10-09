@@ -412,6 +412,7 @@ function BenefitsPageContent() {
   const [companyConditions, setCompanyConditions] = useState<CompanyBenefitCondition[]>([]);
   const [conditionsLoading, setConditionsLoading] = useState(false);
   const [conditionDialog, setConditionDialog] = useState(false);
+  const [editingConditionId, setEditingConditionId] = useState<string | null>(null);
   const [conditionSaving, setConditionSaving] = useState(false);
   const [condFormName, setCondFormName] = useState("");
   const [condTriggerId, setCondTriggerId] = useState("");
@@ -624,6 +625,7 @@ function BenefitsPageContent() {
       await api(url, {
         method: "POST",
         body: JSON.stringify({
+          id: editingConditionId || undefined,
           name: condFormName.trim(),
           trigger_concept_id: condTriggerId,
           trigger_plan_filter: condPlanFilter.trim() || null,
@@ -635,6 +637,7 @@ function BenefitsPageContent() {
         }),
       });
       setConditionDialog(false);
+      setEditingConditionId(null);
       setCondFormName("");
       setCondTriggerId("");
       setCondPlanFilter("");
@@ -650,11 +653,34 @@ function BenefitsPageContent() {
     } finally {
       if (mountedRef.current) setConditionSaving(false);
     }
-  }, [selectedCompanyId, selectedProfileId, condFormName, condTriggerId, condPlanFilter, condTargetId, condActionType, condReplacement, condReplacementTitle, loadCompanyConditions]);
+  }, [selectedCompanyId, selectedProfileId, editingConditionId, condFormName, condTriggerId, condPlanFilter, condTargetId, condActionType, condReplacement, condReplacementTitle, loadCompanyConditions]);
+
+  const openAddConditionDialog = useCallback(() => {
+    setEditingConditionId(null);
+    setCondFormName("");
+    setCondTriggerId("");
+    setCondPlanFilter("");
+    setCondTargetId("");
+    setCondActionType("replace_description");
+    setCondReplacement("");
+    setCondReplacementTitle("");
+    setConditionDialog(true);
+  }, []);
+
+  const openEditConditionDialog = useCallback((cond: CompanyBenefitCondition) => {
+    setEditingConditionId(cond.id);
+    setCondFormName(cond.name || "");
+    setCondTriggerId(cond.trigger_concept_id || "");
+    setCondPlanFilter(cond.trigger_plan_filter || "");
+    setCondTargetId(cond.target_concept_id || "");
+    setCondActionType((cond.action_type as "replace_description" | "hide_target") || "replace_description");
+    setCondReplacement(cond.replacement_description || "");
+    setCondReplacementTitle(cond.replacement_title || "");
+    setConditionDialog(true);
+  }, []);
 
   const deleteCompanyCondition = useCallback(async (conditionId: string) => {
     if (!selectedCompanyId) return;
-    if (!window.confirm("Are you sure you want to delete this conditional rule?")) return;
     setConditionsLoading(true);
     try {
       await api(`/business/companies/${selectedCompanyId}/conditions/${conditionId}`, {
@@ -833,7 +859,7 @@ function BenefitsPageContent() {
       api<{ companies: { items: Company[] } }>("/business/companies?page=1&page_size=100"),
       api<{ segments: { items: HierarchyItem[] } }>("/business/segments?page=1&page_size=100"),
       api<{ vehicle_categories: { items: HierarchyItem[] } }>("/business/vehicle-categories?page=1&page_size=100"),
-      api<{ benefit_concepts: { items: Concept[] } }>("/business/benefit-concepts?page=1&page_size=100"),
+      api<{ benefit_concepts: { items: Concept[] } }>("/business/benefit-concepts?status=active&page=1&page_size=250"),
       api<{ sources: { items: Source[] } }>("/business/sources?page=1&page_size=100"),
       api<{ templates: TemplateRecord[] | { items: TemplateRecord[] } }>("/admin/templates?page=1&page_size=20").catch(() =>
         api<{ templates: TemplateRecord[] }>("/business/templates/published").catch(() => ({ templates: [] }))
@@ -2608,8 +2634,11 @@ ${aiMarkdownTable}`;
             companyConditions={companyConditions}
             conditionsLoading={conditionsLoading}
             concepts={concepts}
-            onOpenAddConditionDialog={() => setConditionDialog(true)}
+            onOpenAddConditionDialog={openAddConditionDialog}
+            onEditCondition={openEditConditionDialog}
+            onRefreshConcepts={() => loadReferenceData(true)}
             onQuickCreateUnlimitedTowingRule={() => {
+              setEditingConditionId(null);
               setCondFormName("DPP -> Unlimited Towing Upgrade");
               const dpp = concepts.find((c) => c.concept_key === "driver_passenger_protection");
               const towing = concepts.find((c) => c.concept_key === "towing_assistance" || c.concept_key === "breakdown_assist");
@@ -2617,6 +2646,7 @@ ${aiMarkdownTable}`;
               if (towing) setCondTargetId(towing.id);
               setCondActionType("replace_description");
               setCondReplacement("Unlimited towing distance within Malaysia");
+              setCondReplacementTitle("");
               setConditionDialog(true);
             }}
             onDeleteCondition={deleteCompanyCondition}
@@ -3830,6 +3860,7 @@ ${aiMarkdownTable}`;
         aiDiffResult={aiDiffResult}
         conditionDialog={conditionDialog}
         setConditionDialog={setConditionDialog}
+        editingConditionId={editingConditionId}
         selectedCompany={selectedCompany}
         condFormName={condFormName}
         setCondFormName={setCondFormName}

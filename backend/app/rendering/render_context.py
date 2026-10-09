@@ -374,6 +374,7 @@ def _card(
     eval_context: dict | None = None,
     insurer_catalog: list[dict] | None = None,
     active_conditional_descriptions: dict[str, str] | None = None,
+    active_conditional_titles: dict[str, str] | None = None,
     company_baseline_descriptions: dict[str, str] | None = None,
     company_baseline_costs: dict[str, str] | None = None,
     visual_profile_assets: dict[str, str] | None = None,
@@ -493,7 +494,11 @@ def _card(
     if card_val:
         has_digits = any(c.isdigit() for c in card_val)
         is_unlimited = card_val.strip().lower() == "unlimited"
-        if not has_digits and not is_unlimited:
+        # Plan / Tier suppression: if card_val looks like a plan designation ("Plan 2", "Tier 1", "Pakej 3", or pure standalone 1-2 digit number), suppress it
+        is_plan_indicator = bool(re.match(r"^(?:plan|tier|pakej|pkg)\s*[a-z0-9]+$", card_val.strip(), re.IGNORECASE) or re.match(r"^\d{1,2}$", card_val.strip()))
+        if is_plan_indicator:
+            card_val = ""
+        elif not has_digits and not is_unlimited:
             card_val = ""
         elif card_val.strip().lower() in {"included standard cover", "included", "foc", "as quoted", "selected", "yes", "true", "standard", "optional"}:
             card_val = ""
@@ -507,7 +512,10 @@ def _card(
         else:
             has_digits = any(c.isdigit() for c in ev_str)
             is_unlimited = ev_str.lower() == "unlimited"
-            if has_digits and not ev_str.startswith("RM"):
+            is_plan_indicator = bool(re.match(r"^(?:plan|tier|pakej|pkg)\s*[a-z0-9]+$", ev_str.strip(), re.IGNORECASE) or re.match(r"^\d{1,2}$", ev_str.strip()))
+            if is_plan_indicator:
+                card_val = ""
+            elif has_digits and not ev_str.startswith("RM"):
                 card_val = f"RM {ev_str}"
             elif has_digits or is_unlimited:
                 card_val = ev_str
@@ -575,7 +583,7 @@ def _card(
         "concept_key": concept.concept_key,
         "facet_id": facet_id,
         "branch_key": branch_key,
-        "label": getattr(selection, "label_override", None) or label or getattr(offering, "label_override", None) or concept.label,
+        "label": (active_conditional_titles or {}).get(concept_id_key) or getattr(selection, "label_override", None) or label or getattr(offering, "label_override", None) or concept.label,
         "description": final_desc,
         "is_custom_description": is_custom_desc,
         "description_override": offering_desc,
@@ -608,6 +616,7 @@ def _expanded_cards(
     eval_context: dict | None = None,
     insurer_catalog: list[dict] | None = None,
     active_conditional_descriptions: dict[str, str] | None = None,
+    active_conditional_titles: dict[str, str] | None = None,
     company_baseline_descriptions: dict[str, str] | None = None,
     company_baseline_costs: dict[str, str] | None = None,
     visual_profile_assets: dict[str, str] | None = None,
@@ -623,6 +632,7 @@ def _expanded_cards(
             eval_context=eval_context,
             insurer_catalog=insurer_catalog,
             active_conditional_descriptions=active_conditional_descriptions,
+            active_conditional_titles=active_conditional_titles,
             company_baseline_descriptions=company_baseline_descriptions,
             company_baseline_costs=company_baseline_costs,
             visual_profile_assets=visual_profile_assets,
@@ -643,6 +653,7 @@ def _expanded_cards(
             eval_context=eval_context,
             insurer_catalog=insurer_catalog,
             active_conditional_descriptions=active_conditional_descriptions,
+            active_conditional_titles=active_conditional_titles,
             company_baseline_descriptions=company_baseline_descriptions,
             company_baseline_costs=company_baseline_costs,
             visual_profile_assets=visual_profile_assets,
@@ -675,6 +686,7 @@ def resolve_benefit_cards(
     # Dynamic conditional upgrades from company rules
     active_concept_ids = {str(item.concept_id) for item in current if item.concept_id}
     active_conditional_descriptions: dict[str, str] = {}
+    active_conditional_titles: dict[str, str] = {}
     hidden_concept_ids: set[str] = set()
     for cond in (company_conditions or []):
         if not getattr(cond, "is_active", True):
@@ -704,6 +716,9 @@ def resolve_benefit_cards(
                     hidden_concept_ids.add(str(cond.target_concept_id))
                 else:
                     active_conditional_descriptions[str(cond.target_concept_id)] = cond.replacement_description
+                    rep_title = getattr(cond, "replacement_title", None)
+                    if rep_title and str(rep_title).strip():
+                        active_conditional_titles[str(cond.target_concept_id)] = str(rep_title).strip()
 
     company_baseline_descriptions: dict[str, str] = {
         str(cfg.concept_id): cfg.baseline_description
@@ -727,6 +742,7 @@ def resolve_benefit_cards(
         kwargs["eval_context"] = eval_context
         kwargs["insurer_catalog"] = insurer_catalog
         kwargs["active_conditional_descriptions"] = active_conditional_descriptions
+        kwargs["active_conditional_titles"] = active_conditional_titles
         kwargs["company_baseline_descriptions"] = company_baseline_descriptions
         kwargs["company_baseline_costs"] = company_baseline_costs
         if "visual_profile_assets" not in kwargs:
@@ -744,6 +760,7 @@ def resolve_benefit_cards(
             eval_context=eval_context,
             insurer_catalog=insurer_catalog,
             active_conditional_descriptions=active_conditional_descriptions,
+            active_conditional_titles=active_conditional_titles,
             company_baseline_descriptions=company_baseline_descriptions,
             company_baseline_costs=company_baseline_costs,
             visual_profile_assets=visual_profile_assets,

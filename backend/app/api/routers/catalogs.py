@@ -828,9 +828,10 @@ def business_tier_delete(
 @router.get("/business/benefit-concepts")
 def business_benefit_concepts(
     search: str = Query(default="", max_length=200),
+    status: str | None = Query(default=None, max_length=40),
     visual_profile_id: str | None = Query(default=None, max_length=60),
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=50, ge=1, le=100),
+    page_size: int = Query(default=50, ge=1, le=500),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
@@ -839,6 +840,7 @@ def business_benefit_concepts(
             db,
             user,
             search=search,
+            status=status,
             page=page,
             page_size=page_size,
             visual_profile_id=visual_profile_id,

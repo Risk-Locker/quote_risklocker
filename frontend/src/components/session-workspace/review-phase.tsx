@@ -198,7 +198,7 @@ function formatCoverPeriod(raw: string | null | undefined): string {
 
 
 function displayValue(kind: FieldKind, value: string | null | undefined): string {
-  if (kind === "money") return formatMoney(value);
+  if (kind === "money" || kind === "total") return formatMoney(value);
   if (kind === "date") return formatDate(value);
   if (kind === "percent") return value ? `${String(value).replace(/%/g, "")}%` : "";
   if (kind === "vehicle_type") return String(value || "Car");
@@ -312,22 +312,54 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [roundTotal, setRoundTotal] = useState<boolean>(() =>
     Boolean((workspace?.display_options as Record<string, unknown> | undefined)?.round_total)
   );
+  const lastSyncedRevisionRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (workspace?.display_options && "round_total" in workspace.display_options) {
-      setRoundTotal(Boolean((workspace.display_options as Record<string, unknown>).round_total));
+      if (lastSyncedRevisionRef.current === null || workspace.revision !== lastSyncedRevisionRef.current) {
+        lastSyncedRevisionRef.current = workspace.revision;
+        setRoundTotal(Boolean((workspace.display_options as Record<string, unknown>).round_total));
+      }
     }
-  }, [workspace?.display_options]);
+  }, [workspace?.display_options, workspace?.revision]);
 
   const toggleRoundTotal = useCallback(() => {
     const nextVal = !roundTotal;
     setRoundTotal(nextVal);
+    decideField("total_amount", "clear", "");
+
+    setFormValues((prev) => {
+      const pNum = parseFloat(String(prev["premium"] || (workspace?.fields?.premium as any)?.value || "").replace(/[^0-9.]/g, "")) || 0;
+      const rtNum = parseFloat(String(prev["roadtax"] || (workspace?.fields?.roadtax as any)?.value || "").replace(/[^0-9.]/g, "")) || 0;
+      const sfNum = parseFloat(String(prev["service_fee"] || (workspace?.fields?.service_fee as any)?.value || "").replace(/[^0-9.]/g, "")) || 0;
+      const extrasTotal = (workspace?.extras || []).reduce((acc, ex) => {
+        const amt = (ex as Record<string, unknown>)?.price;
+        const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
+        const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : (typeof val === "number" ? val : 0);
+        return acc + (Number.isFinite(num) ? num : 0);
+      }, 0);
+
+      const calcTotal = pNum + extrasTotal + rtNum + sfNum;
+      if (calcTotal > 0) {
+        const finalTot = nextVal ? Math.round(calcTotal) : calcTotal;
+        const formatted = finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return { ...prev, total_amount: formatted };
+      }
+      const curTot = parseFloat(String(prev["total_amount"] || (workspace?.fields?.total_amount as any)?.value || "").replace(/[^0-9.]/g, "")) || 0;
+      if (curTot > 0) {
+        const finalTot = nextVal ? Math.round(curTot) : curTot;
+        const formatted = finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return { ...prev, total_amount: formatted };
+      }
+      return prev;
+    });
+
     queueOperation(
       { op: "update_display_options", options: { round_total: nextVal } },
       "display_options"
     );
     scheduleSave();
-  }, [roundTotal, queueOperation, scheduleSave]);
+  }, [roundTotal, workspace, decideField, queueOperation, scheduleSave]);
 
   const previousValuesRef = useRef<Record<string, string>>({});
 
@@ -793,16 +825,23 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       return acc + (Number.isFinite(num) ? num : 0);
     }, 0);
 
-    if (pNum > 0) {
+    const totalField = workspace.fields?.total_amount as WorkspaceField | undefined;
+    const isManualTotal = totalField?.decision?.decision === "edit" && totalField?.value;
+    if (isManualTotal) {
+      values.total_amount = displayValue("money", totalField.value);
+    } else if (pNum > 0) {
       const combinedPremium = pNum + extrasTotal;
       values.insurance_premium_total = combinedPremium > 0 ? combinedPremium.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
-      values.total_amount = (pNum + rtNum + sfNum + extrasTotal).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const rawTot = pNum + rtNum + sfNum + extrasTotal;
+      const isRound = roundTotal;
+      const finalTot = isRound && rawTot > 0 ? Math.round(rawTot) : rawTot;
+      values.total_amount = finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     } else if (workspace.total_premium_adjusted) {
       values.total_amount = formatMoney(workspace.total_premium_adjusted);
     }
 
     setFormValues(values);
-  }, [workspace]);
+  }, [workspace, roundTotal]);
 
   useEffect(() => {
     syncForm();
@@ -1329,19 +1368,25 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       return acc + (Number.isFinite(num) ? num : 0);
     }, 0);
 
-    const calculatedTotal = pNum + extrasTotal + rtNum + sfNum;
-    const isRound = roundTotal || Boolean((workspace?.display_options as Record<string, unknown> | undefined)?.round_total);
-    const finalTotalNum = isRound && calculatedTotal > 0 ? Math.round(calculatedTotal) : calculatedTotal;
+    const totalField = workspace?.fields?.total_amount as WorkspaceField | undefined;
+    const isManualTotal = totalField?.decision?.decision === "edit" && totalField?.value;
     let effTotal = "";
-    if (finalTotalNum > 0) {
-      effTotal = finalTotalNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (isManualTotal && formValues["total_amount"]) {
+      effTotal = formValues["total_amount"];
     } else {
-      const rawTot = formValues["total_amount"] || fields["total_amount"] || workspace?.total_premium_adjusted || "";
-      const rawNum = parseFloat(String(rawTot).replace(/[^0-9.]/g, ""));
-      if (isRound && rawNum > 0) {
-        effTotal = Math.round(rawNum).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const calculatedTotal = pNum + extrasTotal + rtNum + sfNum;
+      const isRound = roundTotal;
+      const finalTotalNum = isRound && calculatedTotal > 0 ? Math.round(calculatedTotal) : calculatedTotal;
+      if (finalTotalNum > 0) {
+        effTotal = finalTotalNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       } else {
-        effTotal = rawTot;
+        const rawTot = formValues["total_amount"] || fields["total_amount"] || workspace?.total_premium_adjusted || "";
+        const rawNum = parseFloat(String(rawTot).replace(/[^0-9.]/g, ""));
+        if (isRound && rawNum > 0) {
+          effTotal = Math.round(rawNum).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        } else {
+          effTotal = rawTot;
+        }
       }
     }
 
@@ -1374,10 +1419,9 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     return fields;
   }, [workspace?.fields, workspace?.total_premium_adjusted, workspace?.extras, workspace?.pinned_names?.company_name, workspace?.display_options, formValues, companyName, roundTotal]);
 
-  function commitField(field: FormField) {
-    const current = formValues[field.name];
+  function commitField(field: FormField, explicitValue?: string) {
+    const current = explicitValue !== undefined ? explicitValue : formValues[field.name];
     if (current === undefined) return;
-    if (field.kind === "total") return;
     
     if (current.trim() === "") {
       decideField(field.name, "clear", "");
@@ -1399,6 +1443,30 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         pinCatalog(match.id);
       }
     }
+
+    if (field.name === "premium" || field.name === "roadtax" || field.name === "service_fee") {
+      decideField("total_amount", "clear", "");
+      setFormValues((prev) => {
+        const p = field.name === "premium" ? parseFloat(current.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["premium"] || "").replace(/[^0-9.]/g, "")) || 0;
+        const rt = field.name === "roadtax" ? parseFloat(current.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["roadtax"] || "").replace(/[^0-9.]/g, "")) || 0;
+        const sf = field.name === "service_fee" ? parseFloat(current.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["service_fee"] || "").replace(/[^0-9.]/g, "")) || 0;
+        const extrasTotal = (workspace?.extras || []).reduce((acc, ex) => {
+          const amt = (ex as Record<string, unknown>)?.price;
+          const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
+          const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : (typeof val === "number" ? val : 0);
+          return acc + (Number.isFinite(num) ? num : 0);
+        }, 0);
+        const rawTot = p + rt + sf + extrasTotal;
+        if (rawTot > 0) {
+          const finalTot = roundTotal ? Math.round(rawTot) : rawTot;
+          const formatted = finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          return { ...prev, total_amount: formatted };
+        }
+        return prev;
+      });
+    }
+
+    scheduleSave();
   }
 
   function commitFieldDirectly(name: string, value: string) {
@@ -1410,6 +1478,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         decideField("market_value", "clear", "");
         decideField("agreed_value", "clear", "");
       }
+      scheduleSave();
       return;
     }
     decideField(name, "edit", value);
@@ -1426,9 +1495,39 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         pinCatalog(match.id);
       }
     }
+    if (name === "premium" || name === "roadtax" || name === "service_fee") {
+      decideField("total_amount", "clear", "");
+      setFormValues((prev) => {
+        const p = name === "premium" ? parseFloat(value.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["premium"] || "").replace(/[^0-9.]/g, "")) || 0;
+        const rt = name === "roadtax" ? parseFloat(value.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["roadtax"] || "").replace(/[^0-9.]/g, "")) || 0;
+        const sf = name === "service_fee" ? parseFloat(value.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["service_fee"] || "").replace(/[^0-9.]/g, "")) || 0;
+        const extrasTotal = (workspace?.extras || []).reduce((acc, ex) => {
+          const amt = (ex as Record<string, unknown>)?.price;
+          const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
+          const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : (typeof val === "number" ? val : 0);
+          return acc + (Number.isFinite(num) ? num : 0);
+        }, 0);
+        const rawTot = p + rt + sf + extrasTotal;
+        if (rawTot > 0) {
+          const finalTot = roundTotal ? Math.round(rawTot) : rawTot;
+          const formatted = finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          return { ...prev, total_amount: formatted };
+        }
+        return prev;
+      });
+    }
+    scheduleSave();
   }
 
   const handleResetField = useCallback((field: FormField) => {
+    if (field.name === "total_amount") {
+      const resetTotal = previewFields["total_amount"] || "";
+      setFormValues((prev) => ({ ...prev, total_amount: resetTotal }));
+      decideField("total_amount", "clear", "");
+      delete previousValuesRef.current["total_amount"];
+      scheduleSave();
+      return;
+    }
     const detVal = getDetectedValue(field.name);
     const targetVal = detVal !== "" ? detVal : (previousValuesRef.current[field.name] || "");
     setFormValues((prev) => ({ ...prev, [field.name]: targetVal }));
@@ -1439,7 +1538,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       commitFieldDirectly("agreed_value", targetVal);
     }
     delete previousValuesRef.current[field.name];
-  }, [getDetectedValue]);
+  }, [getDetectedValue, previewFields, decideField, scheduleSave]);
 
   async function pinCatalog(companyId: string, productId?: string | null, tierId?: string | null) {
     setPinLoading(true);

@@ -172,8 +172,8 @@ def _apply_scalar_decision(db, draft: QuotationDraft, user, operation: dict) -> 
     # // RL-DISABLED correction_memory — disabled 2026-09-08; restore when semantic provenance and context-aware learning are implemented
     if decision == "edit" and field_name in PIN_SENSITIVE_FIELDS:
         _reconcile_catalog_pin(db, draft, changed_field=field_name)
-    if field_name in TOTAL_SOURCES:
-        _recompute_total(fields, decisions, user, draft=draft)
+    if field_name in TOTAL_SOURCES or (field_name == "total_amount" and decision == "clear"):
+        _recompute_total(fields, decisions, user, draft=draft, db=db)
     return f"fields.{field_name}"
 
 
@@ -202,44 +202,108 @@ def _normalize_edited_value(field_name: str, raw) -> str | None:
 
 
 
-def _recompute_total(fields: dict, decisions: dict, user, draft: QuotationDraft | None = None) -> None:
-    sources = (
-        ("premium", "coverage_premium", "basic_premium_vehicle"),
-        ("roadtax", "road_tax_amount"),
-        ("service_fee", "runner_fee"),
-    )
-    amounts: list[Decimal] = []
-    for aliases in sources:
-        found_val: Decimal | None = None
-        for name in aliases:
-            field = fields.get(name)
-            value = field.get("value") if isinstance(field, dict) else field
-            if value is not None and str(value).strip():
-                try:
-                    found_val = Decimal(str(value).replace(",", "").strip())
-                    break
-                except (InvalidOperation, TypeError, ValueError):
-                    pass
-        if found_val is None:
-            fields["total_amount"] = {
-                "value": None,
-                "status": "check_needed",
-                "message": "Add the premium, road tax, and runner fee to compute the total.",
-            }
-            decisions["total_amount"] = {
-                "decision": "keep_check_needed",
-                "decided_by": user.id,
-                "decided_at": _utcnow().isoformat(),
-            }
-            return
-        amounts.append(found_val)
-    total = sum(amounts, Decimal("0"))
+def _recompute_total(fields: dict, decisions: dict, user, draft: QuotationDraft | None = None, db=None) -> None:
+    # 1. Base premium
+    prem_aliases = ("premium", "coverage_premium", "basic_premium_vehicle")
+    base_prem: Decimal | None = None
+    for name in prem_aliases:
+        field = fields.get(name)
+        value = field.get("value") if isinstance(field, dict) else field
+        if value is not None and str(value).strip():
+            try:
+                base_prem = Decimal(str(value).replace(",", "").strip())
+                break
+            except (InvalidOperation, TypeError, ValueError):
+                pass
+
+    if base_prem is None:
+        # Check if user manually entered total_amount directly
+        tot_field = fields.get("total_amount")
+        tot_val = tot_field.get("value") if isinstance(tot_field, dict) else tot_field
+        if tot_val is not None and str(tot_val).strip():
+            try:
+                manual_tot = Decimal(str(tot_val).replace(",", "").strip())
+                round_tot = bool((getattr(draft, "display_options", None) or {}).get("round_total", False)) if draft else False
+                if round_tot:
+                    manual_tot = Decimal(int(manual_tot.quantize(Decimal("1"), rounding="ROUND_HALF_UP")))
+                fields["total_amount"] = {"value": f"{manual_tot:.2f}", "status": "ready", "message": ""}
+                decisions["total_amount"] = {
+                    "decision": "edit",
+                    "decided_by": user.id,
+                    "decided_at": _utcnow().isoformat(),
+                }
+                return
+            except (InvalidOperation, TypeError, ValueError):
+                pass
+
+        fields["total_amount"] = {
+            "value": None,
+            "status": "check_needed",
+            "message": "Add the motor premium to compute the total payable.",
+        }
+        decisions["total_amount"] = {
+            "decision": "keep_check_needed",
+            "decided_by": user.id,
+            "decided_at": _utcnow().isoformat(),
+        }
+        return
+
+    # 2. Add-on extras (priced benefits)
+    extras_total = Decimal("0")
+    if draft and db:
+        try:
+            selections = _draft_selections_with_pending(db, draft.id)
+            concepts = list(db.scalars(select(BenefitConcept)).all())
+            offerings = list(
+                db.scalars(
+                    select(CatalogOffering).where(CatalogOffering.catalog_revision_id == draft.catalog_revision_id)
+                ).all()
+            ) if draft.catalog_revision_id else []
+            extras = build_extras(selections, concepts, offerings)
+            for extra in extras:
+                raw_price = extra.get("price") or {}
+                amt = raw_price.get("amount") if raw_price.get("amount") is not None else raw_price.get("value")
+                if amt is not None:
+                    try:
+                        extras_total += Decimal(re.sub(r"[^\d.]", "", str(amt)))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    # 3. Road tax (optional, defaults to 0)
+    rt_aliases = ("roadtax", "road_tax_amount")
+    rt_val: Decimal = Decimal("0")
+    for name in rt_aliases:
+        field = fields.get(name)
+        value = field.get("value") if isinstance(field, dict) else field
+        if value is not None and str(value).strip():
+            try:
+                rt_val = Decimal(str(value).replace(",", "").strip())
+                break
+            except (InvalidOperation, TypeError, ValueError):
+                pass
+
+    # 4. Runner / service fee (optional, defaults to 0)
+    sf_aliases = ("service_fee", "runner_fee")
+    sf_val: Decimal = Decimal("0")
+    for name in sf_aliases:
+        field = fields.get(name)
+        value = field.get("value") if isinstance(field, dict) else field
+        if value is not None and str(value).strip():
+            try:
+                sf_val = Decimal(str(value).replace(",", "").strip())
+                break
+            except (InvalidOperation, TypeError, ValueError):
+                pass
+
+    total = base_prem + extras_total + rt_val + sf_val
     round_tot = bool((getattr(draft, "display_options", None) or {}).get("round_total", False)) if draft else False
     if round_tot:
         total = Decimal(int(total.quantize(Decimal("1"), rounding="ROUND_HALF_UP")))
     fields["total_amount"] = {"value": f"{total:.2f}", "status": "ready", "message": ""}
     decisions["total_amount"] = {
-        "decision": "edit",
+        "decision": "confirm",
         "decided_by": user.id,
         "decided_at": _utcnow().isoformat(),
     }
@@ -1084,7 +1148,7 @@ def apply_workspace_patch(
                     draft.display_options = {**(draft.display_options or {}), **options}
                     changed_paths.append("display_options")
                     if "round_total" in options:
-                        _recompute_total(draft.fields or {}, draft.scalar_decisions or {}, user, draft=draft)
+                        _recompute_total(draft.fields or {}, draft.scalar_decisions or {}, user, draft=draft, db=db)
                         changed_paths.append("fields.total_amount")
             elif operation_name == "source_disposition":
                 changed_paths.append(_apply_source_disposition(db, draft, user, operation))
@@ -1111,8 +1175,16 @@ def apply_workspace_patch(
             else:
                 raise AppError(f"Unsupported workspace operation: {operation_name or 'missing'}.", 422)
 
+        benefit_mutation_ops = {"create_custom_benefit", "select_catalog_offering", "select_package_plan", "remove_package_plan", "benefit_update", "revert_benefit", "reset_benefits"}
+        if any(op in benefit_mutation_ops for op in operation_names):
+            _recompute_total(draft.fields or {}, draft.scalar_decisions or {}, user, draft=draft, db=db)
+            if "fields.total_amount" not in changed_paths:
+                changed_paths.append("fields.total_amount")
+
         flag_modified(draft, "fields")
         flag_modified(draft, "scalar_decisions")
+        if "display_options" in changed_paths:
+            flag_modified(draft, "display_options")
         if "layout_override" in changed_paths or "template_selection" in operation_names:
             flag_modified(draft, "layout_override")
         draft.revision += 1

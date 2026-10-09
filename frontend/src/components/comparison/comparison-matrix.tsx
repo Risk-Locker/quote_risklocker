@@ -635,6 +635,13 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       body: JSON.stringify(payload),
     });
     setData(updated);
+    if (payload.id && payload.company_name) {
+      const cName = String(payload.company_name).trim();
+      setActiveVersionsByCompany((prev) => ({
+        ...prev,
+        [cName]: [payload.id],
+      }));
+    }
   };
 
   const handleDeleteEntry = async (entryId: string) => {

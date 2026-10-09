@@ -180,13 +180,18 @@ def serialize_concept(db, item: BenefitConcept, preloaded_assets: dict | None = 
 
 
 def list_benefit_concepts(
-    db, user, *, search: str, page: int, page_size: int, visual_profile_id: str | None = None
+    db, user, *, search: str, page: int, page_size: int, visual_profile_id: str | None = None, status: str | None = None
 ) -> dict:
     _require_business(user)
     from app.models.tables import GlobalBenefitProfile, GlobalBenefitProfileAsset
 
     query = select(BenefitConcept)
     count_query = select(func.count()).select_from(BenefitConcept)
+    if status and status.strip():
+        st = status.strip().lower()
+        if st != "all":
+            query = query.where(BenefitConcept.status == st)
+            count_query = count_query.where(BenefitConcept.status == st)
     if search.strip():
         pattern = f"%{search.strip()}%"
         predicate = or_(BenefitConcept.label.ilike(pattern), BenefitConcept.concept_key.ilike(pattern))

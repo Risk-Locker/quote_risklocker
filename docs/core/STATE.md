@@ -2,6 +2,8 @@
 
 
 
+- 2026-10-09 · Gemini 3.8 Flash · Diagnosed Towing Edit Failure in Marketing Comparison & Review Page Rounding / Manual Editing · Identified HTML5 validation blocking submit on empty sumInsured, multi-version card snapping, review page roundTotal toggle locking, disabled total input, and missing auto-save on field blur. Authored implementation_plan.md. · Pending: User approval to execute fixes.
+
 - 2026-10-08 Â· Antigravity (Gemini 3.1 Pro) Â· Phase 3 Frontend Canvas Decoupling Â· Added componentRole?: string to CanvasElement and replaced all hardcoded UI element IDs (cov_table_bg, premium_info_block, etc.) with semantic fallback checks in shared.tsx. (frontend/src/components/template-canvas/shared.tsx)
 
 - 2026-10-07 Â· Antigravity Â· Implement Pre-flight PDF Estimator and Model Recommendation Rule Â· Added AI model selection rule to AGENTS.md Deep Track execution gate. Integrated PyMuPDF (fitz) into create_queued_upload to evaluate PDF page counts and check against active Gemini RPD quotas in gemini_account_service.py before accepting uploads. (AGENTS.md:44, backend/app/services/upload_intake_service.py:121)
@@ -41,8 +43,6 @@
 - 2026-10-08 · Gemini 3.8 Flash · Comprehensive System, Rules & Logic Architecture Audit · Conducted deep audit across database cascading, quotation rate math, plate validation, and PDF engine parity; authored 4-phase implementation plan. (implementation_plan.md) · Pending: Awaiting user approval to execute Phase 1.
 - 2026-10-08 · Antigravity · Implement Template Auto-Fit & 4-Column Packing on Branch v28 · Enabled proportional auto-fit, 2-line title wrap, side-by-side coverage/cost badges, and 4-column adaptive add-on packing in benefit_grid_renderer.py:378,690, master_template_service.py:68, and template_renderer.py:781; verified 6/6 pre-deploy gate (868/868 passed).
 - 2026-10-08 · Antigravity · Builder Lifecycle & Stacking Context Parity · Fixed template publish contract (base_revision optional in schemas.py:1017, template_revision_service.py:112), added synthetic stress option in live-a4-preview.tsx:210, fixed stacking context bug in benefit_grid_renderer.py:125,490,528 with z-index >= 2 to prevent page_bg occlusion, and verified 1:1 A4 preview across all 21 benefit cards. (backend/app/rendering/benefit_grid_renderer.py; backend/app/api/schemas.py; frontend/src/components/template-builder/clean-studio/live-a4-preview.tsx)
-- 2026-10-08 · Antigravity · Fix Gemini Probe Timeout False-Positive 500 Error · Increased probe timeout from 6s to 25s in gemini_account_service.py:410 and added explicit TimeoutException mapping to 504 / 'Timeout (504)'; live probe verified green (Ready) for Account 1. (backend/app/services/gemini_account_service.py:382,410)
-
-
+- 2026-10-09 · Antigravity (Gemini 3.1 Pro) · Fix Towing limit persistence in Marketing Comparison & Total Payable Rounding / Manual Edit in Review page · Fixed manual quote modal validation & insurer persistence; enabled Total Payable editing with Reset button in policy-fields-card.tsx:480,858; updated _recompute_total decision to confirm in workspace_patch_service.py:306; verified 100% via live E2E Playwright suite. (frontend/src/components/comparison/manual-quote-modal.tsx; frontend/src/components/session-workspace/review-phase.tsx; backend/app/services/workspace_patch_service.py)
 
 

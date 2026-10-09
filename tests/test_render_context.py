@@ -258,3 +258,120 @@ def test_adjusted_total_text_round_total():
     }
     assert adjusted_total_text(fields_half, [], round_total=True) == "801.00"
 
+
+def test_plan_tier_token_suppression_in_coverage_limit():
+    from app.rendering.render_context import build_extras
+
+    class FakeConcept:
+        def __init__(self, id, label, key):
+            self.id = id
+            self.label = label
+            self.concept_key = key
+            self.display_overrides = {}
+
+    class FakeSel:
+        def __init__(self, id, concept_id, label_override, coverage_limit, evidence_limit=None):
+            self.id = id
+            self.concept_id = concept_id
+            self.label_override = label_override
+            self.price = {"amount": "50.00", "currency": "MYR"}
+            self.coverage_limit = coverage_limit
+            self.cost_status = "paid"
+            self.catalog_offering_id = None
+            self.sort_order = 0
+            self.state = "current"
+            self.evidence_snapshot = {"coverage_limit": evidence_limit} if evidence_limit else None
+
+    # Extracted tokens like "2", "Plan 2", "Tier 3" should be suppressed from coverage badges
+    concepts = [
+        FakeConcept("c1", "Motor PA Plus", "motor_pa"),
+        FakeConcept("c2", "Windscreen", "windscreen"),
+        FakeConcept("c3", "OTO 360", "oto_360"),
+    ]
+    selections = [
+        FakeSel("s1", "c1", "Motor PA Plus", "2", evidence_limit="2"),
+        FakeSel("s2", "c2", "Windscreen", "3000", evidence_limit="3000"),
+        FakeSel("s3", "c3", "OTO 360", "Plan 2", evidence_limit="Plan 2"),
+    ]
+    extras = build_extras(selections, concepts)
+    by_key = {e["concept_key"]: e for e in extras}
+    assert by_key["motor_pa"]["coverage_limit"] == ""
+    assert by_key["oto_360"]["coverage_limit"] == ""
+    assert by_key["windscreen"]["coverage_limit"] == "(RM 3,000)"
+
+
+def test_conditional_replacement_title_in_render_context():
+    from app.rendering.render_context import resolve_benefit_cards
+
+    class FakeConcept:
+        def __init__(self, id, key, label):
+            self.id = id
+            self.concept_key = key
+            self.label = label
+            self.default_asset_id = None
+            self.display_overrides = {}
+            self.description = "Base desc"
+            self.status = "active"
+
+    class FakeOffering:
+        def __init__(self, id, key, concept_id):
+            self.id = id
+            self.offering_key = key
+            self.concept_id = concept_id
+            self.label_override = None
+            self.description_override = None
+            self.optional_price = None
+            self.sort_order = 0
+            self.role = "addon_option"
+            self.offering_kind = "optional"
+            self.presentation_facet_ids = []
+            self.typed_value = None
+            self.status = "active"
+
+    class FakeSelection:
+        def __init__(self, id, concept_id, offering_id, key):
+            self.id = id
+            self.concept_id = concept_id
+            self.catalog_offering_id = offering_id
+            self.selection_key = key
+            self.state = "current"
+            self.item_kind = "extra"
+            self.label_override = None
+            self.description_override = None
+            self.coverage_limit = None
+            self.sort_order = 0
+            self.typed_value_override = None
+            self.evidence_snapshot = None
+            self.cost_status = "paid"
+            self.package_plan_id = None
+
+    class FakeCondition:
+        def __init__(self, trig_id, target_id, rep_title, rep_desc):
+            self.trigger_concept_id = trig_id
+            self.target_concept_id = target_id
+            self.plan_filter = None
+            self.action_type = "replace_description"
+            self.replacement_title = rep_title
+            self.replacement_description = rep_desc
+
+    c_trig = FakeConcept("c_trig", "pa_plus", "PA Plus")
+    c_target = FakeConcept("c_target", "car_allowance", "Daily Car Allowance")
+    off_trig = FakeOffering("off_trig", "pa_plus", "c_trig")
+    off_target = FakeOffering("off_target", "car_allowance", "c_target")
+    sel_trig = FakeSelection("sel_trig", "c_trig", "off_trig", "pa_plus")
+    sel_target = FakeSelection("sel_target", "c_target", "off_target", "car_allowance")
+    cond = FakeCondition("c_trig", "c_target", "Executive Car Allowance", "Upgraded to RM 150/day")
+
+    res = resolve_benefit_cards(
+        selections=[sel_trig, sel_target],
+        offerings=[off_trig, off_target],
+        concepts=[c_trig, c_target],
+        relations=[],
+        facets=[],
+        company_conditions=[cond],
+    )
+    cards = {c["concept_key"]: c for c in res["current_benefits"]}
+    assert cards["car_allowance"]["label"] == "Executive Car Allowance"
+    assert cards["car_allowance"]["description"] == "Upgraded to RM 150/day"
+
+

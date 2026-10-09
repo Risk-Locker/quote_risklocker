@@ -84,10 +84,10 @@ export function ManualQuoteModal({
     if (initialData) {
       setActiveTab("manual");
       setCompanyName(initialData.company_name || "AmAssurance");
-      const siStr = initialData.sum_insured ? String(initialData.sum_insured) : "";
+      const siStr = initialData.sum_insured !== undefined && initialData.sum_insured !== null ? String(initialData.sum_insured) : "0";
       setSumInsured(siStr);
       setValuationType(initialData.valuation_type || "agreed_value");
-      setMotorPremium(initialData.motor_premium ? String(initialData.motor_premium) : "");
+      setMotorPremium(initialData.motor_premium !== undefined && initialData.motor_premium !== null ? String(initialData.motor_premium) : "0");
       setTowingLimit(initialData.towing_limit || "Unlimited");
       setAgreedValue(initialData.agreed_value ?? true);
       setWaiverBetterment(initialData.waiver_betterment ?? true);
@@ -560,6 +560,9 @@ export function ManualQuoteModal({
                 onChange={(e) => setCompanyName(e.target.value)}
                 className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm font-medium text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
               >
+                {companyName && !COMMON_INSURERS.includes(companyName) && companyName !== "Other" && (
+                  <option value={companyName}>{companyName}</option>
+                )}
                 {COMMON_INSURERS.map((ins) => (
                   <option key={ins} value={ins}>
                     {ins}
@@ -593,7 +596,6 @@ export function ManualQuoteModal({
                 <input
                   type="text"
                   step="0.01"
-                  required
                   placeholder="e.g. 85000"
                   value={sumInsured}
                   onChange={(e) => handleSumInsuredChange(e.target.value)}
@@ -627,7 +629,6 @@ export function ManualQuoteModal({
               <input
                 type="text"
                 step="0.01"
-                required
                 placeholder="e.g. 1850.50"
                 value={motorPremium}
                 onChange={(e) => setMotorPremium(e.target.value)}

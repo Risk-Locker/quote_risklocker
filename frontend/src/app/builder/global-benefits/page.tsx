@@ -194,6 +194,7 @@ export default function GlobalBenefitsPage() {
   const [replacingAssetId, setReplacingAssetId] = useState<string | null>(null);
   const [replacingIcon, setReplacingIcon] = useState(false);
   const [uploadingNewIcon, setUploadingNewIcon] = useState(false);
+  const [isDraggingArtwork, setIsDraggingArtwork] = useState(false);
   const [formMatch, setFormMatch] = useState<string[]>([]);
   const [formDisplayOverrides, setFormDisplayOverrides] = useState<Record<string, boolean>>({});
   const [formSort, setFormSort] = useState(0);
@@ -721,8 +722,7 @@ export default function GlobalBenefitsPage() {
     }
   }
 
-  async function handleUploadNewIcon(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+  async function uploadDirectFile(file: File) {
     if (!file) return;
     setUploadingNewIcon(true);
     setError("");
@@ -757,6 +757,12 @@ export default function GlobalBenefitsPage() {
         uploadNewInputRef.current.value = "";
       }
     }
+  }
+
+  async function handleUploadNewIcon(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await uploadDirectFile(file);
   }
 
   async function handleAutoAssignReplaceFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -1358,26 +1364,163 @@ export default function GlobalBenefitsPage() {
                       </span>
                     </div>
 
-                    <div className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-3">
-                      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                        <div className="relative group shrink-0">
-                          <span className="grid h-14 w-14 shrink-0 place-items-center rounded-lg border border-[var(--rl-border)] bg-white shadow-xs overflow-hidden">
-                            {formAssetId ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={fileUrl(assets.find((a) => a.id === formAssetId)?.url || "")}
-                                alt=""
-                                key={assets.find((a) => a.id === formAssetId)?.url || formAssetId}
-                                className="max-h-11 max-w-11 object-contain transition-transform group-hover:scale-105"
-                              />
-                            ) : (
-                              <ImageSquare size={28} className="text-[var(--rl-text-muted)]" />
-                            )}
-                          </span>
-                        </div>
+                    <div
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setIsDraggingArtwork(true);
+                      }}
+                      onDragEnter={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setIsDraggingArtwork(true);
+                      }}
+                      onDragLeave={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setIsDraggingArtwork(false);
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setIsDraggingArtwork(false);
+                        const file = e.dataTransfer.files?.[0];
+                        if (file) {
+                          uploadDirectFile(file);
+                        }
+                      }}
+                      className={`rounded-[var(--rl-radius-sm)] border transition-all p-3.5 ${
+                        isDraggingArtwork
+                          ? "border-blue-500 bg-blue-50/60 ring-2 ring-blue-400/20"
+                          : "border-[var(--rl-border)] bg-[var(--rl-bg)]"
+                      }`}
+                    >
+                      {formAssetId ? (
+                        <div className="space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                            <div className="relative group shrink-0">
+                              <span className="grid h-16 w-16 shrink-0 place-items-center rounded-lg border border-[var(--rl-border)] bg-white shadow-xs overflow-hidden">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={fileUrl(assets.find((a) => a.id === formAssetId)?.url || "")}
+                                  alt=""
+                                  key={assets.find((a) => a.id === formAssetId)?.url || formAssetId}
+                                  className="max-h-12 max-w-12 object-contain transition-transform group-hover:scale-105"
+                                />
+                              </span>
+                            </div>
 
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <Select
+                                  value={formAssetId}
+                                  onChange={(e) => setFormAssetId(e.target.value)}
+                                  className="text-xs font-medium bg-white flex-1"
+                                >
+                                  <option value="">(Select Artwork Icon from "{currentProfile?.asset_category}")...</option>
+                                  {categoryAssets.map((asset) => (
+                                    <option key={asset.id} value={asset.id}>
+                                      🖼️ {asset.label}
+                                    </option>
+                                  ))}
+                                </Select>
+
+                                <button
+                                  type="button"
+                                  title="Clear selected icon"
+                                  onClick={() => setFormAssetId("")}
+                                  className="h-8 w-8 shrink-0 rounded flex items-center justify-center text-[var(--rl-text-muted)] hover:text-red-600 hover:bg-red-50 border border-[var(--rl-border)] bg-white transition-colors"
+                                >
+                                  <X size={14} />
+                                </button>
+                              </div>
+
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="secondary"
+                                  disabled={replacingIcon}
+                                  onClick={() => replaceFileInputRef.current?.click()}
+                                  className="h-7 text-[11px] font-semibold gap-1.5 px-2.5 bg-white hover:bg-slate-50 border border-[var(--rl-border)] shadow-2xs"
+                                >
+                                  {replacingIcon ? (
+                                    <>
+                                      <ArrowClockwise size={13} className="animate-spin" /> Replacing file...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ArrowClockwise size={13} weight="bold" /> Replace Image File
+                                    </>
+                                  )}
+                                </Button>
+
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="secondary"
+                                  disabled={uploadingNewIcon}
+                                  onClick={() => uploadNewInputRef.current?.click()}
+                                  className="h-7 text-[11px] font-semibold gap-1.5 px-2.5 bg-white hover:bg-slate-50 border border-[var(--rl-border)] shadow-2xs text-[var(--rl-text-strong)]"
+                                >
+                                  {uploadingNewIcon ? (
+                                    <>
+                                      <ArrowClockwise size={13} className="animate-spin" /> Uploading...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Plus size={13} weight="bold" /> Upload New Icon
+                                    </>
+                                  )}
+                                </Button>
+
+                                <span className="text-[11px] text-[var(--rl-text-muted)] truncate ml-auto">
+                                  {`Selected: ${assets.find((a) => a.id === formAssetId)?.label || "Asset"}`}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Subtle drop hint when icon is already set */}
+                          <div
+                            onClick={() => uploadNewInputRef.current?.click()}
+                            className="text-center py-1.5 px-3 rounded border border-dashed border-slate-200 bg-white/70 hover:bg-white hover:border-blue-400 cursor-pointer transition-colors text-[11px] text-[var(--rl-text-muted)] flex items-center justify-center gap-1.5"
+                          >
+                            <UploadSimple size={12} weight="bold" className="text-blue-600" />
+                            <span>Or drop another artwork file here to instantly upload & select</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {/* Direct Drag & Drop Area */}
+                          <div
+                            onClick={() => uploadNewInputRef.current?.click()}
+                            className={`border-2 border-dashed rounded-lg p-5 flex flex-col items-center justify-center text-center cursor-pointer transition-all ${
+                              isDraggingArtwork
+                                ? "border-blue-500 bg-blue-100/40 scale-[1.01]"
+                                : "border-slate-300 hover:border-blue-500 bg-white hover:bg-blue-50/20 shadow-2xs"
+                            }`}
+                          >
+                            <div className="h-10 w-10 rounded-full bg-blue-50 border border-blue-200/60 flex items-center justify-center text-blue-600 mb-2">
+                              {uploadingNewIcon ? (
+                                <ArrowClockwise size={20} className="animate-spin" />
+                              ) : (
+                                <UploadSimple size={20} weight="bold" />
+                              )}
+                            </div>
+                            <p className="text-xs font-semibold text-[var(--rl-text-strong)]">
+                              {uploadingNewIcon
+                                ? `Uploading icon to "${currentProfile?.asset_category || "General"}"...`
+                                : "Drag & drop artwork here, or click to browse"}
+                            </p>
+                            <p className="text-[11px] text-[var(--rl-text-muted)] mt-0.5">
+                              Instantly files into folder <strong>"{currentProfile?.asset_category || "General"}"</strong> (PNG, SVG, WebP, JPG)
+                            </p>
+                          </div>
+
+                          {/* Or select from existing dropdown */}
+                          <div className="flex items-center gap-2 pt-1">
+                            <span className="text-[11px] text-[var(--rl-text-muted)] shrink-0">Or choose existing:</span>
                             <Select
                               value={formAssetId}
                               onChange={(e) => setFormAssetId(e.target.value)}
@@ -1390,68 +1533,9 @@ export default function GlobalBenefitsPage() {
                                 </option>
                               ))}
                             </Select>
-
-                            {formAssetId ? (
-                              <button
-                                type="button"
-                                title="Clear selected icon"
-                                onClick={() => setFormAssetId("")}
-                                className="h-8 w-8 shrink-0 rounded flex items-center justify-center text-[var(--rl-text-muted)] hover:text-red-600 hover:bg-red-50 border border-[var(--rl-border)] bg-white transition-colors"
-                              >
-                                <X size={14} />
-                              </button>
-                            ) : null}
-                          </div>
-
-                          <div className="mt-2 flex flex-wrap items-center gap-2">
-                            {formAssetId ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="secondary"
-                                disabled={replacingIcon}
-                                onClick={() => replaceFileInputRef.current?.click()}
-                                className="h-7 text-[11px] font-semibold gap-1.5 px-2.5 bg-white hover:bg-slate-50 border border-[var(--rl-border)] shadow-2xs"
-                              >
-                                {replacingIcon ? (
-                                  <>
-                                    <ArrowClockwise size={13} className="animate-spin" /> Replacing image...
-                                  </>
-                                ) : (
-                                  <>
-                                    <ArrowClockwise size={13} weight="bold" /> Replace Image File
-                                  </>
-                                )}
-                              </Button>
-                            ) : null}
-
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="secondary"
-                              disabled={uploadingNewIcon}
-                              onClick={() => uploadNewInputRef.current?.click()}
-                              className="h-7 text-[11px] font-semibold gap-1.5 px-2.5 bg-white hover:bg-slate-50 border border-[var(--rl-border)] shadow-2xs text-[var(--rl-text-strong)]"
-                            >
-                              {uploadingNewIcon ? (
-                                <>
-                                  <ArrowClockwise size={13} className="animate-spin" /> Uploading...
-                                </>
-                              ) : (
-                                <>
-                                  <Plus size={13} weight="bold" /> Upload New Icon to Folder
-                                </>
-                              )}
-                            </Button>
-
-                            <span className="text-[11px] text-[var(--rl-text-muted)] truncate ml-auto">
-                              {formAssetId
-                                ? `Selected: ${assets.find((a) => a.id === formAssetId)?.label || "Asset"}`
-                                : `Showing ${categoryAssets.length} icons in "${currentProfile?.asset_category}".`}
-                            </span>
                           </div>
                         </div>
-                      </div>
+                      )}
 
                       {/* Hidden file inputs for direct image replacement and new upload */}
                       <input

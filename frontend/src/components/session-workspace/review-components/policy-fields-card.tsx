@@ -333,7 +333,7 @@ export interface PolicyFieldsCardProps {
   isFieldModified: (fieldName: string) => boolean;
   getDetectedValue: (fieldName: string) => string | null;
   handleResetField: (field: FormField) => void;
-  commitField: (field: FormField) => void;
+  commitField: (field: FormField, explicitValue?: string) => void;
   commitFieldDirectly: (name: string, value: string) => void;
   syncHighlight: { field: "vehicle_type" | "product_package"; prev: string; next: string; timestamp: number } | null;
   setSyncHighlight: React.Dispatch<React.SetStateAction<{ field: "vehicle_type" | "product_package"; prev: string; next: string; timestamp: number } | null>>;
@@ -496,7 +496,7 @@ export function PolicyFieldsCard({
                           <span>Round Figure</span>
                         </button>
                       ) : null}
-                      {field.kind !== "total" && fieldModified ? (
+                      {fieldModified ? (
                         <button
                           type="button"
                           onClick={(e) => {
@@ -858,10 +858,9 @@ export function PolicyFieldsCard({
                       <Input
                         value={
                           field.kind === "total"
-                            ? previewFields[field.name] || formValues[field.name] || ""
+                            ? (formValues[field.name] !== undefined && formValues[field.name] !== "" ? formValues[field.name] : (previewFields[field.name] || ""))
                             : formValues[field.name] ?? ""
                         }
-                        disabled={field.kind === "total"}
                         placeholder={
                           empty ? "Missing" : field.name === "engine_cc" ? (isCurrentEV ? "150 kW" : "1498 CC") : ""
                         }
@@ -878,8 +877,8 @@ export function PolicyFieldsCard({
                           }
                           setFormValues((values) => ({ ...values, [field.name]: newVal }));
                         }}
-                        onBlur={() => {
-                          commitField(field);
+                        onBlur={(event) => {
+                          commitField(field, event.target.value);
                           if (
                             field.name === "engine_cc" ||
                             field.name === "car_model" ||

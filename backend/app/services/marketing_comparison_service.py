@@ -2127,7 +2127,12 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             tenure.customer.canonical_name = cust_name
         needs_commit = True
     if cust_ic and tenure.customer and tenure.customer.id_number != cust_ic:
-        tenure.customer.id_number = cust_ic
+        existing_cust = db.query(CustomerAccount).filter(CustomerAccount.id_number == cust_ic).first()
+        if existing_cust:
+            if existing_cust.id != tenure.customer_id:
+                tenure.customer_id = existing_cust.id
+        else:
+            tenure.customer.id_number = cust_ic
         needs_commit = True
     if cust_phone and tenure.customer and not tenure.customer.phone:
         tenure.customer.phone = cust_phone
