@@ -66,10 +66,10 @@ def _resolve_company_id(db, identifier: str) -> str:
     if not identifier:
         raise AppError("Company ID is required.", 400)
     try:
-        uuid.UUID(str(identifier))
-        return str(identifier)
+        uuid.UUID(identifier)
+        return identifier
     except (ValueError, TypeError):
-        slug = str(identifier).lower().strip()
+        slug = identifier.lower().strip()
         comp = db.scalar(
             select(InsuranceCompany).where(
                 or_(

@@ -272,8 +272,11 @@ def calculate_betterment_rate(age_in_years: int, company_name: str | None = None
 
 
 def normalize_towing_km(raw_towing: Any, combined_text: str = "") -> str:
-    """Normalize towing benefit into strictly clean numeric KM (e.g. '50 km', '150 km', '200 km') or 'Unlimited'."""
+    """Normalize towing benefit into clean numeric KM, 'Unlimited', 'No towing', or preserve custom text."""
     val_str = str(raw_towing or "").strip()
+
+    if re.search(r"(?i)(?<!\d)0\s*km\b|\b(?:no towing|without towing|not included|tiada|nil)\b|^(?:none|no)$", val_str):
+        return "No towing"
 
     if any(k in val_str.lower() for k in ("unlimited", "24-hr unlimited", "24 hour unlimited", "tanpa had")):
         return "Unlimited"
@@ -306,6 +309,7 @@ def normalize_towing_km(raw_towing: Any, combined_text: str = "") -> str:
         m_any = re.search(r"\b(\d{2,4})\b", val_str)
         if m_any:
             return f"{m_any.group(1)} km"
+        return val_str
 
     return "Unlimited"
 
@@ -421,11 +425,13 @@ def _to_float(val: Any) -> float:
     if raw is None:
         return 0.0
     if isinstance(raw, (int, float, Decimal)):
-        return float(raw)
+        f_val = float(raw)
+        return min(max(f_val, -9_999_999_999.99), 9_999_999_999.99)
     try:
         # Strip currency symbols, commas, and whitespace
         s = str(raw).replace("RM", "").replace("rm", "").replace(",", "").strip()
-        return float(s)
+        f_val = float(s)
+        return min(max(f_val, -9_999_999_999.99), 9_999_999_999.99)
     except (ValueError, TypeError):
         return 0.0
 
@@ -1779,10 +1785,11 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                 entries.append(new_entry)
             needs_commit = True
 
-        # Auto-healing: ensure Betterment, Towing, and Financial parity
+        # Parity check: synchronize fixed costs (road tax, runner fee) and fallback betterment rates without clobbering user edits
         for e in entries:
-            # Sync runner fee from tenure if entry is 0.0
-            if float(e.runner_fee) == 0.0 and float(tenure.runner_fee) > 0.0:
+            # Sync road tax & runner fee from tenure if changed
+            if abs(float(e.road_tax) - float(tenure.road_tax)) > 0.01 or abs(float(e.runner_fee) - float(tenure.runner_fee)) > 0.01:
+                e.road_tax = float(tenure.road_tax)
                 e.runner_fee = float(tenure.runner_fee)
                 e.total_payable = float(e.motor_premium) + float(e.road_tax) + float(e.runner_fee)
                 needs_commit = True
@@ -1800,13 +1807,13 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                 e.betterment_display = fallback_bet_disp
                 needs_commit = True
 
-            clean_tow = normalize_towing_km(e.towing_km or e.towing_limit, "")
-            if e.towing_km != clean_tow or e.towing_limit != clean_tow:
-                e.towing_km = clean_tow
-                e.towing_limit = clean_tow
+            if not e.towing_km and not e.towing_limit:
+                e.towing_km = "Unlimited"
+                e.towing_limit = "Unlimited"
                 needs_commit = True
 
-            if e.session_id:
+            # If not manual override, heal uninitialized or corrupted values from draft
+            if not e.is_manual and e.session_id:
                 s = session_map.get(e.session_id)
                 if s and s.draft and s.draft.fields:
                     f = s.draft.fields
@@ -1815,40 +1822,7 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                     val_type, is_agr = _extract_valuation_type(f, s_obj=s)
                     excess_val = _extract_excess(f, s_obj=s)
 
-                    # Always evaluate live ground-truth benefits from the session's actual extraction records / drafts
-                    b_res = _resolve_comparison_benefits(
-                        db, s, getattr(s, "company_id", None), f, float(tenure.windscreen_target) if tenure.windscreen_target else None
-                    )
-
-                    raw_w = _extract_val(f.get("waiver_of_betterment"))
-                    has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
-                    live_waiver, live_bet_rate, live_bet_disp = evaluate_betterment_rules(
-                        yom=veh_yom,
-                        quote_year=quote_year,
-                        company_name=e.company_name,
-                        has_betterment_peril=has_peril,
-                        is_comprehensive_private=True,
-                    )
-
-                    needs_healing = (
-                        e.sum_insured == 0.0
-                        or e.motor_premium == 0.0
-                        or (e.excess == 400.0 and excess_val != 400.0)
-                        or (e.excess != excess_val)
-                        or (val_type == "agreed_value" and not e.agreed_value)
-                        or (h_sum > 0.0 and abs(float(e.sum_insured) - h_sum) > 0.01)
-                        or (e.special_perils and any(bad in e.special_perils.lower() for bad in ("windscreen", "passenger", "llp", "driver")))
-                        or e.windscreen_sum_insured != b_res["windscreen_sum_insured"]
-                        or (e.windscreen_sum_insured is not None and not _is_valid_windscreen_amt(float(e.windscreen_sum_insured)))
-                        or e.special_perils != b_res["special_perils"]
-                        or e.llp_llop != b_res["llp_llop"]
-                        or e.towing_km != b_res["towing_km"]
-                        or e.betterment_rate != live_bet_rate
-                        or e.betterment_display != live_bet_disp
-                        or e.waiver_betterment != live_waiver
-                    )
-
-                    if needs_healing:
+                    if float(e.sum_insured or 0.0) == 0.0:
                         if h_sum > 0.0:
                             e.sum_insured = h_sum
                         if h_prem > 0.0:
@@ -1856,29 +1830,27 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                         e.valuation_type = val_type
                         e.agreed_value = is_agr
                         e.excess = excess_val
-                        e.towing_limit = b_res["towing_km"]
-                        e.towing_km = b_res["towing_km"]
-                        e.betterment_rate = live_bet_rate
-                        e.betterment_display = live_bet_disp
-                        e.waiver_betterment = live_waiver
-                        e.windscreen_sum_insured = b_res["windscreen_sum_insured"]
-                        e.special_perils = b_res["special_perils"]
-                        e.llp_llop = b_res["llp_llop"]
-
-                        e.road_tax = float(tenure.road_tax)
-                        e.runner_fee = float(tenure.runner_fee)
-                        e.total_payable = float(e.motor_premium) + e.road_tax + e.runner_fee
-                        if e.sum_insured > 0.0:
-                            # Preserve manual basic premium rates if they exist
-                            if not e.is_manual or e.rate_percentage is None or float(e.rate_percentage) == 0.0:
-                                e.rate_percentage = round((float(e.motor_premium) / float(e.sum_insured)) * 100, 4)
+                        e.total_payable = float(e.motor_premium) + float(e.road_tax) + float(e.runner_fee)
+                        ws_val = _extract_windscreen_from_draft(f)
+                        if ws_val and _is_valid_windscreen_amt(ws_val):
+                            e.windscreen_sum_insured = ws_val
                         needs_commit = True
-                    else:
-                        if abs(float(e.road_tax) - float(tenure.road_tax)) > 0.01 or abs(float(e.runner_fee) - float(tenure.runner_fee)) > 0.01:
-                            e.road_tax = float(tenure.road_tax)
-                            e.runner_fee = float(tenure.runner_fee)
-                            e.total_payable = float(e.motor_premium) + e.road_tax + e.runner_fee
-                            needs_commit = True
+
+                    # Heal invalid windscreen (corrupt reference numbers like 283233.0)
+                    ws_invalid = e.windscreen_sum_insured is not None and not _is_valid_windscreen_amt(float(e.windscreen_sum_insured))
+                    if ws_invalid:
+                        b_cand = _resolve_comparison_benefits(
+                            db, s, getattr(s, "company_id", None), f, float(tenure.windscreen_target) if tenure.windscreen_target else None
+                        )
+                        cand_ws = b_cand.get("windscreen_sum_insured")
+                        if cand_ws and _is_valid_windscreen_amt(cand_ws):
+                            e.windscreen_sum_insured = cand_ws
+                        else:
+                            e.windscreen_sum_insured = None
+                        if b_cand.get("towing_km"):
+                            e.towing_km = b_cand["towing_km"]
+                            e.towing_limit = b_cand["towing_km"]
+                        needs_commit = True
 
     # 5. Apply 4-tier Best Deal ranking
     rank_comparison_entries(
@@ -1895,29 +1867,21 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
         company_counts[key] += 1
         e.version = company_counts[key]
 
-    # Detect Windscreen Target from latest uploaded quotes
-    latest_ws = None
-    for s in sessions_desc:
-        if s.draft and isinstance(s.draft.fields, dict):
-            ws_c = _extract_windscreen_from_draft(s.draft.fields)
-            if ws_c and _is_valid_windscreen_amt(ws_c):
-                latest_ws = float(ws_c)
-                break
-            b_cand = _resolve_comparison_benefits(db, s, getattr(s, "company_id", None), s.draft.fields, None)
-            if b_cand.get("windscreen_sum_insured") and _is_valid_windscreen_amt(b_cand["windscreen_sum_insured"]):
-                latest_ws = float(b_cand["windscreen_sum_insured"])
-                break
-
-    if latest_ws and latest_ws > 0.0:
-        if abs(float(tenure.windscreen_target or 0.0) - latest_ws) > 0.01:
-            tenure.windscreen_target = latest_ws
-            needs_commit = True
-    elif not tenure.windscreen_target or float(tenure.windscreen_target) <= 0.0:
-        for e in entries:
-            if e.windscreen_sum_insured and float(e.windscreen_sum_insured) > 0.0:
-                tenure.windscreen_target = float(e.windscreen_sum_insured)
-                needs_commit = True
-                break
+    # Detect Windscreen Target from latest uploaded quotes if tenure.windscreen_target not set
+    if not tenure.windscreen_target or float(tenure.windscreen_target) <= 0.0:
+        for s in sessions_desc:
+            if s.draft and isinstance(s.draft.fields, dict):
+                ws_c = _extract_windscreen_from_draft(s.draft.fields)
+                if ws_c and _is_valid_windscreen_amt(ws_c):
+                    tenure.windscreen_target = float(ws_c)
+                    needs_commit = True
+                    break
+        if not tenure.windscreen_target or float(tenure.windscreen_target) <= 0.0:
+            for e in entries:
+                if e.windscreen_sum_insured and float(e.windscreen_sum_insured) > 0.0:
+                    tenure.windscreen_target = float(e.windscreen_sum_insured)
+                    needs_commit = True
+                    break
 
     if needs_commit:
         db.commit()
@@ -2232,16 +2196,16 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     if needs_commit:
         db.commit()
 
-    # 7. Date reconciliation across multi-quote uploads
-    session_dates = [s.coverage_start_date.strftime("%Y-%m-%d") for s in sessions if s.coverage_start_date]
+    # 7. Year reconciliation across multi-quote uploads: only flag if quotes belong to different calendar years
+    session_years = [s.coverage_start_date.year for s in sessions if s.coverage_start_date]
     date_conflict = None
-    if len(set(session_dates)) > 1:
-        majority = max(set(session_dates), key=session_dates.count)
+    if len(set(session_years)) > 1:
+        majority_yr = max(set(session_years), key=session_years.count)
         date_conflict = {
             "has_conflict": True,
-            "majority_date": majority,
-            "unique_dates": sorted(list(set(session_dates))),
-            "message": f"Different coverage dates detected across quotes ({', '.join(sorted(set(session_dates)))}). Deal period unified to {majority}.",
+            "majority_year": majority_yr,
+            "unique_years": sorted(list(set(session_years))),
+            "message": f"Quotes from multiple calendar years detected ({', '.join(str(y) for y in sorted(set(session_years)))}).",
         }
 
     # 8. Query generated quotations for this vehicle/deal
@@ -2821,6 +2785,11 @@ def save_comparison_entry(
             is_manual=bool(payload.get("is_manual", True)),
         )
         db.add(entry)
+    else:
+        entry.is_manual = True
+
+    if "is_manual" in payload:
+        entry.is_manual = bool(payload["is_manual"])
 
     # Update fields
     if "company_name" in payload:

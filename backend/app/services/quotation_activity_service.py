@@ -297,7 +297,7 @@ def update_quotation_status(
                 for cand in prem_candidates:
                     if cand is not None:
                         try:
-                            cleaned = re.sub(r"[^0-9.]", "", str(cand))
+                            cleaned = re.sub(r"[^0-9.]", "", cand)
                             val = float(cleaned) if cleaned else None
                             if val is not None and val > 0:
                                 parsed_prem = val

@@ -214,24 +214,20 @@ export function ManualQuoteModal({
   function validateDateMatch(pdf: File): boolean {
     if (!tenureStartDate) return true;
     const fileDate = extractDateFromFilename(pdf.name);
-    if (!fileDate) return true; // No date in filename, allowed through to backend extraction check
+    if (!fileDate) return true; // No date in filename, allowed through
 
-    let targetDate = extractDateFromFilename(tenureStartDate);
-    if (!targetDate) {
-      const iso = tenureStartDate.split("T")[0];
-      const parts = iso.split("-");
-      if (parts.length === 3) {
-        targetDate = {
-          raw: parts.join(""),
-          formatted: `${parts[2]}/${parts[1]}/${parts[0]}`,
-          iso,
-        };
-      }
+    let targetYear: number | null = null;
+    const targetDate = extractDateFromFilename(tenureStartDate);
+    if (targetDate?.year) {
+      targetYear = targetDate.year;
+    } else {
+      const yearMatch = tenureStartDate.match(/(20\d{2})/);
+      if (yearMatch) targetYear = parseInt(yearMatch[1], 10);
     }
 
-    if (fileDate && targetDate && fileDate.raw !== targetDate.raw) {
+    if (fileDate.year && targetYear && fileDate.year !== targetYear) {
       setUploadError(
-        `Cannot upload: quotation validity date (${fileDate.formatted}) does not match this comparison period (${targetDate.formatted}).`
+        `Cannot upload: quotation year (${fileDate.year}) does not match comparison year (${targetYear}).`
       );
       setUploadFile(null);
       return false;

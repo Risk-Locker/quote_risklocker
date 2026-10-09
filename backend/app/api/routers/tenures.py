@@ -87,7 +87,7 @@ class LapseTenureRequest(BaseModel):
 import re
 from pydantic import field_validator
 
-def _parse_flexible_float(v: any) -> float | None:
+def _parse_flexible_float(v: Any) -> float | None:
     if v is None or v == "":
         return None
     if isinstance(v, (int, float)):

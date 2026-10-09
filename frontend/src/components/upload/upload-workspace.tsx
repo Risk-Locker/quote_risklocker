@@ -93,7 +93,7 @@ function formatElapsed(seconds: number) {
   return minutes ? `${minutes}m ${remainder.toString().padStart(2, "0")}s` : `${remainder}s`;
 }
 
-export function extractDateFromFilename(filename: string): { raw: string; formatted: string; iso: string } | null {
+export function extractDateFromFilename(filename: string): { raw: string; formatted: string; iso: string; year: number } | null {
   // Matches YYYYMMDD at start or preceded by delimiter, e.g. 20230830_JRW1813_Quotation_STMB.pdf
   const match = filename.match(/(?:^|[_\-\s])(\d{4})(\d{2})(\d{2})(?:[_\-\s]|\.pdf)/i);
   if (match) {
@@ -106,8 +106,20 @@ export function extractDateFromFilename(filename: string): { raw: string; format
         raw: `${year}${month}${day}`,
         formatted: `${day.padStart(2, "0")}/${month.padStart(2, "0")}/${year}`,
         iso: `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`,
+        year: y,
       };
     }
+  }
+  // Fallback: match 4-digit year (e.g. 2025, 2026)
+  const yearMatch = filename.match(/(?:^|[_\-\s])(20\d{2})(?:[_\-\s]|\.pdf)/i);
+  if (yearMatch) {
+    const y = parseInt(yearMatch[1], 10);
+    return {
+      raw: `${y}`,
+      formatted: `${y}`,
+      iso: `${y}-01-01`,
+      year: y,
+    };
   }
   return null;
 }
@@ -370,34 +382,53 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
       );
     }
 
-    // In comparison mode: enforce identical tenure / quotation validity dates
-    let targetDateInfo: { raw: string; formatted: string; iso: string } | null = null;
+    // In comparison mode: only capture and match the YEAR (not policy issue date or exact day)
+    let targetYear: number | null = null;
     if (mode === "comparison") {
       if (bulkFiles.length > 0) {
-        targetDateInfo = extractDateFromFilename(bulkFiles[0].file.name);
+        targetYear = extractDateFromFilename(bulkFiles[0].file.name)?.year ?? null;
       } else if (validPdfs.length > 0) {
-        targetDateInfo = extractDateFromFilename(validPdfs[0].name);
+        targetYear = extractDateFromFilename(validPdfs[0].name)?.year ?? null;
       }
     }
 
+    const existingNames = new Set(bulkFiles.map((b) => b.file.name.toLowerCase()));
     const eligiblePdfs: File[] = [];
     let disqualifiedCount = 0;
+    let duplicateCount = 0;
 
     for (const f of validPdfs) {
-      if (mode === "comparison" && targetDateInfo) {
+      const lowerName = f.name.toLowerCase();
+      // Exact duplicate by filename
+      if (existingNames.has(lowerName)) {
+        duplicateCount += 1;
+        continue;
+      }
+
+      // In comparison mode: check year only
+      if (mode === "comparison" && targetYear !== null) {
         const fileDate = extractDateFromFilename(f.name);
-        if (fileDate && fileDate.raw !== targetDateInfo.raw) {
+        if (fileDate && fileDate.year !== targetYear) {
           disqualifiedCount += 1;
-          continue; // Disqualify mismatched PDF immediately with no trace
+          continue; // Disqualify only if a different calendar year is explicitly specified
         }
       }
+
+      existingNames.add(lowerName);
       eligiblePdfs.push(f);
     }
 
-    if (disqualifiedCount > 0 && targetDateInfo) {
-      setBulkNotice(
-        `Wrong PDFs were uploaded: insurance validity dates do not match. The first quotation period (${targetDateInfo.formatted}) was selected, and ${disqualifiedCount} mismatched PDF(s) were disqualified.`
+    const notices: string[] = [];
+    if (duplicateCount > 0) {
+      notices.push(`Skipped ${duplicateCount} duplicate PDF(s) with identical filenames.`);
+    }
+    if (disqualifiedCount > 0 && targetYear !== null) {
+      notices.push(
+        `Omitted ${disqualifiedCount} PDF(s) with mismatched year (comparison is locked to year ${targetYear}).`
       );
+    }
+    if (notices.length > 0) {
+      setBulkNotice(notices.join(" "));
     }
 
     setBulkFiles((prev) => {

@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -109,11 +110,14 @@ def _records_query(
     search: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
-    sort_by: str = "created_at",
-    sort_dir: str = "desc",
+    sort_by: str | None = "created_at",
+    sort_dir: str | None = "desc",
     company: str | None = None,
-    state: str = "active",
+    state: str | None = "active",
 ):
+    sort_by = sort_by or "created_at"
+    sort_dir = sort_dir or "desc"
+    state = state or "active"
     q = select(ClientRecord).where(ClientRecord.deleted_at.is_(None))
     if search:
         term = f"%{search}%"
@@ -154,8 +158,8 @@ def list_records(
     page: int = 1,
     page_size: int = 50,
 ) -> list[ClientRecord]:
-    page = max(1, int(page))
-    page_size = min(100, max(1, int(page_size)))
+    page = max(1, page)
+    page_size = min(100, max(1, page_size))
     query = _records_query(db, search, date_from, date_to, sort_by, sort_dir, company, state)
     return list(db.scalars(query.offset((page - 1) * page_size).limit(page_size)).all())
 
@@ -164,7 +168,7 @@ def list_records_page(db: Session, **filters) -> dict:
     page = max(1, int(filters.pop("page", 1)))
     page_size = min(100, max(1, int(filters.pop("page_size", 50))))
     query = _records_query(db, **filters)
-    total = int(db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0)
+    total = db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0
     items = list(db.scalars(query.offset((page - 1) * page_size).limit(page_size)).all())
     companies = [item for item in db.scalars(select(ClientRecord.insurance_company).where(ClientRecord.deleted_at.is_(None), ClientRecord.insurance_company.is_not(None)).distinct().order_by(ClientRecord.insurance_company)).all() if item]
     return {"items": items, "page": page, "page_size": page_size, "total": total, "companies": companies}
@@ -266,8 +270,8 @@ def export_csv_bytes(db: Session, search: str | None = None) -> bytes:
     return buf.getvalue().encode("utf-8-sig")
 
 
-def serialize_record(r: ClientRecord) -> dict:
-    data = {"id": r.id, "insurer_no": r.insurer_no}
+def serialize_record(r: ClientRecord) -> dict[str, Any]:
+    data: dict[str, Any] = {"id": r.id, "insurer_no": r.insurer_no}
     for f in BASIC_FIELDS:
         data[f] = getattr(r, f, None)
     data["raw_values"] = r.raw_values

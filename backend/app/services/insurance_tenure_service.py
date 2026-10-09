@@ -267,23 +267,22 @@ def resolve_or_create_tenure(
     db.add(tenure)
     db.flush()
 
-    # Collision & superseding logic: if an uploaded quote overlaps an existing active tenure on the same vehicle,
-    # mark older overlapping tenures as is_hidden = True and link superseded_by_tenure_id.
-    overlapping = list(
-        db.scalars(
-            select(InsuranceTenure)
-            .where(
-                InsuranceTenure.tracked_vehicle_id == vehicle_id,
-                InsuranceTenure.id != tenure.id,
-                InsuranceTenure.is_hidden == False,
-                InsuranceTenure.coverage_start_date < end_dt,
-                InsuranceTenure.coverage_end_date > start_dt,
-            )
-        ).all()
-    )
-    for old_t in overlapping:
-        old_t.is_hidden = True
-        old_t.superseded_by_tenure_id = tenure.id
+    # RL-DISABLED superseding_overlap — disabled 2026-10-09; each calendar year ledger remains independent; quotes uploaded for upcoming years do not hide active tenures.
+    # overlapping = list(
+    #     db.scalars(
+    #         select(InsuranceTenure)
+    #         .where(
+    #             InsuranceTenure.tracked_vehicle_id == vehicle_id,
+    #             InsuranceTenure.id != tenure.id,
+    #             InsuranceTenure.is_hidden == False,
+    #             InsuranceTenure.coverage_start_date < end_dt,
+    #             InsuranceTenure.coverage_end_date > start_dt,
+    #         )
+    #     ).all()
+    # )
+    # for old_t in overlapping:
+    #     old_t.is_hidden = True
+    #     old_t.superseded_by_tenure_id = tenure.id
 
     return tenure
 

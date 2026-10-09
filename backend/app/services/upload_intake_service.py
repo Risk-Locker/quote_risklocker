@@ -116,7 +116,7 @@ async def create_queued_upload(
         )
         
         # --- Pre-flight PDF Token Estimator ---
-        if upload.filename.lower().endswith(".pdf"):
+        if upload.filename and upload.filename.lower().endswith(".pdf"):
             import fitz  # PyMuPDF
             from app.services.gemini_account_service import get_key_pool
             

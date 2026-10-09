@@ -600,7 +600,7 @@ def clone_package(db, user, catalog_id: str, source_package_id: str, payload: di
     )
     if duplicate:
         raise AppError("A package already uses this key in this draft revision.", 409)
-    if package_kind == "comprehensive" and catalog.package_id is not None and str(catalog.package_id) != str(source.id):
+    if package_kind == "comprehensive" and catalog.package_id is not None and catalog.package_id != source.id:
         raise AppError("This catalog already targets another comprehensive package.", 409)
 
     target = BenefitPackage(
@@ -693,7 +693,7 @@ def _plan_item(item: BenefitPackagePlanItem) -> dict:
     }
 
 
-def _locked_bundle_package(db, catalog_id: str, package_id: str, base_revision: int) -> tuple[BenefitCatalog, BenefitCatalogRevision, BenefitPackage]:
+def _locked_bundle_package(db, catalog_id: str, package_id: str, base_revision: int | None) -> tuple[BenefitCatalog, BenefitCatalogRevision, BenefitPackage]:
     catalog, revision = _locked_catalog_with_draft(db, catalog_id, base_revision)
     package = db.get(BenefitPackage, package_id)
     if package is None or package.catalog_revision_id != revision.id:

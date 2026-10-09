@@ -32,7 +32,10 @@ export function formatBenefitCoverage(
   }
 
   if (fmt === "KM") {
-    if (/unlimited/i.test(str)) {
+    if (/no towing|not included|none|tiada|nil|^0\s*km$/i.test(str)) {
+      return "No Towing";
+    }
+    if (/unlimited|tanpa had/i.test(str)) {
       return "Unlimited KM";
     }
     const match = str.match(/(\d+(?:,\d+)*(?:\.\d+)?)/);

@@ -274,6 +274,9 @@ class GeminiAccountManager:
                     switch_reason = f"Account {self._active_index + 1} is cooling down"
 
             if can_use_active:
+                active.request_timestamps_min.append(now)
+                active.request_timestamps_min = [t for t in active.request_timestamps_min if t >= now - 60]
+                active.request_count_today += 1
                 return active.key
 
             # Find next ready account
@@ -285,6 +288,9 @@ class GeminiAccountManager:
                     self._active_index = idx
                     cand.last_switch_reason = f"Auto-switched from Account {self._active_index + 1}: {switch_reason}"
                     logger.info("Auto-switched to Gemini Account %d (%s): %s", idx + 1, cand.label, switch_reason)
+                    cand.request_timestamps_min.append(now)
+                    cand.request_timestamps_min = [t for t in cand.request_timestamps_min if t >= now - 60]
+                    cand.request_count_today += 1
                     return cand.key
 
             logger.warning("All available accounts are currently in short RPM/TPM cooling. Short wait required.")
@@ -328,9 +334,6 @@ class GeminiAccountManager:
 
             acc = self._find_account_by_key(key)
             if acc:
-                acc.request_timestamps_min.append(now)
-                acc.request_timestamps_min = [t for t in acc.request_timestamps_min if t >= now - 60]
-                acc.request_count_today += 1
                 acc.token_timestamps_min.append((now, tok_count))
                 acc.token_timestamps_min = [(t, k) for t, k in acc.token_timestamps_min if t >= now - 60]
                 acc.tokens_today += tok_count
@@ -484,6 +487,7 @@ class GeminiAccountManager:
                 self._last_probe_cached_time = time.time()
                 return self.get_quota_stats()
 
+        self.record_request(test_key)
         res = self.probe_single_key(test_key, model=model)
         with self._lock:
             self._last_probe_cached_time = time.time()
@@ -611,6 +615,10 @@ class GeminiAccountManager:
                 "message": f"Active: {active_acc.label if active_acc else 'None'} ({max(0, self._max_rpd_per_key - active_rpd_used)} / {self._max_rpd_per_key} RPD safe capacity)",
                 "troubleshooting": {},
             }
+
+    def get_health(self) -> dict[str, Any]:
+        """Return comprehensive health and quota metrics for the Gemini key pool."""
+        return self.get_quota_stats()
 
     def get_status(self) -> str:
         with self._lock:

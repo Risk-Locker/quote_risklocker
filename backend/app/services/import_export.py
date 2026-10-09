@@ -66,7 +66,7 @@ def parse_tabular(filename: str, data: bytes) -> list[list[object]]:
         except UnicodeDecodeError:
             text = data.decode("latin-1", errors="replace")
         reader = csv.reader(io.StringIO(text))
-        rows = [[_clean_cell(cell) for cell in row] for row in reader if any(str(c).strip() for c in row)]
+        rows = [[_clean_cell(cell) for cell in row] for row in reader if any(c.strip() for c in row)]
         return _as_rows(rows)
     from openpyxl import load_workbook
 
@@ -74,7 +74,10 @@ def parse_tabular(filename: str, data: bytes) -> list[list[object]]:
         wb = load_workbook(io.BytesIO(data), data_only=True, read_only=True)
     except Exception as exc:
         raise AppError("Could not read the Excel file. Save it as .xlsx first.", 400) from exc
-    ws = wb.active
+    ws = wb.active or (wb.worksheets[0] if wb.worksheets else None)
+    if ws is None:
+        wb.close()
+        raise AppError("Excel file has no active sheets.", 400)
     rows = [
         [_clean_cell(cell) for cell in row]
         for row in ws.iter_rows(values_only=True)

@@ -77,7 +77,6 @@ def test_overlapping_tenure_collision_superseding(db_session: Session):
     db_session.refresh(t1)
     db_session.refresh(t2)
 
-    # Invariant: t1 is superseded and marked is_hidden = True, pointing to t2
-    assert t1.is_hidden is True
-    assert t1.superseded_by_tenure_id == t2.id
+    # Invariant: Each calendar year ledger remains independent; t1 is preserved and not hidden
+    assert t1.is_hidden is False
     assert t2.is_hidden is False

@@ -543,34 +543,10 @@ def process_extraction_job(
     if session.tenure_id:
         tenure = db.get(InsuranceTenure, session.tenure_id)
         if tenure:
-            # Check for plate mismatch in comparison mode
-            anchor_plate = normalize_plate(tenure.vehicle_no) if tenure.vehicle_no else ""
-            extracted_plate = normalize_plate(effective_veh_no) if effective_veh_no else ""
-            if anchor_plate and extracted_plate and anchor_plate != extracted_plate:
-                # Plate mismatch: exclude this document from anchor tenure and route to its own tenure
-                doc_tenure = resolve_or_create_tenure(
-                    db=db,
-                    vehicle_no=effective_veh_no,
-                    customer_name=customer or "Valued Client",
-                    start_date=cover_start or None,
-                    end_date=cover_end or None,
-                    tracked_vehicle_id=veh.id if veh else None,
-                    customer_id=cust_account.id if cust_account else None,
-                    chassis_no=raw_chassis or None,
-                    engine_no=raw_engine or None,
-                )
-                curr_opts = draft.display_options or {}
-                curr_opts["disqualified_from_comparison"] = True
-                curr_opts["disqualified_from_tenure_id"] = tenure.id
-                curr_opts["target_plate"] = effective_veh_no
-                curr_opts["target_tenure_id"] = doc_tenure.id
-                draft.display_options = curr_opts
-                tenure = doc_tenure
-            else:
-                if veh and not tenure.tracked_vehicle_id:
-                    tenure.tracked_vehicle_id = veh.id
-                if cust_account and not tenure.customer_id:
-                    tenure.customer_id = cust_account.id
+            if veh and not tenure.tracked_vehicle_id:
+                tenure.tracked_vehicle_id = veh.id
+            if cust_account and not tenure.customer_id:
+                tenure.customer_id = cust_account.id
 
     if not tenure:
         tenure = resolve_or_create_tenure(

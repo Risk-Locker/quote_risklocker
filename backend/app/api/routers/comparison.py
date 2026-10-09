@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import current_user, settings_dep
 from app.core.config import Settings
 from app.db.session import get_db
-from app.models.tables import InsuranceTenure, Session as SessionModel, TenureComparisonEntry, User, new_id
+from app.models.tables import InsuranceTenure, Session as SessionModel, TenureComparisonEntry, UploadedFile, User, new_id
 from app.services.marketing_comparison_service import (
     delete_comparison_entry,
     format_whatsapp_teaser,
@@ -38,10 +38,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/comparison", tags=["marketing-comparison"])
 
 
-import re
 from pydantic import field_validator
 
-def _parse_flexible_float(v: any) -> float | None:
+def _parse_flexible_float(v: Any) -> float | None:
     if v is None or v == "":
         return None
     if isinstance(v, (int, float)):
@@ -55,7 +54,7 @@ def _parse_flexible_float(v: any) -> float | None:
     except Exception:
         return 0.0
 
-def _parse_flexible_bool(v: any) -> bool:
+def _parse_flexible_bool(v: Any) -> bool:
     if isinstance(v, bool):
         return v
     if v is None:
@@ -297,19 +296,31 @@ async def upload_comparison_quote(
     if not tenure:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenure {tenure_id} not found")
 
-    # Check if filename specifies a date and verify against tenure coverage period
     fname = file.filename or ""
-    date_match = re.search(r"(?:^|[_\-\s])(\d{4})(\d{2})(\d{2})(?:[_\-\s]|\.pdf)", fname, re.IGNORECASE)
-    if date_match and tenure.coverage_start_date:
-        y, m, d = date_match.groups()
-        file_date_str = f"{y}{m}{d}"
-        tenure_date_str = tenure.coverage_start_date.strftime("%Y%m%d")
-        if file_date_str != tenure_date_str:
-            target_fmt = tenure.coverage_start_date.strftime("%d/%m/%Y")
-            file_fmt = f"{d}/{m}/{y}"
+    # Exact duplicate check: if a file with the identical name already exists in this tenure
+    existing_file = db.scalar(
+        select(UploadedFile)
+        .join(SessionModel, SessionModel.uploaded_file_id == UploadedFile.id)
+        .where(
+            SessionModel.tenure_id == tenure_id,
+            SessionModel.status != "trash",
+            UploadedFile.original_filename == fname,
+        )
+    )
+    if existing_file:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Duplicate quotation: '{fname}' has already been uploaded for this comparison.",
+        )
+
+    # Check if filename specifies a year and verify against tenure coverage year (never block for day/month)
+    year_match = re.search(r"(?:^|[_\-\s])(20\d{2})(?:[_\-\s]|\.pdf|\d{4})", fname, re.IGNORECASE)
+    if year_match and tenure.coverage_start_date:
+        file_year = int(year_match.group(1))
+        if file_year != tenure.coverage_start_date.year:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot upload: quotation validity date ({file_fmt}) does not match this comparison period ({target_fmt}).",
+                detail=f"Cannot upload: quotation year ({file_year}) does not match comparison year ({tenure.coverage_start_date.year}).",
             )
 
     idempotency_key = f"comp_{tenure_id}_{new_id()[:12]}"
