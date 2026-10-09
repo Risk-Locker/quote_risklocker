@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { ArrowCounterClockwise, Check, PencilSimple, Sparkle, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, ArrowLeft, ArrowRight, Check, PencilSimple, Sparkle, X } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { fileUrl } from "@/lib/api";
 import type { BenefitCardSummary } from "../types";
@@ -13,6 +13,7 @@ export function IncludedCard({
   selection,
   canUndo,
   onQueue,
+  isPurchasedAddon = false,
 }: {
   card: BenefitCardSummary;
   index: number;
@@ -20,6 +21,7 @@ export function IncludedCard({
   selection?: { id: string; cost_status: string } | Record<string, unknown> | null;
   canUndo: boolean;
   onQueue: (operation: Record<string, unknown> & { op: string }, path: string, revertOp?: Record<string, unknown> & { op: string }) => void;
+  isPurchasedAddon?: boolean;
 }) {
   const selectionId = selection && typeof selection === "object" && "id" in selection ? String(selection.id) : (card.selection_id || null);
   const pending = !selectionId || String(selectionId).startsWith("pending:");
@@ -161,19 +163,69 @@ export function IncludedCard({
     );
   };
 
-  const handleMoveToAddon = () => {
-    if (!window.confirm(`Are you sure you want to move "${card.label}" to add-ons?`)) return;
-    if (selectionId) {
+  // Directional Movement Handlers:
+  // 1. Move Left to Column 1 (Make Free / Included cover)
+  const handleMakeFoc = () => {
+    if (selectionId && !pending) {
+      onQueue(
+        { op: "benefit_update", selection_id: selectionId, state: "current", cost_status: "included", is_extra: false, price: null },
+        `benefits.${selectionId}.cost_status`,
+        { op: "benefit_update", selection_id: selectionId, state: "current", cost_status: "paid", is_extra: true, ...(currentPriceNum ? { price: { amount: currentPriceNum, currency: "MYR" } } : {}) }
+      );
+    } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
+      onQueue(
+        { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "included", is_extra: false, price: null },
+        `benefits.offer.${card.offering_id}`,
+        { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "paid", is_extra: true }
+      );
+    } else if (card.concept_key || selectionId) {
+      const targetId = selectionId || card.concept_key!;
+      onQueue(
+        { op: "benefit_update", selection_id: targetId, state: "current", cost_status: "included", is_extra: false, price: null },
+        `benefits.${targetId}.cost_status`,
+        { op: "benefit_update", selection_id: targetId, state: "current", cost_status: "paid", is_extra: true }
+      );
+    }
+  };
+
+  // 2. Move Right to Column 2 (Purchased Extras / Paid Add-on on Quote)
+  const handleMakePaid = () => {
+    const defaultPrice = currentPriceNum ? { amount: currentPriceNum, currency: "MYR" } : null;
+    if (selectionId && !pending) {
+      onQueue(
+        { op: "benefit_update", selection_id: selectionId, state: "current", cost_status: "paid", is_extra: true, ...(defaultPrice ? { price: defaultPrice } : {}) },
+        `benefits.${selectionId}.cost_status`,
+        { op: "benefit_update", selection_id: selectionId, state: "current", cost_status: "included", is_extra: false, price: null }
+      );
+    } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
+      onQueue(
+        { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "paid", is_extra: true, ...(defaultPrice ? { price: defaultPrice } : {}) },
+        `benefits.offer.${card.offering_id}`,
+        { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "included", is_extra: false, price: null }
+      );
+    } else if (card.concept_key || selectionId) {
+      const targetId = selectionId || card.concept_key!;
+      onQueue(
+        { op: "benefit_update", selection_id: targetId, state: "current", cost_status: "paid", is_extra: true, ...(defaultPrice ? { price: defaultPrice } : {}) },
+        `benefits.${targetId}.cost_status`,
+        { op: "benefit_update", selection_id: targetId, state: "current", cost_status: "included", is_extra: false, price: null }
+      );
+    }
+  };
+
+  // 3. Move Right to Column 3 (Optional Add-on covers)
+  const handleMoveToOptional = () => {
+    if (selectionId && !pending) {
       onQueue(
         { op: "benefit_update", selection_id: selectionId, state: "available_addon", cost_status: "paid" },
         `benefits.${selectionId}.state`,
-        { op: "benefit_update", selection_id: selectionId, state: "current", cost_status: "included" }
+        { op: "benefit_update", selection_id: selectionId, state: "current", cost_status: isPurchasedAddon ? "paid" : "included" }
       );
     } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
       onQueue(
         { op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid" },
         `benefits.offer.${card.offering_id}`,
-        { op: "select_catalog_offering", offering_id: card.offering_id, state: "removed", cost_status: "included" }
+        { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: isPurchasedAddon ? "paid" : "included" }
       );
     } else {
       const customKey = `addon:${card.concept_key || index}`;
@@ -406,21 +458,55 @@ export function IncludedCard({
         )}
       </div>
       {/* Actions */}
-      <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
-        <Button
-          variant="secondary"
-          size="sm"
-          title="Move this benefit to Optional Add-ons"
-          onClick={handleMoveToAddon}
-          className="text-[11px] h-7 px-2"
-        >
-          → Add-on
-        </Button>
+      <div className="flex items-center gap-1 shrink-0 mt-0.5">
+        {isPurchasedAddon ? (
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              title="Move left to Free / Included cover"
+              onClick={handleMakeFoc}
+              className="text-[11px] h-7 px-2 font-semibold text-emerald-800 hover:bg-emerald-100"
+            >
+              ← Make FOC
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              title="Move right to Optional Add-ons"
+              onClick={handleMoveToOptional}
+              className="text-[11px] h-7 px-2 font-semibold text-blue-700 hover:bg-blue-100"
+            >
+              → Optional
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              title="Move right to Purchased Extras (Paid Add-on on Quote)"
+              onClick={handleMakePaid}
+              className="text-[11px] h-7 px-2 font-semibold text-amber-800 hover:bg-amber-100"
+            >
+              → Extras
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              title="Move right to Optional Add-ons"
+              onClick={handleMoveToOptional}
+              className="text-[11px] h-7 px-2 font-semibold text-blue-700 hover:bg-blue-100"
+            >
+              → Optional
+            </Button>
+          </>
+        )}
         <button
           type="button"
           aria-label={`Remove ${card.label} from this quotation`}
           onClick={handleRemove}
-          className="rounded-full p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] transition-colors cursor-pointer"
+          className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] transition-colors cursor-pointer"
           title="Remove benefit completely"
         >
           <X size={14} weight="bold" />
@@ -623,6 +709,39 @@ export function AddonCard({
           cost_status: "paid",
           label: card.label,
           ...(finalPrice ? { price: finalPrice } : {}),
+        },
+        `benefits.add.${index}`,
+        { op: "benefit_update", selection_id: customKey, state: "removed" }
+      );
+    }
+  };
+
+  // Move Left all the way to Column 1 (Free / Included Cover)
+  const handleMakeFoc = () => {
+    if (selectionId && !pending) {
+      onQueue(
+        { op: "benefit_update", selection_id: selectionId, state: "current", cost_status: "included", is_extra: false, price: null },
+        `benefits.${selectionId}.state`,
+        { op: "benefit_update", selection_id: selectionId, state: "available_addon", cost_status: "paid" }
+      );
+    } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
+      onQueue(
+        { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "included", is_extra: false, price: null },
+        `benefits.offer.${card.offering_id}`,
+        { op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid" }
+      );
+    } else {
+      const customKey = `foc:${card.concept_key || card.concept_id || index}`;
+      onQueue(
+        {
+          op: "create_custom_benefit",
+          selection_key: customKey,
+          concept_id: card.concept_id,
+          concept_key: card.concept_key,
+          state: "current",
+          cost_status: "included",
+          label: card.label,
+          price: null,
         },
         `benefits.add.${index}`,
         { op: "benefit_update", selection_id: customKey, state: "removed" }
@@ -848,21 +967,30 @@ export function AddonCard({
         </div>
       </div>
       {/* Actions */}
-      <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
+      <div className="flex items-center gap-1 shrink-0 mt-0.5">
         <Button
           size="sm"
           variant="secondary"
-          title="Add to Purchased Extras on this quotation"
+          title="Move left to Purchased Extras on this quotation"
           onClick={handleAddToPurchasedAddons}
-          className="text-[11px] h-7 px-2.5 font-bold bg-amber-50 border border-amber-300 text-amber-900 hover:bg-amber-100 transition-colors shadow-2xs"
+          className="text-[11px] h-7 px-2 font-bold bg-amber-50 border border-amber-300 text-amber-900 hover:bg-amber-100 transition-colors shadow-2xs"
         >
-          + Add to Quotation
+          ← Add to Quote
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          title="Move left directly to Free / Included covers"
+          onClick={handleMakeFoc}
+          className="text-[11px] h-7 px-2 text-emerald-800 hover:bg-emerald-100 transition-colors"
+        >
+          ← FOC
         </Button>
         <button
           type="button"
           aria-label={`Remove ${card.label}`}
           onClick={handleRemove}
-          className="rounded-full p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] transition-colors"
+          className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] transition-colors cursor-pointer"
           title="Remove add-on completely"
         >
           <X size={14} weight="bold" />

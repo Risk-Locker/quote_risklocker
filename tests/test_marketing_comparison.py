@@ -1161,3 +1161,150 @@ def test_save_comparison_entry_dynamic_rating_and_quotation_sync(db_session: Ses
     assert e["source_quotation_no"] == "QM12390133"
     assert e["quotation_ref"] == "QM12390133"
 
+
+def test_covernote_separation_and_matrix_payload(db_session: Session):
+    """Ensure cover note sessions are excluded from matrix columns and populated in covernote_policy."""
+    tenure, sess_quote, sess_covernote, _ = _seed_tenure_with_sessions(db_session)
+
+    # Mark second session as covernote
+    sess_covernote.document_type = "covernote"
+    sess_covernote.detected_company = "Etiqa Takaful"
+    sess_covernote.policy_number = "POL-ETIQA-88219"
+    sess_covernote.coverage_start_date = datetime(2026, 5, 1, tzinfo=timezone.utc)
+    sess_covernote.coverage_end_date = datetime(2027, 4, 30, tzinfo=timezone.utc)
+    sess_covernote.draft.fields = {
+        **sess_covernote.draft.fields,
+        "sum_insured": "85000.00",
+        "company_name": "Etiqa Takaful",
+    }
+    sess_covernote.extracted_data = {
+        "company_name": "Etiqa Takaful",
+        "sum_insured": 85000.0,
+        "total_payable": 2150.0,
+        "coverage_start_date": "2026-05-01",
+        "coverage_end_date": "2027-04-30",
+        "coverage_period_formatted": "01/05/2026 - 30/04/2027",
+        "canonical_perils_formatted": "Comprehensive · Windscreen · Flood",
+    }
+    tenure.covernote_session_id = sess_covernote.id
+    tenure.policy_number = "POL-ETIQA-88219"
+    tenure.stage = "Issue Policy"
+    db_session.commit()
+
+    # Query marketing comparison
+    matrix = get_marketing_comparison(db_session, tenure.id)
+
+    # Matrix entries must ONLY contain quotation sessions, NEVER covernote sessions
+    matrix_session_ids = [e["session_id"] for e in matrix["entries"]]
+    assert str(sess_covernote.id) not in matrix_session_ids
+    assert str(sess_quote.id) in matrix_session_ids
+
+    # Cover note policy must be properly returned in payload
+    assert matrix["covernote_policy"] is not None
+    assert matrix["covernote_policy"]["session_id"] == str(sess_covernote.id)
+    assert matrix["covernote_policy"]["company_name"] == "Etiqa Takaful"
+    assert matrix["covernote_policy"]["policy_number"] == "POL-ETIQA-88219"
+    assert matrix["covernote_policy"]["sum_insured"] == 85000.0
+    assert matrix["covernote_policy"]["coverage_period_formatted"] == "01/05/2026 - 30/04/2027"
+    assert "Comprehensive" in matrix["covernote_policy"]["canonical_perils_formatted"]
+
+
+def test_convert_session_and_unlink_covernote(db_session: Session):
+    """Ensure convert_session_document_type and unlink_tenure_covernote operate cleanly."""
+    from app.api.routers.comparison import (
+        convert_session_document_type,
+        unlink_tenure_covernote,
+        ConvertDocumentTypeRequest,
+    )
+
+    tenure, sess_quote, sess_2, owner = _seed_tenure_with_sessions(db_session)
+
+    # 1. Promote sess_quote to covernote
+    res_promote = convert_session_document_type(
+        tenure_id=tenure.id,
+        session_id=sess_quote.id,
+        payload=ConvertDocumentTypeRequest(document_type="covernote"),
+        db=db_session,
+        user=owner,
+    )
+    assert res_promote["status"] == "success"
+    assert tenure.covernote_session_id == sess_quote.id
+    assert sess_quote.document_type == "covernote"
+    assert tenure.stage == "Issue Policy"
+
+    # Verify marketing comparison now treats sess_quote as covernote, excluded from columns
+    matrix = get_marketing_comparison(db_session, tenure.id)
+    matrix_session_ids = [e["session_id"] for e in matrix["entries"]]
+    assert str(sess_quote.id) not in matrix_session_ids
+    assert matrix["covernote_policy"] is not None
+    assert matrix["covernote_policy"]["session_id"] == str(sess_quote.id)
+
+    # 2. Unlink covernote
+    res_unlink = unlink_tenure_covernote(
+        tenure_id=tenure.id,
+        db=db_session,
+        user=owner,
+    )
+    assert res_unlink["status"] == "success"
+    assert tenure.covernote_session_id is None
+    assert tenure.stage == "Quotations"
+
+    # Matrix no longer has covernote_policy
+    matrix_after = get_marketing_comparison(db_session, tenure.id)
+    assert matrix_after["covernote_policy"] is None
+
+
+def test_target_windscreen_isolation_and_preservation(db_session):
+    """
+    Verify that:
+    1. Setting windscreen_target to 0.0 ("No windscreen") persists and is not overwritten by entries.
+    2. Editing underwriter quotes with windscreen values does not mutate tenure.windscreen_target.
+    3. Saving fixed costs does not tamper with individual underwriter quotes' windscreen.
+    """
+    from app.services.marketing_comparison_service import (
+        update_tenure_fixed_costs,
+        save_comparison_entry,
+        get_marketing_comparison,
+    )
+
+    tenure, sess_1, sess_2, owner = _seed_tenure_with_sessions(db_session)
+
+    # Explicitly set windscreen target to 0.0 ("No")
+    update_tenure_fixed_costs(
+        db_session,
+        tenure.id,
+        road_tax=90.0,
+        runner_fee=50.0,
+        windscreen_target=0.0,
+    )
+    assert float(tenure.windscreen_target) == 0.0
+
+    # Fetch comparison — must NOT overwrite windscreen_target even though quotes may have windscreen
+    matrix = get_marketing_comparison(db_session, tenure.id)
+    assert float(tenure.windscreen_target) == 0.0
+    assert matrix["tenure"]["windscreen_target"] == 0.0 or matrix["tenure"]["windscreen_target"] is None
+
+    # Save/edit an underwriter entry with a high windscreen sum insured
+    first_entry = matrix["entries"][0]
+    updated_matrix = save_comparison_entry(
+        db_session,
+        tenure.id,
+        {
+            "id": first_entry["id"],
+            "company_name": "Etiqa",
+            "sum_insured": 50000.0,
+            "motor_premium": 1200.0,
+            "windscreen_sum_insured": 2000.0,
+        },
+    )
+
+    # Target windscreen on tenure must still be 0.0 (untouched by company quote edit)
+    assert float(tenure.windscreen_target) == 0.0
+
+    # Verify the edited entry kept its 2000.0 windscreen
+    saved_e = next(e for e in updated_matrix["entries"] if e["id"] == first_entry["id"])
+    assert saved_e["windscreen_sum_insured"] == 2000.0
+
+
+
+

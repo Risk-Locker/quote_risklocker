@@ -110,7 +110,7 @@ export function ManualQuoteModal({
       }
       setSourceQuotationNo(initialData.source_quotation_no || initialData.quotation_ref || "");
     } else {
-      setActiveTab(tenureId ? "upload" : "manual");
+      setActiveTab("manual");
       setCompanyName("AmAssurance");
       setCustomCompany("");
       setSumInsured("");

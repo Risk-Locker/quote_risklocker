@@ -1531,6 +1531,20 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     )
     session_map = {s.id: s for s in sessions}
 
+    # Clean up any comparison entries erroneously created for Cover Note sessions
+    valid_entries = []
+    for e in entries:
+        sess = session_map.get(e.session_id) if e.session_id else None
+        if sess and getattr(sess, "document_type", "quotation") == "covernote":
+            db.delete(e)
+            needs_commit = True
+        else:
+            valid_entries.append(e)
+    entries = valid_entries
+
+    # Separate quotation sessions from cover note sessions
+    quote_sessions = [s for s in sessions if getattr(s, "document_type", "quotation") != "covernote"]
+
     sessions_desc = sorted(
         sessions,
         key=lambda s: s.created_at or datetime.min.replace(tzinfo=timezone.utc),
@@ -1665,9 +1679,9 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                     break
     veh_age = calculate_vehicle_age(veh_yom, tenure.coverage_start_date)
 
-    # 4. If no entries exist yet, auto-hydrate from sessions under this tenure
+    # 4. If no entries exist yet, auto-hydrate from quotation sessions under this tenure
     if not entries:
-        for idx, s in enumerate(sessions):
+        for idx, s in enumerate(quote_sessions):
             comp_name = s.detected_company or (s.uploaded_file.original_filename if s.uploaded_file else f"Quote #{idx+1}")
             f = s.draft.fields if s.draft and s.draft.fields else {}
 
@@ -1725,9 +1739,9 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
 
         needs_commit = True
     else:
-        # Synchronize any sessions under this tenure that don't have a comparison entry yet
+        # Synchronize any quotation sessions under this tenure that don't have a comparison entry yet
         existing_sess_ids = {e.session_id for e in entries if e.session_id}
-        unlinked_sessions = [s for s in sessions if s.id not in existing_sess_ids]
+        unlinked_sessions = [s for s in quote_sessions if s.id not in existing_sess_ids]
         if unlinked_sessions:
             for idx, s in enumerate(unlinked_sessions):
                 comp_name = s.detected_company or (s.uploaded_file.original_filename if s.uploaded_file else f"Quote #{len(entries)+idx+1}")
@@ -1863,26 +1877,18 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
 
     # 6. Assign stable version numbers for same-insurer revisions
     company_counts: dict[str, int] = defaultdict(int)
-    for e in sorted(entries, key=lambda x: (x.created_at or datetime.min.replace(tzinfo=timezone.utc), x.id or "")):
+    def _entry_sort_key(x: Any) -> tuple[datetime, str]:
+        dt = getattr(x, "created_at", None)
+        if not dt:
+            return (datetime.min.replace(tzinfo=timezone.utc), getattr(x, "id", "") or "")
+        if getattr(dt, "tzinfo", None) is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (dt, getattr(x, "id", "") or "")
+
+    for e in sorted(entries, key=_entry_sort_key):
         key = (e.company_name or "Unknown").strip().lower()
         company_counts[key] += 1
         e.version = company_counts[key]
-
-    # Detect Windscreen Target from latest uploaded quotes if tenure.windscreen_target not set
-    if not tenure.windscreen_target or float(tenure.windscreen_target) <= 0.0:
-        for s in sessions_desc:
-            if s.draft and isinstance(s.draft.fields, dict):
-                ws_c = _extract_windscreen_from_draft(s.draft.fields)
-                if ws_c and _is_valid_windscreen_amt(ws_c):
-                    tenure.windscreen_target = float(ws_c)
-                    needs_commit = True
-                    break
-        if not tenure.windscreen_target or float(tenure.windscreen_target) <= 0.0:
-            for e in entries:
-                if e.windscreen_sum_insured and float(e.windscreen_sum_insured) > 0.0:
-                    tenure.windscreen_target = float(e.windscreen_sum_insured)
-                    needs_commit = True
-                    break
 
     if needs_commit:
         db.commit()
@@ -2454,6 +2460,58 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "company_name": ds.detected_company or "Underwriter",
         })
 
+    # Locate active Cover Note / Issued Policy session for this tenure
+    cn_session = None
+    if tenure.covernote_session_id and tenure.covernote_session_id in session_map:
+        cn_session = session_map[tenure.covernote_session_id]
+    if not cn_session:
+        for s in sessions_desc:
+            if getattr(s, "document_type", "quotation") == "covernote":
+                cn_session = s
+                if not tenure.covernote_session_id:
+                    tenure.covernote_session_id = s.id
+                    needs_commit = True
+                break
+
+    covernote_policy = None
+    if cn_session:
+        cn_f = cn_session.draft.fields if cn_session.draft and cn_session.draft.fields else {}
+        cn_comp = cn_session.detected_company or (cn_session.uploaded_file.original_filename if cn_session.uploaded_file else "Issued Policy")
+        cn_sum = _extract_vehicle_sum_insured(cn_f, s_obj=cn_session)
+        cn_prem = _extract_vehicle_motor_premium(cn_f)
+        cn_val_type, cn_agreed = _extract_valuation_type(cn_f, s_obj=cn_session)
+        cn_tot_pay = float(tenure.won_premium) if tenure.won_premium is not None else (cn_prem + float(tenure.road_tax) + float(tenure.runner_fee))
+        cn_b_res = _resolve_comparison_benefits(
+            db, cn_session, getattr(cn_session, "company_id", None), cn_f, float(tenure.windscreen_target) if tenure.windscreen_target else None
+        )
+        s_date = cn_session.coverage_start_date or tenure.coverage_start_date
+        e_date = cn_session.coverage_end_date or tenure.coverage_end_date
+        s_fmt = s_date.strftime("%d/%m/%Y") if s_date else ""
+        e_fmt = e_date.strftime("%d/%m/%Y") if e_date else ""
+        cov_period_str = f"{s_fmt} - {e_fmt}" if s_fmt and e_fmt else (s_fmt or "—")
+
+        covernote_policy = {
+            "session_id": cn_session.id,
+            "company_name": cn_comp,
+            "company_id": getattr(cn_session, "company_id", None) or tenure.winning_company_id,
+            "policy_number": cn_session.policy_number or tenure.policy_number,
+            "coverage_start_date": s_date.isoformat() if s_date else None,
+            "coverage_end_date": e_date.isoformat() if e_date else None,
+            "coverage_period_formatted": cov_period_str,
+            "sum_insured": cn_sum,
+            "valuation_type": cn_val_type,
+            "agreed_value": cn_agreed,
+            "motor_premium": cn_prem,
+            "total_payable": cn_tot_pay,
+            "rounded_total_payable": round(cn_tot_pay),
+            "windscreen_sum_insured": cn_b_res.get("windscreen_sum_insured"),
+            "towing_km": cn_b_res.get("towing_km") or "Unlimited",
+            "special_perils": cn_b_res.get("special_perils"),
+            "canonical_perils_formatted": cn_b_res.get("canonical_perils_formatted") or "Standard Comprehensive Policy",
+            "uploaded_file_id": cn_session.uploaded_file_id,
+            "uploaded_file_name": cn_session.uploaded_file.original_filename if cn_session.uploaded_file else f"{cn_comp}.pdf",
+        }
+
     # Dynamic active winner policy period resolution
     winner_entry = next((e for e in entry_dicts if e.get("is_recommended")), None)
     if not winner_entry and entry_dicts:
@@ -2461,7 +2519,16 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
 
     active_start_date = tenure.coverage_start_date
     active_end_date = tenure.coverage_end_date
-    if winner_entry and winner_entry.get("coverage_start_date"):
+    if covernote_policy and covernote_policy.get("coverage_start_date"):
+        try:
+            active_start_date = datetime.fromisoformat(covernote_policy["coverage_start_date"])
+            if covernote_policy.get("coverage_end_date"):
+                active_end_date = datetime.fromisoformat(covernote_policy["coverage_end_date"])
+            else:
+                active_end_date = active_start_date + timedelta(days=364)
+        except Exception:
+            pass
+    elif winner_entry and winner_entry.get("coverage_start_date"):
         try:
             active_start_date = datetime.fromisoformat(winner_entry["coverage_start_date"])
             if winner_entry.get("coverage_end_date"):
@@ -2502,8 +2569,11 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "coverage_start_date": active_start_date.isoformat() if active_start_date else tenure.coverage_start_date.isoformat(),
             "coverage_end_date": active_end_date.isoformat() if active_end_date else tenure.coverage_end_date.isoformat(),
             "coverage_period_formatted": active_period_formatted,
-            "winning_file_id": winner_entry.get("uploaded_file_id") if winner_entry else None,
-            "winning_file_name": winner_entry.get("original_filename") if winner_entry else None,
+            "covernote_session_id": tenure.covernote_session_id,
+            "policy_number": tenure.policy_number or (covernote_policy.get("policy_number") if covernote_policy else None),
+            "is_covernote_issued": bool(covernote_policy),
+            "winning_file_id": (covernote_policy.get("uploaded_file_id") if covernote_policy else None) or (winner_entry.get("uploaded_file_id") if winner_entry else None),
+            "winning_file_name": (covernote_policy.get("uploaded_file_name") if covernote_policy else None) or (winner_entry.get("original_filename") if winner_entry else None),
             "expiry_month": tenure.expiry_month,
             "status": tenure.status,
             "road_tax": float(tenure.road_tax),
@@ -2515,6 +2585,7 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "vehicle_model": veh_model or "Motor Vehicle",
             "vehicle_type": "Comprehensive (综合险)",
         },
+        "covernote_policy": covernote_policy,
         "entries": entry_dicts,
         "upload_sessions": upload_sessions,
         "duplicate_alerts": duplicate_alerts,
@@ -2778,9 +2849,6 @@ def update_tenure_fixed_costs(
         e.road_tax = road_tax
         e.runner_fee = float(tenure.runner_fee)
         e.total_payable = float(e.motor_premium) + road_tax + float(tenure.runner_fee)
-        if windscreen_target is not None and windscreen_target > 0:
-            if not e.windscreen_sum_insured or float(e.windscreen_sum_insured) <= 0.0:
-                e.windscreen_sum_insured = windscreen_target
 
     db.commit()
     return get_marketing_comparison(db, tenure_id)
@@ -3427,7 +3495,7 @@ def rescan_comparison_tenure(db: Session, tenure_id: str) -> dict[str, Any]:
             if entry.sum_insured > 0:
                 entry.rate_percentage = round((float(entry.motor_premium) / float(entry.sum_insured)) * 100, 4)
 
-    if detected_ws and (not tenure.windscreen_target or float(tenure.windscreen_target) <= 0.0):
+    if detected_ws and tenure.windscreen_target is None:
         tenure.windscreen_target = detected_ws
 
     tv = tenure.tracked_vehicle

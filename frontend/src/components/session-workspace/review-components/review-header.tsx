@@ -164,28 +164,34 @@ export function ReviewHeader({
             {mutation.dirty ? "Save Changes" : "Saved"}
           </Button>
 
-          {/* PNG Actions Button (Copy as PNG | Download PNG) */}
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={copiedPng ? <Check weight="bold" className="text-emerald-600" /> : <Copy weight="bold" />}
-            onClick={handleCopyPng}
-            disabled={copyingPng}
-            title={mutation.dirty ? "Save changes first to copy PNG" : "Copy high-resolution quotation canvas to clipboard as image"}
-          >
-            {copiedPng ? "Copied PNG!" : copyingPng ? "Copying..." : "Copy as PNG"}
-          </Button>
-
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={<DownloadSimple weight="bold" />}
-            onClick={handleDownloadPng}
-            disabled={downloadingPng}
-            title={mutation.dirty ? "Save changes first to download PNG" : "Open in new tab and download high-resolution PNG"}
-          >
-            {downloadingPng ? "Generating..." : "Download as PNG"}
-          </Button>
+          {/* Consolidated PNG Quick Actions */}
+          <div className="flex items-center rounded-lg border border-[var(--rl-border)] bg-gray-100 p-0.5 shadow-2xs">
+            <button
+              type="button"
+              onClick={handleCopyPng}
+              disabled={copyingPng}
+              className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-all ${
+                copiedPng
+                  ? "bg-emerald-50 text-emerald-800"
+                  : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] hover:bg-white"
+              }`}
+              title={mutation.dirty ? "Save changes first to copy PNG" : "Copy quotation canvas to clipboard as image"}
+            >
+              {copiedPng ? <Check size={13} weight="bold" className="text-emerald-600" /> : <Copy size={13} weight="bold" />}
+              <span>{copiedPng ? "Copied!" : copyingPng ? "Copying..." : "Copy as PNG"}</span>
+            </button>
+            <div className="h-3.5 w-px bg-gray-200" />
+            <button
+              type="button"
+              onClick={handleDownloadPng}
+              disabled={downloadingPng}
+              className="flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] hover:bg-white transition-all"
+              title={mutation.dirty ? "Save changes first to download PNG" : "Download high-resolution PNG image"}
+            >
+              <DownloadSimple size={13} weight="bold" />
+              <span>{downloadingPng ? "Saving..." : "Download PNG"}</span>
+            </button>
+          </div>
 
           {/* Unified Action 3: Download PDF */}
           <Button

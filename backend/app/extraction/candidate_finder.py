@@ -19,6 +19,7 @@ DRAFT_FIELDS = [
     "ic_or_brn",
     "representative_name",
     "quotation_no",
+    "policy_number",
     "issue_date",
     "valid_until",
     "vehicle_no",
@@ -111,6 +112,7 @@ DEFAULT_ALIASES = {
     "windscreen": ["windscreen", "cermin hadapan"],
     "valuation_type": ["valuation type", "valuation basis", "basis of sum insured", "type of sum insured", "basis of valuation", "agreed value", "vehicle agreed value", "market value"],
     "quotation_no": ["quotation no", "quotation number", "quote no", "quote number", "no sebutharga", "sebutharga no", "no sebut harga", "no. sebutharga", "proposal no", "schedule no"],
+    "policy_number": ["policy no", "policy number", "no polisi", "no. polisi", "e-cover note no", "cover note no", "certificate no", "no sijil", "schedule no", "no jadual"],
     }
 
 DEFAULT_VEHICLE_BRANDS = ("PROTON", "PERODUA", "HONDA", "TOYOTA", "NISSAN", "BMW", "MERCEDES", "MERCEDES-BENZ", "MAZDA", "MITSUBISHI", "KIA", "HYUNDAI")
@@ -122,8 +124,6 @@ CANONICAL_COVERAGE_TYPES = [
     "THIRD PARTY",
     "MMIP",
     "MALAYSIAN MOTOR INSURANCE POOL",
-    "COVER NOTE",
-    "COVERNOTE",
     "COMPREHENSIVE",
     "PRIVATE CAR",
     "MOTOR TAKAFUL",
@@ -134,6 +134,54 @@ MONEY_RE = r"(?:RM\s*)?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})?"
 
 def _compact_evidence(text: str, start: int, end: int) -> str:
     return re.sub(r"\s+", " ", text[max(0, start - 80) : min(len(text), end + 80)]).strip()
+
+
+def detect_is_covernote(text: str, filename: str | None = None) -> bool:
+    """Classify whether an uploaded document is an official issued Cover Note / Policy Schedule vs a Quotation."""
+    if filename:
+        fn_clean = re.sub(r"[_\-\s]+", " ", str(filename).lower())
+        if any(term in fn_clean for term in [
+            "covernote", "cover note", "e covernote", "e cover note",
+            "policy schedule", "polisi", "jadual polisi", "nota perlindungan",
+            "insurance policy", "policy cert"
+        ]):
+            return True
+        if re.search(r"\bcn[\s\-_0-9]", fn_clean) or re.search(r"[\-_]cn\b", fn_clean):
+            return True
+
+    upper_sample = text[:3500].upper()
+    covernote_signatures = [
+        "COVER NOTE",
+        "E-COVER NOTE",
+        "NOTA PERLINDUNGAN",
+        "POLICY SCHEDULE",
+        "SCHEDULE OF INSURANCE",
+        "JADUAL POLISI",
+        "POLISI INSURANS",
+        "CERTIFICATE OF INSURANCE",
+        "SIJIL INSURANS",
+        "HERE IS YOUR INSURANCE POLICY",
+    ]
+    has_cn_sig = any(sig in upper_sample for sig in covernote_signatures)
+
+    quote_signatures = [
+        "QUOTATION",
+        "PROPOSAL",
+        "SEBUT HARGA",
+        "SEBUTHARGA",
+        "CADANGAN INSURANS",
+        "QUOTATION SCHEDULE",
+    ]
+    has_quote_sig = any(sig in upper_sample for sig in quote_signatures)
+
+    if has_cn_sig and not has_quote_sig:
+        return True
+
+    if has_cn_sig and has_quote_sig:
+        if re.search(r"(?:POLICY\s*(?:NO\.?|NUMBER)|NO\.?\s*POLISI)\s*:\s*[A-Z0-9/_-]{6,}", upper_sample):
+            return True
+
+    return False
 
 
 def _page_for_offset(page_text: list[dict], offset: int) -> int | None:
@@ -802,7 +850,7 @@ def _add_messy_compact_text(
     for coverage in CANONICAL_COVERAGE_TYPES:
         token = re.sub(r"[^A-Z0-9]", "", coverage)
         if token and token in compact:
-            if coverage in {"THIRD PARTY ONLY", "THIRD PARTY", "MMIP", "MALAYSIAN MOTOR INSURANCE POOL", "COVER NOTE", "COVERNOTE"}:
+            if coverage in {"THIRD PARTY ONLY", "THIRD PARTY", "MMIP", "MALAYSIAN MOTOR INSURANCE POOL"}:
                 cov_val = "Third Party"
             elif coverage in {"THIRD PARTY FIRE AND THEFT", "THIRD PARTY FIRE & THEFT"}:
                 cov_val = "Third Party Fire & Theft"
@@ -1125,6 +1173,18 @@ def find_candidates(
             cand_q = match.group(1).strip()
             if _is_valid_candidate_qno(cand_q):
                 _add(results, "quotation_no", cand_q, q_src, q_score, text, match.start(), match.end(), page_text)
+
+    # 1b. Policy Number patterns for Cover Notes and Policy Schedules
+    policy_patterns = [
+        (r"(?i)\b(?:policy\s*(?:no\.?|number)|no\.?\s*polisi|cover\s*note\s*(?:no\.?|number)|e-cover\s*note\s*(?:no\.?|number)|certificate\s*(?:no\.?|number)|no\.?\s*sijil)\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\-_/]{5,35})", "generic_policy_no", 0.94),
+        (r"\b([A-Z]/\d{2}/[A-Z0-9]+/\d+/[A-Z0-9-]+)\b", "lonpac_policy_no", 0.96),
+        (r"\b(\d{2}-[A-Z]{3}-\d{6,8}-\d{2,4})\b", "formatted_policy_no", 0.95),
+    ]
+    for p_pat, p_src, p_score in policy_patterns:
+        for match in re.finditer(p_pat, text):
+            cand_p = match.group(1).strip()
+            if _is_valid_candidate_qno(cand_p):
+                _add(results, "policy_number", cand_p, p_src, p_score, text, match.start(), match.end(), page_text)
 
     date_pattern = DATE_RE
     dates = list(re.finditer(date_pattern, text))

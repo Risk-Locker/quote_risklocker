@@ -141,6 +141,24 @@ export interface TenureRow {
   loss_reason_category: string | null;
   road_tax: number;
   runner_fee: number;
+  covernote_session_id?: string | null;
+  policy_number?: string | null;
+  covernote_policy?: {
+    session_id: string;
+    company: string;
+    policy_number?: string | null;
+    total_payable?: number | string | null;
+    sum_insured?: number | string | null;
+    coverage_start_date?: string | null;
+    coverage_end_date?: string | null;
+    coverage_period_formatted?: string | null;
+    perils?: string | null;
+    windscreen?: number | string | null;
+    towing?: string | null;
+    uploaded_file_id?: string | null;
+    file_name?: string | null;
+  } | null;
+  is_covernote_issued?: boolean;
   sourced_quotes: Array<{
     session_id: string;
     company: string;
@@ -576,16 +594,16 @@ export function TenureTimelineLedger() {
             onClick={() => {
               setHitConfirmTenure(t);
               const winningQ = t.sourced_quotes?.find(q => q.is_winner || q.company === t.winning_company_name || q.company === t.winning_company_id);
-              const startCandidate = winningQ?.coverage_start_date || t.coverage_start_date || new Date().toISOString().split("T")[0];
+              const startCandidate = t.covernote_policy?.coverage_start_date || winningQ?.coverage_start_date || t.coverage_start_date || new Date().toISOString().split("T")[0];
               setHitConfirmedStartDate(startCandidate);
-              if (winningQ?.coverage_end_date || t.coverage_end_date) {
-                setHitConfirmedEndDate(winningQ?.coverage_end_date || t.coverage_end_date);
+              if (t.covernote_policy?.coverage_end_date || winningQ?.coverage_end_date || t.coverage_end_date) {
+                setHitConfirmedEndDate(t.covernote_policy?.coverage_end_date || winningQ?.coverage_end_date || t.coverage_end_date);
               } else {
                 const endD = new Date(startCandidate);
                 endD.setDate(endD.getDate() + 364);
                 setHitConfirmedEndDate(endD.toISOString().split("T")[0]);
               }
-              setHitConfirmedInsurer(t.winning_company_name || t.winning_company_id || winningQ?.company || t.sourced_quotes?.[0]?.company || "");
+              setHitConfirmedInsurer(t.covernote_policy?.company || t.winning_company_name || t.winning_company_id || winningQ?.company || t.sourced_quotes?.[0]?.company || "");
             }}
             className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] shadow-2xs cursor-pointer transition-colors flex items-center gap-1"
             title="Policy is issued! Click to review policy details and mark as HIT (won)"
@@ -1911,12 +1929,137 @@ export function TenureTimelineLedger() {
                             </div>
                           </td>
 
-                          {/* 4. Latest Activity & Quotes */}
+                          {/* 4. Policy Details & Sourced Quotes */}
                           <td className="py-3 px-3">
-                            {mainTenure.sourced_quotes.length === 0 ? (
-                              <span className="text-neutral-400 italic text-[11px]">0 quotes compiled</span>
+                            {mainTenure.covernote_policy ? (
+                              <div className="space-y-1.5 min-w-[210px] max-w-[260px]">
+                                {/* Official Issued Cover Note Top Strip */}
+                                <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-bold">
+                                    <CheckCircle size={12} weight="fill" className="text-emerald-700" />
+                                    {mainTenure.covernote_policy.company}
+                                  </span>
+                                  {mainTenure.covernote_policy.total_payable && (
+                                    <span className="text-emerald-950 font-mono font-bold text-xs bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                      RM {Number(mainTenure.covernote_policy.total_payable).toFixed(2)}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Authentic Insurance Period & Policy # */}
+                                <div className="text-[10.5px] font-mono text-neutral-700 flex items-center justify-between gap-1">
+                                  <span className="font-semibold text-neutral-900">
+                                    {formatDateSafe(mainTenure.covernote_policy.coverage_start_date)} – {formatDateSafe(mainTenure.covernote_policy.coverage_end_date)}
+                                  </span>
+                                  {mainTenure.covernote_policy.policy_number && (
+                                    <span className="text-[9.5px] text-neutral-500 truncate" title={mainTenure.covernote_policy.policy_number}>
+                                      #{mainTenure.covernote_policy.policy_number}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Key Perils */}
+                                {mainTenure.covernote_policy.perils && (
+                                  <div className="text-[9.5px] text-neutral-600 truncate bg-neutral-50 px-1.5 py-0.5 rounded border border-neutral-200/60" title={mainTenure.covernote_policy.perils}>
+                                    🛡️ {mainTenure.covernote_policy.perils}
+                                  </div>
+                                )}
+
+                                {/* Direct PDF Link & Quick Hit Action */}
+                                <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                                  {mainTenure.covernote_policy.uploaded_file_id && (
+                                    <a
+                                      href={`/api/quotations/files/${mainTenure.covernote_policy.uploaded_file_id}/download`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300 transition-colors"
+                                      title="Download official Cover Note PDF"
+                                    >
+                                      <FilePdf size={11} weight="fill" className="text-emerald-600" />
+                                      <span>Policy PDF</span>
+                                    </a>
+                                  )}
+
+                                  {mainTenure.stage === "Issue Policy" && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setHitConfirmTenure(mainTenure);
+                                        const startCandidate = mainTenure.covernote_policy?.coverage_start_date || mainTenure.coverage_start_date || new Date().toISOString().split("T")[0];
+                                        setHitConfirmedStartDate(startCandidate);
+                                        if (mainTenure.covernote_policy?.coverage_end_date || mainTenure.coverage_end_date) {
+                                          setHitConfirmedEndDate(mainTenure.covernote_policy?.coverage_end_date || mainTenure.coverage_end_date);
+                                        } else {
+                                          const endD = new Date(startCandidate);
+                                          endD.setDate(endD.getDate() + 364);
+                                          setHitConfirmedEndDate(endD.toISOString().split("T")[0]);
+                                        }
+                                        setHitConfirmedInsurer(mainTenure.covernote_policy?.company || mainTenure.winning_company_name || "");
+                                      }}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-700 hover:bg-emerald-800 text-white text-[10px] font-bold shadow-2xs transition-colors cursor-pointer"
+                                      title="Policy is issued! Click to seal HIT"
+                                    >
+                                      <CheckCircle size={11} weight="bold" />
+                                      <span>Confirm Hit ✓</span>
+                                    </button>
+                                  )}
+                                </div>
+
+                                {/* Multi-Insurer Quotation Quick Links (target="_blank" for middle/right click) */}
+                                {mainTenure.sourced_quotes && mainTenure.sourced_quotes.length > 0 && (
+                                  <div className="flex items-center gap-1 flex-wrap pt-1 border-t border-neutral-100">
+                                    <span className="text-[9px] font-bold text-neutral-400 uppercase">Quotes:</span>
+                                    {mainTenure.sourced_quotes.map((q) => (
+                                      <Link
+                                        key={q.session_id}
+                                        href={`/workspace?session_id=${q.session_id}` as Route}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className={`inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] transition-colors border shadow-2xs hover:border-neutral-900 ${
+                                          q.is_winner
+                                            ? "bg-amber-50 text-amber-900 border-amber-300 font-bold"
+                                            : "bg-white text-neutral-700 border-neutral-200 hover:bg-neutral-50 font-medium"
+                                        }`}
+                                        title={`Open ${q.company} quote workspace in new tab (middle-click/right-click enabled)`}
+                                      >
+                                        <span>{q.company}</span>
+                                        {q.total_payable && (
+                                          <span className="font-mono text-[9px] text-neutral-500 font-bold">
+                                            {Number(q.total_payable).toFixed(0)}
+                                          </span>
+                                        )}
+                                      </Link>
+                                    ))}
+                                    <Link
+                                      href={`/comparison?tenure_id=${mainTenure.id}` as Route}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-800 hover:text-amber-950 hover:underline ml-0.5"
+                                      title="Open Marketing Comparison in new tab"
+                                    >
+                                      <span>({mainTenure.sourced_quotes.length}) →</span>
+                                    </Link>
+                                  </div>
+                                )}
+                              </div>
+                            ) : mainTenure.sourced_quotes.length === 0 ? (
+                              <div className="space-y-1">
+                                <span className="text-neutral-400 italic text-[11px] block">0 quotes compiled</span>
+                                <div className="text-[10px] text-neutral-500 font-mono">
+                                  {formatDateSafe(mainTenure.coverage_start_date)} – {formatDateSafe(mainTenure.coverage_end_date)}
+                                </div>
+                                <Link
+                                  href={`/comparison?tenure_id=${mainTenure.id}` as Route}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-[10px] font-bold text-neutral-700 hover:text-black underline"
+                                >
+                                  <span>Open Comparison Matrix →</span>
+                                </Link>
+                              </div>
                             ) : (
-                              <div className="space-y-1 max-w-[210px]">
+                              <div className="space-y-1.5 min-w-[210px] max-w-[260px]">
+                                {/* Leading / Winning Quote Strip */}
                                 <div className="flex items-center justify-between gap-1.5">
                                   <span className="font-bold text-xs text-neutral-900 truncate">
                                     {mainTenure.winning_company_name || mainTenure.sourced_quotes[0].company}
@@ -1927,61 +2070,85 @@ export function TenureTimelineLedger() {
                                     </span>
                                   )}
                                 </div>
-                                <div className="flex items-center justify-between text-[10px]">
+
+                                {/* Target Coverage Period */}
+                                <div className="text-[10.5px] font-mono text-neutral-600">
+                                  {formatDateSafe(mainTenure.coverage_start_date)} – {formatDateSafe(mainTenure.coverage_end_date)}
+                                </div>
+
+                                {/* Multi-Insurer Quotation Quick-Links (target="_blank" for middle/right click) */}
+                                <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                                  {mainTenure.sourced_quotes.map((q) => (
+                                    <Link
+                                      key={q.session_id}
+                                      href={`/workspace?session_id=${q.session_id}` as Route}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors border shadow-2xs hover:border-neutral-900 ${
+                                        q.is_winner
+                                          ? "bg-amber-50 text-amber-900 border-amber-300 font-bold"
+                                          : "bg-white text-neutral-700 border-neutral-200 hover:bg-neutral-50 font-medium"
+                                      }`}
+                                      title={`Open ${q.company} quote in new tab (middle/right-click enabled)`}
+                                    >
+                                      <span>{q.company}</span>
+                                      {q.total_payable && (
+                                        <span className="font-mono text-[9px] text-neutral-500 font-bold">
+                                          {Number(q.total_payable).toFixed(0)}
+                                        </span>
+                                      )}
+                                    </Link>
+                                  ))}
                                   <Link
                                     href={`/comparison?tenure_id=${mainTenure.id}` as Route}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="font-bold text-amber-800 hover:text-amber-950 hover:underline flex items-center gap-1"
+                                    className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-800 hover:text-amber-950 hover:underline ml-0.5"
                                     title="Open Marketing Comparison in new tab"
                                   >
-                                    <span>Comparison ({mainTenure.sourced_quotes.length}) →</span>
+                                    <span>({mainTenure.sourced_quotes.length}) →</span>
                                   </Link>
-                                  {mainTenure.last_activity_at && (
-                                    <span className="text-neutral-400 font-mono">
-                                      {new Date(mainTenure.last_activity_at).toLocaleDateString("en-MY", { day: "2-digit", month: "short" })}
+                                </div>
+
+                                {/* PDF links */}
+                                <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                                  {mainTenure.winning_file_id ? (
+                                    <a
+                                      href={`/api/quotations/files/${mainTenure.winning_file_id}/download`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300 transition-colors cursor-pointer"
+                                      title={`Accepted Quotation PDF: ${mainTenure.winning_file_name || "Quotation PDF"}`}
+                                    >
+                                      <FilePdf size={11} weight="fill" className="text-emerald-600" />
+                                      <span className="truncate max-w-[120px]">Accepted PDF</span>
+                                    </a>
+                                  ) : mainTenure.sourced_quotes?.find(q => q.uploaded_file_id) ? (
+                                    (() => {
+                                      const winQuote = mainTenure.sourced_quotes.find(q => q.is_winner && q.uploaded_file_id) || mainTenure.sourced_quotes.find(q => q.uploaded_file_id);
+                                      return winQuote?.uploaded_file_id ? (
+                                        <a
+                                          href={`/api/quotations/files/${winQuote.uploaded_file_id}/download`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-800 text-[10px] font-bold border border-blue-200 transition-colors cursor-pointer"
+                                          title={`Quotation PDF: ${winQuote.file_name || winQuote.company}`}
+                                        >
+                                          <FilePdf size={11} weight="fill" className="text-blue-600" />
+                                          <span className="truncate max-w-[120px]">{winQuote.is_winner ? "Accepted PDF" : "Quote PDF"}</span>
+                                        </a>
+                                      ) : null;
+                                    })()
+                                  ) : null}
+                                  {mainTenure.generated_quotations && mainTenure.generated_quotations.length > 0 && (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-700 text-[10px] font-bold border border-neutral-200">
+                                      <FilePdf size={11} weight="fill" className="text-neutral-500" />
+                                      <span>{mainTenure.generated_quotations.length} Issued</span>
                                     </span>
                                   )}
                                 </div>
                               </div>
                             )}
-                            <div className="flex items-center gap-1.5 flex-wrap mt-1">
-                              {/* Accepted PDF badge/link if available */}
-                              {mainTenure.winning_file_id ? (
-                                <a
-                                  href={`/api/quotations/files/${mainTenure.winning_file_id}/download`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300 transition-colors cursor-pointer"
-                                  title={`Accepted Quotation PDF: ${mainTenure.winning_file_name || "Quotation PDF"}`}
-                                >
-                                  <FilePdf size={11} weight="fill" className="text-emerald-600" />
-                                  <span className="truncate max-w-[120px]">Accepted PDF</span>
-                                </a>
-                              ) : mainTenure.sourced_quotes?.find(q => q.uploaded_file_id) ? (
-                                (() => {
-                                  const winQuote = mainTenure.sourced_quotes.find(q => q.is_winner && q.uploaded_file_id) || mainTenure.sourced_quotes.find(q => q.uploaded_file_id);
-                                  return winQuote?.uploaded_file_id ? (
-                                    <a
-                                      href={`/api/quotations/files/${winQuote.uploaded_file_id}/download`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-800 text-[10px] font-bold border border-blue-200 transition-colors cursor-pointer"
-                                      title={`Quotation PDF: ${winQuote.file_name || winQuote.company}`}
-                                    >
-                                      <FilePdf size={11} weight="fill" className="text-blue-600" />
-                                      <span className="truncate max-w-[120px]">{winQuote.is_winner ? "Accepted PDF" : "Quote PDF"}</span>
-                                    </a>
-                                  ) : null;
-                                })()
-                              ) : null}
-                              {mainTenure.generated_quotations && mainTenure.generated_quotations.length > 0 && (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-700 text-[10px] font-bold border border-neutral-200">
-                                  <FilePdf size={11} weight="fill" className="text-neutral-500" />
-                                  <span>{mainTenure.generated_quotations.length} Issued</span>
-                                </span>
-                              )}
-                            </div>
                           </td>
 
                           {/* 5. PIC & Milestones */}
@@ -2123,10 +2290,39 @@ export function TenureTimelineLedger() {
                                 <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
                                   {/* Confirmed Coverage Period or Pending Issue */}
                                   <div>
-                                    <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 mb-1">
-                                      Official Coverage Period
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 mb-1 flex items-center justify-between">
+                                      <span>Official Coverage Period</span>
+                                      {mainTenure.covernote_policy && (
+                                        <span className="text-[9.5px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300">
+                                          ✓ Cover Note Issued
+                                        </span>
+                                      )}
                                     </div>
-                                    {mainTenure.coverage_start_date ? (
+                                    {mainTenure.covernote_policy ? (
+                                      <div className="space-y-1">
+                                        <div className="font-mono font-bold text-neutral-900 text-xs">
+                                          {formatDateSafe(mainTenure.covernote_policy.coverage_start_date)} → {formatDateSafe(mainTenure.covernote_policy.coverage_end_date)}
+                                        </div>
+                                        <div className="text-[11px] text-emerald-900 font-semibold flex items-center justify-between">
+                                          <span>Underwriter: {mainTenure.covernote_policy.company}</span>
+                                          {mainTenure.covernote_policy.uploaded_file_id && (
+                                            <a
+                                              href={`/api/quotations/files/${mainTenure.covernote_policy.uploaded_file_id}/download`}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="text-emerald-700 hover:text-emerald-950 font-bold underline text-[10px]"
+                                            >
+                                              [Policy PDF]
+                                            </a>
+                                          )}
+                                        </div>
+                                        {mainTenure.covernote_policy.policy_number && (
+                                          <div className="text-[10px] text-neutral-500 font-mono">
+                                            Policy #: {mainTenure.covernote_policy.policy_number}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : mainTenure.coverage_start_date ? (
                                       <div className="font-mono font-bold text-neutral-900 text-xs">
                                         {formatDateSafe(mainTenure.coverage_start_date)} → {formatDateSafe(mainTenure.coverage_end_date)}
                                       </div>
@@ -2167,13 +2363,17 @@ export function TenureTimelineLedger() {
                                         {mainTenure.sourced_quotes.map((q) => {
                                           const isWin = q.is_winner || q.company === mainTenure.winning_company_name;
                                           return (
-                                            <span
+                                            <Link
                                               key={q.session_id}
-                                              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium border ${
+                                              href={`/workspace?session_id=${q.session_id}` as Route}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium border hover:border-neutral-900 transition-colors ${
                                                 isWin
                                                   ? "bg-emerald-50 text-emerald-900 border-emerald-300 font-bold ring-1 ring-emerald-400/50"
-                                                  : "bg-neutral-100 text-neutral-800 border-neutral-200/80"
+                                                  : "bg-neutral-100 text-neutral-800 border-neutral-200/80 hover:bg-neutral-200/70"
                                               }`}
+                                              title={`Open ${q.company} quote workspace in new tab`}
                                             >
                                               <span>{isWin ? "★ " : ""}{q.company}</span>
                                               {q.total_payable && (
@@ -2185,12 +2385,13 @@ export function TenureTimelineLedger() {
                                                   target="_blank"
                                                   rel="noopener noreferrer"
                                                   className="text-neutral-500 hover:text-emerald-700 ml-0.5"
+                                                  onClick={(e) => e.stopPropagation()}
                                                   title={`Download ${q.file_name || "quote PDF"}`}
                                                 >
                                                   <FilePdf size={12} weight="fill" />
                                                 </a>
                                               )}
-                                            </span>
+                                            </Link>
                                           );
                                         })}
                                       </div>
@@ -3237,9 +3438,26 @@ export function TenureTimelineLedger() {
               {/* Accepted Quotation PDF */}
               <div>
                 <label className="text-xs font-bold text-neutral-800 block mb-1">
-                  3. Accepted Quotation PDF
+                  3. {hitConfirmTenure.covernote_policy ? "Official Cover Note / Policy PDF" : "Accepted Quotation PDF"}
                 </label>
-                {hitConfirmTenure.winning_file_id ? (
+                {hitConfirmTenure.covernote_policy?.uploaded_file_id ? (
+                  <div className="p-2.5 bg-emerald-50/60 border border-emerald-300 rounded flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <FilePdf size={16} weight="fill" className="text-emerald-700 shrink-0" />
+                      <span className="font-bold text-emerald-950 truncate">
+                        {hitConfirmTenure.covernote_policy.file_name || `${hitConfirmTenure.covernote_policy.company} Cover Note`}
+                      </span>
+                    </div>
+                    <a
+                      href={`/api/quotations/files/${hitConfirmTenure.covernote_policy.uploaded_file_id}/download`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-emerald-800 hover:text-emerald-950 font-bold text-[11px] underline shrink-0 ml-2"
+                    >
+                      View Policy PDF ↗
+                    </a>
+                  </div>
+                ) : hitConfirmTenure.winning_file_id ? (
                   <div className="p-2.5 bg-neutral-50 border border-neutral-200 rounded flex items-center justify-between text-xs">
                     <div className="flex items-center gap-1.5 truncate">
                       <FilePdf size={16} weight="fill" className="text-emerald-600 shrink-0" />

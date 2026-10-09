@@ -110,7 +110,7 @@ export function BenefitsManagerPanel({
                     : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
                 }`}
               >
-                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-100 text-[10px] font-bold text-emerald-800">
+                <span className="flex h-4 min-w-4 px-1 items-center justify-center rounded bg-emerald-100 text-[10px] font-bold text-emerald-800">
                   {currentCards.length}
                 </span>
                 Default / FOC Benefits
@@ -125,7 +125,7 @@ export function BenefitsManagerPanel({
                     : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
                 }`}
               >
-                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-800">
+                <span className="flex h-4 min-w-4 px-1 items-center justify-center rounded bg-blue-100 text-[10px] font-bold text-blue-800">
                   {addonCards.length}
                 </span>
                 Optional Add-ons
@@ -247,7 +247,7 @@ export function BenefitsManagerPanel({
                     </h3>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                    <span className="rounded-md bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
                       {focCards.length} standard covers (constant)
                     </span>
                   </div>
@@ -312,7 +312,7 @@ export function BenefitsManagerPanel({
                       </h3>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="rounded-full bg-amber-100 border border-amber-300 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                      <span className="rounded-md bg-amber-50 border border-amber-300 px-2 py-0.5 text-[10px] font-bold text-amber-800">
                         {purchasedAddonCards.length} on quotation
                       </span>
                     </div>
@@ -349,6 +349,7 @@ export function BenefitsManagerPanel({
                           selection={selection}
                           canUndo={Boolean(card.branch_key)}
                           onQueue={onQueue}
+                          isPurchasedAddon={true}
                         />
                       );
                     })}
@@ -367,7 +368,7 @@ export function BenefitsManagerPanel({
                     </h3>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-800">
+                    <span className="rounded-md bg-blue-50 border border-blue-200 px-2 py-0.5 text-[10px] font-bold text-blue-800">
                       {addonCards.length} available
                     </span>
                     <button
@@ -393,7 +394,7 @@ export function BenefitsManagerPanel({
                           Add-on Bundle Packages
                         </h4>
                       </div>
-                      <span className="text-[10px] font-bold text-[var(--rl-red)] bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
+                      <span className="text-[10px] font-bold text-[var(--rl-red)] bg-red-50 border border-red-200 px-2 py-0.5 rounded-md">
                         Stack Cards ({workspace.packs.length} bundles)
                       </span>
                     </div>
@@ -442,12 +443,12 @@ export function BenefitsManagerPanel({
                             ) : null}
                           </div>
 
-                          {/* Plan Tier Selector Pills */}
+                          {/* Plan Tier Selector */}
                           <div className="mt-2.5">
                             <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
                               Select Plan Tier:
                             </span>
-                            <div className="mt-1 flex flex-wrap gap-1.5">
+                            <div className="mt-1 flex flex-wrap items-center p-0.5 rounded-md border border-[var(--rl-border)] bg-gray-100/90 gap-1 w-fit">
                               {pack.plans.map((plan) => {
                                 const isSelected = plan.plan_id === selectedPlanId;
                                 return (
@@ -457,10 +458,10 @@ export function BenefitsManagerPanel({
                                     onClick={() =>
                                       setPackPlanSelections((prev) => ({ ...prev, [pack.package_id]: plan.plan_id }))
                                     }
-                                    className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold transition-all ${
+                                    className={`px-3 py-1 text-xs font-semibold rounded transition-all cursor-pointer ${
                                       isSelected
-                                        ? "bg-[var(--rl-red)] text-white shadow-xs"
-                                        : "bg-gray-100 text-[var(--rl-text-strong)] hover:bg-gray-200"
+                                        ? "bg-white text-[var(--rl-text-strong)] shadow-xs font-bold"
+                                        : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] hover:bg-white/50"
                                     }`}
                                   >
                                     <span>{plan.name}</span>
@@ -485,7 +486,7 @@ export function BenefitsManagerPanel({
                                     className="flex items-center justify-between gap-1.5 rounded bg-white p-1.5 border border-gray-200/70 text-xs shadow-2xs"
                                   >
                                     <div className="flex items-center gap-1.5 min-w-0">
-                                      <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[9px] font-bold text-emerald-800">
+                                      <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-emerald-100 text-[9px] font-bold text-emerald-800">
                                         ✓
                                       </span>
                                       <span className="truncate font-semibold text-[11px] text-[var(--rl-text-strong)]">

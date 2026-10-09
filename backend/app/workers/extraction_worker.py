@@ -276,8 +276,6 @@ def process_extraction_job(
     is_tpo = (
         cov_val in ("third party", "third party only", "third_party")
         or "mmip" in fn_val
-        or "covernote" in fn_val
-        or "cover note" in fn_val
     )
     if is_tpo:
         if not cov_val or "third" not in cov_val:
@@ -600,6 +598,65 @@ def process_extraction_job(
     )
     session.content_hash = content_hash
 
+    # Detect whether this uploaded document is a Cover Note / Policy Schedule vs a Quotation
+    raw_doc_text = str(full.get("raw_text") or full.get("ocr_text") or "")
+    from app.extraction.candidate_finder import detect_is_covernote
+    is_cn = detect_is_covernote(text=raw_doc_text, filename=uploaded.original_filename)
+
+    curr_opts = draft.display_options or {}
+
+    if is_cn:
+        session.document_type = "covernote"
+        curr_opts["document_type"] = "covernote"
+
+        # Extract and persist policy number
+        cand_pno = str((draft.fields.get("policy_number") or {}).get("value") or "").strip()
+        if not cand_pno:
+            cand_qno = str((draft.fields.get("quotation_no") or {}).get("value") or "").strip()
+            if cand_qno and any(ch in cand_qno for ch in ["/", "-", "."]):
+                cand_pno = cand_qno
+        if cand_pno:
+            session.policy_number = cand_pno
+            tenure.policy_number = cand_pno
+
+        # Anchor Cover Note directly into tenure
+        tenure.covernote_session_id = session.id
+        if parsed_s_start:
+            tenure.coverage_start_date = parsed_s_start
+            tenure.coverage_end_date = parsed_s_end
+            tenure.expiry_month = parsed_s_end.strftime("%Y-%m")
+
+        if company_id:
+            tenure.winning_company_id = company_id
+        elif session.detected_company:
+            from app.models.tables import InsuranceCompany
+            matching_comp = db.scalar(
+                select(InsuranceCompany).where(
+                    InsuranceCompany.status == AccountStatus.ACTIVE.value,
+                    InsuranceCompany.name.ilike(f"%{session.detected_company.strip()}%"),
+                )
+            )
+            if matching_comp:
+                tenure.winning_company_id = matching_comp.id
+
+        tot_val = (draft.fields.get("total_amount") or {}).get("value") or (draft.fields.get("total_payable") or {}).get("value")
+        if tot_val:
+            try:
+                tenure.won_premium = float(str(tot_val).replace(",", "").replace("RM", "").strip())
+            except (ValueError, TypeError):
+                pass
+
+        # Advance stage to "Issue Policy" ready for 1-click HIT sealing
+        if tenure.stage in ("Quotations", "Material to Client", None, "draft"):
+            tenure.stage = "Issue Policy"
+            stage_hist = dict(tenure.stage_history or {})
+            stage_hist["Issue Policy"] = datetime.now(timezone.utc).isoformat()
+            tenure.stage_history = stage_hist
+            tenure.stage_updated_at = datetime.now(timezone.utc)
+    else:
+        session.document_type = "quotation"
+        curr_opts["document_type"] = "quotation"
+
     action, existing_sess, version = evaluate_tenure_ingestion(
         db=db,
         tenure_id=tenure.id,
@@ -608,7 +665,6 @@ def process_extraction_job(
         content_hash=content_hash,
         current_session_id=session.id,
     )
-    curr_opts = draft.display_options or {}
     if action == "SKIP_IDENTICAL" and existing_sess and existing_sess.id != session.id:
         from app.models.tables import Session as SessionModel
         existing_company_sessions = list(

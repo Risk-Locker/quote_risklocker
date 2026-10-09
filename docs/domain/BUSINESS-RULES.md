@@ -26,6 +26,15 @@
 - Never show OCR, parser, regex, confidence, coordinates, storage keys, provider URLs, or technical stack traces to Staff.
 - Quotation reference numbers (`quotation_reference`) are NEVER extracted from insurer quotation PDFs or underwriter documents. Reference numbers are strictly internal system sequences formatted as `RL{YY}{SEQ:07d}` (e.g. `RL260000001`), partitioned and reset by real-time calendar year (`Asia/Kuala_Lumpur` business clock), and managed atomically via database sequence counters.
 
+## Quotation vs Cover Note Policy Separation
+
+- Uploaded PDFs are differentiated as either **Quotations** (price comparison candidates) or **Cover Notes / Policy Schedules** (official issued binding policies) using filename cues (`cn`, `cover note`, `schedule`, `polisi`, `policy`) and text cues.
+- **Never Show Cover Notes in Comparison Columns**: A Cover Note is an issued binding policy, not a comparison quote. Cover Note sessions are strictly excluded from `TenureComparisonEntry` creation and matrix comparison columns.
+- **Current Policy Binding**: When a Cover Note is uploaded, it directly populates the **Current Policy** box (top right) with its authentic Policy Period (`start_date` to `end_date`), underwriter, sum insured, canonical perils (Comprehensive/TPFT/TPO, windscreen, towing), and final premium.
+- **Auto-Transition to Issue Policy**: Linking a Cover Note automatically advances the insurance tenure stage to `Issue Policy`. Quotations can still be uploaded alongside for record-keeping without overwriting the issued Cover Note.
+- **Convert and Unlink Ergonomics**: Staff can convert any uploaded quotation into the issued Cover Note ("Mark as Issued Cover Note") or unlink/delete an existing Cover Note, which restores the session as a comparison quotation and allows re-selection.
+- **Motor Renewal Ledger Visibility**: The ledger replaces generic placeholder activity with authentic Cover Note data (policy period, underwriter, policy number, perils, and direct link to Policy PDF). Sourced quotes render as individual insurer quick-links (`[Etiqa RM 1,420]`) with `target="_blank"` for native new-tab opening. When stage is `Issue Policy`, a 1-click `[Confirm Hit ✓]` button facilitates instant deal confirmation.
+
 ## Catalog Benefit Semantics
 
 - A benefit concept is the stable facility (for example towing or windscreen); `base`, `upgrade`, and `optional` describe how a pinned company/product/tier offers that concept.

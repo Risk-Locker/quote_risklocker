@@ -1347,7 +1347,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       if (isEV) {
         const computedRT = computeMalaysianRoadTax(rawParsed, vtype, "Individual");
         if (computedRT > 0) {
-          rtax = computedRT.toFixed(2);
+          const currentRT = parseFloat(String(rtax || "").replace(/[^0-9.]/g, "")) || 0;
+          if (currentRT === 0) {
+            rtax = computedRT.toFixed(2);
+          }
         }
       } else if (rawParsed <= 7000) {
         const parsedCC = Math.round(rawParsed);
@@ -1356,7 +1359,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         const computedRT = computeMalaysianRoadTax(parsedCC, baseType, isCompany ? "Company" : "Individual");
         if (computedRT > 0) {
           const currentRT = parseFloat(String(rtax || "").replace(/[^0-9.]/g, "")) || 0;
-          if (currentRT === 0 || currentRT > 10000 || (isCompany && currentRT < computedRT) || vtype === "NonSaloonCar") {
+          if (currentRT === 0) {
             rtax = computedRT.toFixed(2);
           }
         }

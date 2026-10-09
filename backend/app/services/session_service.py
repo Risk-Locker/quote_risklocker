@@ -271,6 +271,8 @@ def serialize_session(
         "vehicle_model": vehicle_model,
         "total_premium": total_premium,
         "quotation_status": session.quotation_status or "pending",
+        "document_type": getattr(session, "document_type", "quotation"),
+        "policy_number": getattr(session, "policy_number", None),
         "miss_reason": session.miss_reason,
         "coverage_start_date": session.coverage_start_date.isoformat() if session.coverage_start_date else None,
         "coverage_end_date": session.coverage_end_date.isoformat() if session.coverage_end_date else None,

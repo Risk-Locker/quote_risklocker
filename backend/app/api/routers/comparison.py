@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -616,3 +616,103 @@ def resolve_duplicate_session(
 
     db.commit()
     return {"status": "success", "session_id": session_id, "action": action}
+
+
+class ConvertDocumentTypeRequest(BaseModel):
+    document_type: str = Field(..., description="'covernote' or 'quotation'")
+
+
+@router.post("/{tenure_id}/sessions/{session_id}/convert-type")
+def convert_session_document_type(
+    tenure_id: str,
+    session_id: str,
+    payload: ConvertDocumentTypeRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Toggle a session between Cover Note (Issued Policy) and Quotation."""
+    tenure = db.get(InsuranceTenure, tenure_id)
+    if not tenure:
+        raise HTTPException(status_code=404, detail="Tenure not found")
+    session = db.get(SessionModel, session_id)
+    if not session or session.tenure_id != tenure_id:
+        raise HTTPException(status_code=404, detail="Session not found under this tenure")
+
+    target_type = payload.document_type.lower().strip()
+    if target_type not in ("covernote", "quotation"):
+        raise HTTPException(status_code=400, detail="Invalid document_type. Must be 'covernote' or 'quotation'.")
+
+    session.document_type = target_type
+
+    if target_type == "covernote":
+        # Remove any existing comparison entry for this session
+        entries = list(
+            db.scalars(
+                select(TenureComparisonEntry).where(
+                    TenureComparisonEntry.tenure_id == tenure_id,
+                    TenureComparisonEntry.session_id == session.id,
+                )
+            ).all()
+        )
+        for e in entries:
+            db.delete(e)
+
+        # Bind as the active cover note for the tenure
+        tenure.covernote_session_id = session.id
+        if session.coverage_start_date:
+            tenure.coverage_start_date = session.coverage_start_date
+        if session.coverage_end_date:
+            tenure.coverage_end_date = session.coverage_end_date
+            tenure.expiry_month = session.coverage_end_date.strftime("%Y-%m")
+        if getattr(session, "company_id", None):
+            tenure.winning_company_id = session.company_id
+        if session.policy_number:
+            tenure.policy_number = session.policy_number
+        if session.draft and isinstance(session.draft.fields, dict):
+            tot_val = (session.draft.fields.get("total_amount") or {}).get("value") or (session.draft.fields.get("total_payable") or {}).get("value")
+            if tot_val:
+                try:
+                    tenure.won_premium = float(str(tot_val).replace(",", "").replace("RM", "").strip())
+                except (ValueError, TypeError):
+                    pass
+
+        if tenure.stage in ("Quotations", "Material to Client", None, "draft"):
+            tenure.stage = "Issue Policy"
+            stage_hist = dict(tenure.stage_history or {})
+            stage_hist["Issue Policy"] = datetime.now(timezone.utc).isoformat()
+            tenure.stage_history = stage_hist
+            tenure.stage_updated_at = datetime.now(timezone.utc)
+    else:
+        # Revert back to quotation: clear covernote link if this was the covernote
+        if tenure.covernote_session_id == session.id:
+            tenure.covernote_session_id = None
+        if tenure.stage == "Issue Policy":
+            tenure.stage = "Quotations"
+            tenure.stage_updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    return {"status": "success", "session_id": session_id, "document_type": target_type}
+
+
+@router.delete("/{tenure_id}/covernote")
+def unlink_tenure_covernote(
+    tenure_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Unlink the active Cover Note from the tenure without deleting the session/file."""
+    tenure = db.get(InsuranceTenure, tenure_id)
+    if not tenure:
+        raise HTTPException(status_code=404, detail="Tenure not found")
+
+    if tenure.covernote_session_id:
+        cn_s = db.get(SessionModel, tenure.covernote_session_id)
+        if cn_s:
+            cn_s.document_type = "quotation"
+        tenure.covernote_session_id = None
+        if tenure.stage == "Issue Policy":
+            tenure.stage = "Quotations"
+            tenure.stage_updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    return {"status": "success", "tenure_id": tenure_id, "message": "Cover note unlinked successfully"}

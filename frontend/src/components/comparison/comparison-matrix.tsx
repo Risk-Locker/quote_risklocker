@@ -89,6 +89,8 @@ interface TenureSpec {
   vehicle_type: string;
   winning_file_id?: string | null;
   winning_file_name?: string | null;
+  policy_number?: string | null;
+  covernote_session_id?: string | null;
 }
 
 interface ComparisonEntry {
@@ -218,6 +220,33 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       created_at: string;
       has_pdf: boolean;
     }>;
+    covernote_policy?: {
+      session_id: string;
+      document_type: string;
+      policy_number?: string | null;
+      company_name: string;
+      company_id?: string | null;
+      sum_insured: number;
+      valuation_type: string;
+      motor_premium: number;
+      road_tax: number;
+      runner_fee: number;
+      total_payable: number;
+      rounded_total_payable?: number | null;
+      towing_limit: string;
+      towing_km?: string;
+      agreed_value: boolean;
+      excess: number;
+      windscreen_sum_insured: number | null;
+      canonical_perils: string[];
+      canonical_perils_formatted: string;
+      coverage_start_date?: string | null;
+      coverage_end_date?: string | null;
+      coverage_period_formatted?: string | null;
+      uploaded_file_id?: string | null;
+      original_filename?: string | null;
+      is_covernote: boolean;
+    } | null;
     detection_logs?: {
       vehicle?: {
         model?: string;
@@ -249,6 +278,49 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [copiedWhatsapp, setCopiedWhatsapp] = useState(false);
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<ComparisonEntry | null>(null);
+  const [isUnlinkingCovernote, setIsUnlinkingCovernote] = useState(false);
+  const [promotingEntryId, setPromotingEntryId] = useState<string | null>(null);
+
+  const handleUnlinkCovernote = async () => {
+    if (!confirm("Are you sure you want to unlink this Cover Note? The policy status will revert from Issued Policy back to quotation comparison mode.")) {
+      return;
+    }
+    try {
+      setIsUnlinkingCovernote(true);
+      await api(`/comparison/${tenureId}/covernote`, {
+        method: "DELETE",
+      });
+      triggerStatus("success", "Cover Note Unlinked", "The cover note was unlinked and the tenure status was updated.");
+      await fetchComparison(true);
+    } catch (err: any) {
+      alert("Failed to unlink cover note: " + (err.message || String(err)));
+    } finally {
+      setIsUnlinkingCovernote(false);
+    }
+  };
+
+  const handlePromoteToCovernote = async (entry: ComparisonEntry) => {
+    if (!entry.session_id) {
+      alert("This quotation does not have an attached PDF session.");
+      return;
+    }
+    if (!confirm(`Mark ${entry.company_name} as the official issued Cover Note / Policy for this vehicle? This will move it from the comparison matrix into the Current Policy section and transition the tenure to Issued Policy.`)) {
+      return;
+    }
+    try {
+      setPromotingEntryId(entry.id);
+      await api(`/comparison/${tenureId}/sessions/${entry.session_id}/convert-type`, {
+        method: "POST",
+        body: JSON.stringify({ document_type: "covernote" }),
+      });
+      triggerStatus("success", "Cover Note Issued", `${entry.company_name} is now designated as the official issued Cover Note.`);
+      await fetchComparison(true);
+    } catch (err: any) {
+      alert("Failed to convert document type: " + (err.message || String(err)));
+    } finally {
+      setPromotingEntryId(null);
+    }
+  };
 
   // Source PDF Viewer State & Resizer/Docking
   const [activePdfSession, setActivePdfSession] = useState<{
@@ -943,6 +1015,16 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   }, [data?.entries, visibleDisplayEntries, visibleRanksMap]);
 
   const activeWinnerPeriod = useMemo(() => {
+    if (data?.covernote_policy?.coverage_period_formatted) {
+      return data.covernote_policy.coverage_period_formatted;
+    }
+    if (data?.covernote_policy?.coverage_start_date) {
+      const s = new Date(data.covernote_policy.coverage_start_date).toLocaleDateString("en-GB");
+      const e = data.covernote_policy.coverage_end_date
+        ? new Date(data.covernote_policy.coverage_end_date).toLocaleDateString("en-GB")
+        : "";
+      return e ? `${s} - ${e}` : s;
+    }
     if (currentPolicyWinner?.coverage_period_formatted) {
       return currentPolicyWinner.coverage_period_formatted;
     }
@@ -954,7 +1036,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       return e ? `${s} - ${e}` : s;
     }
     return data?.tenure?.coverage_period_formatted || "—";
-  }, [currentPolicyWinner, data?.tenure?.coverage_period_formatted]);
+  }, [data?.covernote_policy, currentPolicyWinner, data?.tenure?.coverage_period_formatted]);
 
   if (loading && !data) {
     return (
@@ -1497,56 +1579,61 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             )}
           </Button>
 
-          {/* Generate Quotation Button for this specific card */}
-          <Button
-            variant="secondary"
-            size="sm"
-            className="w-full text-xs font-bold border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717]"
-            loading={generatingQuoteEntryId === entry.id}
-            onClick={() => handleGenerateSingleQuote(entry.id)}
-            icon={<FilePdf size={14} weight="bold" className="text-[#ed1c24]" />}
-            title="Generate official Risk-Locker quotation draft from this underwriter"
-          >
-            Generate Quotation
-          </Button>
-
-          {/* Direct Review & Issue Action if session exists */}
-          {entry.session_id && (
+          {/* Direct Quotation Workspace Action */}
+          {entry.session_id ? (
             <Link
               href={`/sessions/${entry.session_id}/review` as Route}
               target="_blank"
               rel="noopener noreferrer"
-              className={`flex items-center justify-center gap-1.5 w-full py-1.5 rounded-lg text-xs font-bold transition-colors shadow-2xs ${
+              className={`flex items-center justify-center gap-1.5 w-full py-2 px-3 rounded-lg text-xs font-bold transition-all shadow-2xs ${
                 isWinner
                   ? "text-[#ed1c24] bg-rose-50 hover:bg-rose-100 border border-rose-200"
                   : "text-[#1b1717] bg-white hover:bg-neutral-100 border border-[#e5e5ea]"
               }`}
+              title="Open quotation in the unified Quotation Workspace to review benefits, edit draft fields, and preview/generate customer PDF"
             >
               <FilePdf size={14} weight="bold" className={isWinner ? "text-[#ed1c24]" : "text-[#454545]"} />
-              <span>{isWinner ? "Review & Issue Winner PDF →" : "Review & Edit Draft →"}</span>
+              <span>{isWinner ? "Open Winner in Quotation Workspace →" : "Edit in Quotation Workspace →"}</span>
             </Link>
-          )}
+          ) : null}
 
-          <div className="flex items-center justify-between px-1 pt-1">
+          {/* Edit Quote Details Button (prominent and always editable) */}
+          <button
+            type="button"
+            onClick={() => {
+              setEditingEntry(entry);
+              setIsManualModalOpen(true);
+            }}
+            className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg text-xs font-semibold bg-white hover:bg-neutral-50 text-[#1b1717] border border-[#e5e5ea] shadow-2xs cursor-pointer transition-colors"
+            title="Edit underwriter quotation details, sums insured, motor premium, excess, and perils"
+          >
+            <PencilSimple size={13} weight="bold" />
+            <span>Edit Quote Details</span>
+          </button>
+
+          {/* Promote to Official Issued Cover Note */}
+          {entry.session_id && (
             <button
               type="button"
-              onClick={() => {
-                setEditingEntry(entry);
-                setIsManualModalOpen(true);
-              }}
-              className="text-xs font-medium text-[#454545] hover:text-[#1b1717] flex items-center gap-1 cursor-pointer"
+              onClick={() => handlePromoteToCovernote(entry)}
+              disabled={promotingEntryId === entry.id}
+              className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all shadow-2xs bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 cursor-pointer disabled:opacity-50"
+              title="Promote this underwriter quote to official issued Cover Note"
             >
-              <PencilSimple size={13} />
-              Edit
+              <CheckCircle size={14} weight="bold" className="text-emerald-700" />
+              <span>{promotingEntryId === entry.id ? "Promoting..." : "Mark as Issued Cover Note"}</span>
             </button>
+          )}
 
+          <div className="flex items-center justify-end px-1 pt-1">
             <button
               type="button"
               onClick={() => handleDeleteEntry(entry.id)}
               className="text-xs font-medium text-[#ed1c24] hover:text-[#c4171e] flex items-center gap-1 cursor-pointer"
+              title="Delete this underwriter comparison column"
             >
               <Trash size={13} />
-              Delete
+              Delete Column
             </button>
           </div>
         </div>
@@ -2004,27 +2091,14 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             Print
           </Button>
 
-          {entries.length > 0 && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleGenerateAllQuotes}
-              loading={generatingAllQuotes}
-              icon={<FilePdf weight="bold" size={16} className="text-[#ed1c24]" />}
-              className="border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717] font-semibold"
-              title="Generate official Risk-Locker quotations for all underwriter options"
-            >
-              Generate All Quotations
-            </Button>
-          )}
-
+          {/* Single Unified Upload PDF Action */}
           <Link
             href={`/upload?mode=comparison&tenure_id=${tenure.id}` as Route}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e5e5ea] bg-white hover:bg-neutral-50 text-xs font-semibold text-[#1b1717] transition-colors shadow-2xs"
-            title="Upload additional quotation PDFs for this vehicle"
+            title="Upload underwriter quotation or cover note PDF for this vehicle"
           >
             <UploadSimple size={15} weight="bold" />
-            <span>Upload Quotes</span>
+            <span>Upload PDF</span>
           </Link>
 
           <Button
@@ -2178,11 +2252,15 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             <div className="pt-3 space-y-1.5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-[#6e6e73] uppercase">Insurance Period (保险日期)</span>
-                {currentPolicyWinner && (
+                {data.covernote_policy ? (
+                  <span className="text-[10px] text-emerald-800 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-300 flex items-center gap-1">
+                    <CheckCircle size={11} weight="fill" /> Issued Cover Note
+                  </span>
+                ) : currentPolicyWinner ? (
                   <span className="text-[10px] text-emerald-800 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                     {currentPolicyWinner.is_recommended ? "★ Winner Policy" : "Active Quote"}
                   </span>
-                )}
+                ) : null}
                 {editingFixedCosts && (
                   <span className="text-[10px] text-indigo-700 font-bold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
                     Auto 1-Year Sync
@@ -2213,7 +2291,24 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               ) : (
                 <div className="space-y-1">
                   <p className="font-mono font-bold text-xs text-[#1b1717]">{activeWinnerPeriod}</p>
-                  {currentPolicyWinner && (
+                  {data.covernote_policy ? (
+                    <p className="text-[10px] text-[#6e6e73] flex items-center gap-1">
+                      <span>Source:</span>
+                      <strong className="text-emerald-900 font-bold">{data.covernote_policy.company_name}</strong>
+                      <span className="text-neutral-500 font-mono">({data.covernote_policy.policy_number || "Official Issue"})</span>
+                      {data.covernote_policy.uploaded_file_id && (
+                        <a
+                          href={`/api/quotations/files/${data.covernote_policy.uploaded_file_id}/download`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-emerald-700 hover:text-emerald-900 underline ml-1 font-semibold"
+                          title="Open official Cover Note PDF"
+                        >
+                          [Policy PDF]
+                        </a>
+                      )}
+                    </p>
+                  ) : currentPolicyWinner ? (
                     <p className="text-[10px] text-[#6e6e73] flex items-center gap-1">
                       <span>Source:</span>
                       <strong className="text-neutral-800">{currentPolicyWinner.company_name}</strong>
@@ -2229,7 +2324,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                         </a>
                       )}
                     </p>
-                  )}
+                  ) : null}
                 </div>
               )}
             </div>
@@ -2636,14 +2731,13 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                   </div>
 
                   <div className="flex items-center gap-2 pt-2">
-                    <Button
-                      type="button"
-                      onClick={() => router.push(`/upload/marketing-comparison?tenure_id=${tenureId}` as Route)}
-                      className="bg-[#1b1717] hover:bg-black text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer"
+                    <Link
+                      href={`/upload?mode=comparison&tenure_id=${tenureId}` as Route}
+                      className="bg-[#1b1717] hover:bg-black text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer inline-flex items-center gap-1.5"
                     >
-                      <Plus size={14} weight="bold" className="mr-1.5" />
-                      Upload Quotation PDFs
-                    </Button>
+                      <UploadSimple size={14} weight="bold" />
+                      <span>Upload PDF</span>
+                    </Link>
                     <Button
                       type="button"
                       variant="secondary"
@@ -2685,9 +2779,140 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         {/* RIGHT PANE: Previous Policy & Valuation Matrix                 */}
         {/* ============================================================== */}
         <div className="space-y-4 sticky top-6">
-          {/* Current Policy Card (Dynamically reflecting selected winner quote terms) */}
+          {/* Current Policy Card (Official Cover Note OR Leading Option) */}
           {(() => {
             const currentYear = tenure.coverage_start_date ? new Date(tenure.coverage_start_date).getFullYear() : new Date().getFullYear();
+            const cn = data.covernote_policy;
+
+            if (cn) {
+              return (
+                <div className="rounded-2xl border-2 border-emerald-600 bg-gradient-to-b from-emerald-50/30 to-white p-4 shadow-md ring-2 ring-emerald-500/15">
+                  <div className="flex items-center justify-between border-b border-emerald-200 pb-2.5 mb-3">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold uppercase tracking-wider text-emerald-950">
+                        Current Policy ({currentYear})
+                      </span>
+                      <span className="rounded bg-emerald-700 text-white font-bold px-1.5 py-0.5 text-[9px] uppercase flex items-center gap-1">
+                        <CheckCircle size={10} weight="fill" /> Issued Cover Note
+                      </span>
+                    </div>
+                    <span className="rounded bg-emerald-900 px-2 py-0.5 text-xs font-bold text-white uppercase">
+                      {cn.company_name}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2 text-xs text-[#454545]">
+                    {/* Policy / Cover Note Number */}
+                    <div className="flex justify-between items-center py-1 border-b border-emerald-100 bg-emerald-50/70 -mx-4 px-4">
+                      <span className="text-[11px] font-bold text-emerald-900">Cover Note / Policy #:</span>
+                      <span className="font-mono font-bold text-xs text-emerald-950">{cn.policy_number || tenure.policy_number || "CN-ISSUED"}</span>
+                    </div>
+
+                    {/* Period of Insurance */}
+                    <div className="flex justify-between items-center">
+                      <span className="text-neutral-500">Insurance Period:</span>
+                      <span className="font-mono font-bold text-neutral-900">
+                        {cn.coverage_period_formatted || "—"}
+                      </span>
+                    </div>
+
+                    {/* Sum Insured */}
+                    <div className="flex justify-between">
+                      <span className="text-neutral-500">Sum Insured:</span>
+                      <span className="font-mono font-bold text-neutral-900">
+                        RM {cn.sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                        <span className="text-[10px] text-neutral-500 font-normal ml-1">
+                          ({cn.valuation_type === "agreed_value" ? "Agreed" : "Market"})
+                        </span>
+                      </span>
+                    </div>
+
+                    {/* Premium / Final Payable */}
+                    <div className="flex justify-between">
+                      <span className="text-neutral-500">Premium Payable:</span>
+                      <span className="font-mono font-bold text-emerald-700">
+                        RM {(cn.rounded_total_payable != null ? cn.rounded_total_payable : cn.total_payable).toFixed(2)}
+                      </span>
+                    </div>
+
+                    {/* Fixed Costs */}
+                    <div className="flex justify-between">
+                      <span className="text-neutral-500">Fixed Costs:</span>
+                      <span className="font-mono font-medium text-neutral-700">
+                        RM {(cn.road_tax + cn.runner_fee).toFixed(2)} (Tax + Runner)
+                      </span>
+                    </div>
+
+                    {/* Included Perils */}
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-neutral-500 shrink-0">Included Perils:</span>
+                      <span className="font-medium text-emerald-900 text-right">
+                        {cn.canonical_perils_formatted || "Comprehensive Policy Coverage"}
+                      </span>
+                    </div>
+
+                    {/* Riders breakdown */}
+                    <div className="mt-2 space-y-1">
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-neutral-500">Windscreen:</span>
+                        <span className="font-mono font-medium text-neutral-800">
+                          {cn.windscreen_sum_insured ? `RM ${cn.windscreen_sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}` : "—"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-neutral-500">Towing:</span>
+                        <span className="font-mono font-medium text-neutral-800">
+                          {formatBenefitCoverage(cn.towing_km || cn.towing_limit || "Unlimited", "KM")}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between pt-1">
+                      <span className="text-neutral-500">Model:</span>
+                      <span className="font-medium text-neutral-900 text-right truncate max-w-[150px]">
+                        {tenure.vehicle_model}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-neutral-500">YOM:</span>
+                      <span className="font-medium text-neutral-900 text-right">
+                        {tenure.manufacture_year || ""}
+                      </span>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="pt-3 border-t border-emerald-200 flex items-center gap-2">
+                      {cn.uploaded_file_id && (
+                        <a
+                          href={`/api/quotations/files/${cn.uploaded_file_id}/download`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 shadow-2xs transition-colors"
+                          title="View / download original Cover Note PDF"
+                        >
+                          <FilePdf size={14} weight="bold" />
+                          <span>View Policy PDF</span>
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleUnlinkCovernote}
+                        disabled={isUnlinkingCovernote}
+                        className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-700 hover:text-rose-900 hover:bg-rose-50 border border-rose-200 transition-colors cursor-pointer disabled:opacity-50"
+                        title="Unlink this cover note and revert policy stage"
+                      >
+                        {isUnlinkingCovernote ? "Unlinking..." : "Unlink"}
+                      </button>
+                    </div>
+
+                    <div className="mt-2 text-center text-[10px] font-bold text-emerald-800 bg-emerald-100/70 rounded py-1 border border-emerald-200/80">
+                      ✓ Policy Issued · Verified Binding Terms
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
             return (
               <div className="rounded-2xl border-2 border-[#1b1717] bg-white p-4 shadow-sm">
                 <div className="flex items-center justify-between border-b border-[#e5e5ea] pb-2.5 mb-3">
@@ -2775,10 +3000,11 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                         {tenure.manufacture_year || ""}
                       </span>
                     </div>
+
                   </div>
                 ) : (
                   <div className="text-center py-4 text-xs text-[#6e6e73]">
-                    <p>No quotes active yet.</p>
+                    <p>No policy or quotations active yet.</p>
                   </div>
                 )}
               </div>

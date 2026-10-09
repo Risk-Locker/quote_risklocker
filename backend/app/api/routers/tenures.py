@@ -636,6 +636,9 @@ def list_tenures(
         sourced = []
         gen_quotes = []
         for s in sessions:
+            if getattr(s, "document_type", "quotation") == "covernote" or s.id == t.covernote_session_id:
+                continue
+
             draft = s.draft
             f = draft.fields if draft else {}
             def _val(k: str) -> Any:
@@ -670,6 +673,8 @@ def list_tenures(
                 "coverage_start_date": s_start,
                 "coverage_end_date": s_end,
                 "coverage_period_formatted": s_period,
+                "document_type": getattr(s, "document_type", "quotation"),
+                "policy_number": getattr(s, "policy_number", None),
                 "is_winner": is_win,
             })
 
@@ -684,11 +689,49 @@ def list_tenures(
         stage_up = t.stage_updated_at if t.stage_updated_at.tzinfo else t.stage_updated_at.replace(tzinfo=timezone.utc)
         days_in_stage = max(0, (now - stage_up).days) if t.stage_updated_at else 0
 
+        # Locate active cover note session for this tenure
+        cn_sess = next((s for s in sessions if s.id == t.covernote_session_id), None)
+        if not cn_sess:
+            cn_sess = next((s for s in sessions if getattr(s, "document_type", "quotation") == "covernote"), None)
+
+        covernote_info = None
+        if cn_sess:
+            f_cn = cn_sess.draft.fields if cn_sess.draft and isinstance(cn_sess.draft.fields, dict) else {}
+            def _cn_val(k: str) -> Any:
+                item = f_cn.get(k)
+                return item.get("value") if isinstance(item, dict) else item
+
+            s_date = cn_sess.coverage_start_date or t.coverage_start_date
+            e_date = cn_sess.coverage_end_date or t.coverage_end_date
+            s_fmt = s_date.strftime("%d/%m/%Y") if s_date else ""
+            e_fmt = e_date.strftime("%d/%m/%Y") if e_date else ""
+            cov_period_str = f"{s_fmt} - {e_fmt}" if s_fmt and e_fmt else (s_fmt or "—")
+
+            ws_val = _cn_val("windscreen_sum_insured") or _cn_val("windscreen")
+            tow_val = _cn_val("towing_km") or _cn_val("towing") or _cn_val("towing_limit") or "Unlimited"
+            cov_type = str(_cn_val("coverage_type") or "Comprehensive").title()
+
+            covernote_info = {
+                "session_id": cn_sess.id,
+                "company": cn_sess.detected_company or (t.winning_company.name if t.winning_company else "Underwriter"),
+                "policy_number": cn_sess.policy_number or t.policy_number,
+                "total_payable": _cn_val("total_amount") or _cn_val("total_payable") or (float(t.won_premium) if t.won_premium is not None else None),
+                "sum_insured": _cn_val("sum_insured") or _cn_val("coverage_amount"),
+                "coverage_start_date": s_date.isoformat() if s_date else None,
+                "coverage_end_date": e_date.isoformat() if e_date else None,
+                "coverage_period_formatted": cov_period_str,
+                "perils": f"{cov_type} Policy",
+                "windscreen": ws_val,
+                "towing": tow_val,
+                "uploaded_file_id": cn_sess.uploaded_file_id,
+                "file_name": cn_sess.uploaded_file.original_filename if cn_sess.uploaded_file else f"{cn_sess.detected_company or 'Policy'}.pdf",
+            }
+
         win_quote = next((sq for sq in sourced if sq.get("is_winner")), None)
         if not win_quote and sourced:
             win_quote = sourced[0]
-        winning_file_id = win_quote.get("uploaded_file_id") if win_quote else None
-        winning_file_name = win_quote.get("file_name") if win_quote else None
+        winning_file_id = (cn_sess.uploaded_file_id if cn_sess else None) or (win_quote.get("uploaded_file_id") if win_quote else None)
+        winning_file_name = (cn_sess.uploaded_file.original_filename if cn_sess and cn_sess.uploaded_file else None) or (win_quote.get("file_name") if win_quote else None)
 
         items.append({
             "id": t.id,
@@ -723,6 +766,10 @@ def list_tenures(
             "winning_quotation_ref": t.winning_quotation_ref,
             "winning_file_id": winning_file_id,
             "winning_file_name": winning_file_name,
+            "covernote_session_id": t.covernote_session_id,
+            "policy_number": t.policy_number or (cn_sess.policy_number if cn_sess else None),
+            "covernote_policy": covernote_info,
+            "is_covernote_issued": bool(covernote_info),
             "won_premium": float(t.won_premium) if t.won_premium is not None else None,
             "miss_reason": t.miss_reason,
             "loss_reason_category": t.loss_reason_category,
@@ -828,12 +875,12 @@ def update_tenure_ledger_fields(
     if payload.winning_company_id is not None:
         tenure.winning_company_id = payload.winning_company_id
     elif payload.winning_company_name is not None and payload.winning_company_name.strip():
-        from app.models.tables import Company
+        from app.models.tables import InsuranceCompany
         comp = db.scalar(
-            select(Company).where(
+            select(InsuranceCompany).where(
                 or_(
-                    Company.name.ilike(payload.winning_company_name.strip()),
-                    Company.code.ilike(payload.winning_company_name.strip()),
+                    InsuranceCompany.name.ilike(payload.winning_company_name.strip()),
+                    InsuranceCompany.code.ilike(payload.winning_company_name.strip()),
                 )
             )
         )

@@ -21,36 +21,47 @@ export type FieldKind = "text" | "date" | "percent" | "money" | "total" | "vehic
 
 export type FormField = { name: string; label: string; kind: FieldKind };
 
-export const FORM_FIELDS: FormField[] = [
+export const PRIMARY_POLICY_FIELDS: FormField[] = [
+  { name: "vehicle_no", label: "Vehicle no. / Car plate", kind: "text" },
   { name: "customer_name", label: "Insured name", kind: "text" },
   { name: "ic_or_brn", label: "NRIC / Business Reg. No.", kind: "text" },
-  { name: "quotation_reference", label: "Quotation ref", kind: "text" },
-  { name: "vehicle_no", label: "Vehicle no. / Car plate", kind: "text" },
-  { name: "vehicle_year", label: "Year of make", kind: "text" },
-  { name: "vehicle_type", label: "Vehicle type", kind: "vehicle_type" },
   { name: "car_model", label: "Car model", kind: "text" },
   { name: "engine_cc", label: "Engine CC / Capacity", kind: "text" },
-  { name: "chassis_no", label: "Chassis / VIN No.", kind: "text" },
-  { name: "engine_no", label: "Engine No.", kind: "text" },
-  { name: "sum_insured", label: "Sum insured / Market value", kind: "money" },
+  { name: "vehicle_year", label: "Year of make", kind: "text" },
+  { name: "vehicle_type", label: "Vehicle type", kind: "vehicle_type" },
   { name: "insurance_company", label: "Insurance name", kind: "text" },
   { name: "coverage_type", label: "Coverage type", kind: "text" },
   { name: "cover_period", label: "Cover period", kind: "text" },
+  { name: "sum_insured", label: "Sum insured / Market value", kind: "money" },
   { name: "valuation_type", label: "Valuation Type", kind: "valuation_type" },
+  { name: "ncd_percent", label: "NCD", kind: "percent" },
+  { name: "excess_amount", label: "Excess amount", kind: "money" },
+];
+
+export const PRICING_FIELDS: FormField[] = [
+  { name: "premium", label: "Insurance Premium (After NCD)", kind: "money" },
+  { name: "roadtax", label: "Road tax", kind: "money" },
+  { name: "service_fee", label: "Runner fee", kind: "money" },
+  { name: "total_amount", label: "Total Payable", kind: "total" },
+];
+
+export const ADVANCED_POLICY_FIELDS: FormField[] = [
+  { name: "chassis_no", label: "Chassis / VIN No.", kind: "text" },
+  { name: "engine_no", label: "Engine No.", kind: "text" },
+  { name: "quotation_reference", label: "Quotation ref", kind: "text" },
   { name: "authorized_driver", label: "Authorized Driver", kind: "text" },
   { name: "valid_until", label: "Quotation validity", kind: "text" },
-  { name: "excess_amount", label: "Excess amount", kind: "money" },
   { name: "compulsory_excess", label: "Compulsory excess", kind: "money" },
-  { name: "ncd_percent", label: "NCD", kind: "percent" },
   { name: "loading_amount", label: "Loading amount", kind: "money" },
   { name: "gross_premium", label: "Gross premium", kind: "money" },
   { name: "service_tax", label: "Service tax (SST)", kind: "money" },
   { name: "stamp_duty", label: "Stamp duty", kind: "money" },
-  { name: "premium", label: "Insurance Premium After NCD, Excluding Add-Ons", kind: "money" },
-  { name: "insurance_premium_total", label: "Insurance premium", kind: "total" },
-  { name: "roadtax", label: "Road tax", kind: "money" },
-  { name: "service_fee", label: "Runner fee", kind: "money" },
-  { name: "total_amount", label: "Total Payable", kind: "total" },
+];
+
+export const FORM_FIELDS: FormField[] = [
+  ...PRIMARY_POLICY_FIELDS,
+  ...ADVANCED_POLICY_FIELDS,
+  ...PRICING_FIELDS,
 ];
 
 export function detectEVCategory(
@@ -369,6 +380,519 @@ export function PolicyFieldsCard({
   categorizedProducts,
   pinCatalog,
 }: PolicyFieldsCardProps) {
+  const [advancedCollapsed, setAdvancedCollapsed] = React.useState(true);
+
+  const extraExtractedFields = Object.entries(workspace.fields || {}).filter(
+    ([k, v]) =>
+      !FORM_FIELDS.some((f) => f.name === k) &&
+      !k.startsWith("_") &&
+      v &&
+      typeof v === "object" &&
+      "value" in v &&
+      (v as WorkspaceField).value
+  );
+
+  const renderField = (field: FormField, isPricing: boolean = false) => {
+    let stored = workspace.fields[field.name] as WorkspaceField | undefined;
+    if (field.name === "sum_insured") {
+      const numStored = parseFloat(String(stored?.value || "").replace(/[^0-9.]/g, ""));
+      const altCov = (workspace.fields["coverage_amount"] as WorkspaceField | undefined)?.value;
+      const numAlt = parseFloat(String(altCov || "").replace(/[^0-9.]/g, ""));
+      if ((!stored?.value || numStored < 1000) && numAlt >= 1000) {
+        stored = workspace.fields["coverage_amount"] as WorkspaceField | undefined;
+      } else if (!stored?.value) {
+        stored =
+          (workspace.fields["market_value"] as WorkspaceField | undefined) ||
+          (workspace.fields["agreed_value"] as WorkspaceField | undefined);
+      }
+    }
+    const empty = !stored?.value;
+    const needsCheck = !empty && stored?.status === "check_needed";
+    const isCurrentEV = (
+      formValues["vehicle_type"] ||
+      (workspace.fields?.vehicle_type as WorkspaceField | undefined)?.value ||
+      ""
+    )
+      .toLowerCase()
+      .includes("ev");
+    const fieldLabel =
+      field.name === "engine_cc"
+        ? isCurrentEV
+          ? "Motor Output (kW)"
+          : "Engine Capacity (CC)"
+        : field.label;
+    const fieldModified = isFieldModified(field.name);
+
+    return (
+      <label key={field.name} className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
+        <span className="flex items-center justify-between gap-1">
+          <span className="truncate">{fieldLabel}</span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {needsCheck ? <span className="text-[10px] text-amber-700 font-bold">Check value</span> : null}
+            {field.name === "total_amount" ? (
+              <button
+                type="button"
+                onClick={toggleRoundTotal}
+                className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold transition-all shadow-2xs ${
+                  roundTotal
+                    ? "bg-emerald-600 text-white border border-emerald-700"
+                    : "bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200"
+                }`}
+                title={
+                  roundTotal
+                    ? "Round figure active (0 cents). Click to toggle."
+                    : "Click to round figure total to whole RM (0 cents)."
+                }
+              >
+                <Check size={11} weight="bold" className={roundTotal ? "opacity-100" : "opacity-0"} />
+                <span>Round Figure</span>
+              </button>
+            ) : null}
+            {fieldModified ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleResetField(field);
+                }}
+                className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-300 hover:bg-amber-100 hover:text-amber-950 transition-colors shadow-2xs"
+                title={`Reset to detected: "${getDetectedValue(field.name)}"`}
+              >
+                <ArrowCounterClockwise size={11} weight="bold" />
+                <span>Reset</span>
+              </button>
+            ) : null}
+          </div>
+          {field.kind === "vehicle_type" &&
+          syncHighlight &&
+          syncHighlight.field === "vehicle_type" &&
+          Date.now() - syncHighlight.timestamp < 6000 ? (
+            <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 border border-emerald-300 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 shadow-xs animate-pulse">
+              <span className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider">Auto-synced</span>
+              <span className="line-through text-slate-400 font-normal">{syncHighlight.prev}</span>
+              <span className="text-emerald-500 font-bold">→</span>
+              <span className="bg-emerald-100 text-emerald-900 px-1 rounded font-bold">{syncHighlight.next}</span>
+            </span>
+          ) : null}
+        </span>
+        {field.kind === "vehicle_type" ? (
+          <div className="grid gap-1.5">
+            {/* Usage Scope Segmented Toggle: Private vs Commercial */}
+            <div className="flex items-center gap-1 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-0.5 text-xs">
+              {[
+                { id: "Individual", label: "👤 Private", isCommercial: false },
+                { id: "Company", label: "🏢 Commercial / Company", isCommercial: true },
+              ].map((usage) => {
+                const currentVtype = String(formValues[field.name] || "");
+                const currentClientType = String(formValues["client_type"] || "");
+                const isCurrentlyCompany =
+                  currentClientType.toLowerCase().includes("company") ||
+                  currentVtype.toLowerCase().includes("company");
+                const active = usage.isCommercial ? isCurrentlyCompany : !isCurrentlyCompany;
+                return (
+                  <button
+                    key={usage.id}
+                    type="button"
+                    onClick={() => {
+                      if (usage.isCommercial && !isCurrentlyCompany) {
+                        const newVtype =
+                          currentVtype === "Car"
+                            ? "CompanyCar"
+                            : currentVtype === "Motorcycle"
+                            ? "CompanyMotorcycle"
+                            : currentVtype;
+                        setFormValues((v) => ({ ...v, [field.name]: newVtype, client_type: "Company" }));
+                        commitFieldDirectly(field.name, newVtype);
+                        commitFieldDirectly("client_type", "Company");
+
+                        const companyProds = companyWorkspace?.products || [];
+                        const commProd = companyProds.find((p: any) =>
+                          /commercial.*car|company.*car|corporate/i.test(p.name || "")
+                        );
+                        if (commProd && workspace?.pinned.company_id) {
+                          pinCatalog(workspace.pinned.company_id as string, commProd.id);
+                          setSyncHighlight({
+                            field: "product_package",
+                            prev: "Private Package",
+                            next: formatProductLabel(commProd.name),
+                            timestamp: Date.now(),
+                          });
+                        }
+                      } else if (!usage.isCommercial && isCurrentlyCompany) {
+                        const newVtype =
+                          currentVtype === "CompanyCar"
+                            ? "Car"
+                            : currentVtype === "CompanyMotorcycle"
+                            ? "Motorcycle"
+                            : currentVtype;
+                        setFormValues((v) => ({ ...v, [field.name]: newVtype, client_type: "Individual" }));
+                        commitFieldDirectly(field.name, newVtype);
+                        commitFieldDirectly("client_type", "Individual");
+
+                        const companyProds = companyWorkspace?.products || [];
+                        const privProd = companyProds.find(
+                          (p: any) =>
+                            /private.*car.*comprehensive|auto365.*lite|auto365.*plus|sompo motor|private car/i.test(
+                              p.name || ""
+                            ) && !/commercial|company/i.test(p.name || "")
+                        );
+                        if (privProd && workspace?.pinned.company_id) {
+                          pinCatalog(workspace.pinned.company_id as string, privProd.id);
+                          setSyncHighlight({
+                            field: "product_package",
+                            prev: "Commercial Package",
+                            next: formatProductLabel(privProd.name),
+                            timestamp: Date.now(),
+                          });
+                        }
+                      }
+                    }}
+                    className={`flex-1 py-1 text-center font-bold text-[11px] rounded-[3px] transition-all ${
+                      active
+                        ? "bg-[var(--rl-black)] text-white shadow-xs"
+                        : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                    }`}
+                  >
+                    {usage.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Engine Type Segmented Toggle */}
+            <div className="flex items-center gap-1 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-0.5 text-xs">
+              {(["ICE", "EV"] as const).map((eng) => {
+                const currentVal = String(formValues[field.name] || "");
+                const isCurrentEVVal = currentVal.startsWith("EV");
+                const active = eng === "EV" ? isCurrentEVVal : !isCurrentEVVal;
+                return (
+                  <button
+                    key={eng}
+                    type="button"
+                    onClick={() => {
+                      if (eng === "EV" && !isCurrentEVVal) {
+                        const newVtype =
+                          currentVal === "NonSaloonCar"
+                            ? "EVNonSaloonCar"
+                            : currentVal.toLowerCase().includes("motor")
+                            ? "EVMotorcycle"
+                            : currentVal.toLowerCase().includes("lorry") || currentVal.toLowerCase().includes("other")
+                            ? "EVCommercial"
+                            : "EVSaloonCar";
+                        setFormValues((v) => ({ ...v, [field.name]: newVtype }));
+                        commitFieldDirectly(field.name, newVtype);
+
+                        const currentProd = (companyWorkspace?.products || []).find(
+                          (p: any) => p.id === workspace?.pinned?.product_id
+                        );
+                        const companyProds = companyWorkspace?.products || [];
+                        const matchingEv = companyProds.find((p: any) => {
+                          const nm = (p.name || "").toLowerCase();
+                          if (!/\(ev\)|(\bev\b)|electric/i.test(nm)) return false;
+                          if (newVtype.includes("Motor")) return /motor/i.test(nm);
+                          if (newVtype.includes("Commercial") || newVtype.toLowerCase().includes("lorry"))
+                            return /lorry|commercial/i.test(nm);
+                          return !/motor|lorry|commercial/i.test(nm);
+                        });
+                        if (matchingEv && workspace?.pinned.company_id) {
+                          pinCatalog(workspace.pinned.company_id as string, matchingEv.id);
+                          setSyncHighlight({
+                            field: "product_package",
+                            prev: currentProd ? formatProductLabel(currentProd.name) : "ICE Package",
+                            next: formatProductLabel(matchingEv.name),
+                            timestamp: Date.now(),
+                          });
+                        }
+                      } else if (eng === "ICE" && isCurrentEVVal) {
+                        const newVtype =
+                          currentVal === "EVNonSaloonCar"
+                            ? "NonSaloonCar"
+                            : currentVal === "EVMotorcycle"
+                            ? "Motorcycle"
+                            : currentVal === "EVCommercial"
+                            ? "Lorry"
+                            : "Car";
+                        setFormValues((v) => ({ ...v, [field.name]: newVtype }));
+                        commitFieldDirectly(field.name, newVtype);
+
+                        const currentProd = (companyWorkspace?.products || []).find(
+                          (p: any) => p.id === workspace?.pinned?.product_id
+                        );
+                        const companyProds = companyWorkspace?.products || [];
+                        const matchingIce = companyProds.find((p: any) => {
+                          const nm = (p.name || "").toLowerCase();
+                          if (/\(ev\)|(\bev\b)|electric/i.test(nm)) return false;
+                          if (newVtype.includes("Motor")) return /motor/i.test(nm);
+                          if (newVtype.includes("Commercial") || newVtype.toLowerCase().includes("lorry"))
+                            return /lorry|commercial/i.test(nm);
+                          return !/motor|lorry|commercial/i.test(nm);
+                        });
+                        if (matchingIce && workspace?.pinned.company_id) {
+                          pinCatalog(workspace.pinned.company_id as string, matchingIce.id);
+                          setSyncHighlight({
+                            field: "product_package",
+                            prev: currentProd ? formatProductLabel(currentProd.name) : "EV Package",
+                            next: formatProductLabel(matchingIce.name),
+                            timestamp: Date.now(),
+                          });
+                        }
+                      }
+                    }}
+                    className={`flex-1 py-1 text-center font-bold text-[11px] rounded-[3px] transition-all ${
+                      active
+                        ? "bg-[var(--rl-black)] text-white shadow-xs"
+                        : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                    }`}
+                  >
+                    {eng === "ICE" ? "ICE (Petrol / Diesel)" : "EV (Electric)"}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Filtered Vehicle Type Dropdown */}
+            <Select
+              value={
+                formValues[field.name] ||
+                (String(formValues[field.name] || "").startsWith("EV") ? "EVSaloonCar" : "Car")
+              }
+              onChange={(event) => {
+                const newVtype = event.target.value;
+                const isCompany =
+                  newVtype.toLowerCase().includes("company") || newVtype.toLowerCase().includes("corp");
+                setFormValues((values) => ({
+                  ...values,
+                  [field.name]: newVtype,
+                  ...(isCompany ? { client_type: "Company" } : {}),
+                }));
+                commitFieldDirectly(field.name, newVtype);
+                if (isCompany) {
+                  commitFieldDirectly("client_type", "Company");
+                }
+
+                const currentProd = (companyWorkspace?.products || []).find(
+                  (p: any) => p.id === workspace?.pinned?.product_id
+                );
+                const currentProdCat = currentProd ? getProductVehicleCategory(currentProd.name || "") : null;
+                const targetCat: "Car" | "Motorcycle" | "Lorry" = newVtype.toLowerCase().includes("motor")
+                  ? "Motorcycle"
+                  : newVtype.toLowerCase().includes("lorry") ||
+                    newVtype.toLowerCase().includes("other") ||
+                    newVtype.toLowerCase().includes("commercial")
+                  ? "Lorry"
+                  : "Car";
+
+                if ((!currentProd || currentProdCat !== targetCat) && workspace?.pinned.company_id) {
+                  const targetPool =
+                    targetCat === "Motorcycle"
+                      ? categorizedProducts.motorcycles
+                      : targetCat === "Lorry"
+                      ? categorizedProducts.lorries
+                      : categorizedProducts.cars;
+
+                  const bestMatching =
+                    targetPool.find((p) =>
+                      /private car protector|auto365.*lite|sompo motor|private car secure|comprehensive private car|takaful mymotor|tune protect motor easy|commercial lorry.*own goods.*c permit|c permit|own goods|motorcycle policy \(private\)/i.test(
+                        p.name
+                      )
+                    ) || targetPool[0];
+
+                  if (bestMatching) {
+                    pinCatalog(workspace.pinned.company_id, bestMatching.id);
+                    setSyncHighlight({
+                      field: "product_package",
+                      prev: currentProd ? formatProductLabel(currentProd.name) : "Previous Package",
+                      next: formatProductLabel(bestMatching.name),
+                      timestamp: Date.now(),
+                    });
+                  }
+                }
+
+                if (formValues["engine_cc"]) {
+                  const rawCC = parseFloat(String(formValues["engine_cc"]).replace(/[^0-9.]/g, ""));
+                  if (rawCC > 0) {
+                    const computedRT = computeMalaysianRoadTax(
+                      rawCC,
+                      newVtype,
+                      isCompany ? "Company" : "Individual"
+                    );
+                    if (computedRT > 0 && (!formValues["roadtax"] || parseFloat(formValues["roadtax"]) === 0)) {
+                      const rtFormatted = computedRT.toFixed(2);
+                      setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
+                      commitFieldDirectly("roadtax", rtFormatted);
+                    }
+                  }
+                }
+              }}
+              className={`text-xs font-medium transition-all duration-300 ${
+                syncHighlight &&
+                syncHighlight.field === "vehicle_type" &&
+                Date.now() - syncHighlight.timestamp < 6000
+                  ? "border-emerald-500 ring-2 ring-emerald-300 bg-emerald-50/20"
+                  : ""
+              }`}
+            >
+              {String(formValues[field.name] || "").startsWith("EV") ? (
+                <>
+                  <option value="EVSaloonCar">EV Saloon (Sedan / Coupe - Private & Company)</option>
+                  <option value="EVNonSaloonCar">EV Non-Saloon (SUV / MPV / Crossover / Pickup)</option>
+                  <option value="EVMotorcycle">Electric Motorcycle (Private & Company)</option>
+                  <option value="EVCommercial">EV Commercial (Van / Lorry / Fleet)</option>
+                </>
+              ) : (
+                <>
+                  <option value="Car">Car (Private Saloon)</option>
+                  <option value="CompanyCar">Car (Company / Corporate Saloon)</option>
+                  <option value="NonSaloonCar">Non-Saloon (SUV / MPV / 4x4 / Pickup)</option>
+                  <option value="Motorcycle">Motorcycle (Private)</option>
+                  <option value="CompanyMotorcycle">Motorcycle (Corporate)</option>
+                  <option value="Lorry">Lorry / Commercial</option>
+                  <option value="Others">Others</option>
+                </>
+              )}
+            </Select>
+          </div>
+        ) : field.kind === "valuation_type" ? (
+          <Select
+            value={formValues[field.name] || "Market Value"}
+            onChange={(event) => {
+              const val = event.target.value;
+              setFormValues((values) => ({ ...values, [field.name]: val }));
+              commitFieldDirectly(field.name, val);
+            }}
+            className="text-xs font-medium"
+          >
+            <option value="Agreed Value">Agreed Value (Nilai Dipersetujui)</option>
+            <option value="Market Value">Market Value (Nilai Pasaran)</option>
+          </Select>
+        ) : (
+          <span className="relative">
+            {field.kind === "money" || field.kind === "total" ? (
+              <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-[var(--rl-text-muted)]">
+                RM
+              </span>
+            ) : null}
+            <Input
+              value={
+                field.kind === "total"
+                  ? (formValues[field.name] !== undefined && formValues[field.name] !== "" ? formValues[field.name] : (previewFields[field.name] || ""))
+                  : formValues[field.name] ?? ""
+              }
+              placeholder={
+                empty ? "Missing" : field.name === "engine_cc" ? (isCurrentEV ? "150 kW" : "1498 CC") : ""
+              }
+              list={field.name === "insurance_company" ? "company-suggestions" : undefined}
+              className={`${
+                field.kind === "money" || field.kind === "total"
+                  ? "pl-8 text-xs font-mono font-medium"
+                  : "text-xs font-medium"
+              } ${
+                field.name === "total_amount"
+                  ? "font-bold text-[var(--rl-red)] bg-red-50/40 border-red-200"
+                  : ""
+              } ${needsCheck ? "border-amber-400 bg-amber-50/50 ring-1 ring-amber-300" : ""}`}
+              onChange={(event) => {
+                const newVal = event.target.value;
+                if (previousValuesRef.current[field.name] === undefined) {
+                  previousValuesRef.current[field.name] = formValues[field.name] || "";
+                }
+                setFormValues((values) => ({ ...values, [field.name]: newVal }));
+              }}
+              onBlur={(event) => {
+                commitField(field, event.target.value);
+                if (
+                  field.name === "engine_cc" ||
+                  field.name === "car_model" ||
+                  field.name === "insured_name" ||
+                  field.name === "customer_name" ||
+                  field.name === "client_type"
+                ) {
+                  const custName = formValues["insured_name"] || formValues["customer_name"] || "";
+                  const isCorp =
+                    /(SDN\s*BHD|BHD|ENTERPRISE|TRADING|LTD|LLC|PLT|COMPANY|ENT\.|CORP|HOLDINGS|CO\.)/i.test(
+                      String(custName)
+                    ) || String(formValues["client_type"] || "").toLowerCase().includes("company");
+                  const carModel = formValues["car_model"] || "";
+                  const carBrand =
+                    formValues["car_brand"] ||
+                    (workspace.fields?.car_brand as WorkspaceField | undefined)?.value ||
+                    "";
+                  let vtype = formValues["vehicle_type"] || "Car";
+                  const evCat = detectEVCategory(carBrand, carModel, formValues["engine_cc"]);
+
+                  if (vtype.startsWith("EV") || evCat) {
+                    vtype = vtype.startsWith("EV") ? vtype : evCat || "EVSaloonCar";
+                    setFormValues((v) => ({ ...v, vehicle_type: vtype }));
+                    commitFieldDirectly("vehicle_type", vtype);
+                  } else if (isNonSaloonCarModel(carModel) || vtype === "NonSaloonCar") {
+                    vtype = "NonSaloonCar";
+                    setFormValues((v) => ({ ...v, vehicle_type: "NonSaloonCar" }));
+                    commitFieldDirectly("vehicle_type", "NonSaloonCar");
+                  }
+
+                  const isEV = vtype.startsWith("EV");
+                  const currentCCStr =
+                    formValues["engine_cc"] ||
+                    (field.name === "car_model"
+                      ? inferCCFromCarModel(formValues["car_model"])?.toString()
+                      : null);
+                  const rawParsed = currentCCStr
+                    ? parseFloat(String(currentCCStr).replace(/[^0-9.]/g, ""))
+                    : null;
+                  if (rawParsed && rawParsed > 0) {
+                    if (isEV) {
+                      const kw = rawParsed >= 1000 ? rawParsed / 1000 : rawParsed;
+                      const formattedPower = `${Number.isInteger(kw) ? kw : kw.toFixed(1)} kW`;
+                      setFormValues((values) => ({ ...values, engine_cc: formattedPower }));
+                      commitFieldDirectly("engine_cc", formattedPower);
+                      const computedRT = computeMalaysianRoadTax(rawParsed, vtype, "Individual");
+                      if (computedRT > 0 && (!formValues["roadtax"] || parseFloat(formValues["roadtax"]) === 0)) {
+                        const rtFormatted = computedRT.toFixed(2);
+                        setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
+                        commitFieldDirectly("roadtax", rtFormatted);
+                      }
+                    } else if (rawParsed <= 7000) {
+                      const parsedCC = Math.round(rawParsed);
+                      if (!formValues["engine_cc"] || !formValues["engine_cc"].includes("CC")) {
+                        setFormValues((values) => ({ ...values, engine_cc: `${parsedCC} CC` }));
+                        commitFieldDirectly("engine_cc", `${parsedCC} CC`);
+                      }
+                      const isCompany =
+                        isCorp ||
+                        vtype.toLowerCase().includes("company") ||
+                        vtype.toLowerCase().includes("corp");
+                      const baseType =
+                        vtype === "NonSaloonCar"
+                          ? "NonSaloonCar"
+                          : vtype.toLowerCase().includes("motor")
+                          ? "Motorcycle"
+                          : vtype.toLowerCase().includes("lorry") || vtype.toLowerCase().includes("other")
+                          ? "Lorry"
+                          : "Car";
+                      const computedRT = computeMalaysianRoadTax(
+                        parsedCC,
+                        baseType,
+                        isCompany ? "Company" : "Individual"
+                      );
+                      if (computedRT > 0 && (!formValues["roadtax"] || parseFloat(formValues["roadtax"]) === 0)) {
+                        const rtFormatted = computedRT.toFixed(2);
+                        setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
+                        commitFieldDirectly("roadtax", rtFormatted);
+                      }
+                    }
+                  }
+                }
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+              }}
+            />
+          </span>
+        )}
+      </label>
+    );
+  };
+
   return (
     <Card className="rl-tour-fields grid gap-3 p-4">
       <div className="flex flex-wrap items-center justify-between border-b border-[var(--rl-border)] pb-2 gap-2">
@@ -406,7 +930,7 @@ export function PolicyFieldsCard({
             <span>{geminiExtracting ? "Extracting with AI..." : "Re-Extract with AI"}</span>
           </Button>
           <GeminiQuotaInfoButton quota={geminiQuotaInfo} />
-          <Badge variant="default">{FORM_FIELDS.length} fields</Badge>
+          <Badge variant="default">{PRIMARY_POLICY_FIELDS.length + PRICING_FIELDS.length} fields</Badge>
           <button
             type="button"
             onClick={() => setExtractedValuesCollapsed((v) => !v)}
@@ -440,603 +964,111 @@ export function PolicyFieldsCard({
         </div>
       ) : (
         <>
+          {/* Section 1: Core Policy & Vehicle Details */}
           <div className="grid gap-3 sm:grid-cols-2">
-            {FORM_FIELDS.map((field) => {
-              let stored = workspace.fields[field.name] as WorkspaceField | undefined;
-              if (field.name === "sum_insured") {
-                const numStored = parseFloat(String(stored?.value || "").replace(/[^0-9.]/g, ""));
-                const altCov = (workspace.fields["coverage_amount"] as WorkspaceField | undefined)?.value;
-                const numAlt = parseFloat(String(altCov || "").replace(/[^0-9.]/g, ""));
-                if ((!stored?.value || numStored < 1000) && numAlt >= 1000) {
-                  stored = workspace.fields["coverage_amount"] as WorkspaceField | undefined;
-                } else if (!stored?.value) {
-                  stored =
-                    (workspace.fields["market_value"] as WorkspaceField | undefined) ||
-                    (workspace.fields["agreed_value"] as WorkspaceField | undefined);
-                }
-              }
-              const empty = !stored?.value;
-              const needsCheck = !empty && stored?.status === "check_needed";
-              const isCurrentEV = (
-                formValues["vehicle_type"] ||
-                (workspace.fields?.vehicle_type as WorkspaceField | undefined)?.value ||
-                ""
-              )
-                .toLowerCase()
-                .includes("ev");
-              const fieldLabel =
-                field.name === "engine_cc"
-                  ? isCurrentEV
-                    ? "Motor Output (kW)"
-                    : "Engine Capacity (CC)"
-                  : field.label;
-              const fieldModified = isFieldModified(field.name);
-              return (
-                <label key={field.name} className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
-                  <span className="flex items-center justify-between gap-1">
-                    <span className="truncate">{fieldLabel}</span>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {needsCheck ? <span className="text-[10px] text-amber-700 font-bold">Check value</span> : null}
-                      {field.name === "total_amount" ? (
-                        <button
-                          type="button"
-                          onClick={toggleRoundTotal}
-                          className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold transition-all shadow-2xs ${
-                            roundTotal
-                              ? "bg-emerald-600 text-white border border-emerald-700"
-                              : "bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200"
-                          }`}
-                          title={
-                            roundTotal
-                              ? "Round figure active (0 cents). Click to toggle."
-                              : "Click to round figure total to whole RM (0 cents)."
-                          }
-                        >
-                          <Check size={11} weight="bold" className={roundTotal ? "opacity-100" : "opacity-0"} />
-                          <span>Round Figure</span>
-                        </button>
-                      ) : null}
-                      {fieldModified ? (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            handleResetField(field);
-                          }}
-                          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-300 hover:bg-amber-100 hover:text-amber-950 transition-colors shadow-2xs"
-                          title={`Reset to detected: "${getDetectedValue(field.name)}"`}
-                        >
-                          <ArrowCounterClockwise size={11} weight="bold" />
-                          <span>Reset</span>
-                        </button>
-                      ) : null}
-                    </div>
-                    {field.kind === "vehicle_type" &&
-                    syncHighlight &&
-                    syncHighlight.field === "vehicle_type" &&
-                    Date.now() - syncHighlight.timestamp < 6000 ? (
-                      <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 border border-emerald-300 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 shadow-xs animate-pulse">
-                        <span className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider">Auto-synced</span>
-                        <span className="line-through text-slate-400 font-normal">{syncHighlight.prev}</span>
-                        <span className="text-emerald-500 font-bold">→</span>
-                        <span className="bg-emerald-100 text-emerald-900 px-1 rounded font-bold">{syncHighlight.next}</span>
-                      </span>
-                    ) : null}
-                  </span>
-                  {field.kind === "vehicle_type" ? (
-                    <div className="grid gap-1.5">
-                      {/* Usage Scope Segmented Toggle: Private vs Commercial */}
-                      <div className="flex items-center gap-1 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-0.5 text-xs">
-                        {[
-                          { id: "Individual", label: "👤 Private", isCommercial: false },
-                          { id: "Company", label: "🏢 Commercial / Company", isCommercial: true },
-                        ].map((usage) => {
-                          const currentVtype = String(formValues[field.name] || "");
-                          const currentClientType = String(formValues["client_type"] || "");
-                          const isCurrentlyCompany =
-                            currentClientType.toLowerCase().includes("company") ||
-                            currentVtype.toLowerCase().includes("company");
-                          const active = usage.isCommercial ? isCurrentlyCompany : !isCurrentlyCompany;
-                          return (
-                            <button
-                              key={usage.id}
-                              type="button"
-                              onClick={() => {
-                                if (usage.isCommercial && !isCurrentlyCompany) {
-                                  // Switch to Commercial
-                                  const newVtype =
-                                    currentVtype === "Car"
-                                      ? "CompanyCar"
-                                      : currentVtype === "Motorcycle"
-                                      ? "CompanyMotorcycle"
-                                      : currentVtype;
-                                  setFormValues((v) => ({ ...v, [field.name]: newVtype, client_type: "Company" }));
-                                  commitFieldDirectly(field.name, newVtype);
-                                  commitFieldDirectly("client_type", "Company");
-
-                                  // Auto-sync Commercial product package
-                                  const companyProds = companyWorkspace?.products || [];
-                                  const commProd = companyProds.find((p: any) =>
-                                    /commercial.*car|company.*car|corporate/i.test(p.name || "")
-                                  );
-                                  if (commProd && workspace?.pinned.company_id) {
-                                    pinCatalog(workspace.pinned.company_id as string, commProd.id);
-                                    setSyncHighlight({
-                                      field: "product_package",
-                                      prev: "Private Package",
-                                      next: formatProductLabel(commProd.name),
-                                      timestamp: Date.now(),
-                                    });
-                                  }
-                                } else if (!usage.isCommercial && isCurrentlyCompany) {
-                                  // Switch to Private
-                                  const newVtype =
-                                    currentVtype === "CompanyCar"
-                                      ? "Car"
-                                      : currentVtype === "CompanyMotorcycle"
-                                      ? "Motorcycle"
-                                      : currentVtype;
-                                  setFormValues((v) => ({ ...v, [field.name]: newVtype, client_type: "Individual" }));
-                                  commitFieldDirectly(field.name, newVtype);
-                                  commitFieldDirectly("client_type", "Individual");
-
-                                  // Auto-sync Private product package
-                                  const companyProds = companyWorkspace?.products || [];
-                                  const privProd = companyProds.find(
-                                    (p: any) =>
-                                      /private.*car.*comprehensive|auto365.*lite|auto365.*plus|sompo motor|private car/i.test(
-                                        p.name || ""
-                                      ) && !/commercial|company/i.test(p.name || "")
-                                  );
-                                  if (privProd && workspace?.pinned.company_id) {
-                                    pinCatalog(workspace.pinned.company_id as string, privProd.id);
-                                    setSyncHighlight({
-                                      field: "product_package",
-                                      prev: "Commercial Package",
-                                      next: formatProductLabel(privProd.name),
-                                      timestamp: Date.now(),
-                                    });
-                                  }
-                                }
-                              }}
-                              className={`flex-1 py-1 text-center font-bold text-[11px] rounded-[3px] transition-all ${
-                                active
-                                  ? "bg-[var(--rl-black)] text-white shadow-xs"
-                                  : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                              }`}
-                            >
-                              {usage.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {/* Engine Type Segmented Toggle */}
-                      <div className="flex items-center gap-1 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-0.5 text-xs">
-                        {(["ICE", "EV"] as const).map((eng) => {
-                          const currentVal = String(formValues[field.name] || "");
-                          const isCurrentEVVal = currentVal.startsWith("EV");
-                          const active = eng === "EV" ? isCurrentEVVal : !isCurrentEVVal;
-                          return (
-                            <button
-                              key={eng}
-                              type="button"
-                              onClick={() => {
-                                if (eng === "EV" && !isCurrentEVVal) {
-                                  const newVtype =
-                                    currentVal === "NonSaloonCar"
-                                      ? "EVNonSaloonCar"
-                                      : currentVal.toLowerCase().includes("motor")
-                                      ? "EVMotorcycle"
-                                      : currentVal.toLowerCase().includes("lorry") || currentVal.toLowerCase().includes("other")
-                                      ? "EVCommercial"
-                                      : "EVSaloonCar";
-                                  setFormValues((v) => ({ ...v, [field.name]: newVtype }));
-                                  commitFieldDirectly(field.name, newVtype);
-
-                                  const currentProd = (companyWorkspace?.products || []).find(
-                                    (p: any) => p.id === workspace?.pinned?.product_id
-                                  );
-                                  const companyProds = companyWorkspace?.products || [];
-                                  const matchingEv = companyProds.find((p: any) => {
-                                    const nm = (p.name || "").toLowerCase();
-                                    if (!/\(ev\)|(\bev\b)|electric/i.test(nm)) return false;
-                                    if (newVtype.includes("Motor")) return /motor/i.test(nm);
-                                    if (newVtype.includes("Commercial") || newVtype.toLowerCase().includes("lorry"))
-                                      return /lorry|commercial/i.test(nm);
-                                    return !/motor|lorry|commercial/i.test(nm);
-                                  });
-                                  if (matchingEv && workspace?.pinned.company_id) {
-                                    pinCatalog(workspace.pinned.company_id as string, matchingEv.id);
-                                    setSyncHighlight({
-                                      field: "product_package",
-                                      prev: currentProd ? formatProductLabel(currentProd.name) : "ICE Package",
-                                      next: formatProductLabel(matchingEv.name),
-                                      timestamp: Date.now(),
-                                    });
-                                  }
-                                } else if (eng === "ICE" && isCurrentEVVal) {
-                                  const newVtype =
-                                    currentVal === "EVNonSaloonCar"
-                                      ? "NonSaloonCar"
-                                      : currentVal === "EVMotorcycle"
-                                      ? "Motorcycle"
-                                      : currentVal === "EVCommercial"
-                                      ? "Lorry"
-                                      : "Car";
-                                  setFormValues((v) => ({ ...v, [field.name]: newVtype }));
-                                  commitFieldDirectly(field.name, newVtype);
-
-                                  const currentProd = (companyWorkspace?.products || []).find(
-                                    (p: any) => p.id === workspace?.pinned?.product_id
-                                  );
-                                  const companyProds = companyWorkspace?.products || [];
-                                  const matchingIce = companyProds.find((p: any) => {
-                                    const nm = (p.name || "").toLowerCase();
-                                    if (/\(ev\)|(\bev\b)|electric/i.test(nm)) return false;
-                                    if (newVtype.includes("Motor")) return /motor/i.test(nm);
-                                    if (newVtype.includes("Commercial") || newVtype.toLowerCase().includes("lorry"))
-                                      return /lorry|commercial/i.test(nm);
-                                    return !/motor|lorry|commercial/i.test(nm);
-                                  });
-                                  if (matchingIce && workspace?.pinned.company_id) {
-                                    pinCatalog(workspace.pinned.company_id as string, matchingIce.id);
-                                    setSyncHighlight({
-                                      field: "product_package",
-                                      prev: currentProd ? formatProductLabel(currentProd.name) : "EV Package",
-                                      next: formatProductLabel(matchingIce.name),
-                                      timestamp: Date.now(),
-                                    });
-                                  }
-                                }
-                              }}
-                              className={`flex-1 py-1 text-center font-bold text-[11px] rounded-[3px] transition-all ${
-                                active
-                                  ? "bg-[var(--rl-black)] text-white shadow-xs"
-                                  : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                              }`}
-                            >
-                              {eng === "ICE" ? "ICE (Petrol / Diesel)" : "EV (Electric)"}
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {/* Filtered Vehicle Type Dropdown */}
-                      <Select
-                        value={
-                          formValues[field.name] ||
-                          (String(formValues[field.name] || "").startsWith("EV") ? "EVSaloonCar" : "Car")
-                        }
-                        onChange={(event) => {
-                          const newVtype = event.target.value;
-                          const isCompany =
-                            newVtype.toLowerCase().includes("company") || newVtype.toLowerCase().includes("corp");
-                          setFormValues((values) => ({
-                            ...values,
-                            [field.name]: newVtype,
-                            ...(isCompany ? { client_type: "Company" } : {}),
-                          }));
-                          commitFieldDirectly(field.name, newVtype);
-                          if (isCompany) {
-                            commitFieldDirectly("client_type", "Company");
-                          }
-
-                          // Two-way synchronization: Auto-sync matching package if vehicle category changed
-                          const currentProd = (companyWorkspace?.products || []).find(
-                            (p: any) => p.id === workspace?.pinned?.product_id
-                          );
-                          const currentProdCat = currentProd ? getProductVehicleCategory(currentProd.name || "") : null;
-                          const targetCat: "Car" | "Motorcycle" | "Lorry" = newVtype.toLowerCase().includes("motor")
-                            ? "Motorcycle"
-                            : newVtype.toLowerCase().includes("lorry") ||
-                              newVtype.toLowerCase().includes("other") ||
-                              newVtype.toLowerCase().includes("commercial")
-                            ? "Lorry"
-                            : "Car";
-
-                          if ((!currentProd || currentProdCat !== targetCat) && workspace?.pinned.company_id) {
-                            const targetPool =
-                              targetCat === "Motorcycle"
-                                ? categorizedProducts.motorcycles
-                                : targetCat === "Lorry"
-                                ? categorizedProducts.lorries
-                                : categorizedProducts.cars;
-
-                            // Prefer Comprehensive coverage or canonical package if available
-                            const bestMatching =
-                              targetPool.find((p) =>
-                                /private car protector|auto365.*lite|sompo motor|private car secure|comprehensive private car|takaful mymotor|tune protect motor easy|commercial lorry.*own goods.*c permit|c permit|own goods|motorcycle policy \(private\)/i.test(
-                                  p.name
-                                )
-                              ) ||
-                              targetPool.find((p) => /comprehensive/i.test(p.name || "")) ||
-                              targetPool[0];
-
-                            if (bestMatching) {
-                              pinCatalog(workspace.pinned.company_id as string, bestMatching.id);
-                              setSyncHighlight({
-                                field: "product_package",
-                                prev: currentProd ? formatProductLabel(currentProd.name || "") : "Previous Package",
-                                next: formatProductLabel(bestMatching.name || ""),
-                                timestamp: Date.now(),
-                              });
-                            }
-                          }
-
-                          const currentCCStr =
-                            formValues["engine_cc"] ||
-                            (workspace.fields["engine_cc"] as WorkspaceField | undefined)?.value;
-                          const isEVType = newVtype.startsWith("EV");
-                          const rawParsed = currentCCStr
-                            ? parseFloat(String(currentCCStr).replace(/[^0-9.]/g, ""))
-                            : isEVType
-                            ? null
-                            : inferCCFromCarModel(
-                                formValues["car_model"] ||
-                                  (workspace.fields["car_model"] as WorkspaceField | undefined)?.value
-                              );
-                          if (rawParsed && rawParsed > 0) {
-                            if (isEVType) {
-                              const computedRT = computeMalaysianRoadTax(rawParsed, newVtype, "Individual");
-                              if (computedRT > 0) {
-                                const rtFormatted = computedRT.toFixed(2);
-                                setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
-                                commitFieldDirectly("roadtax", rtFormatted);
-                              }
-                            } else if (rawParsed <= 7000) {
-                              const parsedCC = Math.round(rawParsed);
-                              const baseType =
-                                newVtype === "NonSaloonCar"
-                                  ? "NonSaloonCar"
-                                  : newVtype.toLowerCase().includes("motor")
-                                  ? "Motorcycle"
-                                  : newVtype.toLowerCase().includes("lorry") || newVtype.toLowerCase().includes("other")
-                                  ? "Lorry"
-                                  : "Car";
-                              const computedRT = computeMalaysianRoadTax(
-                                parsedCC,
-                                baseType,
-                                isCompany ? "Company" : "Individual"
-                              );
-                              if (computedRT > 0) {
-                                const rtFormatted = computedRT.toFixed(2);
-                                setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
-                                commitFieldDirectly("roadtax", rtFormatted);
-                              }
-                            }
-                          }
-                        }}
-                        className={`text-xs font-medium transition-all duration-300 ${
-                          syncHighlight &&
-                          syncHighlight.field === "vehicle_type" &&
-                          Date.now() - syncHighlight.timestamp < 6000
-                            ? "border-emerald-500 ring-2 ring-emerald-300 bg-emerald-50/20"
-                            : ""
-                        }`}
-                      >
-                        {String(formValues[field.name] || "").startsWith("EV") ? (
-                          <>
-                            <option value="EVSaloonCar">EV Saloon (Sedan / Coupe - Private & Company)</option>
-                            <option value="EVNonSaloonCar">EV Non-Saloon (SUV / MPV / Crossover / Pickup)</option>
-                            <option value="EVMotorcycle">Electric Motorcycle (Private & Company)</option>
-                            <option value="EVCommercial">EV Commercial (Van / Lorry / Fleet)</option>
-                          </>
-                        ) : (
-                          <>
-                            <option value="Car">Car (Private Saloon)</option>
-                            <option value="CompanyCar">Car (Company / Corporate Saloon)</option>
-                            <option value="NonSaloonCar">Non-Saloon (SUV / MPV / 4x4 / Pickup)</option>
-                            <option value="Motorcycle">Motorcycle (Private)</option>
-                            <option value="CompanyMotorcycle">Motorcycle (Corporate)</option>
-                            <option value="Lorry">Lorry / Commercial</option>
-                            <option value="Others">Others</option>
-                          </>
-                        )}
-                      </Select>
-                    </div>
-                  ) : field.kind === "valuation_type" ? (
-                    <Select
-                      value={formValues[field.name] || "Market Value"}
-                      onChange={(event) => {
-                        const val = event.target.value;
-                        setFormValues((values) => ({ ...values, [field.name]: val }));
-                        commitFieldDirectly(field.name, val);
-                      }}
-                      className="text-xs font-medium"
-                    >
-                      <option value="Agreed Value">Agreed Value (Nilai Dipersetujui)</option>
-                      <option value="Market Value">Market Value (Nilai Pasaran)</option>
-                    </Select>
-                  ) : (
-                    <span className="relative">
-                      {field.kind === "money" || field.kind === "total" ? (
-                        <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-[var(--rl-text-muted)]">
-                          RM
-                        </span>
-                      ) : null}
-                      <Input
-                        value={
-                          field.kind === "total"
-                            ? (formValues[field.name] !== undefined && formValues[field.name] !== "" ? formValues[field.name] : (previewFields[field.name] || ""))
-                            : formValues[field.name] ?? ""
-                        }
-                        placeholder={
-                          empty ? "Missing" : field.name === "engine_cc" ? (isCurrentEV ? "150 kW" : "1498 CC") : ""
-                        }
-                        list={field.name === "insurance_company" ? "company-suggestions" : undefined}
-                        className={`${
-                          field.kind === "money" || field.kind === "total"
-                            ? "pl-8 text-xs font-mono font-medium"
-                            : "text-xs font-medium"
-                        } ${needsCheck ? "border-amber-400 bg-amber-50/50 ring-1 ring-amber-300" : ""}`}
-                        onChange={(event) => {
-                          const newVal = event.target.value;
-                          if (previousValuesRef.current[field.name] === undefined) {
-                            previousValuesRef.current[field.name] = formValues[field.name] || "";
-                          }
-                          setFormValues((values) => ({ ...values, [field.name]: newVal }));
-                        }}
-                        onBlur={(event) => {
-                          commitField(field, event.target.value);
-                          if (
-                            field.name === "engine_cc" ||
-                            field.name === "car_model" ||
-                            field.name === "insured_name" ||
-                            field.name === "customer_name" ||
-                            field.name === "client_type"
-                          ) {
-                            const custName = formValues["insured_name"] || formValues["customer_name"] || "";
-                            const isCorp =
-                              /(SDN\s*BHD|BHD|ENTERPRISE|TRADING|LTD|LLC|PLT|COMPANY|ENT\.|CORP|HOLDINGS|CO\.)/i.test(
-                                String(custName)
-                              ) || String(formValues["client_type"] || "").toLowerCase().includes("company");
-                            const carModel = formValues["car_model"] || "";
-                            const carBrand =
-                              formValues["car_brand"] ||
-                              (workspace.fields?.car_brand as WorkspaceField | undefined)?.value ||
-                              "";
-                            let vtype = formValues["vehicle_type"] || "Car";
-                            const evCat = detectEVCategory(carBrand, carModel, formValues["engine_cc"]);
-
-                            if (vtype.startsWith("EV") || evCat) {
-                              vtype = vtype.startsWith("EV") ? vtype : evCat || "EVSaloonCar";
-                              setFormValues((v) => ({ ...v, vehicle_type: vtype }));
-                              commitFieldDirectly("vehicle_type", vtype);
-                            } else if (isNonSaloonCarModel(carModel) || vtype === "NonSaloonCar") {
-                              vtype = "NonSaloonCar";
-                              setFormValues((v) => ({ ...v, vehicle_type: "NonSaloonCar" }));
-                              commitFieldDirectly("vehicle_type", "NonSaloonCar");
-                            }
-
-                            const isEV = vtype.startsWith("EV");
-                            const currentCCStr =
-                              formValues["engine_cc"] ||
-                              (field.name === "car_model"
-                                ? inferCCFromCarModel(formValues["car_model"])?.toString()
-                                : null);
-                            const rawParsed = currentCCStr
-                              ? parseFloat(String(currentCCStr).replace(/[^0-9.]/g, ""))
-                              : null;
-                            if (rawParsed && rawParsed > 0) {
-                              if (isEV) {
-                                const kw = rawParsed >= 1000 ? rawParsed / 1000 : rawParsed;
-                                const formattedPower = `${Number.isInteger(kw) ? kw : kw.toFixed(1)} kW`;
-                                setFormValues((values) => ({ ...values, engine_cc: formattedPower }));
-                                commitFieldDirectly("engine_cc", formattedPower);
-                                const computedRT = computeMalaysianRoadTax(rawParsed, vtype, "Individual");
-                                if (computedRT > 0) {
-                                  const rtFormatted = computedRT.toFixed(2);
-                                  setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
-                                  commitFieldDirectly("roadtax", rtFormatted);
-                                }
-                              } else if (rawParsed <= 7000) {
-                                const parsedCC = Math.round(rawParsed);
-                                if (!formValues["engine_cc"] || !formValues["engine_cc"].includes("CC")) {
-                                  setFormValues((values) => ({ ...values, engine_cc: `${parsedCC} CC` }));
-                                  commitFieldDirectly("engine_cc", `${parsedCC} CC`);
-                                }
-                                const isCompany =
-                                  isCorp ||
-                                  vtype.toLowerCase().includes("company") ||
-                                  vtype.toLowerCase().includes("corp");
-                                const baseType =
-                                  vtype === "NonSaloonCar"
-                                    ? "NonSaloonCar"
-                                    : vtype.toLowerCase().includes("motor")
-                                    ? "Motorcycle"
-                                    : vtype.toLowerCase().includes("lorry") || vtype.toLowerCase().includes("other")
-                                    ? "Lorry"
-                                    : "Car";
-                                const computedRT = computeMalaysianRoadTax(
-                                  parsedCC,
-                                  baseType,
-                                  isCompany ? "Company" : "Individual"
-                                );
-                                if (computedRT > 0) {
-                                  const rtFormatted = computedRT.toFixed(2);
-                                  setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
-                                  commitFieldDirectly("roadtax", rtFormatted);
-                                }
-                              }
-                            }
-                          }
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") (event.target as HTMLInputElement).blur();
-                        }}
-                      />
-                    </span>
-                  )}
-                </label>
-              );
-            })}
-            {/* Dynamic Additional Extracted Fields */}
-            {Object.entries(workspace.fields || {})
-              .filter(
-                ([k, v]) =>
-                  !FORM_FIELDS.some((f) => f.name === k) &&
-                  !k.startsWith("_") &&
-                  v &&
-                  typeof v === "object" &&
-                  "value" in v &&
-                  (v as WorkspaceField).value
-              )
-              .map(([extraKey, extraField]) => {
-                const wf = extraField as WorkspaceField;
-                const label = extraKey.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-                const fieldModified = isFieldModified(extraKey);
-                return (
-                  <label key={extraKey} className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
-                    <span className="flex items-center justify-between gap-1">
-                      <span className="truncate">{label}</span>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {wf.status === "check_needed" ? (
-                          <span className="text-[10px] text-amber-700 font-bold">Check value</span>
-                        ) : null}
-                        {fieldModified ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              handleResetField({ name: extraKey, label, kind: "text" });
-                            }}
-                            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-300 hover:bg-amber-100 hover:text-amber-950 transition-colors shadow-2xs"
-                            title={`Reset to detected: "${getDetectedValue(extraKey)}"`}
-                          >
-                            <ArrowCounterClockwise size={11} weight="bold" />
-                            <span>Reset</span>
-                          </button>
-                        ) : null}
-                      </div>
-                    </span>
-                    <span className="relative">
-                      <Input
-                        value={formValues[extraKey] ?? (wf.value || "")}
-                        placeholder="Missing"
-                        className={`text-xs font-medium ${
-                          wf.status === "check_needed" ? "border-amber-400 bg-amber-50/50 ring-1 ring-amber-300" : ""
-                        }`}
-                        onChange={(event) => {
-                          const newVal = event.target.value;
-                          if (previousValuesRef.current[extraKey] === undefined) {
-                            previousValuesRef.current[extraKey] = formValues[extraKey] || wf.value || "";
-                          }
-                          setFormValues((values) => ({ ...values, [extraKey]: newVal }));
-                        }}
-                        onBlur={() => {
-                          commitFieldDirectly(extraKey, formValues[extraKey] ?? (wf.value || ""));
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") (event.target as HTMLInputElement).blur();
-                        }}
-                      />
-                    </span>
-                  </label>
-                );
-              })}
+            {PRIMARY_POLICY_FIELDS.map((field) => renderField(field, false))}
           </div>
-          <datalist id="company-suggestions">
+
+          {/* Section 2: Quotation Pricing & Fees (Directly Editable) */}
+          <div className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-gray-50/80 p-3.5 grid gap-3">
+            <div className="flex flex-wrap items-center justify-between border-b border-gray-200/80 pb-2 gap-2">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-xs text-[var(--rl-text-strong)] uppercase tracking-wider">
+                  Quotation Pricing & Summary
+                </span>
+                <span className="text-[10px] text-emerald-800 bg-emerald-50 border border-emerald-200 font-semibold px-2 py-0.5 rounded-md">
+                  Active in Quotation
+                </span>
+              </div>
+              <p className="text-[11px] text-[var(--rl-text-muted)]">
+                Net Premium + Road Tax + Runner Fee = Total Payable
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {PRICING_FIELDS.map((field) => renderField(field, true))}
+            </div>
+          </div>
+
+          {/* Section 3: Additional Policy & Breakdown Details (Collapsible) */}
+          <div className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white overflow-hidden transition-all">
+            <button
+              type="button"
+              onClick={() => setAdvancedCollapsed((v) => !v)}
+              className="w-full flex items-center justify-between p-2.5 text-xs font-semibold text-[var(--rl-text-strong)] hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                {advancedCollapsed ? <CaretDown size={14} weight="bold" /> : <CaretUp size={14} weight="bold" />}
+                <span>Additional Policy & Technical Details</span>
+                <span className="text-[10px] text-gray-600 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded-md font-medium">
+                  {ADVANCED_POLICY_FIELDS.length + extraExtractedFields.length} secondary fields
+                </span>
+              </div>
+              <span className="text-[11px] text-[var(--rl-text-muted)] font-normal">
+                {advancedCollapsed ? "Show Chassis, Engine No, SST breakdown..." : "Hide secondary details"}
+              </span>
+            </button>
+
+            {!advancedCollapsed ? (
+              <div className="border-t border-[var(--rl-border)] p-3 grid gap-3 sm:grid-cols-2 bg-gray-50/40">
+                {ADVANCED_POLICY_FIELDS.map((field) => renderField(field, false))}
+                {extraExtractedFields.map(([extraKey, extraField]) => {
+                  const wf = extraField as WorkspaceField;
+                  const label = extraKey.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+                  const fieldModified = isFieldModified(extraKey);
+                  return (
+                    <label key={extraKey} className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
+                      <span className="flex items-center justify-between gap-1">
+                        <span className="truncate">{label}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {wf.status === "check_needed" ? (
+                            <span className="text-[10px] text-amber-700 font-bold">Check value</span>
+                          ) : null}
+                          {fieldModified ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleResetField({ name: extraKey, label, kind: "text" });
+                              }}
+                              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-300 hover:bg-amber-100 hover:text-amber-950 transition-colors shadow-2xs"
+                              title={`Reset to detected: "${getDetectedValue(extraKey)}"`}
+                            >
+                              <ArrowCounterClockwise size={11} weight="bold" />
+                              <span>Reset</span>
+                            </button>
+                          ) : null}
+                        </div>
+                      </span>
+                      <span className="relative">
+                        <Input
+                          value={formValues[extraKey] ?? (wf.value || "")}
+                          placeholder="Missing"
+                          className={`text-xs font-medium ${
+                            wf.status === "check_needed" ? "border-amber-400 bg-amber-50/50 ring-1 ring-amber-300" : ""
+                          }`}
+                          onChange={(event) => {
+                            const newVal = event.target.value;
+                            if (previousValuesRef.current[extraKey] === undefined) {
+                              previousValuesRef.current[extraKey] = formValues[extraKey] || wf.value || "";
+                            }
+                            setFormValues((values) => ({ ...values, [extraKey]: newVal }));
+                          }}
+                          onBlur={() => {
+                            commitFieldDirectly(extraKey, formValues[extraKey] ?? (wf.value || ""));
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+                          }}
+                        />
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+<datalist id="company-suggestions">
             {companies.map((c) => (
               <option key={c.id} value={c.name} />
             ))}
