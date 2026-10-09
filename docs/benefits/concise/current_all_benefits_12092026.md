@@ -10,14 +10,19 @@
 ## Policy Tier Packaging Principle (MANDATORY INVARIANT)
 
 > [!IMPORTANT]
-> **COMPREHENSIVE DEFAULTS INVARIANT**:
-> In all Comprehensive motor policies, **Own Damage**, **Third Party Bodily Injury & Death**, and **Third Party Property Damage (TPPD)** are statutory tariff baselines inherent to Comprehensive cover by law and policy definition.
-> 
-> - **TPFT (Third Party, Fire & Theft) & TPO (Third Party Only)**: In these lower tiers, **ONLY** these 3 statutory baseline benefits exist in Defaults (Included at RM 0):
->   1. **Own Damage** (Restricted to Fire & Theft for TPFT; excluded for TPO)
->   2. **Third Party Bodily Injury & Death**
->   3. **Third Party Property Damage (TPPD)**
-> - **Comprehensive Policies**: In Comprehensive policies, these 3 benefits are **STRICTLY OMITTED from the Defaults list** to eliminate redundant clutter. Defaults in Comprehensive profiles exclusively represent the insurer's non-tariff, bundled, or value-added inclusions (e.g. Free Towing, Betterment Waiver, Legal Defense, Key Replacement, All Drivers Excess Waiver, Workmanship Warranty, Non-Claim Cashback, etc.).
+> **POLICY TIER PACKAGING RULES (COMPREHENSIVE vs TPFT vs TPO)**:
+> - **Third Party Only (TPO)**: In TPO policies, **ONLY** these 3 statutory baseline benefits exist in Defaults (Included at RM 0):
+>   1. **Third-Party Bodily Injury or Death**: Pays for medical costs or legal compensation if you injure or kill someone else in a car accident.
+>   2. **Third-Party Property Damage**: Pays to repair or replace another person's car, fence, gate, wall, or shopfront if you hit it (up to RM 3,000,000).
+>   3. **Legal Costs**: Covers approved legal fees and expenses related to third-party claims (subject to policy limits).
+> - **Third Party, Fire & Theft (TPFT)**: In TPFT policies, **ONLY** these 5 statutory baseline benefits exist in Defaults (Included at RM 0):
+>   1. **Third-Party Bodily Injury or Death**: Pays for legal liabilities if you accidentally cause injury or death to someone else.
+>   2. **Third-Party Property Damage**: Covers repair or replacement costs up to policy limits (typically up to RM 3,000,000).
+>   3. **Legal Defence Costs**: Covers approved legal fees and representation costs if you are sued following an accident.
+>   4. **Own-Car Fire Damage**: Compensates you if your car is destroyed or damaged by fire, explosion, or lightning.
+>   5. **Own-Car Theft**: Compensates you (up to the market value or set limit) if your car or factory parts are stolen, burgled, or damaged during an attempted theft.
+> - **Comprehensive Policies**: In Comprehensive policies, statutory baseline covers (`Own Damage`, `Third Party Bodily Injury & Death`, `Third Party Property Damage`) are inherent by law and are **STRICTLY OMITTED from the Defaults list** to eliminate redundant clutter. Defaults in Comprehensive profiles exclusively represent the insurer's non-tariff, bundled, or value-added inclusions (e.g. Free Towing, Betterment Waiver, Legal Defense, Key Replacement, All Drivers Excess Waiver, Workmanship Warranty, Non-Claim Cashback, etc.).
+> - **Signature Packs & Towing Upgrades**: Insurers offer their signature pack as a single add-on (e.g. `Motor PA PLUS`, `AutoBuddy`, `OTO 360`, `Private Car 365`, `SOMPO Motor N-hancer`, `Smart Driver PA`, `Driver Passenger Protector`). When present, it automatically triggers a condition rule upgrading the base `Emergency Towing Assistance` card to **"Unlimited Towing"** without creating extra card clutter.
 
 ---
 
