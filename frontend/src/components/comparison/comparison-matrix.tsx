@@ -87,6 +87,8 @@ interface TenureSpec {
   engine_cc: string;
   vehicle_model: string;
   vehicle_type: string;
+  winning_file_id?: string | null;
+  winning_file_name?: string | null;
 }
 
 interface ComparisonEntry {
@@ -149,6 +151,11 @@ interface ComparisonEntry {
     has_cost?: boolean;
     is_included?: boolean;
   }>;
+  coverage_start_date?: string | null;
+  coverage_end_date?: string | null;
+  coverage_period_formatted?: string | null;
+  uploaded_file_id?: string | null;
+  original_filename?: string | null;
 }
 
 export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
@@ -935,6 +942,20 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     );
   }, [data?.entries, visibleDisplayEntries, visibleRanksMap]);
 
+  const activeWinnerPeriod = useMemo(() => {
+    if (currentPolicyWinner?.coverage_period_formatted) {
+      return currentPolicyWinner.coverage_period_formatted;
+    }
+    if (currentPolicyWinner?.coverage_start_date) {
+      const s = new Date(currentPolicyWinner.coverage_start_date).toLocaleDateString("en-GB");
+      const e = currentPolicyWinner.coverage_end_date
+        ? new Date(currentPolicyWinner.coverage_end_date).toLocaleDateString("en-GB")
+        : "";
+      return e ? `${s} - ${e}` : s;
+    }
+    return data?.tenure?.coverage_period_formatted || "—";
+  }, [currentPolicyWinner, data?.tenure?.coverage_period_formatted]);
+
   if (loading && !data) {
     return (
       <div className="flex h-96 flex-col items-center justify-center gap-3">
@@ -1219,6 +1240,19 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                 title={entry.source_quotation_no || entry.quotation_ref || undefined}
               >
                 Ref: {entry.source_quotation_no || entry.quotation_ref || "—"}
+              </span>
+            </div>
+
+            {/* Row 5: Policy Period (Extracted from PDF) */}
+            <div className={`mt-2 pt-1.5 border-t border-[#e5e5ea]/80 flex items-center justify-between text-[11px] ${
+              isWinner ? "bg-amber-100/60 -mx-4 -mb-4 px-4 py-2 border-t border-amber-300 rounded-b-none" : ""
+            }`}>
+              <span className={`font-semibold ${isWinner ? "text-amber-950 flex items-center gap-1 font-bold" : "text-[#6e6e73]"}`}>
+                {isWinner && <Star size={11} weight="fill" className="text-amber-500" />}
+                {isWinner ? "Winner Period:" : "Period:"}
+              </span>
+              <span className={`font-mono ${isWinner ? "font-bold text-amber-950" : "text-neutral-800 font-medium"}`}>
+                {entry.coverage_period_formatted || tenure.coverage_period_formatted}
               </span>
             </div>
           </div>
@@ -1534,7 +1568,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                 </h1>
               </div>
               <p className="text-xs text-[#6e6e73] mt-1">
-                Underwriter Market Benchmarking · Policy Period: {tenure.coverage_period_formatted}
+                Underwriter Market Benchmarking · Policy Period: {activeWinnerPeriod}
               </p>
             </div>
             <div className="text-right text-xs space-y-0.5">
@@ -1862,7 +1896,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             </span>
           </div>
           <div className="text-xs text-[#6e6e73] mt-2 flex items-center gap-2 flex-wrap">
-            <span>Period: <strong className="text-[#1b1717] font-mono">{tenure.coverage_period_formatted}</strong></span>
+            <span>Period: <strong className="text-[#1b1717] font-mono">{activeWinnerPeriod}</strong></span>
             <span>•</span>
             <span>Model: <strong className="text-[#1b1717]">{tenure.vehicle_model || "Motor Vehicle"}</strong> ({tenure.engine_cc || "N/A"})</span>
             {(tenure.formatted_ic || tenure.ic_no) && (
@@ -2144,6 +2178,11 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             <div className="pt-3 space-y-1.5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-[#6e6e73] uppercase">Insurance Period (保险日期)</span>
+                {currentPolicyWinner && (
+                  <span className="text-[10px] text-emerald-800 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                    {currentPolicyWinner.is_recommended ? "★ Winner Policy" : "Active Quote"}
+                  </span>
+                )}
                 {editingFixedCosts && (
                   <span className="text-[10px] text-indigo-700 font-bold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
                     Auto 1-Year Sync
@@ -2172,7 +2211,26 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                   </div>
                 </div>
               ) : (
-                <p className="font-mono font-bold text-xs text-[#1b1717]">{tenure.coverage_period_formatted}</p>
+                <div className="space-y-1">
+                  <p className="font-mono font-bold text-xs text-[#1b1717]">{activeWinnerPeriod}</p>
+                  {currentPolicyWinner && (
+                    <p className="text-[10px] text-[#6e6e73] flex items-center gap-1">
+                      <span>Source:</span>
+                      <strong className="text-neutral-800">{currentPolicyWinner.company_name}</strong>
+                      {currentPolicyWinner.uploaded_file_id && (
+                        <a
+                          href={`/api/files/${currentPolicyWinner.uploaded_file_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-emerald-700 hover:text-emerald-900 underline ml-1 font-semibold"
+                          title="Open original quotation PDF"
+                        >
+                          [PDF]
+                        </a>
+                      )}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
 
@@ -3045,7 +3103,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                       </h2>
                     </div>
                     <p className="text-xs text-[#6e6e73]">
-                      Market Underwriter Benchmarking · Policy Period: {tenure.coverage_period_formatted}
+                      Market Underwriter Benchmarking · Policy Period: {activeWinnerPeriod}
                     </p>
                   </div>
 

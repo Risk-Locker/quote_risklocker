@@ -6,8 +6,10 @@ import hashlib
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+from app.services.vehicle_tracking_service import parse_date_safe
 
 from sqlalchemy import select
 
@@ -560,9 +562,28 @@ def process_extraction_job(
             chassis_no=raw_chassis or None,
             engine_no=raw_engine or None,
         )
+    # Universal Session & Tenure Date Synchronization from Extracted PDF
+    parsed_s_start = parse_date_safe(cover_start) if cover_start else None
+    parsed_s_end = parse_date_safe(cover_end) if cover_end else None
+    if parsed_s_start and parsed_s_start.tzinfo is None:
+        parsed_s_start = parsed_s_start.replace(tzinfo=timezone.utc)
+    if parsed_s_end and parsed_s_end.tzinfo is None:
+        parsed_s_end = parsed_s_end.replace(tzinfo=timezone.utc)
+    elif parsed_s_start:
+        parsed_s_end = (parsed_s_start + timedelta(days=364)).replace(tzinfo=timezone.utc)
+
     session.tenure_id = tenure.id
-    session.coverage_start_date = tenure.coverage_start_date
-    session.coverage_end_date = tenure.coverage_end_date
+    if parsed_s_start:
+        session.coverage_start_date = parsed_s_start
+        session.coverage_end_date = parsed_s_end
+        # Instantly anchor tenure dates if tenure is draft, untracked, upcoming, or has placeholder dates
+        if tenure.status in ("draft", "untracked", "upcoming") or tenure.coverage_start_date is None:
+            tenure.coverage_start_date = parsed_s_start
+            tenure.coverage_end_date = parsed_s_end
+            tenure.expiry_month = parsed_s_end.strftime("%Y-%m")
+    else:
+        session.coverage_start_date = tenure.coverage_start_date
+        session.coverage_end_date = tenure.coverage_end_date
     tenure.last_activity_at = datetime.now(timezone.utc)
 
     # Propagate detected NCD into tenure if not initialized

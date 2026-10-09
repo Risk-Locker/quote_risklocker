@@ -396,3 +396,38 @@ def test_excess_and_compulsory_excess_disambiguation_scenarios():
     assert f3["excess_amount"]["value"] == "0.00"
     assert f3["compulsory_excess"]["value"] == "0.00"
 
+
+def test_period_of_insurans_and_malay_keywords_extraction():
+    # Scenario 1: "Period of insurans" (Malaysian spelling)
+    text1 = """
+    SCHEDULE OF INSURANCE
+    Period of insurans : 15/05/2026 to 14/05/2027
+    Vehicle No: WXY1234
+    """
+    c1 = find_candidates(text1, [{"page": 1, "text": text1}], source_filename="quote1.pdf", db_companies=COMPANY_RECORDS)
+    f1, _, _ = build_draft(c1)
+    assert f1["cover_start_date"]["value"] == "2026-05-15"
+    assert f1["cover_end_date"]["value"] == "2027-05-14"
+
+    # Scenario 2: "Tempoh Insurans" with month names
+    text2 = """
+    IKHTISAR POLISI
+    Tempoh Insurans: Dari 01-Jan-2026 Sehingga 31-Dec-2026
+    No Kenderaan: VAA8888
+    """
+    c2 = find_candidates(text2, [{"page": 1, "text": text2}], source_filename="quote2.pdf", db_companies=COMPANY_RECORDS)
+    f2, _, _ = build_draft(c2)
+    assert f2["cover_start_date"]["value"] == "2026-01-01"
+    assert f2["cover_end_date"]["value"] == "2026-12-31"
+
+    # Scenario 3: "Period of insurance" across two lines
+    text3 = """
+    Period of insurance
+    From 10/10/2026 To 09/10/2027
+    """
+    c3 = find_candidates(text3, [{"page": 1, "text": text3}], source_filename="quote3.pdf", db_companies=COMPANY_RECORDS)
+    f3, _, _ = build_draft(c3)
+    assert f3["cover_start_date"]["value"] == "2026-10-10"
+    assert f3["cover_end_date"]["value"] == "2027-10-09"
+
+

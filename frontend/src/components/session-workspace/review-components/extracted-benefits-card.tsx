@@ -179,13 +179,13 @@ export function ExtractedBenefitsCard({
                                         const cleanCost = extra.cost ? Number(String(extra.cost).replace(/[^0-9.]/g, "")) : null;
                                         const priceObj = cleanCost && Number.isFinite(cleanCost) ? { amount: cleanCost, currency: "MYR" } : null;
                                         const cleanLimit = extra.coverage_limit && typeof extra.coverage_limit === "string" ? extra.coverage_limit.trim() : null;
-                                        addConceptAsBenefit(concept, "available_addon", priceObj, cleanLimit);
+                                        addConceptAsBenefit(concept, "current", priceObj, cleanLimit);
                                       }
                                     }}
-                                    className="text-[11px] h-7 px-2.5 shrink-0 font-medium"
-                                    title="Add this detected cover to optional add-ons list"
+                                    className="text-[11px] h-7 px-2.5 shrink-0 font-bold bg-amber-50 border border-amber-300 text-amber-900 hover:bg-amber-100 transition-colors shadow-2xs"
+                                    title="Add this detected cover to purchased extras on quotation"
                                   >
-                                    + Add to add-ons
+                                    + Add to Quotation
                                   </Button>
                                 ) : null}
                               </div>

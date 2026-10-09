@@ -369,7 +369,7 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
         else []
     )
     extras = build_extras(selections, concepts, offerings)
-    round_tot = bool((draft.display_options or {}).get("round_total", False))
+    round_tot = bool((draft.display_options or {}).get("round_total", True))
     adjusted_total = adjusted_total_text(draft.fields or {}, extras, round_total=round_tot)
     
     # Extract car model string safely

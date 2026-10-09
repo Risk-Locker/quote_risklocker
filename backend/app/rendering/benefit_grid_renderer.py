@@ -162,7 +162,17 @@ def _dynamic_benefit_grid(
                     asset_uri_c = uri
                     break
 
-        is_purchased_extra = bool(card.get("is_extra") or (card.get("cost_status") == "paid" and kind == "current_benefits"))
+        if kind == "available_addons":
+            is_purchased_extra = False
+        elif card.get("is_pure_default") or card.get("cost_status") in {"included", "foc"}:
+            is_purchased_extra = False
+        else:
+            is_purchased_extra = bool(
+                kind in {"extras", "purchased_extras"}
+                or card.get("is_extra")
+                or (card.get("cost_status") == "paid" and kind == "current_benefits")
+                or (card.get("price") and kind == "current_benefits")
+            )
         is_dark = element.get("benefitPreset") == "dark-signature"
         is_minimal = element.get("benefitPreset") == "compact-minimal" or element.get("cardStyle") == "minimal"
         is_elevated = element.get("benefitPreset") == "elevated-3d" or element.get("cardStyle") == "soft"
@@ -312,8 +322,13 @@ def _dynamic_benefit_grid(
         if is_valid_cov and value_str.lower() in {"included standard cover", "included", "foc", "as quoted", "selected", "optional"}:
             is_valid_cov = False
             value_str = ""
+        elif value_str in {"0", "0.00", "RM 0", "RM 0.00", "0.0"}:
+            is_valid_cov = False
+            value_str = ""
 
-        show_value = is_valid_cov and card.get("_showCoverage", True)
+        # Coverage amount and price badges are STRICTLY for purchased extras / paid add-ons.
+        # Free Added Coverage (Defaults) and Recommended Add-on Upgrades must NEVER show coverage limits or prices.
+        show_value = is_valid_cov and is_purchased_extra and kind != "available_addons" and card.get("_showCoverage", True)
         coverage_html = (
             f'<span style="display:block;font-size:{val_fs}px;font-weight:700;line-height:1.15;'
             f'color:{val_color};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{value_str}</span>'
@@ -338,8 +353,7 @@ def _dynamic_benefit_grid(
         # --- Cost / price badge ---
         price_badge = ""
         price = card.get("price") or card.get("optional_price")
-        is_addon_card = card.get("is_addon") or kind == "available_addons" or is_purchased_extra or bool(card.get("price"))
-        if is_addon_card and not card.get("is_pure_default") and card.get("_showCost", True):
+        if is_purchased_extra and kind != "available_addons" and not card.get("is_pure_default") and card.get("_showCost", True):
             p_val = None
             if price:
                 p_val = (price.get("amount") if price.get("amount") is not None else price.get("value")) if isinstance(price, dict) else price

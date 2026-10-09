@@ -71,13 +71,13 @@ export function TenureTimelineDrawer({
             </div>
             <p className="text-xs text-neutral-500 mt-1">
               Confirmed Period:{" "}
-              {data?.stage === "Issue Policy" && data?.coverage_start_date ? (
+              {data?.coverage_start_date ? (
                 <strong className="font-mono text-neutral-800">
                   {new Date(data.coverage_start_date).toLocaleDateString("en-GB")} to{" "}
                   {data.coverage_end_date ? new Date(data.coverage_end_date).toLocaleDateString("en-GB") : "—"}
                 </strong>
               ) : (
-                <span className="text-neutral-400 font-mono">— (Pending Policy Issue)</span>
+                <span className="text-neutral-400 font-mono">— (Pending Quotation Upload)</span>
               )}{" "}
               <span className="font-semibold text-neutral-600">(Cohort {data?.expiry_month})</span>
             </p>

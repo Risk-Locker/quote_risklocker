@@ -223,9 +223,6 @@ def _recompute_total(fields: dict, decisions: dict, user, draft: QuotationDraft 
         if tot_val is not None and str(tot_val).strip():
             try:
                 manual_tot = Decimal(str(tot_val).replace(",", "").strip())
-                round_tot = bool((getattr(draft, "display_options", None) or {}).get("round_total", False)) if draft else False
-                if round_tot:
-                    manual_tot = Decimal(int(manual_tot.quantize(Decimal("1"), rounding="ROUND_HALF_UP")))
                 fields["total_amount"] = {"value": f"{manual_tot:.2f}", "status": "ready", "message": ""}
                 decisions["total_amount"] = {
                     "decision": "edit",
@@ -298,9 +295,6 @@ def _recompute_total(fields: dict, decisions: dict, user, draft: QuotationDraft 
                 pass
 
     total = base_prem + extras_total + rt_val + sf_val
-    round_tot = bool((getattr(draft, "display_options", None) or {}).get("round_total", False)) if draft else False
-    if round_tot:
-        total = Decimal(int(total.quantize(Decimal("1"), rounding="ROUND_HALF_UP")))
     fields["total_amount"] = {"value": f"{total:.2f}", "status": "ready", "message": ""}
     decisions["total_amount"] = {
         "decision": "confirm",

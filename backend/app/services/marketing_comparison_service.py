@@ -46,6 +46,7 @@ from app.models.tables import (
 )
 from app.services.customer_account_service import resolve_or_create_customer
 from app.services.benefit_evaluation_engine import BenefitEvaluationEngine, EvaluatedBenefit
+from app.services.vehicle_tracking_service import parse_date_safe
 
 logger = logging.getLogger(__name__)
 
@@ -2271,6 +2272,18 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
         entry_ncd = _extract_ncd_from_draft(f_obj, s_obj=s_obj)
         source_quote_no = _extract_source_quotation_no(s_obj, f_obj)
 
+        cand_start_str = _extract_val(f_obj.get("cover_start_date") or f_obj.get("issue_date")) if f_obj else None
+        cand_end_str = _extract_val(f_obj.get("cover_end_date") or f_obj.get("valid_until")) if f_obj else None
+        dt_start_obj = s_obj.coverage_start_date if (s_obj and s_obj.coverage_start_date) else parse_date_safe(cand_start_str)
+        dt_end_obj = s_obj.coverage_end_date if (s_obj and s_obj.coverage_end_date) else parse_date_safe(cand_end_str)
+        if dt_start_obj and not dt_end_obj:
+            dt_end_obj = dt_start_obj + timedelta(days=364)
+        entry_period_fmt = (
+            f"{dt_start_obj.strftime('%d/%m/%Y')} - {dt_end_obj.strftime('%d/%m/%Y')}"
+            if (dt_start_obj and dt_end_obj)
+            else None
+        )
+
         entry_dicts.append({
             "id": e.id,
             "tenure_id": e.tenure_id,
@@ -2354,6 +2367,11 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             ),
             "source_quotation_no": source_quote_no or getattr(e, "quotation_ref", None),
             "is_takaful": "contribution" in basic_term_label.lower() or "takaful" in e.company_name.lower(),
+            "coverage_start_date": dt_start_obj.isoformat() if dt_start_obj else None,
+            "coverage_end_date": dt_end_obj.isoformat() if dt_end_obj else None,
+            "coverage_period_formatted": entry_period_fmt,
+            "uploaded_file_id": s_obj.uploaded_file_id if s_obj else None,
+            "original_filename": s_obj.uploaded_file.original_filename if (s_obj and s_obj.uploaded_file) else None,
         })
 
     # 10. Group sessions into upload session timeline ribbon
@@ -2436,6 +2454,29 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "company_name": ds.detected_company or "Underwriter",
         })
 
+    # Dynamic active winner policy period resolution
+    winner_entry = next((e for e in entry_dicts if e.get("is_recommended")), None)
+    if not winner_entry and entry_dicts:
+        winner_entry = entry_dicts[0]
+
+    active_start_date = tenure.coverage_start_date
+    active_end_date = tenure.coverage_end_date
+    if winner_entry and winner_entry.get("coverage_start_date"):
+        try:
+            active_start_date = datetime.fromisoformat(winner_entry["coverage_start_date"])
+            if winner_entry.get("coverage_end_date"):
+                active_end_date = datetime.fromisoformat(winner_entry["coverage_end_date"])
+            else:
+                active_end_date = active_start_date + timedelta(days=364)
+        except Exception:
+            pass
+
+    active_period_formatted = (
+        f"{active_start_date.strftime('%d/%m/%Y')} - {active_end_date.strftime('%d/%m/%Y')}"
+        if (active_start_date and active_end_date)
+        else f"{tenure.coverage_start_date.strftime('%d/%m/%Y')} - {tenure.coverage_end_date.strftime('%d/%m/%Y')}"
+    )
+
     return {
         "tenure": {
             "id": tenure.id,
@@ -2458,9 +2499,11 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "manufacture_year": veh_yom or 2023,
             "vehicle_age": veh_age,
             "seating_capacity": veh_seating or "5",
-            "coverage_start_date": tenure.coverage_start_date.isoformat(),
-            "coverage_end_date": tenure.coverage_end_date.isoformat(),
-            "coverage_period_formatted": f"{tenure.coverage_start_date.strftime('%d/%m/%Y')} - {tenure.coverage_end_date.strftime('%d/%m/%Y')}",
+            "coverage_start_date": active_start_date.isoformat() if active_start_date else tenure.coverage_start_date.isoformat(),
+            "coverage_end_date": active_end_date.isoformat() if active_end_date else tenure.coverage_end_date.isoformat(),
+            "coverage_period_formatted": active_period_formatted,
+            "winning_file_id": winner_entry.get("uploaded_file_id") if winner_entry else None,
+            "winning_file_name": winner_entry.get("original_filename") if winner_entry else None,
             "expiry_month": tenure.expiry_month,
             "status": tenure.status,
             "road_tax": float(tenure.road_tax),
@@ -3065,8 +3108,33 @@ def select_winner_and_generate_draft(
         tenure.won_premium = primary.total_payable
         if primary.session_id:
             s_primary = db.get(SessionModel, primary.session_id)
-            if s_primary and s_primary.quotation_ref:
-                tenure.winning_quotation_ref = s_primary.quotation_ref
+            if s_primary:
+                if s_primary.quotation_ref:
+                    tenure.winning_quotation_ref = s_primary.quotation_ref
+                # Dynamically synchronize winning quotation policy period to tenure
+                cand_st = s_primary.coverage_start_date
+                cand_en = s_primary.coverage_end_date
+                if not cand_st and s_primary.draft and isinstance(s_primary.draft.fields, dict):
+                    f_d = s_primary.draft.fields
+                    raw_st = f_d.get("cover_start_date", {}).get("value") if isinstance(f_d.get("cover_start_date"), dict) else f_d.get("cover_start_date")
+                    raw_en = f_d.get("cover_end_date", {}).get("value") if isinstance(f_d.get("cover_end_date"), dict) else f_d.get("cover_end_date")
+                    cand_st = parse_date_safe(raw_st)
+                    cand_en = parse_date_safe(raw_en)
+                if cand_st:
+                    if cand_st.tzinfo is None:
+                        cand_st = cand_st.replace(tzinfo=timezone.utc)
+                    tenure.coverage_start_date = cand_st
+                    s_primary.coverage_start_date = cand_st
+                if cand_en:
+                    if cand_en.tzinfo is None:
+                        cand_en = cand_en.replace(tzinfo=timezone.utc)
+                    tenure.coverage_end_date = cand_en
+                    tenure.expiry_month = cand_en.strftime("%Y-%m")
+                    s_primary.coverage_end_date = cand_en
+                elif cand_st:
+                    tenure.coverage_end_date = cand_st + timedelta(days=364)
+                    tenure.expiry_month = tenure.coverage_end_date.strftime("%Y-%m")
+                    s_primary.coverage_end_date = tenure.coverage_end_date
     else:
         tenure.winning_company_id = None
         tenure.won_premium = None

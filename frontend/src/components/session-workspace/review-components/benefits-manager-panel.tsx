@@ -602,9 +602,9 @@ export function BenefitsManagerPanel({
               size="sm"
               onClick={() => addCustomBenefit("current")}
               disabled={!customLabel.trim()}
-              className="text-xs"
+              className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-bold shadow-xs"
             >
-              + Add to Default / FOC
+              + Add to Purchased Add-ons
             </Button>
             <Button
               size="sm"
@@ -613,7 +613,7 @@ export function BenefitsManagerPanel({
               disabled={!customLabel.trim()}
               className="text-xs"
             >
-              + Add to Add-ons
+              + Add to Optional Add-ons
             </Button>
           </div>
         </>

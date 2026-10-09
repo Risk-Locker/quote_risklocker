@@ -142,11 +142,11 @@ GEMINI_EXTRACTION_SCHEMA = {
         },
         "cover_start_date": {
             "type": "string",
-            "description": "Coverage period start date in DD/MM/YYYY or DD-MM-YYYY format.",
+            "description": "Coverage period start date in DD/MM/YYYY or DD-MM-YYYY format. Look for 'Period of Insurance', 'Period of Insurans', 'Tempoh Insurans', 'Period of Cover', 'Period of Takaful', 'Tempoh Perlindungan', 'Cover Period', 'From', 'Effective Date'.",
         },
         "cover_end_date": {
             "type": "string",
-            "description": "Coverage period expiry / end date in DD/MM/YYYY or DD-MM-YYYY format.",
+            "description": "Coverage period expiry / end date in DD/MM/YYYY or DD-MM-YYYY format. Look for 'Period of Insurance', 'Period of Insurans', 'Tempoh Insurans', 'Period of Cover', 'Period of Takaful', 'Tempoh Perlindungan', 'To', 'Until', 'Sehingga', 'Expiry Date'.",
         },
         "ncd_percent": {
             "type": "string",

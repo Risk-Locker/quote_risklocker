@@ -218,10 +218,10 @@ export function ReviewModals({
                       size="sm"
                       variant="secondary"
                       onClick={() => addConceptAsBenefit(concept, "current")}
-                      className="text-[10px] h-7 px-2 cursor-pointer"
-                      title="Add to Default / FOC Benefits"
+                      className="text-[10px] h-7 px-2 cursor-pointer font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300"
+                      title="Add to Purchased Extras on this quotation"
                     >
-                      + Default
+                      + Quotation
                     </Button>
                     <Button
                       size="sm"
@@ -230,7 +230,7 @@ export function ReviewModals({
                       className="text-[10px] h-7 px-2 cursor-pointer"
                       title="Add to Optional Add-ons"
                     >
-                      + Add-on
+                      + Optional
                     </Button>
                   </div>
                 </div>

@@ -416,14 +416,21 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
     combined_rt_display = f"{combined_rt_val:.2f}" if combined_rt_val > 0 else (rt_display or "")
     rt_label = str(labels.get("roadtax") or "Roadtax and Runner Fee / 路税及服务费")
 
-    # Get total early
+    disp_opts = (render_context or {}).get("display_options") or ((render_context or {}).get("draft") or {}).get("display_options") or {}
+    round_tot = bool(disp_opts.get("round_total", True))
+
     total = (render_context or {}).get("total_premium_adjusted") or _value(fields, "total_premium_adjusted")
     if not total:
-        disp_opts = (render_context or {}).get("display_options") or ((render_context or {}).get("draft") or {}).get("display_options") or {}
-        round_tot = bool(disp_opts.get("round_total", False))
-        total = adjusted_total_text(fields, extras, round_total=round_tot) if extras else _value(fields, "total_amount")
+        total = adjusted_total_text(fields, extras, round_total=round_tot)
     if not total:
         total = _value(fields, "total_amount")
+
+    if total and round_tot:
+        try:
+            clean_num = float(re.sub(r"[^\d.]", "", str(total)))
+            total = f"{round(clean_num):,.2f}"
+        except Exception:
+            pass
 
     def _get_v4_premium():
         try:

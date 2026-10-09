@@ -87,8 +87,8 @@ MONEY_FIELDS = {
 DEFAULT_ALIASES = {
     "customer_name": ["insured name", "the insured", "customer name", "client name", "policyholder", "owner name", "pihak diinsuranskan", "participant"],
     "vehicle_no": ["vehicle no", "registration no", "reg no", "car no", "plate no", "vehicle registration"],
-    "cover_start_date": ["cover start", "period from", "from date", "effective date"],
-    "cover_end_date": ["cover end", "period to", "to date", "expiry date"],
+    "cover_start_date": ["cover start", "period from", "from date", "effective date", "period of insurance", "period of insurans", "tempoh insurans", "tempoh perlindungan", "period of cover", "period of takaful"],
+    "cover_end_date": ["cover end", "period to", "to date", "expiry date", "until date", "sehingga", "tarikh tamat"],
     "car_brand": ["make", "brand", "car"],
     "car_model": ["model", "vehicle model"],
     "engine_cc": ["engine cc", "capacity", "cubic capacity", "engine capacity", "keupayaan enjin", "cc", "motor capacity", "keupayaan motor", "electric motor", "motor output", "output", "kw", "watt"],
@@ -517,24 +517,42 @@ def _semantic_label_map() -> list[tuple[str, str]]:
 
 
 def _add_period_of_cover(text: str, lines: list[str], page_text: list[dict], results: dict[str, list[CandidateValue]]) -> None:
+    date_token_pat = r"(?:\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{1,2}\s+[a-zA-Z]{3,9}\s+\d{4}|\d{1,2}-[a-zA-Z]{3,9}-\d{4})"
     patterns = [
-        r"(?i)period of cover\s*:?\s*(?P<start>\d{1,2}[/-]\d{1,2}[/-]\d{4})\s*(?:until|to|-)\s*(?P<end>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
-        r"(?i)period of takaful\s*:?\s*(?P<start>\d{1,2}[/-]\d{1,2}[/-]\d{4})\s*(?:until|to|-)\s*(?P<end>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
-        r"(?i)period of insurance\s*:?\s*(?P<start>\d{1,2}[/-]\d{1,2}[/-]\d{4})\s*(?:until|to|-)\s*(?P<end>\d{1,2}[/-]\d{1,2}[/-]\d{4})",
+        # Catch: Period of Insurance / Insurans / Cover / Takaful, Tempoh Insurans / Takaful / Perlindungan
+        rf"(?i)(?:period\s+of\s+(?:insurans?|insurance|cover|takaful)|tempoh\s+(?:insurans?|takaful|perlindungan)|cover\s+period)\s*:?\s*(?:from\s*|drpd\s*|dari\s*)?(?P<start>{date_token_pat})\s*(?:until|sehingga|to|till|hingga|-)\s*(?:to\s*|hingga\s*)?(?P<end>{date_token_pat})",
+        rf"(?i)period\s+of\s+(?:insurans?|insurance)\s*:?\s*(?:from\s*)?(?P<start>{date_token_pat})\s*(?:until|to|-|till)\s*(?P<end>{date_token_pat})",
+        rf"(?i)tempoh\s+insurans?\s*:?\s*(?:dari\s*)?(?P<start>{date_token_pat})\s*(?:sehingga|hingga|to|-)\s*(?P<end>{date_token_pat})",
+        rf"(?i)(?:from|drpd|dari)\s*(?P<start>{date_token_pat})\s*(?:until|sehingga|to|till|hingga|-)\s*(?P<end>{date_token_pat})",
     ]
     for pattern in patterns:
-        match = re.search(pattern, text, re.DOTALL)
+        match = re.search(pattern, text)
         if match:
-            _add(results, "cover_start_date", match.group("start"), "semantic_cover_period", 0.97, text, match.start(), match.end(), page_text)
-            _add(results, "cover_end_date", match.group("end"), "semantic_cover_period", 0.97, text, match.start(), match.end(), page_text)
+            _add(results, "cover_start_date", match.group("start"), "semantic_cover_period", 0.98, text, match.start(), match.end(), page_text)
+            _add(results, "cover_end_date", match.group("end"), "semantic_cover_period", 0.98, text, match.start(), match.end(), page_text)
             return
+
+    cover_keywords = {
+        "period of cover", "cover period", "period of takaful", "period of insurance",
+        "period of insurans", "period of insuran", "tempoh insurans", "tempoh insuran",
+        "tempoh takaful", "tempoh perlindungan"
+    }
     for index, line in enumerate(lines):
-        if line.lower() in {"period of cover", "cover period", "period of takaful", "period of insurance"}:
+        norm_line = line.lower().strip(" :-")
+        if any(norm_line == kw or norm_line.startswith(kw) or f" {kw}" in norm_line for kw in cover_keywords):
+            # Check context across the next few lines
+            context_block = " ".join(lines[index : min(len(lines), index + 4)])
+            dates = _dates(context_block)
+            if len(dates) >= 2:
+                _add_line_value(results, "cover_start_date", dates[0], "semantic_cover_period", 0.96, line, text, page_text)
+                _add_line_value(results, "cover_end_date", dates[1], "semantic_cover_period", 0.96, line, text, page_text)
+                return
             value = _next_value(lines, index)
             dates = _dates(value)
             if len(dates) >= 2:
                 _add_line_value(results, "cover_start_date", dates[0], "semantic_cover_period", 0.96, line, text, page_text)
                 _add_line_value(results, "cover_end_date", dates[1], "semantic_cover_period", 0.96, line, text, page_text)
+                return
 
 
 def _add_semantic_label_values(text: str, page_text: list[dict], results: dict[str, list[CandidateValue]]) -> None:

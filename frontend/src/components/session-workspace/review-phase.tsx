@@ -279,8 +279,25 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
   const addonCards = useMemo(() => {
     if (!workspace?.benefit_cards?.available_addons) return [];
-    return workspace.benefit_cards.available_addons.filter((card) => !isExcludedForVehicle(card));
-  }, [workspace?.benefit_cards?.available_addons, isExcludedForVehicle]);
+    const currentConceptIds = new Set(
+      currentCards.map((c) => String(c.concept_id || "")).filter(Boolean)
+    );
+    const currentConceptKeys = new Set(
+      currentCards.map((c) => String(c.concept_key || "")).filter(Boolean)
+    );
+    const currentLabels = new Set(
+      currentCards.map((c) => String(c.label || "").trim().toLowerCase()).filter(Boolean)
+    );
+
+    return workspace.benefit_cards.available_addons
+      .filter((card) => !isExcludedForVehicle(card))
+      .filter((card) => {
+        if (card.concept_id && currentConceptIds.has(String(card.concept_id))) return false;
+        if (card.concept_key && currentConceptKeys.has(String(card.concept_key))) return false;
+        if (card.label && currentLabels.has(String(card.label).trim().toLowerCase())) return false;
+        return true;
+      });
+  }, [workspace?.benefit_cards?.available_addons, currentCards, isExcludedForVehicle]);
 
   const focCards = useMemo(() => {
     return currentCards.filter((card) => !isPaidExtraBenefitCard(card));
@@ -310,7 +327,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   }
 
   const [roundTotal, setRoundTotal] = useState<boolean>(() =>
-    Boolean((workspace?.display_options as Record<string, unknown> | undefined)?.round_total)
+    (workspace?.display_options as Record<string, unknown> | undefined)?.round_total !== false
   );
   const lastSyncedRevisionRef = useRef<number | null>(null);
 
@@ -318,7 +335,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     if (workspace?.display_options && "round_total" in workspace.display_options) {
       if (lastSyncedRevisionRef.current === null || workspace.revision !== lastSyncedRevisionRef.current) {
         lastSyncedRevisionRef.current = workspace.revision;
-        setRoundTotal(Boolean((workspace.display_options as Record<string, unknown>).round_total));
+        setRoundTotal((workspace.display_options as Record<string, unknown>).round_total !== false);
       }
     }
   }, [workspace?.display_options, workspace?.revision]);
@@ -1702,7 +1719,8 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     coverageLimit?: string | null
   ) {
     const key = `concept:${concept.concept_key}:${crypto.randomUUID().slice(0, 8)}`;
-    const costStatus = price ? "paid" : state === "current" ? "included" : "paid";
+    // Anything manually added to current on quotation is a Purchased Add-on, never an included default
+    const costStatus = "paid";
     const cleanLimit = coverageLimit && typeof coverageLimit === "string" && !coverageLimit.includes("[object") ? coverageLimit.trim() : "";
     const typedValue = cleanLimit
       ? { type: "custom", display_text: cleanLimit.startsWith("RM") ? cleanLimit : `RM ${cleanLimit}` }
@@ -1771,13 +1789,13 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   function addCustomBenefit(targetState: "current" | "available_addon" = "current") {
     const label = customLabel.trim();
     if (!label) return;
-    const isAddon = targetState === "available_addon";
     const key = `custom:${crypto.randomUUID()}`;
     const priceText = customPrice.trim();
     const price = priceText
       ? { amount: priceText.replace(/,/g, ""), currency: "MYR" }
       : undefined;
-    const costStatus = price ? "paid" : isAddon ? "paid" : "included";
+    // Anything manually added to the quotation is strictly a Purchased Add-on / Extra, never a default inclusion
+    const costStatus = "paid";
     const op = {
       op: "create_custom_benefit",
       selection_key: key,

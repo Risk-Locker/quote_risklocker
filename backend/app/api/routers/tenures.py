@@ -138,6 +138,9 @@ class UpdateTenureLedgerRequest(BaseModel):
     status: str | None = None
     external_policy_start_date: str | None = None
     external_policy_end_date: str | None = None
+    coverage_start_date: str | None = None
+    coverage_end_date: str | None = None
+    winning_company_name: str | None = None
 
 
 @router.post("")
@@ -643,12 +646,31 @@ def list_tenures(
             sum_ins = _val("sum_insured") or _val("coverage_amount")
             comp = s.detected_company or "Unknown"
 
+            is_win = bool(
+                (t.winning_quotation_ref and s.quotation_ref == t.winning_quotation_ref)
+                or (t.winning_company_id and getattr(s, "company_id", None) == t.winning_company_id)
+            )
+            s_fn = s.uploaded_file.original_filename if s.uploaded_file else f"{comp}.pdf"
+            s_start = s.coverage_start_date.isoformat() if s.coverage_start_date else None
+            s_end = s.coverage_end_date.isoformat() if s.coverage_end_date else None
+            s_period = (
+                f"{s.coverage_start_date.strftime('%d/%m/%Y')} - {s.coverage_end_date.strftime('%d/%m/%Y')}"
+                if (s.coverage_start_date and s.coverage_end_date)
+                else None
+            )
+
             sourced.append({
                 "session_id": s.id,
                 "company": comp,
                 "version": s.tenure_version,
                 "total_payable": tot,
                 "sum_insured": sum_ins,
+                "uploaded_file_id": s.uploaded_file_id,
+                "file_name": s_fn,
+                "coverage_start_date": s_start,
+                "coverage_end_date": s_end,
+                "coverage_period_formatted": s_period,
+                "is_winner": is_win,
             })
 
             if s.quotation_ref and s.quotation_ref.startswith("RL"):
@@ -661,6 +683,12 @@ def list_tenures(
 
         stage_up = t.stage_updated_at if t.stage_updated_at.tzinfo else t.stage_updated_at.replace(tzinfo=timezone.utc)
         days_in_stage = max(0, (now - stage_up).days) if t.stage_updated_at else 0
+
+        win_quote = next((sq for sq in sourced if sq.get("is_winner")), None)
+        if not win_quote and sourced:
+            win_quote = sourced[0]
+        winning_file_id = win_quote.get("uploaded_file_id") if win_quote else None
+        winning_file_name = win_quote.get("file_name") if win_quote else None
 
         items.append({
             "id": t.id,
@@ -693,6 +721,8 @@ def list_tenures(
             "winning_company_id": t.winning_company_id,
             "winning_company_name": t.winning_company.name if t.winning_company else "",
             "winning_quotation_ref": t.winning_quotation_ref,
+            "winning_file_id": winning_file_id,
+            "winning_file_name": winning_file_name,
             "won_premium": float(t.won_premium) if t.won_premium is not None else None,
             "miss_reason": t.miss_reason,
             "loss_reason_category": t.loss_reason_category,
@@ -797,6 +827,32 @@ def update_tenure_ledger_fields(
         tenure.loss_reason_category = payload.loss_reason_category
     if payload.winning_company_id is not None:
         tenure.winning_company_id = payload.winning_company_id
+    elif payload.winning_company_name is not None and payload.winning_company_name.strip():
+        from app.models.tables import Company
+        comp = db.scalar(
+            select(Company).where(
+                or_(
+                    Company.name.ilike(payload.winning_company_name.strip()),
+                    Company.code.ilike(payload.winning_company_name.strip()),
+                )
+            )
+        )
+        if comp:
+            tenure.winning_company_id = comp.id
+
+    if payload.coverage_start_date is not None and payload.coverage_start_date.strip():
+        try:
+            s_dt = datetime.strptime(payload.coverage_start_date.strip()[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            tenure.coverage_start_date = s_dt
+            tenure.expiry_month = f"{s_dt.year}-{s_dt.month:02d}"
+        except Exception:
+            pass
+    if payload.coverage_end_date is not None and payload.coverage_end_date.strip():
+        try:
+            e_dt = datetime.strptime(payload.coverage_end_date.strip()[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            tenure.coverage_end_date = e_dt
+        except Exception:
+            pass
     if payload.winning_quotation_ref is not None:
         tenure.winning_quotation_ref = payload.winning_quotation_ref
     if payload.won_premium is not None:

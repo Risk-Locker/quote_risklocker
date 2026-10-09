@@ -852,14 +852,16 @@ def resolve_benefit_cards(
             if not concept:
                 continue
             matching_sel = available_selected_by_offering.get(str(target.id)) or available_selected_by_concept.get(str(target.concept_id))
-            available_cards.append(_card(
+            ucard = _card(
                 selection=matching_sel,
                 offering=target,
                 concept=concept,
                 typed_value=(matching_sel.typed_value_override if matching_sel else None) or target.typed_value,
                 branch_key=edge.branch_key,
                 visual_profile_assets=visual_profile_assets,
-            ))
+            )
+            ucard["is_upgrade_edge"] = True
+            available_cards.append(ucard)
             offered_ids.add(target.id)
 
         # Also support same-concept upgrade options without requiring an explicit edge
@@ -880,14 +882,16 @@ def resolve_benefit_cards(
                 concept = concepts_by_id.get(str(off.concept_id))
                 if concept:
                     matching_sel = available_selected_by_offering.get(str(off.id)) or available_selected_by_concept.get(str(off.concept_id))
-                    available_cards.append(_card(
+                    ucard = _card(
                         selection=matching_sel,
                         offering=off,
                         concept=concept,
                         typed_value=(matching_sel.typed_value_override if matching_sel else None) or off.typed_value,
                         branch_key=getattr(off, "branch_key", None),
                         visual_profile_assets=visual_profile_assets,
-                    ))
+                    )
+                    ucard["is_upgrade_edge"] = True
+                    available_cards.append(ucard)
                     offered_ids.add(off.id)
 
     active_concepts = {str(item.concept_id) for item in current if item.concept_id}
@@ -945,9 +949,34 @@ def resolve_benefit_cards(
         current_cards = [card for card in current_cards if str(card.get("concept_id") or "") not in hidden_concept_ids]
         available_cards = [card for card in available_cards if str(card.get("concept_id") or "") not in hidden_concept_ids]
 
+    # Strictly guarantee no duplicate benefits between current_benefits and available_addons
+    current_concept_ids = {str(card.get("concept_id")) for card in current_cards if card.get("concept_id")}
+    current_concept_keys = {str(card.get("concept_key")) for card in current_cards if card.get("concept_key")}
+    current_labels = {re.sub(r"[^a-z0-9]+", " ", str(card.get("label") or "").lower()).strip() for card in current_cards if card.get("label")}
+
+    deduped_available_cards: list[dict] = []
+    seen_addon_keys: set[str] = set()
+    for card in available_cards:
+        cid = str(card.get("concept_id") or "")
+        ckey = str(card.get("concept_key") or "")
+        lbl_norm = re.sub(r"[^a-z0-9]+", " ", str(card.get("label") or "").lower()).strip()
+        is_upgrade = bool(card.get("is_upgrade_edge") or card.get("branch_key"))
+        if not is_upgrade:
+            if cid and cid in current_concept_ids:
+                continue
+            if ckey and ckey in current_concept_keys:
+                continue
+            if lbl_norm and lbl_norm in current_labels:
+                continue
+        dedup_key = f"{ckey or cid or lbl_norm}:{card.get('branch_key') or card.get('offering_id') or ''}"
+        if dedup_key in seen_addon_keys:
+            continue
+        seen_addon_keys.add(dedup_key)
+        deduped_available_cards.append(card)
+
     order = lambda card: (card["sort_order"], card["label"].casefold(), card["card_key"])
     current_sorted = sorted(current_cards, key=order)
-    addons_sorted = sorted(available_cards, key=order)
+    addons_sorted = sorted(deduped_available_cards, key=order)
     plan_rows = {str(item.id): item for item in (plans or [])}
     groups: list[dict] = []
     for card in current_sorted:

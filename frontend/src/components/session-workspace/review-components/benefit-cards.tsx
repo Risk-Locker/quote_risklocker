@@ -571,25 +571,59 @@ export function AddonCard({
 
   const hasPriceDiff = initialPriceNum !== null && (currentPriceNum === null || Math.abs(initialPriceNum - currentPriceNum) > 0.01);
 
-  const handleMoveToDefault = () => {
+  const handleAddToPurchasedAddons = () => {
     const priceVal = card.price || card.optional_price || null;
-    const costStatus = priceVal ? "paid" : "included";
+    let finalPrice = null;
+    if (priceVal) {
+      if (typeof priceVal === "object") {
+        const amt = priceVal.amount ?? (priceVal as any).value;
+        if (amt !== null && amt !== undefined && !isNaN(Number(amt)) && Number(amt) > 0) {
+          finalPrice = { amount: Number(amt), value: Number(amt), currency: "MYR" };
+        }
+      } else if (!isNaN(Number(priceVal)) && Number(priceVal) > 0) {
+        finalPrice = { amount: Number(priceVal), value: Number(priceVal), currency: "MYR" };
+      }
+    } else if (card.detected_cost && !isNaN(Number(card.detected_cost)) && Number(card.detected_cost) > 0) {
+      finalPrice = { amount: Number(card.detected_cost), value: Number(card.detected_cost), currency: "MYR" };
+    }
+
     if (selectionId) {
       onQueue(
-        { op: "benefit_update", selection_id: selectionId, state: "current", cost_status: costStatus, ...(priceVal ? { price: priceVal } : {}) },
+        {
+          op: "benefit_update",
+          selection_id: selectionId,
+          state: "current",
+          cost_status: "paid",
+          ...(finalPrice ? { price: finalPrice } : {}),
+        },
         `benefits.${selectionId}.state`,
         { op: "benefit_update", selection_id: selectionId, state: "available_addon", cost_status: "paid" }
       );
     } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
       onQueue(
-        { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: costStatus, ...(priceVal ? { price: priceVal } : {}) },
+        {
+          op: "select_catalog_offering",
+          offering_id: card.offering_id,
+          state: "current",
+          cost_status: "paid",
+          ...(finalPrice ? { price: finalPrice } : {}),
+        },
         `benefits.offer.${card.offering_id}`,
-        { op: "select_catalog_offering", offering_id: card.offering_id, state: "removed", cost_status: "included" }
+        { op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid" }
       );
     } else {
-      const customKey = `default:${card.concept_key || index}`;
+      const customKey = `extra:${card.concept_key || card.concept_id || index}`;
       onQueue(
-        { op: "create_custom_benefit", selection_key: customKey, state: "current", cost_status: costStatus, label: card.label, ...(priceVal ? { price: priceVal } : {}) },
+        {
+          op: "create_custom_benefit",
+          selection_key: customKey,
+          concept_id: card.concept_id,
+          concept_key: card.concept_key,
+          state: "current",
+          cost_status: "paid",
+          label: card.label,
+          ...(finalPrice ? { price: finalPrice } : {}),
+        },
         `benefits.add.${index}`,
         { op: "benefit_update", selection_id: customKey, state: "removed" }
       );
@@ -818,11 +852,11 @@ export function AddonCard({
         <Button
           size="sm"
           variant="secondary"
-          title="Move to Default / FOC Benefits"
-          onClick={handleMoveToDefault}
-          className="text-[11px] h-7 px-2 group-hover:bg-[var(--rl-black)] group-hover:text-white"
+          title="Add to Purchased Extras on this quotation"
+          onClick={handleAddToPurchasedAddons}
+          className="text-[11px] h-7 px-2.5 font-bold bg-amber-50 border border-amber-300 text-amber-900 hover:bg-amber-100 transition-colors shadow-2xs"
         >
-          ← Default/FOC
+          + Add to Quotation
         </Button>
         <button
           type="button"

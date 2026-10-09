@@ -7,7 +7,17 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
 
-DATE_FORMATS = ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%Y/%m/%d")
+DATE_FORMATS = (
+    "%Y-%m-%d",
+    "%d/%m/%Y",
+    "%d-%m-%Y",
+    "%d.%m.%Y",
+    "%Y/%m/%d",
+    "%d %b %Y",
+    "%d-%b-%Y",
+    "%d %B %Y",
+    "%d-%B-%Y",
+)
 
 
 def normalize_money(value: str | None) -> str | None:

@@ -402,7 +402,7 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
     config, assets, asset_hashes = _snapshot_assets(db, config, cards, draft)
     extras = build_extras(selections, concepts, offerings)
     fields = deepcopy(draft.fields or {})
-    round_tot = bool((draft.display_options or {}).get("round_total", False))
+    round_tot = bool((draft.display_options or {}).get("round_total", True))
     adjusted_total = adjusted_total_text(fields, extras, round_total=round_tot)
     fields["total_premium_adjusted"] = {
         "value": adjusted_total if adjusted_total else _field_text(fields, "total_amount"),

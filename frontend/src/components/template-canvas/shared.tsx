@@ -869,24 +869,34 @@ export function CanvasElementView({
                     return null;
                   };
                   const costNum = extractCost(b) ?? (extraMatch ? extractCost(extraMatch) : null);
-                  const costBadge = costNum !== null
+                  // Paid extra strictly when it is a paid card AND not inside the Recommended Add-ons section
+                  const isPaidExtra = isPaidExtraBenefitCard(b) && !isAddons;
+                  // Free Added Coverage (Defaults) and Recommended Add-on Upgrades must NEVER show coverage amount or price badge
+                  const costBadge = (isPaidExtra && costNum !== null)
                     ? `Cost : MYR ${costNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                     : null;
 
-                  const rawLimit = b?.detected_limit || b?.coverage_limit;
-                  if (rawLimit && typeof rawLimit === "string" && rawLimit.trim()) {
-                    const s = rawLimit.trim();
-                    if (/\d/.test(s) || /unlimited/i.test(s)) {
-                      val = s.startsWith("RM") ? s : `RM ${s}`;
+                  if (!isPaidExtra) {
+                    val = "";
+                  } else {
+                    const rawLimit = b?.detected_limit || b?.coverage_limit;
+                    if (rawLimit && typeof rawLimit === "string" && rawLimit.trim()) {
+                      const s = rawLimit.trim();
+                      if (/\d/.test(s) || /unlimited/i.test(s)) {
+                        val = s.startsWith("RM") ? s : `RM ${s}`;
+                      }
+                    } else if (costNum !== null && val) {
+                      const valNum = parseFloat(String(val).replace(/[^0-9.]/g, ""));
+                      if (Number.isFinite(valNum) && Math.abs(valNum - costNum) < 0.01) {
+                        val = "";
+                      }
                     }
-                  } else if (costNum !== null && val) {
-                    const valNum = parseFloat(String(val).replace(/[^0-9.]/g, ""));
-                    if (Number.isFinite(valNum) && Math.abs(valNum - costNum) < 0.01) {
+                    if (val && !(/\d/.test(val) || /unlimited/i.test(val))) {
                       val = "";
                     }
-                  }
-                  if (val && !(/\d/.test(val) || /unlimited/i.test(val))) {
-                    val = "";
+                    if (val === "RM 0" || val === "RM 0.00" || val === "0" || val === "0.00") {
+                      val = "";
+                    }
                   }
 
                   const isDark = element.benefitPreset === "dark-signature";
@@ -1179,28 +1189,38 @@ export function CanvasElementView({
                               return null;
                             };
                             const costNum = extractCost(b) ?? (extraMatch ? extractCost(extraMatch) : null);
-                            const costBadge = costNum !== null
+                            // Paid extra strictly when it is a paid card AND not inside the Recommended Add-ons section
+                            const isPaidExtra = isPaidExtraBenefitCard(b) && !isAddons;
+                            // Free Added Coverage (Defaults) and Recommended Add-on Upgrades must NEVER show coverage amount or price badge
+                            const costBadge = (isPaidExtra && costNum !== null)
                               ? `Cost : MYR ${costNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                               : null;
 
-                            let rawLimit = b?.detected_limit || b?.coverage_limit;
-                            if (b?.typed_value?.hide_limit) {
-                              rawLimit = null;
+                            if (!isPaidExtra) {
                               val = "";
-                            }
-                            if (rawLimit && typeof rawLimit === "string" && rawLimit.trim()) {
-                              const s = rawLimit.trim();
-                              if (/\d/.test(s) || /unlimited/i.test(s)) {
-                                val = s.startsWith("RM") ? s : `RM ${s}`;
-                              }
-                            } else if (costNum !== null && val) {
-                              const valNum = parseFloat(String(val).replace(/[^0-9.]/g, ""));
-                              if (Number.isFinite(valNum) && Math.abs(valNum - costNum) < 0.01) {
+                            } else {
+                              let rawLimit = b?.detected_limit || b?.coverage_limit;
+                              if (b?.typed_value?.hide_limit) {
+                                rawLimit = null;
                                 val = "";
                               }
-                            }
-                            if (val && !(/\d/.test(val) || /unlimited/i.test(val))) {
-                              val = "";
+                              if (rawLimit && typeof rawLimit === "string" && rawLimit.trim()) {
+                                const s = rawLimit.trim();
+                                if (/\d/.test(s) || /unlimited/i.test(s)) {
+                                  val = s.startsWith("RM") ? s : `RM ${s}`;
+                                }
+                              } else if (costNum !== null && val) {
+                                const valNum = parseFloat(String(val).replace(/[^0-9.]/g, ""));
+                                if (Number.isFinite(valNum) && Math.abs(valNum - costNum) < 0.01) {
+                                  val = "";
+                                }
+                              }
+                              if (val && !(/\d/.test(val) || /unlimited/i.test(val))) {
+                                val = "";
+                              }
+                              if (val === "RM 0" || val === "RM 0.00" || val === "0" || val === "0.00") {
+                                val = "";
+                              }
                             }
 
                         const customIconSize = (element as any).iconSize ? Number((element as any).iconSize) : 0;
@@ -1549,6 +1569,11 @@ export function CanvasElementView({
           }
           const runner = variableValues?.service_fee || "";
 
+          const dispOpts = (benefitData?.displayOptions && Object.keys(benefitData.displayOptions).length > 0)
+            ? benefitData.displayOptions
+            : ((config as any)?.display_options || {});
+          const shouldRoundTotal = dispOpts?.round_total !== false;
+
           const pNum = parseFloat(String(premium).replace(/[^0-9.]/g, "")) || 0;
           const rtNum = parseFloat(String(roadtax).replace(/[^0-9.]/g, "")) || 0;
           const sfNum = parseFloat(String(runner).replace(/[^0-9.]/g, "")) || 0;
@@ -1561,9 +1586,21 @@ export function CanvasElementView({
 
           let total = "";
           if (pNum > 0) {
-            total = (pNum + rtNum + sfNum + extrasTotal).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const rawSum = pNum + rtNum + sfNum + extrasTotal;
+            const finalSum = shouldRoundTotal ? Math.round(rawSum) : rawSum;
+            total = finalSum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
           } else {
-            total = variableValues?.total_premium_adjusted || variableValues?.total_amount || "";
+            const rawTot = variableValues?.total_premium_adjusted || variableValues?.total_amount || "";
+            if (rawTot && shouldRoundTotal) {
+              const cleanTot = parseFloat(String(rawTot).replace(/[^0-9.]/g, ""));
+              if (Number.isFinite(cleanTot)) {
+                total = Math.round(cleanTot).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+              } else {
+                total = rawTot;
+              }
+            } else {
+              total = rawTot;
+            }
           }
           const combinedRoadtaxVal = rtNum + sfNum;
           const displayRoadtax = combinedRoadtaxVal > 0 ? combinedRoadtaxVal.toFixed(2) : (roadtax || "");
@@ -1804,7 +1841,21 @@ export function balanceBenefitGridElements(
   const qrSize = Math.min(90, Math.max(70, qrH - 16));
 
   const currentCards = benefitData?.current_benefits || [];
-  const addonCards = benefitData?.available_addons || [];
+  const currentConceptIds = new Set(
+    currentCards.map((c: any) => String(c?.concept_id || "")).filter(Boolean)
+  );
+  const currentConceptKeys = new Set(
+    currentCards.map((c: any) => String(c?.concept_key || "")).filter(Boolean)
+  );
+  const currentLabels = new Set(
+    currentCards.map((c: any) => String(c?.label || "").trim().toLowerCase()).filter(Boolean)
+  );
+  const addonCards = (benefitData?.available_addons || []).filter((c: any) => {
+    if (c?.concept_id && currentConceptIds.has(String(c.concept_id))) return false;
+    if (c?.concept_key && currentConceptKeys.has(String(c.concept_key))) return false;
+    if (c?.label && currentLabels.has(String(c.label).trim().toLowerCase())) return false;
+    return true;
+  });
 
   const isPaidExtra = isPaidExtraBenefitCard;
 

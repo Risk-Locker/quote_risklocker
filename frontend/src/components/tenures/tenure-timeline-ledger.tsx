@@ -134,6 +134,8 @@ export interface TenureRow {
   winning_company_id: string | null;
   winning_company_name: string;
   winning_quotation_ref: string | null;
+  winning_file_id?: string | null;
+  winning_file_name?: string | null;
   won_premium: number | null;
   miss_reason: string | null;
   loss_reason_category: string | null;
@@ -145,6 +147,12 @@ export interface TenureRow {
     version: number;
     total_payable: string | null;
     sum_insured: string | null;
+    uploaded_file_id?: string | null;
+    file_name?: string | null;
+    coverage_start_date?: string | null;
+    coverage_end_date?: string | null;
+    coverage_period_formatted?: string | null;
+    is_winner?: boolean;
   }>;
   generated_quotations: Array<{
     session_id: string;
@@ -338,6 +346,13 @@ export function TenureTimelineLedger() {
   const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<{ id: string; vehicleNo: string; allIds: string[] } | null>(null);
   const [deletingVehicle, setDeletingVehicle] = useState<boolean>(false);
 
+  // Hit confirmation modal state (confirming policy details before marking Hit)
+  const [hitConfirmTenure, setHitConfirmTenure] = useState<TenureRow | null>(null);
+  const [hitConfirmedStartDate, setHitConfirmedStartDate] = useState<string>("");
+  const [hitConfirmedEndDate, setHitConfirmedEndDate] = useState<string>("");
+  const [hitConfirmedInsurer, setHitConfirmedInsurer] = useState<string>("");
+  const [savingHitConfirm, setSavingHitConfirm] = useState<boolean>(false);
+
   const handleConfirmMiss = async () => {
     if (!missModalTenure) return;
     setSavingMissOutcome(true);
@@ -403,6 +418,38 @@ export function TenureTimelineLedger() {
       alert("Failed to update deal: " + (err?.message || err));
     } finally {
       setSavingMissOutcome(false);
+    }
+  };
+
+  const handleConfirmHit = async () => {
+    if (!hitConfirmTenure) return;
+    setSavingHitConfirm(true);
+    try {
+      const updatePayload: any = {
+        stage: "Close - Win",
+        status: "hit",
+      };
+      if (hitConfirmedStartDate) {
+        updatePayload.coverage_start_date = hitConfirmedStartDate;
+      }
+      if (hitConfirmedEndDate) {
+        updatePayload.coverage_end_date = hitConfirmedEndDate;
+      }
+      if (hitConfirmedInsurer) {
+        updatePayload.winning_company_name = hitConfirmedInsurer;
+      }
+      await api(`/tenures/${hitConfirmTenure.id}/ledger-fields`, {
+        method: "PATCH",
+        body: JSON.stringify(updatePayload),
+      });
+      setHitConfirmTenure(null);
+      loadTenures();
+      loadStageSummary();
+      loadYoyStats();
+    } catch (err: any) {
+      alert("Failed to confirm hit: " + (err?.message || err));
+    } finally {
+      setSavingHitConfirm(false);
     }
   };
 
@@ -493,10 +540,11 @@ export function TenureTimelineLedger() {
                   onClick={() => {
                     if (st.id === "Issue Policy") {
                       setIssuePolicyModalTenure(t);
+                      const winningQ = t.sourced_quotes?.find(q => q.is_winner || q.company === t.winning_company_name || q.company === t.winning_company_id);
                       const firstQuote = t.sourced_quotes && t.sourced_quotes[0] ? t.sourced_quotes[0].company : "";
-                      setSelectedWinnerQuote(t.winning_company_id || firstQuote);
-                      const todayStr = new Date().toISOString().split("T")[0];
-                      setPolicyStartDate(todayStr);
+                      setSelectedWinnerQuote(t.winning_company_id || t.winning_company_name || firstQuote);
+                      const startCandidate = winningQ?.coverage_start_date || t.coverage_start_date || new Date().toISOString().split("T")[0];
+                      setPolicyStartDate(startCandidate);
                     } else {
                       patchTenureField(t.id, { stage: st.id });
                     }
@@ -525,9 +573,22 @@ export function TenureTimelineLedger() {
         {canHit ? (
           <button
             type="button"
-            onClick={() => patchTenureField(t.id, { stage: "Close - Win", status: "hit" })}
+            onClick={() => {
+              setHitConfirmTenure(t);
+              const winningQ = t.sourced_quotes?.find(q => q.is_winner || q.company === t.winning_company_name || q.company === t.winning_company_id);
+              const startCandidate = winningQ?.coverage_start_date || t.coverage_start_date || new Date().toISOString().split("T")[0];
+              setHitConfirmedStartDate(startCandidate);
+              if (winningQ?.coverage_end_date || t.coverage_end_date) {
+                setHitConfirmedEndDate(winningQ?.coverage_end_date || t.coverage_end_date);
+              } else {
+                const endD = new Date(startCandidate);
+                endD.setDate(endD.getDate() + 364);
+                setHitConfirmedEndDate(endD.toISOString().split("T")[0]);
+              }
+              setHitConfirmedInsurer(t.winning_company_name || t.winning_company_id || winningQ?.company || t.sourced_quotes?.[0]?.company || "");
+            }}
             className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] shadow-2xs cursor-pointer transition-colors flex items-center gap-1"
-            title="Policy is issued! Click to mark this client as HIT (creates next year renewal)"
+            title="Policy is issued! Click to review policy details and mark as HIT (won)"
           >
             <CheckCircle size={11} weight="bold" />
             <span>Hit</span>
@@ -1781,7 +1842,7 @@ export function TenureTimelineLedger() {
 
                           {/* 2. Coverage Period (Main Policy) */}
                           <td className="py-3 px-3">
-                            {mainTenure.stage === "Issue Policy" && mainTenure.coverage_start_date ? (
+                            {mainTenure.coverage_start_date ? (
                               <div className="space-y-0.5">
                                 <div className="flex items-center gap-1 text-[11px]">
                                   <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200 shrink-0">
@@ -1812,17 +1873,17 @@ export function TenureTimelineLedger() {
                             ) : (
                               <div className="space-y-0.5">
                                 <span className="text-neutral-400 font-mono text-xs">—</span>
-                                <div className="text-[10px] text-neutral-400 font-medium">Pending Issue</div>
+                                <div className="text-[10px] text-neutral-400 font-medium">Pending Quote / Issue</div>
                               </div>
                             )}
                             <div className="flex items-center gap-1.5 mt-1">
-                              {(mainTenure.stage === "Issue Policy" || mainTenure.stage === "Close - Win") && mainTenure.expiry_month ? (
+                              {mainTenure.expiry_month ? (
                                 <span className="text-[10px] text-neutral-500 font-medium font-mono">
                                   Exp: {mainTenure.expiry_month}
                                 </span>
                               ) : (
                                 <span className="text-[10px] text-neutral-400 font-medium italic">
-                                  Confirmed on Policy Issue
+                                  Extracted on Upload
                                 </span>
                               )}
                               {mainTenure.is_main && (
@@ -1858,11 +1919,11 @@ export function TenureTimelineLedger() {
                               <div className="space-y-1 max-w-[210px]">
                                 <div className="flex items-center justify-between gap-1.5">
                                   <span className="font-bold text-xs text-neutral-900 truncate">
-                                    {mainTenure.sourced_quotes[0].company}
+                                    {mainTenure.winning_company_name || mainTenure.sourced_quotes[0].company}
                                   </span>
-                                  {mainTenure.sourced_quotes[0].total_payable && (
+                                  {(mainTenure.won_premium ? String(mainTenure.won_premium) : mainTenure.sourced_quotes[0].total_payable) && (
                                     <span className="text-neutral-900 font-mono font-bold text-xs bg-neutral-100 px-1.5 py-0.5 rounded border border-neutral-200 shrink-0">
-                                      RM {mainTenure.sourced_quotes[0].total_payable}
+                                      RM {mainTenure.won_premium || mainTenure.sourced_quotes[0].total_payable}
                                     </span>
                                   )}
                                 </div>
@@ -1884,14 +1945,43 @@ export function TenureTimelineLedger() {
                                 </div>
                               </div>
                             )}
-                            {mainTenure.generated_quotations && mainTenure.generated_quotations.length > 0 && (
-                              <div className="mt-1">
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 text-[10px] font-bold border border-emerald-200">
+                            <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                              {/* Accepted PDF badge/link if available */}
+                              {mainTenure.winning_file_id ? (
+                                <a
+                                  href={`/api/quotations/files/${mainTenure.winning_file_id}/download`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300 transition-colors cursor-pointer"
+                                  title={`Accepted Quotation PDF: ${mainTenure.winning_file_name || "Quotation PDF"}`}
+                                >
                                   <FilePdf size={11} weight="fill" className="text-emerald-600" />
+                                  <span className="truncate max-w-[120px]">Accepted PDF</span>
+                                </a>
+                              ) : mainTenure.sourced_quotes?.find(q => q.uploaded_file_id) ? (
+                                (() => {
+                                  const winQuote = mainTenure.sourced_quotes.find(q => q.is_winner && q.uploaded_file_id) || mainTenure.sourced_quotes.find(q => q.uploaded_file_id);
+                                  return winQuote?.uploaded_file_id ? (
+                                    <a
+                                      href={`/api/quotations/files/${winQuote.uploaded_file_id}/download`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-800 text-[10px] font-bold border border-blue-200 transition-colors cursor-pointer"
+                                      title={`Quotation PDF: ${winQuote.file_name || winQuote.company}`}
+                                    >
+                                      <FilePdf size={11} weight="fill" className="text-blue-600" />
+                                      <span className="truncate max-w-[120px]">{winQuote.is_winner ? "Accepted PDF" : "Quote PDF"}</span>
+                                    </a>
+                                  ) : null;
+                                })()
+                              ) : null}
+                              {mainTenure.generated_quotations && mainTenure.generated_quotations.length > 0 && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-700 text-[10px] font-bold border border-neutral-200">
+                                  <FilePdf size={11} weight="fill" className="text-neutral-500" />
                                   <span>{mainTenure.generated_quotations.length} Issued</span>
                                 </span>
-                              </div>
-                            )}
+                              )}
+                            </div>
                           </td>
 
                           {/* 5. PIC & Milestones */}
@@ -2036,7 +2126,7 @@ export function TenureTimelineLedger() {
                                     <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 mb-1">
                                       Official Coverage Period
                                     </div>
-                                    {mainTenure.stage === "Issue Policy" && mainTenure.coverage_start_date ? (
+                                    {mainTenure.coverage_start_date ? (
                                       <div className="font-mono font-bold text-neutral-900 text-xs">
                                         {formatDateSafe(mainTenure.coverage_start_date)} → {formatDateSafe(mainTenure.coverage_end_date)}
                                       </div>
@@ -2044,10 +2134,10 @@ export function TenureTimelineLedger() {
                                       <div className="space-y-0.5 text-neutral-400">
                                         <div className="text-xs font-medium text-neutral-500 flex items-center gap-1">
                                           <span>—</span>
-                                          <span>Pending Issue</span>
+                                          <span>Pending Quote / Issue</span>
                                         </div>
                                         <div className="text-[11px] italic text-neutral-400">
-                                          Confirmed on Policy Issue
+                                          Extracted on Upload
                                         </div>
                                       </div>
                                     )}
@@ -2055,24 +2145,54 @@ export function TenureTimelineLedger() {
 
                                   {/* Sourced Quotes in this Locker */}
                                   <div>
-                                    <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 mb-1">
-                                      Sourced Quotes ({mainTenure.sourced_quotes.length})
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 mb-1 flex items-center justify-between">
+                                      <span>Sourced Quotes ({mainTenure.sourced_quotes.length})</span>
+                                      {mainTenure.winning_file_id && (
+                                        <a
+                                          href={`/api/quotations/files/${mainTenure.winning_file_id}/download`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-emerald-700 hover:text-emerald-900 font-bold flex items-center gap-1 normal-case text-[10px] bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200"
+                                          title="Download accepted quotation PDF"
+                                        >
+                                          <FilePdf size={11} weight="fill" />
+                                          <span>Accepted PDF ({mainTenure.winning_company_name || "Winner"})</span>
+                                        </a>
+                                      )}
                                     </div>
                                     {mainTenure.sourced_quotes.length === 0 ? (
                                       <span className="text-neutral-400 italic text-xs">0 quotes compiled</span>
                                     ) : (
                                       <div className="flex flex-wrap gap-1.5">
-                                        {mainTenure.sourced_quotes.map((q) => (
-                                          <span
-                                            key={q.session_id}
-                                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-neutral-100 text-neutral-800 text-[11px] font-medium border border-neutral-200/80"
-                                          >
-                                            <span className="font-bold">{q.company}</span>
-                                            {q.total_payable && (
-                                              <span className="font-mono text-neutral-900 font-bold">RM {q.total_payable}</span>
-                                            )}
-                                          </span>
-                                        ))}
+                                        {mainTenure.sourced_quotes.map((q) => {
+                                          const isWin = q.is_winner || q.company === mainTenure.winning_company_name;
+                                          return (
+                                            <span
+                                              key={q.session_id}
+                                              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium border ${
+                                                isWin
+                                                  ? "bg-emerald-50 text-emerald-900 border-emerald-300 font-bold ring-1 ring-emerald-400/50"
+                                                  : "bg-neutral-100 text-neutral-800 border-neutral-200/80"
+                                              }`}
+                                            >
+                                              <span>{isWin ? "★ " : ""}{q.company}</span>
+                                              {q.total_payable && (
+                                                <span className="font-mono font-bold">RM {q.total_payable}</span>
+                                              )}
+                                              {q.uploaded_file_id && (
+                                                <a
+                                                  href={`/api/quotations/files/${q.uploaded_file_id}/download`}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="text-neutral-500 hover:text-emerald-700 ml-0.5"
+                                                  title={`Download ${q.file_name || "quote PDF"}`}
+                                                >
+                                                  <FilePdf size={12} weight="fill" />
+                                                </a>
+                                              )}
+                                            </span>
+                                          );
+                                        })}
                                       </div>
                                     )}
                                   </div>
@@ -3023,6 +3143,175 @@ export function TenureTimelineLedger() {
                 className="px-4 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded shadow-xs cursor-pointer disabled:opacity-50"
               >
                 {savingIssuePolicy ? "Confirming..." : "Confirm & Issue Policy"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal for Hit Confirmation: Confirm Policy Dates, Insurer, and Accepted PDF before marking Hit */}
+      {hitConfirmTenure && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-[var(--rl-radius)] border border-neutral-200 shadow-xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-4 border-b border-neutral-100 bg-[#fbfbfd] flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle size={16} weight="fill" className="text-emerald-600" />
+                  <h3 className="font-bold text-sm text-neutral-900">Confirm Policy &amp; Mark as HIT (Won)</h3>
+                </div>
+                <p className="text-xs text-neutral-500 font-mono mt-0.5">
+                  {hitConfirmTenure.vehicle_no} · {hitConfirmTenure.customer_name}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHitConfirmTenure(null)}
+                className="text-neutral-400 hover:text-neutral-700 text-sm font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Confirmed Winning Insurer */}
+              <div>
+                <label className="text-xs font-bold text-neutral-800 block mb-1">
+                  1. Confirmed Insurer
+                </label>
+                <input
+                  type="text"
+                  value={hitConfirmedInsurer}
+                  onChange={(e) => setHitConfirmedInsurer(e.target.value)}
+                  placeholder="e.g. Allianz General Insurance, Zurich Takaful..."
+                  className="w-full h-9 px-3 text-xs rounded border border-neutral-300 focus:outline-none focus:border-neutral-900 font-semibold"
+                />
+              </div>
+
+              {/* Confirmed Insurance Period */}
+              <div>
+                <label className="text-xs font-bold text-neutral-800 block mb-1">
+                  2. Confirmed Insurance Period (Tempoh Insurans)
+                </label>
+                <p className="text-[11px] text-neutral-500 mb-2">
+                  Verify or adjust the policy dates extracted from the quotation PDF:
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <span className="text-[10px] font-bold text-neutral-600 block mb-1">Start Date</span>
+                    <input
+                      type="date"
+                      value={hitConfirmedStartDate}
+                      onChange={(e) => {
+                        const newStart = e.target.value;
+                        setHitConfirmedStartDate(newStart);
+                        if (newStart) {
+                          const d = new Date(newStart);
+                          d.setDate(d.getDate() + 364);
+                          setHitConfirmedEndDate(d.toISOString().split("T")[0]);
+                        }
+                      }}
+                      className="w-full h-8 px-2.5 text-xs rounded border border-neutral-300 focus:outline-none focus:border-neutral-900 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-neutral-600 block mb-1">End Date</span>
+                    <input
+                      type="date"
+                      value={hitConfirmedEndDate}
+                      onChange={(e) => setHitConfirmedEndDate(e.target.value)}
+                      className="w-full h-8 px-2.5 text-xs rounded border border-neutral-300 focus:outline-none focus:border-neutral-900 font-mono"
+                    />
+                  </div>
+                </div>
+
+                {hitConfirmedStartDate && hitConfirmedEndDate && (
+                  <div className="mt-2.5 p-2 bg-emerald-50 border border-emerald-200 rounded text-[11px] text-emerald-950 font-mono flex items-center justify-between">
+                    <span>Period: {hitConfirmedStartDate} → {hitConfirmedEndDate}</span>
+                    <span className="text-[10px] font-bold text-emerald-700 bg-white px-1.5 py-0.5 rounded border border-emerald-300">
+                      1 Year
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Accepted Quotation PDF */}
+              <div>
+                <label className="text-xs font-bold text-neutral-800 block mb-1">
+                  3. Accepted Quotation PDF
+                </label>
+                {hitConfirmTenure.winning_file_id ? (
+                  <div className="p-2.5 bg-neutral-50 border border-neutral-200 rounded flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <FilePdf size={16} weight="fill" className="text-emerald-600 shrink-0" />
+                      <span className="font-medium text-neutral-900 truncate">
+                        {hitConfirmTenure.winning_file_name || "Accepted Quotation PDF"}
+                      </span>
+                    </div>
+                    <a
+                      href={`/api/quotations/files/${hitConfirmTenure.winning_file_id}/download`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-emerald-700 hover:text-emerald-900 font-bold text-[11px] underline shrink-0 ml-2"
+                    >
+                      View PDF ↗
+                    </a>
+                  </div>
+                ) : hitConfirmTenure.sourced_quotes?.find((q) => q.uploaded_file_id) ? (
+                  (() => {
+                    const winQuote =
+                      hitConfirmTenure.sourced_quotes.find((q) => q.is_winner && q.uploaded_file_id) ||
+                      hitConfirmTenure.sourced_quotes.find((q) => q.uploaded_file_id);
+                    return winQuote?.uploaded_file_id ? (
+                      <div className="p-2.5 bg-neutral-50 border border-neutral-200 rounded flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-1.5 truncate">
+                          <FilePdf size={16} weight="fill" className="text-blue-600 shrink-0" />
+                          <span className="font-medium text-neutral-900 truncate">
+                            {winQuote.file_name || `${winQuote.company} Quote`}
+                          </span>
+                        </div>
+                        <a
+                          href={`/api/quotations/files/${winQuote.uploaded_file_id}/download`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-700 hover:text-blue-900 font-bold text-[11px] underline shrink-0 ml-2"
+                        >
+                          View PDF ↗
+                        </a>
+                      </div>
+                    ) : (
+                      <div className="p-2.5 bg-neutral-50 rounded border border-neutral-200 text-xs text-neutral-500 italic">
+                        No PDF uploaded for this quote.
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <div className="p-2.5 bg-neutral-50 rounded border border-neutral-200 text-xs text-neutral-500 italic">
+                    No PDF uploaded for this quote.
+                  </div>
+                )}
+              </div>
+
+              <div className="p-2.5 bg-amber-50 rounded border border-amber-200 text-[11px] text-amber-900 leading-relaxed">
+                Confirming this policy issuance will mark the deal as <strong>HIT (Won)</strong> and automatically create the next-year renewal in the Motor Timeline.
+              </div>
+            </div>
+
+            <div className="p-3 bg-neutral-50 border-t border-neutral-200 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setHitConfirmTenure(null)}
+                className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmHit}
+                disabled={savingHitConfirm}
+                className="px-4 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded shadow-xs cursor-pointer disabled:opacity-50 flex items-center gap-1"
+              >
+                <CheckCircle size={13} weight="bold" />
+                <span>{savingHitConfirm ? "Confirming..." : "Confirm & Mark as HIT (Won)"}</span>
               </button>
             </div>
           </div>
