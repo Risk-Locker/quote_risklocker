@@ -170,3 +170,32 @@ def test_miss_or_discarded_does_not_create_next_year_renewal(client: TestClient,
         select(InsuranceTenure).where(InsuranceTenure.previous_tenure_id == tenure.id)
     )
     assert next_tenure is None
+
+
+def test_bulk_confirm_hit(client: TestClient, db_session: Session, test_user: User):
+    t1 = _make_tenure(db_session, test_user, vehicle_no="BULK001", year=2026)
+    t2 = _make_tenure(db_session, test_user, vehicle_no="BULK002", year=2026)
+
+    res = client.post(
+        "/api/tenures/bulk-confirm-hit",
+        json={"tenure_ids": [t1.id, t2.id]},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert data["updated_count"] == 2
+
+    db_session.refresh(t1)
+    db_session.refresh(t2)
+    assert t1.stage == "Close - Win"
+    assert t1.status == "hit"
+    assert t2.stage == "Close - Win"
+    assert t2.status == "hit"
+
+    # Verify next-year renewals were auto-created
+    next_t1 = db_session.scalar(select(InsuranceTenure).where(InsuranceTenure.previous_tenure_id == t1.id))
+    next_t2 = db_session.scalar(select(InsuranceTenure).where(InsuranceTenure.previous_tenure_id == t2.id))
+    assert next_t1 is not None
+    assert next_t2 is not None
+    assert next_t1.status == "draft"
+    assert next_t2.status == "draft"

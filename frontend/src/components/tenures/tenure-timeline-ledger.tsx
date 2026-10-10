@@ -320,6 +320,14 @@ export function TenureTimelineLedger() {
   const [loadingTenures, setLoadingTenures] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [policyFilter, setPolicyFilter] = useState<"all" | "issued" | "pending">("all");
+
+  const issuedCount = useMemo(() => {
+    return tenures.filter((t) => Boolean(t.covernote_policy || t.stage === "Close - Win" || t.status === "hit")).length;
+  }, [tenures]);
+  const pendingCount = useMemo(() => {
+    return tenures.filter((t) => !Boolean(t.covernote_policy || t.stage === "Close - Win" || t.status === "hit")).length;
+  }, [tenures]);
 
   // Sorting state (default: last_activity desc)
   const [sortBy, setSortBy] = useState<LedgerSortColumn>("last_activity");
@@ -366,7 +374,7 @@ export function TenureTimelineLedger() {
       setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
     } else {
       setSortBy(column);
-      setSortDir(column === "vehicle_no" ? "asc" : "desc");
+      setSortDir(column === "vehicle_no" || column === "coverage_period" ? "asc" : "desc");
     }
   };
 
@@ -956,6 +964,34 @@ export function TenureTimelineLedger() {
     }
   };
 
+  const [confirmingBulk, setConfirmingBulk] = useState(false);
+  const handleBulkConfirmHit = async () => {
+    if (selectedTenureIds.length === 0) return;
+    const count = selectedTenureIds.length;
+    if (
+      !confirm(
+        `Confirm Hit (Policy Won / Issued) for ${count} selected policy deal(s)? This will mark them as won and automatically roll forward their next-year renewal tracking.`
+      )
+    ) {
+      return;
+    }
+    setConfirmingBulk(true);
+    try {
+      await api("/tenures/bulk-confirm-hit", {
+        method: "POST",
+        body: JSON.stringify({ tenure_ids: selectedTenureIds }),
+      });
+      setSelectedTenureIds([]);
+      loadTenures();
+      loadStageSummary();
+      loadYoyStats();
+    } catch (err: any) {
+      alert("Failed to bulk confirm hit: " + (err?.message || err));
+    } finally {
+      setConfirmingBulk(false);
+    }
+  };
+
   // Handle deleting a single deal from the ledger
   const handleDeleteTenure = async (tenureId: string, vehicleNo: string) => {
     if (
@@ -1270,33 +1306,97 @@ export function TenureTimelineLedger() {
       });
     });
 
-    return [...groups].sort((a, b) => {
+    let filteredGroups = groups;
+    if (policyFilter === "issued") {
+      filteredGroups = filteredGroups.filter((g) => {
+        const t = g.mainTenure;
+        return Boolean(t.covernote_policy || t.stage === "Close - Win" || t.status === "hit");
+      });
+    } else if (policyFilter === "pending") {
+      filteredGroups = filteredGroups.filter((g) => {
+        const t = g.mainTenure;
+        return !Boolean(t.covernote_policy || t.stage === "Close - Win" || t.status === "hit");
+      });
+    }
+
+    return [...filteredGroups].sort((a, b) => {
       let cmp = 0;
       if (sortBy === "vehicle_no") {
         cmp = a.vehicle_no.localeCompare(b.vehicle_no);
+        return sortDir === "asc" ? cmp : -cmp;
       } else if (sortBy === "coverage_period") {
-        const da = a.mainTenure.coverage_start_date || a.mainTenure.coverage_end_date || "";
-        const db = b.mainTenure.coverage_start_date || b.mainTenure.coverage_end_date || "";
-        cmp = da.localeCompare(db);
+        const isIssuedA = Boolean(
+          a.mainTenure.covernote_policy ||
+          a.mainTenure.is_covernote_issued ||
+          a.mainTenure.stage === "Close - Win" ||
+          a.mainTenure.status === "hit"
+        );
+        const isIssuedB = Boolean(
+          b.mainTenure.covernote_policy ||
+          b.mainTenure.is_covernote_issued ||
+          b.mainTenure.stage === "Close - Win" ||
+          b.mainTenure.status === "hit"
+        );
+
+        // Tier 1: Perfectly issued policies ALWAYS appear first at the top!
+        if (isIssuedA && !isIssuedB) return -1;
+        if (!isIssuedA && isIssuedB) return 1;
+
+        // Tier 2: Within same bucket (both issued OR both unissued), sort by date
+        const da = (isIssuedA ? (a.mainTenure.covernote_policy?.coverage_start_date || a.mainTenure.coverage_start_date) : (a.mainTenure.coverage_start_date || a.mainTenure.coverage_end_date)) || "";
+        const db = (isIssuedB ? (b.mainTenure.covernote_policy?.coverage_start_date || b.mainTenure.coverage_start_date) : (b.mainTenure.coverage_start_date || b.mainTenure.coverage_end_date)) || "";
+
+        // Deals with no dates always go to the end of their respective bucket
+        if (!da && db) return 1;
+        if (da && !db) return -1;
+        if (!da && !db) return a.vehicle_no.localeCompare(b.vehicle_no);
+
+        const dateCmp = da.localeCompare(db);
+        if (dateCmp !== 0) {
+          return sortDir === "asc" ? dateCmp : -dateCmp;
+        }
+        return a.vehicle_no.localeCompare(b.vehicle_no);
       } else if (sortBy === "stage") {
-        cmp = (a.mainTenure.stage || "").localeCompare(b.mainTenure.stage || "");
+        const stageWeight: Record<string, number> = {
+          "Close - Win": 5,
+          "Issue Policy": 4,
+          "Material to Client": 3,
+          "Quotations": 2,
+          "Close - Lose": 1,
+        };
+        const wa = stageWeight[a.mainTenure.stage] ?? 0;
+        const wb = stageWeight[b.mainTenure.stage] ?? 0;
+        if (wa !== wb) {
+          cmp = wa - wb;
+          return sortDir === "asc" ? cmp : -cmp;
+        }
+        // Tie-breaker within same stage: most recently active deal first
+        const dateA = a.mainTenure.last_activity_at || a.mainTenure.stage_updated_at || a.mainTenure.created_at || "";
+        const dateB = b.mainTenure.last_activity_at || b.mainTenure.stage_updated_at || b.mainTenure.created_at || "";
+        return dateB.localeCompare(dateA);
       } else if (sortBy === "created_at") {
         const ca = a.mainTenure.created_at || "";
         const cb = b.mainTenure.created_at || "";
+        if (!ca && cb) return 1;
+        if (ca && !cb) return -1;
         cmp = ca.localeCompare(cb);
+        return sortDir === "asc" ? cmp : -cmp;
       } else if (sortBy === "pic") {
         const picA = (getPicDisplay(a.mainTenure)?.name || a.mainTenure.sub_agent_name || "").toLowerCase();
         const picB = (getPicDisplay(b.mainTenure)?.name || b.mainTenure.sub_agent_name || "").toLowerCase();
         cmp = picA.localeCompare(picB);
+        return sortDir === "asc" ? cmp : -cmp;
       } else {
         // "last_activity"
         const dateA = a.mainTenure.last_activity_at || a.mainTenure.stage_updated_at || a.mainTenure.created_at || "";
         const dateB = b.mainTenure.last_activity_at || b.mainTenure.stage_updated_at || b.mainTenure.created_at || "";
+        if (!dateA && dateB) return 1;
+        if (dateA && !dateB) return -1;
         cmp = dateA.localeCompare(dateB);
+        return sortDir === "asc" ? cmp : -cmp;
       }
-      return sortDir === "asc" ? cmp : -cmp;
     });
-  }, [tenures, sortBy, sortDir, pics]);
+  }, [tenures, sortBy, sortDir, pics, policyFilter]);
 
   const [expandedVehicleKeys, setExpandedVehicleKeys] = useState<string[]>([]);
   const toggleExpandVehicle = (key: string) => {
@@ -1588,28 +1688,71 @@ export function TenureTimelineLedger() {
       {/* 3. ACTIVE RENEWALS VS LOST CLIENTS PANEL & SEARCH CONTROLS                 */}
       {/* ========================================================================= */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        {/* Category Switcher: Active Renewals vs Lost Clients */}
-        <div className="flex items-center gap-1 bg-[#f5f5f7] p-1 rounded-[var(--rl-radius-sm)] border border-[#e5e5ea] w-fit">
+        {/* Category Switcher: Active Renewals vs Issued vs Pending vs Lost Clients */}
+        <div className="flex items-center gap-1 bg-[#f5f5f7] p-1 rounded-[var(--rl-radius-sm)] border border-[#e5e5ea] w-fit flex-wrap">
           <button
             type="button"
             onClick={() => {
               setCategory("active");
+              setPolicyFilter("all");
               if (stageFilter === "Close - Lose" || stageFilter === "Others") {
                 setStageFilter("all");
               }
             }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
-              category === "active"
+              category === "active" && policyFilter === "all"
                 ? "bg-white text-neutral-900 shadow-2xs"
                 : "text-neutral-500 hover:text-neutral-800"
             }`}
           >
-            <span>Active Renewal Ledger</span>
+            <span>All Renewals ({tenures.length})</span>
           </button>
 
           <button
             type="button"
-            onClick={() => setCategory("lost")}
+            onClick={() => {
+              setCategory("active");
+              setPolicyFilter("issued");
+              if (stageFilter === "Close - Lose" || stageFilter === "Others") {
+                setStageFilter("all");
+              }
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
+              category === "active" && policyFilter === "issued"
+                ? "bg-emerald-600 text-white shadow-2xs"
+                : "text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50"
+            }`}
+            title="Filter to vehicles with an issued policy / cover note bound"
+          >
+            <CheckCircle size={13} weight="bold" />
+            <span>Issued Policies ({issuedCount})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setCategory("active");
+              setPolicyFilter("pending");
+              if (stageFilter === "Close - Lose" || stageFilter === "Others") {
+                setStageFilter("all");
+              }
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
+              category === "active" && policyFilter === "pending"
+                ? "bg-amber-600 text-white shadow-2xs"
+                : "text-amber-700 hover:text-amber-900 hover:bg-amber-50"
+            }`}
+            title="Filter to vehicles awaiting cover note upload / policy issue"
+          >
+            <span>Awaiting Cover Note ({pendingCount})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setCategory("lost");
+              setPolicyFilter("all");
+            }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
               category === "lost"
                 ? "bg-rose-50 text-rose-900 border border-rose-200 shadow-2xs"
@@ -1623,15 +1766,25 @@ export function TenureTimelineLedger() {
 
         {/* Bulk Actions Pill */}
         {selectedTenureIds.length > 0 && (
-          <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 px-3 py-1 rounded-[var(--rl-radius-sm)]">
-            <span className="text-xs font-bold text-rose-800">
+          <div className="flex items-center gap-2 bg-neutral-900 text-white px-3 py-1.5 rounded-[var(--rl-radius-sm)] shadow-md animate-fadeIn flex-wrap">
+            <span className="text-xs font-bold text-neutral-200">
               {selectedTenureIds.length} selected
             </span>
             <button
               type="button"
+              onClick={handleBulkConfirmHit}
+              disabled={confirmingBulk}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
+              title="Confirm policy as Hit (Won / Issued Policy) for all selected deals in one go"
+            >
+              <CheckCircle size={13} weight="bold" />
+              <span>{confirmingBulk ? "Confirming..." : `Bulk Confirm Hit (${selectedTenureIds.length})`}</span>
+            </button>
+            <button
+              type="button"
               onClick={handleBulkDelete}
               disabled={deletingBulk}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
               title="Delete all selected deals"
             >
               <Trash size={13} weight="bold" />
@@ -1640,7 +1793,7 @@ export function TenureTimelineLedger() {
             <button
               type="button"
               onClick={() => setSelectedTenureIds([])}
-              className="text-[11px] text-neutral-500 hover:text-neutral-800 underline cursor-pointer"
+              className="text-[11px] text-neutral-400 hover:text-white underline cursor-pointer"
             >
               Clear
             </button>
@@ -1996,6 +2149,9 @@ export function TenureTimelineLedger() {
                                     {formatDateSafe(mainTenure.covernote_policy?.coverage_end_date || mainTenure.coverage_end_date)}
                                   </span>
                                 </div>
+                                <div className="text-[9.5px] text-emerald-700 font-bold flex items-center gap-0.5 pt-0.5">
+                                  <CheckCircle size={10} weight="fill" /> Issued Policy
+                                </div>
                               </div>
                             ) : mainTenure.external_policy_start_date ? (
                               <div className="space-y-0.5">
@@ -2006,10 +2162,32 @@ export function TenureTimelineLedger() {
                                   {formatDateSafe(mainTenure.external_policy_start_date)} → {formatDateSafe(mainTenure.external_policy_end_date)}
                                 </div>
                               </div>
+                            ) : (mainTenure.coverage_start_date && mainTenure.coverage_end_date && mainTenure.sourced_quotes && mainTenure.sourced_quotes.length > 0) ? (
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-1 text-[11px]">
+                                  <span className="text-[9px] font-bold uppercase tracking-wider text-amber-700 bg-amber-50 px-1 py-0.2 rounded border border-amber-200 shrink-0">
+                                    Start
+                                  </span>
+                                  <span className="font-mono font-medium text-neutral-800">
+                                    {formatDateSafe(mainTenure.coverage_start_date)}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1 text-[11px]">
+                                  <span className="text-[9px] font-bold uppercase tracking-wider text-amber-700 bg-amber-50 px-1 py-0.2 rounded border border-amber-200 shrink-0">
+                                    End
+                                  </span>
+                                  <span className="font-mono font-medium text-neutral-800">
+                                    {formatDateSafe(mainTenure.coverage_end_date)}
+                                  </span>
+                                </div>
+                                <div className="text-[9.5px] text-amber-700 font-semibold pt-0.5">
+                                  Pending Cover Note
+                                </div>
+                              </div>
                             ) : (
                               <div className="space-y-0.5">
                                 <span className="text-neutral-400 font-mono text-xs">—</span>
-                                <div className="text-[10px] text-neutral-400 font-medium">Pending Issue</div>
+                                <div className="text-[10px] text-neutral-400 font-medium">Pending Renewal</div>
                               </div>
                             )}
                             <div className="flex items-center gap-1.5 mt-1">
@@ -2167,7 +2345,12 @@ export function TenureTimelineLedger() {
                               </div>
                             ) : mainTenure.sourced_quotes.length === 0 ? (
                               <div className="space-y-1">
-                                <span className="text-neutral-400 italic text-[11px] block">0 quotes compiled</span>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-neutral-400 italic text-[11px]">0 quotes compiled</span>
+                                  <span className="inline-flex items-center px-1.5 py-0.2 rounded bg-neutral-100 text-neutral-600 text-[9px] font-medium border border-neutral-200">
+                                    Awaiting Cover Note
+                                  </span>
+                                </div>
                                 <div className="text-[10px] text-neutral-500 font-mono">
                                   {formatDateSafe(mainTenure.coverage_start_date)} – {formatDateSafe(mainTenure.coverage_end_date)}
                                 </div>
@@ -2182,11 +2365,16 @@ export function TenureTimelineLedger() {
                               </div>
                             ) : (
                               <div className="space-y-1.5 min-w-[210px] max-w-[260px]">
-                                {/* Leading / Winning Quote Strip */}
-                                <div className="flex items-center justify-between gap-1.5">
-                                  <span className="font-bold text-xs text-neutral-900 truncate">
-                                    {mainTenure.winning_company_name || mainTenure.sourced_quotes[0].company}
-                                  </span>
+                                {/* Leading / Sourced Quote Strip */}
+                                <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-bold text-xs text-neutral-900 truncate">
+                                      {mainTenure.winning_company_name || mainTenure.sourced_quotes[0].company}
+                                    </span>
+                                    <span className="inline-flex items-center px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 text-[9px] font-bold border border-amber-200">
+                                      Awaiting Cover Note
+                                    </span>
+                                  </div>
                                   {(mainTenure.won_premium ? String(mainTenure.won_premium) : mainTenure.sourced_quotes[0].total_payable) && (
                                     <span className="text-neutral-900 font-mono font-bold text-xs bg-neutral-100 px-1.5 py-0.5 rounded border border-neutral-200 shrink-0">
                                       RM {mainTenure.won_premium || mainTenure.sourced_quotes[0].total_payable}
@@ -2244,21 +2432,28 @@ export function TenureTimelineLedger() {
                                       title={`Accepted Quotation PDF: ${mainTenure.winning_file_name || "Quotation PDF"}`}
                                     >
                                       <FilePdf size={11} weight="fill" className="text-emerald-600" />
-                                      <span className="truncate max-w-[120px]">Accepted PDF</span>
+                                      <span className="truncate max-w-[120px]">
+                                        {mainTenure.stage === "Close - Win" || mainTenure.status === "hit" ? "Accepted PDF" : "Quote PDF"}
+                                      </span>
                                     </a>
                                   ) : mainTenure.sourced_quotes?.find(q => q.uploaded_file_id) ? (
                                     (() => {
                                       const winQuote = mainTenure.sourced_quotes.find(q => q.is_winner && q.uploaded_file_id) || mainTenure.sourced_quotes.find(q => q.uploaded_file_id);
+                                      const isActualWinner = Boolean(winQuote?.is_winner || mainTenure.stage === "Close - Win" || mainTenure.status === "hit");
                                       return winQuote?.uploaded_file_id ? (
                                         <a
                                           href={fileUrl(`/uploaded-files/${winQuote.uploaded_file_id}/content`)}
                                           target="_blank"
                                           rel="noopener noreferrer"
-                                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-800 text-[10px] font-bold border border-blue-200 transition-colors cursor-pointer"
+                                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer ${
+                                            isActualWinner
+                                              ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300"
+                                              : "bg-blue-50 hover:bg-blue-100 text-blue-800 border-blue-200"
+                                          }`}
                                           title={`Quotation PDF: ${winQuote.file_name || winQuote.company}`}
                                         >
-                                          <FilePdf size={11} weight="fill" className="text-blue-600" />
-                                          <span className="truncate max-w-[120px]">{winQuote.is_winner ? "Accepted PDF" : "Quote PDF"}</span>
+                                          <FilePdf size={11} weight="fill" className={isActualWinner ? "text-emerald-600" : "text-blue-600"} />
+                                          <span className="truncate max-w-[120px]">{isActualWinner ? "Accepted PDF" : "Quote PDF"}</span>
                                         </a>
                                       ) : null;
                                     })()
@@ -2266,7 +2461,7 @@ export function TenureTimelineLedger() {
                                   {mainTenure.generated_quotations && mainTenure.generated_quotations.length > 0 && (
                                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-700 text-[10px] font-bold border border-neutral-200">
                                       <FilePdf size={11} weight="fill" className="text-neutral-500" />
-                                      <span>{mainTenure.generated_quotations.length} Issued</span>
+                                      <span>{mainTenure.generated_quotations.length} Quote Gen</span>
                                     </span>
                                   )}
                                 </div>

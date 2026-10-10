@@ -1531,15 +1531,16 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     )
     session_map = {s.id: s for s in sessions}
 
-    # Clean up any comparison entries erroneously created for Cover Note sessions
+    # Clean up any comparison entries erroneously created for Cover Note sessions or pointing to trashed/missing sessions
     valid_entries = []
     for e in entries:
-        sess = session_map.get(e.session_id) if e.session_id else None
-        if sess and getattr(sess, "document_type", "quotation") == "covernote":
-            db.delete(e)
-            needs_commit = True
-        else:
-            valid_entries.append(e)
+        if e.session_id:
+            sess = session_map.get(e.session_id)
+            if not sess or sess.status == "trash" or getattr(sess, "document_type", "quotation") in ("covernote", "unlinked_covernote"):
+                db.delete(e)
+                needs_commit = True
+                continue
+        valid_entries.append(e)
     entries = valid_entries
 
     # Separate quotation sessions from cover note sessions

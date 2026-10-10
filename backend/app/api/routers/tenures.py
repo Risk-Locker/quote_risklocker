@@ -143,6 +143,10 @@ class UpdateTenureLedgerRequest(BaseModel):
     winning_company_name: str | None = None
 
 
+class BulkConfirmHitRequest(BaseModel):
+    tenure_ids: list[str] = Field(default_factory=list, description="List of tenure IDs to confirm as hit/won")
+
+
 @router.post("")
 def create_tenure(
     payload: CreateTenureRequest,
@@ -721,10 +725,17 @@ def list_tenures(
             }
 
         win_quote = next((sq for sq in sourced if sq.get("is_winner")), None)
-        if not win_quote and sourced:
-            win_quote = sourced[0]
         winning_file_id = (cn_sess.uploaded_file_id if cn_sess else None) or (win_quote.get("uploaded_file_id") if win_quote else None)
         winning_file_name = (cn_sess.uploaded_file.original_filename if cn_sess and cn_sess.uploaded_file else None) or (win_quote.get("file_name") if win_quote else None)
+
+        latest_act = t.last_activity_at or t.updated_at or t.created_at
+        for s in sessions:
+            s_act = s.updated_at or s.created_at
+            if s_act:
+                s_act_tz = s_act if s_act.tzinfo else s_act.replace(tzinfo=timezone.utc)
+                l_act_tz = latest_act if (latest_act and latest_act.tzinfo) else (latest_act.replace(tzinfo=timezone.utc) if latest_act else None)
+                if not l_act_tz or s_act_tz > l_act_tz:
+                    latest_act = s_act_tz
 
         items.append({
             "id": t.id,
@@ -783,7 +794,7 @@ def list_tenures(
             "stage_updated_at": (t.stage_updated_at or t.updated_at or t.created_at).isoformat() if (t.stage_updated_at or t.updated_at or t.created_at) else None,
             "external_policy_start_date": t.external_policy_start_date.isoformat() if t.external_policy_start_date else None,
             "external_policy_end_date": t.external_policy_end_date.isoformat() if t.external_policy_end_date else None,
-            "last_activity_at": (t.last_activity_at or t.updated_at or t.created_at).isoformat() if (t.last_activity_at or t.updated_at or t.created_at) else None,
+            "last_activity_at": latest_act.isoformat() if latest_act else None,
             "created_at": t.created_at.isoformat(),
             "created_by_id": t.created_by_id,
             "created_by_email": t.created_by.email if t.created_by else None,
@@ -1053,8 +1064,34 @@ def update_tenure_ledger_fields(
 
     tenure.last_activity_at = now
     db.commit()
-    db.refresh(tenure)
     return {"success": True, "id": tenure.id, "stage": tenure.stage, "is_main": tenure.is_main}
+
+
+@router.post("/bulk-confirm-hit")
+def bulk_confirm_hit(
+    payload: BulkConfirmHitRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Bulk confirm multiple tenures as won (Hit / Issued Policy) and roll forward next year renewals."""
+    from app.services.insurance_tenure_service import (
+        create_next_year_renewal_tenure,
+        record_stage_timestamp,
+    )
+    now = datetime.now(timezone.utc)
+    updated_ids: list[str] = []
+    for tid in payload.tenure_ids:
+        t = db.get(InsuranceTenure, tid)
+        if t and not t.is_discarded:
+            t.stage = "Close - Win"
+            t.status = "hit"
+            record_stage_timestamp(t, "Close - Win")
+            t.last_activity_at = now
+            create_next_year_renewal_tenure(db, t, user_id=user.id)
+            updated_ids.append(t.id)
+
+    db.commit()
+    return {"success": True, "updated_count": len(updated_ids), "updated_ids": updated_ids}
 
 
 @router.post("/{tenure_id}/set-main")

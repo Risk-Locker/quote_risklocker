@@ -2828,28 +2828,42 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                     </div>
 
                     {/* Action Buttons */}
-                    <div className="pt-3 border-t border-emerald-200 flex items-center gap-2">
-                      {cn.uploaded_file_id && (
-                        <a
-                          href={fileUrl(`/uploaded-files/${cn.uploaded_file_id}/content`)}
+                    <div className="pt-3 border-t border-emerald-200 flex flex-col gap-1.5">
+                      <div className="flex items-center gap-2">
+                        {cn.uploaded_file_id && (
+                          <a
+                            href={fileUrl(`/uploaded-files/${cn.uploaded_file_id}/content`)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 shadow-2xs transition-colors"
+                            title="View / download original Cover Note PDF"
+                          >
+                            <FilePdf size={14} weight="bold" />
+                            <span>View Policy PDF</span>
+                          </a>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleUnlinkCovernote}
+                          disabled={isUnlinkingCovernote}
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-700 hover:text-rose-900 hover:bg-rose-50 border border-rose-200 transition-colors cursor-pointer disabled:opacity-50"
+                          title="Unlink this cover note and revert policy stage"
+                        >
+                          {isUnlinkingCovernote ? "Unlinking..." : "Unlink"}
+                        </button>
+                      </div>
+                      {cn.session_id && (
+                        <Link
+                          href={`/sessions/${cn.session_id}/review` as Route}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 shadow-2xs transition-colors"
-                          title="View / download original Cover Note PDF"
+                          className="flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-bold text-emerald-950 bg-emerald-100/80 hover:bg-emerald-200/90 border border-emerald-300 transition-colors shadow-2xs"
+                          title="Open issued cover note in Quotation Workspace to review extracted fields or generate documentation"
                         >
-                          <FilePdf size={14} weight="bold" />
-                          <span>View Policy PDF</span>
-                        </a>
+                          <FilePdf size={14} weight="bold" className="text-emerald-800" />
+                          <span>Open in Quotation Workspace ↗</span>
+                        </Link>
                       )}
-                      <button
-                        type="button"
-                        onClick={handleUnlinkCovernote}
-                        disabled={isUnlinkingCovernote}
-                        className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-700 hover:text-rose-900 hover:bg-rose-50 border border-rose-200 transition-colors cursor-pointer disabled:opacity-50"
-                        title="Unlink this cover note and revert policy stage"
-                      >
-                        {isUnlinkingCovernote ? "Unlinking..." : "Unlink"}
-                      </button>
                     </div>
 
                     <div className="mt-2 text-center text-[10px] font-bold text-emerald-800 bg-emerald-100/70 rounded py-1 border border-emerald-200/80">
