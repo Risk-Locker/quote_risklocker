@@ -81,6 +81,36 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [latestPolicyIssue, setLatestPolicyIssue] = useState<{
+    tenure_id?: string;
+    vehicle_no?: string;
+    company?: string;
+    timestamp?: number;
+  } | null>(null);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("rl_latest_policy_issue");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && (!parsed.timestamp || Date.now() - parsed.timestamp < 3600000)) {
+          setLatestPolicyIssue(parsed);
+        }
+      }
+    } catch {}
+
+    const handlePolicyIssued = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail) {
+        setLatestPolicyIssue(customEvent.detail);
+      }
+    };
+
+    window.addEventListener("rl_policy_issued", handlePolicyIssued);
+    return () => {
+      window.removeEventListener("rl_policy_issued", handlePolicyIssued);
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -243,6 +273,53 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
+
+      {/* Top Banner: Real-time Policy Issued Notification */}
+      {latestPolicyIssue && (
+        <aside
+          aria-label="Policy Issued Notification"
+          className="sticky top-[56px] z-30 w-full bg-emerald-900 border-b border-emerald-700 text-white px-4 py-2 shadow-md flex items-center justify-between gap-3 text-xs transition-all animate-fade-in"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-base select-none">🎉</span>
+            <span className="font-semibold truncate">
+              Policy Issued for{" "}
+              <strong className="font-mono text-emerald-200 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-700/50">
+                {latestPolicyIssue.vehicle_no || "Vehicle"}
+              </strong>
+              {latestPolicyIssue.company ? ` (${latestPolicyIssue.company})` : ""}
+            </span>
+            <span className="text-emerald-300 text-[11px] font-medium hidden sm:inline">· Just now</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                const target = latestPolicyIssue.tenure_id;
+                router.push(`/ledger?highlight_tenure=${target || ""}&t=${Date.now()}` as Route);
+              }}
+              className="inline-flex items-center gap-1.5 bg-emerald-100 hover:bg-white text-emerald-950 font-bold px-3 py-1 rounded text-xs transition-colors cursor-pointer shadow-2xs"
+            >
+              <span>Open Motor Renewal Ledger</span>
+              <span className="text-xs">↗</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLatestPolicyIssue(null);
+                try {
+                  localStorage.removeItem("rl_latest_policy_issue");
+                } catch {}
+              }}
+              className="p-1 rounded text-emerald-300 hover:text-white hover:bg-emerald-800/60 transition-colors cursor-pointer"
+              title="Dismiss notification"
+              aria-label="Dismiss notification"
+            >
+              <X size={14} weight="bold" />
+            </button>
+          </div>
+        </aside>
+      )}
 
       {/* Mobile slide-over drawer overlay & sheet */}
       {mobileNavOpen && (

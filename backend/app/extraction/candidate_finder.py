@@ -136,52 +136,99 @@ def _compact_evidence(text: str, start: int, end: int) -> str:
     return re.sub(r"\s+", " ", text[max(0, start - 80) : min(len(text), end + 80)]).strip()
 
 
-def detect_is_covernote(text: str, filename: str | None = None) -> bool:
-    """Classify whether an uploaded document is an official issued Cover Note / Policy Schedule vs a Quotation."""
-    if filename:
-        fn_clean = re.sub(r"[_\-\s]+", " ", str(filename).lower())
-        if any(term in fn_clean for term in [
-            "covernote", "cover note", "e covernote", "e cover note",
-            "policy schedule", "polisi", "jadual polisi", "nota perlindungan",
-            "insurance policy", "policy cert"
-        ]):
-            return True
-        if re.search(r"\bcn[\s\-_0-9]", fn_clean) or re.search(r"[\-_]cn\b", fn_clean):
-            return True
+def score_document_type(text: str, filename: str | None = None) -> tuple[str, float, dict]:
+    """Score and classify whether an uploaded document is an official issued Cover Note vs a Quotation.
+    Returns (document_type, total_score, breakdown).
+    Decision threshold: total_score >= 50 -> 'covernote', else 'quotation'.
+    """
+    breakdown: dict[str, float] = {}
+    total_score = 0.0
 
-    upper_sample = text[:3500].upper()
-    covernote_signatures = [
+    if filename:
+        fn_clean = re.sub(r"[_\-\s]+", " ", str(filename).lower()).strip()
+        # 1. Filename Cover Note indicators (+60)
+        cn_fn_terms = [
+            "covernote", "cover note", "e covernote", "e cover note",
+            "notaperlindungan", "nota perlindungan", "sijil insurans",
+            "cert of insurance", "certificate of insurance"
+        ]
+        has_cn_name = any(term in fn_clean for term in cn_fn_terms) or bool(
+            re.search(r"(?:^|[\s_\-])cn(?:[\s_\-0-9]|$)", str(filename).lower())
+        )
+        if has_cn_name:
+            breakdown["filename_covernote"] = 60.0
+            total_score += 60.0
+
+        # 2. Filename Quotation indicators (-60)
+        quote_fn_terms = [
+            "quotation", "quote", "sebut harga", "sebutharga",
+            "proposal", "cadangan"
+        ]
+        has_quote_name = any(term in fn_clean for term in quote_fn_terms)
+        if has_quote_name:
+            breakdown["filename_quotation"] = -60.0
+            total_score -= 60.0
+
+    upper_sample = text[:4000].upper()
+
+    # 3. Text Header Signatures (+30 / -30)
+    cn_headers = [
         "COVER NOTE",
         "E-COVER NOTE",
         "NOTA PERLINDUNGAN",
-        "POLICY SCHEDULE",
         "SCHEDULE OF INSURANCE",
-        "JADUAL POLISI",
-        "POLISI INSURANS",
         "CERTIFICATE OF INSURANCE",
         "SIJIL INSURANS",
-        "HERE IS YOUR INSURANCE POLICY",
+        "OFFICIAL COVER NOTE",
+        "JADUAL POLISI",
     ]
-    has_cn_sig = any(sig in upper_sample for sig in covernote_signatures)
+    if any(sig in upper_sample for sig in cn_headers):
+        breakdown["header_covernote"] = 30.0
+        total_score += 30.0
 
-    quote_signatures = [
+    quote_headers = [
         "QUOTATION",
-        "PROPOSAL",
         "SEBUT HARGA",
         "SEBUTHARGA",
         "CADANGAN INSURANS",
         "QUOTATION SCHEDULE",
+        "PROPOSAL FORM",
     ]
-    has_quote_sig = any(sig in upper_sample for sig in quote_signatures)
+    if any(sig in upper_sample for sig in quote_headers):
+        breakdown["header_quotation"] = -30.0
+        total_score -= 30.0
 
-    if has_cn_sig and not has_quote_sig:
-        return True
+    # 4. Policy Number / Cover Note Number Regex (+20)
+    has_cn_num = bool(
+        re.search(r"(?:COVER\s*NOTE\s*(?:NO\.?|NUMBER)|NO\.?\s*NOTA\s*PERLINDUNGAN)\s*[:#]?\s*[A-Z0-9/_\-]{5,}", upper_sample)
+        or re.search(r"(?:POLICY\s*(?:NO\.?|NUMBER)|NO\.?\s*POLISI)\s*[:#]?\s*[A-Z0-9/_\-]{6,}", upper_sample)
+    )
+    if has_cn_num:
+        breakdown["identifier_policy_no"] = 20.0
+        total_score += 20.0
 
-    if has_cn_sig and has_quote_sig:
-        if re.search(r"(?:POLICY\s*(?:NO\.?|NUMBER)|NO\.?\s*POLISI)\s*:\s*[A-Z0-9/_-]{6,}", upper_sample):
-            return True
+    # 5. Explicit Quotation Disclaimers (-20)
+    quote_disclaimers = [
+        "THIS IS A QUOTATION",
+        "THIS IS NOT AN INSURANCE POLICY",
+        "NOT AN INSURANCE POLICY",
+        "NOT A POLICY",
+        "VALID FOR 14 DAYS",
+        "VALID FOR 30 DAYS",
+        "SEBUTHARGA SAHAJA",
+    ]
+    if any(disc in upper_sample for disc in quote_disclaimers):
+        breakdown["disclaimer_quotation"] = -20.0
+        total_score -= 20.0
 
-    return False
+    doc_type = "covernote" if total_score >= 50.0 else "quotation"
+    return doc_type, total_score, breakdown
+
+
+def detect_is_covernote(text: str, filename: str | None = None) -> bool:
+    """Classify whether an uploaded document is an official issued Cover Note / Policy Schedule vs a Quotation."""
+    doc_type, _score, _breakdown = score_document_type(text=text, filename=filename)
+    return doc_type == "covernote"
 
 
 def _page_for_offset(page_text: list[dict], offset: int) -> int | None:

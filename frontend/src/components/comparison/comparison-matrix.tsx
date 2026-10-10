@@ -2215,11 +2215,11 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                   <span className="text-[10px] text-emerald-800 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-300 flex items-center gap-1">
                     <CheckCircle size={11} weight="fill" /> Issued Cover Note
                   </span>
-                ) : currentPolicyWinner ? (
-                  <span className="text-[10px] text-emerald-800 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                    {currentPolicyWinner.is_recommended ? "★ Winner Policy" : "Active Quote"}
+                ) : (
+                  <span className="text-[10px] text-neutral-600 font-bold bg-neutral-100 px-2 py-0.5 rounded border border-neutral-200">
+                    Pending Issue
                   </span>
-                ) : null}
+                )}
                 {editingFixedCosts && (
                   <span className="text-[10px] text-indigo-700 font-bold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
                     Auto 1-Year Sync
@@ -2267,23 +2267,11 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                         </a>
                       )}
                     </p>
-                  ) : currentPolicyWinner ? (
-                    <p className="text-[10px] text-[#6e6e73] flex items-center gap-1">
-                      <span>Source:</span>
-                      <strong className="text-neutral-800">{currentPolicyWinner.company_name}</strong>
-                      {currentPolicyWinner.uploaded_file_id && (
-                        <a
-                          href={fileUrl(`/uploaded-files/${currentPolicyWinner.uploaded_file_id}/content`)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-emerald-700 hover:text-emerald-900 underline ml-1 font-semibold"
-                          title="Open original quotation PDF"
-                        >
-                          [PDF]
-                        </a>
-                      )}
+                  ) : (
+                    <p className="text-[10px] text-neutral-400 italic">
+                      Awaiting official Cover Note binding
                     </p>
-                  ) : null}
+                  )}
                 </div>
               )}
             </div>
@@ -2929,99 +2917,43 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             }
 
             return (
-              <div className="rounded-2xl border-2 border-[#1b1717] bg-white p-4 shadow-sm">
-                <div className="flex items-center justify-between border-b border-[#e5e5ea] pb-2.5 mb-3">
+              <div className="rounded-2xl border-2 border-dashed border-neutral-300 bg-neutral-50/70 p-4 shadow-2xs">
+                <div className="flex items-center justify-between border-b border-neutral-200/80 pb-2.5 mb-3">
                   <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-bold uppercase tracking-wider text-[#1b1717]">
+                    <span className="text-xs font-bold uppercase tracking-wider text-neutral-800">
                       Current Policy ({currentYear})
                     </span>
-                    <span className="rounded bg-amber-400 text-amber-950 font-bold px-1.5 py-0.2 text-[9px] uppercase">
-                      {currentPolicyWinner?.is_recommended ? "Selected Winner" : "Leading Option"}
+                    <span className="rounded bg-neutral-200 text-neutral-700 font-bold px-1.5 py-0.5 text-[9px] uppercase">
+                      Pending Issue
                     </span>
                   </div>
-                  {currentPolicyWinner && (
-                    <span className="rounded bg-[#1b1717] px-2 py-0.5 text-xs font-bold text-white">
-                      {currentPolicyWinner.company_name}
-                    </span>
-                  )}
+                  <span className="rounded bg-neutral-100 text-neutral-600 px-2 py-0.5 text-[10px] font-bold border border-neutral-200">
+                    Awaiting Cover Note
+                  </span>
                 </div>
 
-                {currentPolicyWinner ? (
-                  <div className="space-y-2 text-xs text-[#454545]">
-                    <div className="flex justify-between">
-                      <span className="text-[#6e6e73]">Sum Insured:</span>
-                      <span className="font-mono font-bold text-[#1b1717]">
-                        RM {currentPolicyWinner.sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
-                        <span className="text-[10px] text-[#6e6e73] font-normal ml-1">
-                          ({currentPolicyWinner.valuation_type === "agreed_value" ? "Agreed" : "Market"})
-                        </span>
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[#6e6e73]">Premium Payable:</span>
-                      <span className="font-mono font-bold text-emerald-700">
-                        RM {(currentPolicyWinner.rounded_total_payable != null ? currentPolicyWinner.rounded_total_payable : currentPolicyWinner.total_payable).toFixed(2)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-start gap-2">
-                      <span className="text-[#6e6e73] shrink-0">Included Perils:</span>
-                      <span className="font-medium text-[#1b1717] text-right">
-                        {currentPolicyWinner.canonical_perils_formatted || "Standard Policy Coverage"}
-                      </span>
-                    </div>
-                    <div className="mt-2 space-y-1">
-                      <div className="flex justify-between text-[11px]">
-                        <span className="text-[#6e6e73]">Windscreen:</span>
-                        <span className="font-mono font-medium text-[#1b1717]">
-                          {currentPolicyWinner.windscreen_sum_insured ? `RM ${currentPolicyWinner.windscreen_sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}` : "—"}
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-[11px]">
-                        <span className="text-[#6e6e73]">Towing:</span>
-                        <span className="font-mono font-medium text-[#1b1717]">
-                          {formatBenefitCoverage(currentPolicyWinner.towing_km || currentPolicyWinner.towing_limit || "Unlimited", "KM")}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center text-[11px] mt-1.5">
-                        <span className="text-[#6e6e73]">Discount (%):</span>
-                        <input
-                          type="text"
-                          min="0"
-                          max="100"
-                          value={currentPolicyDiscount || ""}
-                          onChange={(e) => setCurrentPolicyDiscount(Number(e.target.value))}
-                          className="w-16 h-6 px-1.5 border border-[#e5e5ea] rounded text-right font-mono outline-none focus:border-[#1b1717]"
-                          placeholder="0"
-                        />
-                      </div>
-                      {currentPolicyDiscount > 0 ? (
-                        <div className="flex justify-between text-[11px] font-bold mt-1 text-emerald-700 bg-emerald-50 px-1.5 py-1 rounded">
-                          <span>Final Payable:</span>
-                          <span className="font-mono">
-                            RM {((currentPolicyWinner.rounded_total_payable != null ? currentPolicyWinner.rounded_total_payable : currentPolicyWinner.total_payable) * (1 - currentPolicyDiscount / 100)).toFixed(2)}
-                          </span>
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="flex justify-between pt-1">
-                      <span className="text-[#6e6e73]">Model:</span>
-                      <span className="font-medium text-[#1b1717] text-right truncate max-w-[150px]">
-                        {tenure.vehicle_model}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[#6e6e73]">YOM:</span>
-                      <span className="font-medium text-[#1b1717] text-right">
-                        {tenure.manufacture_year || ""}
-                      </span>
-                    </div>
-
+                <div className="space-y-2.5 py-3 text-center">
+                  <div className="size-10 rounded-full bg-neutral-100 border border-neutral-200 mx-auto flex items-center justify-center text-neutral-500">
+                    <ShieldCheck size={20} weight="duotone" />
                   </div>
-                ) : (
-                  <div className="text-center py-4 text-xs text-[#6e6e73]">
-                    <p>No policy or quotations active yet.</p>
+                  <div>
+                    <p className="text-xs font-bold text-neutral-900">
+                      No Official Policy Issued Yet
+                    </p>
+                    <p className="text-[11px] text-neutral-500 max-w-xs mx-auto mt-1 leading-relaxed">
+                      This workspace is currently evaluating quotations. The Current Policy section accepts strictly official issued Cover Notes. Upload an issued Cover Note PDF or confirm the deal in the Motor Ledger to bind the policy.
+                    </p>
                   </div>
-                )}
+                  <div className="pt-1 flex items-center justify-center gap-2">
+                    <Link
+                      href={`/upload?mode=comparison&tenure_id=${tenureId}` as Route}
+                      className="px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-black text-white text-[11px] font-bold shadow-2xs transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <UploadSimple size={12} weight="bold" />
+                      <span>Upload Cover Note PDF</span>
+                    </Link>
+                  </div>
+                </div>
 
                 {/* Expandable Previously Removed / Available Policies Drawer (when unlinked) */}
                 {data.unlinked_covernotes && data.unlinked_covernotes.length > 0 && (

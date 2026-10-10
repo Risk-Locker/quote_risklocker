@@ -601,10 +601,28 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                 total_premium?: string | number;
                 quotation_ref?: string;
                 tenure_id?: string;
+                document_type?: string;
               };
             }>(`/sessions/${sessionId}`);
 
             const resolvedTenureId = sRes.session.tenure_id || existingTenureId;
+
+            const isCoverNote =
+              sRes.session.document_type === "covernote" ||
+              /cover[\s_-]*note/i.test(bulkFiles.find((f) => f.id === itemId)?.file?.name || "");
+
+            if (isCoverNote && resolvedTenureId) {
+              const eventData = {
+                tenure_id: resolvedTenureId,
+                vehicle_no: sRes.session.vehicle_plate || bulkFiles.find((f) => f.id === itemId)?.file?.name || "Vehicle",
+                company: sRes.session.detected_company || "Underwriter",
+                timestamp: Date.now(),
+              };
+              try {
+                localStorage.setItem("rl_latest_policy_issue", JSON.stringify(eventData));
+                window.dispatchEvent(new CustomEvent("rl_policy_issued", { detail: eventData }));
+              } catch {}
+            }
 
             setBulkFiles((prev) =>
               prev.map((i) =>

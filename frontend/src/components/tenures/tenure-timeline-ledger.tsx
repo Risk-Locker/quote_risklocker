@@ -2,8 +2,29 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { Route } from "next";
+
+export type LedgerSortColumn =
+  | "vehicle_no"
+  | "coverage_period"
+  | "stage"
+  | "last_activity"
+  | "created_at"
+  | "pic";
+
+function formatRelativeTime(dateStr?: string | null): string {
+  if (!dateStr) return "";
+  const diffSec = Math.max(0, Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000));
+  if (diffSec < 5) return "Just now";
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}h ago`;
+  const diffDays = Math.floor(diffHour / 24);
+  return `${diffDays}d ago`;
+}
 import {
   CalendarBlank,
   Car,
@@ -301,20 +322,51 @@ export function TenureTimelineLedger() {
   const [statusFilter, setStatusFilter] = useState("all");
 
   // Sorting state (default: last_activity desc)
-  const [sortBy, setSortBy] = useState<"last_activity" | "vehicle_no" | "customer_name" | "stage">("last_activity");
+  const [sortBy, setSortBy] = useState<LedgerSortColumn>("last_activity");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  // Highlighted tenure row (e.g. from Policy Issue notification) & live relative ticker
+  const searchParams = useSearchParams();
+  const [highlightedTenureId, setHighlightedTenureId] = useState<string | null>(null);
+  const [, setTicker] = useState(0);
+
+  // Tick relative timestamps every 5 seconds
+  useEffect(() => {
+    const timer = setInterval(() => setTicker((t) => t + 1), 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Listen for highlight parameter from notifications or URL
+  useEffect(() => {
+    const target = searchParams?.get("highlight_tenure");
+    if (target) {
+      setHighlightedTenureId(target);
+      setViewMode("ledger");
+      setTimeout(() => {
+        const el = document.getElementById(`tenure-row-${target}`);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }, 500);
+
+      const clearTimer = setTimeout(() => {
+        setHighlightedTenureId(null);
+      }, 30000); // 30 seconds illumination
+      return () => clearTimeout(clearTimer);
+    }
+  }, [searchParams]);
 
   // Calendar Sessions state
   const [calendarSessions, setCalendarSessions] = useState<any[]>([]);
   const [calendarVehicleFilter, setCalendarVehicleFilter] = useState<string>("all");
   const [loadingCalendar, setLoadingCalendar] = useState(false);
 
-  const handleSort = (column: "last_activity" | "vehicle_no" | "customer_name" | "stage") => {
+  const handleSort = (column: LedgerSortColumn) => {
     if (sortBy === column) {
       setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
     } else {
       setSortBy(column);
-      setSortDir("desc");
+      setSortDir(column === "vehicle_no" ? "asc" : "desc");
     }
   };
 
@@ -460,6 +512,18 @@ export function TenureTimelineLedger() {
         method: "PATCH",
         body: JSON.stringify(updatePayload),
       });
+
+      try {
+        const ev = {
+          tenure_id: hitConfirmTenure.id,
+          vehicle_no: hitConfirmTenure.vehicle_no,
+          company: hitConfirmedInsurer || hitConfirmTenure.covernote_policy?.company || hitConfirmTenure.winning_company_name || "",
+          timestamp: Date.now(),
+        };
+        localStorage.setItem("rl_latest_policy_issue", JSON.stringify(ev));
+        window.dispatchEvent(new CustomEvent("rl_policy_issued", { detail: ev }));
+      } catch {}
+
       setHitConfirmTenure(null);
       loadTenures();
       loadStageSummary();
@@ -1210,10 +1274,20 @@ export function TenureTimelineLedger() {
       let cmp = 0;
       if (sortBy === "vehicle_no") {
         cmp = a.vehicle_no.localeCompare(b.vehicle_no);
-      } else if (sortBy === "customer_name") {
-        cmp = (a.customer_name || "").localeCompare(b.customer_name || "");
+      } else if (sortBy === "coverage_period") {
+        const da = a.mainTenure.coverage_start_date || a.mainTenure.coverage_end_date || "";
+        const db = b.mainTenure.coverage_start_date || b.mainTenure.coverage_end_date || "";
+        cmp = da.localeCompare(db);
       } else if (sortBy === "stage") {
         cmp = (a.mainTenure.stage || "").localeCompare(b.mainTenure.stage || "");
+      } else if (sortBy === "created_at") {
+        const ca = a.mainTenure.created_at || "";
+        const cb = b.mainTenure.created_at || "";
+        cmp = ca.localeCompare(cb);
+      } else if (sortBy === "pic") {
+        const picA = (getPicDisplay(a.mainTenure)?.name || a.mainTenure.sub_agent_name || "").toLowerCase();
+        const picB = (getPicDisplay(b.mainTenure)?.name || b.mainTenure.sub_agent_name || "").toLowerCase();
+        cmp = picA.localeCompare(picB);
       } else {
         // "last_activity"
         const dateA = a.mainTenure.last_activity_at || a.mainTenure.stage_updated_at || a.mainTenure.created_at || "";
@@ -1222,7 +1296,7 @@ export function TenureTimelineLedger() {
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
-  }, [tenures, sortBy, sortDir]);
+  }, [tenures, sortBy, sortDir, pics]);
 
   const [expandedVehicleKeys, setExpandedVehicleKeys] = useState<string[]>([]);
   const toggleExpandVehicle = (key: string) => {
@@ -1682,51 +1756,82 @@ export function TenureTimelineLedger() {
                     onClick={() => handleSort("vehicle_no")}
                     className="py-3 px-3 min-w-[200px] cursor-pointer hover:text-black transition-colors"
                   >
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5">
                       <span>Vehicle &amp; Customer</span>
-                      {sortBy === "vehicle_no" && (
-                        <span>{sortDir === "asc" ? "▲" : "▼"}</span>
-                      )}
+                      <span className={`text-[10px] transition-colors ${sortBy === "vehicle_no" ? "text-neutral-900 font-bold" : "text-neutral-300"}`}>
+                        {sortBy === "vehicle_no" ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+                      </span>
                     </div>
                   </th>
-                  <th className="py-3 px-3 min-w-[170px]">Coverage Period</th>
+                  <th
+                    onClick={() => handleSort("coverage_period")}
+                    className="py-3 px-3 min-w-[170px] cursor-pointer hover:text-black transition-colors"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Coverage Period</span>
+                      <span className={`text-[10px] transition-colors ${sortBy === "coverage_period" ? "text-neutral-900 font-bold" : "text-neutral-300"}`}>
+                        {sortBy === "coverage_period" ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+                      </span>
+                    </div>
+                  </th>
                   <th
                     onClick={() => handleSort("stage")}
                     className="py-3 px-3 min-w-[340px] cursor-pointer hover:text-black transition-colors"
                   >
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5">
                       <span>Pipeline Stage</span>
-                      {sortBy === "stage" && (
-                        <span>{sortDir === "asc" ? "▲" : "▼"}</span>
-                      )}
+                      <span className={`text-[10px] transition-colors ${sortBy === "stage" ? "text-neutral-900 font-bold" : "text-neutral-300"}`}>
+                        {sortBy === "stage" ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+                      </span>
                     </div>
                   </th>
                   <th
                     onClick={() => handleSort("last_activity")}
                     className="py-3 px-3 min-w-[190px] cursor-pointer hover:text-black transition-colors"
                   >
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5">
                       <span>Latest Activity &amp; Quotes</span>
-                      {sortBy === "last_activity" && (
-                        <span>{sortDir === "asc" ? "▲" : "▼"}</span>
-                      )}
+                      <span className={`text-[10px] transition-colors ${sortBy === "last_activity" ? "text-neutral-900 font-bold" : "text-neutral-300"}`}>
+                        {sortBy === "last_activity" ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+                      </span>
                     </div>
                   </th>
-                  <th className="py-3 px-3 min-w-[160px]">PIC &amp; Milestones</th>
+                  <th
+                    onClick={() => handleSort("created_at")}
+                    className="py-3 px-3 min-w-[160px] cursor-pointer hover:text-black transition-colors"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Date of Ledger Creation</span>
+                      <span className={`text-[10px] transition-colors ${sortBy === "created_at" ? "text-neutral-900 font-bold" : "text-neutral-300"}`}>
+                        {sortBy === "created_at" ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+                      </span>
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleSort("pic")}
+                    className="py-3 px-3 min-w-[160px] cursor-pointer hover:text-black transition-colors"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>PIC &amp; Milestones</span>
+                      <span className={`text-[10px] transition-colors ${sortBy === "pic" ? "text-neutral-900 font-bold" : "text-neutral-300"}`}>
+                        {sortBy === "pic" ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+                      </span>
+                    </div>
+                  </th>
                   <th className="py-3 px-3 text-right min-w-[190px]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
                 {loadingTenures ? (
                   <tr>
-                    <td colSpan={7} className="py-14 text-center text-neutral-400">
+                    <td colSpan={8} className="py-14 text-center text-neutral-400">
                       <ArrowsClockwise className="w-5 h-5 animate-spin mx-auto mb-2 text-neutral-500" />
                       Loading Motor Renewal Ledger...
                     </td>
                   </tr>
                 ) : tenures.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-14 text-center text-neutral-400">
+                    <td colSpan={8} className="py-14 text-center text-neutral-400">
                       {category === "lost"
                         ? "No lost client records found matching the active filters."
                         : `No active renewal policies found for ${selectedMonth === "all" ? selectedYear : selectedMonth}.`}
@@ -1749,8 +1854,15 @@ export function TenureTimelineLedger() {
                       <React.Fragment key={group.vehicle_no}>
                         {/* Primary Vehicle Row */}
                         <tr
+                          id={`tenure-row-${mainTenure.id}`}
                           className={`hover:bg-neutral-50/80 transition-colors ${
-                            stageConf.isLost ? "bg-rose-50/20" : isVehicleExpanded ? "bg-[#f5f5f7]/60" : ""
+                            highlightedTenureId === mainTenure.id
+                              ? "bg-emerald-100/90 ring-4 ring-emerald-500 ring-inset shadow-xl animate-pulse"
+                              : stageConf.isLost
+                              ? "bg-rose-50/20"
+                              : isVehicleExpanded
+                              ? "bg-[#f5f5f7]/60"
+                              : ""
                           }`}
                         >
                           {/* 0. Select Checkbox & Direct Delete & Expand */}
@@ -1935,10 +2047,15 @@ export function TenureTimelineLedger() {
                               <div className="space-y-1.5 min-w-[210px] max-w-[260px]">
                                 {/* Official Issued Cover Note Top Strip */}
                                 <div className="flex items-center justify-between gap-1.5 flex-wrap">
-                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-bold">
-                                    <CheckCircle size={12} weight="fill" className="text-emerald-700" />
-                                    {mainTenure.covernote_policy.company}
-                                  </span>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-bold">
+                                      <CheckCircle size={12} weight="fill" className="text-emerald-700" />
+                                      {mainTenure.covernote_policy.company}
+                                    </span>
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-800 text-[9px] font-bold border border-emerald-200">
+                                      ⚡ Policy Issued · {formatRelativeTime(mainTenure.last_activity_at || mainTenure.created_at) || "Recent"}
+                                    </span>
+                                  </div>
                                   {mainTenure.covernote_policy.total_payable && (
                                     <span className="text-emerald-950 font-mono font-bold text-xs bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
                                       RM {Number(mainTenure.covernote_policy.total_payable).toFixed(2)}
@@ -2151,7 +2268,32 @@ export function TenureTimelineLedger() {
                             )}
                           </td>
 
-                          {/* 5. PIC & Milestones */}
+                          {/* 5. Date of Ledger Creation */}
+                          <td className="py-3 px-3 min-w-[150px]">
+                            <div className="space-y-0.5">
+                              <div className="text-[11px] font-mono font-semibold text-neutral-900">
+                                {formatDateSafe(mainTenure.created_at)}
+                              </div>
+                              <div className="text-[10px] font-mono text-neutral-500">
+                                {mainTenure.created_at ? (() => {
+                                  try {
+                                    const d = new Date(mainTenure.created_at);
+                                    return isNaN(d.getTime())
+                                      ? ""
+                                      : d.toLocaleTimeString("en-MY", {
+                                          hour: "2-digit",
+                                          minute: "2-digit",
+                                          hour12: true,
+                                        });
+                                  } catch {
+                                    return "";
+                                  }
+                                })() : "—"}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* 6. PIC & Milestones */}
                           <td className="py-3 px-3">
                             <div className="space-y-1.5">
                               {/* Row 1: PIC info */}
@@ -2247,7 +2389,7 @@ export function TenureTimelineLedger() {
                         {/* Inline Expandable Sub-panel: Deal Intelligence & Remarks */}
                         {isVehicleExpanded && (
                           <tr className="bg-[#f9f9fb] border-b-2 border-neutral-300">
-                            <td colSpan={7} className="p-4 whitespace-normal space-y-4">
+                            <td colSpan={8} className="p-4 whitespace-normal space-y-4">
                               {/* Quotation Locker & Session Summary Card */}
                               <div className="bg-white rounded-xl border border-neutral-200 shadow-2xs overflow-hidden">
                                 <div className="px-4 py-2.5 bg-neutral-100/70 border-b border-neutral-200 flex items-center justify-between">
