@@ -1497,6 +1497,57 @@ def _extract_source_quotation_no(session: SessionModel | Any | None = None, draf
     return None
 
 
+def is_covernote_document(session: SessionModel | None, db: Session | None = None) -> bool:
+    """Classify whether a session is an official Cover Note / Policy Schedule / Certificate of Insurance.
+    Cover Notes and issued Policies are the bound contract and must NEVER appear as quotation comparison columns.
+    """
+    if not session:
+        return False
+    doc_t = getattr(session, "document_type", "quotation") or "quotation"
+    if doc_t in ("covernote", "unlinked_covernote"):
+        return True
+
+    # 1. Inspect original filename
+    fn = ""
+    if session.uploaded_file:
+        fn = str(session.uploaded_file.original_filename or "").lower()
+    if not fn and getattr(session, "display_options", None) and isinstance(session.display_options, dict):
+        fn = str(session.display_options.get("filename") or "").lower()
+    if not fn and session.draft and getattr(session.draft, "display_options", None) and isinstance(session.draft.display_options, dict):
+        fn = str(session.draft.display_options.get("filename") or "").lower()
+
+    cn_fn_terms = (
+        "covernote", "cover_note", "cover note", "cover-note",
+        "e-cover", "ecover", "notaperlindungan", "nota perlindungan",
+        "sijil insurans", "sijil_insurans", "cert of insurance",
+        "certificate of insurance", "policy_schedule", "policyschedule",
+        "jadual polisi", "jadual_polisi"
+    )
+    if any(term in fn for term in cn_fn_terms) or re.search(r"(?:^|[\s_\-])cn(?:[\s_\-0-9]|$)", fn):
+        session.document_type = "covernote"
+        return True
+
+    # 2. Inspect extracted OCR / raw text
+    raw_text = ""
+    if session.draft:
+        full_ext = getattr(session.draft, "full_extraction", None)
+        if full_ext and isinstance(full_ext, dict):
+            raw_text = str(full_ext.get("raw_text") or full_ext.get("ocr_text") or "")
+        if not raw_text:
+            ext_data = getattr(session.draft, "extracted_data", None)
+            if ext_data and isinstance(ext_data, dict):
+                raw_text = str(ext_data.get("raw_text") or ext_data.get("ocr_text") or "")
+    if not raw_text and session.uploaded_file and getattr(session.uploaded_file, "extraction_record", None):
+        raw_text = str(session.uploaded_file.extraction_record.raw_text or session.uploaded_file.extraction_record.ocr_text or "")
+
+    from app.extraction.candidate_finder import detect_is_covernote
+    if raw_text and detect_is_covernote(text=raw_text, filename=fn):
+        session.document_type = "covernote"
+        return True
+
+    return False
+
+
 def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     """Retrieve or auto-hydrate the full marketing comparison matrix for an insurance tenure.
     
@@ -1542,15 +1593,31 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     for e in entries:
         if e.session_id:
             sess = session_map.get(e.session_id)
-            if not sess or sess.status == "trash" or getattr(sess, "document_type", "quotation") in ("covernote", "unlinked_covernote"):
+            if not sess or sess.status == "trash" or is_covernote_document(sess, db):
                 db.delete(e)
                 needs_commit = True
                 continue
+        # Also clean up any entry whose company_name contains covernote / certificate indicators
+        c_lower = (e.company_name or "").lower()
+        if any(term in c_lower for term in ("covernote", "cover note", "sijil insurans", "certificate of insurance")):
+            db.delete(e)
+            needs_commit = True
+            continue
         valid_entries.append(e)
     entries = valid_entries
 
     # Separate quotation sessions from cover note sessions
-    quote_sessions = [s for s in sessions if getattr(s, "document_type", "quotation") != "covernote"]
+    quote_sessions = [s for s in sessions if not is_covernote_document(s, db)]
+
+    # Auto-link Cover Note to tenure if not already assigned (exclude unlinked_covernote)
+    if not tenure.covernote_session_id:
+        for s in sessions:
+            if is_covernote_document(s, db) and getattr(s, "document_type", "") != "unlinked_covernote":
+                tenure.covernote_session_id = s.id
+                if tenure.stage in ("Quotations", "Material to Client", None, "draft"):
+                    tenure.stage = "Issue Policy"
+                needs_commit = True
+                break
 
     sessions_desc = sorted(
         sessions,
@@ -2602,6 +2669,7 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "fixed_costs_total": float(tenure.road_tax + tenure.runner_fee),
             "windscreen_target": float(tenure.windscreen_target) if tenure.windscreen_target else None,
             "ncd_percentage": float(tenure.ncd_percentage) if tenure.ncd_percentage is not None else None,
+            "car_brand": (tenure.tracked_vehicle.car_brand if tenure.tracked_vehicle else None) or waterfall_brand,
             "vehicle_model": veh_model or "Motor Vehicle",
             "vehicle_type": "Comprehensive (综合险)",
         },
@@ -2669,6 +2737,8 @@ def update_tenure_fixed_costs(
     coverage_end_date: str | None = None,
     customer_name: str | None = None,
     ic_no: str | None = None,
+    vehicle_no: str | None = None,
+    car_brand: str | None = None,
     engine_cc: str | None = None,
     engine_no: str | None = None,
     chassis_no: str | None = None,
@@ -2694,6 +2764,13 @@ def update_tenure_fixed_costs(
 
     if customer_name and customer_name.strip():
         tenure.customer_name = customer_name.strip()
+
+    norm_vehicle_plate = None
+    if vehicle_no and vehicle_no.strip():
+        from app.services.vehicle_tracking_service import normalize_plate
+        norm_vehicle_plate = normalize_plate(vehicle_no.strip())
+        if norm_vehicle_plate:
+            tenure.vehicle_no = norm_vehicle_plate
 
     # Link/resolve CustomerAccount and persist government ID & propagate across tenures
     if (ic_no and ic_no.strip()) or (customer_name and customer_name.strip()):
@@ -2721,7 +2798,7 @@ def update_tenure_fixed_costs(
                 .values(customer_name=cust.canonical_name)
             )
 
-            # Also propagate customer name and IC to all quotation drafts under this customer/tenure
+            # Also propagate customer name, IC and vehicle plate to all quotation drafts under this customer/tenure
             sessions_to_sync = list(
                 db.scalars(
                     select(SessionModel).where(
@@ -2751,6 +2828,13 @@ def update_tenure_fixed_costs(
                                     f[ic_k] = {**f[ic_k], "value": cust.id_number}
                                 else:
                                     f[ic_k] = cust.id_number
+                    if norm_vehicle_plate:
+                        for v_k in ["vehicle_no", "registration_no", "veh_reg_no"]:
+                            if v_k in f:
+                                if isinstance(f[v_k], dict):
+                                    f[v_k] = {**f[v_k], "value": norm_vehicle_plate}
+                                else:
+                                    f[v_k] = norm_vehicle_plate
                     s.draft.fields = f
 
     tv = tenure.tracked_vehicle
@@ -2758,7 +2842,21 @@ def update_tenure_fixed_costs(
         tv = db.get(TrackedVehicle, tenure.tracked_vehicle_id)
         if tv:
             tenure.tracked_vehicle = tv
-    if not tv and tenure.vehicle_no:
+    if norm_vehicle_plate:
+        existing_tv = db.scalar(select(TrackedVehicle).where(TrackedVehicle.vehicle_no == norm_vehicle_plate))
+        if existing_tv:
+            tenure.tracked_vehicle = existing_tv
+            tenure.tracked_vehicle_id = existing_tv.id
+            tv = existing_tv
+        elif tv:
+            tv.vehicle_no = norm_vehicle_plate
+        else:
+            tv = TrackedVehicle(vehicle_no=norm_vehicle_plate)
+            db.add(tv)
+            db.flush()
+            tenure.tracked_vehicle = tv
+            tenure.tracked_vehicle_id = tv.id
+    elif not tv and tenure.vehicle_no:
         tv = db.scalar(select(TrackedVehicle).where(TrackedVehicle.vehicle_no == tenure.vehicle_no))
         if not tv:
             tv = TrackedVehicle(vehicle_no=tenure.vehicle_no)
@@ -2768,18 +2866,21 @@ def update_tenure_fixed_costs(
         tenure.tracked_vehicle_id = tv.id
 
     if tv:
+        if car_brand and car_brand.strip():
+            tv.car_brand = car_brand.strip()
         if manufacture_year and manufacture_year > 1900:
             tv.manufacture_year = manufacture_year
         if engine_cc and engine_cc.strip():
             tv.engine_cc = engine_cc.strip()
         if vehicle_model and vehicle_model.strip():
             tv.car_model = vehicle_model.strip()
-            from app.services.vehicle_simplifier_service import CANONICAL_BRANDS
-            v_upper = vehicle_model.strip().upper()
-            for k, b in CANONICAL_BRANDS.items():
-                if v_upper == k or v_upper.startswith(k + " "):
-                    tv.car_brand = b
-                    break
+            if not (car_brand and car_brand.strip()):
+                from app.services.vehicle_simplifier_service import CANONICAL_BRANDS
+                v_upper = vehicle_model.strip().upper()
+                for k, b in CANONICAL_BRANDS.items():
+                    if v_upper == k or v_upper.startswith(k + " "):
+                        tv.car_brand = b
+                        break
         if engine_no and engine_no.strip():
             tv.engine_no = engine_no.strip()
         if chassis_no and chassis_no.strip():
@@ -3029,16 +3130,42 @@ def save_comparison_entry(
     return get_marketing_comparison(db, tenure_id)
 
 
-def delete_comparison_entry(db: Session, tenure_id: str, entry_id: str) -> dict[str, Any]:
-    """Delete a comparison column."""
-    entry = db.get(TenureComparisonEntry, entry_id)
-    if entry and entry.tenure_id == tenure_id:
-        if entry.session_id:
-            s = db.get(SessionModel, entry.session_id)
+def delete_comparison_entry(
+    db: Session,
+    tenure_id: str,
+    entry_id: str,
+    delete_all_versions: bool = False,
+) -> dict[str, Any]:
+    """Delete a comparison column.
+    If delete_all_versions is True, deletes all versions of that underwriter under this tenure.
+    Marks linked sessions as status='trash' and is_tenure_active=False so they never reappear.
+    """
+    target = db.get(TenureComparisonEntry, entry_id)
+    if not target or target.tenure_id != tenure_id:
+        return get_marketing_comparison(db, tenure_id)
+
+    if delete_all_versions:
+        entries_to_delete = list(
+            db.scalars(
+                select(TenureComparisonEntry).where(
+                    TenureComparisonEntry.tenure_id == tenure_id,
+                    TenureComparisonEntry.company_name == target.company_name,
+                )
+            ).all()
+        )
+    else:
+        entries_to_delete = [target]
+
+    for e in entries_to_delete:
+        if e.session_id:
+            s = db.get(SessionModel, e.session_id)
             if s:
                 s.status = "trash"
-        db.delete(entry)
-        db.commit()
+                s.is_tenure_active = False
+                s.tenure_id = None
+        db.delete(e)
+
+    db.commit()
     return get_marketing_comparison(db, tenure_id)
 
 

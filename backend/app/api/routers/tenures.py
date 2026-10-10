@@ -44,12 +44,15 @@ router = APIRouter(prefix="/tenures", tags=["tenures"])
 class CreateTenureRequest(BaseModel):
     vehicle_no: str | None = Field(None, description="Vehicle registration plate")
     customer_name: str = Field(..., description="Customer / policyholder name")
+    stage: str | None = Field(None, description="Initial pipeline stage")
     coverage_start_date: str | None = Field(None, description="Start date (YYYY-MM-DD)")
     coverage_end_date: str | None = Field(None, description="End date (YYYY-MM-DD)")
     chassis_no: str | None = Field(None, description="Chassis / VIN for new or unregistered vehicles")
     engine_no: str | None = Field(None, description="Engine number")
     engine_cc: str | None = Field(None, description="Engine capacity")
+    car_brand: str | None = Field(None, description="Car brand / make (e.g. Honda, Toyota, Proton)")
     car_model: str | None = Field(None, description="Car model")
+    manufacture_year: int | None = Field(None, description="Year of make (YOM)")
     ic_no: str | None = Field(None, description="Customer IC or Passport")
     phone: str | None = Field(None, description="Customer phone")
     email: str | None = Field(None, description="Customer email")
@@ -184,6 +187,8 @@ def create_tenure(
     )
     if not tenure.created_by_id:
         tenure.created_by_id = user.id
+    if payload.stage:
+        tenure.stage = payload.stage.strip()
     if payload.road_tax > 0.0:
         tenure.road_tax = payload.road_tax
     if payload.runner_fee > 0.0:
@@ -198,14 +203,18 @@ def create_tenure(
         tenure.notes = payload.notes
 
     if tenure.tracked_vehicle:
+        if payload.car_brand:
+            tenure.tracked_vehicle.car_brand = payload.car_brand.strip()
         if payload.car_model:
-            tenure.tracked_vehicle.car_model = payload.car_model
+            tenure.tracked_vehicle.car_model = payload.car_model.strip()
+        if payload.manufacture_year:
+            tenure.tracked_vehicle.manufacture_year = payload.manufacture_year
         if payload.engine_cc:
-            tenure.tracked_vehicle.engine_cc = payload.engine_cc
+            tenure.tracked_vehicle.engine_cc = payload.engine_cc.strip()
         if payload.chassis_no:
-            tenure.tracked_vehicle.chassis_no = payload.chassis_no
+            tenure.tracked_vehicle.chassis_no = payload.chassis_no.strip()
         if payload.engine_no:
-            tenure.tracked_vehicle.engine_no = payload.engine_no
+            tenure.tracked_vehicle.engine_no = payload.engine_no.strip()
 
     db.commit()
     return {
@@ -331,6 +340,7 @@ def get_tenure_stage_summary(
     query = query.where(InsuranceTenure.is_projected == False)
     if not show_hidden:
         query = query.where(InsuranceTenure.is_hidden == False)
+    query = query.where(InsuranceTenure.is_discarded == False)
 
     if year and month:
         _, last_day = calendar.monthrange(year, month)
@@ -338,13 +348,21 @@ def get_tenure_stage_summary(
         end_of_month = datetime(year, month, last_day, 23, 59, 59, tzinfo=timezone.utc)
         pattern = f"{year:04d}-{month:02d}"
         query = query.where(
-            InsuranceTenure.coverage_start_date.between(start_of_month, end_of_month)
+            or_(
+                InsuranceTenure.coverage_start_date.between(start_of_month, end_of_month),
+                InsuranceTenure.coverage_end_date.between(start_of_month, end_of_month),
+                InsuranceTenure.expiry_month == pattern,
+            )
         )
     elif year:
         start_of_year = datetime(year, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
         end_of_year = datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
         query = query.where(
-            InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year)
+            or_(
+                InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year),
+                InsuranceTenure.coverage_end_date.between(start_of_year, end_of_year),
+                InsuranceTenure.expiry_month.like(f"{year:04d}-%"),
+            )
         )
 
     rows = db.execute(query.group_by(InsuranceTenure.stage)).all()
@@ -381,6 +399,7 @@ def list_tenure_months(
         InsuranceTenure.status,
     )
     stmt = stmt.where(InsuranceTenure.is_projected == False)
+    stmt = stmt.where(InsuranceTenure.is_discarded == False)
     if not show_hidden:
         stmt = stmt.where(InsuranceTenure.is_hidden == False)
 
@@ -523,7 +542,11 @@ def list_tenures(
         end_of_year = datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
 
         query = query.where(
-            InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year)
+            or_(
+                InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year),
+                InsuranceTenure.coverage_end_date.between(start_of_year, end_of_year),
+                InsuranceTenure.expiry_month.like(f"{year:04d}-%"),
+            )
         )
 
     # 2. Category filtering: active (exclude Close - Lose & Others) vs lost vs all
@@ -1148,6 +1171,7 @@ def get_tenure_yoy_stats(
         InsuranceTenure.stage,
     )
     stmt = stmt.where(InsuranceTenure.is_projected == False)
+    stmt = stmt.where(InsuranceTenure.is_discarded == False)
     if not show_hidden:
         stmt = stmt.where(InsuranceTenure.is_hidden == False)
 
@@ -1175,10 +1199,14 @@ def get_tenure_yoy_stats(
         else:
             all_active += 1
 
-        # Determine year(s) - strictly based on deal start date
+        # Determine year(s) - matching list_tenures: start year, end year, and expiry month
         years_for_item = set()
         if start_dt:
             years_for_item.add(str(start_dt.year))
+        if end_dt:
+            years_for_item.add(str(end_dt.year))
+        if exp_m and len(exp_m) >= 4 and exp_m[:4].isdigit():
+            years_for_item.add(exp_m[:4])
 
         for y_str in years_for_item:
             year_data[y_str]["tenure_ids"].add(t_id)

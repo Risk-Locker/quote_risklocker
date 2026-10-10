@@ -7,7 +7,7 @@ import re
 from datetime import date, datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -71,10 +71,13 @@ class FixedCostsUpdateRequest(BaseModel):
     coverage_end_date: str | None = Field(None, description="ISO format or YYYY-MM-DD for insurance end date")
     customer_name: str | None = Field(None, description="Customer name")
     ic_no: str | None = Field(None, description="Malaysian IC or Passport number")
+    vehicle_no: str | None = Field(None, description="Vehicle registration plate")
+    car_brand: str | None = Field(None, description="Car brand / make (e.g. Honda, Toyota, Proton)")
     engine_cc: str | None = Field(None, description="Engine CC (e.g. 1496 CC)")
     engine_no: str | None = Field(None, description="Engine number")
     chassis_no: str | None = Field(None, description="Chassis / VIN number")
     vehicle_model: str | None = Field(None, description="Vehicle make and model")
+    car_model: str | None = Field(None, description="Car model alias")
     manufacture_year: int | None = Field(None, description="Vehicle year of manufacture (e.g. 2020)")
 
     @field_validator("road_tax", "runner_fee", "windscreen_target", "ncd_percentage", mode="before")
@@ -167,10 +170,12 @@ def update_fixed_costs(
             coverage_end_date=payload.coverage_end_date,
             customer_name=payload.customer_name,
             ic_no=payload.ic_no,
+            vehicle_no=payload.vehicle_no,
+            car_brand=payload.car_brand,
             engine_cc=payload.engine_cc,
             engine_no=payload.engine_no,
             chassis_no=payload.chassis_no,
-            vehicle_model=payload.vehicle_model,
+            vehicle_model=payload.vehicle_model or payload.car_model,
             manufacture_year=payload.manufacture_year,
         )
 
@@ -202,12 +207,13 @@ def upsert_entry(
 def delete_entry(
     tenure_id: str,
     entry_id: str,
+    all_versions: bool = Query(default=False, description="Delete all versions of this underwriter"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Delete a comparison column."""
     try:
-        return delete_comparison_entry(db, tenure_id, entry_id)
+        return delete_comparison_entry(db, tenure_id, entry_id, delete_all_versions=all_versions)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:

@@ -87,6 +87,7 @@ interface TenureSpec {
   windscreen_target: number | null;
   ncd_percentage: number | null;
   engine_cc: string;
+  car_brand?: string | null;
   vehicle_model: string;
   vehicle_type: string;
   winning_file_id?: string | null;
@@ -461,6 +462,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [refreshingLedger, setRefreshingLedger] = useState(false);
   const [customerNameInput, setCustomerNameInput] = useState("");
   const [icNoInput, setIcNoInput] = useState("");
+  const [vehicleNoInput, setVehicleNoInput] = useState("");
+  const [carBrandInput, setCarBrandInput] = useState("");
   const [roadTaxInput, setRoadTaxInput] = useState("70");
   const [runnerFeeInput, setRunnerFeeInput] = useState("50");
   const [windscreenInput, setWindscreenInput] = useState("");
@@ -528,6 +531,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   };
 
   const populateEditInputs = (tenure: TenureSpec) => {
+    setVehicleNoInput(tenure.vehicle_no && tenure.vehicle_no !== "UNPLATED" ? tenure.vehicle_no : "");
+    setCarBrandInput(tenure.car_brand || "");
     setCustomerNameInput(tenure.customer_name || "");
     setIcNoInput(tenure.ic_no || "");
     setRoadTaxInput(String(tenure.road_tax));
@@ -583,9 +588,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [isCompilingBatch, setIsCompilingBatch] = useState(isFromUpload);
 
   useEffect(() => {
-    if (tenureId) {
-      fetchComparison();
-    }
+    if (!tenureId) return;
+    fetchComparison();
   }, [tenureId]);
 
   // Live polling for remaining background batch extractions
@@ -620,6 +624,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           coverage_end_date: endDateInput || undefined,
           customer_name: customerNameInput || undefined,
           ic_no: icNoInput || undefined,
+          vehicle_no: vehicleNoInput.trim() ? vehicleNoInput.trim().toUpperCase() : undefined,
+          car_brand: carBrandInput.trim() || undefined,
           engine_cc: engineCcInput || undefined,
           engine_no: engineNoInput || undefined,
           chassis_no: chassisNoInput || undefined,
@@ -754,13 +760,23 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     }
   };
 
-  const handleDeleteEntry = async (entryId: string) => {
-    if (!confirm("Are you sure you want to remove this underwriter column from comparison?")) return;
+  const handleDeleteEntry = async (entryId: string, deleteAllVersions: boolean = true) => {
+    const promptMsg = deleteAllVersions
+      ? "Are you sure you want to completely remove this underwriter and all its quotes from comparison?"
+      : "Are you sure you want to remove this quotation version from comparison?";
+    if (!confirm(promptMsg)) return;
     try {
-      const updated = await api<any>(`/comparison/${tenureId}/entry/${entryId}`, {
+      const updated = await api<any>(`/comparison/${tenureId}/entry/${entryId}?all_versions=${deleteAllVersions}`, {
         method: "DELETE",
       });
       setData(updated);
+      setActiveVersionsByCompany((prev) => {
+        const next = { ...prev };
+        for (const [cName, ids] of Object.entries(next)) {
+          next[cName] = ids.filter((id) => id !== entryId);
+        }
+        return next;
+      });
     } catch (err: any) {
       alert(err.message);
     }
@@ -1586,16 +1602,39 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             </button>
           )}
 
-          <div className="flex items-center justify-end px-1 pt-1">
-            <button
-              type="button"
-              onClick={() => handleDeleteEntry(entry.id)}
-              className="text-xs font-medium text-[#ed1c24] hover:text-[#c4171e] flex items-center gap-1 cursor-pointer"
-              title="Delete this underwriter comparison column"
-            >
-              <Trash size={13} />
-              Delete Column
-            </button>
+          <div className="flex items-center justify-between px-1 pt-1 border-t border-neutral-100 mt-1">
+            {group.entries.length > 1 ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteEntry(entry.id, false)}
+                  className="text-[11px] font-medium text-neutral-500 hover:text-[#ed1c24] flex items-center gap-1 cursor-pointer"
+                  title={`Delete only version v${entry.version || 1}`}
+                >
+                  <Trash size={12} />
+                  Delete v{entry.version || 1}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteEntry(entry.id, true)}
+                  className="text-[11px] font-bold text-[#ed1c24] hover:text-[#c4171e] flex items-center gap-1 cursor-pointer"
+                  title="Delete this entire underwriter column and all its versions"
+                >
+                  <Trash size={12} weight="bold" />
+                  Delete Underwriter
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => handleDeleteEntry(entry.id, true)}
+                className="text-xs font-medium text-[#ed1c24] hover:text-[#c4171e] flex items-center gap-1 cursor-pointer ml-auto"
+                title="Delete this underwriter comparison column"
+              >
+                <Trash size={13} />
+                Delete Column
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -2333,13 +2372,38 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               {editingFixedCosts ? (
                 <div className="space-y-2 bg-[#f5f5f7] p-2.5 rounded-lg border border-[#e5e5ea]">
                   <div>
-                    <label className="text-[11px] font-semibold text-[#454545] block mb-1">Make / Model</label>
+                    <label className="text-[11px] font-semibold text-[#454545] block mb-1">
+                      Registration No (Plate Number)
+                    </label>
                     <input
                       type="text"
-                      value={vehicleModelInput}
-                      onChange={(e) => setVehicleModelInput(e.target.value)}
-                      className="w-full rounded px-2.5 py-1.5 text-xs border border-[#e5e5ea] bg-white text-[#1b1717]"
+                      value={vehicleNoInput}
+                      onChange={(e) => setVehicleNoInput(e.target.value.toUpperCase())}
+                      placeholder="e.g. WVV 1234 or JDR2263"
+                      className="w-full rounded px-2.5 py-1.5 text-xs font-mono font-bold uppercase tracking-wider border border-[#e5e5ea] bg-white text-[#1b1717] focus:outline-none focus:ring-1 focus:ring-[#1b1717]"
                     />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[11px] font-semibold text-[#454545] block mb-1">Brand / Make</label>
+                      <input
+                        type="text"
+                        value={carBrandInput}
+                        onChange={(e) => setCarBrandInput(e.target.value)}
+                        placeholder="e.g. Honda, Proton"
+                        className="w-full rounded px-2.5 py-1.5 text-xs border border-[#e5e5ea] bg-white text-[#1b1717]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-[#454545] block mb-1">Model / Variant</label>
+                      <input
+                        type="text"
+                        value={vehicleModelInput}
+                        onChange={(e) => setVehicleModelInput(e.target.value)}
+                        placeholder="e.g. Civic 1.5 V"
+                        className="w-full rounded px-2.5 py-1.5 text-xs border border-[#e5e5ea] bg-white text-[#1b1717]"
+                      />
+                    </div>
                   </div>
                   <div>
                     <label className="text-[11px] font-semibold text-[#454545] block mb-1">Year of Make (YOM)</label>
@@ -2425,8 +2489,10 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                     )}
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-[#6e6e73]">Model:</span>
-                    <span className="font-semibold text-[#1b1717]">{tenure.vehicle_model}</span>
+                    <span className="text-[#6e6e73]">Brand &amp; Model:</span>
+                    <span className="font-semibold text-[#1b1717]">
+                      {tenure.car_brand ? `${tenure.car_brand} ` : ""}{tenure.vehicle_model}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-[#6e6e73]">Year of Make:</span>

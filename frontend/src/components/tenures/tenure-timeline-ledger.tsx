@@ -287,6 +287,29 @@ export const STAGE_ORDER = [
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+const POPULAR_BRANDS = [
+  "Perodua",
+  "Proton",
+  "Toyota",
+  "Honda",
+  "Nissan",
+  "Mazda",
+  "Mercedes-Benz",
+  "BMW",
+  "Hyundai",
+  "Kia",
+  "BYD",
+  "Tesla",
+  "Mitsubishi",
+  "Subaru",
+  "Volkswagen",
+  "Audi",
+  "Volvo",
+  "Ford",
+  "Isuzu",
+  "Other",
+];
+
 export function TenureTimelineLedger() {
   const router = useRouter();
 
@@ -298,7 +321,7 @@ export function TenureTimelineLedger() {
   }, []);
 
   const [selectedYear, setSelectedYear] = useState<string>(currentYear);
-  const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthKey);
+  const [selectedMonth, setSelectedMonth] = useState<string>("all");
   const [months, setMonths] = useState<MonthItem[]>([]);
   const [loadingMonths, setLoadingMonths] = useState(true);
 
@@ -436,6 +459,120 @@ export function TenureTimelineLedger() {
   const [hitConfirmedEndDate, setHitConfirmedEndDate] = useState<string>("");
   const [hitConfirmedInsurer, setHitConfirmedInsurer] = useState<string>("");
   const [savingHitConfirm, setSavingHitConfirm] = useState<boolean>(false);
+
+  // Add Custom Vehicle Modal State
+  const [addVehicleModalOpen, setAddVehicleModalOpen] = useState(false);
+  const [newVehPlate, setNewVehPlate] = useState("");
+  const [newVehCustomerName, setNewVehCustomerName] = useState("");
+  const [newVehIcNo, setNewVehIcNo] = useState("");
+  const [newVehBrand, setNewVehBrand] = useState("Perodua");
+  const [newVehCustomBrand, setNewVehCustomBrand] = useState("");
+  const [newVehModel, setNewVehModel] = useState("");
+  const [newVehYom, setNewVehYom] = useState(String(new Date().getFullYear()));
+  const [newVehEngineCc, setNewVehEngineCc] = useState("1496 CC");
+  const [newVehStartDate, setNewVehStartDate] = useState(new Date().toISOString().split("T")[0]);
+  const [newVehEndDate, setNewVehEndDate] = useState(() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() + 1);
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().split("T")[0];
+  });
+  const [newVehWindscreen, setNewVehWindscreen] = useState("");
+  const [savingNewVehicle, setSavingNewVehicle] = useState(false);
+
+  const handleNewVehStartDateChange = (val: string) => {
+    setNewVehStartDate(val);
+    if (!val) return;
+    try {
+      const parts = val.split("-");
+      if (parts.length === 3) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        const d = parseInt(parts[2], 10);
+        if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+          const dt = new Date(Date.UTC(y + 1, m - 1, d));
+          dt.setUTCDate(dt.getUTCDate() - 1);
+          setNewVehEndDate(dt.toISOString().split("T")[0]);
+        }
+      }
+    } catch {}
+  };
+
+  const handleNewVehEndDateChange = (val: string) => {
+    setNewVehEndDate(val);
+    if (!val) return;
+    try {
+      const parts = val.split("-");
+      if (parts.length === 3) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        const d = parseInt(parts[2], 10);
+        if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+          const dt = new Date(Date.UTC(y - 1, m - 1, d));
+          dt.setUTCDate(dt.getUTCDate() + 1);
+          setNewVehStartDate(dt.toISOString().split("T")[0]);
+        }
+      }
+    } catch {}
+  };
+
+  const handleCreateCustomVehicle = async (openComparison: boolean) => {
+    const cleanPlate = newVehPlate.trim().toUpperCase().replace(/\s+/g, "");
+    const cleanName = newVehCustomerName.trim();
+    if (!cleanPlate) {
+      alert("Please enter a vehicle registration number (e.g. WVV 1234 or JDR2263).");
+      return;
+    }
+    if (!cleanName) {
+      alert("Please enter the customer / policyholder name.");
+      return;
+    }
+
+    setSavingNewVehicle(true);
+    try {
+      const finalBrand = newVehBrand === "Other" ? newVehCustomBrand.trim() : newVehBrand.trim();
+      const payload: any = {
+        vehicle_no: cleanPlate,
+        customer_name: cleanName,
+        ic_no: newVehIcNo.trim() || undefined,
+        car_brand: finalBrand || undefined,
+        car_model: newVehModel.trim() || undefined,
+        manufacture_year: parseInt(newVehYom, 10) || undefined,
+        engine_cc: newVehEngineCc.trim() || undefined,
+        coverage_start_date: newVehStartDate || undefined,
+        coverage_end_date: newVehEndDate || undefined,
+        windscreen_target: parseFloat(newVehWindscreen) || undefined,
+      };
+
+      const res = await api<{ id?: string; tenure?: { id: string } }>("/tenures", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      const newId = res?.id || res?.tenure?.id;
+      setAddVehicleModalOpen(false);
+
+      if (openComparison && newId) {
+        router.push(`/comparison?tenure_id=${newId}` as Route);
+      } else {
+        await loadTenures();
+        await loadStageSummary();
+        await loadMonths();
+        await loadYoyStats();
+        if (newId) {
+          setHighlightedTenureId(newId);
+          setTimeout(() => {
+            const el = document.getElementById(`tenure-row-${newId}`);
+            if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+          }, 400);
+        }
+      }
+    } catch (err: any) {
+      alert("Failed to create vehicle: " + (err?.message || err));
+    } finally {
+      setSavingNewVehicle(false);
+    }
+  };
 
   const handleConfirmMiss = async () => {
     if (!missModalTenure) return;
@@ -845,12 +982,13 @@ export function TenureTimelineLedger() {
     setLoadingSummary(true);
     try {
       const params = new URLSearchParams();
-      if (selectedYear && selectedYear !== "all") {
-        params.set("year", selectedYear);
-      }
       if (selectedMonth && selectedMonth !== "all" && selectedMonth.includes("-")) {
-        const m = parseInt(selectedMonth.split("-")[1], 10);
+        const parts = selectedMonth.split("-");
+        params.set("year", parts[0]);
+        const m = parseInt(parts[1], 10);
         params.set("month", String(m));
+      } else if (selectedYear && selectedYear !== "all") {
+        params.set("year", selectedYear);
       }
       const data = await api<StageSummary>(`/tenures/stage-summary?${params.toString()}`);
       setSummary(data);
@@ -870,8 +1008,8 @@ export function TenureTimelineLedger() {
     setLoadingTenures(true);
     try {
       const params = new URLSearchParams();
-      // Tabular view is strictly by Year; Calendar view can filter by Month
-      if (viewMode === "calendar" && selectedMonth && selectedMonth !== "all") {
+      // Filter by Month if a specific month is selected; otherwise filter by Year
+      if (selectedMonth && selectedMonth !== "all") {
         params.set("month", selectedMonth);
       } else if (selectedYear && selectedYear !== "all") {
         params.set("year", selectedYear);
@@ -915,6 +1053,8 @@ export function TenureTimelineLedger() {
     const handleRefresh = () => {
       loadTenures();
       loadStageSummary();
+      loadMonths();
+      loadYoyStats();
     };
     window.addEventListener("focus", handleRefresh);
     window.addEventListener("rl_policy_issued", handleRefresh);
@@ -922,7 +1062,7 @@ export function TenureTimelineLedger() {
       window.removeEventListener("focus", handleRefresh);
       window.removeEventListener("rl_policy_issued", handleRefresh);
     };
-  }, [loadTenures, loadStageSummary]);
+  }, [loadTenures, loadStageSummary, loadMonths, loadYoyStats]);
 
   // Load Calendar Quotation Sessions
   const loadCalendarSessions = useCallback(async () => {
@@ -1693,74 +1833,72 @@ export function TenureTimelineLedger() {
           </div>
         </div>
 
-        {/* Row 2: 12 Months Tabs with Start/End Hover Tooltip - ONLY SHOWN IN CALENDAR VIEW */}
-        {viewMode === "calendar" && (
-          <div className="space-y-1.5 pt-2 border-t border-[#f2f2f7]">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-neutral-700 uppercase tracking-wide">
-                Step 2: Filter by Month
-              </span>
-              <span className="text-[10px] text-neutral-400">
-                Hover over a month to see starting vs expiring breakdown
-              </span>
-            </div>
-
-            {loadingMonths ? (
-              <div className="h-9 flex items-center text-xs text-[#8e8e93]">Loading tenure timeline...</div>
-            ) : (
-              <div
-                ref={monthScrollRef}
-                className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-0.5 scroll-smooth scrollbar-thin"
-              >
-                {/* "All Months" tab */}
-                <button
-                  type="button"
-                  onClick={() => setSelectedMonth("all")}
-                  className={`shrink-0 min-w-max px-3.5 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
-                    selectedMonth === "all"
-                      ? "bg-[#1b1717] text-white shadow-2xs font-bold"
-                      : "bg-[#f5f5f7] text-[#6e6e73] hover:bg-[#e5e5ea] border border-[#e5e5ea]"
-                  }`}
-                >
-                  <span>{selectedYear === "all" ? "All Months" : `All ${selectedYear}`}</span>
-                </button>
-
-                {/* 12 Months: Jan to Dec */}
-                {monthsOfYear.map((m) => {
-                  const isActive = selectedMonth === m.month;
-                  const isCurrent = m.month === currentMonthKey;
-                  const tooltipText = `${m.label} ${selectedYear === "all" ? currentYear : selectedYear}\n• ${m.start_count} Starting\n• ${m.end_count} Expiring\n${m.total} Total Policies · ${m.cars} Cars`;
-
-                  return (
-                    <button
-                      key={m.month}
-                      type="button"
-                      data-month={m.month}
-                      onClick={() => setSelectedMonth(m.month)}
-                      className={`shrink-0 min-w-max px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-medium whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
-                        isActive
-                          ? "bg-[#1b1717] text-white shadow-2xs font-bold"
-                          : "bg-[#f5f5f7] text-[#454545] hover:bg-[#e5e5ea] border border-[#e5e5ea]"
-                      } ${isCurrent && !isActive ? "ring-1 ring-[#007aff]/60 font-semibold" : ""}`}
-                      title={tooltipText}
-                    >
-                      <span>{m.label}</span>
-                      {m.total > 0 && (
-                        <span
-                          className={`px-1.5 py-0.2 rounded text-[10px] font-bold font-mono ${
-                            isActive ? "bg-white/20 text-white" : "bg-[#e5e5ea] text-[#1b1717]"
-                          }`}
-                        >
-                          ({m.total})
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+        {/* Row 2: 12 Months Tabs with Start/End Hover Tooltip */}
+        <div className="space-y-1.5 pt-2 border-t border-[#f2f2f7]">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-neutral-700 uppercase tracking-wide">
+              Step 2: Filter by Month
+            </span>
+            <span className="text-[10px] text-neutral-400">
+              Hover over a month to see starting vs expiring breakdown
+            </span>
           </div>
-        )}
+
+          {loadingMonths ? (
+            <div className="h-9 flex items-center text-xs text-[#8e8e93]">Loading tenure timeline...</div>
+          ) : (
+            <div
+              ref={monthScrollRef}
+              className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-0.5 scroll-smooth scrollbar-thin"
+            >
+              {/* "All Months" tab */}
+              <button
+                type="button"
+                onClick={() => setSelectedMonth("all")}
+                className={`shrink-0 min-w-max px-3.5 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+                  selectedMonth === "all"
+                    ? "bg-[#1b1717] text-white shadow-2xs font-bold"
+                    : "bg-[#f5f5f7] text-[#6e6e73] hover:bg-[#e5e5ea] border border-[#e5e5ea]"
+                }`}
+              >
+                <span>{selectedYear === "all" ? "All Months" : `All ${selectedYear}`}</span>
+              </button>
+
+              {/* 12 Months: Jan to Dec */}
+              {monthsOfYear.map((m) => {
+                const isActive = selectedMonth === m.month;
+                const isCurrent = m.month === currentMonthKey;
+                const tooltipText = `${m.label} ${selectedYear === "all" ? currentYear : selectedYear}\n• ${m.start_count} Starting\n• ${m.end_count} Expiring\n${m.total} Total Policies · ${m.cars} Cars`;
+
+                return (
+                  <button
+                    key={m.month}
+                    type="button"
+                    data-month={m.month}
+                    onClick={() => setSelectedMonth(m.month)}
+                    className={`shrink-0 min-w-max px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-medium whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+                      isActive
+                        ? "bg-[#1b1717] text-white shadow-2xs font-bold"
+                        : "bg-[#f5f5f7] text-[#454545] hover:bg-[#e5e5ea] border border-[#e5e5ea]"
+                    } ${isCurrent && !isActive ? "ring-1 ring-[#007aff]/60 font-semibold" : ""}`}
+                    title={tooltipText}
+                  >
+                    <span>{m.label}</span>
+                    {m.total > 0 && (
+                      <span
+                        className={`px-1.5 py-0.2 rounded text-[10px] font-bold font-mono ${
+                          isActive ? "bg-white/20 text-white" : "bg-[#e5e5ea] text-[#1b1717]"
+                        }`}
+                      >
+                        ({m.total})
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ========================================================================= */}
@@ -1933,14 +2071,15 @@ export function TenureTimelineLedger() {
             <span>{showHidden ? "Hide Superseded" : "Show Superseded"}</span>
           </button>
 
-          <Link
-            href={"/upload/marketing-comparison" as Route}
+          <button
+            type="button"
+            onClick={() => setAddVehicleModalOpen(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
-            title="Intake quotations & build Marketing Comparison matrix"
+            title="Add a custom vehicle / policy and start quotation comparison"
           >
             <Plus size={14} weight="bold" />
             <span>Add Vehicle</span>
-          </Link>
+          </button>
         </div>
       </div>
 
@@ -3736,6 +3875,271 @@ export function TenureTimelineLedger() {
                 className="px-3.5 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 cursor-pointer disabled:opacity-50"
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* ADD CUSTOM VEHICLE & POLICY MODAL                                         */}
+      {/* ========================================================================= */}
+      {addVehicleModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150"
+          onClick={() => !savingNewVehicle && setAddVehicleModalOpen(false)}
+        >
+          <div
+            className="bg-white rounded-[var(--rl-radius-md)] border border-neutral-200 shadow-xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="p-4 bg-neutral-900 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white">
+                  <Car size={18} weight="bold" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold tracking-tight">Add Custom Vehicle &amp; Policy</h3>
+                  <p className="text-[11px] text-neutral-300">
+                    Register a vehicle to track on the renewal ledger and start marketing comparison quotes.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAddVehicleModalOpen(false)}
+                disabled={savingNewVehicle}
+                className="text-neutral-400 hover:text-white p-1 rounded-sm cursor-pointer transition-colors"
+              >
+                <XCircle size={18} weight="bold" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4 overflow-y-auto">
+              {/* Row 1: Plate & Customer Name */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-neutral-800 mb-1">
+                    Vehicle Reg. No (Plate) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newVehPlate}
+                    onChange={(e) => setNewVehPlate(e.target.value.toUpperCase().replace(/\s+/g, ""))}
+                    placeholder="e.g. WVV1234 or JDR2263"
+                    className="w-full px-3 py-2 text-xs font-mono font-bold uppercase rounded-[var(--rl-radius-sm)] border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900"
+                    autoFocus
+                  />
+                  <span className="text-[10px] text-neutral-400 mt-0.5 block">
+                    Spaces are automatically trimmed and capitalized.
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-neutral-800 mb-1">
+                    Customer / Policyholder Name <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newVehCustomerName}
+                    onChange={(e) => setNewVehCustomerName(e.target.value)}
+                    placeholder="e.g. Tan Ah Kow or ABC Logistics Sdn Bhd"
+                    className="w-full px-3 py-2 text-xs rounded-[var(--rl-radius-sm)] border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900"
+                  />
+                  <span className="text-[10px] text-neutral-400 mt-0.5 block">
+                    Individual policyholder or commercial enterprise name.
+                  </span>
+                </div>
+              </div>
+
+              {/* Row 2: IC / Passport & Brand */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-neutral-800 mb-1">
+                    IC / Passport / Company Reg No.
+                  </label>
+                  <input
+                    type="text"
+                    value={newVehIcNo}
+                    onChange={(e) => setNewVehIcNo(e.target.value)}
+                    placeholder="e.g. 901010-14-1234 or 202301012345"
+                    className="w-full px-3 py-2 text-xs rounded-[var(--rl-radius-sm)] border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-neutral-800 mb-1">
+                    Brand / Manufacturer
+                  </label>
+                  <div className="flex gap-2">
+                    <select
+                      value={newVehBrand}
+                      onChange={(e) => setNewVehBrand(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-[var(--rl-radius-sm)] border border-neutral-300 bg-white focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900"
+                    >
+                      {POPULAR_BRANDS.map((b) => (
+                        <option key={b} value={b}>
+                          {b}
+                        </option>
+                      ))}
+                    </select>
+                    {newVehBrand === "Other" && (
+                      <input
+                        type="text"
+                        value={newVehCustomBrand}
+                        onChange={(e) => setNewVehCustomBrand(e.target.value)}
+                        placeholder="Specify Make"
+                        className="w-full px-3 py-2 text-xs rounded-[var(--rl-radius-sm)] border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900"
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Row 3: Model & Year of Make & Engine CC */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-neutral-800 mb-1">
+                    Model
+                  </label>
+                  <input
+                    type="text"
+                    value={newVehModel}
+                    onChange={(e) => setNewVehModel(e.target.value)}
+                    placeholder="e.g. Myvi 1.5 AV or City V"
+                    className="w-full px-3 py-2 text-xs rounded-[var(--rl-radius-sm)] border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-neutral-800 mb-1">
+                    Year of Make (YOM)
+                  </label>
+                  <input
+                    type="number"
+                    min="1980"
+                    max={new Date().getFullYear() + 1}
+                    value={newVehYom}
+                    onChange={(e) => setNewVehYom(e.target.value)}
+                    placeholder="e.g. 2022"
+                    className="w-full px-3 py-2 text-xs rounded-[var(--rl-radius-sm)] border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-neutral-800 mb-1">
+                    Engine Capacity (CC)
+                  </label>
+                  <input
+                    type="text"
+                    value={newVehEngineCc}
+                    onChange={(e) => setNewVehEngineCc(e.target.value)}
+                    placeholder="e.g. 1496 CC"
+                    className="w-full px-3 py-2 text-xs rounded-[var(--rl-radius-sm)] border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900"
+                  />
+                </div>
+              </div>
+
+              {/* Row 4: Coverage Period & Target Windscreen */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-neutral-800 mb-1">
+                    Coverage Start Date
+                  </label>
+                  <input
+                    type="date"
+                    value={newVehStartDate}
+                    onChange={(e) => handleNewVehStartDateChange(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-[var(--rl-radius-sm)] border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900"
+                  />
+                  <span className="text-[10px] text-neutral-400 mt-0.5 block">
+                    Auto-calculates expiry (+1 yr -1 day).
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-neutral-800 mb-1">
+                    Coverage End Date (Expiry)
+                  </label>
+                  <input
+                    type="date"
+                    value={newVehEndDate}
+                    onChange={(e) => handleNewVehEndDateChange(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-[var(--rl-radius-sm)] border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-neutral-800 mb-1">
+                    Target Windscreen (RM)
+                  </label>
+                  <input
+                    type="number"
+                    step="100"
+                    value={newVehWindscreen}
+                    onChange={(e) => setNewVehWindscreen(e.target.value)}
+                    placeholder="e.g. 1000 or 1500"
+                    className="w-full px-3 py-2 text-xs rounded-[var(--rl-radius-sm)] border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900"
+                  />
+                </div>
+              </div>
+
+              {/* Upload PDF Alternative Note */}
+              <div className="p-3 rounded-[var(--rl-radius-sm)] bg-neutral-50 border border-neutral-200 flex items-center justify-between text-xs text-neutral-600">
+                <div className="flex items-center gap-2">
+                  <FilePdf size={16} className="text-neutral-500 shrink-0" />
+                  <span>Already have quotation PDFs from insurers?</span>
+                </div>
+                <Link
+                  href={"/upload/marketing-comparison" as Route}
+                  onClick={() => setAddVehicleModalOpen(false)}
+                  className="font-bold text-neutral-900 hover:underline flex items-center gap-1"
+                >
+                  <span>Upload PDFs directly</span>
+                  <ArrowRight size={12} weight="bold" />
+                </Link>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-neutral-50 border-t border-neutral-200 flex flex-col sm:flex-row items-center justify-end gap-2.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setAddVehicleModalOpen(false)}
+                disabled={savingNewVehicle}
+                className="w-full sm:w-auto px-4 py-2 text-xs font-semibold text-neutral-600 hover:text-neutral-900 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleCreateCustomVehicle(false)}
+                disabled={savingNewVehicle}
+                className="w-full sm:w-auto px-4 py-2 text-xs font-bold rounded-[var(--rl-radius-sm)] bg-white hover:bg-neutral-100 text-neutral-800 border border-neutral-300 transition-all shadow-2xs cursor-pointer disabled:opacity-50"
+              >
+                {savingNewVehicle ? "Saving..." : "Save to Ledger Only"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleCreateCustomVehicle(true)}
+                disabled={savingNewVehicle}
+                className="w-full sm:w-auto px-4 py-2 text-xs font-bold rounded-[var(--rl-radius-sm)] bg-neutral-900 hover:bg-neutral-800 text-white transition-all shadow-xs cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                {savingNewVehicle ? (
+                  <>
+                    <ArrowsClockwise size={14} className="animate-spin" />
+                    <span>Creating Vehicle...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkle size={14} weight="bold" className="text-amber-400" />
+                    <span>Save &amp; Build Comparison Matrix</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
