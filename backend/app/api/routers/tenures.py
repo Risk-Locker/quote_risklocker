@@ -476,13 +476,6 @@ def list_tenures(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    # Auto-ensure next-year renewals are synced when requested for upcoming year
-    if year and year >= 2027:
-        try:
-            ensure_next_year_renewal_tenures(db, target_year=year, user_id=user.id)
-        except (ValueError, TypeError):
-            pass
-
     query = select(InsuranceTenure).where(InsuranceTenure.is_projected == False)
 
     if not show_hidden:
@@ -1102,8 +1095,6 @@ def get_tenure_yoy_stats(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Retrieve year-over-year tenure statistics (counts, cars, growth, active vs lost)."""
-    ensure_next_year_renewal_tenures(db, target_year=2027, user_id=user.id)
-
     stmt = select(
         InsuranceTenure.id,
         InsuranceTenure.vehicle_no,

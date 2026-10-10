@@ -1843,6 +1843,12 @@ export function TenureTimelineLedger() {
                     const picInfo = getPicDisplay(mainTenure);
                     const stageConf = STAGE_CONFIGS[mainTenure.stage] || STAGE_CONFIGS.Quotations;
                     const isOverdue = mainTenure.days_in_stage > 7 && !stageConf.isLost && mainTenure.stage !== "Close - Win";
+                    const isPolicyIssued = Boolean(
+                      mainTenure.covernote_policy ||
+                      mainTenure.is_covernote_issued ||
+                      mainTenure.stage === "Close - Win" ||
+                      mainTenure.status === "hit"
+                    );
                     const isVehicleExpanded = expandedVehicleKeys.includes(group.vehicle_no);
                     const isGroupSelected = group.tenures.some((t) => selectedTenureIds.includes(t.id));
                     const displayName = getVehicleDisplayName(group.vehicle_no, group.chassis_no);
@@ -1972,14 +1978,14 @@ export function TenureTimelineLedger() {
 
                           {/* 2. Coverage Period (Main Policy) */}
                           <td className="py-3 px-3">
-                            {mainTenure.coverage_start_date ? (
+                            {isPolicyIssued && (mainTenure.covernote_policy?.coverage_start_date || mainTenure.coverage_start_date) ? (
                               <div className="space-y-0.5">
                                 <div className="flex items-center gap-1 text-[11px]">
                                   <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200 shrink-0">
                                     Start
                                   </span>
                                   <span className="font-mono font-medium text-neutral-800">
-                                    {formatDateSafe(mainTenure.coverage_start_date)}
+                                    {formatDateSafe(mainTenure.covernote_policy?.coverage_start_date || mainTenure.coverage_start_date)}
                                   </span>
                                 </div>
                                 <div className="flex items-center gap-1 text-[11px]">
@@ -1987,7 +1993,7 @@ export function TenureTimelineLedger() {
                                     End
                                   </span>
                                   <span className="font-mono font-medium text-neutral-800">
-                                    {formatDateSafe(mainTenure.coverage_end_date)}
+                                    {formatDateSafe(mainTenure.covernote_policy?.coverage_end_date || mainTenure.coverage_end_date)}
                                   </span>
                                 </div>
                               </div>
@@ -2003,7 +2009,7 @@ export function TenureTimelineLedger() {
                             ) : (
                               <div className="space-y-0.5">
                                 <span className="text-neutral-400 font-mono text-xs">—</span>
-                                <div className="text-[10px] text-neutral-400 font-medium">Pending Quote / Issue</div>
+                                <div className="text-[10px] text-neutral-400 font-medium">Pending Issue</div>
                               </div>
                             )}
                             <div className="flex items-center gap-1.5 mt-1">
@@ -2440,43 +2446,43 @@ export function TenureTimelineLedger() {
                                         </span>
                                       )}
                                     </div>
-                                    {mainTenure.covernote_policy ? (
+                                    {isPolicyIssued && (mainTenure.covernote_policy || mainTenure.coverage_start_date) ? (
                                       <div className="space-y-1">
                                         <div className="font-mono font-bold text-neutral-900 text-xs">
-                                          {formatDateSafe(mainTenure.covernote_policy.coverage_start_date)} → {formatDateSafe(mainTenure.covernote_policy.coverage_end_date)}
+                                          {formatDateSafe(mainTenure.covernote_policy?.coverage_start_date || mainTenure.coverage_start_date)} → {formatDateSafe(mainTenure.covernote_policy?.coverage_end_date || mainTenure.coverage_end_date)}
                                         </div>
-                                        <div className="text-[11px] text-emerald-900 font-semibold flex items-center justify-between">
-                                          <span>Underwriter: {mainTenure.covernote_policy.company}</span>
-                                          {mainTenure.covernote_policy.uploaded_file_id && (
-                                            <a
-                                              href={fileUrl(`/uploaded-files/${mainTenure.covernote_policy.uploaded_file_id}/content`)}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              className="text-emerald-700 hover:text-emerald-950 font-bold underline text-[10px]"
-                                            >
-                                              [Policy PDF]
-                                            </a>
-                                          )}
-                                        </div>
-                                        {mainTenure.covernote_policy.policy_number && (
+                                        {mainTenure.covernote_policy && (
+                                          <div className="text-[11px] text-emerald-900 font-semibold flex items-center justify-between">
+                                            <span>Underwriter: {mainTenure.covernote_policy.company}</span>
+                                            {mainTenure.covernote_policy.uploaded_file_id && (
+                                              <a
+                                                href={fileUrl(`/uploaded-files/${mainTenure.covernote_policy.uploaded_file_id}/content`)}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-emerald-700 hover:text-emerald-950 font-bold underline text-[10px]"
+                                              >
+                                                [Policy PDF]
+                                              </a>
+                                            )}
+                                          </div>
+                                        )}
+                                        {mainTenure.covernote_policy?.policy_number && (
                                           <div className="text-[10px] text-neutral-500 font-mono">
                                             Policy #: {mainTenure.covernote_policy.policy_number}
                                           </div>
                                         )}
                                       </div>
-                                    ) : mainTenure.coverage_start_date ? (
-                                      <div className="font-mono font-bold text-neutral-900 text-xs">
-                                        {formatDateSafe(mainTenure.coverage_start_date)} → {formatDateSafe(mainTenure.coverage_end_date)}
-                                      </div>
                                     ) : (
                                       <div className="space-y-0.5 text-neutral-400">
                                         <div className="text-xs font-medium text-neutral-500 flex items-center gap-1">
                                           <span>—</span>
-                                          <span>Pending Quote / Issue</span>
+                                          <span>Pending Issue / Awaiting Cover Note</span>
                                         </div>
-                                        <div className="text-[11px] italic text-neutral-400">
-                                          Extracted on Upload
-                                        </div>
+                                        {mainTenure.expiry_month && (
+                                          <div className="text-[11px] italic text-neutral-400">
+                                            Target Expiry: {mainTenure.expiry_month}
+                                          </div>
+                                        )}
                                       </div>
                                     )}
                                   </div>

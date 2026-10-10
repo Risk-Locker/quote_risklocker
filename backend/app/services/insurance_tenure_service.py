@@ -739,7 +739,11 @@ def ensure_next_year_renewal_tenures(
                 InsuranceTenure.is_discarded == False,
                 InsuranceTenure.is_projected == False,
                 InsuranceTenure.status != "miss",
-                ~InsuranceTenure.stage.in_(["Close - Lose", "Others"]),
+                or_(
+                    InsuranceTenure.status == "hit",
+                    InsuranceTenure.stage == "Close - Win",
+                    InsuranceTenure.covernote_session_id.isnot(None),
+                ),
             ).order_by(InsuranceTenure.coverage_start_date.desc())
         ).all()
     )

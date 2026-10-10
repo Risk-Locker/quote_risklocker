@@ -98,8 +98,8 @@ def test_ensure_next_year_renewal_tenures_roll_forward(db_session: Session, test
         coverage_start_date=datetime(2026, 8, 15, 0, 0, 0, tzinfo=timezone.utc),
         coverage_end_date=datetime(2027, 8, 14, 0, 0, 0, tzinfo=timezone.utc),
         expiry_month="2027-08",
-        status="draft",
-        stage="Quotations",
+        status="hit",
+        stage="Close - Win",
         business_type="Renewal",
         road_tax=90.0,
         runner_fee=15.0,
@@ -251,24 +251,38 @@ def test_api_yoy_stats_and_sync_endpoint(client: TestClient, db_session: Session
         coverage_start_date=datetime(2026, 10, 1, 0, 0, 0, tzinfo=timezone.utc),
         coverage_end_date=datetime(2027, 9, 30, 0, 0, 0, tzinfo=timezone.utc),
         expiry_month="2027-09",
-        status="draft",
-        stage="Quotations",
+        status="hit",
+        stage="Close - Win",
         is_discarded=False,
         is_projected=False,
     )
     db_session.add(t_2026)
     db_session.commit()
 
-    # Call GET /api/tenures/stats/yoy
+    # Call GET /api/tenures/stats/yoy BEFORE sync: 2027 should NOT exist yet
     res = client.get("/api/tenures/stats/yoy")
     assert res.status_code == 200
     data = res.json()
     years = [y["year"] for y in data["years"]]
     assert "2026" in years
-    assert "2027" in years  # 2027 is now surfaced!
+    assert "2027" not in years
+
+    # Call POST /api/tenures/sync-next-year-renewals to explicitly create 2027 renewal
+    res_sync = client.post("/api/tenures/sync-next-year-renewals?target_year=2027")
+    assert res_sync.status_code == 200
+    sync_data = res_sync.json()
+    assert sync_data["status"] == "success"
+    assert sync_data["target_year"] == 2027
+
+    # After explicit sync, GET /api/tenures/stats/yoy surfaces 2027
+    res2 = client.get("/api/tenures/stats/yoy")
+    assert res2.status_code == 200
+    data2 = res2.json()
+    years2 = [y["year"] for y in data2["years"]]
+    assert "2027" in years2
 
     # Verify 2027 count in YoY stats
-    y27 = next(y for y in data["years"] if y["year"] == "2027")
+    y27 = next(y for y in data2["years"] if y["year"] == "2027")
     assert y27["total"] >= 1
     assert y27["active"] >= 1
     assert y27["lost"] == 0
@@ -280,10 +294,3 @@ def test_api_yoy_stats_and_sync_endpoint(client: TestClient, db_session: Session
     assert list_data["total"] >= 1
     veh_plates = [item["vehicle_no"] for item in list_data["items"]]
     assert "KAA 5566" in veh_plates
-
-    # Call POST /api/tenures/sync-next-year-renewals
-    res_sync = client.post("/api/tenures/sync-next-year-renewals?target_year=2027")
-    assert res_sync.status_code == 200
-    sync_data = res_sync.json()
-    assert sync_data["status"] == "success"
-    assert sync_data["target_year"] == 2027
