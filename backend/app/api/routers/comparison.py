@@ -710,9 +710,20 @@ def unlink_tenure_covernote(
         if cn_s:
             cn_s.document_type = "unlinked_covernote"
         tenure.covernote_session_id = None
-        if tenure.stage == "Issue Policy":
-            tenure.stage = "Quotations"
-            tenure.stage_updated_at = datetime.now(timezone.utc)
+
+    other_cns = db.query(SessionModel).filter(
+        SessionModel.tenure_id == tenure.id,
+        SessionModel.document_type == "covernote"
+    ).all()
+    for s in other_cns:
+        s.document_type = "unlinked_covernote"
+
+    if tenure.stage in ("Issue Policy", "Close - Win"):
+        tenure.stage = "Quotations"
+        tenure.stage_updated_at = datetime.now(timezone.utc)
+    if tenure.status == "hit":
+        tenure.status = "draft"
+    tenure.won_premium = None
 
     db.commit()
     return {"status": "success", "tenure_id": tenure_id, "message": "Cover note unlinked successfully"}

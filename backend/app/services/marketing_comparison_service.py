@@ -887,12 +887,12 @@ def extract_strict_schedule_excess(text: str) -> float | None:
         r"(?i)(?:is applicable|shall be borne|under 21|bawah 21|provisional|percubaan|learner|sementara|if you|increase to|penalty|in the event|unnamed driver|holding a|holds a)"
     )
     patterns = [
-        r"(?i)policy\s+excess\s*:\s*(?:RM|MYR)?\s*([\d,]+(?:\.\d{2})?)",
-        r"(?i)(?:([\d,]+(?:\.\d{2})?)\s*(?:RM|MYR)?\s*voluntary\s+excess|voluntary\s+excess\s*(?:RM|MYR)?\s*([\d,]+(?:\.\d{2})?))",
-        r"(?i)excess\s+all\s+claims\s*:\s*(?:RM|MYR)?\s*([\d,]+(?:\.\d{2})?)",
-        r"(?i)\*?\s*excess\s+amount\s*:\s*(?:RM|MYR)?\s*([\d,]+(?:\.\d{2})?)",
-        r"(?i)excess\s+lebihan\s*\(\s*(?:MYR|RM)?\s*([\d,]+(?:\.\d{2})?)\s*\)",
-        r"(?i)excess\s*(?:/\s*lebihan)?\s*[:]?\s*(?:RM|MYR)?\s*([\d,]+(?:\.\d{2})?)",
+        r"(?i)policy\s+excess\s*:\s*(?:RM|MYR)?\s*(\d[\d,]*(?:\.\d{2})?)",
+        r"(?i)(?:(\d[\d,]*(?:\.\d{2})?)\s*(?:RM|MYR)?\s*voluntary\s+excess|voluntary\s+excess\s*(?:RM|MYR)?\s*(\d[\d,]*(?:\.\d{2})?))",
+        r"(?i)excess\s+all\s+claims\s*:\s*(?:RM|MYR)?\s*(\d[\d,]*(?:\.\d{2})?)",
+        r"(?i)\*?\s*excess\s+amount\s*:\s*(?:RM|MYR)?\s*(\d[\d,]*(?:\.\d{2})?)",
+        r"(?i)excess\s+lebihan\s*\(\s*(?:MYR|RM)?\s*(\d[\d,]*(?:\.\d{2})?)\s*\)",
+        r"(?i)excess\s*(?:/\s*lebihan)?\s*[:]?\s*(?:RM|MYR)?\s*(\d[\d,]*(?:\.\d{2})?)",
     ]
     for line in text.splitlines():
         clean_line = line.strip()
@@ -901,8 +901,14 @@ def extract_strict_schedule_excess(text: str) -> float | None:
         for pat in patterns:
             m = re.search(pat, clean_line)
             if m:
-                val_str = [g for g in m.groups() if g is not None][0]
-                return float(val_str.replace(",", ""))
+                valid_groups = [g for g in m.groups() if g is not None and g.strip()]
+                if not valid_groups:
+                    continue
+                val_str = valid_groups[0].strip().replace(",", "")
+                try:
+                    return float(val_str)
+                except (ValueError, TypeError):
+                    continue
     return None
 
 

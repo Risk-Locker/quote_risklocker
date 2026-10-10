@@ -57,6 +57,7 @@ import {
   Plus,
   Trash,
   TrendUp,
+  UploadSimple,
 } from "@phosphor-icons/react";
 import { api, fileUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -344,6 +345,10 @@ export function TenureTimelineLedger() {
     return () => clearInterval(timer);
   }, []);
 
+  // Upload Cover Note Modal State
+  const [covernoteUploadTenure, setCovernoteUploadTenure] = useState<TenureRow | null>(null);
+  const [uploadingCovernote, setUploadingCovernote] = useState(false);
+
   // Listen for highlight parameter from notifications or URL
   useEffect(() => {
     const target = searchParams?.get("highlight_tenure");
@@ -387,15 +392,7 @@ export function TenureTimelineLedger() {
   const [selectedTenureIds, setSelectedTenureIds] = useState<string[]>([]);
   const [deletingBulk, setDeletingBulk] = useState(false);
 
-  // Inline Expandable Sub-panel State
-  const [expandedTenureIds, setExpandedTenureIds] = useState<string[]>([]);
   const [showHidden, setShowHidden] = useState<boolean>(false);
-
-  const toggleExpandRow = (id: string) => {
-    setExpandedTenureIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
-  };
 
   // PICs directory for dropdown selection
   const [pics, setPics] = useState<PicItem[]>([]);
@@ -543,6 +540,49 @@ export function TenureTimelineLedger() {
     }
   };
 
+  const handleUploadCovernoteForTenure = async (file: File) => {
+    if (!covernoteUploadTenure) return;
+    setUploadingCovernote(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("tenure_id", covernoteUploadTenure.id);
+
+      const res = await api<any>("/uploads", {
+        method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        body: form,
+      });
+
+      const jobId = res?.job_id;
+      if (jobId) {
+        let attempts = 0;
+        while (attempts < 15) {
+          await new Promise((r) => setTimeout(r, 1000));
+          attempts++;
+          try {
+            const jobStatus = await api<any>(`/uploads/jobs/${jobId}`);
+            if (jobStatus?.status === "completed" || jobStatus?.status === "failed") {
+              break;
+            }
+          } catch {
+            break;
+          }
+        }
+      }
+
+      const vehicleName = covernoteUploadTenure.vehicle_no;
+      setCovernoteUploadTenure(null);
+      await loadTenures();
+      await loadStageSummary();
+      alert(`Cover Note for ${vehicleName} uploaded successfully! Policy is now in Issue Policy stage.`);
+    } catch (err: any) {
+      alert("Cover Note upload failed: " + (err.message || String(err)));
+    } finally {
+      setUploadingCovernote(false);
+    }
+  };
+
   const renderPipelineProgress = (t: TenureRow) => {
     const isHit = t.stage === "Close - Win";
     const isMiss = t.stage === "Close - Lose";
@@ -629,12 +669,12 @@ export function TenureTimelineLedger() {
                   type="button"
                   onClick={() => {
                     if (st.id === "Issue Policy") {
-                      setIssuePolicyModalTenure(t);
-                      const winningQ = t.sourced_quotes?.find(q => q.is_winner || q.company === t.winning_company_name || q.company === t.winning_company_id);
-                      const firstQuote = t.sourced_quotes && t.sourced_quotes[0] ? t.sourced_quotes[0].company : "";
-                      setSelectedWinnerQuote(t.winning_company_id || t.winning_company_name || firstQuote);
-                      const startCandidate = winningQ?.coverage_start_date || t.coverage_start_date || new Date().toISOString().split("T")[0];
-                      setPolicyStartDate(startCandidate);
+                      const hasCn = Boolean(t.covernote_policy || t.is_covernote_issued);
+                      if (!hasCn) {
+                        setCovernoteUploadTenure(t);
+                        return;
+                      }
+                      patchTenureField(t.id, { stage: "Issue Policy" });
                     } else {
                       patchTenureField(t.id, { stage: st.id });
                     }
@@ -646,10 +686,17 @@ export function TenureTimelineLedger() {
                       ? "text-emerald-700 hover:text-emerald-900 font-medium"
                       : "text-neutral-400 hover:text-neutral-700"
                   }`}
-                  title={tooltipText}
+                  title={
+                    st.id === "Issue Policy" && !Boolean(t.covernote_policy || t.is_covernote_issued)
+                      ? "Official Cover Note PDF required to reach Issue Policy stage. Click to upload."
+                      : tooltipText
+                  }
                 >
                   {isCompleted && <Check size={10} weight="bold" className="text-emerald-600 shrink-0" />}
                   <span>{st.label}</span>
+                  {st.id === "Issue Policy" && !Boolean(t.covernote_policy || t.is_covernote_issued) && (
+                    <UploadSimple size={10} className="text-amber-600 shrink-0" />
+                  )}
                 </button>
                 {idx < linearStages.length - 1 && (
                   <span className="text-neutral-300 px-0.5 select-none font-bold">→</span>
@@ -837,6 +884,16 @@ export function TenureTimelineLedger() {
   useEffect(() => {
     loadTenures();
   }, [loadTenures]);
+
+  // Auto-refresh ledger on window focus (e.g. after returning from Quotation Workspace)
+  useEffect(() => {
+    const handleFocus = () => {
+      loadTenures();
+      loadStageSummary();
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [loadTenures, loadStageSummary]);
 
   // Load Calendar Quotation Sessions
   const loadCalendarSessions = useCallback(async () => {
@@ -1397,13 +1454,6 @@ export function TenureTimelineLedger() {
       }
     });
   }, [tenures, sortBy, sortDir, pics, policyFilter]);
-
-  const [expandedVehicleKeys, setExpandedVehicleKeys] = useState<string[]>([]);
-  const toggleExpandVehicle = (key: string) => {
-    setExpandedVehicleKeys((prev) =>
-      prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key]
-    );
-  };
 
   return (
     <div className="space-y-5">
@@ -2002,12 +2052,10 @@ export function TenureTimelineLedger() {
                       mainTenure.stage === "Close - Win" ||
                       mainTenure.status === "hit"
                     );
-                    const isVehicleExpanded = expandedVehicleKeys.includes(group.vehicle_no);
                     const isGroupSelected = group.tenures.some((t) => selectedTenureIds.includes(t.id));
                     const displayName = getVehicleDisplayName(group.vehicle_no, group.chassis_no);
                     const isChassis = displayName.startsWith("Chassis:");
                     const isBlank = displayName === "No Plate (Blank)";
-                    const hasMultiplePeriods = group.tenures.length > 1;
 
                     return (
                       <React.Fragment key={group.vehicle_no}>
@@ -2019,12 +2067,10 @@ export function TenureTimelineLedger() {
                               ? "bg-emerald-100/90 ring-4 ring-emerald-500 ring-inset shadow-xl animate-pulse"
                               : stageConf.isLost
                               ? "bg-rose-50/20"
-                              : isVehicleExpanded
-                              ? "bg-[#f5f5f7]/60"
                               : ""
                           }`}
                         >
-                          {/* 0. Select Checkbox & Direct Delete & Expand */}
+                          {/* 0. Select Checkbox & Direct Delete */}
                           <td className="py-3 px-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
                               <input
@@ -2042,19 +2088,6 @@ export function TenureTimelineLedger() {
                                 title={`Select ${displayName}`}
                                 aria-label={`Select ${displayName}`}
                               />
-                              <button
-                                type="button"
-                                onClick={() => toggleExpandVehicle(group.vehicle_no)}
-                                className={`p-1 rounded transition-colors cursor-pointer ${
-                                  isVehicleExpanded
-                                    ? "bg-neutral-900 text-white"
-                                    : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
-                                }`}
-                                title={isVehicleExpanded ? "Collapse deal details" : "Expand deal details"}
-                                aria-label={isVehicleExpanded ? "Collapse deal details" : "Expand deal details"}
-                              >
-                                {isVehicleExpanded ? <CaretUp size={13} weight="bold" /> : <CaretDown size={13} weight="bold" />}
-                              </button>
                               <button
                                 type="button"
                                 onClick={() => {
@@ -2570,428 +2603,18 @@ export function TenureTimelineLedger() {
                                 Logs
                               </Button>
 
-                              <button
-                                type="button"
-                                onClick={() => toggleExpandVehicle(group.vehicle_no)}
-                                className={`h-7 px-2 text-xs font-bold rounded flex items-center gap-1 transition-colors cursor-pointer ${
-                                  isVehicleExpanded
-                                    ? "bg-neutral-900 text-white"
-                                    : "bg-neutral-100 hover:bg-neutral-200 text-neutral-700"
-                                }`}
-                                title={isVehicleExpanded ? "Collapse periods" : "Expand periods list"}
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => setEditingTenure(mainTenure)}
+                                className="h-7 text-xs font-semibold cursor-pointer border-[#e5e5ea] hover:border-black"
                               >
-                                <span>{hasMultiplePeriods ? `Periods (${group.tenures.length})` : isVehicleExpanded ? "Close" : "Details"}</span>
-                                {isVehicleExpanded ? <CaretUp size={11} weight="bold" /> : <CaretDown size={11} weight="bold" />}
-                              </button>
+                                Details
+                              </Button>
                             </div>
                           </td>
                         </tr>
 
-                        {/* Inline Expandable Sub-panel: Deal Intelligence & Remarks */}
-                        {isVehicleExpanded && (
-                          <tr className="bg-[#f9f9fb] border-b-2 border-neutral-300">
-                            <td colSpan={8} className="p-4 whitespace-normal space-y-4">
-                              {/* Quotation Locker & Session Summary Card */}
-                              <div className="bg-white rounded-xl border border-neutral-200 shadow-2xs overflow-hidden">
-                                <div className="px-4 py-2.5 bg-neutral-100/70 border-b border-neutral-200 flex items-center justify-between">
-                                  <div className="flex items-center gap-2">
-                                    <Car size={14} className="text-neutral-700" />
-                                    <span className="font-bold text-xs text-neutral-900 uppercase tracking-wider">
-                                      Deal Locker: {displayName}
-                                    </span>
-                                    <span className="text-neutral-400">·</span>
-                                    <span className="text-xs font-medium text-neutral-600">
-                                      {group.customer_name}
-                                    </span>
-                                    {mainTenure.created_by_email && (
-                                      <>
-                                        <span className="text-neutral-400">·</span>
-                                        <span className="text-[10px] font-medium text-neutral-500 bg-neutral-200/80 px-1.5 py-0.5 rounded">
-                                          By {mainTenure.created_by_email}
-                                        </span>
-                                      </>
-                                    )}
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <Link
-                                      href={`/comparison?tenure_id=${mainTenure.id}` as Route}
-                                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold transition-colors shadow-2xs cursor-pointer"
-                                    >
-                                      <Columns className="w-3 h-3" />
-                                      <span>Open Comparison Matrix →</span>
-                                    </Link>
-                                    <button
-                                      type="button"
-                                      onClick={() => setActiveDrawerTenureId(mainTenure.id)}
-                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-xs font-semibold transition-colors cursor-pointer border border-neutral-200"
-                                    >
-                                      <span>Timeline Logs</span>
-                                    </button>
-                                  </div>
-                                </div>
-
-                                <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-                                  {/* Confirmed Coverage Period or Pending Issue */}
-                                  <div>
-                                    <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 mb-1 flex items-center justify-between">
-                                      <span>Official Coverage Period</span>
-                                      {mainTenure.covernote_policy && (
-                                        <span className="text-[9.5px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300">
-                                          ✓ Cover Note Issued
-                                        </span>
-                                      )}
-                                    </div>
-                                    {isPolicyIssued && (mainTenure.covernote_policy || mainTenure.coverage_start_date) ? (
-                                      <div className="space-y-1">
-                                        <div className="font-mono font-bold text-neutral-900 text-xs">
-                                          {formatDateSafe(mainTenure.covernote_policy?.coverage_start_date || mainTenure.coverage_start_date)} → {formatDateSafe(mainTenure.covernote_policy?.coverage_end_date || mainTenure.coverage_end_date)}
-                                        </div>
-                                        {mainTenure.covernote_policy && (
-                                          <div className="text-[11px] text-emerald-900 font-semibold flex items-center justify-between">
-                                            <span>Underwriter: {mainTenure.covernote_policy.company}</span>
-                                            {mainTenure.covernote_policy.uploaded_file_id && (
-                                              <a
-                                                href={fileUrl(`/uploaded-files/${mainTenure.covernote_policy.uploaded_file_id}/content`)}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="text-emerald-700 hover:text-emerald-950 font-bold underline text-[10px]"
-                                              >
-                                                [Policy PDF]
-                                              </a>
-                                            )}
-                                          </div>
-                                        )}
-                                        {mainTenure.covernote_policy?.policy_number && (
-                                          <div className="text-[10px] text-neutral-500 font-mono">
-                                            Policy #: {mainTenure.covernote_policy.policy_number}
-                                          </div>
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <div className="space-y-0.5 text-neutral-400">
-                                        <div className="text-xs font-medium text-neutral-500 flex items-center gap-1">
-                                          <span>—</span>
-                                          <span>Pending Issue / Awaiting Cover Note</span>
-                                        </div>
-                                        {mainTenure.expiry_month && (
-                                          <div className="text-[11px] italic text-neutral-400">
-                                            Target Expiry: {mainTenure.expiry_month}
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  {/* Sourced Quotes in this Locker */}
-                                  <div>
-                                    <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 mb-1 flex items-center justify-between">
-                                      <span>Sourced Quotes ({mainTenure.sourced_quotes.length})</span>
-                                      {mainTenure.winning_file_id && (
-                                        <a
-                                          href={fileUrl(`/uploaded-files/${mainTenure.winning_file_id}/content`)}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="text-emerald-700 hover:text-emerald-900 font-bold flex items-center gap-1 normal-case text-[10px] bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200"
-                                          title="Download accepted quotation PDF"
-                                        >
-                                          <FilePdf size={11} weight="fill" />
-                                          <span>Accepted PDF ({mainTenure.winning_company_name || "Winner"})</span>
-                                        </a>
-                                      )}
-                                    </div>
-                                    {mainTenure.sourced_quotes.length === 0 ? (
-                                      <span className="text-neutral-400 italic text-xs">0 quotes compiled</span>
-                                    ) : (
-                                      <div className="flex flex-wrap gap-1.5">
-                                        {mainTenure.sourced_quotes.map((q) => {
-                                          const isWin = q.is_winner || q.company === mainTenure.winning_company_name;
-                                          return (
-                                            <Link
-                                              key={q.session_id}
-                                              href={`/workspace?session_id=${q.session_id}` as Route}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium border hover:border-neutral-900 transition-colors ${
-                                                isWin
-                                                  ? "bg-emerald-50 text-emerald-900 border-emerald-300 font-bold ring-1 ring-emerald-400/50"
-                                                  : "bg-neutral-100 text-neutral-800 border-neutral-200/80 hover:bg-neutral-200/70"
-                                              }`}
-                                              title={`Open ${q.company} quote workspace in new tab`}
-                                            >
-                                              <span>{isWin ? "★ " : ""}{q.company}</span>
-                                              {q.total_payable && (
-                                                <span className="font-mono font-bold">RM {q.total_payable}</span>
-                                              )}
-                                              {q.uploaded_file_id && (
-                                                <a
-                                                  href={fileUrl(`/uploaded-files/${q.uploaded_file_id}/content`)}
-                                                  target="_blank"
-                                                  rel="noopener noreferrer"
-                                                  className="text-neutral-500 hover:text-emerald-700 ml-0.5"
-                                                  onClick={(e) => e.stopPropagation()}
-                                                  title={`Download ${q.file_name || "quote PDF"}`}
-                                                >
-                                                  <FilePdf size={12} weight="fill" />
-                                                </a>
-                                              )}
-                                            </Link>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  {/* Fulfillment Checklists */}
-                                  <div>
-                                    <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 mb-1">
-                                      Fulfillment
-                                    </div>
-                                    <div className="flex items-center gap-3 text-xs">
-                                      <label className="flex items-center gap-1 text-[11px] font-medium text-neutral-700 cursor-pointer">
-                                        <input
-                                          type="checkbox"
-                                          checked={Boolean(mainTenure.key_in_ucd)}
-                                          onChange={(e) => patchTenureField(mainTenure.id, { key_in_ucd: e.target.checked })}
-                                          className="w-3.5 h-3.5 accent-teal-600 rounded cursor-pointer"
-                                        />
-                                        <span>UCD</span>
-                                      </label>
-                                      <label className="flex items-center gap-1 text-[11px] font-medium text-neutral-700 cursor-pointer">
-                                        <input
-                                          type="checkbox"
-                                          checked={Boolean(mainTenure.client_payment_received)}
-                                          onChange={(e) => patchTenureField(mainTenure.id, { client_payment_received: e.target.checked })}
-                                          className="w-3.5 h-3.5 accent-emerald-600 rounded cursor-pointer"
-                                        />
-                                        <span>Client Paid</span>
-                                      </label>
-                                      <label className="flex items-center gap-1 text-[11px] font-medium text-neutral-700 cursor-pointer">
-                                        <input
-                                          type="checkbox"
-                                          checked={Boolean(mainTenure.agency_payment_done)}
-                                          onChange={(e) => patchTenureField(mainTenure.id, { agency_payment_done: e.target.checked })}
-                                          className="w-3.5 h-3.5 accent-blue-600 rounded cursor-pointer"
-                                        />
-                                        <span>Agency Paid</span>
-                                      </label>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Sub-panel Secondary Cards: Remarks, Operations & Lost Client Retention */}
-                              <div className={`grid grid-cols-1 ${mainTenure.stage === "Close - Lose" ? "md:grid-cols-3" : "md:grid-cols-2"} gap-4 text-xs`}>
-                                {/* Sub-panel Card 1: Deal Intelligence & Remarks */}
-                                <div className="p-3.5 bg-white rounded-xl border border-neutral-200 shadow-2xs space-y-3">
-                                  <div className="flex items-center justify-between pb-1.5 border-b border-neutral-100">
-                                    <span className="font-bold text-neutral-900 uppercase tracking-wider text-[11px] flex items-center gap-1">
-                                      <NotePencil size={14} className="text-amber-600" />
-                                      Deal Intelligence &amp; Remarks
-                                    </span>
-                                    {savingFieldId === mainTenure.id && (
-                                      <span className="text-[10px] text-neutral-500 font-semibold animate-pulse">
-                                        Saving...
-                                      </span>
-                                    )}
-                                    {savedFieldId === mainTenure.id && (
-                                      <span className="text-[10px] text-emerald-600 font-bold">
-                                        ✓ Saved
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  <div>
-                                    <label className="text-[11px] font-bold text-neutral-700 block mb-1">
-                                      Deal Comment
-                                    </label>
-                                    <input
-                                      type="text"
-                                      defaultValue={mainTenure.comment || ""}
-                                      placeholder="Add deal comment / reminder..."
-                                      onBlur={(e) => {
-                                        if (e.target.value !== (mainTenure.comment || "")) {
-                                          patchTenureField(mainTenure.id, { comment: e.target.value });
-                                        }
-                                      }}
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter") e.currentTarget.blur();
-                                      }}
-                                      className="w-full h-8 px-2.5 text-xs rounded border border-neutral-300 bg-white focus:ring-1 focus:ring-neutral-900 outline-none"
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <label className="text-[11px] font-bold text-neutral-700 block mb-1">
-                                      Client Habitual Preference Notes
-                                    </label>
-                                    <textarea
-                                      rows={2}
-                                      defaultValue={mainTenure.client_preference_notes || mainTenure.notes || ""}
-                                      placeholder="Habitual pattern, underwriter preferences, agreed value rules..."
-                                      onBlur={(e) => {
-                                        if (e.target.value !== (mainTenure.client_preference_notes || "")) {
-                                          patchTenureField(mainTenure.id, { client_preference_notes: e.target.value });
-                                        }
-                                      }}
-                                      className="w-full p-2 text-xs rounded border border-neutral-300 bg-white focus:ring-1 focus:ring-neutral-900 outline-none resize-none"
-                                    />
-                                  </div>
-                                </div>
-
-                                {/* Sub-panel Card 2: Operations & Fulfillment */}
-                                <div className="p-3.5 bg-white rounded-xl border border-neutral-200 shadow-2xs space-y-3">
-                                  <div className="flex items-center justify-between pb-1.5 border-b border-neutral-100">
-                                    <span className="font-bold text-neutral-900 uppercase tracking-wider text-[11px] flex items-center gap-1">
-                                      <CurrencyDollar size={14} className="text-emerald-600" />
-                                      Operations &amp; Roadtax Fulfillment
-                                    </span>
-                                  </div>
-
-                                  <div className="grid grid-cols-2 gap-2">
-                                    <div>
-                                      <label className="text-[10px] font-bold text-neutral-600 block mb-0.5">
-                                        Print Roadtax
-                                      </label>
-                                      <select
-                                        value={mainTenure.print_roadtax || "No"}
-                                        onChange={(e) => patchTenureField(mainTenure.id, { print_roadtax: e.target.value })}
-                                        className="w-full h-7 px-1.5 text-xs font-semibold rounded border border-neutral-300 bg-white"
-                                      >
-                                        <option value="No">No</option>
-                                        <option value="MyEG Pending">MyEG Pending</option>
-                                        <option value="Done">Done</option>
-                                        <option value="Counter">Counter</option>
-                                        <option value="Digital Only">Digital Only</option>
-                                      </select>
-                                    </div>
-                                    <div>
-                                      <label className="text-[10px] font-bold text-neutral-600 block mb-0.5">
-                                        Roadtax Receipt
-                                      </label>
-                                      <select
-                                        value={mainTenure.roadtax_receipt || "None"}
-                                        onChange={(e) => patchTenureField(mainTenure.id, { roadtax_receipt: e.target.value })}
-                                        className="w-full h-7 px-1.5 text-xs font-semibold rounded border border-neutral-300 bg-white"
-                                      >
-                                        <option value="None">None</option>
-                                        <option value="Pending">Pending</option>
-                                        <option value="Received">Received</option>
-                                        <option value="Sent to Client">Sent to Client</option>
-                                      </select>
-                                    </div>
-                                  </div>
-
-                                  <div className="pt-2 border-t border-neutral-100 flex items-center justify-between">
-                                    <Link
-                                      href={`/comparison?tenure_id=${mainTenure.id}` as Route}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-xs font-bold text-amber-700 hover:text-amber-900 flex items-center gap-1"
-                                    >
-                                      <span>Open Comparison Matrix →</span>
-                                    </Link>
-                                    <button
-                                      type="button"
-                                      onClick={() => setEditingTenure(mainTenure)}
-                                      className="text-xs font-bold text-neutral-700 hover:text-neutral-900 underline cursor-pointer"
-                                    >
-                                      Edit Deal Modal
-                                    </button>
-                                  </div>
-                                </div>
-
-                                {/* Sub-panel Card 3: Lost Client Retention & External Policy Dates */}
-                                {mainTenure.stage === "Close - Lose" && (
-                                  <div className="p-3.5 bg-amber-50/50 rounded-xl border border-amber-200/80 shadow-2xs space-y-3">
-                                    <div className="flex items-center justify-between pb-1.5 border-b border-amber-200/60">
-                                      <span className="font-bold text-amber-950 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
-                                        <Clock size={14} className="text-amber-700" />
-                                        Lost Client Retention
-                                      </span>
-                                      <span
-                                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                                          mainTenure.is_discarded
-                                            ? "bg-rose-100 text-rose-800 border border-rose-300"
-                                            : "bg-emerald-100 text-emerald-800 border border-emerald-300"
-                                        }`}
-                                      >
-                                        {mainTenure.is_discarded ? "Discarded" : "Active Pipeline"}
-                                      </span>
-                                    </div>
-
-                                    <p className="text-[11px] text-amber-900/80 leading-relaxed">
-                                      Track competitor policy dates to automatically queue this vehicle for renewal outreach next year.
-                                    </p>
-
-                                    <div className="grid grid-cols-2 gap-2">
-                                      <div>
-                                        <label className="text-[10px] font-bold text-amber-900 block mb-0.5">
-                                          External Policy Start
-                                        </label>
-                                        <input
-                                          type="date"
-                                          defaultValue={
-                                            mainTenure.external_policy_start_date
-                                              ? mainTenure.external_policy_start_date.split("T")[0]
-                                              : ""
-                                          }
-                                          onBlur={(e) => {
-                                            const val = e.target.value;
-                                            if (val !== (mainTenure.external_policy_start_date?.split("T")[0] || "")) {
-                                              patchTenureField(mainTenure.id, { external_policy_start_date: val || null });
-                                            }
-                                          }}
-                                          className="w-full h-7 px-2 text-xs font-mono font-medium rounded border border-amber-300 bg-white"
-                                        />
-                                      </div>
-                                      <div>
-                                        <label className="text-[10px] font-bold text-amber-900 block mb-0.5">
-                                          External Policy End
-                                        </label>
-                                        <input
-                                          type="date"
-                                          defaultValue={
-                                            mainTenure.external_policy_end_date
-                                              ? mainTenure.external_policy_end_date.split("T")[0]
-                                              : ""
-                                          }
-                                          onBlur={(e) => {
-                                            const val = e.target.value;
-                                            if (val !== (mainTenure.external_policy_end_date?.split("T")[0] || "")) {
-                                              patchTenureField(mainTenure.id, { external_policy_end_date: val || null });
-                                            }
-                                          }}
-                                          className="w-full h-7 px-2 text-xs font-mono font-medium rounded border border-amber-300 bg-white"
-                                        />
-                                      </div>
-                                    </div>
-
-                                    <div className="pt-2 border-t border-amber-200/60 flex items-center justify-between">
-                                      <span className="text-[10px] text-amber-800">
-                                        {mainTenure.is_discarded
-                                          ? "Excluded from active renewal queue."
-                                          : "Queued for next year's renewal."}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          patchTenureField(mainTenure.id, { is_discarded: !mainTenure.is_discarded })
-                                        }
-                                        className={`px-2 py-1 text-xs font-bold rounded transition-colors cursor-pointer border ${
-                                          mainTenure.is_discarded
-                                            ? "bg-white text-emerald-700 border-emerald-300 hover:bg-emerald-50"
-                                            : "bg-white text-rose-700 border-rose-300 hover:bg-rose-50"
-                                        }`}
-                                      >
-                                        {mainTenure.is_discarded ? "Restore Client" : "Discard Client"}
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
                       </React.Fragment>
                     );
                   })
@@ -3934,6 +3557,156 @@ export function TenureTimelineLedger() {
                 className="px-3.5 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded shadow-xs cursor-pointer disabled:opacity-50"
               >
                 {deletingVehicle ? "Deleting..." : "Yes, Move to Trash"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal for Cover Note Upload to reach Issue Policy stage */}
+      {covernoteUploadTenure && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-[var(--rl-radius)] border border-neutral-200 shadow-2xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-4 border-b border-neutral-100 bg-[#fbfbfd] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-800">
+                  <UploadSimple size={18} weight="bold" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-neutral-900">Upload Policy / Cover Note</h3>
+                  <p className="text-[11px] text-neutral-500">
+                    Required before advancing to Issue Policy stage
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCovernoteUploadTenure(null)}
+                className="text-neutral-400 hover:text-neutral-700 text-sm font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Vehicle & Customer Context Card */}
+              <div className="bg-neutral-50 p-3.5 rounded-lg border border-neutral-200 space-y-2 text-xs">
+                <div className="flex items-center justify-between pb-1.5 border-b border-neutral-200/60">
+                  <span className="font-mono font-bold text-sm text-neutral-900">
+                    {getVehicleDisplayName(covernoteUploadTenure.vehicle_no, covernoteUploadTenure.chassis_no)}
+                  </span>
+                  {covernoteUploadTenure.expiry_month && (
+                    <span className="text-[10px] font-mono font-semibold bg-white px-2 py-0.5 rounded border border-neutral-200 text-neutral-600">
+                      Exp: {covernoteUploadTenure.expiry_month}
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div>
+                    <span className="text-neutral-500 block text-[10px]">Customer:</span>
+                    <span className="font-semibold text-neutral-800 truncate block">
+                      {covernoteUploadTenure.customer_name || "—"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-neutral-500 block text-[10px]">Customer IC / Reg No:</span>
+                    <span className="font-mono text-neutral-800 truncate block">
+                      {covernoteUploadTenure.customer_ic_no || "—"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-neutral-500 block text-[10px]">Chassis No:</span>
+                    <span className="font-mono text-neutral-800 truncate block">
+                      {covernoteUploadTenure.chassis_no || "—"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-neutral-500 block text-[10px]">Vehicle Model:</span>
+                    <span className="text-neutral-800 truncate block">
+                      {[covernoteUploadTenure.car_brand, covernoteUploadTenure.car_model].filter(Boolean).join(" ") || "—"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Upload Drop Area */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-neutral-800 block">
+                  Select Official Cover Note PDF
+                </label>
+                <div
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const file = e.dataTransfer.files?.[0];
+                    if (file && file.type === "application/pdf") {
+                      handleUploadCovernoteForTenure(file);
+                    } else if (file) {
+                      alert("Please select a PDF file.");
+                    }
+                  }}
+                  className="border-2 border-dashed border-neutral-300 hover:border-neutral-900 rounded-xl p-6 text-center transition-colors bg-white hover:bg-neutral-50/50 cursor-pointer relative"
+                >
+                  <input
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    disabled={uploadingCovernote}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        handleUploadCovernoteForTenure(file);
+                      }
+                    }}
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                  />
+                  {uploadingCovernote ? (
+                    <div className="flex flex-col items-center gap-2 py-2">
+                      <ArrowsClockwise className="w-6 h-6 animate-spin text-amber-600" />
+                      <span className="text-xs font-bold text-neutral-800">
+                        Extracting &amp; Attaching Cover Note...
+                      </span>
+                      <span className="text-[10px] text-neutral-500">
+                        OCR scanning schedule excess, perils, and policy number
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="w-10 h-10 rounded-full bg-neutral-100 flex items-center justify-center text-neutral-600">
+                        <FilePdf size={22} weight="duotone" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-neutral-800 block">
+                          Drop Cover Note PDF here, or click to browse
+                        </span>
+                        <span className="text-[10px] text-neutral-400">
+                          Supports official PDF schedules from all Malaysian insurers
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Secondary link to workspace upload */}
+              <div className="pt-2 text-center">
+                <Link
+                  href={`/upload?mode=comparison&tenure_id=${covernoteUploadTenure.id}` as Route}
+                  onClick={() => setCovernoteUploadTenure(null)}
+                  className="text-[11px] text-neutral-600 hover:text-neutral-900 font-semibold underline"
+                >
+                  Or open dedicated Upload Intake Workspace →
+                </Link>
+              </div>
+            </div>
+
+            <div className="p-3 bg-neutral-50 border-t border-neutral-200 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => setCovernoteUploadTenure(null)}
+                disabled={uploadingCovernote}
+                className="px-3.5 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 cursor-pointer disabled:opacity-50"
+              >
+                Cancel
               </button>
             </div>
           </div>

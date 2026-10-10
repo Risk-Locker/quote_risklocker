@@ -290,8 +290,6 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<ComparisonEntry | null>(null);
   const [isUnlinkingCovernote, setIsUnlinkingCovernote] = useState(false);
-  const [isLinkingCovernote, setIsLinkingCovernote] = useState(false);
-  const [isUnlinkedDrawerOpen, setIsUnlinkedDrawerOpen] = useState(false);
   const [promotingEntryId, setPromotingEntryId] = useState<string | null>(null);
 
   const handleUnlinkCovernote = async () => {
@@ -309,22 +307,6 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       alert("Failed to unlink cover note: " + (err.message || String(err)));
     } finally {
       setIsUnlinkingCovernote(false);
-    }
-  };
-
-  const handleLinkCovernote = async (sessionId: string) => {
-    try {
-      setIsLinkingCovernote(true);
-      await api(`/comparison/${tenureId}/covernote/link`, {
-        method: "POST",
-        body: JSON.stringify({ session_id: sessionId }),
-      });
-      triggerStatus("success", "Cover Note Linked", "The policy has been linked as the official issued Cover Note.");
-      await fetchComparison(true);
-    } catch (err: any) {
-      alert("Failed to link cover note: " + (err.message || String(err)));
-    } finally {
-      setIsLinkingCovernote(false);
     }
   };
 
@@ -2829,18 +2811,29 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
 
                     {/* Action Buttons */}
                     <div className="pt-3 border-t border-emerald-200 flex flex-col gap-1.5">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         {cn.uploaded_file_id && (
-                          <a
-                            href={fileUrl(`/uploaded-files/${cn.uploaded_file_id}/content`)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 shadow-2xs transition-colors"
-                            title="View / download original Cover Note PDF"
-                          >
-                            <FilePdf size={14} weight="bold" />
-                            <span>View Policy PDF</span>
-                          </a>
+                          <>
+                            <a
+                              href={fileUrl(`/uploaded-files/${cn.uploaded_file_id}/content`)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex-1 min-w-[95px] flex items-center justify-center gap-1 py-1.5 px-2.5 rounded-lg text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 shadow-2xs transition-colors"
+                              title="View official Cover Note PDF in new tab"
+                            >
+                              <FilePdf size={13} weight="bold" />
+                              <span>View PDF</span>
+                            </a>
+                            <a
+                              href={fileUrl(`/uploaded-files/${cn.uploaded_file_id}/content`)}
+                              download={(cn as any).file_name || `${cn.company_name || 'policy'}_covernote.pdf`}
+                              className="flex items-center justify-center gap-1 py-1.5 px-2.5 rounded-lg text-xs font-bold text-emerald-900 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 transition-colors cursor-pointer shadow-2xs"
+                              title="Download official Cover Note PDF to your device"
+                            >
+                              <DownloadSimple size={13} weight="bold" />
+                              <span>Download</span>
+                            </a>
+                          </>
                         )}
                         <button
                           type="button"
@@ -2869,62 +2862,6 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                     <div className="mt-2 text-center text-[10px] font-bold text-emerald-800 bg-emerald-100/70 rounded py-1 border border-emerald-200/80">
                       ✓ Policy Issued · Verified Binding Terms
                     </div>
-
-                    {/* Expandable Previously Removed / Available Policies Drawer */}
-                    {data.unlinked_covernotes && data.unlinked_covernotes.length > 0 && (
-                      <div className="mt-3 pt-2.5 border-t border-emerald-200">
-                        <button
-                          type="button"
-                          onClick={() => setIsUnlinkedDrawerOpen((prev) => !prev)}
-                          className="w-full flex items-center justify-between text-[11px] font-semibold text-emerald-900 hover:text-emerald-950 transition-colors py-1 px-1.5 rounded hover:bg-emerald-100/60 cursor-pointer"
-                        >
-                          <span className="flex items-center gap-1.5">
-                            <FilePdf size={13} className="text-emerald-700" />
-                            <span>Previously Removed Policies ({data.unlinked_covernotes.length})</span>
-                          </span>
-                          {isUnlinkedDrawerOpen ? <CaretUp size={12} /> : <CaretDown size={12} />}
-                        </button>
-
-                        {isUnlinkedDrawerOpen && (
-                          <div className="mt-2 space-y-2 max-h-56 overflow-y-auto pr-1">
-                            {data.unlinked_covernotes.map((uc) => (
-                              <div
-                                key={uc.session_id}
-                                className="p-2 rounded-lg bg-white/90 border border-emerald-200 text-xs flex items-center justify-between gap-2 shadow-2xs"
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <div className="font-bold text-neutral-900 truncate">{uc.company_name}</div>
-                                  <div className="text-[10px] text-neutral-500 font-mono truncate" title={uc.uploaded_file_name}>
-                                    {uc.uploaded_file_name}
-                                  </div>
-                                  <div className="text-[10px] text-neutral-400">{uc.coverage_period_formatted}</div>
-                                </div>
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                  {uc.uploaded_file_id && (
-                                    <a
-                                      href={fileUrl(`/uploaded-files/${uc.uploaded_file_id}/content`)}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="px-2 py-1 text-[10px] font-semibold text-neutral-700 bg-white border border-neutral-300 rounded hover:bg-neutral-100"
-                                    >
-                                      View PDF ↗
-                                    </a>
-                                  )}
-                                  <button
-                                    type="button"
-                                    disabled={isLinkingCovernote}
-                                    onClick={() => handleLinkCovernote(uc.session_id)}
-                                    className="px-2 py-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 rounded hover:bg-emerald-200 transition-colors cursor-pointer disabled:opacity-50"
-                                  >
-                                    {isLinkingCovernote ? "Linking..." : "Link Policy"}
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </div>
               );
@@ -2955,7 +2892,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                       No Official Policy Issued Yet
                     </p>
                     <p className="text-[11px] text-neutral-500 max-w-xs mx-auto mt-1 leading-relaxed">
-                      This workspace is currently evaluating quotations. The Current Policy section accepts strictly official issued Cover Notes. Upload an issued Cover Note PDF or confirm the deal in the Motor Ledger to bind the policy.
+                      This workspace is currently evaluating quotations. The Current Policy section accepts strictly official issued Cover Notes. Upload an issued Cover Note PDF to bind the policy.
                     </p>
                   </div>
                   <div className="pt-1 flex items-center justify-center gap-2">
@@ -2968,62 +2905,6 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                     </Link>
                   </div>
                 </div>
-
-                {/* Expandable Previously Removed / Available Policies Drawer (when unlinked) */}
-                {data.unlinked_covernotes && data.unlinked_covernotes.length > 0 && (
-                  <div className="mt-3 pt-2.5 border-t border-[#e5e5ea]">
-                    <button
-                      type="button"
-                      onClick={() => setIsUnlinkedDrawerOpen((prev) => !prev)}
-                      className="w-full flex items-center justify-between text-[11px] font-semibold text-neutral-600 hover:text-neutral-900 transition-colors py-1 px-1.5 rounded hover:bg-neutral-100 cursor-pointer"
-                    >
-                      <span className="flex items-center gap-1.5">
-                        <FilePdf size={13} className="text-neutral-500" />
-                        <span>Previously Removed Policies ({data.unlinked_covernotes.length})</span>
-                      </span>
-                      {isUnlinkedDrawerOpen ? <CaretUp size={12} /> : <CaretDown size={12} />}
-                    </button>
-
-                    {isUnlinkedDrawerOpen && (
-                      <div className="mt-2 space-y-2 max-h-56 overflow-y-auto pr-1">
-                        {data.unlinked_covernotes.map((uc) => (
-                          <div
-                            key={uc.session_id}
-                            className="p-2 rounded-lg bg-neutral-50 border border-neutral-200 text-xs flex items-center justify-between gap-2 shadow-2xs"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="font-bold text-neutral-900 truncate">{uc.company_name}</div>
-                              <div className="text-[10px] text-neutral-500 font-mono truncate" title={uc.uploaded_file_name}>
-                                {uc.uploaded_file_name}
-                              </div>
-                              <div className="text-[10px] text-neutral-400">{uc.coverage_period_formatted}</div>
-                            </div>
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              {uc.uploaded_file_id && (
-                                <a
-                                  href={fileUrl(`/uploaded-files/${uc.uploaded_file_id}/content`)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="px-2 py-1 text-[10px] font-semibold text-neutral-700 bg-white border border-neutral-300 rounded hover:bg-neutral-100"
-                                >
-                                  View PDF ↗
-                                </a>
-                              )}
-                              <button
-                                type="button"
-                                disabled={isLinkingCovernote}
-                                onClick={() => handleLinkCovernote(uc.session_id)}
-                                className="px-2 py-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 rounded hover:bg-emerald-200 transition-colors cursor-pointer disabled:opacity-50"
-                              >
-                                {isLinkingCovernote ? "Linking..." : "Link Policy"}
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             );
           })()}
