@@ -1247,11 +1247,28 @@ def test_convert_session_and_unlink_covernote(db_session: Session):
     )
     assert res_unlink["status"] == "success"
     assert tenure.covernote_session_id is None
-    assert tenure.stage == "Quotations"
-
-    # Matrix no longer has covernote_policy
+    # Matrix no longer has covernote_policy, but lists sess_quote in unlinked_covernotes
     matrix_after = get_marketing_comparison(db_session, tenure.id)
     assert matrix_after["covernote_policy"] is None
+    assert len(matrix_after["unlinked_covernotes"]) == 1
+    assert matrix_after["unlinked_covernotes"][0]["session_id"] == str(sess_quote.id)
+
+    # 3. Re-link covernote
+    from app.api.routers.comparison import link_tenure_covernote, LinkCovernoteRequest
+    res_relink = link_tenure_covernote(
+        tenure_id=tenure.id,
+        payload=LinkCovernoteRequest(session_id=str(sess_quote.id)),
+        db=db_session,
+        user=owner,
+    )
+    assert res_relink["status"] == "success"
+    assert tenure.covernote_session_id == sess_quote.id
+    assert tenure.stage == "Issue Policy"
+
+    matrix_relinked = get_marketing_comparison(db_session, tenure.id)
+    assert matrix_relinked["covernote_policy"] is not None
+    assert matrix_relinked["covernote_policy"]["session_id"] == str(sess_quote.id)
+    assert len(matrix_relinked["unlinked_covernotes"]) == 0
 
 
 def test_target_windscreen_isolation_and_preservation(db_session):

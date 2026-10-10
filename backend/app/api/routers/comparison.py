@@ -708,7 +708,7 @@ def unlink_tenure_covernote(
     if tenure.covernote_session_id:
         cn_s = db.get(SessionModel, tenure.covernote_session_id)
         if cn_s:
-            cn_s.document_type = "quotation"
+            cn_s.document_type = "unlinked_covernote"
         tenure.covernote_session_id = None
         if tenure.stage == "Issue Policy":
             tenure.stage = "Quotations"
@@ -716,3 +716,33 @@ def unlink_tenure_covernote(
 
     db.commit()
     return {"status": "success", "tenure_id": tenure_id, "message": "Cover note unlinked successfully"}
+
+
+class LinkCovernoteRequest(BaseModel):
+    session_id: str
+
+
+@router.post("/{tenure_id}/covernote/link")
+def link_tenure_covernote(
+    tenure_id: str,
+    payload: LinkCovernoteRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Link a previously unlinked or available Cover Note session to the tenure."""
+    tenure = db.get(InsuranceTenure, tenure_id)
+    if not tenure:
+        raise HTTPException(status_code=404, detail="Tenure not found")
+
+    sess = db.get(SessionModel, payload.session_id)
+    if not sess or sess.tenure_id != tenure_id:
+        raise HTTPException(status_code=404, detail="Session not found or does not belong to this tenure")
+
+    sess.document_type = "covernote"
+    tenure.covernote_session_id = sess.id
+    tenure.stage = "Issue Policy"
+    tenure.stage_updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    return {"status": "success", "tenure_id": tenure_id, "session_id": sess.id, "message": "Policy linked successfully"}
+

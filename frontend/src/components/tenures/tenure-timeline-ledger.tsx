@@ -37,7 +37,7 @@ import {
   Trash,
   TrendUp,
 } from "@phosphor-icons/react";
-import { api } from "@/lib/api";
+import { api, fileUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { TenureTimelineDrawer } from "@/components/tenures/tenure-timeline-drawer";
@@ -1969,7 +1969,7 @@ export function TenureTimelineLedger() {
                                 <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
                                   {mainTenure.covernote_policy.uploaded_file_id && (
                                     <a
-                                      href={`/api/quotations/files/${mainTenure.covernote_policy.uploaded_file_id}/download`}
+                                      href={fileUrl(`/uploaded-files/${mainTenure.covernote_policy.uploaded_file_id}/content`)}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300 transition-colors"
@@ -2114,7 +2114,7 @@ export function TenureTimelineLedger() {
                                 <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
                                   {mainTenure.winning_file_id ? (
                                     <a
-                                      href={`/api/quotations/files/${mainTenure.winning_file_id}/download`}
+                                      href={fileUrl(`/uploaded-files/${mainTenure.winning_file_id}/content`)}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300 transition-colors cursor-pointer"
@@ -2128,7 +2128,7 @@ export function TenureTimelineLedger() {
                                       const winQuote = mainTenure.sourced_quotes.find(q => q.is_winner && q.uploaded_file_id) || mainTenure.sourced_quotes.find(q => q.uploaded_file_id);
                                       return winQuote?.uploaded_file_id ? (
                                         <a
-                                          href={`/api/quotations/files/${winQuote.uploaded_file_id}/download`}
+                                          href={fileUrl(`/uploaded-files/${winQuote.uploaded_file_id}/content`)}
                                           target="_blank"
                                           rel="noopener noreferrer"
                                           className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-800 text-[10px] font-bold border border-blue-200 transition-colors cursor-pointer"
@@ -2307,7 +2307,7 @@ export function TenureTimelineLedger() {
                                           <span>Underwriter: {mainTenure.covernote_policy.company}</span>
                                           {mainTenure.covernote_policy.uploaded_file_id && (
                                             <a
-                                              href={`/api/quotations/files/${mainTenure.covernote_policy.uploaded_file_id}/download`}
+                                              href={fileUrl(`/uploaded-files/${mainTenure.covernote_policy.uploaded_file_id}/content`)}
                                               target="_blank"
                                               rel="noopener noreferrer"
                                               className="text-emerald-700 hover:text-emerald-950 font-bold underline text-[10px]"
@@ -2345,7 +2345,7 @@ export function TenureTimelineLedger() {
                                       <span>Sourced Quotes ({mainTenure.sourced_quotes.length})</span>
                                       {mainTenure.winning_file_id && (
                                         <a
-                                          href={`/api/quotations/files/${mainTenure.winning_file_id}/download`}
+                                          href={fileUrl(`/uploaded-files/${mainTenure.winning_file_id}/content`)}
                                           target="_blank"
                                           rel="noopener noreferrer"
                                           className="text-emerald-700 hover:text-emerald-900 font-bold flex items-center gap-1 normal-case text-[10px] bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200"
@@ -2381,7 +2381,7 @@ export function TenureTimelineLedger() {
                                               )}
                                               {q.uploaded_file_id && (
                                                 <a
-                                                  href={`/api/quotations/files/${q.uploaded_file_id}/download`}
+                                                  href={fileUrl(`/uploaded-files/${q.uploaded_file_id}/content`)}
                                                   target="_blank"
                                                   rel="noopener noreferrer"
                                                   className="text-neutral-500 hover:text-emerald-700 ml-0.5"
@@ -3449,7 +3449,7 @@ export function TenureTimelineLedger() {
                       </span>
                     </div>
                     <a
-                      href={`/api/quotations/files/${hitConfirmTenure.covernote_policy.uploaded_file_id}/download`}
+                      href={fileUrl(`/uploaded-files/${hitConfirmTenure.covernote_policy.uploaded_file_id}/content`)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-emerald-800 hover:text-emerald-950 font-bold text-[11px] underline shrink-0 ml-2"
@@ -3466,7 +3466,7 @@ export function TenureTimelineLedger() {
                       </span>
                     </div>
                     <a
-                      href={`/api/quotations/files/${hitConfirmTenure.winning_file_id}/download`}
+                      href={fileUrl(`/uploaded-files/${hitConfirmTenure.winning_file_id}/content`)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-emerald-700 hover:text-emerald-900 font-bold text-[11px] underline shrink-0 ml-2"
@@ -3488,7 +3488,7 @@ export function TenureTimelineLedger() {
                           </span>
                         </div>
                         <a
-                          href={`/api/quotations/files/${winQuote.uploaded_file_id}/download`}
+                          href={fileUrl(`/uploaded-files/${winQuote.uploaded_file_id}/content`)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-blue-700 hover:text-blue-900 font-bold text-[11px] underline shrink-0 ml-2"

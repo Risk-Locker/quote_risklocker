@@ -1878,7 +1878,8 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     # 6. Assign stable version numbers for same-insurer revisions
     company_counts: dict[str, int] = defaultdict(int)
     def _entry_sort_key(x: Any) -> tuple[datetime, str]:
-        dt = getattr(x, "created_at", None)
+        s = session_map.get(getattr(x, "session_id", None)) if getattr(x, "session_id", None) else None
+        dt = getattr(x, "uploaded_at", None) or (s.created_at if s else None) or getattr(x, "created_at", None)
         if not dt:
             return (datetime.min.replace(tzinfo=timezone.utc), getattr(x, "id", "") or "")
         if getattr(dt, "tzinfo", None) is None:
@@ -2464,14 +2465,26 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     cn_session = None
     if tenure.covernote_session_id and tenure.covernote_session_id in session_map:
         cn_session = session_map[tenure.covernote_session_id]
-    if not cn_session:
-        for s in sessions_desc:
-            if getattr(s, "document_type", "quotation") == "covernote":
-                cn_session = s
-                if not tenure.covernote_session_id:
-                    tenure.covernote_session_id = s.id
-                    needs_commit = True
-                break
+
+    # Collect any unlinked covernotes / issued policy documents available for this tenure
+    unlinked_covernotes = []
+    for s in sessions_desc:
+        if s.id != (tenure.covernote_session_id or "") and getattr(s, "document_type", "") in ("unlinked_covernote", "covernote"):
+            f_name = s.uploaded_file.original_filename if s.uploaded_file else f"{s.detected_company or 'Policy'}.pdf"
+            s_date = s.coverage_start_date or tenure.coverage_start_date
+            e_date = s.coverage_end_date or tenure.coverage_end_date
+            s_fmt = s_date.strftime("%d/%m/%Y") if s_date else ""
+            e_fmt = e_date.strftime("%d/%m/%Y") if e_date else ""
+            cov_period = f"{s_fmt} - {e_fmt}" if s_fmt and e_fmt else (s_fmt or "—")
+            unlinked_covernotes.append({
+                "session_id": s.id,
+                "company_name": s.detected_company or "Underwriter",
+                "policy_number": s.policy_number or "—",
+                "uploaded_file_id": s.uploaded_file_id,
+                "uploaded_file_name": f_name,
+                "coverage_period_formatted": cov_period,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+            })
 
     covernote_policy = None
     if cn_session:
@@ -2586,6 +2599,7 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "vehicle_type": "Comprehensive (综合险)",
         },
         "covernote_policy": covernote_policy,
+        "unlinked_covernotes": unlinked_covernotes,
         "entries": entry_dicts,
         "upload_sessions": upload_sessions,
         "duplicate_alerts": duplicate_alerts,

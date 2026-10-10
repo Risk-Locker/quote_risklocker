@@ -27,6 +27,8 @@ import {
   SidebarSimple,
   UploadSimple,
   CircleNotch,
+  CaretDown,
+  CaretUp,
   Columns,
   ArrowsClockwise,
   Eye,
@@ -247,6 +249,15 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       original_filename?: string | null;
       is_covernote: boolean;
     } | null;
+    unlinked_covernotes?: Array<{
+      session_id: string;
+      company_name: string;
+      policy_number: string;
+      uploaded_file_id: string | null;
+      uploaded_file_name: string;
+      coverage_period_formatted: string;
+      created_at: string | null;
+    }>;
     detection_logs?: {
       vehicle?: {
         model?: string;
@@ -279,6 +290,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<ComparisonEntry | null>(null);
   const [isUnlinkingCovernote, setIsUnlinkingCovernote] = useState(false);
+  const [isLinkingCovernote, setIsLinkingCovernote] = useState(false);
+  const [isUnlinkedDrawerOpen, setIsUnlinkedDrawerOpen] = useState(false);
   const [promotingEntryId, setPromotingEntryId] = useState<string | null>(null);
 
   const handleUnlinkCovernote = async () => {
@@ -296,6 +309,22 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       alert("Failed to unlink cover note: " + (err.message || String(err)));
     } finally {
       setIsUnlinkingCovernote(false);
+    }
+  };
+
+  const handleLinkCovernote = async (sessionId: string) => {
+    try {
+      setIsLinkingCovernote(true);
+      await api(`/comparison/${tenureId}/covernote/link`, {
+        method: "POST",
+        body: JSON.stringify({ session_id: sessionId }),
+      });
+      triggerStatus("success", "Cover Note Linked", "The policy has been linked as the official issued Cover Note.");
+      await fetchComparison(true);
+    } catch (err: any) {
+      alert("Failed to link cover note: " + (err.message || String(err)));
+    } finally {
+      setIsLinkingCovernote(false);
     }
   };
 
@@ -945,23 +974,17 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     return Array.from(map.values());
   }, [data?.entries, showHiddenCards]);
 
-  // Helper to get active entry IDs for a company group (supports single frame view or side-by-side split)
+  // Helper to get active entry IDs for a company group (single column per insurer, latest version or winner by default)
   const getActiveEntryIdsForGroup = (group: { companyName: string; entries: ComparisonEntry[] }): string[] => {
-    const isSplit = !!splitModeByCompany[group.companyName];
     const customIds = activeVersionsByCompany[group.companyName];
-    if (!isSplit) {
-      if (customIds && customIds.length > 0) {
-        const found = group.entries.find((e) => e.id === customIds[0]);
-        if (found) return [found.id];
-      }
-      const winner = group.entries.find((e) => e.is_recommended);
-      return winner ? [winner.id] : (group.entries[0] ? [group.entries[0].id] : []);
-    }
     if (customIds && customIds.length > 0) {
-      const valid = customIds.filter((id) => group.entries.some((e) => e.id === id));
-      if (valid.length > 0) return valid;
+      const found = group.entries.find((e) => e.id === customIds[0]);
+      if (found) return [found.id];
     }
-    return group.entries.map((e) => e.id);
+    const winner = group.entries.find((e) => e.is_recommended);
+    if (winner) return [winner.id];
+    const sortedByVer = [...group.entries].sort((a, b) => (b.version || 0) - (a.version || 0));
+    return sortedByVer[0] ? [sortedByVer[0].id] : [];
   };
 
   // Quotation cards strictly visible in the UI viewport
@@ -1086,14 +1109,19 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             : "border border-[#e5e5ea] shadow-xs hover:border-neutral-400"
         }`}
       >
-        {/* Winner Top Ribbon */}
-        {isWinner && (
-          <div className="bg-[#1b1717] text-white text-xs font-bold px-3 py-1.5 flex items-center justify-between rounded-t-xl print:bg-black print:text-white">
+        {/* Equal Height Standardized Top Slot (h-8) for Perfect Grid Row Alignment */}
+        {isWinner ? (
+          <div className="h-8 bg-[#1b1717] text-white text-xs font-bold px-3 flex items-center justify-between rounded-t-xl shrink-0 print:bg-black print:text-white">
             <span className="flex items-center gap-1.5">
-              <Star weight="fill" size={14} className="text-amber-400" />
+              <Star weight="fill" size={13} className="text-amber-400" />
               RECOMMENDED WINNER
             </span>
-            <ShieldCheck size={16} weight="bold" />
+            <ShieldCheck size={15} weight="bold" />
+          </div>
+        ) : (
+          <div className="h-8 bg-[#f5f5f7]/80 text-[#6e6e73] px-3 flex items-center justify-between rounded-t-xl shrink-0 border-b border-[#e5e5ea]/60">
+            <span className="text-[11px] font-semibold text-neutral-600">Quotation Option</span>
+            <span className="text-[10px] text-neutral-400 font-mono">Rank #{visibleRanksMap[entry.id] ?? entry.rank ?? 1}</span>
           </div>
         )}
 
@@ -1124,7 +1152,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               </div>
             </div>
 
-            {/* Row 2: Rank badge with clean highlight & instant click-to-rank picker (NO Auto, NO Best Deal, NO trophies) */}
+            {/* Row 2: Rank badge with clean highlight & instant click-to-rank picker */}
             <div className="mt-2 min-h-[26px] flex items-center justify-between gap-1">
               {editingRankEntryId === entry.id && visibleDisplayEntries.length > 1 ? (
                 <div className="flex items-center gap-1 flex-wrap py-0.5">
@@ -1191,124 +1219,58 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               )}
             </div>
 
-            {/* Row 3: Dedicated Version Row (v1, v2, v3...) with Single Frame & Split Mode */}
-            <div className="mt-2 min-h-[26px] flex items-center justify-between gap-1.5 flex-wrap">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {group.entries.map((q, qIdx) => {
-                  const isThisActive = activeIds.includes(q.id);
-                  const isThisCard = q.id === entry.id;
-                  const isEntryWinner = q.is_recommended;
-                  const formattedUpload = q.uploaded_at
-                    ? new Date(q.uploaded_at).toLocaleString("en-GB", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        hour12: true,
-                      })
-                    : "Uploaded Quote";
-
-                  return (
-                    <button
-                      key={q.id}
-                      type="button"
-                      onClick={() => {
-                        const isSplit = !!splitModeByCompany[group.companyName];
-                        if (!isSplit) {
-                          // Single frame mode: switch frame to this version
-                          setActiveVersionsByCompany((prev) => ({
-                            ...prev,
-                            [group.companyName]: [q.id],
-                          }));
-                        } else {
-                          // Split mode: toggle this version in/out of side-by-side view
-                          setActiveVersionsByCompany((prev) => {
-                            const current = getActiveEntryIdsForGroup(group);
-                            if (current.includes(q.id)) {
-                              if (current.length > 1) {
-                                return {
-                                  ...prev,
-                                  [group.companyName]: current.filter((id) => id !== q.id),
-                                };
-                              }
-                              return prev;
-                            } else {
-                              return {
-                                ...prev,
-                                [group.companyName]: [...current, q.id],
-                              };
-                            }
-                          });
-                        }
-                      }}
-                      className={`px-2.5 py-0.5 rounded text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
-                        isThisCard
-                          ? "bg-[#1b1717] text-white shadow-xs"
-                          : isThisActive
-                          ? "bg-neutral-700 text-white hover:bg-neutral-800"
-                          : "bg-[#f5f5f7] text-[#454545] hover:bg-neutral-200 border border-[#e5e5ea]"
-                      }`}
-                      title={`v${q.version || qIdx + 1} • Uploaded: ${formattedUpload} • RM ${q.total_payable.toFixed(2)} (${
-                        q.valuation_type === "agreed_value" ? "Agreed" : "Market"
-                      }) • Click to ${splitModeByCompany[group.companyName] ? "toggle in split view" : "switch version in frame"}`}
-                    >
-                      <span>v{q.version || qIdx + 1}</span>
-                      {isEntryWinner && (
-                        <Star
-                          weight="fill"
-                          size={10}
-                          className={isThisCard ? "text-amber-300" : "text-amber-500"}
-                        />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Split Mode Toggle Button (if insurer has 2+ versions) */}
-              {group.entries.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const nextSplit = !splitModeByCompany[group.companyName];
-                    setSplitModeByCompany((prev) => ({
-                      ...prev,
-                      [group.companyName]: nextSplit,
-                    }));
-                    if (nextSplit) {
-                      // Expand all versions side-by-side
-                      setActiveVersionsByCompany((prev) => ({
-                        ...prev,
-                        [group.companyName]: group.entries.map((e) => e.id),
-                      }));
-                    } else {
-                      // Collapse to current single frame
-                      setActiveVersionsByCompany((prev) => ({
-                        ...prev,
-                        [group.companyName]: [entry.id],
-                      }));
-                    }
-                  }}
-                  className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-colors flex items-center gap-1 cursor-pointer shrink-0 ${
-                    splitModeByCompany[group.companyName]
-                      ? "bg-neutral-900 text-white border-neutral-900"
-                      : "bg-[#f5f5f7] text-[#6e6e73] hover:text-[#1b1717] border-[#e5e5ea] hover:bg-neutral-200"
-                  }`}
-                  title={
-                    splitModeByCompany[group.companyName]
-                      ? "Split view active: All versions open side-by-side. Click to collapse to single frame."
-                      : "Click to open all versions of this insurer side-by-side in split view."
-                  }
-                >
-                  <Columns size={12} weight={splitModeByCompany[group.companyName] ? "fill" : "bold"} />
-                  <span>{splitModeByCompany[group.companyName] ? "Split On" : "Split"}</span>
-                </button>
+            {/* Row 3: Dedicated Version Row with Clean Inline Switcher */}
+            <div className="mt-2 min-h-[28px] flex items-center justify-between gap-1.5">
+              {group.entries.length > 1 ? (
+                <div className="flex items-center gap-1 p-0.5 bg-neutral-100 rounded-lg border border-neutral-200">
+                  {[...group.entries]
+                    .sort((a, b) => (a.version || 0) - (b.version || 0))
+                    .map((q) => {
+                      const isThisSelected = q.id === entry.id;
+                      const maxVer = Math.max(...group.entries.map((x) => x.version || 1));
+                      const isLatest = (q.version || 1) === maxVer;
+                      return (
+                        <button
+                          key={q.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveVersionsByCompany((prev) => ({
+                              ...prev,
+                              [group.companyName]: [q.id],
+                            }));
+                          }}
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                            isThisSelected
+                              ? "bg-[#1b1717] text-white shadow-xs"
+                              : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-200/60"
+                          }`}
+                          title={`v${q.version || 1} • RM ${q.total_payable.toFixed(2)}${isLatest ? " (Latest)" : ""}`}
+                        >
+                          <span>v{q.version || 1}</span>
+                          {isLatest && <span className="text-[9px] opacity-75 font-normal">Latest</span>}
+                          {q.is_recommended && (
+                            <Star
+                              weight="fill"
+                              size={10}
+                              className={isThisSelected ? "text-amber-300" : "text-amber-500"}
+                            />
+                          )}
+                        </button>
+                      );
+                    })}
+                </div>
+              ) : (
+                <span className="text-[10px] font-semibold text-neutral-500 bg-neutral-100 px-2 py-0.5 rounded border border-neutral-200">
+                  v{entry.version || 1} (Latest)
+                </span>
               )}
+              <span className="text-[10px] text-neutral-400 font-mono">
+                {entry.is_manual ? "Portal" : "PDF"}
+              </span>
             </div>
 
             {/* Row 4: Valuation & Quotation Reference */}
-            <div className="mt-2 pt-1 border-t border-[#e5e5ea]/80 flex items-center justify-between gap-1.5">
+            <div className="mt-2 pt-1 border-t border-[#e5e5ea]/80 flex items-center justify-between gap-1.5 min-h-[22px]">
               <div className="flex items-center gap-1.5 min-w-0">
                 <span className="text-xs text-[#6e6e73] font-medium">
                   {entry.valuation_type === "agreed_value" ? "Agreed Value 约定价" : "Market Value 市价"}
@@ -1325,23 +1287,21 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               </span>
             </div>
 
-            {/* Row 5: Policy Period (Extracted from PDF) */}
-            <div className={`mt-2 pt-1.5 border-t border-[#e5e5ea]/80 flex items-center justify-between text-[11px] ${
-              isWinner ? "bg-amber-100/60 -mx-4 -mb-4 px-4 py-2 border-t border-amber-300 rounded-b-none" : ""
-            }`}>
-              <span className={`font-semibold ${isWinner ? "text-amber-950 flex items-center gap-1 font-bold" : "text-[#6e6e73]"}`}>
+            {/* Row 5: Policy Period */}
+            <div className="mt-2 pt-1.5 border-t border-[#e5e5ea]/80 flex items-center justify-between text-[11px] min-h-[26px]">
+              <span className="text-[#6e6e73] font-medium flex items-center gap-1">
                 {isWinner && <Star size={11} weight="fill" className="text-amber-500" />}
                 {isWinner ? "Winner Period:" : "Period:"}
               </span>
-              <span className={`font-mono ${isWinner ? "font-bold text-amber-950" : "text-neutral-800 font-medium"}`}>
+              <span className={`font-mono ${isWinner ? "font-bold text-neutral-900" : "text-neutral-800 font-medium"}`}>
                 {entry.coverage_period_formatted || tenure.coverage_period_formatted}
               </span>
             </div>
           </div>
 
-          {/* Numeric Figures Card */}
+          {/* Numeric Figures Card with Exact Locked Heights */}
           <div className="p-4 space-y-3.5 border-b border-[#e5e5ea]">
-            <div>
+            <div className="h-[48px] flex flex-col justify-center">
               <span className="text-[11px] uppercase font-bold text-[#6e6e73] block mb-0.5">
                 Sum Insured (保额)
               </span>
@@ -1355,7 +1315,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               </div>
             </div>
 
-            <div>
+            <div className="h-[44px] flex flex-col justify-center">
               <span className="text-[11px] uppercase font-bold text-[#6e6e73] block mb-0.5">
                 Motor Premium (车险)
               </span>
@@ -1366,7 +1326,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
 
             {/* Total Payable Box */}
             <div
-              className={`rounded-xl p-3.5 border transition-colors ${
+              className={`rounded-xl p-3.5 border transition-colors h-[92px] flex flex-col justify-between ${
                 isWinner
                   ? "border-2 border-[#1b1717] bg-[#f5f5f7]"
                   : "border border-[#e5e5ea] bg-[#f5f5f7]/80"
@@ -1381,22 +1341,22 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               >
                 RM {(entry.rounded_total_payable != null ? entry.rounded_total_payable : Math.ceil(entry.total_payable)).toFixed(2)}
               </p>
-              <span className="text-[11px] text-[#6e6e73] font-medium block mt-0.5">
+              <span className="text-[11px] text-[#6e6e73] font-medium block">
                 (Incl. RM {tenure.fixed_costs_total.toFixed(2)} Roadtax &amp; Runner fee)
               </span>
             </div>
           </div>
 
           {/* Feature Comparison Rows */}
-          <div className="p-4 space-y-2.5 text-xs divide-y divide-[#e5e5ea]">
+          <div className="p-4 space-y-2 text-xs divide-y divide-[#e5e5ea]">
             {/* Towing Limit */}
-            <div className="flex items-center justify-between pt-1">
+            <div className="h-8 flex items-center justify-between pt-1">
               <span className="text-[#6e6e73]">Towing (拖车):</span>
               <span className="font-bold text-[#1b1717]">{formatBenefitCoverage(entry.towing_km || entry.towing_limit || "Unlimited", "KM")}</span>
             </div>
 
             {/* Agreed Value */}
-            <div className="flex items-center justify-between pt-2">
+            <div className="h-8 flex items-center justify-between pt-2">
               <span className="text-[#6e6e73]">Agreed Value:</span>
               <span className={`font-bold ${entry.agreed_value ? "text-emerald-700" : "text-[#6e6e73]"}`}>
                 {entry.agreed_value ? "Yes" : "No"}
@@ -1404,8 +1364,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             </div>
 
             {/* Betterment Co-pay / Waiver */}
-            {/* Betterment Co-pay / Waiver with BNM Scale Tooltip */}
-            <div className="flex items-center justify-between pt-2">
+            <div className="h-8 flex items-center justify-between pt-2">
               <div className="flex items-center gap-1 text-[#6e6e73]">
                 <span>Betterment (自付额):</span>
               </div>
@@ -1422,15 +1381,15 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             </div>
 
             {/* Excess */}
-            <div className="flex items-center justify-between pt-2">
+            <div className="h-8 flex items-center justify-between pt-2">
               <span className="text-[#6e6e73]">Excess:</span>
               <span className="font-mono font-bold text-[#1b1717]">
                 RM {entry.excess.toFixed(2)}
               </span>
             </div>
 
-            {/* Rate: Formula = (Basic Premium or Contribution) / Sum Insured (6 decimals) */}
-            <div className="flex items-center justify-between pt-2">
+            {/* Rate */}
+            <div className="h-8 flex items-center justify-between pt-2">
               <span className="text-[#6e6e73]">Rate:</span>
               <span
                 className="font-mono font-bold text-[#1b1717] cursor-help"
@@ -1447,7 +1406,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             </div>
 
             {/* Windscreen (Target vs Sourced) */}
-            <div className="flex items-center justify-between pt-2">
+            <div className="min-h-[38px] flex items-center justify-between pt-2">
               <span className="text-[#6e6e73]">Windscreen:</span>
               <div className="text-right">
                 <span className="font-mono font-bold text-[#1b1717]">
@@ -1472,7 +1431,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             </div>
 
             {/* Special Perils / Flood */}
-            <div className="flex items-center justify-between pt-2">
+            <div className="h-8 flex items-center justify-between pt-2">
               <span className="text-[#6e6e73]">Special Perils:</span>
               <span className={`font-bold ${entry.special_perils ? "text-emerald-700" : "text-[#6e6e73]"}`}>
                 {entry.special_perils ? formatBenefitCoverage(entry.special_perils, "RM") : "Not Included"}
@@ -1480,7 +1439,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             </div>
 
             {/* LLP / LLOP (Passenger Liability) */}
-            <div className="flex items-center justify-between pt-2">
+            <div className="h-8 flex items-center justify-between pt-2">
               <span className="text-[#6e6e73]">LLP / LLOP:</span>
               <span className={`font-bold ${entry.llp_llop ? "text-[#1b1717]" : "text-[#6e6e73]"}`}>
                 {entry.llp_llop || "—"}
@@ -1684,7 +1643,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         )}
 
         {/* 3-Stage Action Stepper Bar */}
-        <div className="rounded-2xl border border-[#e5e5ea] bg-white p-3 shadow-xs no-print print:hidden">
+        <div id="tour-stepper" className="rounded-2xl border border-[#e5e5ea] bg-white p-3 shadow-xs no-print print:hidden">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
           {/* Stage 1: Compare Underwriters */}
           <div className="flex items-center gap-3 p-3 rounded-xl bg-[#f5f5f7]">
@@ -2147,7 +2106,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         {/* ============================================================== */}
         {/* LEFT PANE: Customer Dossier & Vehicle Fixed Costs              */}
         {/* ============================================================== */}
-        <div className="rounded-2xl border border-[#e5e5ea] bg-white shadow-sm overflow-hidden sticky top-6 print:static print:shadow-none break-inside-avoid">
+        <div id="tour-customer-ledger" className="rounded-2xl border border-[#e5e5ea] bg-white shadow-sm overflow-hidden sticky top-6 print:static print:shadow-none break-inside-avoid">
           <div className="bg-[#f5f5f7] px-4 py-3 border-b border-[#e5e5ea] flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-[#1b1717]">
               Customer &amp; Vehicle Ledger
@@ -2298,7 +2257,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                       <span className="text-neutral-500 font-mono">({data.covernote_policy.policy_number || "Official Issue"})</span>
                       {data.covernote_policy.uploaded_file_id && (
                         <a
-                          href={`/api/quotations/files/${data.covernote_policy.uploaded_file_id}/download`}
+                          href={fileUrl(`/uploaded-files/${data.covernote_policy.uploaded_file_id}/content`)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-emerald-700 hover:text-emerald-900 underline ml-1 font-semibold"
@@ -2314,7 +2273,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                       <strong className="text-neutral-800">{currentPolicyWinner.company_name}</strong>
                       {currentPolicyWinner.uploaded_file_id && (
                         <a
-                          href={`/api/files/${currentPolicyWinner.uploaded_file_id}`}
+                          href={fileUrl(`/uploaded-files/${currentPolicyWinner.uploaded_file_id}/content`)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-emerald-700 hover:text-emerald-900 underline ml-1 font-semibold"
@@ -2576,7 +2535,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         {/* ============================================================== */}
         {/* CENTER PANE: Dynamic Side-by-Side Underwriter Columns           */}
         {/* ============================================================== */}
-        <div className="min-w-0 overflow-x-auto pb-4 print:overflow-visible print:w-full">
+        <div id="tour-comparison-matrix" className="min-w-0 overflow-x-auto pb-4 print:overflow-visible print:w-full">
           <div className="flex gap-4 min-w-max print:min-w-0 print:flex-wrap">
             {companyGroups.map((group) => {
               const activeIds = getActiveEntryIdsForGroup(group);
@@ -2778,7 +2737,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         {/* ============================================================== */}
         {/* RIGHT PANE: Previous Policy & Valuation Matrix                 */}
         {/* ============================================================== */}
-        <div className="space-y-4 sticky top-6">
+        <div id="tour-current-policy" className="space-y-4 sticky top-6">
           {/* Current Policy Card (Official Cover Note OR Leading Option) */}
           {(() => {
             const currentYear = tenure.coverage_start_date ? new Date(tenure.coverage_start_date).getFullYear() : new Date().getFullYear();
@@ -2884,7 +2843,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                     <div className="pt-3 border-t border-emerald-200 flex items-center gap-2">
                       {cn.uploaded_file_id && (
                         <a
-                          href={`/api/quotations/files/${cn.uploaded_file_id}/download`}
+                          href={fileUrl(`/uploaded-files/${cn.uploaded_file_id}/content`)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 shadow-2xs transition-colors"
@@ -2908,6 +2867,62 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                     <div className="mt-2 text-center text-[10px] font-bold text-emerald-800 bg-emerald-100/70 rounded py-1 border border-emerald-200/80">
                       ✓ Policy Issued · Verified Binding Terms
                     </div>
+
+                    {/* Expandable Previously Removed / Available Policies Drawer */}
+                    {data.unlinked_covernotes && data.unlinked_covernotes.length > 0 && (
+                      <div className="mt-3 pt-2.5 border-t border-emerald-200">
+                        <button
+                          type="button"
+                          onClick={() => setIsUnlinkedDrawerOpen((prev) => !prev)}
+                          className="w-full flex items-center justify-between text-[11px] font-semibold text-emerald-900 hover:text-emerald-950 transition-colors py-1 px-1.5 rounded hover:bg-emerald-100/60 cursor-pointer"
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <FilePdf size={13} className="text-emerald-700" />
+                            <span>Previously Removed Policies ({data.unlinked_covernotes.length})</span>
+                          </span>
+                          {isUnlinkedDrawerOpen ? <CaretUp size={12} /> : <CaretDown size={12} />}
+                        </button>
+
+                        {isUnlinkedDrawerOpen && (
+                          <div className="mt-2 space-y-2 max-h-56 overflow-y-auto pr-1">
+                            {data.unlinked_covernotes.map((uc) => (
+                              <div
+                                key={uc.session_id}
+                                className="p-2 rounded-lg bg-white/90 border border-emerald-200 text-xs flex items-center justify-between gap-2 shadow-2xs"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="font-bold text-neutral-900 truncate">{uc.company_name}</div>
+                                  <div className="text-[10px] text-neutral-500 font-mono truncate" title={uc.uploaded_file_name}>
+                                    {uc.uploaded_file_name}
+                                  </div>
+                                  <div className="text-[10px] text-neutral-400">{uc.coverage_period_formatted}</div>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {uc.uploaded_file_id && (
+                                    <a
+                                      href={fileUrl(`/uploaded-files/${uc.uploaded_file_id}/content`)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="px-2 py-1 text-[10px] font-semibold text-neutral-700 bg-white border border-neutral-300 rounded hover:bg-neutral-100"
+                                    >
+                                      View PDF ↗
+                                    </a>
+                                  )}
+                                  <button
+                                    type="button"
+                                    disabled={isLinkingCovernote}
+                                    onClick={() => handleLinkCovernote(uc.session_id)}
+                                    className="px-2 py-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 rounded hover:bg-emerald-200 transition-colors cursor-pointer disabled:opacity-50"
+                                  >
+                                    {isLinkingCovernote ? "Linking..." : "Link Policy"}
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -3005,6 +3020,62 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                 ) : (
                   <div className="text-center py-4 text-xs text-[#6e6e73]">
                     <p>No policy or quotations active yet.</p>
+                  </div>
+                )}
+
+                {/* Expandable Previously Removed / Available Policies Drawer (when unlinked) */}
+                {data.unlinked_covernotes && data.unlinked_covernotes.length > 0 && (
+                  <div className="mt-3 pt-2.5 border-t border-[#e5e5ea]">
+                    <button
+                      type="button"
+                      onClick={() => setIsUnlinkedDrawerOpen((prev) => !prev)}
+                      className="w-full flex items-center justify-between text-[11px] font-semibold text-neutral-600 hover:text-neutral-900 transition-colors py-1 px-1.5 rounded hover:bg-neutral-100 cursor-pointer"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <FilePdf size={13} className="text-neutral-500" />
+                        <span>Previously Removed Policies ({data.unlinked_covernotes.length})</span>
+                      </span>
+                      {isUnlinkedDrawerOpen ? <CaretUp size={12} /> : <CaretDown size={12} />}
+                    </button>
+
+                    {isUnlinkedDrawerOpen && (
+                      <div className="mt-2 space-y-2 max-h-56 overflow-y-auto pr-1">
+                        {data.unlinked_covernotes.map((uc) => (
+                          <div
+                            key={uc.session_id}
+                            className="p-2 rounded-lg bg-neutral-50 border border-neutral-200 text-xs flex items-center justify-between gap-2 shadow-2xs"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="font-bold text-neutral-900 truncate">{uc.company_name}</div>
+                              <div className="text-[10px] text-neutral-500 font-mono truncate" title={uc.uploaded_file_name}>
+                                {uc.uploaded_file_name}
+                              </div>
+                              <div className="text-[10px] text-neutral-400">{uc.coverage_period_formatted}</div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {uc.uploaded_file_id && (
+                                <a
+                                  href={fileUrl(`/uploaded-files/${uc.uploaded_file_id}/content`)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-2 py-1 text-[10px] font-semibold text-neutral-700 bg-white border border-neutral-300 rounded hover:bg-neutral-100"
+                                >
+                                  View PDF ↗
+                                </a>
+                              )}
+                              <button
+                                type="button"
+                                disabled={isLinkingCovernote}
+                                onClick={() => handleLinkCovernote(uc.session_id)}
+                                className="px-2 py-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 rounded hover:bg-emerald-200 transition-colors cursor-pointer disabled:opacity-50"
+                              >
+                                {isLinkingCovernote ? "Linking..." : "Link Policy"}
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

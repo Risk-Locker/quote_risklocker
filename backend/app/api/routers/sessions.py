@@ -1237,6 +1237,8 @@ def extraction_detail(uploaded_file_id: str, db: Session = Depends(get_db), user
 
 
 @router.get("/uploaded-files/{uploaded_file_id}/content")
+@router.get("/quotations/files/{uploaded_file_id}/download")
+@router.get("/quotations/files/{uploaded_file_id}/content")
 def uploaded_file_content(
     uploaded_file_id: str,
     download: bool = Query(default=False),
