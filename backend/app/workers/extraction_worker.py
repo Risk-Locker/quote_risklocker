@@ -619,6 +619,14 @@ def process_extraction_job(
             session.policy_number = cand_pno
             tenure.policy_number = cand_pno
 
+        # Cleanly replace previous cover note if duplicate/revised covernote uploaded for this tenure
+        if tenure.covernote_session_id and tenure.covernote_session_id != session.id:
+            old_cn_sess = db.get(Session, tenure.covernote_session_id)
+            if old_cn_sess:
+                old_cn_sess.status = "trash"
+                old_cn_sess.document_type = "unlinked_covernote"
+                old_cn_sess.tenure_id = None
+
         # Anchor Cover Note directly into tenure
         tenure.covernote_session_id = session.id
         if parsed_s_start:

@@ -826,6 +826,13 @@ def update_tenure_ledger_fields(
     old_status = tenure.status
 
     if payload.stage is not None and payload.stage != tenure.stage:
+        # Pipeline Lock Invariant:
+        # If an official Cover Note is active, do not allow reverting to Quotations or Material to Client
+        if payload.stage in ("Quotations", "Material to Client") and tenure.covernote_session_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot revert stage to Quotations or Material to Client while an official Cover Note is linked. Unlink the Cover Note in the Marketing Comparison table first."
+            )
         tenure.stage = payload.stage
         if payload.stage == "Close - Win":
             tenure.status = "hit"
@@ -1047,19 +1054,19 @@ def update_tenure_ledger_fields(
                     ot.is_main = False
 
     # Auto renewal lifecycle:
-    # 1. When marked HIT (Close - Win), auto-create the next year renewal tenure with empty comparison
     from app.services.insurance_tenure_service import (
         create_next_year_renewal_tenure,
         remove_auto_created_next_year_tenure,
     )
     is_hit = (tenure.stage == "Close - Win" or tenure.status == "hit") and not tenure.is_discarded
+    is_miss = (tenure.stage == "Close - Lose" or tenure.status == "miss") and not tenure.is_discarded
     was_hit = (old_stage == "Close - Win" or old_status == "hit")
 
-    if is_hit:
+    if payload.is_discarded or tenure.is_discarded:
+        remove_auto_created_next_year_tenure(db, tenure)
+    elif is_hit or is_miss:
         create_next_year_renewal_tenure(db, tenure, user_id=user.id)
     elif was_hit and not is_hit:
-        remove_auto_created_next_year_tenure(db, tenure)
-    elif payload.is_discarded or tenure.stage == "Close - Lose" or tenure.status == "miss":
         remove_auto_created_next_year_tenure(db, tenure)
 
     tenure.last_activity_at = now

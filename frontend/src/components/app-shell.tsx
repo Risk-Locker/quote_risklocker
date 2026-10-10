@@ -86,6 +86,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     vehicle_no?: string;
     company?: string;
     timestamp?: number;
+    count?: number;
+    vehicles?: string[];
   } | null>(null);
 
   useEffect(() => {
@@ -93,8 +95,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       const stored = localStorage.getItem("rl_latest_policy_issue");
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (parsed && (!parsed.timestamp || Date.now() - parsed.timestamp < 3600000)) {
+        // Only show if generated within the last 8 seconds
+        if (parsed && parsed.timestamp && Date.now() - parsed.timestamp < 8000) {
           setLatestPolicyIssue(parsed);
+        } else {
+          localStorage.removeItem("rl_latest_policy_issue");
         }
       }
     } catch {}
@@ -111,6 +116,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       window.removeEventListener("rl_policy_issued", handlePolicyIssued);
     };
   }, []);
+
+  // Auto-dismiss notification after 7 seconds
+  useEffect(() => {
+    if (!latestPolicyIssue) return;
+    const timer = setTimeout(() => {
+      setLatestPolicyIssue(null);
+      try {
+        localStorage.removeItem("rl_latest_policy_issue");
+      } catch {}
+    }, 7000);
+    return () => clearTimeout(timer);
+  }, [latestPolicyIssue]);
 
   useEffect(() => {
     try {
@@ -274,8 +291,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      {/* Top Banner: Real-time Policy Issued Notification */}
-      {latestPolicyIssue && (
+      {/* Top Banner: Real-time Policy Issued Notification (suppressed in quotation workspace and builder) */}
+      {latestPolicyIssue && !(pathname?.startsWith("/workspace") || pathname?.startsWith("/builder") || pathname?.includes("/review")) && (
         <aside
           aria-label="Policy Issued Notification"
           className="sticky top-[56px] z-30 w-full bg-emerald-900 border-b border-emerald-700 text-white px-4 py-2 shadow-md flex items-center justify-between gap-3 text-xs transition-all animate-fade-in"
@@ -283,11 +300,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-2 min-w-0">
             <span className="text-base select-none">🎉</span>
             <span className="font-semibold truncate">
-              Policy Issued for{" "}
-              <strong className="font-mono text-emerald-200 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-700/50">
-                {latestPolicyIssue.vehicle_no || "Vehicle"}
-              </strong>
-              {latestPolicyIssue.company ? ` (${latestPolicyIssue.company})` : ""}
+              {latestPolicyIssue.count && latestPolicyIssue.count > 1 ? (
+                <>
+                  <strong className="font-mono text-emerald-200 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-700/50">
+                    {latestPolicyIssue.count} Policies Issued
+                  </strong>
+                  <span className="ml-1.5 text-emerald-100">
+                    ({latestPolicyIssue.vehicles?.slice(0, 3).join(", ") || latestPolicyIssue.vehicle_no}
+                    {latestPolicyIssue.vehicles && latestPolicyIssue.vehicles.length > 3 ? "…" : ""})
+                  </span>
+                </>
+              ) : (
+                <>
+                  Policy Issued for{" "}
+                  <strong className="font-mono text-emerald-200 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-700/50">
+                    {latestPolicyIssue.vehicle_no || "Vehicle"}
+                  </strong>
+                  {latestPolicyIssue.company ? ` (${latestPolicyIssue.company})` : ""}
+                </>
+              )}
             </span>
             <span className="text-emerald-300 text-[11px] font-medium hidden sm:inline">· Just now</span>
           </div>
@@ -296,6 +327,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               type="button"
               onClick={() => {
                 const target = latestPolicyIssue.tenure_id;
+                setLatestPolicyIssue(null);
+                try {
+                  localStorage.removeItem("rl_latest_policy_issue");
+                } catch {}
                 router.push(`/ledger?highlight_tenure=${target || ""}&t=${Date.now()}` as Route);
               }}
               className="inline-flex items-center gap-1.5 bg-emerald-100 hover:bg-white text-emerald-950 font-bold px-3 py-1 rounded text-xs transition-colors cursor-pointer shadow-2xs"

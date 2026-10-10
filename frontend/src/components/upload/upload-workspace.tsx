@@ -612,11 +612,27 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
               /cover[\s_-]*note/i.test(bulkFiles.find((f) => f.id === itemId)?.file?.name || "");
 
             if (isCoverNote && resolvedTenureId) {
+              const currentPlate = sRes.session.vehicle_plate || bulkFiles.find((f) => f.id === itemId)?.file?.name || "Vehicle";
+              let existingBatch: any = null;
+              try {
+                const raw = localStorage.getItem("rl_latest_policy_issue");
+                if (raw) {
+                  const p = JSON.parse(raw);
+                  if (p && p.timestamp && Date.now() - p.timestamp < 15000) {
+                    existingBatch = p;
+                  }
+                }
+              } catch {}
+
+              const count = (existingBatch?.count || 0) + 1;
+              const vehicles = Array.from(new Set([...(existingBatch?.vehicles || []), currentPlate]));
               const eventData = {
                 tenure_id: resolvedTenureId,
-                vehicle_no: sRes.session.vehicle_plate || bulkFiles.find((f) => f.id === itemId)?.file?.name || "Vehicle",
+                vehicle_no: currentPlate,
                 company: sRes.session.detected_company || "Underwriter",
                 timestamp: Date.now(),
+                count,
+                vehicles,
               };
               try {
                 localStorage.setItem("rl_latest_policy_issue", JSON.stringify(eventData));

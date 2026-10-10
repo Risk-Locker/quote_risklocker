@@ -84,7 +84,7 @@ def _make_vehicle(db: Session, vehicle_no: str, model: str = "Honda Civic") -> T
 
 
 def test_ensure_next_year_renewal_tenures_roll_forward(db_session: Session, test_user: User):
-    """Active 2026 vehicles that are never missed/dropped get 2027 renewal tenures."""
+    """Active and missed 2026 vehicles (not dropped) get 2027 renewal tenures for annual follow-up."""
     v1 = _make_vehicle(db_session, "WXY 1234")
     v_drop = _make_vehicle(db_session, "BBA 9999")
     v_miss = _make_vehicle(db_session, "CCC 8888")
@@ -122,7 +122,7 @@ def test_ensure_next_year_renewal_tenures_roll_forward(db_session: Session, test
         is_projected=False,
     )
 
-    # 3. Missed vehicle (ineligible)
+    # 3. Missed vehicle (eligible for next-year win-back outreach)
     t_missed = InsuranceTenure(
         id=new_id(),
         tracked_vehicle_id=v_miss.id,
@@ -142,9 +142,14 @@ def test_ensure_next_year_renewal_tenures_roll_forward(db_session: Session, test
 
     # Trigger ensure_next_year_renewal_tenures for 2027
     created = ensure_next_year_renewal_tenures(db_session, target_year=2027, user_id=test_user.id)
-    assert len(created) == 1
-    new_t = created[0]
-    assert new_t.vehicle_no == "WXY 1234"
+    # Both active vehicle and missed vehicle roll forward; dropped vehicle is excluded
+    assert len(created) == 2
+    created_plates = {t.vehicle_no for t in created}
+    assert "WXY 1234" in created_plates
+    assert "CCC 8888" in created_plates
+    assert "BBA 9999" not in created_plates
+
+    new_t = next(t for t in created if t.vehicle_no == "WXY 1234")
     assert new_t.customer_name == "Alice Tan"
     assert new_t.previous_tenure_id == t1.id
     assert new_t.coverage_start_date.year == 2027

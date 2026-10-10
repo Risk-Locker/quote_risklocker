@@ -717,7 +717,7 @@ def ensure_next_year_renewal_tenures(
     target_year: int = 2027,
     user_id: str | None = None,
 ) -> list[InsuranceTenure]:
-    """Ensure all active non-dropped and non-missed vehicles have a next-year renewal tenure."""
+    """Ensure all active vehicles (including missed deals for win-back follow-up) have a next-year renewal tenure."""
     target_cutoff = datetime(target_year, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
     target_end_cutoff = datetime(target_year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
 
@@ -731,19 +731,13 @@ def ensure_next_year_renewal_tenures(
         ).all()
     )
 
-    # 2. Query all active tenures before target_cutoff that are not missed and not dropped
+    # 2. Query all active tenures before target_cutoff that are not dropped (includes won, in-progress, and missed deals)
     candidates = list(
         db.scalars(
             select(InsuranceTenure).where(
                 InsuranceTenure.coverage_start_date < target_cutoff,
                 InsuranceTenure.is_discarded == False,
                 InsuranceTenure.is_projected == False,
-                InsuranceTenure.status != "miss",
-                or_(
-                    InsuranceTenure.status == "hit",
-                    InsuranceTenure.stage == "Close - Win",
-                    InsuranceTenure.covernote_session_id.isnot(None),
-                ),
             ).order_by(InsuranceTenure.coverage_start_date.desc())
         ).all()
     )

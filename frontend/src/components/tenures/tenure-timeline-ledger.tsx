@@ -364,7 +364,16 @@ export function TenureTimelineLedger() {
 
       const clearTimer = setTimeout(() => {
         setHighlightedTenureId(null);
-      }, 30000); // 30 seconds illumination
+        // Clear param from URL so page refresh doesn't re-trigger blinking
+        try {
+          const currentUrl = new URL(window.location.href);
+          if (currentUrl.searchParams.has("highlight_tenure")) {
+            currentUrl.searchParams.delete("highlight_tenure");
+            currentUrl.searchParams.delete("t");
+            window.history.replaceState({}, "", currentUrl.pathname + (currentUrl.search ? `?${currentUrl.searchParams.toString()}` : ""));
+          }
+        } catch {}
+      }, 6000); // 6 seconds soft illumination
       return () => clearTimeout(clearTimer);
     }
   }, [searchParams]);
@@ -676,6 +685,20 @@ export function TenureTimelineLedger() {
                       }
                       patchTenureField(t.id, { stage: "Issue Policy" });
                     } else {
+                      const isPolicyIssued = Boolean(
+                        t.covernote_policy ||
+                        t.is_covernote_issued ||
+                        t.stage === "Issue Policy" ||
+                        t.stage === "Close - Win" ||
+                        t.status === "hit"
+                      );
+                      if (isPolicyIssued && (st.id === "Quotations" || st.id === "Material to Client")) {
+                        alert(
+                          `This policy has already been issued with an official Cover Note for ${t.vehicle_no || "this vehicle"}.\n\n` +
+                          `The pipeline is locked to protect the issued policy. To move the pipeline back to ${st.label}, you must first unlink/remove the Cover Note in the Marketing Comparison table.`
+                        );
+                        return;
+                      }
                       patchTenureField(t.id, { stage: st.id });
                     }
                   }}
@@ -689,6 +712,8 @@ export function TenureTimelineLedger() {
                   title={
                     st.id === "Issue Policy" && !Boolean(t.covernote_policy || t.is_covernote_issued)
                       ? "Official Cover Note PDF required to reach Issue Policy stage. Click to upload."
+                      : Boolean(t.covernote_policy || t.is_covernote_issued) && (st.id === "Quotations" || st.id === "Material to Client")
+                      ? "Cover Note is active. Unlink Cover Note in Marketing Comparison first to revert stage."
                       : tooltipText
                   }
                 >
@@ -885,14 +910,18 @@ export function TenureTimelineLedger() {
     loadTenures();
   }, [loadTenures]);
 
-  // Auto-refresh ledger on window focus (e.g. after returning from Quotation Workspace)
+  // Auto-refresh ledger on window focus or when policy is issued via upload
   useEffect(() => {
-    const handleFocus = () => {
+    const handleRefresh = () => {
       loadTenures();
       loadStageSummary();
     };
-    window.addEventListener("focus", handleFocus);
-    return () => window.removeEventListener("focus", handleFocus);
+    window.addEventListener("focus", handleRefresh);
+    window.addEventListener("rl_policy_issued", handleRefresh);
+    return () => {
+      window.removeEventListener("focus", handleRefresh);
+      window.removeEventListener("rl_policy_issued", handleRefresh);
+    };
   }, [loadTenures, loadStageSummary]);
 
   // Load Calendar Quotation Sessions
@@ -2064,7 +2093,7 @@ export function TenureTimelineLedger() {
                           id={`tenure-row-${mainTenure.id}`}
                           className={`hover:bg-neutral-50/80 transition-colors ${
                             highlightedTenureId === mainTenure.id
-                              ? "bg-emerald-100/90 ring-4 ring-emerald-500 ring-inset shadow-xl animate-pulse"
+                              ? "bg-emerald-50/90 ring-2 ring-emerald-500/80 ring-inset shadow-md transition-all duration-1000"
                               : stageConf.isLost
                               ? "bg-rose-50/20"
                               : ""

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from typing import Any
-from sqlalchemy import func, or_, select, String
+from sqlalchemy import and_, func, or_, select, String
 from sqlalchemy.orm import Session, defer, joinedload, object_session
 
 from app.core.cache import _memory_cache, invalidate_cache
 from app.core.errors import AppError
-from app.models.tables import Session as SessionModel, UploadedFile, QuotationDraft, User, OutputTemplateConfig, TemplateRevision
+from app.models.tables import Session as SessionModel, UploadedFile, QuotationDraft, User, OutputTemplateConfig, TemplateRevision, InsuranceTenure
 
 
 def get_session_filter_options(db: Session) -> dict[str, Any]:
@@ -94,7 +94,19 @@ def list_sessions(
         select(SessionModel)
         .join(UploadedFile, SessionModel.uploaded_file_id == UploadedFile.id)
         .outerjoin(QuotationDraft, SessionModel.draft_id == QuotationDraft.id)
-        .where(UploadedFile.deleted_at.is_(None))
+        .outerjoin(InsuranceTenure, SessionModel.tenure_id == InsuranceTenure.id)
+        .where(
+            UploadedFile.deleted_at.is_(None),
+            SessionModel.status != "trash",
+            or_(
+                SessionModel.is_test.is_(True),
+                and_(
+                    SessionModel.tenure_id.is_not(None),
+                    InsuranceTenure.id.is_not(None),
+                    InsuranceTenure.is_discarded.is_(False),
+                ),
+            ),
+        )
     )
     if search:
         like = f"%{search.strip()}%"
