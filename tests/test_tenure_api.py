@@ -109,15 +109,21 @@ def test_list_tenure_months_and_tenures(client: TestClient, db_session: Session)
     assert res.status_code == 200
     months_data = res.json()["months"]
     month_keys = [m["month"] for m in months_data]
-    assert "2027-09" in month_keys
-    assert "2027-10" in month_keys
+    assert "2026-09" in month_keys
+    assert "2026-10" in month_keys
 
-    # Find 2027-09 month stat
-    m_sep = next(m for m in months_data if m["month"] == "2027-09")
+    # Find 2026-09 month stat (anchored on start date)
+    m_sep = next(m for m in months_data if m["month"] == "2026-09")
     assert m_sep["total"] == 1
+    assert m_sep["start_count"] == 1
 
-    # 2. GET /api/tenures filtered by month
-    res_list = client.get("/api/tenures?month=2027-09")
+    # Find 2027-09 month stat (anchored on expiry/end date tooltip only)
+    m_sep_end = next(m for m in months_data if m["month"] == "2027-09")
+    assert m_sep_end["total"] == 0
+    assert m_sep_end["end_count"] == 1
+
+    # 2. GET /api/tenures filtered by start month
+    res_list = client.get("/api/tenures?month=2026-09")
     assert res_list.status_code == 200
     items = res_list.json()["items"]
     assert len(items) == 1

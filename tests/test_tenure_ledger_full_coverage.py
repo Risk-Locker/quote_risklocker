@@ -59,9 +59,9 @@ def test_month_stats_start_and_end_counts(db_session: Session):
     # In May 2027: 2 starting (Customer 1 & 3), 1 ending (Customer 2)
     assert may_2027["start_count"] == 2
     assert may_2027["end_count"] == 1
-    # Total distinct tenures present in May 2027 is 3!
-    assert may_2027["total"] == 3
-    assert may_2027["cars"] == 3
+    # Total tenures belonging to May 2027 ledger is 2 (anchored strictly on starting date)
+    assert may_2027["total"] == 2
+    assert may_2027["cars"] == 2
 
 
 def test_yoy_stats_car_and_period_counts(db_session: Session):

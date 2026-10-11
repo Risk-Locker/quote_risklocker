@@ -179,8 +179,8 @@ def test_stage_summary_and_tenures_parity(client: TestClient, db_session: Sessio
             "vehicle_no": "PARITY2",
             "customer_name": "Customer 2",
             "stage": "Issue Policy",
-            "coverage_start_date": "2028-10-02",
-            "coverage_end_date": "2029-10-01",
+            "coverage_start_date": "2029-10-15",
+            "coverage_end_date": "2030-10-14",
         },
     )
     assert r2.status_code == 200
@@ -388,8 +388,8 @@ def test_delete_comparison_entry_all_versions(client: TestClient, db_session: Se
     assert s2_re.status == "trash"
 
 
-def test_yoy_stats_covers_start_and_end_year(client: TestClient, db_session: Session):
-    # Create tenure spanning 2026 into 2027
+def test_yoy_stats_anchors_strictly_on_start_year(client: TestClient, db_session: Session):
+    # Create tenure spanning 2026 into 2027 (starts in 2026, ends in 2027)
     res = client.post(
         "/api/tenures",
         json={
@@ -401,11 +401,22 @@ def test_yoy_stats_covers_start_and_end_year(client: TestClient, db_session: Ses
     )
     assert res.status_code == 200
 
-    # Check YoY stats
+    # Check YoY stats: policy must be counted strictly in 2026, not 2027
     yoy_res = client.get("/api/tenures/stats/yoy")
     assert yoy_res.status_code == 200
     yoy_data = yoy_res.json()
 
     years_map = {y["year"]: y["total"] for y in yoy_data["years"]}
     assert years_map.get("2026", 0) >= 1
-    assert years_map.get("2027", 0) >= 1
+    assert years_map.get("2027", 0) == 0
+
+    # Query list_tenures: 2026 returns the deal; 2027 does NOT leak it
+    res_2026 = client.get("/api/tenures?year=2026")
+    assert res_2026.status_code == 200
+    p26 = [i["vehicle_no"] for i in res_2026.json()["items"]]
+    assert "YOYTEST20262027" in p26
+
+    res_2027 = client.get("/api/tenures?year=2027")
+    assert res_2027.status_code == 200
+    p27 = [i["vehicle_no"] for i in res_2027.json()["items"]]
+    assert "YOYTEST20262027" not in p27
