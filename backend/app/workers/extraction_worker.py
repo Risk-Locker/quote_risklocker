@@ -601,12 +601,14 @@ def process_extraction_job(
     # Detect whether this uploaded document is a Cover Note / Policy Schedule vs a Quotation
     raw_doc_text = str(full.get("raw_text") or full.get("ocr_text") or "")
     from app.extraction.candidate_finder import detect_is_covernote
-    is_cn = detect_is_covernote(text=raw_doc_text, filename=uploaded.original_filename)
+    is_cn = (session.document_type == "covernote") or detect_is_covernote(text=raw_doc_text, filename=uploaded.original_filename)
 
     curr_opts = draft.display_options or {}
 
     if is_cn:
         session.document_type = "covernote"
+        session.is_tenure_active = True
+        session.tenure_version = 1
         curr_opts["document_type"] = "covernote"
 
         # Extract and persist policy number
@@ -665,50 +667,50 @@ def process_extraction_job(
         session.document_type = "quotation"
         curr_opts["document_type"] = "quotation"
 
-    action, existing_sess, version = evaluate_tenure_ingestion(
-        db=db,
-        tenure_id=tenure.id,
-        company_name=session.detected_company,
-        company_id=draft.company_id,
-        content_hash=content_hash,
-        current_session_id=session.id,
-    )
-    if action == "SKIP_IDENTICAL" and existing_sess and existing_sess.id != session.id:
-        from app.models.tables import Session as SessionModel
-        existing_company_sessions = list(
-            db.scalars(
-                select(SessionModel).where(
-                    SessionModel.tenure_id == tenure.id,
-                    SessionModel.status != "trash",
-                )
-            ).all()
+        action, existing_sess, version = evaluate_tenure_ingestion(
+            db=db,
+            tenure_id=tenure.id,
+            company_name=session.detected_company,
+            company_id=draft.company_id,
+            content_hash=content_hash,
+            current_session_id=session.id,
         )
-        clean_comp = (session.detected_company or "").strip().lower()
-        same_comp_sessions = [
-            s for s in existing_company_sessions
-            if s.detected_company and s.detected_company.strip().lower() == clean_comp
-        ]
-        max_v = max((s.tenure_version for s in same_comp_sessions), default=existing_sess.tenure_version)
-        new_version = max_v + 1
+        if action == "SKIP_IDENTICAL" and existing_sess and existing_sess.id != session.id:
+            from app.models.tables import Session as SessionModel
+            existing_company_sessions = list(
+                db.scalars(
+                    select(SessionModel).where(
+                        SessionModel.tenure_id == tenure.id,
+                        SessionModel.status != "trash",
+                    )
+                ).all()
+            )
+            clean_comp = (session.detected_company or "").strip().lower()
+            same_comp_sessions = [
+                s for s in existing_company_sessions
+                if s.detected_company and s.detected_company.strip().lower() == clean_comp
+            ]
+            max_v = max((s.tenure_version for s in same_comp_sessions), default=existing_sess.tenure_version)
+            new_version = max_v + 1
 
-        session.status = "active"
-        session.is_tenure_active = False
-        session.tenure_version = new_version
-        session.duplicate_of_session_id = existing_sess.id
-        session.duplicate_resolution = "pending"
+            session.status = "active"
+            session.is_tenure_active = False
+            session.tenure_version = new_version
+            session.duplicate_of_session_id = existing_sess.id
+            session.duplicate_resolution = "pending"
 
-        curr_opts["duplicate_detected"] = True
-        curr_opts["original_session_id"] = existing_sess.id
-        curr_opts["original_version"] = existing_sess.tenure_version
-        curr_opts["new_version"] = new_version
-        curr_opts["duplicate_message"] = (
-            f"Uploaded quote for {session.detected_company or 'this insurer'} is identical to v{existing_sess.tenure_version}."
-        )
-    else:
-        session.tenure_version = version
-        session.is_tenure_active = True
-        if version > 1:
-            curr_opts["tenure_version_notice"] = f"Created revised version v{version} under {session.detected_company or 'insurer'}."
+            curr_opts["duplicate_detected"] = True
+            curr_opts["original_session_id"] = existing_sess.id
+            curr_opts["original_version"] = existing_sess.tenure_version
+            curr_opts["new_version"] = new_version
+            curr_opts["duplicate_message"] = (
+                f"Uploaded quote for {session.detected_company or 'this insurer'} is identical to v{existing_sess.tenure_version}."
+            )
+        else:
+            session.tenure_version = version
+            session.is_tenure_active = True
+            if version > 1:
+                curr_opts["tenure_version_notice"] = f"Created revised version v{version} under {session.detected_company or 'insurer'}."
     draft.display_options = curr_opts
 
     complete_job(

@@ -403,6 +403,7 @@ async def upload_one(
     enhanced_reading: bool = Form(False),
     is_test: bool = Form(False),
     tenure_id: str | None = Form(None),
+    document_type: str | None = Form(None),
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
     db: Session = Depends(get_db),
     settings: Settings = Depends(settings_dep),
@@ -417,6 +418,7 @@ async def upload_one(
         enhanced_reading=enhanced_reading,
         is_test=is_test,
         tenure_id=tenure_id,
+        document_type=document_type,
     )
     return {
         "session_id": queued.session.id,
@@ -428,11 +430,18 @@ async def upload_one(
 
 
 @router.get("/jobs/{job_id}")
+@router.get("/uploads/jobs/{job_id}")
 def job_detail(job_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> dict:
     job = db.get(Job, job_id)
     if not job:
         raise AppError("Job not found.", 404)
-    return {"job": serialize_job(job)}
+    serialized = serialize_job(job)
+    serialized["status"] = serialized.get("state")
+    return {
+        "job": serialized,
+        "state": serialized.get("state"),
+        "status": serialized.get("state"),
+    }
 
 
 

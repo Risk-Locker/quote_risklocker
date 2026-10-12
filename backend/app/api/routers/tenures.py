@@ -5,7 +5,7 @@ from __future__ import annotations
 import calendar
 from collections import defaultdict
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -656,22 +656,29 @@ def list_tenures(
 
     # Batch-load all active sessions and pre-load drafts for all page tenures in one query
     tenure_ids = [t.id for t in tenures]
+    cn_session_ids = [t.covernote_session_id for t in tenures if t.covernote_session_id]
     sessions_by_tenure: dict[str, list[SessionModel]] = defaultdict(list)
     if tenure_ids:
+        where_cond = SessionModel.tenure_id.in_(tenure_ids)
+        if cn_session_ids:
+            where_cond = or_(where_cond, SessionModel.id.in_(cn_session_ids))
         all_sessions = list(
             db.scalars(
                 select(SessionModel)
                 .options(selectinload(SessionModel.draft))
                 .where(
-                    SessionModel.tenure_id.in_(tenure_ids),
-                    SessionModel.is_tenure_active,
+                    where_cond,
                     SessionModel.status != "trash",
                 )
             ).all()
         )
         for s in all_sessions:
             if s.tenure_id:
-                sessions_by_tenure[s.tenure_id].append(s)
+                if s.is_tenure_active or getattr(s, "document_type", "quotation") == "covernote" or any(t.covernote_session_id == s.id for t in tenures):
+                    sessions_by_tenure[s.tenure_id].append(s)
+            for t in tenures:
+                if t.covernote_session_id == s.id and s not in sessions_by_tenure[t.id]:
+                    sessions_by_tenure[t.id].append(s)
 
     now = datetime.now(timezone.utc)
     items = []
@@ -679,11 +686,23 @@ def list_tenures(
         # Use pre-loaded active child sessions for this tenure
         sessions = sessions_by_tenure.get(t.id, [])
 
+        # Determine if this tenure is viewed as an UPCOMING RENEWAL for target_year
+        is_upcoming_renewal = False
+        if target_year and t.coverage_start_date:
+            if t.coverage_start_date.year < target_year:
+                is_upcoming_renewal = True
+
         sourced = []
         gen_quotes = []
         for s in sessions:
             if getattr(s, "document_type", "quotation") == "covernote" or s.id == t.covernote_session_id:
                 continue
+
+            # When viewing an upcoming renewal (e.g. 2027), suppress quotes from prior tenure years (2026)
+            if is_upcoming_renewal:
+                s_yr = s.coverage_start_date.year if s.coverage_start_date else (s.created_at.year if s.created_at else None)
+                if s_yr and s_yr < target_year:
+                    continue
 
             draft = s.draft
             f = draft.fields if draft else {}
@@ -772,6 +791,28 @@ def list_tenures(
                 "uploaded_file_id": cn_sess.uploaded_file_id,
                 "file_name": cn_sess.uploaded_file.original_filename if cn_sess.uploaded_file else f"{cn_sess.detected_company or 'Policy'}.pdf",
             }
+        elif is_upcoming_renewal and (t.policy_number or t.won_premium is not None or t.winning_company_id):
+            # Fallback if covernote session not explicitly linked, but tenure was won/issued
+            s_date = t.coverage_start_date
+            e_date = t.coverage_end_date
+            s_fmt = s_date.strftime("%d/%m/%Y") if s_date else ""
+            e_fmt = e_date.strftime("%d/%m/%Y") if e_date else ""
+            cov_period_str = f"{s_fmt} - {e_fmt}" if s_fmt and e_fmt else (s_fmt or "—")
+            covernote_info = {
+                "session_id": None,
+                "company": t.winning_company.name if t.winning_company else "Underwriter",
+                "policy_number": t.policy_number,
+                "total_payable": float(t.won_premium) if t.won_premium is not None else None,
+                "sum_insured": None,
+                "coverage_start_date": s_date.isoformat() if s_date else None,
+                "coverage_end_date": e_date.isoformat() if e_date else None,
+                "coverage_period_formatted": cov_period_str,
+                "perils": "Comprehensive Policy",
+                "windscreen": None,
+                "towing": "Unlimited",
+                "uploaded_file_id": None,
+                "file_name": "Policy.pdf",
+            }
 
         win_quote = next((sq for sq in sourced if sq.get("is_winner")), None)
         winning_file_id = (cn_sess.uploaded_file_id if cn_sess else None) or (win_quote.get("uploaded_file_id") if win_quote else None)
@@ -786,19 +827,41 @@ def list_tenures(
                 if not l_act_tz or s_act_tz > l_act_tz:
                     latest_act = s_act_tz
 
-        # Determine if this tenure is viewed as an UPCOMING RENEWAL for target_year
-        is_upcoming_renewal = False
-        if target_year and t.coverage_start_date:
-            if t.coverage_start_date.year < target_year:
-                is_upcoming_renewal = True
+        if is_upcoming_renewal:
+            out_stage = "Quotations"
+            out_status = "draft"
+            out_is_covernote_issued = False
+            out_winning_file_id = None
+            out_winning_file_name = None
+            out_won_premium = None
+            if covernote_info:
+                out_covernote_policy = dict(covernote_info)
+                out_covernote_policy["is_previous_year_policy"] = True
+                out_covernote_policy["previous_policy_year"] = t.coverage_start_date.year if t.coverage_start_date else None
+            else:
+                out_covernote_policy = None
 
-        out_stage = "Quotations" if is_upcoming_renewal else (t.stage or "Quotations")
-        out_status = "draft" if is_upcoming_renewal else t.status
-        out_covernote_policy = None if is_upcoming_renewal else covernote_info
-        out_is_covernote_issued = False if is_upcoming_renewal else bool(covernote_info)
-        out_winning_file_id = None if is_upcoming_renewal else winning_file_id
-        out_winning_file_name = None if is_upcoming_renewal else winning_file_name
-        out_won_premium = None if is_upcoming_renewal else (float(t.won_premium) if t.won_premium is not None else None)
+            if t.coverage_end_date:
+                renew_start = t.coverage_end_date + timedelta(days=1)
+                renew_end = renew_start + timedelta(days=364)
+                out_cov_start = renew_start.isoformat()
+                out_cov_end = renew_end.isoformat()
+                out_exp_month = renew_end.strftime("%Y-%m")
+            else:
+                out_cov_start = datetime(target_year, 1, 1, tzinfo=timezone.utc).isoformat()
+                out_cov_end = datetime(target_year, 12, 31, tzinfo=timezone.utc).isoformat()
+                out_exp_month = f"{target_year}-12"
+        else:
+            out_stage = t.stage or "Quotations"
+            out_status = t.status
+            out_covernote_policy = covernote_info
+            out_is_covernote_issued = bool(covernote_info)
+            out_winning_file_id = winning_file_id
+            out_winning_file_name = winning_file_name
+            out_won_premium = float(t.won_premium) if t.won_premium is not None else None
+            out_cov_start = t.coverage_start_date.isoformat()
+            out_cov_end = t.coverage_end_date.isoformat()
+            out_exp_month = t.expiry_month
 
         items.append({
             "id": t.id,
@@ -809,9 +872,12 @@ def list_tenures(
             "car_brand": t.tracked_vehicle.car_brand if t.tracked_vehicle else None,
             "car_model": t.tracked_vehicle.car_model if t.tracked_vehicle else None,
             "engine_cc": t.tracked_vehicle.engine_cc if t.tracked_vehicle else None,
-            "coverage_start_date": t.coverage_start_date.isoformat(),
-            "coverage_end_date": t.coverage_end_date.isoformat(),
-            "expiry_month": t.expiry_month,
+            "coverage_start_date": out_cov_start,
+            "coverage_end_date": out_cov_end,
+            "expiry_month": out_exp_month,
+            "previous_coverage_start_date": t.coverage_start_date.isoformat(),
+            "previous_coverage_end_date": t.coverage_end_date.isoformat(),
+            "is_upcoming_renewal": is_upcoming_renewal,
             "status": out_status,
             "stage": out_stage,
             "business_type": t.business_type or "Renewal",

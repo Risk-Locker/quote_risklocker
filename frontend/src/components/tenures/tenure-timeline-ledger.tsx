@@ -179,6 +179,8 @@ export interface TenureRow {
     towing?: string | null;
     uploaded_file_id?: string | null;
     file_name?: string | null;
+    is_previous_year_policy?: boolean;
+    previous_policy_year?: number | null;
   } | null;
   is_covernote_issued?: boolean;
   sourced_quotes: Array<{
@@ -704,6 +706,7 @@ export function TenureTimelineLedger() {
       const form = new FormData();
       form.append("file", file);
       form.append("tenure_id", covernoteUploadTenure.id);
+      form.append("document_type", "covernote");
 
       const res = await api<any>("/uploads", {
         method: "POST",
@@ -714,12 +717,13 @@ export function TenureTimelineLedger() {
       const jobId = res?.job_id;
       if (jobId) {
         let attempts = 0;
-        while (attempts < 15) {
+        while (attempts < 30) {
           await new Promise((r) => setTimeout(r, 1000));
           attempts++;
           try {
-            const jobStatus = await api<any>(`/uploads/jobs/${jobId}`);
-            if (jobStatus?.status === "completed" || jobStatus?.status === "failed") {
+            const jobRes = await api<any>(`/jobs/${jobId}`);
+            const state = jobRes?.job?.state || jobRes?.job?.status || jobRes?.state || jobRes?.status;
+            if (state === "completed" || state === "failed" || state === "cancelled") {
               break;
             }
           } catch {
@@ -2345,7 +2349,29 @@ export function TenureTimelineLedger() {
 
                           {/* 2. Coverage Period (Main Policy) */}
                           <td className="py-3 px-3">
-                            {isPolicyIssued && (mainTenure.covernote_policy?.coverage_start_date || mainTenure.coverage_start_date) ? (
+                            {mainTenure.covernote_policy?.is_previous_year_policy ? (
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-1 text-[11px]">
+                                  <span className="text-[9px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 px-1 py-0.2 rounded border border-blue-200 shrink-0">
+                                    Start
+                                  </span>
+                                  <span className="font-mono font-medium text-neutral-800">
+                                    {formatDateSafe(mainTenure.coverage_start_date)}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1 text-[11px]">
+                                  <span className="text-[9px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 px-1 py-0.2 rounded border border-blue-200 shrink-0">
+                                    End
+                                  </span>
+                                  <span className="font-mono font-medium text-neutral-800">
+                                    {formatDateSafe(mainTenure.coverage_end_date)}
+                                  </span>
+                                </div>
+                                <div className="text-[9.5px] text-blue-700 font-bold flex items-center gap-0.5 pt-0.5">
+                                  <Sparkle size={10} weight="fill" /> Upcoming Renewal
+                                </div>
+                              </div>
+                            ) : isPolicyIssued && (mainTenure.covernote_policy?.coverage_start_date || mainTenure.coverage_start_date) ? (
                               <div className="space-y-0.5">
                                 <div className="flex items-center gap-1 text-[11px]">
                                   <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200 shrink-0">
@@ -2450,9 +2476,15 @@ export function TenureTimelineLedger() {
                                       <CheckCircle size={12} weight="fill" className="text-emerald-700" />
                                       {mainTenure.covernote_policy.company}
                                     </span>
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-800 text-[9px] font-bold border border-emerald-200">
-                                      ⚡ Policy Issued · {formatRelativeTime(mainTenure.last_activity_at || mainTenure.created_at) || "Recent"}
-                                    </span>
+                                    {mainTenure.covernote_policy.is_previous_year_policy ? (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-slate-100 text-slate-800 text-[9px] font-bold border border-slate-300">
+                                        📋 {mainTenure.covernote_policy.previous_policy_year || "Last Year"} Policy on Record · Expiring
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-800 text-[9px] font-bold border border-emerald-200">
+                                        ⚡ Policy Issued · {formatRelativeTime(mainTenure.last_activity_at || mainTenure.created_at) || "Recent"}
+                                      </span>
+                                    )}
                                   </div>
                                   {mainTenure.covernote_policy.total_payable && (
                                     <span className="text-emerald-950 font-mono font-bold text-xs bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
@@ -2521,7 +2553,7 @@ export function TenureTimelineLedger() {
                                 </div>
 
                                 {/* Multi-Insurer Quotation Quick Links (target="_blank" for middle/right click) */}
-                                {mainTenure.sourced_quotes && mainTenure.sourced_quotes.length > 0 && (
+                                {mainTenure.sourced_quotes && mainTenure.sourced_quotes.length > 0 ? (
                                   <div className="flex items-center gap-1 flex-wrap pt-1 border-t border-neutral-100">
                                     <span className="text-[9px] font-bold text-neutral-400 uppercase">Quotes:</span>
                                     {mainTenure.sourced_quotes.map((q) => (
@@ -2555,7 +2587,20 @@ export function TenureTimelineLedger() {
                                       <span>({mainTenure.sourced_quotes.length}) →</span>
                                     </Link>
                                   </div>
-                                )}
+                                ) : mainTenure.covernote_policy.is_previous_year_policy ? (
+                                  <div className="flex items-center justify-between gap-1 pt-1 border-t border-neutral-100 text-[10.5px]">
+                                    <span className="text-[10px] text-neutral-500 font-medium italic">
+                                      0 quotes compiled · Awaiting 2027 Quotes
+                                    </span>
+                                    <Link
+                                      href={`/upload?tenure_id=${mainTenure.id}` as Route}
+                                      target="_blank"
+                                      className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 hover:text-blue-800 hover:underline"
+                                    >
+                                      + Add Quotes →
+                                    </Link>
+                                  </div>
+                                ) : null}
                               </div>
                             ) : mainTenure.sourced_quotes.length === 0 ? (
                               <div className="space-y-1">

@@ -301,3 +301,125 @@ def test_api_yoy_stats_and_sync_endpoint(client: TestClient, db_session: Session
     assert list_data["total"] >= 1
     veh_plates = [item["vehicle_no"] for item in list_data["items"]]
     assert "KAA 5566" in veh_plates
+
+
+def test_upcoming_renewal_ledger_isolates_quotes_and_records_covernote(
+    db_session: Session, client: TestClient, test_user: User
+):
+    """When viewing 2027 upcoming renewal ledger, prior quotes are isolated and previous cover note is recorded."""
+    from app.models.tables import Job
+
+    v = _make_vehicle(db_session, "VAA 8899")
+    t_2026 = InsuranceTenure(
+        id=new_id(),
+        tracked_vehicle_id=v.id,
+        vehicle_no="VAA 8899",
+        customer_name="David Lim",
+        coverage_start_date=datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 3, 31, 0, 0, 0, tzinfo=timezone.utc),
+        expiry_month="2027-03",
+        status="hit",
+        stage="Close - Win",
+        policy_number="POL-2026-DAVID",
+        won_premium=1850.50,
+        is_discarded=False,
+        is_projected=False,
+    )
+    db_session.add(t_2026)
+
+    # 1. 2026 Quotation Session with Draft
+    uf_q = new_id()
+    d_q = QuotationDraft(
+        id=new_id(),
+        uploaded_file_id=uf_q,
+        owner_id=test_user.id,
+        fields={"total_payable": {"value": 1900.0}},
+    )
+    s_quote = SessionModel(
+        id=new_id(),
+        owner_id=test_user.id,
+        uploaded_file_id=uf_q,
+        draft_id=d_q.id,
+        tenure_id=t_2026.id,
+        quotation_ref="QT-2026-ALLIANZ",
+        detected_company="Allianz",
+        coverage_start_date=datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 3, 31, 0, 0, 0, tzinfo=timezone.utc),
+        status="active",
+        is_tenure_active=True,
+        document_type="quotation",
+    )
+    # 2. 2026 Cover Note Session with Draft
+    uf_cn = new_id()
+    d_cn = QuotationDraft(
+        id=new_id(),
+        uploaded_file_id=uf_cn,
+        owner_id=test_user.id,
+        fields={
+            "policy_number": {"value": "POL-2026-DAVID"},
+            "total_payable": {"value": 1850.50},
+        },
+    )
+    s_cn = SessionModel(
+        id=new_id(),
+        owner_id=test_user.id,
+        uploaded_file_id=uf_cn,
+        draft_id=d_cn.id,
+        tenure_id=t_2026.id,
+        policy_number="POL-2026-DAVID",
+        detected_company="Allianz",
+        coverage_start_date=datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 3, 31, 0, 0, 0, tzinfo=timezone.utc),
+        status="active",
+        is_tenure_active=True,
+        document_type="covernote",
+    )
+    t_2026.covernote_session_id = s_cn.id
+
+    # 3. Job associated with extraction
+    job = Job(
+        id=new_id(),
+        owner_id=test_user.id,
+        session_id=s_cn.id,
+        job_type="extract_pdf",
+        idempotency_key="idemp_test_cn_123",
+        state="completed",
+    )
+    db_session.add_all([d_q, s_quote, d_cn, s_cn, job])
+    db_session.commit()
+
+    # Verify job detail endpoint works for both /api/jobs/{id} and /api/uploads/jobs/{id}
+    res_j1 = client.get(f"/api/jobs/{job.id}")
+    assert res_j1.status_code == 200
+    assert res_j1.json()["state"] == "completed"
+    assert res_j1.json()["status"] == "completed"
+
+    res_j2 = client.get(f"/api/uploads/jobs/{job.id}")
+    assert res_j2.status_code == 200
+    assert res_j2.json()["state"] == "completed"
+
+    # Query 2027 ledger
+    res_2027 = client.get("/api/tenures?year=2027")
+    assert res_2027.status_code == 200
+    items = res_2027.json()["items"]
+    target_row = next((item for item in items if item["vehicle_no"] == "VAA 8899"), None)
+    assert target_row is not None
+
+    # Verification: 2026 quotes must be suppressed/isolated from 2027 upcoming renewal
+    assert len(target_row["sourced_quotes"]) == 0
+    assert target_row["stage"] == "Quotations"
+    assert target_row["status"] == "draft"
+    assert target_row["is_covernote_issued"] is False
+
+    # Verification: Cover Note on record forwarded with is_previous_year_policy
+    cn_policy = target_row["covernote_policy"]
+    assert cn_policy is not None
+    assert cn_policy["is_previous_year_policy"] is True
+    assert cn_policy["previous_policy_year"] == 2026
+    assert cn_policy["company"] == "Allianz"
+    assert cn_policy["policy_number"] == "POL-2026-DAVID"
+    assert cn_policy["total_payable"] == 1850.50
+
+    # Verification: Calculated renewal period for 2027
+    assert target_row["coverage_start_date"].startswith("2027-04-01")
+
