@@ -701,7 +701,7 @@ def list_tenures(
             # When viewing an upcoming renewal (e.g. 2027), suppress quotes from prior tenure years (2026)
             if is_upcoming_renewal:
                 s_yr = s.coverage_start_date.year if s.coverage_start_date else (s.created_at.year if s.created_at else None)
-                if s_yr and s_yr < target_year:
+                if s_yr and target_year is not None and s_yr < target_year:
                     continue
 
             draft = s.draft
@@ -848,9 +848,10 @@ def list_tenures(
                 out_cov_end = renew_end.isoformat()
                 out_exp_month = renew_end.strftime("%Y-%m")
             else:
-                out_cov_start = datetime(target_year, 1, 1, tzinfo=timezone.utc).isoformat()
-                out_cov_end = datetime(target_year, 12, 31, tzinfo=timezone.utc).isoformat()
-                out_exp_month = f"{target_year}-12"
+                fallback_year = target_year or (t.coverage_start_date.year + 1 if t.coverage_start_date else 2027)
+                out_cov_start = datetime(fallback_year, 1, 1, tzinfo=timezone.utc).isoformat()
+                out_cov_end = datetime(fallback_year, 12, 31, tzinfo=timezone.utc).isoformat()
+                out_exp_month = f"{fallback_year}-12"
         else:
             out_stage = t.stage or "Quotations"
             out_status = t.status
@@ -1021,7 +1022,7 @@ def update_tenure_ledger_fields(
             select(InsuranceCompany).where(
                 or_(
                     InsuranceCompany.name.ilike(payload.winning_company_name.strip()),
-                    InsuranceCompany.code.ilike(payload.winning_company_name.strip()),
+                    InsuranceCompany.slug.ilike(payload.winning_company_name.strip()),
                 )
             )
         )

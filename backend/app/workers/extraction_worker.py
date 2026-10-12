@@ -577,8 +577,9 @@ def process_extraction_job(
         # Instantly anchor tenure dates if tenure is draft, untracked, upcoming, or has placeholder dates
         if tenure.status in ("draft", "untracked", "upcoming") or tenure.coverage_start_date is None:
             tenure.coverage_start_date = parsed_s_start
-            tenure.coverage_end_date = parsed_s_end
-            tenure.expiry_month = parsed_s_end.strftime("%Y-%m")
+            if parsed_s_end:
+                tenure.coverage_end_date = parsed_s_end
+                tenure.expiry_month = parsed_s_end.strftime("%Y-%m")
     else:
         session.coverage_start_date = tenure.coverage_start_date
         session.coverage_end_date = tenure.coverage_end_date
@@ -633,13 +634,13 @@ def process_extraction_job(
         tenure.covernote_session_id = session.id
         if parsed_s_start:
             tenure.coverage_start_date = parsed_s_start
-            tenure.coverage_end_date = parsed_s_end
-            tenure.expiry_month = parsed_s_end.strftime("%Y-%m")
+            if parsed_s_end:
+                tenure.coverage_end_date = parsed_s_end
+                tenure.expiry_month = parsed_s_end.strftime("%Y-%m")
 
         if company_id:
             tenure.winning_company_id = company_id
         elif session.detected_company:
-            from app.models.tables import InsuranceCompany
             matching_comp = db.scalar(
                 select(InsuranceCompany).where(
                     InsuranceCompany.status == AccountStatus.ACTIVE.value,
