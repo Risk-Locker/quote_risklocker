@@ -351,32 +351,20 @@ def get_tenure_stage_summary(
         _, last_day = calendar.monthrange(year, month)
         start_of_month = datetime(year, month, 1, 0, 0, 0, tzinfo=timezone.utc)
         end_of_month = datetime(year, month, last_day, 23, 59, 59, tzinfo=timezone.utc)
-        pattern = f"{year:04d}-{month:02d}"
         query = query.where(
-            or_(
-                InsuranceTenure.coverage_start_date.between(start_of_month, end_of_month),
-                InsuranceTenure.coverage_end_date.between(start_of_month, end_of_month),
-                InsuranceTenure.expiry_month == pattern,
-            )
+            InsuranceTenure.coverage_start_date.between(start_of_month, end_of_month)
         )
     elif year:
         start_of_year = datetime(year, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
         end_of_year = datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
         query = query.where(
-            or_(
-                InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year),
-                InsuranceTenure.coverage_end_date.between(start_of_year, end_of_year),
-                InsuranceTenure.expiry_month.like(f"{year:04d}-%"),
-            )
+            InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year)
         )
 
     rows = db.execute(query).all()
     stage_counts: dict[str, int] = defaultdict(int)
     for stg, s_dt, e_dt, exp_m in rows:
-        # If deal started in an earlier year and is viewed under target year, it's an unissued renewal deal (Quotations)
-        if year and s_dt and s_dt.year < year:
-            stage_counts["Quotations"] += 1
-        elif stg:
+        if stg:
             stage_counts[stg] += 1
 
     return {
@@ -537,14 +525,9 @@ def list_tenures(
             _, last_day = calendar.monthrange(y_val, m_val)
             start_of_month = datetime(y_val, m_val, 1, 0, 0, 0, tzinfo=timezone.utc)
             end_of_month = datetime(y_val, m_val, last_day, 23, 59, 59, tzinfo=timezone.utc)
-            ym_pattern = f"{y_val:04d}-{m_val:02d}"
 
             query = query.where(
-                or_(
-                    InsuranceTenure.coverage_start_date.between(start_of_month, end_of_month),
-                    InsuranceTenure.coverage_end_date.between(start_of_month, end_of_month),
-                    InsuranceTenure.expiry_month == ym_pattern,
-                )
+                InsuranceTenure.coverage_start_date.between(start_of_month, end_of_month)
             )
         else:
             query = query.where(InsuranceTenure.coverage_start_date.isnot(None))
@@ -555,11 +538,7 @@ def list_tenures(
         end_of_year = datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
 
         query = query.where(
-            or_(
-                InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year),
-                InsuranceTenure.coverage_end_date.between(start_of_year, end_of_year),
-                InsuranceTenure.expiry_month.like(f"{year:04d}-%"),
-            )
+            InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year)
         )
 
     # 2. Category filtering: active (exclude Close - Lose & Others) vs lost vs all
@@ -570,20 +549,7 @@ def list_tenures(
 
     # 3. Specific stage filter
     if stage and stage != "all":
-        if target_year and stage == "Quotations":
-            query = query.where(
-                or_(
-                    InsuranceTenure.stage == stage.strip(),
-                    InsuranceTenure.coverage_start_date < datetime(target_year, 1, 1, tzinfo=timezone.utc),
-                )
-            )
-        elif target_year and stage == "Issue Policy":
-            query = query.where(
-                InsuranceTenure.stage == "Issue Policy",
-                InsuranceTenure.coverage_start_date >= datetime(target_year, 1, 1, tzinfo=timezone.utc),
-            )
-        else:
-            query = query.where(InsuranceTenure.stage == stage.strip())
+        query = query.where(InsuranceTenure.stage == stage.strip())
 
     if status and status != "all":
         query = query.where(InsuranceTenure.status == status.strip())
@@ -834,12 +800,7 @@ def list_tenures(
             out_winning_file_id = None
             out_winning_file_name = None
             out_won_premium = None
-            if covernote_info:
-                out_covernote_policy = dict(covernote_info)
-                out_covernote_policy["is_previous_year_policy"] = True
-                out_covernote_policy["previous_policy_year"] = t.coverage_start_date.year if t.coverage_start_date else None
-            else:
-                out_covernote_policy = None
+            out_covernote_policy = None
 
             if t.coverage_end_date:
                 renew_start = t.coverage_end_date + timedelta(days=1)

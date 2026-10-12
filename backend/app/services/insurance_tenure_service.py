@@ -647,6 +647,16 @@ def create_next_year_renewal_tenure(
     if existing:
         return existing
 
+    # Eligibility Guard: Renewal tenure is created if and only if current policy is closed/issued (won, bound, miss, covernote, or policy number)
+    is_eligible = (
+        tenure.status in ("hit", "bound", "miss")
+        or tenure.stage in ("Close - Win", "Close - Lose", "Issue Policy")
+        or tenure.covernote_session_id is not None
+        or bool(tenure.policy_number)
+    )
+    if not is_eligible:
+        return existing
+
     # Calculate next year's 1-year coverage window
     if tenure.coverage_end_date:
         start_date = tenure.coverage_end_date + timedelta(days=1)
@@ -731,13 +741,19 @@ def ensure_next_year_renewal_tenures(
         ).all()
     )
 
-    # 2. Query all active tenures before target_cutoff that are not dropped (includes won, in-progress, and missed deals)
+    # 2. Query all active tenures before target_cutoff that have an actual policy issued (won, bound, covernote, or policy number)
     candidates = list(
         db.scalars(
             select(InsuranceTenure).where(
                 InsuranceTenure.coverage_start_date < target_cutoff,
                 InsuranceTenure.is_discarded == False,
                 InsuranceTenure.is_projected == False,
+                or_(
+                    InsuranceTenure.status.in_(["hit", "bound", "miss"]),
+                    InsuranceTenure.stage.in_(["Close - Win", "Close - Lose", "Issue Policy"]),
+                    InsuranceTenure.covernote_session_id.isnot(None),
+                    InsuranceTenure.policy_number.isnot(None),
+                ),
             ).order_by(InsuranceTenure.coverage_start_date.desc())
         ).all()
     )

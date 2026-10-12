@@ -50,7 +50,58 @@ import { api, fileUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { ManualQuoteModal } from "./manual-quote-modal";
 import { decodeMalaysianIC } from "@/lib/mykad";
-import { formatBenefitCoverage } from "@/lib/benefit-utils";
+import { formatBenefitCoverage, formatShortInsurerName } from "@/lib/benefit-utils";
+
+function formatExpiryDateDisplay(tenure?: any, prevPolicy?: any): string {
+  if (prevPolicy?.coverage_end_date) {
+    const d = new Date(prevPolicy.coverage_end_date);
+    if (!isNaN(d.getTime())) {
+      const day = String(d.getDate()).padStart(2, "0");
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      return `${day}/${month}/${d.getFullYear()}`;
+    }
+  }
+  if (tenure?.coverage_end_date) {
+    const d = new Date(tenure.coverage_end_date);
+    if (!isNaN(d.getTime())) {
+      const day = String(d.getDate()).padStart(2, "0");
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      return `${day}/${month}/${d.getFullYear()}`;
+    }
+  }
+  if (tenure?.expiry_month && tenure.expiry_month.includes("-")) {
+    const [y, m] = tenure.expiry_month.split("-");
+    if (y && m) return `${m.padStart(2, "0")}/${y}`;
+  }
+  return tenure?.expiry_month || "—";
+}
+
+function formatLlpLlop(val: string | null | undefined): string {
+  if (!val) return "Not Included";
+  const trimmed = val.trim();
+  if (
+    !trimmed ||
+    trimmed === "-" ||
+    trimmed === "—" ||
+    trimmed.toLowerCase() === "none" ||
+    trimmed.toLowerCase() === "not included"
+  ) {
+    return "Not Included";
+  }
+  return trimmed;
+}
+
+function isLlpLlopIncluded(val: string | null | undefined): boolean {
+  if (!val) return false;
+  const trimmed = val.trim().toLowerCase();
+  return (
+    trimmed !== "" &&
+    trimmed !== "-" &&
+    trimmed !== "—" &&
+    trimmed !== "none" &&
+    trimmed !== "not included"
+  );
+}
 
 interface ComparisonMatrixProps {
   tenureId: string;
@@ -170,7 +221,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     entries: ComparisonEntry[];
     previous_policy: any;
     recommended_sum_insured: Record<string, number>;
-    ncd: { current: number | null; next: number | null };
+    ncd: { current: number | null; next: number | null; current_period?: string; next_period?: string; has_previous_policy?: boolean };
     pending_jobs_count?: number;
     vehicle_age?: number;
     upload_sessions?: Array<{
@@ -580,6 +631,51 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       setError(err.message || "Failed to load comparison");
     } finally {
       if (!silent) setLoading(false);
+    }
+  };
+
+  // NCD Entitlement & Previous Policy Edit State
+  const [showNcdModal, setShowNcdModal] = useState(false);
+  const [editCurrentNcd, setEditCurrentNcd] = useState<string>("");
+  const [editNextNcd, setEditNextNcd] = useState<string>("");
+  const [pastingPolicyText, setPastingPolicyText] = useState("");
+  const [savingNcd, setSavingNcd] = useState(false);
+
+  const handleOpenNcdModal = () => {
+    if (data?.ncd) {
+      setEditCurrentNcd(data.ncd.current != null ? String(data.ncd.current) : "");
+      setEditNextNcd(data.ncd.next != null ? String(data.ncd.next) : "");
+    }
+    setPastingPolicyText("");
+    setShowNcdModal(true);
+  };
+
+  const handleSaveNcd = async () => {
+    if (!data?.tenure) return;
+    try {
+      setSavingNcd(true);
+      const currVal = editCurrentNcd.trim() !== "" ? parseFloat(editCurrentNcd) : null;
+      const nextVal = editNextNcd.trim() !== "" ? parseFloat(editNextNcd) : null;
+
+      await api(`/comparison/${data.tenure.id}/fixed-costs`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          road_tax: data.tenure.road_tax,
+          runner_fee: data.tenure.runner_fee,
+          windscreen_target: data.tenure.windscreen_target,
+          ncd_percentage: nextVal,
+          current_ncd: currVal,
+        }),
+      });
+
+      triggerStatus("success", "NCD Entitlement Updated", "Current NCD and Next NCD entitlement were successfully saved.");
+      setShowNcdModal(false);
+      await fetchComparison(true);
+    } catch (err: any) {
+      triggerStatus("error", "Failed to Save NCD", err.message || String(err));
+    } finally {
+      setSavingNcd(false);
     }
   };
 
@@ -1147,9 +1243,9 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           {/* 4-Row Card Header */}
           <div className={`p-4 border-b ${isWinner ? "border-[#e5e5ea] bg-[#f5f5f7]/60" : "border-[#e5e5ea]"}`}>
             {/* Row 1: Company Name + Visibility Toggle */}
-            <div className="flex items-center justify-between gap-2 min-h-[26px]">
-              <h3 className="font-bold text-sm text-[#1b1717] uppercase tracking-tight truncate" title={entry.company_name}>
-                {entry.company_name}
+            <div className="flex items-center justify-between gap-2 h-7">
+              <h3 className="font-bold text-sm text-[#1b1717] uppercase tracking-tight truncate whitespace-nowrap" title={entry.company_name}>
+                {formatShortInsurerName(entry.company_name)}
               </h3>
               <div className="flex items-center gap-1 shrink-0">
                 {isViewingPdf && (
@@ -1291,7 +1387,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             <div className="mt-2 pt-1 border-t border-[#e5e5ea]/80 flex items-center justify-between gap-1.5 min-h-[22px]">
               <div className="flex items-center gap-1.5 min-w-0">
                 <span className="text-xs text-[#6e6e73] font-medium">
-                  {entry.valuation_type === "agreed_value" ? "Agreed Value 约定价" : "Market Value 市价"}
+                  {entry.valuation_type === "agreed_value" ? "Agreed Value" : "Market Value"}
                 </span>
                 <span className="font-mono text-[10px] text-[#8e8e93]">
                   {entry.valuation_type === "agreed_value" ? "[A]" : "[M]"}
@@ -1321,7 +1417,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           <div className="p-4 space-y-3.5 border-b border-[#e5e5ea]">
             <div className="h-[48px] flex flex-col justify-center">
               <span className="text-[11px] uppercase font-bold text-[#6e6e73] block mb-0.5">
-                Sum Insured (保额)
+                Sum Insured
               </span>
               <div className="flex items-baseline gap-1.5">
                 <p className="font-mono text-base font-bold text-[#1b1717]">
@@ -1335,7 +1431,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
 
             <div className="h-[44px] flex flex-col justify-center">
               <span className="text-[11px] uppercase font-bold text-[#6e6e73] block mb-0.5">
-                Motor Premium (车险)
+                Motor Premium
               </span>
               <p className="font-mono text-sm font-bold text-[#1b1717]">
                 RM {entry.motor_premium.toFixed(2)}
@@ -1351,7 +1447,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               }`}
             >
               <span className="text-[11px] uppercase font-bold text-[#454545] block">
-                Total Payable (总额)
+                Total Payable
               </span>
               <p
                 className="font-mono text-lg font-black text-[#1b1717]"
@@ -1369,7 +1465,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           <div className="p-4 space-y-2 text-xs divide-y divide-[#e5e5ea]">
             {/* Towing Limit */}
             <div className="h-8 flex items-center justify-between pt-1">
-              <span className="text-[#6e6e73]">Towing (拖车):</span>
+              <span className="text-[#6e6e73]">Towing:</span>
               <span className="font-bold text-[#1b1717]">{formatBenefitCoverage(entry.towing_km || entry.towing_limit || "Unlimited", "KM")}</span>
             </div>
 
@@ -1384,7 +1480,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             {/* Betterment Co-pay / Waiver */}
             <div className="h-8 flex items-center justify-between pt-2">
               <div className="flex items-center gap-1 text-[#6e6e73]">
-                <span>Betterment (自付额):</span>
+                <span>Betterment:</span>
               </div>
               <span
                 className={`font-bold cursor-help ${
@@ -1459,8 +1555,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             {/* LLP / LLOP (Passenger Liability) */}
             <div className="h-8 flex items-center justify-between pt-2">
               <span className="text-[#6e6e73]">LLP / LLOP:</span>
-              <span className={`font-bold ${entry.llp_llop ? "text-[#1b1717]" : "text-[#6e6e73]"}`}>
-                {entry.llp_llop || "—"}
+              <span className={`font-bold ${isLlpLlopIncluded(entry.llp_llop) ? "text-[#1b1717]" : "text-[#6e6e73]"}`}>
+                {formatLlpLlop(entry.llp_llop)}
               </span>
             </div>
 
@@ -1645,27 +1741,48 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     <div className="flex gap-4 items-start relative w-full">
       <div className="flex-1 min-w-0 space-y-6 pb-12 overflow-x-hidden print:overflow-visible">
         {/* Print-Only Executive Comparison Header */}
-        <div className="hidden print:block mb-6 border-b-2 border-[#1b1717] pb-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="flex items-center gap-2.5">
-                <img src="/assets/brand/logo-black.png" alt="Risk-Locker" className="h-6 w-auto object-contain" />
-                <h1 className="text-xl font-bold tracking-tight text-[#1b1717]">
-                  MOTOR QUOTATION COMPARISON
-                </h1>
+        <div className="hidden print:block mb-6 border-b-2 border-[#1b1717] pb-4 space-y-4">
+          <div className="relative flex items-center justify-between">
+            <div className="flex items-center">
+              <img src="/assets/brand/logo-black.png" alt="Risklocker" className="h-9 w-auto object-contain" />
+            </div>
+            <div className="absolute left-1/2 -translate-x-1/2 text-center pointer-events-none">
+              <h1 className="text-xl font-black tracking-tight text-[#1b1717] uppercase">
+                MOTOR QUOTATION COMPARISON
+              </h1>
+            </div>
+            <div className="text-right">
+              <div className="inline-block bg-[#f5f5f7] border border-[#e5e5ea] px-3.5 py-1 rounded-lg">
+                <span className="font-mono font-bold text-base text-[#1b1717]">
+                  {tenure.is_plate_undetected || tenure.vehicle_no === "N/A"
+                    ? `N/A · Chassis: ${tenure.chassis_no || "N/A"}`
+                    : (tenure.vehicle_no || tenure.chassis_no || "Unregistered Vehicle")}
+                </span>
               </div>
-              <p className="text-xs text-[#6e6e73] mt-1">
-                Underwriter Market Benchmarking · Policy Period: {activeWinnerPeriod}
+            </div>
+          </div>
+          <div className="flex items-end justify-between text-xs pt-1">
+            <div className="space-y-0.5">
+              <p className="text-xs font-semibold text-[#454545]">
+                Commercial General Insurance
+              </p>
+              <p className="text-[11px] text-[#6e6e73]">
+                Your Shield Against The Unexpected
+              </p>
+              <p className="text-xs text-[#454545]">
+                Coverage Period :{" "}
+                <span className="font-mono font-bold text-[#1b1717]">{activeWinnerPeriod}</span>
               </p>
             </div>
-            <div className="text-right text-xs space-y-0.5">
-              <p className="font-mono font-bold text-sm text-[#1b1717]">
-                {tenure.is_plate_undetected || tenure.vehicle_no === "N/A"
-                  ? `N/A · Chassis: ${tenure.chassis_no || "N/A"}`
-                  : (tenure.vehicle_no || tenure.chassis_no || "Unregistered Vehicle")}
+            <div className="text-right space-y-0.5">
+              <p className="font-bold text-xs text-[#1b1717]">{tenure.customer_name} {tenure.ic_no ? `(${tenure.ic_no})` : ""}</p>
+              <p className="text-[11px] text-[#6e6e73]">{tenure.vehicle_model} · {tenure.engine_cc}</p>
+              <p className="text-[11px] font-semibold text-[#454545]">
+                Roadtax and Runner fee :{" "}
+                <span className="font-mono font-bold text-[#1b1717]">
+                  RM {(tenure.road_tax + tenure.runner_fee).toFixed(2)}
+                </span>
               </p>
-              <p className="font-semibold text-[#454545]">{tenure.customer_name} {tenure.ic_no ? `(${tenure.ic_no})` : ""}</p>
-              <p className="text-[#6e6e73]">{tenure.vehicle_model} · {tenure.engine_cc}</p>
             </div>
           </div>
         </div>
@@ -1709,13 +1826,13 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                 {winnerEntries.length === 0
                   ? "Select Recommendation(s)"
                   : winnerEntries.length === 1
-                  ? `Recommended: ${winnerEntries[0].company_name}`
+                  ? `Recommended: ${formatShortInsurerName(winnerEntries[0].company_name)}`
                   : `${winnerEntries.length} Recommendations Selected ★`}
               </span>
               <span className="text-[11px] text-[#6e6e73] block truncate">
                 {winnerEntries.length === 0
                   ? "Click any quote to recommend"
-                  : winnerEntries.map((w) => w.company_name.split(" ")[0]).join(", ")}
+                  : winnerEntries.map((w) => formatShortInsurerName(w.company_name)).join(", ")}
               </span>
             </div>
           </div>
@@ -1731,7 +1848,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                   {winnerEntries.length > 1
                     ? `Issue ${winnerEntries.length} Quotations`
                     : winnerEntries.length === 1
-                    ? `Issue ${winnerEntries[0].company_name.split(" ")[0]} Quotation`
+                    ? `Issue ${formatShortInsurerName(winnerEntries[0].company_name)} Quotation`
                     : "Review & Issue Quotation"}
                 </span>
                 <span className="text-[11px] text-[#6e6e73] block truncate">
@@ -1767,7 +1884,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                       title={`Open ${w.company_name} quote review`}
                       className="inline-flex items-center gap-1 text-[11px] font-bold text-[#ed1c24] hover:text-[#c4171e] px-2 py-1 rounded-md bg-white shadow-2xs border border-rose-200 transition-colors hover:bg-rose-50"
                     >
-                      <span>{w.company_name.split(" ")[0]}</span>
+                      <span>{formatShortInsurerName(w.company_name)}</span>
                       <ArrowRight size={10} weight="bold" />
                     </Link>
                   ) : null
@@ -1869,7 +1986,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           </div>
           <div className="flex items-center gap-2">
             {data.upload_sessions.map((batch, idx) => {
-              const qNames = batch.quotes.map((q) => `${q.company_name} v${q.version}`).join(", ");
+              const qNames = batch.quotes.map((q) => `${formatShortInsurerName(q.company_name)} v${q.version}`).join(", ");
               const isHighlighted =
                 batch.quotes.some((q) => q.session_id === highlightedSessionId) ||
                 batch.session_id === highlightedSessionId;
@@ -1978,8 +2095,9 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             <h1 className="text-xl font-bold tracking-tight text-[#1b1717]">
               {tenure.customer_name}
             </h1>
-            <span className="rounded-md bg-[#f5f5f7] px-2.5 py-0.5 text-xs font-semibold text-[#454545] border border-[#e5e5ea]">
-              Expiring {tenure.expiry_month}
+            <span className="inline-flex items-center gap-1.5 rounded-lg bg-rose-50 px-2.5 py-1 text-xs font-bold text-rose-700 border border-rose-200/90 shadow-2xs">
+              <span className="size-1.5 rounded-full bg-rose-500 animate-pulse" />
+              <span>Expiry Date: {formatExpiryDateDisplay(tenure, previous_policy)}</span>
             </span>
           </div>
           <div className="text-xs text-[#6e6e73] mt-2 flex items-center gap-2 flex-wrap">
@@ -2608,123 +2726,6 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               );
             })}
 
-            {/* Previous Policy Baseline Reference Column (Always visible on right) */}
-            {previous_policy ? (
-              <div className="w-[285px] shrink-0 rounded-2xl border-2 border-dashed border-neutral-300 bg-neutral-50/50 p-4 shadow-2xs flex flex-col justify-between relative">
-                <div>
-                  {/* Top Baseline Header */}
-                  <div className="flex items-center justify-between pb-2.5 border-b border-neutral-200 mb-3">
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-bold uppercase tracking-wider text-neutral-900">
-                          Previous Policy
-                        </span>
-                        <span className="px-1.5 py-0.2 rounded bg-neutral-200 text-neutral-700 text-[9px] font-bold">
-                          {previous_policy.year || (tenure.coverage_start_date ? new Date(tenure.coverage_start_date).getFullYear() - 1 : "Prior Year")}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-neutral-500 mt-0.5">Baseline Reference</p>
-                    </div>
-                    {previous_policy.insurer && (
-                      <span className="rounded bg-white px-2 py-0.5 text-xs font-bold text-neutral-900 border border-neutral-200 shadow-2xs">
-                        {previous_policy.insurer}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Policy Specifications & Figures */}
-                  <div className="space-y-2 text-xs">
-                    <div className="flex justify-between py-1 border-b border-neutral-200/60">
-                      <span className="text-neutral-500">Sum Insured:</span>
-                      <span className="font-mono font-bold text-neutral-900">
-                        {previous_policy.sum_insured
-                          ? `RM ${previous_policy.sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
-                          : "—"}
-                      </span>
-                    </div>
-                    <div className="flex justify-between py-1 border-b border-neutral-200/60">
-                      <span className="text-neutral-500">Premium Paid:</span>
-                      <span className="font-mono font-bold text-emerald-700">
-                        {previous_policy.insurance_premium
-                          ? `RM ${previous_policy.insurance_premium.toFixed(2)}`
-                          : "—"}
-                      </span>
-                    </div>
-                    <div className="flex justify-between py-1 border-b border-neutral-200/60">
-                      <span className="text-neutral-500">Fixed Costs:</span>
-                      <span className="font-mono font-medium text-neutral-700">
-                        RM {(tenure.road_tax + tenure.runner_fee).toFixed(2)} (Tax + Runner)
-                      </span>
-                    </div>
-                    <div className="flex justify-between py-1 border-b border-neutral-200/60">
-                      <span className="text-neutral-500">Model:</span>
-                      <span className="font-medium text-neutral-800 text-right truncate max-w-[150px]">
-                        {previous_policy.model || tenure.vehicle_model}
-                      </span>
-                    </div>
-                    <div className="flex justify-between py-1 border-b border-neutral-200/60">
-                      <span className="text-neutral-500">YOM:</span>
-                      <span className="font-medium text-neutral-800 text-right">
-                        {previous_policy.yom || tenure.manufacture_year || ""}
-                      </span>
-                    </div>
-                    <div className="flex justify-between py-1 border-b border-neutral-200/60">
-                      <span className="text-neutral-500">Period:</span>
-                      <span className="font-mono text-[11px] text-neutral-600">
-                        {previous_policy.period}
-                      </span>
-                    </div>
-                    <div className="pt-1">
-                      <span className="text-neutral-500 block text-[11px] mb-1">Included Perils:</span>
-                      <span className="inline-block bg-white border border-neutral-200 rounded px-2 py-1 text-[11px] text-neutral-700 font-medium w-full">
-                        {previous_policy.perils || "Standard Policy Coverage"}
-                      </span>
-                      <div className="mt-2 space-y-1">
-                        <div className="flex justify-between text-[11px]">
-                          <span className="text-neutral-500">Windscreen:</span>
-                          <span className="font-mono font-medium text-neutral-800">
-                            {previous_policy.windscreen ? `RM ${previous_policy.windscreen.toLocaleString("en-MY", { minimumFractionDigits: 2 })}` : "—"}
-                          </span>
-                        </div>
-                        <div className="flex justify-between text-[11px]">
-                          <span className="text-neutral-500">Towing:</span>
-                          <span className="font-mono font-medium text-neutral-800">
-                            {formatBenefitCoverage(previous_policy.towing || "Unlimited", "KM")}
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center text-[11px] mt-1.5">
-                          <span className="text-neutral-500">Discount (%):</span>
-                          <input
-                            type="text"
-                            min="0"
-                            max="100"
-                            value={previousPolicyDiscount || ""}
-                            onChange={(e) => setPreviousPolicyDiscount(Number(e.target.value))}
-                            className="w-16 h-6 px-1.5 border border-neutral-300 rounded text-right font-mono outline-none focus:border-[#1b1717]"
-                            placeholder="0"
-                          />
-                        </div>
-                        {previousPolicyDiscount > 0 && previous_policy.insurance_premium ? (
-                          <div className="flex justify-between text-[11px] font-bold mt-1 text-emerald-700 bg-emerald-50 px-1.5 py-1 rounded">
-                            <span>Final Payable:</span>
-                            <span className="font-mono">
-                              RM {(previous_policy.insurance_premium * (1 - previousPolicyDiscount / 100)).toFixed(2)}
-                            </span>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-4 pt-3 border-t border-neutral-200 text-center">
-                  <span className="text-[10px] text-neutral-400 font-medium">
-                    ✓ Prior policy loaded from database
-                  </span>
-                </div>
-              </div>
-            ) : null}
-
             {/* Empty State: Marketing Comparison Table Dropzone */}
             {companyGroups.length === 0 && (
               <>
@@ -2794,7 +2795,138 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         {/* RIGHT PANE: Previous Policy & Valuation Matrix                 */}
         {/* ============================================================== */}
         <div id="tour-current-policy" className="space-y-4 sticky top-6">
-          {/* Current Policy Card (Official Cover Note OR Leading Option) */}
+          {/* Card 1: Previous Policy Card (Baseline Reference & Current NCD) */}
+          {(() => {
+            const priorYear = tenure.coverage_start_date ? new Date(tenure.coverage_start_date).getFullYear() - 1 : new Date().getFullYear() - 1;
+            const prevPeriod = previous_policy?.period || data.ncd?.current_period || `${priorYear}`;
+            const currentNcdVal = previous_policy?.ncd_percentage != null ? previous_policy.ncd_percentage : data.ncd?.current;
+
+            if (previous_policy && (previous_policy.insurer || previous_policy.sum_insured > 0 || currentNcdVal != null)) {
+              return (
+                <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-center justify-between border-b border-neutral-200 pb-2.5 mb-3">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-xs font-bold uppercase tracking-wider text-neutral-900 truncate">
+                        Previous Policy ({prevPeriod})
+                      </span>
+                      <span className="rounded bg-neutral-100 text-neutral-700 font-bold px-1.5 py-0.5 text-[9px] uppercase border border-neutral-200 shrink-0">
+                        Baseline
+                      </span>
+                    </div>
+                    {previous_policy.insurer && (
+                      <span className="rounded bg-neutral-100 px-2 py-0.5 text-xs font-bold text-neutral-800 border border-neutral-200 uppercase whitespace-nowrap shrink-0" title={previous_policy.insurer}>
+                        {formatShortInsurerName(previous_policy.insurer)}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="space-y-2 text-xs text-[#454545]">
+                    {/* Period of Insurance */}
+                    <div className="flex justify-between items-center py-1 border-b border-neutral-100 bg-neutral-50/70 -mx-4 px-4">
+                      <span className="text-[11px] font-bold text-neutral-700">Insurance Period:</span>
+                      <span className="font-mono font-bold text-xs text-neutral-900">{prevPeriod}</span>
+                    </div>
+
+                    {/* Current NCD */}
+                    <div className="flex justify-between items-center">
+                      <span className="text-neutral-500">Current NCD:</span>
+                      <span className="font-mono font-bold text-neutral-900">
+                        {currentNcdVal != null ? `${currentNcdVal}%` : "—"}
+                      </span>
+                    </div>
+
+                    {/* Sum Insured */}
+                    <div className="flex justify-between">
+                      <span className="text-neutral-500">Sum Insured:</span>
+                      <span className="font-mono font-bold text-neutral-900">
+                        {previous_policy.sum_insured
+                          ? `RM ${previous_policy.sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
+                          : "—"}
+                      </span>
+                    </div>
+
+                    {/* Premium Paid */}
+                    <div className="flex justify-between">
+                      <span className="text-neutral-500">Premium Paid:</span>
+                      <span className="font-mono font-bold text-neutral-900">
+                        {previous_policy.insurance_premium
+                          ? `RM ${previous_policy.insurance_premium.toFixed(2)}`
+                          : "—"}
+                      </span>
+                    </div>
+
+                    {/* Included Perils */}
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-neutral-500 shrink-0">Included Perils:</span>
+                      <span className="font-medium text-neutral-800 text-right truncate max-w-[170px]" title={previous_policy.perils}>
+                        {previous_policy.perils || "Standard Policy Coverage"}
+                      </span>
+                    </div>
+
+                    {/* Riders */}
+                    <div className="mt-1 space-y-1">
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-neutral-500">Windscreen:</span>
+                        <span className="font-mono font-medium text-neutral-800">
+                          {previous_policy.windscreen ? `RM ${previous_policy.windscreen.toLocaleString("en-MY", { minimumFractionDigits: 2 })}` : "—"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-neutral-500">Towing:</span>
+                        <span className="font-mono font-medium text-neutral-800">
+                          {formatBenefitCoverage(previous_policy.towing || "Unlimited", "KM")}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Bottom action: 1-click edit NCD / upload previous policy */}
+                    <div className="pt-2.5 border-t border-neutral-100 flex items-center justify-between text-[10px]">
+                      <span className="text-neutral-400 font-mono">
+                        {previous_policy.policy_number ? `Ref: ${previous_policy.policy_number}` : "Prior Policy Term"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleOpenNcdModal}
+                        className="text-neutral-700 hover:text-black font-bold flex items-center gap-1 cursor-pointer"
+                        title="Edit Current NCD or upload previous policy document"
+                      >
+                        <PencilSimple size={11} weight="bold" />
+                        <span>Edit / Upload</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div className="rounded-2xl border-2 border-dashed border-neutral-300 bg-neutral-50/60 p-4 shadow-2xs">
+                <div className="flex items-center justify-between border-b border-neutral-200 pb-2 mb-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-neutral-700">
+                    Previous Policy ({priorYear})
+                  </span>
+                  <span className="rounded bg-neutral-200 text-neutral-600 font-bold px-1.5 py-0.5 text-[9px] uppercase">
+                    No Record
+                  </span>
+                </div>
+                <p className="text-[11px] text-neutral-500 leading-relaxed py-1.5 text-center">
+                  No prior policy term recorded for this vehicle.
+                </p>
+                <div className="pt-1 text-center">
+                  <button
+                    type="button"
+                    onClick={handleOpenNcdModal}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-neutral-300 hover:border-[#1b1717] text-xs font-bold text-neutral-800 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <UploadSimple size={12} weight="bold" />
+                    <span>Upload Last Year Policy / Edit NCD</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Card 2: Current Policy Card (Official Cover Note OR Leading Option) */}
           {(() => {
             const currentYear = tenure.coverage_start_date ? new Date(tenure.coverage_start_date).getFullYear() : new Date().getFullYear();
             const cn = data.covernote_policy;
@@ -2811,8 +2943,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                         <CheckCircle size={10} weight="fill" /> Issued Cover Note
                       </span>
                     </div>
-                    <span className="rounded bg-emerald-900 px-2 py-0.5 text-xs font-bold text-white uppercase">
-                      {cn.company_name}
+                    <span className="rounded bg-emerald-900 px-2.5 py-0.5 text-xs font-bold text-white uppercase whitespace-nowrap shrink-0" title={cn.company_name}>
+                      {formatShortInsurerName(cn.company_name)}
                     </span>
                   </div>
 
@@ -3020,26 +3152,65 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           </div>
 
           {/* NCD Block */}
-          <div className="rounded-2xl border border-[#e5e5ea] bg-white p-4 shadow-sm">
-            <span className="block text-xs font-bold uppercase tracking-wider text-[#1b1717] border-b border-[#e5e5ea] pb-2 mb-3">
-              NCD Entitlement
-            </span>
+          <div className="rounded-2xl border border-[#e5e5ea] bg-white p-4 shadow-sm space-y-3">
+            <div className="flex items-center justify-between border-b border-[#e5e5ea] pb-2">
+              <span className="block text-xs font-bold uppercase tracking-wider text-[#1b1717]">
+                NCD Entitlement
+              </span>
+              <button
+                type="button"
+                onClick={handleOpenNcdModal}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-neutral-600 hover:text-black bg-neutral-100 hover:bg-neutral-200 px-2 py-0.5 rounded-md transition-colors cursor-pointer"
+                title="Edit Current or Next NCD / Upload last year policy"
+              >
+                <PencilSimple size={12} weight="bold" />
+                <span>Edit / Upload</span>
+              </button>
+            </div>
+
             <div className="grid grid-cols-2 gap-2 text-center text-xs">
-              <div className="rounded-lg bg-[#f5f5f7] p-2 border border-[#e5e5ea]">
-                <span className="text-xs text-[#6e6e73] block">Current NCD</span>
-                <span className="font-mono font-bold text-sm text-[#1b1717]">
-                  {ncd?.current != null
-                    ? `${ncd.current % 1 === 0 ? ncd.current.toFixed(0) : ncd.current.toFixed(2)}%`
-                    : "Not Detected"}
-                </span>
+              <div
+                onClick={handleOpenNcdModal}
+                className="rounded-xl bg-[#f5f5f7] p-3 border border-[#e5e5ea] flex flex-col justify-between cursor-pointer hover:border-neutral-400 transition-colors shadow-2xs group"
+                title="Click to edit Current NCD or upload previous policy"
+              >
+                <div>
+                  <span className="text-xs text-[#6e6e73] block font-semibold uppercase tracking-wider">Current NCD</span>
+                  <span className="font-mono font-black text-base text-[#1b1717] mt-0.5 block">
+                    {ncd?.current != null
+                      ? `${ncd.current % 1 === 0 ? ncd.current.toFixed(0) : ncd.current.toFixed(2)}%`
+                      : "Not Recorded"}
+                  </span>
+                </div>
+                <div className="text-[10px] text-[#6e6e73] font-mono mt-2 pt-1.5 border-t border-neutral-200/80 leading-snug">
+                  {ncd?.current_period ? (
+                    <span>({ncd.current_period})</span>
+                  ) : (
+                    <span>(Prior Policy Term)</span>
+                  )}
+                </div>
               </div>
-              <div className="rounded-lg bg-emerald-50 p-2 border border-emerald-200">
-                <span className="text-xs text-emerald-800 block font-semibold">Next NCD</span>
-                <span className="font-mono font-bold text-sm text-emerald-800">
-                  {ncd?.next != null
-                    ? `${ncd.next % 1 === 0 ? ncd.next.toFixed(0) : ncd.next.toFixed(2)}%`
-                    : "Not Detected"}
-                </span>
+
+              <div
+                onClick={handleOpenNcdModal}
+                className="rounded-xl bg-emerald-50/80 p-3 border border-emerald-200 flex flex-col justify-between cursor-pointer hover:border-emerald-400 transition-colors shadow-2xs group"
+                title="Click to edit Next NCD"
+              >
+                <div>
+                  <span className="text-xs text-emerald-800 block font-semibold uppercase tracking-wider">Next NCD</span>
+                  <span className="font-mono font-black text-base text-emerald-800 mt-0.5 block">
+                    {ncd?.next != null
+                      ? `${ncd.next % 1 === 0 ? ncd.next.toFixed(0) : ncd.next.toFixed(2)}%`
+                      : "Not Detected"}
+                  </span>
+                </div>
+                <div className="text-[10px] text-emerald-700 font-mono mt-2 pt-1.5 border-t border-emerald-200/80 leading-snug">
+                  {ncd?.next_period ? (
+                    <span>({ncd.next_period})</span>
+                  ) : (
+                    <span>(Renewal Policy Term)</span>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -3304,32 +3475,59 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                 style={{ minWidth: snapshotVisibleCards.length <= 3 ? "760px" : "1040px" }}
               >
                 {/* Snapshot Brand & Vehicle Header */}
-                <div className="flex items-start justify-between border-b-2 border-[#1b1717] pb-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2.5">
-                      <img src="/assets/brand/logo-black.png" alt="Risk-Locker" className="h-7 w-auto object-contain" />
-                      <h2 className="text-lg font-black tracking-tight text-[#1b1717]">
+                <div className="border-b-2 border-[#1b1717] pb-4 space-y-4">
+                  {/* Top Tier: Logo (Left), Title (Center), Plate (Right) */}
+                  <div className="relative flex items-center justify-between">
+                    <div className="flex items-center">
+                      <img
+                        src="/assets/brand/logo-black.png"
+                        alt="Risklocker"
+                        className="h-9 w-auto object-contain"
+                      />
+                    </div>
+
+                    <div className="absolute left-1/2 -translate-x-1/2 text-center pointer-events-none">
+                      <h2 className="text-lg md:text-xl font-black tracking-tight text-[#1b1717] uppercase">
                         MOTOR QUOTATION COMPARISON
                       </h2>
                     </div>
-                    <p className="text-xs text-[#6e6e73]">
-                      Market Underwriter Benchmarking · Policy Period: {activeWinnerPeriod}
-                    </p>
+
+                    <div className="text-right">
+                      <div className="inline-block bg-[#f5f5f7] border border-[#e5e5ea] px-3.5 py-1 rounded-lg shadow-2xs">
+                        <span className="font-mono font-bold text-base text-[#1b1717]">
+                          {tenure.is_plate_undetected || tenure.vehicle_no === "N/A"
+                            ? `N/A · Chassis: ${tenure.chassis_no || "N/A"}`
+                            : (tenure.vehicle_no || tenure.chassis_no || "Unregistered Vehicle")}
+                        </span>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="text-right space-y-0.5">
-                    <div className="inline-block bg-[#f5f5f7] border border-[#e5e5ea] px-3 py-1 rounded-lg">
-                      <span className="font-mono font-bold text-base text-[#1b1717]">
-                        {tenure.is_plate_undetected || tenure.vehicle_no === "N/A"
-                          ? `N/A · Chassis: ${tenure.chassis_no || "N/A"}`
-                          : (tenure.vehicle_no || tenure.chassis_no || "Unregistered Vehicle")}
-                      </span>
+                  {/* Bottom Tier: Policy Period (Left) baseline-aligned with Customer & Roadtax/Runner fee (Right) */}
+                  <div className="flex items-end justify-between text-xs pt-1">
+                    <div className="space-y-0.5">
+                      <p className="text-xs font-semibold text-[#454545]">
+                        Commercial General Insurance
+                      </p>
+                      <p className="text-[11px] text-[#6e6e73]">
+                        Your Shield Against The Unexpected
+                      </p>
+                      <p className="text-xs text-[#454545]">
+                        Coverage Period :{" "}
+                        <span className="font-mono font-bold text-[#1b1717]">{activeWinnerPeriod}</span>
+                      </p>
                     </div>
-                    <p className="font-bold text-xs text-[#1b1717]">{tenure.customer_name}</p>
-                    <p className="text-[11px] text-[#6e6e73]">{tenure.vehicle_model} · {tenure.engine_cc}</p>
-                    <p className="text-[10px] font-semibold text-[#6e6e73]">
-                      Roadtax and Runner fee : RM {(tenure.road_tax + tenure.runner_fee).toFixed(2)}
-                    </p>
+
+                    <div className="text-right space-y-0.5">
+                      <p className="font-bold text-xs text-[#1b1717]">{tenure.customer_name}</p>
+                      <p className="text-[11px] text-[#6e6e73]">{tenure.vehicle_model} · {tenure.engine_cc}</p>
+                      <p className="text-[11px] font-semibold text-[#454545]">
+                        Roadtax and Runner fee :{" "}
+                        <span className="font-mono font-bold text-[#1b1717]">
+                          RM {(tenure.road_tax + tenure.runner_fee).toFixed(2)}
+                        </span>
+                      </p>
+                    </div>
                   </div>
                 </div>
 
@@ -3363,9 +3561,9 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                       >
                         <div className="space-y-3">
                           {/* Rank Badge & Winner Pill */}
-                          <div className="flex items-center justify-between gap-1.5">
+                          <div className="flex items-center justify-between gap-1.5 h-6">
                             <span
-                              className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                              className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full whitespace-nowrap shrink-0 ${
                                 rankNum === 1
                                   ? "bg-amber-100 text-amber-900 border border-amber-300"
                                   : "bg-neutral-100 text-neutral-700 border border-neutral-200"
@@ -3374,20 +3572,17 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                               {`Rank #${rankNum}`}
                             </span>
                             {isWinner && (
-                              <span className="text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full">
+                              <span className="text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full whitespace-nowrap shrink-0">
                                 Recommended
                               </span>
                             )}
                           </div>
 
                           {/* Company Name */}
-                          <div>
-                            <h4 className="font-black text-sm text-[#1b1717] tracking-tight uppercase truncate">
-                              {card.company_name}
+                          <div className="h-6 flex items-center">
+                            <h4 className="font-black text-sm text-[#1b1717] tracking-tight uppercase truncate whitespace-nowrap" title={card.company_name}>
+                              {formatShortInsurerName(card.company_name)}
                             </h4>
-                            <p className="text-[11px] text-[#6e6e73] font-mono">
-                              {card.is_takaful ? "Islamic Takaful" : "Conventional"}
-                            </p>
                           </div>
 
                           {/* Premium Pricing Block */}
@@ -3404,28 +3599,31 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                                 RM {card.total_payable.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
                               </span>
                             </div>
-
                           </div>
 
                           {/* Benefit Highlights */}
                           <div className="space-y-1 text-[11px] pt-1 border-t border-neutral-200/60">
-                            <div className="flex justify-between">
+                            <div className="h-5 flex items-center justify-between">
                               <span className="text-[#6e6e73]">Valuation:</span>
                               <span className="font-semibold text-[#1b1717]">
-                                {card.valuation_type === "agreed_value" ? "Agreed Value 约定价" : "Market Value 市价"}
+                                {card.valuation_type === "agreed_value" ? "Agreed Value" : "Market Value"}
                               </span>
                             </div>
-                            <div className="flex justify-between">
+                            <div className="h-5 flex items-center justify-between">
                               <span className="text-[#6e6e73]">NCD:</span>
                               <span className="font-mono font-bold text-[#1b1717]">
-                                {tenure.ncd_percentage != null
+                                {card.ncd_percentage != null
+                                  ? `${card.ncd_percentage}%`
+                                  : data.ncd?.next != null
+                                  ? `${data.ncd.next}%`
+                                  : tenure.ncd_percentage != null
                                   ? `${tenure.ncd_percentage}%`
                                   : data.ncd?.current != null
                                   ? `${data.ncd.current}%`
                                   : "0%"}
                               </span>
                             </div>
-                            <div className="flex justify-between">
+                            <div className="h-5 flex items-center justify-between">
                               <span className="text-[#6e6e73]">Windscreen:</span>
                               <span className="font-mono font-semibold text-[#1b1717]">
                                 {card.windscreen_sum_insured && card.windscreen_sum_insured > 0
@@ -3433,33 +3631,39 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                                   : "None"}
                               </span>
                             </div>
-                            <div className="flex justify-between">
+                            <div className="h-5 flex items-center justify-between">
                               <span className="text-[#6e6e73]">Flood / Perils:</span>
                               <span
                                 className={`font-semibold ${
                                   card.special_perils && card.special_perils !== "0" && card.special_perils !== "None"
                                     ? "text-emerald-700"
                                     : "text-neutral-400"
-                                  }`}
+                                }`}
                               >
                                 {card.special_perils && card.special_perils !== "0" && card.special_perils !== "None"
                                   ? "Covered"
                                   : "Not Included"}
                               </span>
                             </div>
-                            <div className="flex justify-between">
+                            <div className="h-5 flex items-center justify-between">
                               <span className="text-[#6e6e73]">Betterment:</span>
                               <span className="font-semibold text-[#1b1717]">
                                 {card.betterment_display || (card.waiver_betterment ? "No (0%)" : "Yes")}
                               </span>
                             </div>
-                            <div className="flex justify-between">
+                            <div className="h-5 flex items-center justify-between">
                               <span className="text-[#6e6e73]">LLP / LLOP:</span>
-                              <span className="font-semibold text-[#1b1717]">
-                                {card.llp_llop || "—"}
+                              <span
+                                className={`font-semibold ${
+                                  isLlpLlopIncluded(card.llp_llop)
+                                    ? "text-[#1b1717]"
+                                    : "text-neutral-400"
+                                }`}
+                              >
+                                {formatLlpLlop(card.llp_llop)}
                               </span>
                             </div>
-                            <div className="flex justify-between">
+                            <div className="h-5 flex items-center justify-between">
                               <span className="text-[#6e6e73]">Towing Limit:</span>
                               <span className="font-mono font-semibold text-[#1b1717]">
                                 {card.towing_limit || card.towing_km || "Standard"}
@@ -3484,7 +3688,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
 
                 {/* Footer disclaimer */}
                 <div className="flex items-center justify-between text-[10px] text-neutral-400 pt-2 border-t border-neutral-200">
-                  <span>Confidential quotation benchmarking prepared by Risk-Locker</span>
+                  <span>Confidential quotation benchmarking prepared by Risklocker</span>
                   <span className="font-mono">
                     Generated {new Date().toLocaleDateString("en-MY")}, {new Date().toLocaleTimeString("en-MY", { hour: "2-digit", minute: "2-digit" })}
                   </span>
@@ -3704,6 +3908,189 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                 <DownloadSimple size={14} weight="bold" />
                 <span>Download &amp; Unlink</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* NCD Entitlement & Previous Policy Edit Modal */}
+      {showNcdModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 no-print animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl border border-neutral-200 max-w-lg w-full overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#e5e5ea] bg-[#f5f5f7]">
+              <div>
+                <h3 className="text-base font-bold text-[#1b1717] flex items-center gap-2">
+                  <ShieldCheck size={20} weight="fill" className="text-emerald-600" />
+                  NCD Entitlement &amp; Previous Policy
+                </h3>
+                <p className="text-xs text-[#6e6e73]">
+                  Update Current NCD (last year policy) and Next NCD (renewal quotation)
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowNcdModal(false)}
+                className="p-1.5 rounded-xl border border-neutral-300 hover:bg-neutral-200 text-neutral-600 transition-colors cursor-pointer"
+              >
+                <X size={18} weight="bold" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {/* Current NCD Selection */}
+              <div>
+                <div className="flex justify-between items-baseline mb-1.5">
+                  <label className="text-xs font-bold text-[#1b1717]">
+                    Current NCD (Last Year Policy)
+                  </label>
+                  <span className="text-[11px] font-mono text-[#6e6e73]">
+                    {data?.ncd?.current_period ? `Period: ${data.ncd.current_period}` : ""}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 mb-2">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    value={editCurrentNcd}
+                    onChange={(e) => setEditCurrentNcd(e.target.value)}
+                    placeholder="e.g. 55"
+                    className="w-24 h-9 px-3 rounded-lg border border-neutral-300 font-mono text-sm font-bold text-center focus:border-[#1b1717] outline-none"
+                  />
+                  <span className="text-sm font-bold text-neutral-500">%</span>
+                  <div className="flex-1 flex gap-1 flex-wrap">
+                    {[0, 25, 30, 38.33, 45, 55].map((val) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setEditCurrentNcd(String(val))}
+                        className={`px-2 py-1 rounded text-xs font-mono font-bold transition-all cursor-pointer ${
+                          parseFloat(editCurrentNcd) === val
+                            ? "bg-[#1b1717] text-white"
+                            : "bg-neutral-100 hover:bg-neutral-200 text-neutral-800"
+                        }`}
+                      >
+                        {val}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Next NCD Selection */}
+              <div>
+                <div className="flex justify-between items-baseline mb-1.5">
+                  <label className="text-xs font-bold text-[#1b1717]">
+                    Next NCD (Renewal Quotation)
+                  </label>
+                  <span className="text-[11px] font-mono text-[#6e6e73]">
+                    {data?.ncd?.next_period ? `Period: ${data.ncd.next_period}` : ""}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 mb-2">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    value={editNextNcd}
+                    onChange={(e) => setEditNextNcd(e.target.value)}
+                    placeholder="e.g. 55"
+                    className="w-24 h-9 px-3 rounded-lg border border-neutral-300 font-mono text-sm font-bold text-center focus:border-[#1b1717] outline-none"
+                  />
+                  <span className="text-sm font-bold text-neutral-500">%</span>
+                  <div className="flex-1 flex gap-1 flex-wrap">
+                    {[0, 25, 30, 38.33, 45, 55].map((val) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setEditNextNcd(String(val))}
+                        className={`px-2 py-1 rounded text-xs font-mono font-bold transition-all cursor-pointer ${
+                          parseFloat(editNextNcd) === val
+                            ? "bg-emerald-700 text-white"
+                            : "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200"
+                        }`}
+                      >
+                        {val}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Paste or Drop Zone for Policy Text / PDF snippet */}
+              <div className="rounded-xl border border-dashed border-neutral-300 p-3 bg-neutral-50 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-neutral-700 block">
+                    Upload Previous Policy (PNG / PDF) or Paste Text Snippet
+                  </span>
+                  <label className="inline-flex items-center gap-1 text-[10px] font-semibold text-neutral-700 bg-white border border-neutral-300 hover:bg-neutral-100 px-2 py-0.5 rounded cursor-pointer transition-colors shadow-2xs">
+                    <CloudArrowUp size={12} weight="bold" />
+                    <span>Choose File</span>
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const name = file.name;
+                          setPastingPolicyText(`Uploaded file: ${name}`);
+                          const match = name.match(/(\d+(?:\.\d+)?)\s*%/);
+                          if (match) {
+                            setEditCurrentNcd(match[1]);
+                          }
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+                <textarea
+                  rows={2}
+                  value={pastingPolicyText}
+                  onChange={(e) => {
+                    const txt = e.target.value;
+                    setPastingPolicyText(txt);
+                    const match = txt.match(/(\d+(?:\.\d+)?)\s*%/);
+                    if (match) {
+                      setEditCurrentNcd(match[1]);
+                    }
+                  }}
+                  placeholder="Drop last year policy PNG / PDF or paste 2-4 lines of text (e.g. 'Current NCD: 55% 22/01/2024 to 21/01/2025')..."
+                  className="w-full text-xs p-2 rounded-lg border border-neutral-200 bg-white font-mono outline-none focus:border-[#1b1717]"
+                />
+                <div className="flex items-center justify-between text-[10px] text-neutral-500">
+                  <span>Tip: Any detected % in the pasted text or file will auto-fill Current NCD.</span>
+                  <Link
+                    href={`/upload?mode=comparison&tenure_id=${tenureId}` as Route}
+                    className="text-blue-600 hover:underline font-semibold flex items-center gap-1"
+                    target="_blank"
+                  >
+                    <span>Full Intake OCR Upload ↗</span>
+                  </Link>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-3 border-t border-[#e5e5ea] bg-[#f5f5f7] flex items-center justify-end gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowNcdModal(false)}
+                disabled={savingNcd}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={handleSaveNcd}
+                loading={savingNcd}
+                className="bg-[#1b1717] hover:bg-black text-white font-bold"
+              >
+                Save NCD Entitlement
+              </Button>
             </div>
           </div>
         </div>

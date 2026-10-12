@@ -388,6 +388,11 @@ def test_upcoming_renewal_ledger_isolates_quotes_and_records_covernote(
     db_session.add_all([d_q, s_quote, d_cn, s_cn, job])
     db_session.commit()
 
+    # Automatically create next year renewal tenure for 2027 upon cover note issuance
+    t_2027 = create_next_year_renewal_tenure(db_session, t_2026, user_id=test_user.id)
+    db_session.commit()
+    assert t_2027 is not None
+
     # Verify job detail endpoint works for both /api/jobs/{id} and /api/uploads/jobs/{id}
     res_j1 = client.get(f"/api/jobs/{job.id}")
     assert res_j1.status_code == 200
@@ -411,14 +416,8 @@ def test_upcoming_renewal_ledger_isolates_quotes_and_records_covernote(
     assert target_row["status"] == "draft"
     assert target_row["is_covernote_issued"] is False
 
-    # Verification: Cover Note on record forwarded with is_previous_year_policy
-    cn_policy = target_row["covernote_policy"]
-    assert cn_policy is not None
-    assert cn_policy["is_previous_year_policy"] is True
-    assert cn_policy["previous_policy_year"] == 2026
-    assert cn_policy["company"] == "Allianz"
-    assert cn_policy["policy_number"] == "POL-2026-DAVID"
-    assert cn_policy["total_payable"] == 1850.50
+    # Verification: 2027 renewal ledger is a clean empty ledger awaiting 2027 quotes (no leaked previous year policy)
+    assert target_row["covernote_policy"] is None
 
     # Verification: Calculated renewal period for 2027
     assert target_row["coverage_start_date"].startswith("2027-04-01")

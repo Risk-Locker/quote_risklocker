@@ -412,11 +412,28 @@ def test_yoy_stats_anchors_strictly_on_start_year(client: TestClient, db_session
     assert years_map.get("2027", 0) == 0
     assert cars_map.get("2027", 0) >= 1
 
-    # Query list_tenures: 2026 returns the deal as active/issued; 2027 returns the deal as an upcoming renewal with 0 policies
+    # Query list_tenures: 2026 returns the deal; 2027 is strictly isolated until policy is issued
     res_2026 = client.get("/api/tenures?year=2026")
     assert res_2026.status_code == 200
     p26 = [i["vehicle_no"] for i in res_2026.json()["items"]]
     assert "YOYTEST20262027" in p26
+
+    res_2027_pre = client.get("/api/tenures?year=2027")
+    assert res_2027_pre.status_code == 200
+    assert "YOYTEST20262027" not in [i["vehicle_no"] for i in res_2027_pre.json()["items"]]
+
+    # Once policy is issued/won, next year renewal entry is created
+    from sqlalchemy import select
+    from app.models.tables import InsuranceTenure
+    t26 = db_session.scalar(select(InsuranceTenure).where(InsuranceTenure.vehicle_no == "YOYTEST20262027"))
+    assert t26 is not None
+    t26.status = "hit"
+    t26.stage = "Close - Win"
+    db_session.commit()
+
+    from app.services.insurance_tenure_service import create_next_year_renewal_tenure
+    create_next_year_renewal_tenure(db_session, t26)
+    db_session.commit()
 
     res_2027 = client.get("/api/tenures?year=2027")
     assert res_2027.status_code == 200

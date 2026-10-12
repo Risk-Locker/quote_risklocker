@@ -664,6 +664,14 @@ def process_extraction_job(
             stage_hist["Issue Policy"] = datetime.now(timezone.utc).isoformat()
             tenure.stage_history = stage_hist
             tenure.stage_updated_at = datetime.now(timezone.utc)
+
+        # Autonomous Next-Year Renewal Invariant:
+        # Once policy is issued/bound, immediately create the clean Y+1 renewal tenure (empty marketing comparison)
+        try:
+            from app.services.insurance_tenure_service import create_next_year_renewal_tenure
+            create_next_year_renewal_tenure(db=db, tenure=tenure, user_id=session.created_by_id)
+        except Exception as exc:
+            logger.warning("Could not auto-create next year renewal tenure for tenure %s: %s", tenure.id, exc)
     else:
         session.document_type = "quotation"
         curr_opts["document_type"] = "quotation"

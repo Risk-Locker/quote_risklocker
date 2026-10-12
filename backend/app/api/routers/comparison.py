@@ -67,6 +67,7 @@ class FixedCostsUpdateRequest(BaseModel):
     runner_fee: float = Field(0.0, description="Runner / agent service fee in MYR")
     windscreen_target: float | None = Field(None, description="Windscreen coverage amount in MYR")
     ncd_percentage: float | None = Field(None, description="NCD percentage (e.g. 55.0)")
+    current_ncd: float | None = Field(None, description="Current NCD percentage from previous policy term (e.g. 55.0)")
     coverage_start_date: str | None = Field(None, description="ISO format or YYYY-MM-DD for insurance start date")
     coverage_end_date: str | None = Field(None, description="ISO format or YYYY-MM-DD for insurance end date")
     customer_name: str | None = Field(None, description="Customer name")
@@ -80,7 +81,7 @@ class FixedCostsUpdateRequest(BaseModel):
     car_model: str | None = Field(None, description="Car model alias")
     manufacture_year: int | None = Field(None, description="Vehicle year of manufacture (e.g. 2020)")
 
-    @field_validator("road_tax", "runner_fee", "windscreen_target", "ncd_percentage", mode="before")
+    @field_validator("road_tax", "runner_fee", "windscreen_target", "ncd_percentage", "current_ncd", mode="before")
     def parse_floats(cls, v):
         return _parse_flexible_float(v)
 
@@ -166,6 +167,7 @@ def update_fixed_costs(
             runner_fee=payload.runner_fee,
             windscreen_target=payload.windscreen_target,
             ncd_percentage=payload.ncd_percentage,
+            current_ncd=payload.current_ncd,
             coverage_start_date=payload.coverage_start_date,
             coverage_end_date=payload.coverage_end_date,
             customer_name=payload.customer_name,
@@ -688,6 +690,13 @@ def convert_session_document_type(
             stage_hist["Issue Policy"] = datetime.now(timezone.utc).isoformat()
             tenure.stage_history = stage_hist
             tenure.stage_updated_at = datetime.now(timezone.utc)
+
+        # Autonomous Next-Year Renewal Invariant
+        from app.services.insurance_tenure_service import create_next_year_renewal_tenure
+        try:
+            create_next_year_renewal_tenure(db=db, tenure=tenure, user_id=user.id)
+        except Exception:
+            pass
     else:
         # Revert back to quotation: clear covernote link if this was the covernote
         if tenure.covernote_session_id == session.id:
@@ -695,6 +704,11 @@ def convert_session_document_type(
         if tenure.stage == "Issue Policy":
             tenure.stage = "Quotations"
             tenure.stage_updated_at = datetime.now(timezone.utc)
+        from app.services.insurance_tenure_service import remove_auto_created_next_year_tenure
+        try:
+            remove_auto_created_next_year_tenure(db=db, tenure=tenure)
+        except Exception:
+            pass
 
     db.commit()
     return {"status": "success", "session_id": session_id, "document_type": target_type}
@@ -731,6 +745,12 @@ def unlink_tenure_covernote(
         tenure.status = "draft"
     tenure.won_premium = None
 
+    from app.services.insurance_tenure_service import remove_auto_created_next_year_tenure
+    try:
+        remove_auto_created_next_year_tenure(db=db, tenure=tenure)
+    except Exception:
+        pass
+
     db.commit()
     return {"status": "success", "tenure_id": tenure_id, "message": "Cover note unlinked successfully"}
 
@@ -759,6 +779,12 @@ def link_tenure_covernote(
     tenure.covernote_session_id = sess.id
     tenure.stage = "Issue Policy"
     tenure.stage_updated_at = datetime.now(timezone.utc)
+
+    from app.services.insurance_tenure_service import create_next_year_renewal_tenure
+    try:
+        create_next_year_renewal_tenure(db=db, tenure=tenure, user_id=user.id)
+    except Exception:
+        pass
 
     db.commit()
     return {"status": "success", "tenure_id": tenure_id, "session_id": sess.id, "message": "Policy linked successfully"}

@@ -51,3 +51,41 @@ export function formatBenefitCoverage(
   // Raw plain text (no RM or KM)
   return str;
 }
+
+export function formatShortInsurerName(name?: string | null): string {
+  if (!name) return "Underwriter";
+  const clean = name.trim();
+  const lower = clean.toLowerCase();
+
+  if (lower.includes("allianz")) return "ALLIANZ";
+  if (lower.includes("etiqa") && lower.includes("takaful")) return "ETIQA TAKAFUL";
+  if (lower.includes("etiqa")) return "ETIQA";
+  if (lower.includes("zurich") && lower.includes("takaful")) return "ZURICH TAKAFUL";
+  if (lower.includes("zurich")) return "ZURICH";
+  if (lower.includes("lonpac")) return "LONPAC";
+  if (lower.includes("berjaya") || lower.includes("sompo")) return "BERJAYA SOMPO";
+  if (lower.includes("pacific") && lower.includes("orient")) return "PACIFIC & ORIENT";
+  if (lower.includes("pacific")) return "PACIFIC";
+  if (lower.includes("takaful malaysia") || lower.includes("syarikat takaful")) return "TAKAFUL MALAYSIA";
+  if (lower.includes("takaful ikhlas") || lower.includes("ikhlas")) return "TAKAFUL IKHLAS";
+  if (lower.includes("amgeneral") || lower.includes("kurnia")) return "AMGENERAL / KURNIA";
+  if (lower.includes("chubb")) return "CHUBB";
+  if (lower.includes("msig")) return "MSIG";
+  if (lower.includes("rhb")) return "RHB";
+  if (lower.includes("liberty")) return "LIBERTY";
+  if (lower.includes("tune")) return "TUNE PROTECT";
+  if (lower.includes("great eastern")) return "GREAT EASTERN";
+  if (lower.includes("aig")) return "AIG";
+  if (lower.includes("generali") || lower.includes("axa")) return "GENERALI";
+  if (lower.includes("progressive")) return "PROGRESSIVE";
+  if (lower.includes("tokio marine")) return "TOKIO MARINE";
+  if (lower.includes("qbe")) return "QBE";
+  if (lower.includes("hong leong") || lower.includes("hla")) return "HONG LEONG";
+
+  return clean
+    .replace(/\b(General Insurance Company|General Insurance|Insurance Company|Insurance Co\.?|Insurans|Insurance|Takaful|Berhad|Bhd\.?|Sdn\.? Bhd\.?|Corporation|Malaysia)\b/gi, "")
+    .replace(/[()]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase() || clean.toUpperCase();
+}

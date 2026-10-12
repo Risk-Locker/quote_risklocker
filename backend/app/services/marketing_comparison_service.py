@@ -1982,6 +1982,7 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     year_start_date = datetime(current_year, 1, 1).date() if isinstance(tenure.coverage_start_date, datetime) else date(current_year, 1, 1)
 
     prev_tenure = None
+    best_prev_sess = None
     if tenure.previous_tenure_id:
         prev_tenure = db.get(InsuranceTenure, tenure.previous_tenure_id)
 
@@ -2049,6 +2050,8 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "year": prev_tenure.coverage_start_date.year if prev_tenure.coverage_start_date else (current_year - 1),
             "period": f"{prev_tenure.coverage_start_date.strftime('%d/%m/%Y')} - {prev_tenure.coverage_end_date.strftime('%d/%m/%Y')}" if (prev_tenure.coverage_start_date and prev_tenure.coverage_end_date) else f"{current_year - 1}",
             "insurer": prev_company or "Previous Insurer",
+            "policy_number": prev_tenure.policy_number,
+            "ncd_percentage": float(prev_tenure.ncd_percentage) if prev_tenure.ncd_percentage is not None else None,
             "sum_insured": prev_sum_ins,
             "insurance_premium": prev_motor_prem,
             "perils": prev_perils_str,
@@ -2264,7 +2267,36 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                     break
 
     is_commercial_veh = resolved_vtype in ("CommercialVehicle", "Motorcycle", "EVMotorcycle") or "commercial" in (resolved_vtype or "").lower()
-    current_ncd, next_ncd = calculate_ncd_pair(cand_ncd, is_commercial=is_commercial_veh)
+    next_ncd = cand_ncd
+    saved_current_ncd = (tenure.recommended_sum_insured_json or {}).get("current_ncd") if isinstance(tenure.recommended_sum_insured_json, dict) else None
+
+    if saved_current_ncd is not None:
+        try:
+            current_ncd = float(saved_current_ncd)
+        except (ValueError, TypeError):
+            current_ncd = None
+    elif prev_tenure and prev_tenure.ncd_percentage is not None:
+        current_ncd = float(prev_tenure.ncd_percentage)
+    elif prev_policy_data and best_prev_sess and best_prev_sess.draft and isinstance(best_prev_sess.draft.fields, dict):
+        current_ncd = _extract_ncd_from_draft(best_prev_sess.draft.fields)
+    else:
+        # Fallback to predecessor on Malaysian PIAM scale
+        scale = COMMERCIAL_NCD_SCALE if is_commercial_veh else NCD_RATE_SCALE
+        if next_ncd is not None:
+            best_idx = 0
+            min_diff = float("inf")
+            for idx, tier in enumerate(scale):
+                diff = abs(tier - next_ncd)
+                if diff < min_diff:
+                    min_diff = diff
+                    best_idx = idx
+            pred_idx = max(0, best_idx - 1)
+            current_ncd = scale[pred_idx]
+        else:
+            current_ncd = None
+
+    if next_ncd is None and current_ncd is not None:
+        _, next_ncd = calculate_ncd_pair(current_ncd, is_commercial=is_commercial_veh)
 
     # Count pending/processing jobs
     pending_jobs_count = 0
@@ -2637,8 +2669,32 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     active_period_formatted = (
         f"{active_start_date.strftime('%d/%m/%Y')} - {active_end_date.strftime('%d/%m/%Y')}"
         if (active_start_date and active_end_date)
-        else f"{tenure.coverage_start_date.strftime('%d/%m/%Y')} - {tenure.coverage_end_date.strftime('%d/%m/%Y')}"
+        else (
+            f"{tenure.coverage_start_date.strftime('%d/%m/%Y')} - {tenure.coverage_end_date.strftime('%d/%m/%Y')}"
+            if (tenure.coverage_start_date and tenure.coverage_end_date)
+            else "—"
+        )
     )
+
+    if active_start_date and active_end_date:
+        next_ncd_period = f"{active_start_date.strftime('%d/%m/%Y')} to {active_end_date.strftime('%d/%m/%Y')}"
+    elif tenure.coverage_start_date and tenure.coverage_end_date:
+        next_ncd_period = f"{tenure.coverage_start_date.strftime('%d/%m/%Y')} to {tenure.coverage_end_date.strftime('%d/%m/%Y')}"
+    else:
+        next_ncd_period = f"{current_year} to {current_year + 1}"
+
+    if prev_tenure and prev_tenure.coverage_start_date and prev_tenure.coverage_end_date:
+        current_ncd_period = f"{prev_tenure.coverage_start_date.strftime('%d/%m/%Y')} to {prev_tenure.coverage_end_date.strftime('%d/%m/%Y')}"
+    elif active_start_date:
+        prev_st = active_start_date - timedelta(days=365)
+        prev_en = active_start_date - timedelta(days=1)
+        current_ncd_period = f"{prev_st.strftime('%d/%m/%Y')} to {prev_en.strftime('%d/%m/%Y')}"
+    elif tenure.coverage_start_date:
+        prev_st = tenure.coverage_start_date - timedelta(days=365)
+        prev_en = tenure.coverage_start_date - timedelta(days=1)
+        current_ncd_period = f"{prev_st.strftime('%d/%m/%Y')} to {prev_en.strftime('%d/%m/%Y')}"
+    else:
+        current_ncd_period = f"{current_year - 1} to {current_year}"
 
     return {
         "tenure": {
@@ -2693,6 +2749,9 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
         "ncd": {
             "current": current_ncd,
             "next": next_ncd,
+            "current_period": current_ncd_period,
+            "next_period": next_ncd_period,
+            "has_previous_policy": bool(prev_tenure or (prev_policy_data and prev_policy_data.get("insurer"))),
         },
         "vehicle_age": veh_age,
         "date_conflict": date_conflict,
@@ -2742,6 +2801,7 @@ def update_tenure_fixed_costs(
     runner_fee: float,
     windscreen_target: float | None = None,
     ncd_percentage: float | None = None,
+    current_ncd: float | None = None,
     coverage_start_date: str | None = None,
     coverage_end_date: str | None = None,
     customer_name: str | None = None,
@@ -2770,6 +2830,12 @@ def update_tenure_fixed_costs(
         tenure.windscreen_target = windscreen_target
     if ncd_percentage is not None:
         tenure.ncd_percentage = ncd_percentage
+    if current_ncd is not None:
+        if tenure.previous_tenure:
+            tenure.previous_tenure.ncd_percentage = current_ncd
+        cur_json = dict(tenure.recommended_sum_insured_json or {})
+        cur_json["current_ncd"] = current_ncd
+        tenure.recommended_sum_insured_json = cur_json
 
     if customer_name and customer_name.strip():
         tenure.customer_name = customer_name.strip()
