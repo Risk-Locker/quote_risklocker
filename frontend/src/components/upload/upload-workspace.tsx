@@ -14,6 +14,7 @@ import {
   Files,
   FileText,
   Flask,
+  Lightning,
   Sparkle,
   Trash,
   Upload,
@@ -29,6 +30,11 @@ import { Card } from "@/components/ui/card";
 import { GeminiQuotaInfoButton, type GeminiQuota } from "@/components/gemini-quota-meter";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
+import {
+  saveStagedQueue,
+  loadStagedQueue,
+  clearStagedQueue,
+} from "@/lib/staged-uploads-storage";
 
 export type UploadMode = "single" | "comparison" | "bulk";
 
@@ -165,14 +171,84 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
   const activeSessionId = useRef<string | null>(null);
   const redirectedRef = useRef(false);
 
-  // Bulk upload state
   const [bulkFiles, setBulkFiles] = useState<BulkFileItem[]>([]);
   const [bulkProcessing, setBulkProcessing] = useState(false);
   const [bulkNotice, setBulkNotice] = useState("");
+  const [redetectingItemId, setRedetectingItemId] = useState<string | null>(null);
+
+  const handleRedetectBulkItem = async (item: BulkFileItem) => {
+    if (!item.sessionId) return;
+    setRedetectingItemId(item.id);
+    try {
+      const res = await api<{
+        success: boolean;
+        vehicle_plate?: string;
+        detected_company?: string;
+        total_premium?: string | number;
+        message?: string;
+      }>(`/sessions/${item.sessionId}/rescan`, {
+        method: "POST",
+        body: JSON.stringify({ mode: "in_place", engine: "auto" }),
+      });
+      if (res?.success) {
+        setBulkFiles((prev) =>
+          prev.map((i) =>
+            i.id === item.id
+              ? {
+                  ...i,
+                  status: "completed",
+                  plate: res.vehicle_plate || i.plate,
+                  insurer: res.detected_company || i.insurer,
+                  premium: res.total_premium || i.premium,
+                  error: undefined,
+                }
+              : i
+          )
+        );
+      }
+    } catch (err: any) {
+      console.error("Bulk item redetection failed:", err);
+      alert("Re-detection failed: " + (err?.message || "Error"));
+    } finally {
+      setRedetectingItemId(null);
+    }
+  };
 
   const maximum = limits?.max_source_pdf_bytes || limits?.max_upload_bytes || 20 * 1024 * 1024;
-  const maxBulkLimit = mode === "comparison" ? 10 : (limits?.max_bulk_upload_files || 10);
+  const maxBulkLimit = mode === "comparison" ? 30 : (limits?.max_bulk_upload_files || 30);
   const gemini = limits?.gemini;
+
+  // Restore staged queue on mount so staged PDFs never vanish
+  const hasRestoredQueue = useRef(false);
+  useEffect(() => {
+    if (hasRestoredQueue.current) return;
+    hasRestoredQueue.current = true;
+
+    loadStagedQueue()
+      .then((stored) => {
+        if (!mounted.current || !stored || stored.length === 0) return;
+        setBulkFiles((current) => {
+          if (current.length > 0) return current;
+          for (const item of stored) {
+            if (
+              (item.status === "processing" || item.status === "uploading") &&
+              item.sessionId &&
+              item.jobId
+            ) {
+              pollBulkJob(item.id, item.sessionId, item.jobId);
+            }
+          }
+          return stored;
+        });
+      })
+      .catch(() => {});
+  }, []);
+
+  // Persist staged queue across tab reloads/crashes
+  useEffect(() => {
+    if (!hasRestoredQueue.current) return;
+    saveStagedQueue(bulkFiles).catch(() => {});
+  }, [bulkFiles]);
 
   useEffect(() => {
     api<UploadLimits>("/settings/limits").then(setLimits).catch(() => setLimits(null));
@@ -468,6 +544,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
     if (bulkProcessing) return;
     setBulkFiles([]);
     setBulkNotice("");
+    clearStagedQueue().catch(() => {});
   }
 
   async function cancelBulkItem(item: BulkFileItem) {
@@ -492,6 +569,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
     setBulkProcessing(false);
     setBulkFiles([]);
     setBulkNotice("Batch stopped. Cancelled sessions have been deleted.");
+    clearStagedQueue().catch(() => {});
     for (const item of activeItems) {
       if (item.sessionId) {
         api(`/sessions/${item.sessionId}`, { method: "DELETE" }).catch(() => {});
@@ -512,56 +590,100 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
 
     setBulkFiles((prev) =>
       prev.map((i) =>
-        stagedItems.some((s) => s.id === i.id) ? { ...i, status: "uploading", progress: 10 } : i
+        stagedItems.some((s) => s.id === i.id) ? { ...i, status: "uploading", progress: 10, error: undefined } : i
       )
     );
 
-    const CHUNK_SIZE = 5;
+    const CHUNK_SIZE = Math.max(1, Math.min(4, gemini?.fleet_summary?.total_parallel_endpoints || 4));
     for (let c = 0; c < stagedItems.length; c += CHUNK_SIZE) {
       const currentChunk = stagedItems.slice(c, c + CHUNK_SIZE);
       await Promise.all(
         currentChunk.map(async (item) => {
-          try {
-            const form = new FormData();
-            form.append("file", item.file);
-            form.append("enhanced_reading", String(enhanced));
-            form.append("is_test", String(isTestUpload));
-            if (existingTenureId) {
-              form.append("tenure_id", existingTenureId);
+          let result: UploadResult | null = null;
+          let lastErr: any = null;
+
+          // Retry loop for rate limit backoff and network transient resilience
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+              const form = new FormData();
+              form.append("file", item.file);
+              form.append("enhanced_reading", String(enhanced));
+              form.append("is_test", String(isTestUpload));
+              if (existingTenureId) {
+                form.append("tenure_id", existingTenureId);
+              }
+
+              result = await api<UploadResult>("/uploads", {
+                method: "POST",
+                headers: { "Idempotency-Key": crypto.randomUUID() },
+                body: form,
+              });
+              break;
+            } catch (err: any) {
+              lastErr = err;
+              const errMsg = (err?.message || "").toLowerCase();
+              const isRateLimit =
+                errMsg.includes("429") ||
+                errMsg.includes("too many requests") ||
+                errMsg.includes("busy") ||
+                errMsg.includes("capacity") ||
+                errMsg.includes("exhausted") ||
+                errMsg.includes("quota");
+
+              if (attempt < 3 && isRateLimit) {
+                setBulkFiles((prev) =>
+                  prev.map((i) =>
+                    i.id === item.id
+                      ? {
+                          ...i,
+                          status: "uploading",
+                          error: `Intake capacity busy. Retrying in ${attempt * 3}s (attempt ${attempt}/3)...`,
+                        }
+                      : i
+                  )
+                );
+                await new Promise((resolve) => setTimeout(resolve, attempt * 3000));
+              } else if (attempt < 3 && !errMsg.includes("exceeds") && !errMsg.includes("invalid")) {
+                await new Promise((resolve) => setTimeout(resolve, 1500));
+              } else {
+                break;
+              }
             }
+          }
 
-            const result = await api<UploadResult>("/uploads", {
-              method: "POST",
-              headers: { "Idempotency-Key": crypto.randomUUID() },
-              body: form,
-            });
-
+          if (result) {
             setBulkFiles((prev) =>
               prev.map((i) =>
                 i.id === item.id
                   ? {
                       ...i,
-                      sessionId: result.session_id,
-                      jobId: result.job_id,
+                      sessionId: result!.session_id,
+                      jobId: result!.job_id,
                       status: "processing",
                       progress: 25,
+                      error: undefined,
                     }
                   : i
               )
             );
 
             await pollBulkJob(item.id, result.session_id, result.job_id);
-          } catch (err) {
+          } else {
             setBulkFiles((prev) =>
               prev.map((i) =>
                 i.id === item.id
-                  ? { ...i, status: "failed", error: apiErrorMessage(err) }
+                  ? { ...i, status: "failed", error: apiErrorMessage(lastErr) }
                   : i
               )
             );
           }
         })
       );
+
+      // Stagger 1200ms between micro-chunks to prevent burst concurrency spikes
+      if (c + CHUNK_SIZE < stagedItems.length) {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+      }
     }
 
     setBulkProcessing(false);
@@ -759,7 +881,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
             </h1>
             <p className="mt-1 text-[13px] text-[var(--rl-text-muted)] line-clamp-2">
               {mode === "comparison"
-                ? "Upload 1 to 10 insurer quotation PDFs for the same vehicle (e.g. Etiqa, Berjaya Sompo, AmAssurance) to compile your side-by-side marketing comparison matrix."
+                ? "Upload up to 30 insurer quotation PDFs for the same vehicle (e.g. Etiqa, Berjaya Sompo, AmAssurance) to compile your side-by-side marketing comparison matrix."
                 : mode === "bulk"
                 ? "High-speed parallel batch intake across 10 concurrent processing slots for corporate fleet deals."
                 : "Single quote preview sandbox. Real client renewal quotes should be compiled in Marketing Comparison for multi-insurer comparisons and ledger tracking."}
@@ -780,7 +902,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
               <Columns size={15} weight={mode === "comparison" ? "bold" : "regular"} />
               <span>Marketing Comparison</span>
               <span className="rounded bg-amber-100 text-amber-900 border border-amber-200/60 px-1.5 py-0.2 text-[10px] font-bold">
-                1–10 Quotes
+                Up to 30 Quotes
               </span>
             </button>
             <button
@@ -945,9 +1067,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
               </div>
               <p className="text-xs text-[var(--rl-text-muted)] mt-0.5">
                 {gemini?.active
-                  ? `Active Model: ${gemini.model} · ${gemini.key_count ?? 1} Key${
-                      (gemini.key_count ?? 1) > 1 ? "s" : ""
-                    } in Pool · Daily Quota: ${(gemini.rpd_remaining ?? 440).toLocaleString()} / ${(gemini.rpd_limit ?? 440).toLocaleString()} RPD`
+                  ? `Parallel Fleet: ${gemini.key_count ?? 2} Keys × 2 Models = ${gemini.fleet_summary?.total_parallel_endpoints ?? 4} Parallel Endpoints · Capacity: ${(gemini.fleet_summary?.fleet_rpm_limit ?? 48)} RPM · ${(gemini.fleet_summary?.fleet_tpm_limit ?? 880_000).toLocaleString()} TPM · ${(gemini.fleet_summary?.fleet_rpd_limit ?? 1840).toLocaleString()} RPD (Buffered: 460/endpoint; 2,000 raw)`
                   : (gemini?.key_count ?? 0) > 0
                   ? `Configured with ${gemini?.key_count ?? 1} key${(gemini?.key_count ?? 1) > 1 ? "s" : ""}. Click 'Test Key' to verify live connection.`
                   : "No Gemini API key configured. Add a key in Settings or .env to enable high-speed AI extraction."}
@@ -1315,12 +1435,12 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                   <div>
                     <span className="font-[var(--font-manrope)] text-[15px] font-semibold text-[var(--rl-text-strong)] block">
                       {mode === "comparison"
-                        ? "Drag and drop 1 to 10 quotation PDFs for this vehicle"
+                        ? `Drag and drop 1 to ${maxBulkLimit} quotation PDFs for this vehicle`
                         : "Drag and drop multiple quotation PDFs here"}
                     </span>
                     <span className="text-[13px] text-[var(--rl-text-muted)] block mt-0.5">
                       {mode === "comparison"
-                        ? "Upload quotes from different underwriters (Etiqa, Berjaya Sompo, Allianz, Zurich, etc.) · Up to 10 files"
+                        ? `Upload quotes from different underwriters (Etiqa, Berjaya Sompo, Allianz, Zurich, etc.) · Up to ${maxBulkLimit} files`
                         : `Upload up to ${maxBulkLimit} PDFs at once · Up to ${formatBytes(maximum)} each`}
                     </span>
                   </div>
@@ -1383,7 +1503,6 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                   </div>
                 )}
               </div>
-
               {/* Checklist Rows */}
               <div className="grid gap-2.5">
                 {bulkFiles.map((item, idx) => {
@@ -1414,6 +1533,22 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                             <p className="truncate text-[13px] font-semibold text-[var(--rl-text-strong)]">
                               {item.file.name}
                             </p>
+                            {item.status === "staged" && (
+                              <span className="inline-flex items-center gap-1 rounded bg-indigo-50 border border-indigo-200/70 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-indigo-800" title="Assigned parallel model endpoint">
+                                <Sparkle size={10} weight="fill" className="text-amber-500" />
+                                {(() => {
+                                  const totalSlots = gemini?.fleet_summary?.total_parallel_endpoints || gemini?.endpoints?.length || 4;
+                                  const slotIdx = idx % totalSlots;
+                                  const ep = gemini?.endpoints?.[slotIdx];
+                                  if (ep) {
+                                    return `${ep.account_label.replace("Account ", "Key ")} · ${ep.model.replace("gemini-2.5-", "")}`;
+                                  }
+                                  const keyNum = Math.floor(slotIdx / 2) + 1;
+                                  const modelStr = slotIdx % 2 === 0 ? "flash" : "flash-lite";
+                                  return `Key ${keyNum} · ${modelStr}`;
+                                })()}
+                              </span>
+                            )}
                             {item.plate && (
                               <span className="rounded bg-black px-1.5 py-0.5 font-mono text-[11px] font-bold text-white uppercase tracking-wider">
                                 {item.plate}
@@ -1477,6 +1612,23 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
 
                         {isDone && item.sessionId && (
                           <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => handleRedetectBulkItem(item)}
+                              disabled={redetectingItemId === item.id}
+                              className="min-h-[34px] px-2.5 text-xs font-semibold gap-1 cursor-pointer bg-white"
+                              title="Re-run AI & PDF detection on this uploaded quotation"
+                            >
+                              <ArrowsClockwise
+                                size={13}
+                                weight="bold"
+                                className={redetectingItemId === item.id ? "animate-spin text-amber-600" : ""}
+                              />
+                              {redetectingItemId === item.id ? "Re-detecting..." : "Re-detect"}
+                            </Button>
+
                             {mode === "comparison" && item.tenureId ? (
                               <Button
                                 type="button"
@@ -1527,6 +1679,24 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                             <Badge variant="danger" className="text-[10px]">
                               Failed
                             </Badge>
+                            {item.sessionId && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => handleRedetectBulkItem(item)}
+                                disabled={redetectingItemId === item.id}
+                                className="min-h-[30px] px-2 text-xs font-semibold gap-1 cursor-pointer bg-white"
+                                title="Re-run AI & PDF detection on this file"
+                              >
+                                <ArrowsClockwise
+                                  size={12}
+                                  weight="bold"
+                                  className={redetectingItemId === item.id ? "animate-spin text-amber-600" : ""}
+                                />
+                                {redetectingItemId === item.id ? "Re-detecting..." : "Re-detect"}
+                              </Button>
+                            )}
                             <button
                               type="button"
                               onClick={() => cancelBulkItem(item)}

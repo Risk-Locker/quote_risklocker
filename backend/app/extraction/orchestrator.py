@@ -65,6 +65,7 @@ class ExtractionOrchestrator:
             from app.extraction.gemini_extractor import extract_with_gemini_sync, get_key_pool
             pdf_bytes = file_path.read_bytes()
             if get_key_pool().get_all_keys() and len(pdf_bytes) > 500:
+                item_idx = abs(hash(source_filename or file_path.name)) % 100
                 gemini_res = extract_with_gemini_sync(
                     pdf_bytes,
                     document_text=combined_text,
@@ -75,6 +76,7 @@ class ExtractionOrchestrator:
                     db_packs=db_packs,
                     correction_memory=db_corrections,
                     prompt_override=prompt_override,
+                    batch_item_index=item_idx,
                 )
             else:
                 gemini_res = None

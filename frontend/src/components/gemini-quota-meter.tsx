@@ -14,6 +14,24 @@ import {
 import { Tooltip } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 
+export type GeminiEndpointItem = {
+  slot_id: string;
+  slot_index: number;
+  account_label: string;
+  masked_key: string;
+  model: string;
+  rpm_used: number;
+  rpm_limit: number;
+  rpm_remaining: number;
+  tpm_used: number;
+  tpm_limit: number;
+  tpm_remaining: number;
+  cooling_until?: number | null;
+  is_ready: boolean;
+  status_label: string;
+  status_color: "green" | "amber" | "red";
+};
+
 export type GeminiQuota = {
   active?: boolean;
   status?: "ready" | "denied" | "rate_limited" | "invalid_key" | "model_not_found" | "error" | "offline" | "untested";
@@ -22,6 +40,17 @@ export type GeminiQuota = {
   model?: string;
   key_count?: number;
   keys_count?: number;
+  fleet_summary?: {
+    keys_count: number;
+    models_per_key: number;
+    total_parallel_endpoints: number;
+    fleet_rpd_limit: number;
+    fleet_rpm_limit: number;
+    fleet_tpm_limit: number;
+    tokens_per_request_budget: number;
+  };
+  endpoints?: GeminiEndpointItem[];
+  tokens_budget_per_request?: number;
   rpm_limit?: number;
   rpm_used?: number;
   rpm_remaining?: number;

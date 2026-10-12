@@ -458,6 +458,7 @@ def rescan_session(
             db_packs=context.get("db_packs") or [],
             correction_memory=context.get("db_corrections") or [],
             prompt_override=prompt_override,
+            batch_item_index=abs(hash(target_session.id)) % 100,
         )
 
         if not gemini_res:
@@ -594,10 +595,24 @@ def rescan_session(
 
     target_session.last_edited_by_id = user.id
     target_session.last_edited_at = now
+
+    # If linked to a marketing comparison tenure, automatically sync the comparison matrix atomically
+    if getattr(target_session, "tenure_id", None):
+        try:
+            from app.services.marketing_comparison_service import rescan_comparison_tenure
+            rescan_comparison_tenure(db, target_session.tenure_id)
+        except Exception as sync_err:
+            logger.warning("Could not auto-sync comparison tenure %s: %s", target_session.tenure_id, sync_err)
+
     db.commit()
 
+    draft_fields = target_draft.fields or {}
+    plate_val = str((draft_fields.get("vehicle_no") or draft_fields.get("vehicle_number") or {}).get("value") or "").strip()
+    prem_val = str((draft_fields.get("total_amount") or {}).get("value") or "").strip()
+    cust_val = str((draft_fields.get("customer_name") or draft_fields.get("insured_name") or {}).get("value") or "").strip()
+
     fields_count = len([
-        k for k, v in (target_draft.fields or {}).items()
+        k for k, v in draft_fields.items()
         if isinstance(v, dict) and str(v.get("value") or "").strip()
     ])
 
@@ -608,6 +623,10 @@ def rescan_session(
         "mode": mode,
         "engine_used": engine_used,
         "detected_company": target_session.detected_company,
+        "vehicle_plate": plate_val or None,
+        "customer_name": cust_val or None,
+        "total_premium": prem_val or None,
         "fields_count": fields_count,
-        "message": f"Quotation {target_session.quotation_ref} rescanned ({engine_used.upper()}) and renewed successfully.",
+        "message": f"Quotation {target_session.quotation_ref} re-detected ({engine_used.upper()}) successfully.",
     }
+

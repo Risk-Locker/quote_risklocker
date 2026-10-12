@@ -85,8 +85,15 @@ export function SyncSessionsModal({
     if (isOpen) {
       fetchPreview();
       setEdits({});
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape" && !confirming) {
+          onClose();
+        }
+      };
+      window.addEventListener("keydown", handleKeyDown);
+      return () => window.removeEventListener("keydown", handleKeyDown);
     }
-  }, [isOpen]);
+  }, [isOpen, confirming]);
 
   // Toggle selection
   function toggleSession(id: string) {
@@ -213,6 +220,8 @@ export function SyncSessionsModal({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close sync modal"
+            data-testid="close-sync-modal-btn"
             className="text-neutral-400 hover:text-neutral-700 p-1 rounded"
           >
             <X size={18} />
@@ -227,6 +236,17 @@ export function SyncSessionsModal({
             <p className="text-xs text-neutral-500 mt-1">
               Extracting vehicle registration plates, dates, customer names, and sequential ownership.
             </p>
+            <div className="mt-4">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={onClose}
+                data-testid="cancel-sync-loading-btn"
+                className="text-xs"
+              >
+                Cancel
+              </Button>
+            </div>
           </div>
         ) : !preview ? (
           <div className="p-12 text-center text-xs text-neutral-500">
@@ -441,7 +461,7 @@ export function SyncSessionsModal({
               </div>
 
               <div className="flex items-center gap-2">
-                <Button variant="secondary" size="sm" onClick={onClose} className="text-xs">
+                <Button variant="secondary" size="sm" onClick={onClose} data-testid="cancel-sync-modal-btn" className="text-xs">
                   Cancel
                 </Button>
                 <Button

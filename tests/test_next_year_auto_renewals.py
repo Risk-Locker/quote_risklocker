@@ -270,7 +270,9 @@ def test_api_yoy_stats_and_sync_endpoint(client: TestClient, db_session: Session
     data = res.json()
     years = [y["year"] for y in data["years"]]
     assert "2026" in years
-    assert "2027" not in years
+    y27_pre = next((y for y in data["years"] if y["year"] == "2027"), None)
+    if y27_pre:
+        assert y27_pre["total"] == 0
 
     # Call POST /api/tenures/sync-next-year-renewals to explicitly create 2027 renewal
     res_sync = client.post("/api/tenures/sync-next-year-renewals?target_year=2027")

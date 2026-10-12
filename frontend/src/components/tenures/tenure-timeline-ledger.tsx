@@ -516,6 +516,17 @@ export function TenureTimelineLedger() {
     } catch {}
   };
 
+  useEffect(() => {
+    if (!addVehicleModalOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !savingNewVehicle) {
+        setAddVehicleModalOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [addVehicleModalOpen, savingNewVehicle]);
+
   const handleCreateCustomVehicle = async (openComparison: boolean) => {
     const cleanPlate = newVehPlate.trim().toUpperCase().replace(/\s+/g, "");
     const cleanName = newVehCustomerName.trim();
@@ -1773,6 +1784,7 @@ export function TenureTimelineLedger() {
               onClick={() => {
                 setSelectedYear("all");
                 setSelectedMonth("all");
+                setPolicyFilter("all");
               }}
               className={`px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
                 selectedYear === "all"
@@ -1806,6 +1818,7 @@ export function TenureTimelineLedger() {
                   onClick={() => {
                     setSelectedYear(yr);
                     setSelectedMonth("all");
+                    setPolicyFilter("all");
                   }}
                   className={`px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
                     isSelected
@@ -1818,7 +1831,7 @@ export function TenureTimelineLedger() {
                   {yr === currentYear && (
                     <span className="text-[10px] text-amber-500 font-bold" title="Current Year">●</span>
                   )}
-                  {totalPolicies > 0 && (
+                  {(totalPolicies > 0 || totalCars > 0) && (
                     <span
                       className={`px-1.5 py-0.2 rounded text-[10px] font-mono font-bold ${
                         isSelected ? "bg-white/20 text-white" : "bg-[#e5e5ea] text-neutral-700"
@@ -1884,13 +1897,13 @@ export function TenureTimelineLedger() {
                     title={tooltipText}
                   >
                     <span>{m.label}</span>
-                    {m.total > 0 && (
+                    {(m.total > 0 || m.cars > 0) && (
                       <span
                         className={`px-1.5 py-0.2 rounded text-[10px] font-bold font-mono ${
                           isActive ? "bg-white/20 text-white" : "bg-[#e5e5ea] text-[#1b1717]"
                         }`}
                       >
-                        ({m.total})
+                        ({m.total > 0 ? m.total : m.cars})
                       </span>
                     )}
                   </button>
@@ -3910,6 +3923,8 @@ export function TenureTimelineLedger() {
                 type="button"
                 onClick={() => setAddVehicleModalOpen(false)}
                 disabled={savingNewVehicle}
+                aria-label="Close modal"
+                data-testid="close-add-vehicle-btn"
                 className="text-neutral-400 hover:text-white p-1 rounded-sm cursor-pointer transition-colors"
               >
                 <XCircle size={18} weight="bold" />
@@ -4109,6 +4124,7 @@ export function TenureTimelineLedger() {
                 type="button"
                 onClick={() => setAddVehicleModalOpen(false)}
                 disabled={savingNewVehicle}
+                data-testid="cancel-add-vehicle-btn"
                 className="w-full sm:w-auto px-4 py-2 text-xs font-semibold text-neutral-600 hover:text-neutral-900 transition-colors cursor-pointer disabled:opacity-50"
               >
                 Cancel

@@ -78,6 +78,41 @@ export default function SessionsPage() {
   const [activeTab, setActiveTab] = useState<"all" | "single" | "comparison" | "test">("all");
   const [staffFilter, setStaffFilter] = useState<string>("all");
   const [staffOptions, setStaffOptions] = useState<StaffOption[]>([]);
+  const [redetectingId, setRedetectingId] = useState<string | null>(null);
+  const [redetectFeedback, setRedetectFeedback] = useState<{ id: string; msg: string; isError?: boolean } | null>(null);
+
+  const handleRedetectSession = async (sessionId: string) => {
+    setRedetectingId(sessionId);
+    setRedetectFeedback(null);
+    try {
+      const res = await api<{ success: boolean; message?: string; fields_count?: number }>(`/sessions/${sessionId}/rescan`, {
+        method: "POST",
+        body: JSON.stringify({ mode: "in_place", engine: "auto" }),
+      });
+      if (res?.success) {
+        setRedetectFeedback({
+          id: sessionId,
+          msg: `Re-detected! (${res.fields_count || 0} fields)`,
+        });
+        setTimeout(() => setRedetectFeedback(null), 4000);
+        await fetchSessions();
+      } else {
+        setRedetectFeedback({ id: sessionId, msg: "Re-detection completed", isError: false });
+        setTimeout(() => setRedetectFeedback(null), 4000);
+        await fetchSessions();
+      }
+    } catch (err: any) {
+      console.error("Re-detection failed:", err);
+      setRedetectFeedback({
+        id: sessionId,
+        msg: "Failed: " + (err?.message || "Re-detection error"),
+        isError: true,
+      });
+      setTimeout(() => setRedetectFeedback(null), 5000);
+    } finally {
+      setRedetectingId(null);
+    }
+  };
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -400,6 +435,39 @@ export default function SessionsPage() {
 
                   {/* Right: Quick Action Buttons */}
                   <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                    {/* Inline Re-detection Feedback */}
+                    {redetectFeedback?.id === s.id && (
+                      <span
+                        className={`text-[11px] font-semibold px-2 py-0.5 rounded ${
+                          redetectFeedback.isError
+                            ? "bg-rose-50 text-rose-700 border border-rose-200"
+                            : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        }`}
+                      >
+                        {redetectFeedback.msg}
+                      </span>
+                    )}
+
+                    {/* Inline Re-detect Button */}
+                    <button
+                      type="button"
+                      onClick={() => handleRedetectSession(s.id)}
+                      disabled={redetectingId === s.id}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
+                        redetectingId === s.id
+                          ? "bg-amber-50 text-amber-800 border-amber-300 animate-pulse cursor-wait"
+                          : "border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-700 hover:text-neutral-900 shadow-2xs"
+                      }`}
+                      title="Re-run AI & PDF detection to extract missing fields or benefits"
+                    >
+                      <ArrowsClockwise
+                        size={13}
+                        weight="bold"
+                        className={redetectingId === s.id ? "animate-spin text-amber-600" : "text-neutral-500"}
+                      />
+                      <span>{redetectingId === s.id ? "Re-detecting..." : "Re-detect"}</span>
+                    </button>
+
                     {/* Direct Single Quote Review */}
                     <Link
                       href={`/sessions/${s.id}` as Route}

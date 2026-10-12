@@ -2854,7 +2854,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                     <div className="flex justify-between">
                       <span className="text-neutral-500">Fixed Costs:</span>
                       <span className="font-mono font-medium text-neutral-700">
-                        RM {(cn.road_tax + cn.runner_fee).toFixed(2)} (Tax + Runner)
+                        RM {(((cn.road_tax ?? tenure.road_tax) || 0) + ((cn.runner_fee ?? tenure.runner_fee) || 0)).toFixed(2)} (Tax + Runner)
                       </span>
                     </div>
 

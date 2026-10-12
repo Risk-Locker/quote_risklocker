@@ -1177,7 +1177,7 @@ def test_covernote_separation_and_matrix_payload(db_session: Session):
         "sum_insured": "85000.00",
         "company_name": "Etiqa Takaful",
     }
-    sess_covernote.extracted_data = {
+    sess_covernote.draft.extracted_data = {
         "company_name": "Etiqa Takaful",
         "sum_insured": 85000.0,
         "total_payable": 2150.0,
@@ -1196,12 +1196,12 @@ def test_covernote_separation_and_matrix_payload(db_session: Session):
 
     # Matrix entries must ONLY contain quotation sessions, NEVER covernote sessions
     matrix_session_ids = [e["session_id"] for e in matrix["entries"]]
-    assert str(sess_covernote.id) not in matrix_session_ids
-    assert str(sess_quote.id) in matrix_session_ids
+    assert sess_covernote.id not in matrix_session_ids
+    assert sess_quote.id in matrix_session_ids
 
     # Cover note policy must be properly returned in payload
     assert matrix["covernote_policy"] is not None
-    assert matrix["covernote_policy"]["session_id"] == str(sess_covernote.id)
+    assert matrix["covernote_policy"]["session_id"] == sess_covernote.id
     assert matrix["covernote_policy"]["company_name"] == "Etiqa Takaful"
     assert matrix["covernote_policy"]["policy_number"] == "POL-ETIQA-88219"
     assert matrix["covernote_policy"]["sum_insured"] == 85000.0
@@ -1235,9 +1235,9 @@ def test_convert_session_and_unlink_covernote(db_session: Session):
     # Verify marketing comparison now treats sess_quote as covernote, excluded from columns
     matrix = get_marketing_comparison(db_session, tenure.id)
     matrix_session_ids = [e["session_id"] for e in matrix["entries"]]
-    assert str(sess_quote.id) not in matrix_session_ids
+    assert sess_quote.id not in matrix_session_ids
     assert matrix["covernote_policy"] is not None
-    assert matrix["covernote_policy"]["session_id"] == str(sess_quote.id)
+    assert matrix["covernote_policy"]["session_id"] == sess_quote.id
 
     # 2. Unlink covernote
     res_unlink = unlink_tenure_covernote(
@@ -1251,13 +1251,13 @@ def test_convert_session_and_unlink_covernote(db_session: Session):
     matrix_after = get_marketing_comparison(db_session, tenure.id)
     assert matrix_after["covernote_policy"] is None
     assert len(matrix_after["unlinked_covernotes"]) == 1
-    assert matrix_after["unlinked_covernotes"][0]["session_id"] == str(sess_quote.id)
+    assert matrix_after["unlinked_covernotes"][0]["session_id"] == sess_quote.id
 
     # 3. Re-link covernote
     from app.api.routers.comparison import link_tenure_covernote, LinkCovernoteRequest
     res_relink = link_tenure_covernote(
         tenure_id=tenure.id,
-        payload=LinkCovernoteRequest(session_id=str(sess_quote.id)),
+        payload=LinkCovernoteRequest(session_id=sess_quote.id),
         db=db_session,
         user=owner,
     )
@@ -1267,7 +1267,7 @@ def test_convert_session_and_unlink_covernote(db_session: Session):
 
     matrix_relinked = get_marketing_comparison(db_session, tenure.id)
     assert matrix_relinked["covernote_policy"] is not None
-    assert matrix_relinked["covernote_policy"]["session_id"] == str(sess_quote.id)
+    assert matrix_relinked["covernote_policy"]["session_id"] == sess_quote.id
     assert len(matrix_relinked["unlinked_covernotes"]) == 0
 
 
@@ -1294,11 +1294,11 @@ def test_target_windscreen_isolation_and_preservation(db_session):
         runner_fee=50.0,
         windscreen_target=0.0,
     )
-    assert float(tenure.windscreen_target) == 0.0
+    assert (tenure.windscreen_target or 0.0) == 0.0
 
     # Fetch comparison — must NOT overwrite windscreen_target even though quotes may have windscreen
     matrix = get_marketing_comparison(db_session, tenure.id)
-    assert float(tenure.windscreen_target) == 0.0
+    assert (tenure.windscreen_target or 0.0) == 0.0
     assert matrix["tenure"]["windscreen_target"] == 0.0 or matrix["tenure"]["windscreen_target"] is None
 
     # Save/edit an underwriter entry with a high windscreen sum insured
@@ -1316,12 +1316,27 @@ def test_target_windscreen_isolation_and_preservation(db_session):
     )
 
     # Target windscreen on tenure must still be 0.0 (untouched by company quote edit)
-    assert float(tenure.windscreen_target) == 0.0
+    assert (tenure.windscreen_target or 0.0) == 0.0
 
     # Verify the edited entry kept its 2000.0 windscreen
     saved_e = next(e for e in updated_matrix["entries"] if e["id"] == first_entry["id"])
     assert saved_e["windscreen_sum_insured"] == 2000.0
 
 
+def test_malaysian_piam_ncd_progression_scale():
+    from app.services.marketing_comparison_service import calculate_ncd_pair
 
+    # Private Car: 0% -> 25% -> 30% -> 38.33% -> 45% -> 55% (max cap)
+    assert calculate_ncd_pair(0.0) == (0.0, 25.0)
+    assert calculate_ncd_pair(25.0) == (25.0, 30.0)
+    assert calculate_ncd_pair(30.0) == (30.0, 38.33)
+    assert calculate_ncd_pair(38.33) == (38.33, 45.0)
+    assert calculate_ncd_pair(45.0) == (45.0, 55.0)
+    # At 55% max cap, future also becomes 55%
+    assert calculate_ncd_pair(55.0) == (55.0, 55.0)
 
+    # Commercial / Motorcycle: 0% -> 15% -> 20% -> 25% (max cap)
+    assert calculate_ncd_pair(0.0, is_commercial=True) == (0.0, 15.0)
+    assert calculate_ncd_pair(15.0, is_commercial=True) == (15.0, 20.0)
+    assert calculate_ncd_pair(20.0, is_commercial=True) == (20.0, 25.0)
+    assert calculate_ncd_pair(25.0, is_commercial=True) == (25.0, 25.0)

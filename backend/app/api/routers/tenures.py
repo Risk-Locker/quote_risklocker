@@ -335,30 +335,49 @@ def get_tenure_stage_summary(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Retrieve live counts for the 10 stage KPI summary cards matching active filter."""
-    query = select(InsuranceTenure.stage, func.count(InsuranceTenure.id))
+    query = select(
+        InsuranceTenure.stage,
+        InsuranceTenure.coverage_start_date,
+        InsuranceTenure.coverage_end_date,
+        InsuranceTenure.expiry_month,
+    )
 
     query = query.where(InsuranceTenure.is_projected == False)
     if not show_hidden:
         query = query.where(InsuranceTenure.is_hidden == False)
     query = query.where(InsuranceTenure.is_discarded == False)
 
-    if year and month:
+    if year and month and isinstance(month, int):
         _, last_day = calendar.monthrange(year, month)
         start_of_month = datetime(year, month, 1, 0, 0, 0, tzinfo=timezone.utc)
         end_of_month = datetime(year, month, last_day, 23, 59, 59, tzinfo=timezone.utc)
         pattern = f"{year:04d}-{month:02d}"
         query = query.where(
-            InsuranceTenure.coverage_start_date.between(start_of_month, end_of_month)
+            or_(
+                InsuranceTenure.coverage_start_date.between(start_of_month, end_of_month),
+                InsuranceTenure.coverage_end_date.between(start_of_month, end_of_month),
+                InsuranceTenure.expiry_month == pattern,
+            )
         )
     elif year:
         start_of_year = datetime(year, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
         end_of_year = datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
         query = query.where(
-            InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year)
+            or_(
+                InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year),
+                InsuranceTenure.coverage_end_date.between(start_of_year, end_of_year),
+                InsuranceTenure.expiry_month.like(f"{year:04d}-%"),
+            )
         )
 
-    rows = db.execute(query.group_by(InsuranceTenure.stage)).all()
-    stage_counts = {r[0]: int(r[1]) for r in rows}
+    rows = db.execute(query).all()
+    stage_counts: dict[str, int] = defaultdict(int)
+    for stg, s_dt, e_dt, exp_m in rows:
+        # If deal started in an earlier year and is viewed under target year, it's an unissued renewal deal (Quotations)
+        if year and s_dt and s_dt.year < year:
+            stage_counts["Quotations"] += 1
+        elif stg:
+            stage_counts[stg] += 1
 
     return {
         "quotations": stage_counts.get("Quotations", 0),
@@ -420,7 +439,7 @@ def list_tenure_months(
             elif t_status == "miss":
                 month_data[s_ym]["miss"] += 1
 
-        # End / Expiry month
+        # End / Expiry month (cars expiring / renewing in this month)
         e_ym = None
         if end_dt:
             e_ym = end_dt.strftime("%Y-%m")
@@ -429,6 +448,8 @@ def list_tenure_months(
 
         if e_ym:
             month_data[e_ym]["end_count"] += 1
+            if veh:
+                month_data[e_ym]["vehicles"].add(veh)
 
     result: list[dict[str, Any]] = []
     for y in range(2024, 2031):
@@ -439,12 +460,13 @@ def list_tenure_months(
                 tot = len(info["tenure_ids"])
                 hit_cnt = info["hit"]
                 miss_cnt = info["miss"]
-                pending_cnt = max(0, tot - hit_cnt - miss_cnt)
+                end_cnt = info["end_count"]
+                pending_cnt = end_cnt if tot == 0 else max(0, tot - hit_cnt - miss_cnt)
                 result.append({
                     "month": key,
                     "total": tot,
                     "start_count": info["start_count"],
-                    "end_count": info["end_count"],
+                    "end_count": end_cnt,
                     "cars": len(info["vehicles"]),
                     "hit": hit_cnt,
                     "miss": miss_cnt,
@@ -492,6 +514,9 @@ def list_tenures(
     if not show_discarded:
         query = query.where(InsuranceTenure.is_discarded == False)
 
+    target_year: int | None = None
+    target_month: int | None = None
+
     # 1. Year and Month filtering
     if month and month.strip() != "all":
         m_str = month.strip()
@@ -507,23 +532,34 @@ def list_tenures(
             m_val = int(m_str)
 
         if y_val and m_val:
+            target_year = y_val
+            target_month = m_val
             _, last_day = calendar.monthrange(y_val, m_val)
             start_of_month = datetime(y_val, m_val, 1, 0, 0, 0, tzinfo=timezone.utc)
             end_of_month = datetime(y_val, m_val, last_day, 23, 59, 59, tzinfo=timezone.utc)
             ym_pattern = f"{y_val:04d}-{m_val:02d}"
 
             query = query.where(
-                InsuranceTenure.coverage_start_date.between(start_of_month, end_of_month)
+                or_(
+                    InsuranceTenure.coverage_start_date.between(start_of_month, end_of_month),
+                    InsuranceTenure.coverage_end_date.between(start_of_month, end_of_month),
+                    InsuranceTenure.expiry_month == ym_pattern,
+                )
             )
         else:
             query = query.where(InsuranceTenure.coverage_start_date.isnot(None))
 
     elif year and str(year) != "all":
+        target_year = year
         start_of_year = datetime(year, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
         end_of_year = datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
 
         query = query.where(
-            InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year)
+            or_(
+                InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year),
+                InsuranceTenure.coverage_end_date.between(start_of_year, end_of_year),
+                InsuranceTenure.expiry_month.like(f"{year:04d}-%"),
+            )
         )
 
     # 2. Category filtering: active (exclude Close - Lose & Others) vs lost vs all
@@ -534,7 +570,20 @@ def list_tenures(
 
     # 3. Specific stage filter
     if stage and stage != "all":
-        query = query.where(InsuranceTenure.stage == stage.strip())
+        if target_year and stage == "Quotations":
+            query = query.where(
+                or_(
+                    InsuranceTenure.stage == stage.strip(),
+                    InsuranceTenure.coverage_start_date < datetime(target_year, 1, 1, tzinfo=timezone.utc),
+                )
+            )
+        elif target_year and stage == "Issue Policy":
+            query = query.where(
+                InsuranceTenure.stage == "Issue Policy",
+                InsuranceTenure.coverage_start_date >= datetime(target_year, 1, 1, tzinfo=timezone.utc),
+            )
+        else:
+            query = query.where(InsuranceTenure.stage == stage.strip())
 
     if status and status != "all":
         query = query.where(InsuranceTenure.status == status.strip())
@@ -737,6 +786,20 @@ def list_tenures(
                 if not l_act_tz or s_act_tz > l_act_tz:
                     latest_act = s_act_tz
 
+        # Determine if this tenure is viewed as an UPCOMING RENEWAL for target_year
+        is_upcoming_renewal = False
+        if target_year and t.coverage_start_date:
+            if t.coverage_start_date.year < target_year:
+                is_upcoming_renewal = True
+
+        out_stage = "Quotations" if is_upcoming_renewal else (t.stage or "Quotations")
+        out_status = "draft" if is_upcoming_renewal else t.status
+        out_covernote_policy = None if is_upcoming_renewal else covernote_info
+        out_is_covernote_issued = False if is_upcoming_renewal else bool(covernote_info)
+        out_winning_file_id = None if is_upcoming_renewal else winning_file_id
+        out_winning_file_name = None if is_upcoming_renewal else winning_file_name
+        out_won_premium = None if is_upcoming_renewal else (float(t.won_premium) if t.won_premium is not None else None)
+
         items.append({
             "id": t.id,
             "vehicle_no": t.vehicle_no,
@@ -749,8 +812,8 @@ def list_tenures(
             "coverage_start_date": t.coverage_start_date.isoformat(),
             "coverage_end_date": t.coverage_end_date.isoformat(),
             "expiry_month": t.expiry_month,
-            "status": t.status,
-            "stage": t.stage or "Quotations",
+            "status": out_status,
+            "stage": out_stage,
             "business_type": t.business_type or "Renewal",
             "pic_id": t.pic_id,
             "sub_agent_name": t.sub_agent_name or (t.pic.name if t.pic else ""),
@@ -768,13 +831,14 @@ def list_tenures(
             "winning_company_id": t.winning_company_id,
             "winning_company_name": t.winning_company.name if t.winning_company else "",
             "winning_quotation_ref": t.winning_quotation_ref,
-            "winning_file_id": winning_file_id,
-            "winning_file_name": winning_file_name,
+            "winning_file_id": out_winning_file_id,
+            "winning_file_name": out_winning_file_name,
             "covernote_session_id": t.covernote_session_id,
             "policy_number": t.policy_number or (cn_sess.policy_number if cn_sess else None),
-            "covernote_policy": covernote_info,
-            "is_covernote_issued": bool(covernote_info),
-            "won_premium": float(t.won_premium) if t.won_premium is not None else None,
+            "covernote_policy": out_covernote_policy,
+            "previous_covernote_policy": covernote_info if is_upcoming_renewal else None,
+            "is_covernote_issued": out_is_covernote_issued,
+            "won_premium": out_won_premium,
             "miss_reason": t.miss_reason,
             "loss_reason_category": t.loss_reason_category,
             "road_tax": float(t.road_tax or 0.0),
@@ -1176,19 +1240,33 @@ def get_tenure_yoy_stats(
         else:
             all_active += 1
 
-        # Determine year(s) - matching list_tenures: strictly start year
-        years_for_item = set()
+        # Determine year(s)
+        # 1. Total policies issued in year: strictly anchored on deal start date
         if start_dt:
-            years_for_item.add(str(start_dt.year))
-
-        for y_str in years_for_item:
-            year_data[y_str]["tenure_ids"].add(t_id)
+            y_start = str(start_dt.year)
+            year_data[y_start]["tenure_ids"].add(t_id)
             if veh:
-                year_data[y_str]["vehicles"].add(veh)
+                year_data[y_start]["vehicles"].add(veh)
             if is_lost:
-                year_data[y_str]["lost"] += 1
+                year_data[y_start]["lost"] += 1
             else:
-                year_data[y_str]["active"] += 1
+                year_data[y_start]["active"] += 1
+
+        # 2. Cars up for renewal in future year: anchored on expiry / end date
+        y_end = None
+        if end_dt:
+            y_end = str(end_dt.year)
+        elif exp_m and len(exp_m) >= 4 and exp_m[:4].isdigit():
+            y_end = exp_m[:4]
+
+        if y_end and (not start_dt or str(start_dt.year) != y_end):
+            # Future renewal year: include vehicle & active/lost, but NOT in tenure_ids (so total policies = 0)
+            if veh:
+                year_data[y_end]["vehicles"].add(veh)
+            if is_lost:
+                year_data[y_end]["lost"] += 1
+            else:
+                year_data[y_end]["active"] += 1
 
     sorted_years = sorted(year_data.keys())
     result_list = []

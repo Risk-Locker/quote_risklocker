@@ -7,6 +7,7 @@ import json
 import logging
 import re
 import threading
+import time
 from typing import Any, Sequence
 
 import httpx
@@ -408,9 +409,10 @@ def extract_with_gemini_sync(
     db_packs: Sequence[dict[str, Any] | str] | None = None,
     correction_memory: Sequence[dict[str, Any] | str] | None = None,
     prompt_override: str | None = None,
+    batch_item_index: int | None = None,
     timeout_seconds: float = 15.0,
 ) -> dict[str, Any] | None:
-    """Extract quotation fields using Gemini AI with API key rotation."""
+    """Extract quotation fields using Gemini AI with 4-endpoint multi-model parallel dispatching."""
     pool = get_key_pool()
     all_keys = pool.get_all_keys()
     if not all_keys:
@@ -472,17 +474,61 @@ def extract_with_gemini_sync(
     # Pre-flight prompt token safety guard
     payload = estimate_and_guard_payload(payload, getattr(settings, "gemini_max_prompt_tokens", 60_000))
 
+    # Timeout: ensure sufficient time for complete structured JSON extraction (typically 5-7s)
+    effective_timeout = max(timeout_seconds or 20.0, 15.0)
+
+    # 1. PARALLEL FLEET DISPATCHING: Acquire dedicated (key, model, slot) honoring 48 RPM / 880k TPM / 1,840 RPD
+    slot_info = pool.acquire_parallel_slot(batch_item_index=batch_item_index)
+    if slot_info:
+        slot_key, slot_model, slot_id = slot_info
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{slot_model}:generateContent?key={slot_key}"
+        start_t = time.perf_counter()
+        try:
+            with httpx.Client(timeout=effective_timeout, http2=False) as client:
+                response = client.post(url, json=payload)
+                latency_ms = int((time.perf_counter() - start_t) * 1000)
+                if response.status_code == 200:
+                    data = response.json()
+                    candidates = data.get("candidates") or []
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts") or []
+                        if parts:
+                            raw_text = parts[0].get("text", "")
+                            parsed = json.loads(raw_text)
+                            usage = data.get("usageMetadata", {})
+                            p_tok = usage.get("promptTokenCount", 0)
+                            c_tok = usage.get("candidatesTokenCount", 0)
+                            t_tok = usage.get("totalTokenCount", p_tok + c_tok)
+                            pool.record_slot_success(slot_id, prompt_tokens=p_tok, candidate_tokens=c_tok, total_tokens=t_tok, latency_ms=latency_ms)
+                            logger.info("Gemini AI parallel extraction succeeded on [%s] with %s (tokens: %d prompt, %d candidate, %dms).", slot_id, slot_model, p_tok, c_tok, latency_ms)
+                            return parsed
+                elif response.status_code == 429:
+                    err_msg = ""
+                    try:
+                        err_msg = response.json().get("error", {}).get("message", "")
+                    except Exception:
+                        err_msg = response.text[:200]
+                    pool.record_slot_failure(slot_id, 429, err_msg or "Rate limit exceeded (429)", latency_ms=latency_ms)
+                    logger.warning("Gemini model %s on slot %s hit rate limit (429); cooling slot for 65s and trying spillover.", slot_model, slot_id)
+                else:
+                    err_msg = response.text[:200]
+                    pool.record_slot_failure(slot_id, response.status_code, err_msg, latency_ms=latency_ms)
+                    logger.warning("Gemini parallel slot %s returned %d; spilling over.", slot_id, response.status_code)
+        except Exception as exc:
+            latency_ms = int((time.perf_counter() - start_t) * 1000)
+            pool.record_slot_failure(slot_id, 500, str(exc)[:200], latency_ms=latency_ms)
+            logger.warning("Gemini parallel slot %s threw exception: %s", slot_id, exc)
+
+    # 2. SPILLOVER / FALLBACK: If slot was rate-limited or unavailable, fall back across candidate models
     candidate_models = [
         configured_model,
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
         "gemini-3.1-flash-lite-preview",
         "gemini-flash-lite-latest",
-        "gemini-2.5-flash-lite",
     ]
     seen_models: set[str] = set()
     models_to_try = [m for m in candidate_models if m and not (m in seen_models or seen_models.add(m))]
-
-    # Timeout: ensure sufficient time for complete structured JSON extraction (typically 5-7s)
-    effective_timeout = max(timeout_seconds or 20.0, 15.0)
 
     api_key = pool.get_next_key()
     if not api_key:

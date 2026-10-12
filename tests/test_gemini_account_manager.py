@@ -269,3 +269,41 @@ def test_settings_add_aq_prefix_manual_key():
     assert "Account added to pool" in data["message"]
     assert data["account"]["masked_key"].startswith("AQ.Ab8")
 
+
+def test_gemini_parallel_fleet_math_and_independent_model_quotas():
+    mgr = GeminiAccountManager(
+        (
+            "AIzaSyKeyOne1111111111111111111111111111",
+            "AIzaSyKeyTwo2222222222222222222222222222",
+        )
+    )
+    # Configure 460 RPD buffer, 12 RPM buffer, 220k TPM buffer per model
+    mgr._max_rpd_per_key = 460
+    mgr._max_rpm_per_key = 12
+    mgr._max_tpm_per_key = 220_000
+    mgr._init_parallel_slots()
+
+    stats = mgr.get_quota_stats()
+    fleet = stats["fleet_summary"]
+
+    assert fleet["keys_count"] == 2
+    assert fleet["models_per_key"] == 2
+    assert fleet["total_parallel_endpoints"] == 4
+    # 4 endpoints * 460 = 1,840 RPD buffered
+    assert fleet["fleet_rpd_limit"] == 1840
+    # 4 endpoints * 500 = 2,000 RPD raw
+    assert fleet["raw_rpd_capacity"] == 2000
+    # 4 endpoints * 12 = 48 RPM buffered
+    assert fleet["fleet_rpm_limit"] == 48
+    # 4 endpoints * 15 = 60 RPM raw
+    assert fleet["raw_rpm_capacity"] == 60
+    # 4 endpoints * 220,000 = 880,000 TPM buffered
+    assert fleet["fleet_tpm_limit"] == 880_000
+
+    endpoints = stats["endpoints"]
+    assert len(endpoints) == 4
+    for ep in endpoints:
+        assert ep["rpd_limit"] == 460
+        assert ep["rpm_limit"] == 12
+        assert ep["tpm_limit"] == 220_000
+

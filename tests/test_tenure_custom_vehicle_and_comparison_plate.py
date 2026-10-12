@@ -401,16 +401,18 @@ def test_yoy_stats_anchors_strictly_on_start_year(client: TestClient, db_session
     )
     assert res.status_code == 200
 
-    # Check YoY stats: policy must be counted strictly in 2026, not 2027
+    # Check YoY stats: policy must be counted strictly in 2026 (0 in 2027), while cars includes 2027
     yoy_res = client.get("/api/tenures/stats/yoy")
     assert yoy_res.status_code == 200
     yoy_data = yoy_res.json()
 
     years_map = {y["year"]: y["total"] for y in yoy_data["years"]}
+    cars_map = {y["year"]: y["cars"] for y in yoy_data["years"]}
     assert years_map.get("2026", 0) >= 1
     assert years_map.get("2027", 0) == 0
+    assert cars_map.get("2027", 0) >= 1
 
-    # Query list_tenures: 2026 returns the deal; 2027 does NOT leak it
+    # Query list_tenures: 2026 returns the deal as active/issued; 2027 returns the deal as an upcoming renewal with 0 policies
     res_2026 = client.get("/api/tenures?year=2026")
     assert res_2026.status_code == 200
     p26 = [i["vehicle_no"] for i in res_2026.json()["items"]]
@@ -418,5 +420,10 @@ def test_yoy_stats_anchors_strictly_on_start_year(client: TestClient, db_session
 
     res_2027 = client.get("/api/tenures?year=2027")
     assert res_2027.status_code == 200
-    p27 = [i["vehicle_no"] for i in res_2027.json()["items"]]
-    assert "YOYTEST20262027" not in p27
+    items_27 = res_2027.json()["items"]
+    p27 = [i["vehicle_no"] for i in items_27]
+    assert "YOYTEST20262027" in p27
+    deal_27 = next(i for i in items_27 if i["vehicle_no"] == "YOYTEST20262027")
+    assert deal_27["stage"] == "Quotations"
+    assert deal_27["covernote_policy"] is None
+    assert deal_27["is_covernote_issued"] is False

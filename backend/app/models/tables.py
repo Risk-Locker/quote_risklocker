@@ -1384,3 +1384,27 @@ class BenefitCardPreset(Base, TimestampMixin):
     is_custom: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     config: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
+
+class GeminiApiCallLog(Base):
+    __tablename__ = "gemini_api_call_logs"
+    __table_args__ = (
+        Index("ix_gemini_call_logs_local_date", "local_date"),
+        Index("ix_gemini_call_logs_acc_date", "account_id", "local_date"),
+        Index("ix_gemini_call_logs_created_at", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    api_key_masked: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    endpoint_slot: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    status_code: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    candidate_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    local_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status-badge";
 import { GuidedTour } from "@/components/guided-tour";
 import {
+  ArrowsClockwise,
   Check,
   Copy,
   DownloadSimple,
@@ -16,6 +17,7 @@ import {
   PencilSimple,
   Sparkle,
 } from "@phosphor-icons/react";
+import { api } from "@/lib/api";
 import type { WorkspaceSnapshot, MutationState } from "../types";
 
 export interface ReviewHeaderProps {
@@ -61,6 +63,30 @@ export function ReviewHeader({
   handleDownloadPdf,
   pdfLoading,
 }: ReviewHeaderProps) {
+  const [redetecting, setRedetecting] = React.useState(false);
+
+  const handleRedetect = async () => {
+    if (!window.confirm("Re-detect this quotation? This will re-analyze the original PDF to pick up any missing fields or benefit lines.")) {
+      return;
+    }
+    setRedetecting(true);
+    try {
+      const res = await api<{ success: boolean; message?: string }>(`/sessions/${workspace.session_id}/rescan`, {
+        method: "POST",
+        body: JSON.stringify({ mode: "in_place", engine: "auto" }),
+      });
+      if (res?.success) {
+        window.location.reload();
+      } else {
+        alert(res?.message || "Re-detection completed.");
+        window.location.reload();
+      }
+    } catch (err: any) {
+      alert("Failed to re-detect: " + (err?.message || "Server error"));
+      setRedetecting(false);
+    }
+  };
+
   return (
     <header className="sticky top-[56px] z-20 w-full border-b border-[var(--rl-border)] bg-[var(--rl-surface)] px-4 py-3 shadow-xs">
       <div className="mx-auto flex w-full max-w-[1800px] flex-wrap items-center justify-between gap-3">
@@ -154,6 +180,18 @@ export function ReviewHeader({
               <span>Preview</span>
             </button>
           </div>
+
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<ArrowsClockwise className={redetecting ? "animate-spin text-amber-600" : ""} weight="bold" />}
+            onClick={handleRedetect}
+            disabled={redetecting}
+            className="cursor-pointer bg-white"
+            title="Re-run AI & PDF detection to extract missing fields or benefits"
+          >
+            {redetecting ? "Re-detecting..." : "Re-detect"}
+          </Button>
 
           <Button
             variant={mutation.dirty ? "primary" : "secondary"}

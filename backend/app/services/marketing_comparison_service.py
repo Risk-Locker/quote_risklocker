@@ -52,16 +52,20 @@ logger = logging.getLogger(__name__)
 
 # Malaysian Private Car NCD Rate Scale (ordered 1st year to 6th+ year max)
 NCD_RATE_SCALE = [0.0, 25.0, 30.0, 38.33, 45.0, 55.0]
+COMMERCIAL_NCD_SCALE = [0.0, 15.0, 20.0, 25.0]
 
 
-def calculate_ncd_pair(ncd_value: float | None) -> tuple[float | None, float | None]:
-    """Calculate (current_ncd, next_ncd) according to Malaysian Private Car NCD Rate Scale.
+def calculate_ncd_pair(ncd_value: float | None, is_commercial: bool = False) -> tuple[float | None, float | None]:
+    """Calculate (current_ncd, next_ncd) according to Malaysian PIAM NCD Rate Scale.
     
-    The scale is:
-    0% (1st Yr) -> 25% (2nd Yr) -> 30% (3rd Yr) -> 38.33% (4th Yr) -> 45% (5th Yr) -> 55% (6th+ Yr).
+    Private Car scale:
+    0% (1st Yr) -> 25% (2nd Yr) -> 30% (3rd Yr) -> 38.33% (4th Yr) -> 45% (5th Yr) -> 55% (6th+ Yr max).
     
-    The PDF quotation displays the upcoming policy's NCD (next_ncd).
-    The previous tenure's NCD (current_ncd) is one step below in the scale.
+    Commercial / Motorcycle scale:
+    0% (1st Yr) -> 15% (2nd Yr) -> 20% (3rd Yr) -> 25% (4th+ Yr max).
+    
+    The PDF quotation displays the active policy term's NCD (current_ncd).
+    The upcoming renewal tenure's NCD (next_ncd) advances to the next step, or stays at the max cap (55% or 25%).
     """
     if ncd_value is None:
         return None, None
@@ -73,18 +77,20 @@ def calculate_ncd_pair(ncd_value: float | None) -> tuple[float | None, float | N
     if val < 0.0:
         return None, None
 
-    # Find closest tier in NCD_RATE_SCALE
+    scale = COMMERCIAL_NCD_SCALE if is_commercial else NCD_RATE_SCALE
+
+    # Find closest tier in scale
     best_idx = 0
     min_diff = float("inf")
-    for idx, tier in enumerate(NCD_RATE_SCALE):
+    for idx, tier in enumerate(scale):
         diff = abs(tier - val)
         if diff < min_diff:
             min_diff = diff
             best_idx = idx
 
-    next_ncd = NCD_RATE_SCALE[best_idx]
-    prev_idx = max(0, best_idx - 1)
-    current_ncd = NCD_RATE_SCALE[prev_idx]
+    current_ncd = scale[best_idx]
+    next_idx = min(len(scale) - 1, best_idx + 1)
+    next_ncd = scale[next_idx]
     return current_ncd, next_ncd
 
 
@@ -1510,7 +1516,7 @@ def is_covernote_document(session: SessionModel | None, db: Session | None = Non
     # 1. Inspect original filename
     fn = ""
     if session.uploaded_file:
-        fn = str(session.uploaded_file.original_filename or "").lower()
+        fn = (session.uploaded_file.original_filename or "").lower()
     if not fn and getattr(session, "display_options", None) and isinstance(session.display_options, dict):
         fn = str(session.display_options.get("filename") or "").lower()
     if not fn and session.draft and getattr(session.draft, "display_options", None) and isinstance(session.draft.display_options, dict):
@@ -1538,7 +1544,8 @@ def is_covernote_document(session: SessionModel | None, db: Session | None = Non
             if ext_data and isinstance(ext_data, dict):
                 raw_text = str(ext_data.get("raw_text") or ext_data.get("ocr_text") or "")
     if not raw_text and session.uploaded_file and getattr(session.uploaded_file, "extraction_record", None):
-        raw_text = str(session.uploaded_file.extraction_record.raw_text or session.uploaded_file.extraction_record.ocr_text or "")
+        rec = session.uploaded_file.extraction_record
+        raw_text = rec.raw_text or rec.ocr_text or ""
 
     from app.extraction.candidate_finder import detect_is_covernote
     if raw_text and detect_is_covernote(text=raw_text, filename=fn):
@@ -1952,7 +1959,8 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     # 6. Assign stable version numbers for same-insurer revisions
     company_counts: dict[str, int] = defaultdict(int)
     def _entry_sort_key(x: Any) -> tuple[datetime, str]:
-        s = session_map.get(getattr(x, "session_id", None)) if getattr(x, "session_id", None) else None
+        x_sid = getattr(x, "session_id", None)
+        s = session_map.get(str(x_sid)) if x_sid else None
         dt = getattr(x, "uploaded_at", None) or (s.created_at if s else None) or getattr(x, "created_at", None)
         if not dt:
             return (datetime.min.replace(tzinfo=timezone.utc), getattr(x, "id", "") or "")
@@ -2255,7 +2263,8 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                     needs_commit = True
                     break
 
-    current_ncd, next_ncd = calculate_ncd_pair(cand_ncd)
+    is_commercial_veh = resolved_vtype in ("CommercialVehicle", "Motorcycle", "EVMotorcycle") or "commercial" in (resolved_vtype or "").lower()
+    current_ncd, next_ncd = calculate_ncd_pair(cand_ncd, is_commercial=is_commercial_veh)
 
     # Count pending/processing jobs
     pending_jobs_count = 0
@@ -2608,18 +2617,18 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     active_end_date = tenure.coverage_end_date
     if covernote_policy and covernote_policy.get("coverage_start_date"):
         try:
-            active_start_date = datetime.fromisoformat(covernote_policy["coverage_start_date"])
+            active_start_date = datetime.fromisoformat(str(covernote_policy["coverage_start_date"]))
             if covernote_policy.get("coverage_end_date"):
-                active_end_date = datetime.fromisoformat(covernote_policy["coverage_end_date"])
+                active_end_date = datetime.fromisoformat(str(covernote_policy["coverage_end_date"]))
             else:
                 active_end_date = active_start_date + timedelta(days=364)
         except Exception:
             pass
     elif winner_entry and winner_entry.get("coverage_start_date"):
         try:
-            active_start_date = datetime.fromisoformat(winner_entry["coverage_start_date"])
+            active_start_date = datetime.fromisoformat(str(winner_entry["coverage_start_date"]))
             if winner_entry.get("coverage_end_date"):
-                active_end_date = datetime.fromisoformat(winner_entry["coverage_end_date"])
+                active_end_date = datetime.fromisoformat(str(winner_entry["coverage_end_date"]))
             else:
                 active_end_date = active_start_date + timedelta(days=364)
         except Exception:

@@ -93,6 +93,7 @@ function LedgerContent() {
             variant="secondary"
             size="sm"
             onClick={() => setShowSyncModal(true)}
+            data-testid="sync-past-sessions-btn"
             className="text-xs h-8 border-neutral-200 text-neutral-800 hover:bg-neutral-50 gap-1.5 font-medium shadow-2xs"
             title="Inspect and sync past quotation sessions into vehicle tracking and calendar ledger"
           >

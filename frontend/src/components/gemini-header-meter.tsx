@@ -47,6 +47,24 @@ export type GeminiAccountItem = {
   is_active: boolean;
 };
 
+export type GeminiEndpointItem = {
+  slot_id: string;
+  slot_index: number;
+  account_label: string;
+  masked_key: string;
+  model: string;
+  rpm_used: number;
+  rpm_limit: number;
+  rpm_remaining: number;
+  tpm_used: number;
+  tpm_limit: number;
+  tpm_remaining: number;
+  cooling_until?: number | null;
+  is_ready: boolean;
+  status_label: string;
+  status_color: "green" | "amber" | "red";
+};
+
 export type GeminiQuotaStats = {
   active?: boolean;
   status?: string;
@@ -57,6 +75,20 @@ export type GeminiQuotaStats = {
   active_account_index?: number;
   active_account_label?: string;
   keys_count?: number;
+  key_count?: number;
+  fleet_endpoints_count?: number;
+  tokens_budget_per_request?: number;
+  fleet_summary?: {
+    keys_count: number;
+    models_per_key: number;
+    total_parallel_endpoints: number;
+    fleet_rpd_limit: number;
+    fleet_rpm_limit: number;
+    fleet_tpm_limit: number;
+    tokens_per_request_budget: number;
+  };
+  endpoints?: GeminiEndpointItem[];
+  parallel_slots?: GeminiEndpointItem[];
   rpm_limit?: number;
   rpm_used?: number;
   rpm_remaining?: number;
@@ -156,19 +188,20 @@ export function GeminiHeaderMeter() {
   const accounts = stats.accounts || [];
   const activeIdx = stats.active_account_index ?? 0;
   const activeAcc = accounts[activeIdx] || accounts[0];
-  const totalAcc = accounts.length || 1;
+  const endpoints = stats.endpoints || [];
 
   const color = stats.status_color || "gray";
-  const rpdUsed = activeAcc?.rpd_used ?? stats.rpd_used ?? 0;
-  const rpdLimit = activeAcc?.rpd_limit ?? stats.rpd_limit ?? 440;
-  const rpmUsed = activeAcc?.rpm_used ?? stats.rpm_used ?? 0;
-  const rpmLimit = activeAcc?.rpm_limit ?? stats.rpm_limit ?? 10;
-  const tpmUsed = activeAcc?.tpm_used ?? 0;
-  const tpmLimit = stats.tpm_limit ?? 100_000;
+  const fleetRpdLimit = stats.fleet_summary?.fleet_rpd_limit ?? stats.pool_rpd_limit ?? stats.rpd_limit ?? 1840;
+  const fleetRpdUsed = stats.pool_rpd_used ?? stats.rpd_used ?? 0;
+  const fleetRpmLimit = stats.fleet_summary?.fleet_rpm_limit ?? stats.pool_rpm_limit ?? stats.rpm_limit ?? 48;
+  const fleetRpmUsed = stats.pool_rpm_used ?? stats.rpm_used ?? 0;
+  const fleetTpmLimit = stats.fleet_summary?.fleet_tpm_limit ?? stats.tpm_limit ?? 880_000;
+  const tokensBudget = stats.fleet_summary?.tokens_per_request_budget ?? stats.tokens_budget_per_request ?? 43_000;
+  const totalEndpoints = stats.fleet_summary?.total_parallel_endpoints ?? (endpoints.length > 0 ? endpoints.length : 4);
+  const totalKeys = stats.fleet_summary?.keys_count ?? stats.key_count ?? stats.keys_count ?? (accounts.length > 0 ? accounts.length : 2);
 
-  const rpdPercent = Math.min(100, Math.round((rpdUsed / rpdLimit) * 100));
-  const rpmPercent = Math.min(100, Math.round((rpmUsed / rpmLimit) * 100));
-  const tpmPercent = Math.min(100, Math.round((tpmUsed / tpmLimit) * 100));
+  const rpdPercent = Math.min(100, Math.round((fleetRpdUsed / fleetRpdLimit) * 100));
+  const rpmPercent = Math.min(100, Math.round((fleetRpmUsed / fleetRpmLimit) * 100));
 
   return (
     <div className="relative" ref={containerRef}>
@@ -177,7 +210,7 @@ export function GeminiHeaderMeter() {
         type="button"
         onClick={() => setIsOpen(!isOpen)}
         aria-label="Gemini AI Fleet Rate Limit Monitor"
-        className="flex items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-2.5 py-1 text-[11px] font-medium text-gray-700 shadow-xs hover:border-gray-300 hover:bg-gray-50 transition-all cursor-pointer select-none"
+        className="flex items-center gap-2 rounded-full border border-gray-200 bg-white/95 px-2.5 py-1 text-[11px] font-medium text-gray-700 shadow-xs hover:border-gray-300 hover:bg-gray-50 transition-all cursor-pointer select-none"
       >
         {/* Pulsing Status Dot */}
         <span className="relative flex size-2">
@@ -205,32 +238,36 @@ export function GeminiHeaderMeter() {
 
         {/* Compact Meter Details */}
         <span className="font-semibold text-gray-900 flex items-center gap-1">
-          <Sparkle size={12} weight="fill" className="text-gray-500" />
-          <span>Acc {activeIdx + 1}/{totalAcc}</span>
+          <Sparkle size={12} weight="fill" className="text-amber-500" />
+          <span>Fleet: {totalKeys} Keys · {totalEndpoints} Endpoints</span>
         </span>
         <span className="text-gray-300">|</span>
-        <span className="font-mono text-[10px] text-gray-600">
-          {rpdUsed}/{rpdLimit} RPD
+        <span className="font-mono text-[10px] text-gray-700 font-semibold" title={`Fleet Total: ${fleetRpdUsed} used of ${fleetRpdLimit} daily requests`}>
+          {fleetRpdUsed}/{fleetRpdLimit} RPD
         </span>
         <span className="text-gray-300">·</span>
-        <span className="font-mono text-[10px] text-gray-600">
-          {rpmUsed}/{rpmLimit} RPM
+        <span className="font-mono text-[10px] text-gray-700 font-semibold" title={`Fleet Total: ${fleetRpmUsed} used of ${fleetRpmLimit} requests per minute`}>
+          {fleetRpmUsed}/{fleetRpmLimit} RPM
+        </span>
+        <span className="text-gray-300">·</span>
+        <span className="font-mono text-[10px] text-gray-700 font-semibold" title={`Per-request token budget: ~${tokensBudget.toLocaleString()} tokens`}>
+          ~{Math.round(tokensBudget / 1000)}k tok/req
         </span>
       </button>
 
       {/* Dropdown Popover */}
       {isOpen && (
-        <div className="absolute right-0 top-full mt-2 w-[340px] rounded-xl border border-gray-200 bg-white p-4 shadow-xl z-50 animate-in fade-in zoom-in-95 duration-150">
+        <div className="absolute right-0 top-full mt-2 w-[390px] rounded-xl border border-gray-200 bg-white p-4 shadow-xl z-50 animate-in fade-in zoom-in-95 duration-150">
           {/* Header Row */}
           <div className="flex items-center justify-between pb-3 border-b border-gray-100">
             <div className="flex items-center gap-2">
-              <span className="grid size-6 place-items-center rounded-md bg-emerald-50 text-emerald-600">
+              <span className="grid size-6 place-items-center rounded-md bg-amber-50 text-amber-600">
                 <Sparkle size={14} weight="fill" />
               </span>
               <div>
-                <h3 className="text-xs font-bold text-gray-900">Gemini AI Fleet Guard</h3>
+                <h3 className="text-xs font-bold text-gray-900">Gemini AI Parallel Fleet ({totalEndpoints} Endpoints)</h3>
                 <span className="text-[10px] font-mono text-gray-500">
-                  {stats.model || "gemini-3.1-flash-lite-preview"}
+                  {totalKeys} Keys × 2 Models · Parallel Dispatching
                 </span>
               </div>
             </div>
@@ -243,44 +280,40 @@ export function GeminiHeaderMeter() {
             </button>
           </div>
 
-          {/* Active Account Card */}
-          <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50/70 p-3">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-gray-900 flex items-center gap-1.5">
-                {activeAcc?.label || `Account ${activeIdx + 1}`}
-                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-gray-200 text-gray-700">
-                  {activeAcc?.source === "env" ? ".env" : "Manual"}
-                </span>
+          {/* Fleet Aggregate Capacity Card */}
+          <div className="mt-3 rounded-lg border border-sky-100 bg-sky-50/60 p-3">
+            <div className="flex items-center justify-between text-xs mb-2">
+              <span className="font-bold text-sky-950 flex items-center gap-1.5">
+                <Lightning size={13} weight="fill" className="text-amber-500" />
+                Fleet Aggregate Limits
               </span>
-              <span
-                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                  color === "green"
-                    ? "bg-emerald-100 text-emerald-800"
-                    : color === "amber"
-                    ? "bg-amber-100 text-amber-800"
-                    : color === "red"
-                    ? "bg-rose-100 text-rose-800"
-                    : "bg-gray-200 text-gray-700"
-                }`}
-              >
-                {activeAcc?.status_label || stats.status_label || "Untested"}
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-mono">
+                {stats.status_label || "Ready · Parallel"}
               </span>
             </div>
 
-            {activeAcc?.masked_key && (
-              <div className="mt-1 font-mono text-[10px] text-gray-500">
-                Key: {activeAcc.masked_key}
+            <div className="grid grid-cols-3 gap-2 text-center py-1 bg-white/80 rounded border border-sky-100">
+              <div className="px-1">
+                <span className="text-[9px] uppercase font-bold text-gray-400 block">Daily Total</span>
+                <span className="font-mono text-xs font-bold text-gray-800">{fleetRpdLimit} RPD</span>
               </div>
-            )}
+              <div className="px-1 border-x border-sky-100">
+                <span className="text-[9px] uppercase font-bold text-gray-400 block">Minute Total</span>
+                <span className="font-mono text-xs font-bold text-gray-800">{fleetRpmLimit} RPM</span>
+              </div>
+              <div className="px-1">
+                <span className="text-[9px] uppercase font-bold text-gray-400 block">Tok / Request</span>
+                <span className="font-mono text-xs font-bold text-emerald-700">~{Math.round(tokensBudget / 1000)}k tok</span>
+              </div>
+            </div>
 
-            {/* Meters Progress Bars */}
-            <div className="mt-3 space-y-2">
-              {/* Daily Requests (RPD) */}
+            {/* Progress Bars */}
+            <div className="mt-2.5 space-y-2">
               <div>
                 <div className="flex justify-between text-[10px] text-gray-600 font-medium">
                   <span>Daily Requests (RPD)</span>
-                  <span className="font-mono">
-                    {rpdUsed} / {rpdLimit} ({rpdPercent}%)
+                  <span className="font-mono font-semibold">
+                    {fleetRpdUsed} / {fleetRpdLimit} ({rpdPercent}%)
                   </span>
                 </div>
                 <div className="mt-1 h-1.5 w-full rounded-full bg-gray-200 overflow-hidden">
@@ -293,12 +326,11 @@ export function GeminiHeaderMeter() {
                 </div>
               </div>
 
-              {/* Requests Per Minute (RPM) */}
               <div>
                 <div className="flex justify-between text-[10px] text-gray-600 font-medium">
-                  <span>Requests Per Minute (RPM)</span>
-                  <span className="font-mono">
-                    {rpmUsed} / {rpmLimit} ({rpmPercent}%)
+                  <span>Minute Rate (RPM)</span>
+                  <span className="font-mono font-semibold">
+                    {fleetRpmUsed} / {fleetRpmLimit} ({rpmPercent}%)
                   </span>
                 </div>
                 <div className="mt-1 h-1.5 w-full rounded-full bg-gray-200 overflow-hidden">
@@ -310,43 +342,59 @@ export function GeminiHeaderMeter() {
                   />
                 </div>
               </div>
-
-              {/* Tokens Per Minute (TPM) */}
-              <div>
-                <div className="flex justify-between text-[10px] text-gray-600 font-medium">
-                  <span>Tokens Per Minute (TPM)</span>
-                  <span className="font-mono">
-                    {tpmUsed.toLocaleString()} / {tpmLimit.toLocaleString()}
-                  </span>
-                </div>
-                <div className="mt-1 h-1.5 w-full rounded-full bg-gray-200 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-indigo-500 transition-all"
-                    style={{ width: `${tpmPercent}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Prompt Guard Badge */}
-            <div className="mt-3 flex items-center justify-between text-[10px] bg-white rounded border border-gray-100 px-2 py-1">
-              <span className="text-gray-600 flex items-center gap-1">
-                <ShieldCheck size={12} weight="fill" className="text-emerald-600" />
-                Prompt Guard
-              </span>
-              <span className="font-mono text-gray-500">&lt; 60k tokens safe cap</span>
             </div>
           </div>
 
-          {/* Hard Cutoff Banner if all accounts reached cap */}
-          {stats.pool_cutoff_active && (
-            <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800 flex items-start gap-1.5">
-              <Warning size={14} weight="fill" className="shrink-0 mt-0.5 text-amber-600" />
-              <div>
-                <strong className="font-semibold">Pool Quota Exhausted:</strong> All {totalAcc} accounts reached safety limit today. AI calls paused; deterministic regex OCR is active.
-              </div>
+          {/* 4 Parallel Model Endpoints Grid */}
+          <div className="mt-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1.5">
+              4 Model Endpoints (Parallel Quotas)
+            </span>
+            <div className="space-y-1.5 max-h-[170px] overflow-y-auto pr-1">
+              {endpoints.length > 0 ? (
+                endpoints.map((ep, idx) => (
+                  <div
+                    key={ep.slot_id || idx}
+                    className="flex items-center justify-between rounded-lg border border-gray-150 bg-gray-50/50 px-2.5 py-1.5 text-xs"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className={`size-2 shrink-0 rounded-full ${
+                          ep.status_color === "green"
+                            ? "bg-emerald-500"
+                            : ep.status_color === "amber"
+                            ? "bg-amber-500"
+                            : "bg-gray-400"
+                        }`}
+                      />
+                      <div className="min-w-0">
+                        <div className="font-medium text-gray-800 text-[11px] truncate flex items-center gap-1">
+                          <span className="font-bold">{ep.account_label.replace("Account ", "Key ")}</span>
+                          <span className="text-gray-400">·</span>
+                          <span className="font-mono text-indigo-700 font-semibold">{ep.model.replace("gemini-2.5-", "")}</span>
+                        </div>
+                        <div className="font-mono text-[9px] text-gray-500">
+                          {ep.rpm_used}/{ep.rpm_limit} RPM · {(ep.tpm_used || 0).toLocaleString()}/{(ep.tpm_limit || 110000).toLocaleString()} TPM
+                        </div>
+                      </div>
+                    </div>
+
+                    <span
+                      className={`text-[9px] font-semibold px-1.5 py-0.5 rounded shrink-0 ${
+                        ep.is_ready ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+                      }`}
+                    >
+                      {ep.status_label || (ep.is_ready ? "Ready" : "Cooling")}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="text-[11px] text-gray-500 p-2 text-center bg-gray-50 rounded">
+                  4 parallel endpoints configured (2 keys × 2 models)
+                </div>
+              )}
             </div>
-          )}
+          </div>
 
           {/* Account Switcher Section (if more than 1 account) */}
           {accounts.length > 1 && (

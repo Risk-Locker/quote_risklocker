@@ -133,8 +133,7 @@ async def create_queued_upload(
                 health = manager.get_health()
                 
                 if health.get("pool_rpd_remaining", 0) <= 0:
-                    raise AppError("AI token quota (RPD) has been exhausted for today. Please try again tomorrow or contact admin.", status_code=429)
-                    
+                    logger.warning("AI token quota (RPD) reached for today; PDF intake accepted for deterministic OCR/regex fallback.")
             except Exception:
                 pass  # If it's not a valid PDF, we'll catch it in the extraction job instead of blocking upload entirely.
         # --------------------------------------
