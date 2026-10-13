@@ -432,12 +432,21 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
         except Exception:
             pass
 
+    def _round_prem_str(val_str: str) -> str:
+        if val_str and round_tot:
+            try:
+                num = float(re.sub(r"[^\d.]", "", val_str))
+                return f"{round(num):,.2f}"
+            except Exception:
+                pass
+        return val_str
+
     def _get_v4_premium():
         try:
             total_num = float(re.sub(r"[^\d.]", "", str(total or "0")))
             return f"{total_num - combined_rt_val:,.2f}"
         except Exception:
-            return _value(fields, "premium")
+            return _round_prem_str(_value(fields, "premium"))
 
     if extras_mode == "none":
         # Template 1: Remove extras completely; fold extras prices into Insurance Premium so left side adds up properly
@@ -464,6 +473,7 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
                         p_display = p_raw
                 else:
                     p_display = p_raw
+            p_display = _round_prem_str(p_display)
         rows.append(("premium", str(labels.get("premium") or "Insurance Premium / 保费"), "", _format_value(p_display, "RM ")))
 
     elif extras_mode == "lump_sum":
@@ -481,7 +491,7 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
             extras_hdr = str(labels.get("extras") or "Extras / 附加项目")
             formatted_lump = f"RM {extras_sum:,.2f}"
             rows.append(("extra_lump", extras_hdr, "", formatted_lump))
-        p_val = _get_v4_premium() if v4_mode else _value(fields, "premium")
+        p_val = _get_v4_premium() if v4_mode else _round_prem_str(_value(fields, "premium"))
         rows.append(("premium", str(labels.get("premium") or "Insurance Premium / 保费"), "", _format_value(p_val, "RM ")))
 
     else:
@@ -551,7 +561,7 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
                 formatted_overflow = f"RM {overflow_sum:,.2f}" if overflow_sum > 0 else ""
                 rows.append(("extra", f"+ {len(overflow_extras)} more...", "", formatted_overflow))
                 
-        p_val = _get_v4_premium() if v4_mode else _value(fields, "premium")
+        p_val = _get_v4_premium() if v4_mode else _round_prem_str(_value(fields, "premium"))
         rows.append(("premium", str(labels.get("premium") or "Insurance Premium / 保费"), "", _format_value(p_val, "RM ")))
 
     if not v4_mode:
@@ -788,7 +798,7 @@ def _element_html(
         value = _format_value(_variable_value(fields, config, var_id), str(element.get("prefix") or ""), str(element.get("suffix") or ""))
         base_style = _style(element)
         if var_id in {"car_model", "customer_name", "insured_name"} and float(element.get("h", 0) or 0) <= 18.0:
-            val_len = len(str(value or ""))
+            val_len = len(value)
             fs_override = ""
             if val_len > 42:
                 fs_override = ";font-size:8px"

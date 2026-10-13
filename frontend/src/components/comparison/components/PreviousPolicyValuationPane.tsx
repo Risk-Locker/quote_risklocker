@@ -109,7 +109,7 @@ export function PreviousPolicyValuationPane({
               <span className="text-neutral-500">Premium Paid:</span>
               <span className="font-mono font-bold text-neutral-900">
                 {previous_policy.insurance_premium
-                  ? `RM ${previous_policy.insurance_premium.toFixed(2)}`
+                  ? `RM ${Math.round(previous_policy.insurance_premium).toFixed(2)}`
                   : "—"}
               </span>
             </div>
@@ -138,7 +138,7 @@ export function PreviousPolicyValuationPane({
               <div className="flex justify-between text-[11px]">
                 <span className="text-neutral-500">Towing:</span>
                 <span className="font-mono font-medium text-neutral-800">
-                  {formatBenefitCoverage(previous_policy.towing || "Unlimited")}
+                  {formatBenefitCoverage(previous_policy.towing || "Unlimited", undefined, previous_policy.company_name)}
                 </span>
               </div>
             </div>
@@ -237,8 +237,11 @@ export function PreviousPolicyValuationPane({
             {/* Premium / Final Payable */}
             <div className="flex justify-between">
               <span className="text-neutral-500">Premium Payable:</span>
-              <span className="font-mono font-bold text-emerald-700">
-                RM {(cn.rounded_total_payable != null ? cn.rounded_total_payable : cn.total_payable).toFixed(2)}
+              <span
+                className="font-mono font-bold text-emerald-700"
+                title={cn.exact_total_payable && cn.rounded_total_payable && cn.exact_total_payable !== cn.rounded_total_payable ? `Exact cents: RM ${cn.exact_total_payable.toFixed(2)}` : undefined}
+              >
+                RM {(cn.rounded_total_payable != null ? cn.rounded_total_payable : Math.round(cn.total_payable)).toFixed(2)}
               </span>
             </div>
 
@@ -271,7 +274,7 @@ export function PreviousPolicyValuationPane({
               <div className="flex justify-between text-[11px]">
                 <span className="text-neutral-500">Towing:</span>
                 <span className="font-mono font-medium text-neutral-800">
-                  {formatBenefitCoverage(cn.towing_km || cn.towing_limit || "Unlimited")}
+                  {formatBenefitCoverage(cn.towing_km || cn.towing_limit || "Unlimited", undefined, cn.company_name)}
                 </span>
               </div>
             </div>

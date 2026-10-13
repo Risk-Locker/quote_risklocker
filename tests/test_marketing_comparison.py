@@ -1541,3 +1541,108 @@ def test_resolve_comparison_benefits_covernote_full_synthesis(db_session: Sessio
     assert any("Roadside Towing" in n for n in dp_names)
     assert any("Windscreen Protection" in n for n in dp_names)
 
+
+def test_underwriter_towing_rules_deterministic():
+    """Verify underwriter-specific towing metrics: RM monetary limits vs KM distance limits and riders."""
+    from app.services.marketing_comparison.towing_evaluator import resolve_insurer_towing_limit
+
+    # QBE (Base RM: default RM 500, tariff RM 200, DPA/DPP/N4 -> Unlimited, NEVER KM)
+    assert resolve_insurer_towing_limit("QBE", "", "", None) == "RM 500"
+    assert resolve_insurer_towing_limit("QBE Insurance", "", "", "100 km") == "RM 500"
+    assert resolve_insurer_towing_limit("QBE Insurance", "", "", "50 km") == "RM 500"
+    assert resolve_insurer_towing_limit("QBE", "basic tariff policy", "", None) == "RM 200"
+    assert resolve_insurer_towing_limit("QBE", "Endorsement N4 Driver Passenger Protector", "", None) == "Unlimited"
+    assert resolve_insurer_towing_limit("QBE", "DPA rider", "", None) == "Unlimited"
+    assert resolve_insurer_towing_limit("QBE", "DPP package", "", None) == "Unlimited"
+
+    # Lonpac (Base RM: default RM 400, tariff RM 200, SDPA Plan 1 -> RM 600, SDPA Plan 2 -> Unlimited)
+    assert resolve_insurer_towing_limit("Lonpac Insurance", "", "", None) == "RM 400"
+    assert resolve_insurer_towing_limit("Lonpac Insurance", "", "", "100 km") == "RM 400"
+    assert resolve_insurer_towing_limit("Lonpac", "statutory tariff policy", "", None) == "RM 200"
+    assert resolve_insurer_towing_limit("Lonpac", "SDPA rider Plan 1", "", None) == "RM 600"
+    assert resolve_insurer_towing_limit("Lonpac", "SDPA Plus rider Plan 2", "", None) == "Unlimited"
+
+    # Berjaya Sompo (Base RM tariff RM 200, flagship SOMPO Motor / Motor N-hancer -> Unlimited)
+    assert resolve_insurer_towing_limit("Berjaya Sompo", "", "", None) == "Unlimited"
+    assert resolve_insurer_towing_limit("SOMPO Motor", "", "", None) == "Unlimited"
+    assert resolve_insurer_towing_limit("Berjaya Sompo", "Motor N-hancer Pack", "", None) == "Unlimited"
+    assert resolve_insurer_towing_limit("Berjaya Sompo", "basic tariff policy", "", None) == "RM 200"
+
+    # Tune Protect (Conventional base RM 300, AutoBuddy -> Unlimited; Motor Easy online base 200 km)
+    assert resolve_insurer_towing_limit("Tune Protect", "", "", None) == "RM 300"
+    assert resolve_insurer_towing_limit("Tune Protect", "AutoBuddy rider", "", None) == "Unlimited"
+    assert resolve_insurer_towing_limit("Tune Protect", "Motor Easy online portal", "", None) == "200 km"
+    assert resolve_insurer_towing_limit("Tune Protect", "Motor Easy with AutoBuddy", "", None) == "Unlimited"
+
+    # Etiqa (Base KM: default 200 km, OTO 360 -> Unlimited)
+    assert resolve_insurer_towing_limit("Etiqa", "", "", None) == "200 km"
+    assert resolve_insurer_towing_limit("Etiqa", "OTO 360 PA rider", "", None) == "Unlimited"
+
+    # Takaful Malaysia / STMB (Base KM: default 50 km, Motor PA Plus Plan 1-4)
+    assert resolve_insurer_towing_limit("Takaful Malaysia", "", "", None) == "50 km"
+    assert resolve_insurer_towing_limit("Takaful Malaysia", "Motor PA Plus Plan 1", "", None) == "100 km"
+    assert resolve_insurer_towing_limit("Takaful Malaysia", "Motor PA Plus Plan 2", "", None) == "200 km"
+    assert resolve_insurer_towing_limit("Takaful Malaysia", "Motor PA Plus Plan 3", "", None) == "300 km"
+    assert resolve_insurer_towing_limit("Takaful Malaysia", "Motor PA Plus Plan 4", "", None) == "Unlimited"
+
+
+def test_marketing_comparison_rounds_motor_premium_and_total_payable(db_session):
+    from datetime import datetime, timezone
+    from app.models.tables import InsuranceTenure, TenureComparisonEntry, TrackedVehicle, new_id
+    from app.services.marketing_comparison_service import get_marketing_comparison
+
+    veh = TrackedVehicle(
+        id=new_id(),
+        vehicle_no="JHX9678",
+        car_brand="Proton",
+        car_model="Waja",
+    )
+    db_session.add(veh)
+    db_session.flush()
+
+    tenure = InsuranceTenure(
+        id=new_id(),
+        tracked_vehicle_id=veh.id,
+        vehicle_no="JHX9678",
+        customer_name="LIM TECK BENG",
+        coverage_start_date=datetime(2026, 10, 13, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 10, 12, tzinfo=timezone.utc),
+        expiry_month="2027-10",
+        road_tax=90.0,
+        runner_fee=10.0,
+        status="ACTIVE",
+    )
+    db_session.add(tenure)
+    db_session.flush()
+
+    # Quote with cents: 510.47 motor premium + 100.0 fixed costs = 610.47 total
+    entry = TenureComparisonEntry(
+        id=new_id(),
+        tenure_id=tenure.id,
+        company_name="AmAssurance",
+        sum_insured=10000.0,
+        valuation_type="agreed_value",
+        motor_premium=510.47,
+        road_tax=90.0,
+        runner_fee=10.0,
+        total_payable=610.47,
+        sort_order=1,
+    )
+    db_session.add(entry)
+    db_session.commit()
+
+    res = get_marketing_comparison(db_session, tenure.id)
+    assert len(res["entries"]) == 1
+    e = res["entries"][0]
+
+    # Exact cents preserved for tooltips/auditing
+    assert e["exact_motor_premium"] == 510.47
+    assert e["exact_total_payable"] == 610.47
+
+    # Rounded whole numbers for display with 0 cents (.00)
+    assert e["rounded_motor_premium"] == 510.0
+    # Rounded total payable is rounded motor premium + fixed costs: 510.0 + 100.0 = 610.0
+    assert e["rounded_total_payable"] == 610.0
+
+
+

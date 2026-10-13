@@ -164,6 +164,8 @@ interface ComparisonEntry {
   sum_insured: number;
   valuation_type: string;
   motor_premium: number;
+  rounded_motor_premium?: number | null;
+  exact_motor_premium?: number | null;
   road_tax: number;
   runner_fee: number;
   total_payable: number;
@@ -1439,7 +1441,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               >
                 <div className="text-xs text-neutral-800">
                   <span className="font-bold">{dup.company_name}</span> · Quoted{" "}
-                  <strong className="font-mono">RM {(dup.total_payable || 0).toFixed(2)}</strong> (Date: {dup.quotation_date || "N/A"})
+                  <strong className="font-mono">RM {Math.round(dup.total_payable || 0).toFixed(2)}</strong> (Date: {dup.quotation_date || "N/A"})
                   <span className="ml-2 text-neutral-500 font-mono text-[11px]">[{dup.file_name || "Quotation.pdf"}]</span>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -1993,7 +1995,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                 <div className="flex items-baseline justify-between text-xs pt-1 border-t border-[#e5e5ea]/80">
                   <span className="text-[#6e6e73]">Total Payable:</span>
                   <span className="font-mono font-bold text-sm text-[#1b1717]">
-                    RM {gq.total_payable.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                    RM {Math.round(gq.total_payable).toLocaleString("en-MY", { minimumFractionDigits: 2 })}
                   </span>
                 </div>
 

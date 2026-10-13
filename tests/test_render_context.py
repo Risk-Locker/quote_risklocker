@@ -249,8 +249,17 @@ def test_adjusted_total_text_round_total():
     }
     # Unrounded:
     assert adjusted_total_text(fields, [], round_total=False) == "2,150.12"
-    # Rounded: rounds 2150.12 to 2150.00 with 0 cents
+    # Rounded: rounds premium 2060.12 to 2060.00, so 2060.00 + 90.00 = 2150.00
     assert adjusted_total_text(fields, [], round_total=True) == "2,150.00"
+
+    # Test with premium ending in .60 (rounds up to 2061.00 + 90.00 = 2151.00):
+    fields_round_up = {
+        "premium": {"value": "2060.60"},
+        "roadtax": {"value": "90.00"},
+        "service_fee": {"value": "50.00"},
+    }
+    assert adjusted_total_text(fields_round_up, [], round_total=True) == "2,201.00"
+    assert adjusted_total_text(fields_round_up, [], round_total=False) == "2,200.60"
 
     # Test with .50 exactly (no premium, falls back to total_amount):
     fields_half = {

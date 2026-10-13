@@ -216,7 +216,7 @@ export function UnderwriterQuoteCard({
                             ? "bg-[#1b1717] text-white shadow-xs"
                             : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-200/60"
                         }`}
-                        title={`v${q.version || 1} • RM ${q.total_payable.toFixed(2)}${isLatest ? " (Latest)" : ""}`}
+                        title={`v${q.version || 1} • RM ${(q.rounded_total_payable != null ? q.rounded_total_payable : Math.round(q.total_payable)).toFixed(2)}${isLatest ? " (Latest)" : ""}`}
                       >
                         <span>v{q.version || 1}</span>
                         {isLatest && <span className="text-[9px] opacity-75 font-normal">Latest</span>}
@@ -291,8 +291,15 @@ export function UnderwriterQuoteCard({
             <span className="text-[11px] uppercase font-bold text-[#6e6e73] block mb-0.5">
               Motor Premium
             </span>
-            <p className="font-mono text-sm font-bold text-[#1b1717]">
-              RM {entry.motor_premium.toFixed(2)}
+            <p
+              className="font-mono text-sm font-bold text-[#1b1717]"
+              title={
+                entry.exact_motor_premium && (entry.rounded_motor_premium ?? Math.round(entry.motor_premium)) !== entry.exact_motor_premium
+                  ? `Exact cents: RM ${entry.exact_motor_premium.toFixed(2)}`
+                  : undefined
+              }
+            >
+              RM {(entry.rounded_motor_premium != null ? entry.rounded_motor_premium : Math.round(entry.motor_premium)).toFixed(2)}
             </p>
           </div>
 
@@ -309,9 +316,13 @@ export function UnderwriterQuoteCard({
             </span>
             <p
               className="font-mono text-lg font-black text-[#1b1717]"
-              title={entry.exact_total_payable && entry.rounded_total_payable && entry.exact_total_payable !== entry.rounded_total_payable ? `Exact cents: RM ${entry.exact_total_payable.toFixed(2)}` : undefined}
+              title={
+                entry.exact_total_payable && (entry.rounded_total_payable ?? Math.round(entry.total_payable)) !== entry.exact_total_payable
+                  ? `Exact cents: RM ${entry.exact_total_payable.toFixed(2)}`
+                  : undefined
+              }
             >
-              RM {(entry.rounded_total_payable != null ? entry.rounded_total_payable : Math.ceil(entry.total_payable)).toFixed(2)}
+              RM {(entry.rounded_total_payable != null ? entry.rounded_total_payable : (Math.round(entry.motor_premium) + tenure.fixed_costs_total)).toFixed(2)}
             </p>
             <span className="text-[11px] text-[#6e6e73] font-medium block">
               (Incl. RM {tenure.fixed_costs_total.toFixed(2)} Roadtax &amp; Runner fee)
@@ -324,7 +335,7 @@ export function UnderwriterQuoteCard({
           {/* Towing Limit */}
           <div className="h-8 flex items-center justify-between pt-1">
             <span className="text-[#6e6e73]">Towing:</span>
-            <span className="font-bold text-[#1b1717]">{formatBenefitCoverage(entry.towing_km || entry.towing_limit || "Unlimited")}</span>
+            <span className="font-bold text-[#1b1717]">{formatBenefitCoverage(entry.towing_km || entry.towing_limit || "Unlimited", undefined, entry.company_name)}</span>
           </div>
 
           {/* Agreed Value */}

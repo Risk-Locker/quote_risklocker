@@ -248,7 +248,11 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
   const coverPeriod = values.cover_period || "Standard Annual";
   const valuationType = values.valuation_type || "Market Value";
   const sumInsured = formatMoney(values.coverage_amount || values.sum_insured || "0.00");
-  const premium = formatMoney(values.premium || "0.00");
+  const dispOpts = workspace.display_options as Record<string, unknown> | undefined;
+  const shouldRound = dispOpts?.round_total !== false;
+  const rawPremNum = parseFloat(String(values.premium || "").replace(/[^0-9.]/g, "")) || 0;
+  const effPremStr = shouldRound && rawPremNum > 0 ? Math.round(rawPremNum).toFixed(2) : values.premium;
+  const premium = formatMoney(effPremStr || "0.00");
   const roadtax = formatMoney(values.roadtax || "0.00");
   const runnerFee = formatMoney(values.service_fee || values.runner_fee || "20.00");
   const totalPayable = formatMoney(values.total_amount || "0.00");

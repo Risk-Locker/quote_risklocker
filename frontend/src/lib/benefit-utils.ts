@@ -5,11 +5,40 @@
 
 export function formatBenefitCoverage(
   value: string | number | null | undefined,
-  format?: "RM" | "KM" | "text" | string
+  format?: "RM" | "KM" | "text" | string,
+  companyName?: string | null
 ): string {
   if (value === null || value === undefined) return "";
   const str = String(value).trim();
   if (!str) return "";
+
+  // Guard: Underwriter-specific RM vs KM rules
+  const comp = (companyName || "").toLowerCase().trim();
+  const isRmCompany =
+    comp.includes("qbe") ||
+    comp.includes("lonpac") ||
+    comp.includes("sompo") ||
+    (comp.includes("tune") && !comp.includes("easy") && !comp.includes("online"));
+
+  // Universal Unlimited check
+  if (/^unlimited(?:\s*(?:km|distance|mileage|towing|costs?))?$/i.test(str) || /tanpa had/i.test(str)) {
+    return "Unlimited";
+  }
+
+  // No towing check
+  if (/no towing|not included|none|tiada|nil|^0\s*km$/i.test(str)) {
+    return "No Towing";
+  }
+
+  // RM-based underwriter guardrail: NEVER display KM distance
+  if (isRmCompany) {
+    if (/km$/i.test(str) || /^\d+\s*km$/i.test(str) || /^rm\s*(?:[1-9]|1\d|20|50)$/i.test(str)) {
+      if (comp.includes("qbe")) return "RM 500";
+      if (comp.includes("lonpac")) return "RM 400";
+      if (comp.includes("sompo")) return "Unlimited";
+      if (comp.includes("tune")) return "RM 300";
+    }
+  }
 
   // Guard: If value already contains RM / MYR, ALWAYS format as currency regardless of requested format
   if (/^(?:RM|MYR)\s*[\d,]+/i.test(str)) {
@@ -29,19 +58,9 @@ export function formatBenefitCoverage(
     return str;
   }
 
-  // Universal Unlimited check
-  if (/^unlimited(?:\s*(?:km|distance|mileage|towing|costs?))?$/i.test(str) || /tanpa had/i.test(str)) {
-    return "Unlimited";
-  }
-
-  // No towing check
-  if (/no towing|not included|none|tiada|nil|^0\s*km$/i.test(str)) {
-    return "No Towing";
-  }
-
   const fmt = (format || "").toUpperCase();
 
-  if (fmt === "RM") {
+  if (fmt === "RM" || isRmCompany) {
     const cleanStr = str.replace(/^(?:RM|MYR)\s*/i, "").trim();
     const cleanNum = cleanStr.replace(/,/g, "");
     const num = parseFloat(cleanNum);
@@ -54,6 +73,12 @@ export function formatBenefitCoverage(
       if (!isNaN(parsed)) {
         return `RM ${parsed.toLocaleString("en-MY", { minimumFractionDigits: parsed % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 })}`;
       }
+    }
+    if (isRmCompany) {
+      if (comp.includes("qbe")) return "RM 500";
+      if (comp.includes("lonpac")) return "RM 400";
+      if (comp.includes("sompo")) return "Unlimited";
+      if (comp.includes("tune")) return "RM 300";
     }
     return str;
   }

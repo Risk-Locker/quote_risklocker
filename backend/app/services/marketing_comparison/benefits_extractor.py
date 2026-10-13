@@ -872,6 +872,10 @@ def _resolve_comparison_benefits(
         comp_obj = db.get(InsuranceCompany, target_comp_id)
         if comp_obj and comp_obj.name:
             comp_name_str = comp_obj.name
+    if not comp_name_str and session and getattr(session, "draft", None) and getattr(session.draft, "company_id", None):
+        comp_obj = db.get(InsuranceCompany, session.draft.company_id)
+        if comp_obj and comp_obj.name:
+            comp_name_str = comp_obj.name
     if not comp_name_str:
         comp_name_str = str(f.get("insurance_company") or f.get("company_name") or f.get("insurer") or getattr(session, "detected_company", None) or "")
 

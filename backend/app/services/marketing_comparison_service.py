@@ -441,7 +441,44 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                 e.betterment_display = fallback_bet_disp
                 needs_commit = True
 
-            if not e.towing_km and not e.towing_limit:
+            # Auto-heal towing limit for RM-based vs KM-based underwriter rules
+            c_name_lower = (e.company_name or "").lower().strip()
+            is_rm_insurer = any(k in c_name_lower for k in ("qbe", "lonpac", "sompo", "berjaya sompo")) or ("tune" in c_name_lower and "easy" not in c_name_lower and "online" not in c_name_lower)
+            cur_tow = str(e.towing_km or e.towing_limit or "").strip()
+
+            tow_is_corrupt = (
+                not cur_tow
+                or (is_rm_insurer and ("km" in cur_tow.lower() or bool(re.match(r"^rm\s*(?:[1-9]|1\d|20|50)$", cur_tow, re.IGNORECASE))))
+            )
+
+            if tow_is_corrupt and not e.is_manual and e.session_id:
+                s_cand = session_map.get(e.session_id)
+                s_cand_fields = s_cand.draft.fields if s_cand and s_cand.draft and isinstance(s_cand.draft.fields, dict) else {}
+                b_cand = _resolve_comparison_benefits(
+                    db,
+                    s_cand,
+                    getattr(s_cand, "company_id", None) or e.company_id,
+                    s_cand_fields,
+                    float(tenure.windscreen_target) if tenure.windscreen_target else None,
+                )
+                cand_tow = b_cand.get("towing_km")
+                if cand_tow:
+                    e.towing_km = cand_tow
+                    e.towing_limit = cand_tow
+                    needs_commit = True
+            elif tow_is_corrupt and is_rm_insurer:
+                if "qbe" in c_name_lower:
+                    fallback_tow = "RM 500"
+                elif "lonpac" in c_name_lower:
+                    fallback_tow = "RM 400"
+                elif "sompo" in c_name_lower:
+                    fallback_tow = "Unlimited"
+                else:
+                    fallback_tow = "RM 300"
+                e.towing_km = fallback_tow
+                e.towing_limit = fallback_tow
+                needs_commit = True
+            elif not e.towing_km and not e.towing_limit:
                 e.towing_km = "Unlimited"
                 e.towing_limit = "Unlimited"
                 needs_commit = True
@@ -958,6 +995,13 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             else None
         )
 
+        raw_motor_prem = float(e.motor_premium)
+        rounded_motor_prem = float(round(raw_motor_prem))
+        rt = float(e.road_tax)
+        rf = float(e.runner_fee)
+        exact_tot = float(e.total_payable) if e.total_payable is not None else (raw_motor_prem + rt + rf)
+        rounded_tot = rounded_motor_prem + rt + rf
+
         entry_dicts.append({
             "id": e.id,
             "tenure_id": e.tenure_id,
@@ -967,11 +1011,13 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "sum_insured": float(e.sum_insured),
             "valuation_type": e.valuation_type,
             "motor_premium": float(e.motor_premium),
-            "road_tax": float(e.road_tax),
-            "runner_fee": float(e.runner_fee),
-            "total_payable": float(e.total_payable) if e.total_payable is not None else 0.0,
-            "rounded_total_payable": float(math.ceil(e.total_payable)) if e.total_payable is not None else 0.0,
-            "exact_total_payable": float(e.total_payable) if e.total_payable is not None else 0.0,
+            "rounded_motor_premium": rounded_motor_prem,
+            "exact_motor_premium": raw_motor_prem,
+            "road_tax": rt,
+            "runner_fee": rf,
+            "total_payable": float(e.total_payable) if e.total_payable is not None else exact_tot,
+            "rounded_total_payable": rounded_tot,
+            "exact_total_payable": exact_tot,
             "towing_limit": e.towing_limit,
             "towing_km": e.towing_km or e.towing_limit,
             "agreed_value": e.agreed_value,
@@ -1182,8 +1228,11 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "valuation_type": cn_val_type,
             "agreed_value": cn_agreed,
             "motor_premium": cn_prem,
+            "rounded_motor_premium": float(round(float(cn_prem))),
+            "exact_motor_premium": float(cn_prem),
             "total_payable": cn_tot_pay,
-            "rounded_total_payable": round(cn_tot_pay),
+            "rounded_total_payable": float(round(float(cn_prem))) + float(tenure.road_tax) + float(tenure.runner_fee),
+            "exact_total_payable": cn_tot_pay,
             "windscreen_sum_insured": cn_b_res.get("windscreen_sum_insured"),
             "towing_km": cn_b_res.get("towing_km") or "Unlimited",
             "special_perils": cn_b_res.get("special_perils"),

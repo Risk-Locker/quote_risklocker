@@ -287,6 +287,7 @@ def test_api_yoy_stats_and_sync_endpoint(client: TestClient, db_session: Session
     data2 = res2.json()
     years2 = [y["year"] for y in data2["years"]]
     assert "2027" in years2
+    assert "2028" not in years2
 
     # Verify 2027 count in YoY stats: 0 issued policies until cover note uploaded, 1 car up for renewal
     y27 = next(y for y in data2["years"] if y["year"] == "2027")

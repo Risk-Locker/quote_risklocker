@@ -26,7 +26,10 @@ import type {
 function _recalcAdjustedTotal(snapshot: WorkspaceSnapshot, nextExtras: WorkspaceSnapshot["extras"]): string {
   const pRaw = snapshot.fields?.premium;
   const pVal = typeof pRaw === "object" && pRaw !== null ? (pRaw as Record<string, unknown>).value : pRaw;
-  const basePremium = parseFloat(String(pVal ?? "").replace(/[^0-9.]/g, "")) || 0;
+  const rawBasePremium = parseFloat(String(pVal ?? "").replace(/[^0-9.]/g, "")) || 0;
+  const dispOpts = snapshot.display_options as Record<string, unknown> | undefined;
+  const shouldRound = dispOpts?.round_total !== false;
+  const basePremium = shouldRound && rawBasePremium > 0 ? Math.round(rawBasePremium) : rawBasePremium;
 
   const rtRaw = snapshot.fields?.roadtax;
   const rtVal = typeof rtRaw === "object" && rtRaw !== null ? (rtRaw as Record<string, unknown>).value : rtRaw;
@@ -131,12 +134,13 @@ function _recalcAdjustedTotal(snapshot: WorkspaceSnapshot, nextExtras: Workspace
 
   let total = 0;
   if (basePremium > 0) {
-    total = basePremium + rt + sf + extrasSum;
+    const rawTot = basePremium + rt + sf + extrasSum;
+    total = shouldRound ? Math.round(rawTot) : rawTot;
   } else {
     const raw = snapshot.fields?.total_amount;
     const baseVal = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>).value : raw;
     const base = parseFloat(String(baseVal ?? "").replace(/[^0-9.]/g, "")) || 0;
-    total = base;
+    total = shouldRound && base > 0 ? Math.round(base) : base;
   }
   return total > 0 ? total.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
 }

@@ -346,7 +346,12 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     decideField("total_amount", "clear", "");
 
     setFormValues((prev) => {
-      const pNum = parseFloat(String(prev["premium"] || (workspace?.fields?.premium as any)?.value || "").replace(/[^0-9.]/g, "")) || 0;
+      const rawStoredPrem = (workspace?.fields?.premium as any)?.detected_value ?? (workspace?.fields?.premium as any)?.value;
+      const baseRaw = nextVal ? (prev["premium"] || rawStoredPrem || "") : (rawStoredPrem || prev["premium"] || "");
+      const pNum = parseFloat(String(baseRaw).replace(/[^0-9.]/g, "")) || 0;
+      const effPremiumNum = nextVal && pNum > 0 ? Math.round(pNum) : pNum;
+      const formattedPremium = pNum > 0 ? effPremiumNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : prev["premium"];
+
       const rtNum = parseFloat(String(prev["roadtax"] || (workspace?.fields?.roadtax as any)?.value || "").replace(/[^0-9.]/g, "")) || 0;
       const sfNum = parseFloat(String(prev["service_fee"] || (workspace?.fields?.service_fee as any)?.value || "").replace(/[^0-9.]/g, "")) || 0;
       const extrasTotal = (workspace?.extras || []).reduce((acc, ex) => {
@@ -356,19 +361,19 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         return acc + (Number.isFinite(num) ? num : 0);
       }, 0);
 
-      const calcTotal = pNum + extrasTotal + rtNum + sfNum;
+      const calcTotal = effPremiumNum + extrasTotal + rtNum + sfNum;
       if (calcTotal > 0) {
         const finalTot = nextVal ? Math.round(calcTotal) : calcTotal;
-        const formatted = finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        return { ...prev, total_amount: formatted };
+        const formattedTotal = finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return { ...prev, premium: formattedPremium, total_amount: formattedTotal };
       }
       const curTot = parseFloat(String(prev["total_amount"] || (workspace?.fields?.total_amount as any)?.value || "").replace(/[^0-9.]/g, "")) || 0;
       if (curTot > 0) {
         const finalTot = nextVal ? Math.round(curTot) : curTot;
-        const formatted = finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        return { ...prev, total_amount: formatted };
+        const formattedTotal = finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return { ...prev, premium: formattedPremium, total_amount: formattedTotal };
       }
-      return prev;
+      return { ...prev, premium: formattedPremium };
     });
 
     queueOperation(
@@ -833,6 +838,11 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
     // Sync Total Premium with roadtax, runner fee, and extras
     const pNum = parseFloat(String(values.premium || "").replace(/[^0-9.]/g, "")) || 0;
+    const isRound = roundTotal;
+    const effPremiumNum = isRound && pNum > 0 ? Math.round(pNum) : pNum;
+    if (isRound && pNum > 0) {
+      values.premium = effPremiumNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
     const rtNum = parseFloat(String(values.roadtax || "").replace(/[^0-9.]/g, "")) || 0;
     const sfNum = parseFloat(String(values.service_fee || "").replace(/[^0-9.]/g, "")) || 0;
     const extrasTotal = (workspace.extras || []).reduce((acc, ex) => {
@@ -847,10 +857,9 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     if (isManualTotal) {
       values.total_amount = displayValue("money", totalField.value);
     } else if (pNum > 0) {
-      const combinedPremium = pNum + extrasTotal;
+      const combinedPremium = effPremiumNum + extrasTotal;
       values.insurance_premium_total = combinedPremium > 0 ? combinedPremium.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
-      const rawTot = pNum + rtNum + sfNum + extrasTotal;
-      const isRound = roundTotal;
+      const rawTot = effPremiumNum + rtNum + sfNum + extrasTotal;
       const finalTot = isRound && rawTot > 0 ? Math.round(rawTot) : rawTot;
       values.total_amount = finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     } else if (workspace.total_premium_adjusted) {
@@ -1379,6 +1388,14 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
     // Compute live total premium (Insurance Premium + Roadtax + Runner Fee + Extras)
     const pNum = parseFloat(String(fields["premium"] || "").replace(/[^0-9.]/g, "")) || 0;
+    const isRound = roundTotal;
+    const effPremiumNum = isRound && pNum > 0 ? Math.round(pNum) : pNum;
+    if (isRound && pNum > 0) {
+      const roundedPremStr = effPremiumNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      fields["premium"] = roundedPremStr;
+      fields["coverage_premium"] = roundedPremStr;
+      fields["basic_premium_vehicle"] = roundedPremStr;
+    }
     const rtNum = parseFloat(String(fields["roadtax"] || "").replace(/[^0-9.]/g, "")) || 0;
     const sfNum = parseFloat(String(fields["service_fee"] || "").replace(/[^0-9.]/g, "")) || 0;
     const extrasTotal = (workspace?.extras || []).reduce((acc, ex) => {
@@ -1394,8 +1411,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     if (isManualTotal && formValues["total_amount"]) {
       effTotal = formValues["total_amount"];
     } else {
-      const calculatedTotal = pNum + extrasTotal + rtNum + sfNum;
-      const isRound = roundTotal;
+      const calculatedTotal = effPremiumNum + extrasTotal + rtNum + sfNum;
       const finalTotalNum = isRound && calculatedTotal > 0 ? Math.round(calculatedTotal) : calculatedTotal;
       if (finalTotalNum > 0) {
         effTotal = finalTotalNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1410,7 +1426,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       }
     }
 
-    const calculatedPremium = pNum + extrasTotal;
+    const calculatedPremium = effPremiumNum + extrasTotal;
     fields["insurance_premium_total"] = calculatedPremium > 0
       ? calculatedPremium.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
       : "";
@@ -1467,7 +1483,8 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     if (field.name === "premium" || field.name === "roadtax" || field.name === "service_fee") {
       decideField("total_amount", "clear", "");
       setFormValues((prev) => {
-        const p = field.name === "premium" ? parseFloat(current.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["premium"] || "").replace(/[^0-9.]/g, "")) || 0;
+        const rawP = field.name === "premium" ? parseFloat(current.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["premium"] || "").replace(/[^0-9.]/g, "")) || 0;
+        const p = roundTotal && rawP > 0 ? Math.round(rawP) : rawP;
         const rt = field.name === "roadtax" ? parseFloat(current.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["roadtax"] || "").replace(/[^0-9.]/g, "")) || 0;
         const sf = field.name === "service_fee" ? parseFloat(current.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["service_fee"] || "").replace(/[^0-9.]/g, "")) || 0;
         const extrasTotal = (workspace?.extras || []).reduce((acc, ex) => {
@@ -1480,7 +1497,11 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         if (rawTot > 0) {
           const finalTot = roundTotal ? Math.round(rawTot) : rawTot;
           const formatted = finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          return { ...prev, total_amount: formatted };
+          return {
+            ...prev,
+            ...(field.name === "premium" && roundTotal && rawP > 0 ? { premium: p.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) } : {}),
+            total_amount: formatted,
+          };
         }
         return prev;
       });
@@ -1518,7 +1539,8 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     if (name === "premium" || name === "roadtax" || name === "service_fee") {
       decideField("total_amount", "clear", "");
       setFormValues((prev) => {
-        const p = name === "premium" ? parseFloat(value.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["premium"] || "").replace(/[^0-9.]/g, "")) || 0;
+        const rawP = name === "premium" ? parseFloat(value.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["premium"] || "").replace(/[^0-9.]/g, "")) || 0;
+        const p = roundTotal && rawP > 0 ? Math.round(rawP) : rawP;
         const rt = name === "roadtax" ? parseFloat(value.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["roadtax"] || "").replace(/[^0-9.]/g, "")) || 0;
         const sf = name === "service_fee" ? parseFloat(value.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["service_fee"] || "").replace(/[^0-9.]/g, "")) || 0;
         const extrasTotal = (workspace?.extras || []).reduce((acc, ex) => {
@@ -1531,7 +1553,11 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         if (rawTot > 0) {
           const finalTot = roundTotal ? Math.round(rawTot) : rawTot;
           const formatted = finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          return { ...prev, total_amount: formatted };
+          return {
+            ...prev,
+            ...(name === "premium" && roundTotal && rawP > 0 ? { premium: p.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) } : {}),
+            total_amount: formatted,
+          };
         }
         return prev;
       });

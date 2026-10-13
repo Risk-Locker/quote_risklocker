@@ -51,6 +51,8 @@ export interface ComparisonEntry {
   sum_insured: number;
   valuation_type: string;
   motor_premium: number;
+  rounded_motor_premium?: number | null;
+  exact_motor_premium?: number | null;
   road_tax: number;
   runner_fee: number;
   total_payable: number;

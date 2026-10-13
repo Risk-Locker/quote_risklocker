@@ -218,7 +218,7 @@ export function SnapshotPreviewModal({
                         <div className="pt-1 border-t border-neutral-100 flex justify-between items-baseline">
                           <span className="text-xs font-bold text-[#1b1717]">Total Payable:</span>
                           <span className="font-mono font-black text-base text-[#1b1717]">
-                            RM {card.total_payable.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                            RM {(card.rounded_total_payable != null ? card.rounded_total_payable : Math.round(card.total_payable)).toLocaleString("en-MY", { minimumFractionDigits: 2 })}
                           </span>
                         </div>
                       </div>
@@ -288,7 +288,7 @@ export function SnapshotPreviewModal({
                         <div className="h-5 flex items-center justify-between">
                           <span className="text-[#6e6e73]">Towing Limit:</span>
                           <span className="font-mono font-semibold text-[#1b1717]">
-                            {formatBenefitCoverage(card.towing_limit || card.towing_km || "Standard")}
+                            {formatBenefitCoverage(card.towing_limit || card.towing_km || "Standard", undefined, card.company_name)}
                           </span>
                         </div>
                       </div>

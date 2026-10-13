@@ -440,8 +440,8 @@ export function PolicyFieldsCard({
                 }`}
                 title={
                   roundTotal
-                    ? "Round figure active (0 cents). Click to toggle."
-                    : "Click to round figure total to whole RM (0 cents)."
+                    ? "Round figure active: Premium & Total rounded to whole RM (0 cents). Click to toggle."
+                    : "Click to round figure premium & total to whole RM (0 cents)."
                 }
               >
                 <Check size={11} weight="bold" className={roundTotal ? "opacity-100" : "opacity-0"} />

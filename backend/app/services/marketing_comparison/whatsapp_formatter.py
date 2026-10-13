@@ -33,12 +33,14 @@ def format_whatsapp_teaser_from_data(data: dict[str, Any]) -> str:
         rec_tag = " ★ (RECOMMENDED)" if e.get("is_recommended") else ""
         val_tag = "Agreed Value" if e.get("agreed_value") else "Market Value"
         betterment_tag = "Yes" if e.get("waiver_betterment") else "No"
+        motor_p = float(e.get("rounded_motor_premium") if e.get("rounded_motor_premium") is not None else round(e.get("motor_premium", 0.0)))
+        tot_p = float(e.get("rounded_total_payable") if e.get("rounded_total_payable") is not None else round(e.get("total_payable", 0.0)))
 
         lines.extend([
             f"*{idx}. {e['company_name']}{rec_tag}*",
             f"   • Sum Insured: RM {e['sum_insured']:,.2f} ({val_tag})",
-            f"   • Motor Insurance: RM {e['motor_premium']:,.2f}",
-            f"   • *TOTAL PAYABLE: RM {e['total_payable']:,.2f}*",
+            f"   • Motor Insurance: RM {motor_p:,.2f}",
+            f"   • *TOTAL PAYABLE: RM {tot_p:,.2f}*",
             f"   • Towing: {e['towing_limit']}",
             f"   • Waiver of Betterment: {betterment_tag} | Excess: RM {e['excess']:.2f}",
             "",
@@ -48,12 +50,13 @@ def format_whatsapp_teaser_from_data(data: dict[str, Any]) -> str:
 
     rec_winners = [e for e in entries if e.get("is_recommended")]
     if len(rec_winners) == 1:
+        win_tot = float(rec_winners[0].get("rounded_total_payable") if rec_winners[0].get("rounded_total_payable") is not None else round(rec_winners[0].get("total_payable", 0.0)))
         lines.append(
-            f"🏆 *Recommended Choice:* {rec_winners[0]['company_name']} (Total: RM {rec_winners[0]['total_payable']:,.2f})\n"
+            f"🏆 *Recommended Choice:* {rec_winners[0]['company_name']} (Total: RM {win_tot:,.2f})\n"
         )
     elif len(rec_winners) > 1:
         winner_items = ", ".join(
-            f"{w['company_name']} (RM {w['total_payable']:,.2f})" for w in rec_winners
+            f"{w['company_name']} (RM {float(w.get('rounded_total_payable') if w.get('rounded_total_payable') is not None else round(w.get('total_payable', 0.0))):,.2f})" for w in rec_winners
         )
         lines.append(f"🏆 *Shortlisted Options ({len(rec_winners)}):* {winner_items}\n")
 

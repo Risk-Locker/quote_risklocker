@@ -1574,7 +1574,8 @@ export function CanvasElementView({
             : ((config as any)?.display_options || {});
           const shouldRoundTotal = dispOpts?.round_total !== false;
 
-          const pNum = parseFloat(String(premium).replace(/[^0-9.]/g, "")) || 0;
+          const rawPNum = parseFloat(String(premium).replace(/[^0-9.]/g, "")) || 0;
+          const pNum = (shouldRoundTotal && rawPNum > 0) ? Math.round(rawPNum) : rawPNum;
           const rtNum = parseFloat(String(roadtax).replace(/[^0-9.]/g, "")) || 0;
           const sfNum = parseFloat(String(runner).replace(/[^0-9.]/g, "")) || 0;
           const extrasTotal = extras.reduce((acc, ex) => {
@@ -1632,6 +1633,8 @@ export function CanvasElementView({
           } else if (extrasMode === "none") {
             const totalPremNum = pNum + extrasTotal;
             displayPremium = totalPremNum > 0 ? `RM ${totalPremNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : (premium ? `RM ${premium}` : "");
+          } else if (pNum > 0) {
+            displayPremium = `RM ${pNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
           }
 
           rows.push({ kind: "premium", label: labels.premium || "Coverage Premium / 保费", value: displayPremium });

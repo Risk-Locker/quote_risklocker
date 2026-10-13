@@ -396,6 +396,10 @@ def list_tenure_months(
         InsuranceTenure.coverage_end_date,
         InsuranceTenure.expiry_month,
         InsuranceTenure.status,
+        InsuranceTenure.stage,
+        InsuranceTenure.covernote_session_id,
+        InsuranceTenure.policy_number,
+        InsuranceTenure.previous_tenure_id,
     )
     stmt = stmt.where(InsuranceTenure.is_projected == False)
     stmt = stmt.where(InsuranceTenure.is_discarded == False)
@@ -413,7 +417,15 @@ def list_tenure_months(
         "miss": 0,
     })
 
-    for t_id, veh, start_dt, end_dt, exp_m, t_status in all_tenures:
+    for t_id, veh, start_dt, end_dt, exp_m, t_status, stage, cn_sess_id, pol_no, prev_tenure_id in all_tenures:
+        is_issued = bool(
+            stage in ("Issue Policy", "Close - Win")
+            or t_status in ("hit", "bound")
+            or cn_sess_id is not None
+            or pol_no
+        )
+        is_renewal = prev_tenure_id is not None
+
         # Start month
         if start_dt:
             s_ym = start_dt.strftime("%Y-%m")
@@ -428,16 +440,20 @@ def list_tenure_months(
                 month_data[s_ym]["miss"] += 1
 
         # End / Expiry month (cars expiring / renewing in this month)
-        e_ym = None
-        if end_dt:
-            e_ym = end_dt.strftime("%Y-%m")
-        elif exp_m:
-            e_ym = exp_m[:7]
+        # CRITICAL INVARIANT: Only officially issued policies OR original intake deals can project expiry.
+        # Unissued renewal tenures (e.g. 2027 awaiting cover note) cannot project phantom expiry into 2028!
+        can_project = is_issued or (not is_renewal)
+        if can_project:
+            e_ym = None
+            if end_dt:
+                e_ym = end_dt.strftime("%Y-%m")
+            elif exp_m:
+                e_ym = exp_m[:7]
 
-        if e_ym:
-            month_data[e_ym]["end_count"] += 1
-            if veh:
-                month_data[e_ym]["vehicles"].add(veh)
+            if e_ym:
+                month_data[e_ym]["end_count"] += 1
+                if veh:
+                    month_data[e_ym]["vehicles"].add(veh)
 
     result: list[dict[str, Any]] = []
     for y in range(2024, 2031):
@@ -1294,20 +1310,24 @@ def get_tenure_yoy_stats(
                 year_data[y_start]["active"] += 1
 
         # 2. Cars up for renewal in future year: anchored on expiry / end date
-        y_end = None
-        if end_dt:
-            y_end = str(end_dt.year)
-        elif exp_m and len(exp_m) >= 4 and exp_m[:4].isdigit():
-            y_end = exp_m[:4]
+        # CRITICAL INVARIANT: Only officially ISSUED policies OR original intake deals can project expiry.
+        # Unissued renewal tenures (e.g. 2027 awaiting cover note) cannot project phantom renewal years (2028)!
+        can_project = is_issued or (not is_renewal)
+        if can_project:
+            y_end = None
+            if end_dt:
+                y_end = str(end_dt.year)
+            elif exp_m and len(exp_m) >= 4 and exp_m[:4].isdigit():
+                y_end = exp_m[:4]
 
-        if y_end and (not start_dt or str(start_dt.year) != y_end):
-            # Future renewal year: include vehicle & active/lost, but NOT in tenure_ids (so total policies = 0)
-            if veh:
-                year_data[y_end]["vehicles"].add(veh)
-            if is_lost:
-                year_data[y_end]["lost"] += 1
-            else:
-                year_data[y_end]["active"] += 1
+            if y_end and (not start_dt or str(start_dt.year) != y_end):
+                # Future renewal year: include vehicle & active/lost, but NOT in tenure_ids (so total policies = 0)
+                if veh:
+                    year_data[y_end]["vehicles"].add(veh)
+                if is_lost:
+                    year_data[y_end]["lost"] += 1
+                else:
+                    year_data[y_end]["active"] += 1
 
     sorted_years = sorted(year_data.keys())
     result_list = []

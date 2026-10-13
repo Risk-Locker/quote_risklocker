@@ -198,6 +198,8 @@ def adjusted_total_text(fields: dict, extras: list[dict], round_total: bool = Fa
             clean_p = re.sub(r"[^\d.]", "", str(p_val))
             if clean_p:
                 base_prem = Decimal(clean_p)
+                if round_total:
+                    base_prem = Decimal(int(base_prem.quantize(Decimal("1"), rounding="ROUND_HALF_UP")))
         except (InvalidOperation, TypeError, ValueError):
             base_prem = None
 
