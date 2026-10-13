@@ -11,10 +11,8 @@ export function formatBenefitCoverage(
   const str = String(value).trim();
   if (!str) return "";
 
-  const fmt = (format || "").toUpperCase();
-
-  if (fmt === "RM") {
-    // If string has numeric content or is just numbers (e.g. "55555" or "4000")
+  // Guard: If value already contains RM / MYR, ALWAYS format as currency regardless of requested format
+  if (/^(?:RM|MYR)\s*[\d,]+/i.test(str)) {
     const cleanStr = str.replace(/^(?:RM|MYR)\s*/i, "").trim();
     const cleanNum = cleanStr.replace(/,/g, "");
     const num = parseFloat(cleanNum);
@@ -31,13 +29,36 @@ export function formatBenefitCoverage(
     return str;
   }
 
-  if (fmt === "KM") {
-    if (/no towing|not included|none|tiada|nil|^0\s*km$/i.test(str)) {
-      return "No Towing";
+  // Universal Unlimited check
+  if (/^unlimited(?:\s*(?:km|distance|mileage|towing|costs?))?$/i.test(str) || /tanpa had/i.test(str)) {
+    return "Unlimited";
+  }
+
+  // No towing check
+  if (/no towing|not included|none|tiada|nil|^0\s*km$/i.test(str)) {
+    return "No Towing";
+  }
+
+  const fmt = (format || "").toUpperCase();
+
+  if (fmt === "RM") {
+    const cleanStr = str.replace(/^(?:RM|MYR)\s*/i, "").trim();
+    const cleanNum = cleanStr.replace(/,/g, "");
+    const num = parseFloat(cleanNum);
+    if (!isNaN(num) && /^-?\d+(?:\.\d+)?$/.test(cleanNum)) {
+      return `RM ${num.toLocaleString("en-MY", { minimumFractionDigits: num % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 })}`;
     }
-    if (/unlimited|tanpa had/i.test(str)) {
-      return "Unlimited KM";
+    const match = str.match(/(\d+(?:,\d+)*(?:\.\d+)?)/);
+    if (match) {
+      const parsed = parseFloat(match[1].replace(/,/g, ""));
+      if (!isNaN(parsed)) {
+        return `RM ${parsed.toLocaleString("en-MY", { minimumFractionDigits: parsed % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 })}`;
+      }
     }
+    return str;
+  }
+
+  if (fmt === "KM" || str.toLowerCase().endsWith("km") || /^\d+\s*km$/i.test(str)) {
     const match = str.match(/(\d+(?:,\d+)*(?:\.\d+)?)/);
     if (match) {
       const num = parseFloat(match[1].replace(/,/g, ""));

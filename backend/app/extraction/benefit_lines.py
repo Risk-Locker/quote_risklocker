@@ -547,6 +547,26 @@ def _heading_scope(line: str) -> tuple[str, str] | None:
     return None
 
 
+MALAYSIAN_TARIFF_ENDORSEMENTS = {
+    "57": ("Special Perils (Flood & Storm)", "special-perils"),
+    "57a": ("Inclusion of Special Perils (Full SI)", "special-perils"),
+    "57b": ("Inclusion of Special Perils", "special-perils"),
+    "72": ("Legal Liability of Passengers (LLOP)", "legal-liability-of-passengers"),
+    "89": ("Breakdown Towing & Roadside Assistance", "towing"),
+    "97": ("Windscreen Damage", "windscreen"),
+    "100": ("Legal Liability to Passengers (LLP)", "legal-liability-to-passengers"),
+    "101": ("Strike, Riot & Civil Commotion (SRCC)", "strike-riot"),
+    "108": ("All Drivers / Unnamed Drivers", "all-drivers"),
+    "111": ("Current Year NCD Relief", "ncd-relief"),
+    "112": ("Compensation for Assessed Repair Time (CART)", "cart"),
+    "113": ("Waiver of Betterment", "waiver-of-betterment"),
+    "25": ("Strike, Riot & Civil Commotion", "strike-riot"),
+    "02": ("Electrical and Electronic Equipment", "accessories"),
+    "2": ("Electrical and Electronic Equipment", "accessories"),
+    "n4": ("Driver and Passenger Protection (DPA/DPP)", "dpa"),
+}
+
+
 def _looks_like_benefit(raw: str, concepts: list[dict], in_section: bool) -> bool:
     if is_spurious_benefit_line(raw):
         return False
@@ -572,8 +592,8 @@ def _looks_like_benefit(raw: str, concepts: list[dict], in_section: bool) -> boo
     if raw.startswith((*CHECKED_PREFIXES, *UNCHECKED_PREFIXES)):
         return True
 
-    # Endorsement codes (e.g. "Endorsement 112 - Passenger Liability", "Endt 89:")
-    if re.match(r"^(?:endorsement|endt\.?|clause)\s*(?:no\.?)?\s*(?:\d{1,3}[a-z]?|\([0-9a-z]+\))(?:\s*[-:])?\s+", normalized):
+    # Endorsement codes (e.g. "Endorsement 112 - Passenger Liability", "Endt 89:", "57 - Inclusion of Special Perils", "97 - Windscreen")
+    if re.match(r"^(?:(?:endorsement|endt\.?|clause)\s*(?:no\.?)?\s*)?(?:57|72|89|97|100|101|108|111|112|113|25|02|n4|dpa|dpp|sdpa|autobuddy|oto\s*360)\b", normalized):
         return True
 
     # If outside any benefit section, do not loosely match sentences as benefits!
@@ -668,6 +688,55 @@ def extract_benefit_lines(
             # If inside a PDS document, skip all lines from becoming quotation benefit candidates
             if in_pds_doc:
                 continue
+
+            # Check for compact endorsement list line: e.g. "Endorsements Attached: 02, 57, 72, 89, 97, 100, 112"
+            m_end_list = re.search(r"(?:endorsements?|clauses?|perils?)\s*(?:attached|attaching|applied)?\s*[:\-]\s*([0-9a-zA-Z,\s\(\)\.\/]+)", raw, re.IGNORECASE)
+            if m_end_list:
+                codes = [re.sub(r"[^0-9a-zA-Z]", "", c).lower() for c in re.split(r"[,;\s]+", m_end_list.group(1))]
+                found_any_end = False
+                for code in codes:
+                    if code in MALAYSIAN_TARIFF_ENDORSEMENTS:
+                        title, ckey = MALAYSIAN_TARIFF_ENDORSEMENTS[code]
+                        ordinal += 1
+                        extracted.append({
+                            "line_id": _stable_line_id(page_number, ordinal, f"Endorsement {code} - {title}"),
+                            "raw_label": f"Endorsement {code} - {title}",
+                            "raw_text": raw,
+                            "normalized_label": title.lower(),
+                            "normalized_text": title.lower(),
+                            "page_number": page_number,
+                            "page": page_number,
+                            "section": "Endorsements Attached",
+                            "source_scope": "selected",
+                            "line_kind": "benefit_candidate",
+                            "heading_category": "selected",
+                            "inclusion_state": "selected",
+                            "confidence": 1.0,
+                            "source_disposition": "auto_apply",
+                            "is_detected": True,
+                            "coverage_limit": None,
+                            "premium_cost": None,
+                            "is_optional_cover": True,
+                            "extracted_value": {"type": "text", "value": "Included", "semantic_role": "limit", "display_text": "Included"},
+                            "candidate_mappings": [
+                                {
+                                    "concept_id": None,
+                                    "concept_key": ckey,
+                                    "name": title,
+                                    "matched_alias": f"Endorsement {code}",
+                                    "score": 100,
+                                    "match_type": "tariff_endorsement",
+                                    "evidence": f"Endorsement {code}",
+                                    "shaped_description": title,
+                                    "coverage_limit": None,
+                                    "premium_cost": None,
+                                    "is_detected": True,
+                                }
+                            ],
+                        })
+                        found_any_end = True
+                if found_any_end:
+                    continue
 
             if is_spurious_benefit_line(raw):
                 continue

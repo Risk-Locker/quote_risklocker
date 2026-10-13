@@ -273,8 +273,21 @@ class ExtractionOrchestrator:
             if detected_packs:
                 candidate_payload["detected_packs"] = detected_packs
         reading_quality = "ready" if draft_status == "Ready" else "cannot_read" if draft_status == "Cannot Read" else "check_needed"
+        fallback_lines = extract_benefit_lines(combined_page_text, concepts=db_benefit_concepts or [])
         if not benefit_lines:
-            benefit_lines = extract_benefit_lines(combined_page_text, concepts=db_benefit_concepts or [])
+            benefit_lines = fallback_lines
+        elif fallback_lines:
+            # Merge deterministic lines that Gemini missed (e.g. Endorsement 57, LLOP, LLP)
+            existing_labels = {
+                (b.get("normalized_label") or b.get("raw_label") or "").lower().strip()
+                for b in benefit_lines
+            }
+            for fl in fallback_lines:
+                fl_lbl = (fl.get("normalized_label") or fl.get("raw_label") or "").lower().strip()
+                if fl_lbl and not any(fl_lbl in ex or ex in fl_lbl for ex in existing_labels):
+                    fl["line_id"] = f"det_{len(benefit_lines) + 1}"
+                    benefit_lines.append(fl)
+                    existing_labels.add(fl_lbl)
 
         return {
             "full_record": {

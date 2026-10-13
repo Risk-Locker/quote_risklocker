@@ -29,7 +29,7 @@ from app.models.tables import (
     VehicleOwnership,
     new_id,
 )
-from app.services.vehicle_tracking_service import normalize_plate, parse_date_safe
+from app.services.vehicle_tracking_service import is_valid_malaysian_plate, normalize_plate, parse_date_safe
 
 
 def compute_quotation_content_hash(
@@ -155,37 +155,55 @@ def resolve_or_create_tenure(
     """Find existing InsuranceTenure matching the vehicle and coverage dates or create one."""
     clean_v = (vehicle_no or "").strip()
     clean_chassis = (chassis_no or "").strip()
+    clean_engine = (engine_no or "").strip()
     norm_plate = normalize_plate(clean_v) if clean_v else ""
 
-    # If vehicle_no is missing or unplated, anchor on chassis_no
-    if not norm_plate and clean_chassis:
+    # If vehicle_no is missing, unplated, or placeholder, anchor on chassis_no or engine_no
+    is_placeholder_plate = (not norm_plate) or norm_plate in ("UNPLATED", "UNKNOWN", "NEW", "NONE", "NA")
+    if is_placeholder_plate and clean_chassis:
         norm_plate = clean_chassis.upper()
+    elif is_placeholder_plate and clean_engine:
+        norm_plate = clean_engine.upper()
 
     start_dt, end_dt, expiry_month = normalize_tenure_dates(start_date, end_date)
 
-    # 1. Resolve vehicle
+    # 1. Resolve vehicle (Priority: ID -> Chassis -> Engine -> Registration Plate)
     veh: TrackedVehicle | None = None
     if tracked_vehicle_id:
         veh = db.get(TrackedVehicle, tracked_vehicle_id)
-    if not veh and norm_plate:
-        veh = db.scalar(select(TrackedVehicle).where(TrackedVehicle.vehicle_no == norm_plate))
     if not veh and clean_chassis:
         veh = db.scalar(select(TrackedVehicle).where(TrackedVehicle.chassis_no == clean_chassis))
-    if not veh and (norm_plate or clean_chassis):
-        primary_veh_no = norm_plate or clean_chassis.upper()
+    if not veh and clean_engine:
+        veh = db.scalar(select(TrackedVehicle).where(TrackedVehicle.engine_no == clean_engine))
+    if not veh and (norm_plate or clean_v) and not is_placeholder_plate:
+        veh = db.scalar(
+            select(TrackedVehicle).where(
+                or_(
+                    TrackedVehicle.vehicle_no == norm_plate,
+                    TrackedVehicle.vehicle_no == clean_v,
+                )
+            )
+        )
+
+    if not veh and (norm_plate or clean_chassis or clean_engine):
+        primary_veh_no = norm_plate if is_valid_malaysian_plate(norm_plate) else (clean_v if clean_v and not is_placeholder_plate else (f"CHASSIS: {clean_chassis}" if clean_chassis else (f"ENGINE: {clean_engine}" if clean_engine else "UNPLATED")))
         veh = TrackedVehicle(
+            id=new_id(),
             vehicle_no=primary_veh_no,
             chassis_no=clean_chassis or None,
-            engine_no=engine_no.strip() if engine_no else None,
+            engine_no=clean_engine or None,
             customer_id=customer_id,
         )
         db.add(veh)
         db.flush()
     elif veh:
+        # If newly uploaded document has a valid Malaysian plate and tracked vehicle had placeholder, upgrade vehicle plate!
+        if is_valid_malaysian_plate(clean_v) and not is_valid_malaysian_plate(veh.vehicle_no):
+            veh.vehicle_no = normalize_plate(clean_v)
         if clean_chassis and not veh.chassis_no:
             veh.chassis_no = clean_chassis
-        if engine_no and not veh.engine_no:
-            veh.engine_no = engine_no.strip()
+        if clean_engine and not veh.engine_no:
+            veh.engine_no = clean_engine
         if customer_id and not veh.customer_id:
             veh.customer_id = customer_id
 
@@ -196,6 +214,8 @@ def resolve_or_create_tenure(
     end_of_year = datetime(start_dt.year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
 
     vehicle_match_clauses = [InsuranceTenure.tracked_vehicle_id == vehicle_id]
+    if veh and is_valid_malaysian_plate(veh.vehicle_no):
+        vehicle_match_clauses.append(InsuranceTenure.vehicle_no == veh.vehicle_no)
     if norm_plate:
         vehicle_match_clauses.append(InsuranceTenure.vehicle_no == norm_plate)
 
@@ -215,6 +235,9 @@ def resolve_or_create_tenure(
         # Link vehicle id if missing
         if veh and not existing_tenure.tracked_vehicle_id:
             existing_tenure.tracked_vehicle_id = veh.id
+        # Upgrade tenure plate if valid plate is now available
+        if is_valid_malaysian_plate(clean_v) and not is_valid_malaysian_plate(existing_tenure.vehicle_no):
+            existing_tenure.vehicle_no = normalize_plate(clean_v)
         # If customer name is more informative in the new quote, update it
         if customer_name and len(customer_name.strip()) > len(existing_tenure.customer_name.strip()):
             existing_tenure.customer_name = customer_name.strip()
@@ -632,7 +655,7 @@ def create_next_year_renewal_tenure(
     db: Session,
     tenure: InsuranceTenure,
     user_id: str | None = None,
-) -> InsuranceTenure:
+) -> InsuranceTenure | None:
     """Automatically create the next year's renewal tenure with an empty marketing comparison.
 
     Triggers upon next-year roll-forward or HIT (Close - Win).

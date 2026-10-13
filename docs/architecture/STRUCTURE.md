@@ -66,7 +66,13 @@ backend/app/
 │   ├── workspace_service.py          # Quotation draft review workspace facade
 │   ├── session_service.py            # Quotation session CRUD & dossier grouping
 │   ├── generation_service.py         # Deterministic PDF quotation generation & storage
-│   ├── marketing_comparison_service.py # 3-pane NxM comparison compilation & rate math
+│   ├── marketing_comparison_service.py # 3-pane NxM comparison compilation facade
+│   ├── marketing_comparison/         # Modular comparison domain package
+│   │   ├── ncd_evaluator.py          # NCD pair calculations, betterment rules & ranking
+│   │   ├── benefits_extractor.py     # Figure parsing, rate calculations & perils normalization
+│   │   ├── towing_evaluator.py       # Underwriter-specific towing limits & upgrade conditions engine
+│   │   ├── covernote_classifier.py   # Document type classifier (CN vs Quotation)
+│   │   └── whatsapp_formatter.py     # Teaser and client pitch summary formatting
 │   ├── insurance_tenure_service.py   # Annual renewal lifecycle & timeline ledger
 │   ├── gemini_account_service.py     # Thread-safe multi-account Gemini key pooling & rotation
 │   ├── road_tax_engine.py            # Official JPJ formula execution & rate math calculations
@@ -97,7 +103,9 @@ frontend/src/
 │       └── uploads/                 # Bulk upload intake limit configuration
 ├── components/
 │   ├── session-workspace/           # Review Phase, PDF viewer, field editors, card grids
-│   ├── comparison/                  # Comparison matrix, manual quote modal, WhatsApp export
+│   ├── comparison/                  # Comparison matrix coordinator, types & submodules
+│   │   ├── components/              # Modular panes & modals (UnderwriterQuoteCard, Panes, Modals)
+│   │   └── hooks/                   # Business hooks (useSnapshotExport, useWhatsAppTester, useNcdHistory)
 │   ├── template-canvas/             # Quotation A4 preview canvas (`shared.tsx`, preset blocks)
 │   ├── template-builder/            # Section-based & freeform template editor
 │   ├── insights/                    # Calendar views, CRM dossiers, sync sessions modal

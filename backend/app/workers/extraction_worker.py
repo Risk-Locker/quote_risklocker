@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from app.services.vehicle_tracking_service import parse_date_safe
+from app.services.vehicle_tracking_service import is_valid_malaysian_plate, parse_date_safe
 
 from sqlalchemy import select
 
@@ -521,6 +521,11 @@ def process_extraction_job(
     )
     if veh:
         session.tracked_vehicle_id = veh.id
+        # Adopt known registration plate if document was unplated/chassis but vehicle already has a registered plate
+        if is_valid_malaysian_plate(veh.vehicle_no) and not is_valid_malaysian_plate(clean_plate):
+            effective_veh_no = veh.vehicle_no
+            if isinstance(draft.fields, dict):
+                draft.fields["vehicle_no"] = {"value": veh.vehicle_no, "status": "ready", "source": "chassis_match"}
         if veh_yom_val and not veh.manufacture_year:
             veh.manufacture_year = veh_yom_val
         if raw_cc and not veh.engine_cc:
@@ -559,6 +564,7 @@ def process_extraction_job(
             customer_id=cust_account.id if cust_account else None,
             chassis_no=raw_chassis or None,
             engine_no=raw_engine or None,
+            created_by_id=getattr(session, "created_by_id", None) or getattr(session, "owner_id", None),
         )
     # Universal Session & Tenure Date Synchronization from Extracted PDF
     parsed_s_start = parse_date_safe(cover_start) if cover_start else None
@@ -574,8 +580,9 @@ def process_extraction_job(
     if parsed_s_start:
         session.coverage_start_date = parsed_s_start
         session.coverage_end_date = parsed_s_end
-        # Instantly anchor tenure dates if tenure is draft, untracked, upcoming, or has placeholder dates
-        if tenure.status in ("draft", "untracked", "upcoming") or tenure.coverage_start_date is None:
+        # Quotation Ingestion Firewall: Quotations are tentative proposals and do NOT re-anchor an established tenure's year across calendar boundaries
+        is_same_year = (parsed_s_start.year == tenure.coverage_start_date.year)
+        if is_same_year and not tenure.covernote_session_id:
             tenure.coverage_start_date = parsed_s_start
             if parsed_s_end:
                 tenure.coverage_end_date = parsed_s_end

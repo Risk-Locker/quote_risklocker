@@ -2238,8 +2238,9 @@ export function TenureTimelineLedger() {
                       mainTenure.status === "hit"
                     );
                     const isGroupSelected = group.tenures.some((t) => selectedTenureIds.includes(t.id));
-                    const displayName = getVehicleDisplayName(group.vehicle_no, group.chassis_no);
+                    const displayName = getVehicleDisplayName(group.vehicle_no, group.chassis_no, group.engine_no);
                     const isChassis = displayName.startsWith("Chassis:");
+                    const isEngine = displayName.startsWith("Engine:");
                     const isBlank = displayName === "No Plate (Blank)";
 
                     return (
@@ -2301,6 +2302,11 @@ export function TenureTimelineLedger() {
                               {isChassis && (
                                 <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 font-sans text-[9px] font-bold shrink-0">
                                   CHASSIS
+                                </span>
+                              )}
+                              {isEngine && (
+                                <span className="px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-900 font-sans text-[9px] font-bold shrink-0">
+                                  ENGINE
                                 </span>
                               )}
                               {isBlank && (
@@ -2559,7 +2565,7 @@ export function TenureTimelineLedger() {
                                     {mainTenure.sourced_quotes.map((q) => (
                                       <Link
                                         key={q.session_id}
-                                        href={`/workspace?session_id=${q.session_id}` as Route}
+                                        href={`/sessions/${q.session_id}/review` as Route}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className={`inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] transition-colors border shadow-2xs hover:border-neutral-900 ${
@@ -2651,7 +2657,7 @@ export function TenureTimelineLedger() {
                                   {mainTenure.sourced_quotes.map((q) => (
                                     <Link
                                       key={q.session_id}
-                                      href={`/workspace?session_id=${q.session_id}` as Route}
+                                      href={`/sessions/${q.session_id}/review` as Route}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors border shadow-2xs hover:border-neutral-900 ${

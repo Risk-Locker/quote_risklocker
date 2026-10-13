@@ -191,7 +191,7 @@ GEMINI_EXTRACTION_SCHEMA = {
         },
         "detected_benefits": {
             "type": "array",
-            "description": "List of all benefits, add-ons, extra covers, and riders explicitly present in this quotation (e.g. Windscreen Damage RM 4,000 cost RM 600, Legal Liability Of Passengers cost RM 7.50, Legal Liability To Passengers cost RM 41.85, All Drivers cost RM 20, 24-hr Towing, Special Perils, Key Replacement RM 1,000, etc.). CRITICAL: DO NOT extract generic policy terms, standard exclusions, legal definitions, or general conditions as benefits. ONLY extract specific coverages or riders explicitly listed in the quotation schedule or pricing summary.",
+            "description": "List of all benefits, add-ons, extra covers, endorsements, and riders explicitly present in this quotation or cover note / certificate of insurance (e.g. Endorsement 57 / Special Perils / Flood, Endorsement 97 or 89 / Windscreen Damage RM 4,000, Endorsement 72 / Legal Liability Of Passengers, Endorsement 100 / Legal Liability To Passengers, Endorsement 112 / CART, Endorsement 113 / Waiver of Betterment, Endorsement 111 / NCD Relief, 24-hr Towing, Key Replacement RM 1,000, DPA, DPP, SDPA, OTO 360, AutoBuddy, etc.). If the document is a Cover Note or Policy Schedule, extract all endorsements from the Endorsements schedule/box even if no separate price is listed. DO NOT extract generic policy terms or legal disclaimers.",
             "items": {
                 "type": "object",
                 "properties": {
@@ -341,8 +341,8 @@ def build_rag_system_prompt(
 Return strictly structured JSON adhering to the provided schema.
 """
 
-    return f"""You are RiskLocker AI, an expert underwriting extraction system specializing in Malaysian Motor Insurance Quotation PDFs.
-Extract accurate, grounded JSON data matching the provided schema from the quotation document text or image.
+    return f"""You are RiskLocker AI, an expert underwriting extraction system specializing in Malaysian Motor Insurance Quotation PDFs, Cover Notes, and Certificates of Insurance.
+Extract accurate, grounded JSON data matching the provided schema from the quotation document, cover note, or policy schedule.
 
 ### CRITICAL GROUNDING RULES:
 1. **CUSTOMER NAME & CLIENT TYPE (The Insured)**:
@@ -378,13 +378,10 @@ Extract accurate, grounded JSON data matching the provided schema from the quota
    - In `detected_benefits`, read the extras table with extreme precision.
    - **Coverage Limit (`coverage_limit`)**: Sum covered or insured limit explicitly stated (e.g. `Windscreen (Sum Insured: RM 2,650) ... RM 397.50` -> `coverage_limit: "2,650"`, `premium_cost: "397.50"`; `Key Replacement (Coverage: RM 1,000) ... RM 45.00` -> `coverage_limit: "1,000"`, `premium_cost: "45.00"`).
    - **No Coverage Limit**: If the benefit is a legal liability endorsement or service rider without an explicit sum insured (e.g. `Legal Liability to Passengers ... RM 41.85`, `Legal Liability of Passengers ... RM 7.50`, `All Drivers ... RM 20.00`, `24-hr Towing`), `coverage_limit` MUST BE EMPTY `""` or null. NEVER put the premium cost or price into `coverage_limit`.
-11. **STRICT BENEFIT FILTERING & PRODUCT DISCLOSURE SHEET (PDS) EXCLUSION**:
-   - If the document contains a Product Disclosure Sheet (PDS) or sample illustration table (e.g. 'As an illustration, for RM2,619.93...'), DO NOT extract benefits, vehicle data, or premiums from the PDS. Extract ONLY from the official quotation schedule or pricing slip.
-   - NEVER extract contact phone numbers (e.g. '03-2262 8666'), email addresses, document revision codes (e.g. '26/PRN/PDS/...'), basic premium, NCD deduction, Service Tax (SST), stamp duty, or sales commission as benefits.
-   - NEVER extract generic policy definitions, standard terms and conditions, legal clauses, or claim procedures as benefits.
-   - ONLY extract concrete coverages, riders, or add-ons that are explicitly listed in the quotation's pricing schedule, benefits table, or endorsements summary.
-   - NEVER extract the core coverage type or vehicle use class (e.g. 'Comprehensive', 'Third Party', 'Third Party Fire & Theft', 'TPFT', 'Private Car - Private Use', 'Motorcycle') as a benefit. These belong in the main vehicle/policy fields.
-   - If a PDF contains pages of generic policy wording or PDS, IGNORE the generic text completely.
+11. **BENEFITS, PERILS & COVER NOTE ENDORSEMENTS**:
+   - **Quotations**: Extract concrete coverages, riders, or add-ons that are explicitly listed in the quotation's pricing schedule, benefits table, or endorsements summary.
+   - **Cover Notes & Policy Schedules**: Always extract all active endorsements and perils listed under 'Endorsements:', 'Endorsements Attached', 'Perils Covered', or 'Clauses' (such as Endorsement 57 / Flood / Special Perils, Endorsement 72 / LLOP, Endorsement 100 / LLP, Endorsement 97 or 89 / Windscreen, Endorsement 112 / CART, Endorsement 113 / Betterment, Endorsement 111 / NCD Relief, Endorsement 25 / SRCC, DPA, DPP, SDPA, AutoBuddy, OTO 360, etc.) even when no separate price is listed. Set value to 'Included' and is_optional_cover to true.
+   - DO NOT extract contact phone numbers (e.g. '03-2262 8666'), email addresses, document revision codes, basic premium, NCD deduction, Service Tax, or generic PDS disclaimer examples as benefits.
 12. **QUOTATION REFERENCE**:
    - DO NOT extract underwriter reference numbers, quote numbers, or ref numbers from the document. Quotation reference is strictly an internal Risklocker system sequence.
 13. **ROAD TAX**:

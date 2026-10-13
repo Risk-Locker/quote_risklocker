@@ -147,7 +147,7 @@ def get_or_create_vehicle_tracking(
     if is_valid_malaysian_plate(vehicle_no):
         norm_plate = normalize_plate(vehicle_no)
         if norm_plate:
-            clean_input = re.sub(r"\s+", "", vehicle_no.upper())
+            clean_input = norm_plate.replace(" ", "")
             veh = db.scalar(
                 select(TrackedVehicle).where(
                     or_(
@@ -182,7 +182,7 @@ def get_or_create_vehicle_tracking(
         if not veh:
             veh = TrackedVehicle(
                 id=new_id(),
-                vehicle_no=f"UNPLATED-{norm_chassis[:12]}",
+                vehicle_no=f"CHASSIS: {norm_chassis}",
                 car_brand=brand,
                 car_model=model,
                 engine_cc=engine_cc,
@@ -192,8 +192,35 @@ def get_or_create_vehicle_tracking(
             )
             db.add(veh)
             db.flush()
+    elif norm_engine:
+        # Fallback tracking by engine number for new/unregistered/unplated vehicles
+        veh = db.scalar(select(TrackedVehicle).where(TrackedVehicle.engine_no == norm_engine))
+        if not veh:
+            veh = TrackedVehicle(
+                id=new_id(),
+                vehicle_no=f"ENGINE: {norm_engine}",
+                car_brand=brand,
+                car_model=model,
+                engine_cc=engine_cc,
+                chassis_no=None,
+                engine_no=norm_engine,
+                customer_id=customer_id,
+            )
+            db.add(veh)
+            db.flush()
     else:
-        return None, None
+        veh = TrackedVehicle(
+            id=new_id(),
+            vehicle_no="UNPLATED",
+            car_brand=brand,
+            car_model=model,
+            engine_cc=engine_cc,
+            chassis_no=None,
+            engine_no=None,
+            customer_id=customer_id,
+        )
+        db.add(veh)
+        db.flush()
 
     if not veh:
         return None, None

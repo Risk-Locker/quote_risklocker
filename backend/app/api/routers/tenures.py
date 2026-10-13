@@ -757,7 +757,7 @@ def list_tenures(
                 "uploaded_file_id": cn_sess.uploaded_file_id,
                 "file_name": cn_sess.uploaded_file.original_filename if cn_sess.uploaded_file else f"{cn_sess.detected_company or 'Policy'}.pdf",
             }
-        elif is_upcoming_renewal and (t.policy_number or t.won_premium is not None or t.winning_company_id):
+        elif (t.policy_number or t.won_premium is not None or t.winning_company_id or t.stage in ("Issue Policy", "Close - Win") or t.status == "hit"):
             # Fallback if covernote session not explicitly linked, but tenure was won/issued
             s_date = t.coverage_start_date
             e_date = t.coverage_end_date
@@ -1238,6 +1238,10 @@ def get_tenure_yoy_stats(
         InsuranceTenure.coverage_end_date,
         InsuranceTenure.expiry_month,
         InsuranceTenure.stage,
+        InsuranceTenure.status,
+        InsuranceTenure.covernote_session_id,
+        InsuranceTenure.policy_number,
+        InsuranceTenure.previous_tenure_id,
     )
     stmt = stmt.where(InsuranceTenure.is_projected == False)
     stmt = stmt.where(InsuranceTenure.is_discarded == False)
@@ -1258,8 +1262,16 @@ def get_tenure_yoy_stats(
     all_active = 0
     all_lost = 0
 
-    for t_id, veh, start_dt, end_dt, exp_m, stage in rows:
-        all_years_tenures.add(t_id)
+    for t_id, veh, start_dt, end_dt, exp_m, stage, status, cn_sess_id, pol_no, prev_tenure_id in rows:
+        is_issued = bool(
+            stage in ("Issue Policy", "Close - Win")
+            or status in ("hit", "bound")
+            or cn_sess_id is not None
+            or pol_no
+        )
+        is_renewal = prev_tenure_id is not None
+        if is_issued or not is_renewal:
+            all_years_tenures.add(t_id)
         if veh:
             all_years_vehicles.add(veh)
         is_lost = stage in ("Close - Lose", "Others")
@@ -1269,10 +1281,11 @@ def get_tenure_yoy_stats(
             all_active += 1
 
         # Determine year(s)
-        # 1. Total policies issued in year: strictly anchored on deal start date
+        # 1. Total policies in start year: unissued renewals do not count as policies; original intake deals do
         if start_dt:
             y_start = str(start_dt.year)
-            year_data[y_start]["tenure_ids"].add(t_id)
+            if not is_renewal or is_issued:
+                year_data[y_start]["tenure_ids"].add(t_id)
             if veh:
                 year_data[y_start]["vehicles"].add(veh)
             if is_lost:

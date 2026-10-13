@@ -843,7 +843,7 @@ def test_windscreen_extraction_and_auto_healing_prevents_corrupt_quotation_refs(
     res = get_marketing_comparison(db_session, tenure.id)
     entry_res = next(e for e in res["entries"] if e["session_id"] == sess.id)
     assert entry_res["windscreen_sum_insured"] == 4000.0
-    assert entry_res["towing_km"] == "100 km"
+    assert entry_res["towing_km"] == "RM 500"
 
     # Verify persisted in database
     db_session.refresh(corrupt_entry)
@@ -1340,3 +1340,204 @@ def test_malaysian_piam_ncd_progression_scale():
     assert calculate_ncd_pair(15.0, is_commercial=True) == (15.0, 20.0)
     assert calculate_ncd_pair(20.0, is_commercial=True) == (20.0, 25.0)
     assert calculate_ncd_pair(25.0, is_commercial=True) == (25.0, 25.0)
+
+
+def test_underwriter_towing_evaluator_rm_and_conditional_upgrades():
+    from app.services.marketing_comparison.towing_evaluator import resolve_insurer_towing_limit
+
+    # 1. QBE Underwriter Rules
+    # Standard base -> RM 500
+    assert resolve_insurer_towing_limit("QBE", "comprehensive private car") == "RM 500"
+    # Tariff basic -> RM 200
+    assert resolve_insurer_towing_limit("QBE", "tariff basic motor private car") == "RM 200"
+    # Upgrade via DPA / DPP / Endorsement N4 -> Unlimited
+    assert resolve_insurer_towing_limit("QBE", "comprehensive with dpa") == "Unlimited"
+    assert resolve_insurer_towing_limit("QBE", "driver plus plan 2") == "Unlimited"
+    assert resolve_insurer_towing_limit("QBE", "endorsement n4 attached") == "Unlimited"
+
+    # 2. Lonpac Underwriter Rules
+    # Standard base -> RM 400
+    assert resolve_insurer_towing_limit("Lonpac", "private car comprehensive") == "RM 400"
+    # Tariff basic -> RM 200
+    assert resolve_insurer_towing_limit("Lonpac", "tariff standard basic motor") == "RM 200"
+    # Upgrade via SDPA Plan 1 -> RM 600
+    assert resolve_insurer_towing_limit("Lonpac", "comprehensive with sdpa plan 1") == "RM 600"
+    # Upgrade via SDPA Plan 2 or SDPA Plus -> Unlimited
+    assert resolve_insurer_towing_limit("Lonpac", "secure driver pa plus") == "Unlimited"
+    assert resolve_insurer_towing_limit("Lonpac", "sdpa plan 2 attached") == "Unlimited"
+
+    # 3. Berjaya Sompo Underwriter Rules
+    # SOMPO Motor standard -> Unlimited
+    assert resolve_insurer_towing_limit("Berjaya Sompo", "sompo motor comprehensive") == "Unlimited"
+    assert resolve_insurer_towing_limit("Berjaya Sompo Insurance", "private car quote") == "Unlimited"
+    # Tariff basic -> RM 200
+    assert resolve_insurer_towing_limit("Berjaya Sompo", "tariff basic private car") == "RM 200"
+    # Upgrade via Motor N-hancer Pack -> Unlimited
+    assert resolve_insurer_towing_limit("Berjaya Sompo", "tariff motor with n-hancer pack") == "Unlimited"
+
+    # 4. Tune Protect Underwriter Rules
+    # Standard conventional/agent base -> RM 300
+    assert resolve_insurer_towing_limit("Tune Protect", "private car motor") == "RM 300"
+    # Motor Easy product tier -> 200 km
+    assert resolve_insurer_towing_limit("Tune Protect", "motor easy comprehensive") == "200 km"
+    # Upgrade via AutoBuddy -> Unlimited
+    assert resolve_insurer_towing_limit("Tune Protect", "private car with autobuddy rider") == "Unlimited"
+
+    # 5. Etiqa Underwriter Rules
+    # Standard base -> 200 km
+    assert resolve_insurer_towing_limit("Etiqa", "motor takaful comprehensive") == "200 km"
+    # Upgrade via OTO 360 -> Unlimited
+    assert resolve_insurer_towing_limit("Etiqa", "comprehensive with oto 360") == "Unlimited"
+
+    # 6. STMB / Takaful Malaysia Underwriter Rules
+    # Standard base -> 50 km
+    assert resolve_insurer_towing_limit("Takaful Malaysia", "motor takaful basic") == "50 km"
+    assert resolve_insurer_towing_limit("STMB", "takaful mymotor") == "50 km"
+    # Upgrade via Motor PA Plus tiers
+    assert resolve_insurer_towing_limit("STMB", "motor pa plus plan 1") == "100 km"
+    assert resolve_insurer_towing_limit("STMB", "motor pa plus plan 2") == "200 km"
+    assert resolve_insurer_towing_limit("STMB", "motor pa plus plan 3") == "300 km"
+    assert resolve_insurer_towing_limit("STMB", "motor pa plus plan 4") == "Unlimited"
+
+    # 7. AmAssurance & Liberty Underwriter Rules
+    assert resolve_insurer_towing_limit("AmAssurance", "private car comprehensive") == "100 km"
+    assert resolve_insurer_towing_limit("Liberty", "private car comprehensive") == "150 km"
+    assert resolve_insurer_towing_limit("AmAssurance", "comprehensive with amdrive plus") == "Unlimited"
+
+
+def test_cover_note_compact_endorsements_and_perils_resolution():
+    from app.services.marketing_comparison.benefits_extractor import format_canonical_perils
+
+    # Simulates compact endorsement list from Malaysian Cover Notes (e.g. 02, 57, 72, 89, 97, 100, 112)
+    cover_note_text = (
+        "POLICY SCHEDULE / COVER NOTE MOTOR PRIVATE CAR\n"
+        "INSURED: ALICE TAN\n"
+        "SUM INSURED: RM 55,000.00\n"
+        "Endorsements Attached: 02, 57, 72, 89, 97, 100, 111, 112, 113\n"
+        "NO CLAIM DISCOUNT: 55%\n"
+    )
+
+    perils = format_canonical_perils(cover_note_text)
+
+    # 57 -> FLOOD / SPECIAL PERILS
+    assert "FLOOD" in perils
+    # 72 -> LLOP
+    assert "LLOP" in perils
+    # 89 / 97 -> TOWING & WINDSCREEN
+    assert "TOWING" in perils
+    assert "WINDSCREEN" in perils
+    # 100 -> LLP
+    assert "LLP" in perils
+    # 111 -> NCD RELIEF
+    assert "NCD RELIEF" in perils
+    # 112 -> CART
+    assert "CART" in perils
+    # 113 -> BETTERMENT
+    assert "BETTERMENT" in perils
+
+
+def test_resolve_comparison_benefits_covernote_full_synthesis(db_session: Session):
+    from app.models.tables import (
+        Batch,
+        ExtractionBenefitLine,
+        ExtractionRecord,
+        InsuranceCompany,
+        InsuranceTenure,
+        QuotationDraft,
+        Session as SessionModel,
+        TrackedVehicle,
+        UploadedFile,
+        User,
+        new_id,
+    )
+    from app.services.marketing_comparison.benefits_extractor import _resolve_comparison_benefits
+
+    # Create user, vehicle, tenure
+    owner = User(id=new_id(), email="agent_cn@risklocker.local", name="Agent CN", password_hash="x", role="agent")
+    db_session.add(owner)
+    vehicle = TrackedVehicle(id=new_id(), vehicle_no="WXY1234", car_brand="Honda", car_model="City")
+    db_session.add(vehicle)
+    tenure = InsuranceTenure(
+        id=new_id(),
+        tracked_vehicle_id=vehicle.id,
+        vehicle_no=vehicle.vehicle_no,
+        customer_name="Alice Tan",
+        coverage_start_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 1, 1, tzinfo=timezone.utc),
+        expiry_month="2026-01",
+        windscreen_target=1500.0,
+    )
+    db_session.add(tenure)
+    comp = InsuranceCompany(id=new_id(), name="QBE Insurance (Malaysia) Berhad")
+    db_session.add(comp)
+    db_session.flush()
+
+    batch = Batch(id=new_id(), owner_id=owner.id, name="Batch CN")
+    db_session.add(batch)
+    uf = UploadedFile(id=new_id(), batch_id=batch.id, owner_id=owner.id, original_filename="covernote.pdf", content_type="application/pdf", storage_path=".qc-tmp/covernote.pdf")
+    db_session.add(uf)
+    draft = QuotationDraft(id=new_id(), uploaded_file_id=uf.id, owner_id=owner.id, fields={"insurance_company": comp.name, "sum_insured": 55000.0, "vehicle_no": "WXY1234"})
+    db_session.add(draft)
+    db_session.flush()
+
+    sess = SessionModel(
+        id=new_id(),
+        owner_id=owner.id,
+        uploaded_file_id=uf.id,
+        draft_id=draft.id,
+        tenure_id=tenure.id,
+        document_type="cover_note",
+    )
+    db_session.add(sess)
+
+    # Extraction record has OCR text with compact endorsements list
+    rec = ExtractionRecord(
+        id=new_id(),
+        uploaded_file_id=uf.id,
+        raw_text="Endorsements Attached: 02, 57, 72, 89, 97, 100, 112\nDriver Plus Plan N4 included\nSUM INSURED RM 55,000",
+        ocr_text="Endorsements Attached: 02, 57, 72, 89, 97, 100, 112\nDriver Plus Plan N4 included",
+        method_summary=["ocr"],
+        benefit_lines=[],
+        reading_quality="verified",
+    )
+    db_session.add(rec)
+    db_session.commit()
+
+    # Resolve comparison benefits
+    res = _resolve_comparison_benefits(
+        db=db_session,
+        session=sess,
+        company_id=comp.id,
+        f=draft.fields,
+        windscreen_target=1500.0,
+    )
+
+    # Check Towing: QBE with Driver Plus Plan -> Unlimited (not 100 km, not RM 500)
+    assert res["towing_limit"] == "Unlimited"
+
+    # Check Special Perils (57)
+    assert res["special_perils"] == "Included"
+
+    # Check LLP (100)
+    assert res["llp_llop"] == "Included"
+
+    # Check Windscreen (97 + target)
+    assert res["windscreen_sum_insured"] == 1500.0
+
+    # Check Canonical Perils list
+    assert "FLOOD" in res["canonical_perils"]
+    assert "LLP" in res["canonical_perils"]
+    assert "LLOP" in res["canonical_perils"]
+    assert "CART" in res["canonical_perils"]
+    assert "WINDSCREEN" in res["canonical_perils"]
+    assert "TOWING" in res["canonical_perils"]
+
+    # Check Detailed Perils synthesized list: MUST have all perils present!
+    dp_names = [dp["name"] for dp in res["detailed_perils"]]
+    assert any("Special Perils" in n for n in dp_names)
+    assert any("Legal Liability to Passengers" in n for n in dp_names)
+    assert any("Legal Liability of Passengers" in n for n in dp_names)
+    assert any("CART" in n for n in dp_names)
+    assert any("Roadside Towing" in n for n in dp_names)
+    assert any("Windscreen Protection" in n for n in dp_names)
+
