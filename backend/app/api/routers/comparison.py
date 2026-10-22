@@ -80,8 +80,9 @@ class FixedCostsUpdateRequest(BaseModel):
     vehicle_model: str | None = Field(None, description="Vehicle make and model")
     car_model: str | None = Field(None, description="Car model alias")
     manufacture_year: int | None = Field(None, description="Vehicle year of manufacture (e.g. 2020)")
+    quotation_discount: float | None = Field(None, description="Global quotation discount in MYR")
 
-    @field_validator("road_tax", "runner_fee", "windscreen_target", "ncd_percentage", "current_ncd", mode="before")
+    @field_validator("road_tax", "runner_fee", "windscreen_target", "ncd_percentage", "current_ncd", "quotation_discount", mode="before")
     def parse_floats(cls, v):
         return _parse_flexible_float(v)
 
@@ -96,6 +97,7 @@ class ComparisonEntryUpsertRequest(BaseModel):
     agreed_value: bool = False
     waiver_betterment: bool = False
     excess: float = 0.0
+    discount: float | None = None
     windscreen_sum_insured: float | None = None
     special_perils: str | None = None
     llp_llop: str | None = None
@@ -105,7 +107,7 @@ class ComparisonEntryUpsertRequest(BaseModel):
     basic_figure_amount: float | None = None
     source_quotation_no: str | None = None
 
-    @field_validator("sum_insured", "motor_premium", "excess", "windscreen_sum_insured", "basic_figure_amount", mode="before")
+    @field_validator("sum_insured", "motor_premium", "excess", "windscreen_sum_insured", "basic_figure_amount", "discount", mode="before")
     def parse_floats(cls, v):
         return _parse_flexible_float(v)
 
@@ -179,6 +181,7 @@ def update_fixed_costs(
             chassis_no=payload.chassis_no,
             vehicle_model=payload.vehicle_model or payload.car_model,
             manufacture_year=payload.manufacture_year,
+            quotation_discount=payload.quotation_discount,
         )
 
     except ValueError as e:

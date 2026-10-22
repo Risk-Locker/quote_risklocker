@@ -1002,6 +1002,11 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
         exact_tot = float(e.total_payable) if e.total_payable is not None else (raw_motor_prem + rt + rf)
         rounded_tot = rounded_motor_prem + rt + rf
 
+        # Effective discount: entry-level discount if specified, else tenure-level quotation discount
+        effective_discount = float(e.discount) if e.discount is not None else float(getattr(tenure, "quotation_discount", 0.0) or 0.0)
+        net_exact_tot = max(0.0, exact_tot - effective_discount)
+        net_rounded_tot = max(0.0, rounded_tot - round(effective_discount))
+
         entry_dicts.append({
             "id": e.id,
             "tenure_id": e.tenure_id,
@@ -1015,9 +1020,13 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "exact_motor_premium": raw_motor_prem,
             "road_tax": rt,
             "runner_fee": rf,
+            "discount": float(e.discount) if e.discount is not None else None,
+            "effective_discount": effective_discount,
             "total_payable": float(e.total_payable) if e.total_payable is not None else exact_tot,
             "rounded_total_payable": rounded_tot,
             "exact_total_payable": exact_tot,
+            "net_total_payable": net_exact_tot,
+            "rounded_net_total_payable": net_rounded_tot,
             "towing_limit": e.towing_limit,
             "towing_km": e.towing_km or e.towing_limit,
             "agreed_value": e.agreed_value,
@@ -1333,6 +1342,7 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "runner_fee": float(tenure.runner_fee),
             "runner_fee_type": "passport" if (float(tenure.runner_fee) >= 20.0 or (cust_ic and cust_ic[0].isalpha() and not cust_ic.upper().startswith("PENDING-"))) else "mykad",
             "fixed_costs_total": float(tenure.road_tax + tenure.runner_fee),
+            "quotation_discount": float(getattr(tenure, "quotation_discount", 0.0) or 0.0),
             "windscreen_target": float(tenure.windscreen_target) if tenure.windscreen_target else None,
             "ncd_percentage": float(tenure.ncd_percentage) if tenure.ncd_percentage is not None else None,
             "car_brand": (tenure.tracked_vehicle.car_brand if tenure.tracked_vehicle else None) or waterfall_brand,
@@ -1414,6 +1424,7 @@ def update_tenure_fixed_costs(
     chassis_no: str | None = None,
     vehicle_model: str | None = None,
     manufacture_year: int | None = None,
+    quotation_discount: float | None = None,
 ) -> dict[str, Any]:
     """Update fixed tenure expenses (Road Tax & Runner Fee), coverage dates, vehicle specs, and recalculate total payables for all columns."""
     tenure = db.get(InsuranceTenure, tenure_id)
@@ -1421,6 +1432,8 @@ def update_tenure_fixed_costs(
         raise ValueError(f"Tenure {tenure_id} not found")
 
     tenure.road_tax = road_tax
+    if quotation_discount is not None:
+        tenure.quotation_discount = max(0.0, float(quotation_discount))
     if runner_fee > 0.0:
         tenure.runner_fee = runner_fee
     elif ic_no and ic_no.strip():
@@ -1769,6 +1782,8 @@ def save_comparison_entry(
         entry.llp_llop = _safe_str(payload["llp_llop"]) or None
     if "notes" in payload:
         entry.notes = _safe_str(payload["notes"]) or None
+    if "discount" in payload:
+        entry.discount = _to_float(payload["discount"]) if payload["discount"] is not None else None
     if "is_recommended" in payload:
         entry.is_recommended = bool(payload["is_recommended"])
 

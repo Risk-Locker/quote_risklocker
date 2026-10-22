@@ -314,16 +314,39 @@ export function UnderwriterQuoteCard({
             <span className="text-[11px] uppercase font-bold text-[#454545] block">
               Total Payable
             </span>
-            <p
-              className="font-mono text-lg font-black text-[#1b1717]"
-              title={
-                entry.exact_total_payable && (entry.rounded_total_payable ?? Math.round(entry.total_payable)) !== entry.exact_total_payable
-                  ? `Exact cents: RM ${entry.exact_total_payable.toFixed(2)}`
-                  : undefined
-              }
-            >
-              RM {(entry.rounded_total_payable != null ? entry.rounded_total_payable : (Math.round(entry.motor_premium) + tenure.fixed_costs_total)).toFixed(2)}
-            </p>
+            {((entry.effective_discount ?? tenure.quotation_discount ?? 0) > 0) ? (
+              <div>
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <span className="text-xs text-neutral-400 line-through font-mono">
+                    RM {(entry.rounded_total_payable != null ? entry.rounded_total_payable : (Math.round(entry.motor_premium) + tenure.fixed_costs_total)).toFixed(2)}
+                  </span>
+                  <span className="bg-emerald-50 text-emerald-800 text-[10px] font-bold px-1.5 py-0.5 rounded border border-emerald-300">
+                    - RM {(entry.effective_discount ?? tenure.quotation_discount ?? 0).toFixed(2)}
+                  </span>
+                </div>
+                <p
+                  className="font-mono text-lg font-black text-emerald-700"
+                  title={
+                    entry.net_total_payable && entry.rounded_net_total_payable && entry.rounded_net_total_payable !== entry.net_total_payable
+                      ? `Exact cents: RM ${entry.net_total_payable.toFixed(2)}`
+                      : undefined
+                  }
+                >
+                  RM {(entry.rounded_net_total_payable != null ? entry.rounded_net_total_payable : Math.max(0, (entry.rounded_total_payable ?? Math.round(entry.total_payable)) - Math.round(entry.effective_discount ?? tenure.quotation_discount ?? 0))).toFixed(2)}
+                </p>
+              </div>
+            ) : (
+              <p
+                className="font-mono text-lg font-black text-[#1b1717]"
+                title={
+                  entry.exact_total_payable && (entry.rounded_total_payable ?? Math.round(entry.total_payable)) !== entry.exact_total_payable
+                    ? `Exact cents: RM ${entry.exact_total_payable.toFixed(2)}`
+                    : undefined
+                }
+              >
+                RM {(entry.rounded_total_payable != null ? entry.rounded_total_payable : (Math.round(entry.motor_premium) + tenure.fixed_costs_total)).toFixed(2)}
+              </p>
+            )}
             <span className="text-[11px] text-[#6e6e73] font-medium block">
               (Incl. RM {tenure.fixed_costs_total.toFixed(2)} Roadtax &amp; Runner fee)
             </span>

@@ -824,19 +824,48 @@ def _resolve_comparison_benefits(
                         windscreen_amount = amt
                         break
 
-    # Priority 3: Check scalar draft fields (windscreen_coverage or windscreen_sum_insured)
+    # Priority 3: Check scalar draft fields (windscreen_coverage or windscreen_sum_insured or optional_cover_amount)
     if windscreen_amount is None:
-        cand_ws = _to_float(f.get("windscreen_coverage") or f.get("windscreen_sum_insured"))
+        cand_ws = _to_float(f.get("windscreen_coverage") or f.get("windscreen_sum_insured") or f.get("windscreen"))
         if _is_valid_windscreen_amt(cand_ws):
             windscreen_amount = cand_ws
+        elif any(w in str(f.get("optional_covers") or "").lower() for w in ("windscreen", "cermin")) and f.get("optional_cover_amount"):
+            cand_opt = _to_float(f.get("optional_cover_amount"))
+            if _is_valid_windscreen_amt(cand_opt):
+                windscreen_amount = cand_opt
 
-    # Priority 4: Explicit currency tokens mentioning windscreen
+    # Priority 4: Explicit line-level currency tokens mentioning windscreen (never search entire document)
     if windscreen_amount is None:
+        lines_to_check: list[str] = []
         for tok in tokens:
-            if "windscreen" in tok.lower() or "cermin" in tok.lower():
-                m = re.search(r"(?:rm|myr)\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?|[1-9][0-9]{2,4}(?:\.[0-9]+)?)", tok, re.IGNORECASE)
+            if "\n" in tok:
+                lines_to_check.extend(tok.splitlines())
+            else:
+                lines_to_check.append(tok)
+
+        for line in lines_to_check:
+            line_clean = line.strip()
+            line_lower = line_clean.lower()
+            if "windscreen" in line_lower or "cermin" in line_lower or "w/screen" in line_lower:
+                # Pattern 1: Explicit sum in parentheses or after prefix e.g. "Windscreen (RM10000.00)" or "Windscreen Damage RM 10,000.00"
+                m = re.search(
+                    r"(?:windscreen|w/screen|cermin)[^\d\n\r]{0,40}?(?:\(|rm\s*|myr\s*)?([1-9][0-9]{0,2}(?:,[0-9]{3})+(?:\.[0-9]+)?|[1-9][0-9]{2,4}(?:\.[0-9]+)?)(?![0-9])",
+                    line_clean,
+                    re.IGNORECASE,
+                )
                 if m:
                     amt = _to_float(m.group(1).replace(",", ""))
+                    if _is_valid_windscreen_amt(amt):
+                        windscreen_amount = amt
+                        break
+                # Pattern 2: General RM on the exact same line
+                m2 = re.search(
+                    r"(?:rm|myr)\s*([1-9][0-9]{0,2}(?:,[0-9]{3})+(?:\.[0-9]+)?|[1-9][0-9]{2,4}(?:\.[0-9]+)?)(?![0-9])",
+                    line_clean,
+                    re.IGNORECASE,
+                )
+                if m2:
+                    amt = _to_float(m2.group(1).replace(",", ""))
                     if _is_valid_windscreen_amt(amt):
                         windscreen_amount = amt
                         break

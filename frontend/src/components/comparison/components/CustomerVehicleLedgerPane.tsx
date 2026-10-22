@@ -61,6 +61,8 @@ interface CustomerVehicleLedgerPaneProps {
   savingFixedCosts: boolean;
   onSaveFixedCosts: () => void;
   onPopulateEditInputs: () => void;
+  quotationDiscountInput: string;
+  setQuotationDiscountInput: (v: string) => void;
 }
 
 export function CustomerVehicleLedgerPane({
@@ -104,6 +106,8 @@ export function CustomerVehicleLedgerPane({
   savingFixedCosts,
   onSaveFixedCosts,
   onPopulateEditInputs,
+  quotationDiscountInput,
+  setQuotationDiscountInput,
 }: CustomerVehicleLedgerPaneProps) {
   return (
     <div
@@ -398,18 +402,34 @@ export function CustomerVehicleLedgerPane({
                   />
                 </div>
               </div>
-              <div>
-                <label className="text-[11px] font-semibold text-[#454545] block mb-1">
-                  Target Windscreen (RM)
-                </label>
-                <input
-                  type="number"
-                  step="100"
-                  value={windscreenInput}
-                  onChange={(e) => setWindscreenInput(e.target.value)}
-                  placeholder="e.g. 1000"
-                  className="w-full rounded px-2.5 py-1.5 text-xs font-mono border border-[#e5e5ea] bg-white text-[#1b1717] focus:outline-none focus:ring-1 focus:ring-[#1b1717]"
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-semibold text-[#454545] block mb-1">
+                    Target Windscreen (RM)
+                  </label>
+                  <input
+                    type="number"
+                    step="100"
+                    value={windscreenInput}
+                    onChange={(e) => setWindscreenInput(e.target.value)}
+                    placeholder="e.g. 1000"
+                    className="w-full rounded px-2.5 py-1.5 text-xs font-mono border border-[#e5e5ea] bg-white text-[#1b1717] focus:outline-none focus:ring-1 focus:ring-[#1b1717]"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-emerald-900 block mb-1">
+                    Quotation Discount (RM)
+                  </label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    value={quotationDiscountInput}
+                    onChange={(e) => setQuotationDiscountInput(e.target.value)}
+                    placeholder="e.g. 50"
+                    className="w-full rounded px-2.5 py-1.5 text-xs font-mono border border-emerald-300 bg-emerald-50/40 text-emerald-900 font-bold focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                  />
+                </div>
               </div>
 
               <div className="pt-2 flex items-center justify-end gap-2">
@@ -480,6 +500,16 @@ export function CustomerVehicleLedgerPane({
                     ? `RM ${tenure.windscreen_target.toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
                     : "None (RM 0.00)"}
                 </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-[#6e6e73]">Quotation Discount:</span>
+                {tenure.quotation_discount && tenure.quotation_discount > 0 ? (
+                  <span className="font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-300 text-[11px]">
+                    - RM {tenure.quotation_discount.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                  </span>
+                ) : (
+                  <span className="font-mono text-[#6e6e73]">None (RM 0.00)</span>
+                )}
               </div>
               <div className="flex justify-between">
                 <span className="text-[#6e6e73]">NCD Status:</span>

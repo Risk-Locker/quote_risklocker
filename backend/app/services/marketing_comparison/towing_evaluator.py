@@ -60,7 +60,7 @@ def resolve_insurer_towing_limit(
     
     is_rm_based = is_qbe or is_lonpac or is_sompo or (is_tune and not is_tune_online)
 
-    # 1. Check for explicit manual override / catalog display value
+    # 1. Follow exact builder benefits catalog value first
     if catalog_display_value and catalog_display_value.strip():
         cdv = catalog_display_value.strip()
         if any(kw in cdv.lower() for kw in ("unlimited", "tanpa had")):

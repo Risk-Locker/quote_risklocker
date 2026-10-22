@@ -149,6 +149,14 @@ export function SnapshotPreviewModal({
                       RM {(tenure.road_tax + tenure.runner_fee).toFixed(2)}
                     </span>
                   </p>
+                  {(tenure.quotation_discount ?? 0) > 0 && (
+                    <p className="text-[11px] font-semibold text-emerald-700">
+                      Quotation Discount :{" "}
+                      <span className="font-mono font-bold">
+                        - RM {(tenure.quotation_discount ?? 0).toFixed(2)}
+                      </span>
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -215,12 +223,35 @@ export function SnapshotPreviewModal({
                             RM {card.sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
                           </span>
                         </div>
-                        <div className="pt-1 border-t border-neutral-100 flex justify-between items-baseline">
-                          <span className="text-xs font-bold text-[#1b1717]">Total Payable:</span>
-                          <span className="font-mono font-black text-base text-[#1b1717]">
-                            RM {(card.rounded_total_payable != null ? card.rounded_total_payable : Math.round(card.total_payable)).toLocaleString("en-MY", { minimumFractionDigits: 2 })}
-                          </span>
-                        </div>
+                        {(card.effective_discount ?? tenure.quotation_discount ?? 0) > 0 ? (
+                          <>
+                            <div className="pt-1 border-t border-neutral-100 flex justify-between items-baseline text-xs text-[#6e6e73]">
+                              <span>Total Payable:</span>
+                              <span className="font-mono font-medium line-through">
+                                RM {(card.rounded_total_payable != null ? card.rounded_total_payable : Math.round(card.total_payable)).toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-baseline text-xs text-emerald-700">
+                              <span className="font-medium">Discount:</span>
+                              <span className="font-mono font-bold">
+                                - RM {(card.effective_discount ?? tenure.quotation_discount ?? 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                            <div className="pt-1 border-t border-emerald-100 flex justify-between items-baseline">
+                              <span className="text-xs font-bold text-emerald-950">Net Payable:</span>
+                              <span className="font-mono font-black text-base text-emerald-700">
+                                RM {(card.rounded_net_total_payable != null ? card.rounded_net_total_payable : Math.max(0, (card.rounded_total_payable ?? Math.round(card.total_payable)) - Math.round(card.effective_discount ?? tenure.quotation_discount ?? 0))).toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="pt-1 border-t border-neutral-100 flex justify-between items-baseline">
+                            <span className="text-xs font-bold text-[#1b1717]">Total Payable:</span>
+                            <span className="font-mono font-black text-base text-[#1b1717]">
+                              RM {(card.rounded_total_payable != null ? card.rounded_total_payable : Math.round(card.total_payable)).toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                        )}
                       </div>
 
                       {/* Benefit Highlights */}

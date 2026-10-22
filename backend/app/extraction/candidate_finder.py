@@ -60,6 +60,9 @@ DRAFT_FIELDS = [
     "optional_covers",
     "benefits_selected",
     "add_ons_selected",
+    "windscreen_sum_insured",
+    "windscreen_premium",
+    "special_perils_premium",
     "notes",
 ]
 
@@ -83,6 +86,9 @@ MONEY_FIELDS = {
     "roadtax",
     "service_fee",
     "total_amount",
+    "windscreen_sum_insured",
+    "windscreen_premium",
+    "special_perils_premium",
 }
 
 DEFAULT_ALIASES = {

@@ -1101,7 +1101,7 @@ def chat_with_copilot(
 
             api_key = pool.get_next_key()
             settings = get_settings()
-            model_name = getattr(settings, "gemini_model", None) or "gemini-2.5-flash"
+            model_name = getattr(settings, "gemini_model", None) or "gemini-3.1-flash-lite"
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
 
             contents: list[dict[str, Any]] = []

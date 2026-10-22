@@ -81,7 +81,7 @@ class ExtractionOrchestrator:
             else:
                 gemini_res = None
             if gemini_res:
-                method_summary.append("Gemini 3.6 Flash AI Extraction")
+                method_summary.append("Gemini 3.1 Flash AI Extraction")
                 for key, val in gemini_res.items():
                     if key in {"detected_benefits", "detected_package_name"} or val is None or str(val).strip() == "":
                         continue
@@ -258,7 +258,65 @@ class ExtractionOrchestrator:
                                 }
                             ] if concept_id or c_key else [],
                         })
+
+                        # Directly bind windscreen and special perils candidates for draft fields
+                        if (c_key == "windscreen" or "windscreen" in b_norm or "cermin" in b_norm) and final_cov_limit:
+                            clean_limit_val = re.sub(r"[^0-9.]", "", final_cov_limit)
+                            if clean_limit_val:
+                                try:
+                                    w_num = float(clean_limit_val)
+                                    if 500.0 <= w_num <= 50000.0:
+                                        candidates["windscreen_sum_insured"] = [
+                                            CandidateValue(
+                                                field="windscreen_sum_insured",
+                                                value=f"{w_num:.2f}",
+                                                source_method="gemini_vision",
+                                                score=0.99,
+                                                page=1,
+                                                evidence=f"Gemini windscreen: {b_label} limit {w_num}",
+                                            )
+                                        ]
+                                except Exception:
+                                    pass
+                            if cost:
+                                clean_cost_val = re.sub(r"[^0-9.]", "", cost)
+                                if clean_cost_val:
+                                    try:
+                                        wp_num = float(clean_cost_val)
+                                        if wp_num > 0:
+                                            candidates["windscreen_premium"] = [
+                                                CandidateValue(
+                                                    field="windscreen_premium",
+                                                    value=f"{wp_num:.2f}",
+                                                    source_method="gemini_vision",
+                                                    score=0.99,
+                                                    page=1,
+                                                    evidence=f"Gemini windscreen premium: {wp_num}",
+                                                )
+                                            ]
+                                    except Exception:
+                                        pass
+                        elif (c_key == "special-perils" or "special-peril" in b_norm or "peril-khas" in b_norm or "banjir" in b_norm) and cost:
+                            clean_cost_val = re.sub(r"[^0-9.]", "", cost)
+                            if clean_cost_val:
+                                try:
+                                    sp_num = float(clean_cost_val)
+                                    if sp_num > 0:
+                                        candidates["special_perils_premium"] = [
+                                            CandidateValue(
+                                                field="special_perils_premium",
+                                                value=f"{sp_num:.2f}",
+                                                source_method="gemini_vision",
+                                                score=0.99,
+                                                page=1,
+                                                evidence=f"Gemini special perils premium: {sp_num}",
+                                            )
+                                        ]
+                                except Exception:
+                                    pass
         except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Gemini multimodal extraction note: %s", exc)
             warnings.append(f"Gemini multimodal extraction note: {exc}")
 
         fields, draft_warnings, draft_status = build_draft(candidates, benefit_lines=benefit_lines)

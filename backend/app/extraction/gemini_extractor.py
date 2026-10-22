@@ -519,8 +519,8 @@ def extract_with_gemini_sync(
     # 2. SPILLOVER / FALLBACK: If slot was rate-limited or unavailable, fall back across candidate models
     candidate_models = [
         configured_model,
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
         "gemini-3.1-flash-lite-preview",
         "gemini-flash-lite-latest",
     ]

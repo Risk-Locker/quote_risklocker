@@ -143,6 +143,7 @@ interface TenureSpec {
   runner_fee: number;
   runner_fee_type?: string;
   fixed_costs_total: number;
+  quotation_discount?: number;
   windscreen_target: number | null;
   ncd_percentage: number | null;
   engine_cc: string;
@@ -168,9 +169,13 @@ interface ComparisonEntry {
   exact_motor_premium?: number | null;
   road_tax: number;
   runner_fee: number;
+  discount?: number | null;
+  effective_discount?: number | null;
   total_payable: number;
   rounded_total_payable?: number | null;
   exact_total_payable?: number | null;
+  net_total_payable?: number;
+  rounded_net_total_payable?: number;
   towing_limit: string;
   towing_km?: string;
   agreed_value: boolean;
@@ -528,6 +533,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [roadTaxInput, setRoadTaxInput] = useState("70");
   const [runnerFeeInput, setRunnerFeeInput] = useState("50");
   const [windscreenInput, setWindscreenInput] = useState("");
+  const [quotationDiscountInput, setQuotationDiscountInput] = useState<string>("0");
   const [currentPolicyDiscount, setCurrentPolicyDiscount] = useState<number>(0);
   const [previousPolicyDiscount, setPreviousPolicyDiscount] = useState<number>(0);
   const [engineCcInput, setEngineCcInput] = useState("");
@@ -599,6 +605,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     setRoadTaxInput(String(tenure.road_tax));
     setRunnerFeeInput(String(tenure.runner_fee));
     setWindscreenInput(tenure.windscreen_target ? String(tenure.windscreen_target) : "");
+    setQuotationDiscountInput(tenure.quotation_discount != null ? String(tenure.quotation_discount) : "0");
     setEngineCcInput(tenure.engine_cc || "");
     setEngineNoInput(tenure.engine_no || "");
     setChassisNoInput(tenure.chassis_no || "");
@@ -726,6 +733,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           road_tax: parseFloat(roadTaxInput) || 0,
           runner_fee: parseFloat(runnerFeeInput) || 0,
           windscreen_target: parseFloat(windscreenInput) || 0,
+          quotation_discount: parseFloat(quotationDiscountInput) || 0,
           coverage_start_date: startDateInput || undefined,
           coverage_end_date: endDateInput || undefined,
           customer_name: customerNameInput || undefined,
@@ -1820,6 +1828,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           setRunnerFeeInput={setRunnerFeeInput}
           windscreenInput={windscreenInput}
           setWindscreenInput={setWindscreenInput}
+          quotationDiscountInput={quotationDiscountInput}
+          setQuotationDiscountInput={setQuotationDiscountInput}
           engineCcInput={engineCcInput}
           setEngineCcInput={setEngineCcInput}
           engineNoInput={engineNoInput}

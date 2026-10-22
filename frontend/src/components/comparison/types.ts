@@ -30,6 +30,7 @@ export interface TenureSpec {
   runner_fee: number;
   runner_fee_type?: string;
   fixed_costs_total: number;
+  quotation_discount?: number;
   windscreen_target: number | null;
   ncd_percentage: number | null;
   engine_cc: string;
@@ -55,9 +56,13 @@ export interface ComparisonEntry {
   exact_motor_premium?: number | null;
   road_tax: number;
   runner_fee: number;
+  discount?: number | null;
+  effective_discount?: number | null;
   total_payable: number;
   rounded_total_payable?: number | null;
   exact_total_payable?: number | null;
+  net_total_payable?: number;
+  rounded_net_total_payable?: number;
   towing_limit: string;
   towing_km?: string;
   agreed_value: boolean;

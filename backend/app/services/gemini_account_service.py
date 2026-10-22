@@ -123,7 +123,7 @@ class GeminiAccount:
         return self.key[:6] + "..." + self.key[-4:]
 
 
-PARALLEL_MODELS: tuple[str, ...] = ("gemini-2.5-flash", "gemini-2.5-flash-lite")
+PARALLEL_MODELS: tuple[str, ...] = ("gemini-3.1-flash-lite", "gemini-3.5-flash-lite")
 
 
 class GeminiAccountManager:
