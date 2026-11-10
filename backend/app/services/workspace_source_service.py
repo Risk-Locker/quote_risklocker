@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.core.errors import AppError
 from app.models.enums import StorageStatus
 from app.models.tables import ExtractionRecord, QuotationDraft, Session, TemplateRevision, UploadedFile
+from app.services.workspace_common import _is_valid_uuid_for_db
 from app.services.workspace_service import BUSINESS_ROLES
 
 
@@ -69,12 +70,14 @@ def get_source_evidence(db, user, session_id: str, field_name: str) -> dict:
 def get_workspace_template_config(db, user, session_id: str) -> dict:
     _session, draft, _uploaded, _extraction = _records(db, user, session_id)
     revision_id = draft.template_revision_id
+    if revision_id and not _is_valid_uuid_for_db(db, revision_id):
+        revision_id = None
     if not revision_id:
         from app.services.template_revision_service import list_published_templates
         published = list_published_templates(db, user)
         if published:
             revision_id = published[0]["template_revision_id"]
-    if not revision_id:
+    if not _is_valid_uuid_for_db(db, revision_id):
         raise AppError("Choose a published template before opening Preview.", 409)
     revision = db.get(TemplateRevision, revision_id)
     if not revision or revision.state not in {"published", "compatibility"}:

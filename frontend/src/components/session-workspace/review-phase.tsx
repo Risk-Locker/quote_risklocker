@@ -51,6 +51,8 @@ import {
   isPaidExtraBenefitCard,
   type CanvasElement,
 } from "@/components/template-canvas/shared";
+import { Design2CanvasView } from "@/components/template-canvas/design2-canvas";
+import { buildUnifiedMatrixCards } from "@/lib/unified-addon-engine";
 import {
   SYSTEM_BENEFIT_PRESETS,
   applyPresetToCanvasElement,
@@ -106,9 +108,9 @@ const GLOBAL_BENEFIT_KEYS = new Set([
   "document-replacement",
 ]);
 
-type CompanyOption = { id: string; name: string };
+type CompanyOption = { id: string; name: string; logo_asset_id?: string | null };
 type CompanyWorkspace = {
-  company: { id: string; name: string };
+  company: { id: string; name: string; logo_asset_id?: string | null };
   products: Array<{ id: string; name: string; status?: string }>;
   tiers: Array<{ id: string; product_id: string; name: string }>;
   catalogs?: Array<{
@@ -329,16 +331,34 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
   const [roundTotal, setRoundTotal] = useState<boolean>(() =>
     (workspace?.display_options as Record<string, unknown> | undefined)?.round_total !== false
   );
+  const [showDesign2Schedule, setShowDesign2Schedule] = useState<boolean>(() =>
+    Boolean((workspace?.display_options as Record<string, unknown> | undefined)?.include_benefit_schedule)
+  );
   const lastSyncedRevisionRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (workspace?.display_options && "round_total" in workspace.display_options) {
+    if (workspace?.display_options) {
       if (lastSyncedRevisionRef.current === null || workspace.revision !== lastSyncedRevisionRef.current) {
         lastSyncedRevisionRef.current = workspace.revision;
-        setRoundTotal((workspace.display_options as Record<string, unknown>).round_total !== false);
+        if ("round_total" in workspace.display_options) {
+          setRoundTotal((workspace.display_options as Record<string, unknown>).round_total !== false);
+        }
+        if ("include_benefit_schedule" in workspace.display_options) {
+          setShowDesign2Schedule(Boolean((workspace.display_options as Record<string, unknown>).include_benefit_schedule));
+        }
       }
     }
   }, [workspace?.display_options, workspace?.revision]);
+
+  const toggleDesign2Schedule = useCallback(() => {
+    const nextVal = !showDesign2Schedule;
+    setShowDesign2Schedule(nextVal);
+    queueOperation(
+      { op: "update_display_options", options: { include_benefit_schedule: nextVal } },
+      "display_options"
+    );
+    scheduleSave();
+  }, [showDesign2Schedule, queueOperation, scheduleSave]);
 
   const toggleRoundTotal = useCallback(() => {
     const nextVal = !roundTotal;
@@ -738,12 +758,30 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     } as any);
   }, [previewTemplate, workspace?.benefit_cards, workspace?.extras, selectedBenefitPreset, displayOptions, allBenefitPresets, currentCards, addonCards]);
 
+  const isDesign2 = useMemo(() => {
+    return Boolean(
+      previewTemplate?.config?.layout_engine === "design2" ||
+      previewTemplate?.config?.template_key === "motor_modern_design_2" ||
+      (previewTemplate?.config as any)?.template_name?.toLowerCase().includes("design 2") ||
+      (previewTemplate?.config as any)?.template_name?.toLowerCase().includes("design2")
+    );
+  }, [previewTemplate]);
+
+  const design2CardCount = useMemo(() => {
+    if (!isDesign2) return 0;
+    return buildUnifiedMatrixCards(currentCards, addonCards, undefined, 24).length;
+  }, [isDesign2, currentCards, addonCards]);
+
   const canvasH = useMemo(() => {
+    if (isDesign2) {
+      const hasPage2 = showDesign2Schedule || design2CardCount > 24;
+      return hasPage2 ? 1123 * 2 + 16 : 1123;
+    }
     const baseHeight = previewTemplate?.config?.canvas?.height || 1123;
     if (!balancedElements.length) return baseHeight;
     const maxElementBottom = Math.max(0, ...balancedElements.map((e: any) => (e.y || 0) + (e.h || 0)));
     return maxElementBottom + 30 > baseHeight ? maxElementBottom + 30 : baseHeight;
-  }, [balancedElements, previewTemplate]);
+  }, [isDesign2, showDesign2Schedule, design2CardCount, balancedElements, previewTemplate]);
 
   const syncForm = useCallback(() => {
     if (!workspace) return;
@@ -899,6 +937,8 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     return () => { cancelled = true; };
   }, [workspace?.pinned.company_id]);
 
+  const userPickedRevisionRef = useRef(false);
+
   useEffect(() => {
     let cancelled = false;
     setTemplatesLoading(true);
@@ -907,7 +947,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         if (!cancelled) {
           const list = result.templates || [];
           setPublishedTemplates(list);
-          if (list.length > 0) {
+          if (list.length > 0 && !userPickedRevisionRef.current) {
             const currentRevisionId = workspace?.pinned.template_revision_id;
             const matching =
               (currentRevisionId ? list.find((item) => item.template_revision_id === currentRevisionId) : null) ||
@@ -936,6 +976,16 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       .finally(() => { if (!cancelled) setTemplatesLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (userPickedRevisionRef.current) return;
+    const pinnedId = workspace?.pinned.template_revision_id;
+    if (!pinnedId || !publishedTemplates.length) return;
+    const matching = publishedTemplates.find((item) => item.template_revision_id === pinnedId);
+    if (matching && selectedRevisionId !== pinnedId) {
+      setSelectedRevisionId(matching.template_revision_id);
+    }
+  }, [workspace?.pinned.template_revision_id, publishedTemplates]);
 
   // Load template config for real-time live preview
   useEffect(() => {
@@ -1015,6 +1065,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     setTemplateError(null);
     setTemplateImpact(null);
     if (!templateRevisionId) return;
+    userPickedRevisionRef.current = true;
     const pool = customList && customList.length > 0 ? customList : publishedTemplates;
     const option = pool.find((item) => item.template_revision_id === templateRevisionId) || pool[0];
     if (!option) {
@@ -2722,18 +2773,33 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                           <MagnifyingGlassPlus size={13} weight="bold" />
                         </button>
                       </div>
-                      <div className="flex items-center gap-1 bg-gray-100/90 rounded px-1.5 py-0.5 border border-gray-200 text-[10px]">
-                        <span className="font-bold text-[var(--rl-text-muted)]">Style:</span>
-                        <select
-                          value={selectedBenefitPreset}
-                          onChange={(e) => handleSelectBenefitPreset(e.target.value)}
-                          className="bg-transparent font-semibold text-[var(--rl-text-strong)] cursor-pointer outline-hidden text-[10px]"
+                      {isDesign2 ? (
+                        <button
+                          type="button"
+                          onClick={toggleDesign2Schedule}
+                          className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold border transition-colors cursor-pointer ${
+                            showDesign2Schedule || design2CardCount > 24
+                              ? "bg-red-50 border-red-300 text-red-700"
+                              : "bg-gray-100/90 border-gray-200 text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                          }`}
+                          title="Include Page 2 Benefits & Endorsements Schedule in preview & generated PDF"
                         >
-                          {allBenefitPresets.map((p) => (
-                            <option key={p.id} value={p.id}>{p.shortName}</option>
-                          ))}
-                        </select>
-                      </div>
+                          <span>{showDesign2Schedule || design2CardCount > 24 ? "Sheet 2: ON" : "+ Sheet 2 Schedule"}</span>
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-1 bg-gray-100/90 rounded px-1.5 py-0.5 border border-gray-200 text-[10px]">
+                          <span className="font-bold text-[var(--rl-text-muted)]">Style:</span>
+                          <select
+                            value={selectedBenefitPreset}
+                            onChange={(e) => handleSelectBenefitPreset(e.target.value)}
+                            className="bg-transparent font-semibold text-[var(--rl-text-strong)] cursor-pointer outline-hidden text-[10px]"
+                          >
+                            {allBenefitPresets.map((p) => (
+                              <option key={p.id} value={p.id}>{p.shortName}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                       <button
                         type="button"
                         onClick={() => setPreviewExpanded((v) => !v)}
@@ -2803,20 +2869,35 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
                             position: "relative",
                           }}
                         >
-                          {balancedElements.map((element: CanvasElement) => (
-                            <CanvasElementView
-                              key={element.id}
-                              element={element}
-                              selected={false}
-                              readOnly={true}
-                              onPointerDown={() => { }}
-                              config={previewTemplate.config}
-                              variableValues={previewFields}
-                              benefitData={{ ...workspace.benefit_cards, current_benefits: currentCards, available_addons: addonCards, extras: workspace.extras, displayOptions }}
-                              conceptAssets={conceptAssets}
+                          {isDesign2 ? (
+                            <Design2CanvasView
+                              fields={previewFields}
+                              currentBenefits={currentCards}
+                              availableAddons={addonCards}
+                              companyName={companyName || undefined}
                               assets={previewTemplateAssets}
+                              includeSchedule={showDesign2Schedule}
+                              insurerLogoUrl={(() => {
+                                const logoId = companyWorkspace?.company?.logo_asset_id || companies.find((c) => c.id === workspace?.pinned.company_id || (companyName && c.name.toLowerCase() === companyName.toLowerCase()))?.logo_asset_id;
+                                return logoId ? `/business/assets/${logoId}/content?profile=ui` : undefined;
+                              })()}
                             />
-                          ))}
+                          ) : (
+                            balancedElements.map((element: CanvasElement) => (
+                              <CanvasElementView
+                                key={element.id}
+                                element={element}
+                                selected={false}
+                                readOnly={true}
+                                onPointerDown={() => { }}
+                                config={previewTemplate.config}
+                                variableValues={previewFields}
+                                benefitData={{ ...workspace.benefit_cards, current_benefits: currentCards, available_addons: addonCards, extras: workspace.extras, displayOptions }}
+                                conceptAssets={conceptAssets}
+                                assets={previewTemplateAssets}
+                              />
+                            ))
+                          )}
                         </div>
                       </div>
                     </div>

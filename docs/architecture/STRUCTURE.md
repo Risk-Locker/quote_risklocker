@@ -58,7 +58,12 @@ backend/app/
 │   └── enums.py             # Domain status enums (QuotationStatus, OfferingKind, etc.)
 ├── rendering/               # Deterministic quotation document generation
 │   ├── template_renderer.py # Master HTML/PDF renderer: geometry, row heights, card grids
+│   ├── template_renderer_design2.py # Dedicated renderer for Design 2 (4-column matrix, floating addons, red footer)
+│   ├── design2_icons.py     # Dual-tone (#1D1D1B + #E52320) 24-concept vector SVGs + Gift badge for Design 2
+│   ├── benefit_schedule_renderer.py # Standalone & Sheet 2 Benefit & Endorsements Schedule A4 pagination renderer
+│   ├── unified_addon_engine.py  # Unified 24-card addon matrix & float-to-top sorter
 │   ├── benefit_grid_renderer.py # Benefit grid dynamic rendering and balancing logic
+│   ├── pdf_generator.py     # Async Playwright Chromium HTML-to-PDF conversion runner
 │   ├── render_context.py    # 7-tier benefit description precedence & asset overlay engine
 │   └── grid_layout.py       # Fixed-grid and dynamic-flow layout calculators
 ├── services/                # Business logic and domain workflows
@@ -106,13 +111,14 @@ frontend/src/
 │   ├── comparison/                  # Comparison matrix coordinator, types & submodules
 │   │   ├── components/              # Modular panes & modals (UnderwriterQuoteCard, Panes, Modals)
 │   │   └── hooks/                   # Business hooks (useSnapshotExport, useWhatsAppTester, useNcdHistory)
-│   ├── template-canvas/             # Quotation A4 preview canvas (`shared.tsx`, preset blocks)
+│   ├── template-canvas/             # Quotation A4 preview canvas (`shared.tsx`, `design2-canvas.tsx`, `design2-icons.tsx`, preset blocks)
 │   ├── template-builder/            # Section-based & freeform template editor
 │   ├── insights/                    # Calendar views, CRM dossiers, sync sessions modal
 │   ├── tenures/                     # Renewal timeline drawer & status ledger
 │   └── global-ai-copilot.tsx        # Floating conversational drawer with duplicate cleanup
 └── lib/
     ├── api.ts                       # Typed frontend fetch client with same-origin proxy
+    ├── unified-addon-engine.ts      # TypeScript counterpart for unified 24-card addon matrix & float-to-top sorting
     ├── template-section-compiler.ts # Bidirectional slot-to-canvas compiler
     ├── benefit-presets.ts           # System benefit card visual presets (Masonry, 3D, Minimal)
     └── benefit-utils.ts             # Benefit currency/distance formatters (RM, KM, text)

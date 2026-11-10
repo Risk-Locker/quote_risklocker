@@ -79,7 +79,30 @@ DATE_FIELDS = frozenset({"issue_date", "valid_until", "cover_start_date", "cover
 TOTAL_SOURCES = frozenset({"premium", "coverage_premium", "roadtax", "road_tax_amount", "service_fee", "runner_fee"})
 
 
-__all__ = ['_utcnow', '_require_business_user', '_session_and_draft', '_rows_for_draft', '_template_for_draft', '_field_summary', 'generation_blockers', 'SCALAR_DECISIONS', 'SELECTION_KEY_RE', '_UUID_RE', 'BUSINESS_ROLES', 'PIN_SENSITIVE_FIELDS', 'MONEY_FIELDS', 'DATE_FIELDS', 'TOTAL_SOURCES']
+__all__ = ['_utcnow', '_require_business_user', '_session_and_draft', '_rows_for_draft', '_template_for_draft', '_field_summary', 'generation_blockers', 'SCALAR_DECISIONS', 'SELECTION_KEY_RE', '_UUID_RE', '_is_valid_uuid_for_db', 'BUSINESS_ROLES', 'PIN_SENSITIVE_FIELDS', 'MONEY_FIELDS', 'DATE_FIELDS', 'TOTAL_SOURCES']
+
+
+def _is_strict_uuid_db(db) -> bool:
+    """Return True when the backing DB enforces native UUID column syntax (PostgreSQL)."""
+    if getattr(db, "strict_uuid", False):
+        return True
+    bind = getattr(db, "bind", None)
+    if bind is None and hasattr(db, "get_bind"):
+        try:
+            bind = db.get_bind()
+        except Exception:
+            bind = None
+    dialect = getattr(bind, "dialect", None)
+    return getattr(dialect, "name", None) == "postgresql"
+
+
+def _is_valid_uuid_for_db(db, value: Any) -> bool:
+    """Validate UUID strings strictly on PostgreSQL while preserving short IDs in hermetic in-memory tests."""
+    if not value or not str(value).strip():
+        return False
+    if _is_strict_uuid_db(db):
+        return bool(_UUID_RE.match(str(value).strip()))
+    return True
 
 
 def _utcnow() -> datetime:
@@ -114,12 +137,12 @@ def _rows_for_draft(db, model, draft_id: str) -> list:
 
 
 def _template_for_draft(db, draft: QuotationDraft) -> TemplateRevision | None:
-    if draft.layout_override is not None and draft.layout_override_template_revision_id:
+    if draft.layout_override is not None and _is_valid_uuid_for_db(db, draft.layout_override_template_revision_id):
         rev = db.get(TemplateRevision, draft.layout_override_template_revision_id)
         if rev:
             return rev
 
-    if draft.template_revision_id:
+    if _is_valid_uuid_for_db(db, draft.template_revision_id):
         rev = db.get(TemplateRevision, draft.template_revision_id)
         if rev:
             latest_revs = list(

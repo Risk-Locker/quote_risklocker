@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, defer, joinedload, object_session
 from app.core.cache import _memory_cache, invalidate_cache
 from app.core.errors import AppError
 from app.models.tables import Session as SessionModel, UploadedFile, QuotationDraft, User, OutputTemplateConfig, TemplateRevision, InsuranceTenure
+from app.services.workspace_common import _is_valid_uuid_for_db
 
 
 def get_session_filter_options(db: Session) -> dict[str, Any]:
@@ -204,7 +205,7 @@ def serialize_session(
     **kwargs: Any,
 ) -> dict:
     filename = session.uploaded_file.original_filename if session.uploaded_file else ""
-    draft_status = session.draft.status if session.draft else ""
+    draft_status = getattr(session.draft, "status", "") if session.draft else ""
     fields = session.draft.fields if session.draft and isinstance(session.draft.fields, dict) else {}
 
     # Extract identifiers safely
@@ -236,19 +237,18 @@ def serialize_session(
     # Resolve bound or default template name
     template_id = None
     template_name = None
+    db_inst = kwargs.get("db") or (object_session(session) if session else None)
     if session.draft:
         template_id = session.draft.layout_override_template_id
         if not template_id and session.draft.template_revision_id:
-            db_inst = kwargs.get("db") or (object_session(session) if session else None)
-            if db_inst:
+            if db_inst and _is_valid_uuid_for_db(db_inst, session.draft.template_revision_id):
                 rev = db_inst.get(TemplateRevision, session.draft.template_revision_id)
                 if rev:
                     template_id = rev.template_id
     if not template_id and session.uploaded_file:
         template_id = session.uploaded_file.template_id
 
-    db_inst = kwargs.get("db") or (object_session(session) if session else None)
-    if template_id and db_inst:
+    if template_id and db_inst and _is_valid_uuid_for_db(db_inst, template_id):
         tpl = db_inst.get(OutputTemplateConfig, template_id)
         if tpl:
             template_name = tpl.name
@@ -288,6 +288,6 @@ def serialize_session(
         "miss_reason": session.miss_reason,
         "coverage_start_date": session.coverage_start_date.isoformat() if session.coverage_start_date else None,
         "coverage_end_date": session.coverage_end_date.isoformat() if session.coverage_end_date else None,
-        "created_at": session.created_at.isoformat(),
-        "updated_at": session.updated_at.isoformat(),
+        "created_at": session.created_at.isoformat() if session.created_at else None,
+        "updated_at": session.updated_at.isoformat() if session.updated_at else None,
     }

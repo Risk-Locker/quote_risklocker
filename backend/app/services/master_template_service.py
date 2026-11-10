@@ -814,3 +814,96 @@ def ensure_master_templates(db, user, *, apply: bool = False, force: bool = Fals
             report["default_cleared"].append(item.id)
         db.commit()
     return report
+
+
+DESIGN2_TEMPLATE_ID = "b78e2024-0002-4000-8000-000000000002"
+DESIGN2_MASTER_KEY = "motor_modern_design_2"
+
+
+def motor_modern_design_2_config() -> dict:
+    """Canonical configuration for Risklocker Motor Quotation Design 2 (Modern 4-Column Grid)."""
+    name = "Design 2 (Modern 4-Column Grid)"
+    height = 1123
+    config = new_v7_template_config(name)
+    config.update({
+        "version": 7,
+        "template_name": name,
+        "v7_master_key": DESIGN2_MASTER_KEY,
+        "template_key": DESIGN2_MASTER_KEY,
+        "layout_engine": "design2",
+        "is_default": False,
+        "locked": False,
+        "assets": {
+            "risklocker_logo": "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f",
+            "bank_logo": "2168eaee-3e56-4903-8c4f-841f01ff2407",
+            "bank_qr": "c4003185-0000-4000-8000-000000000001",
+        },
+        "page_profile": {
+            "profile_key": "a4",
+            "name": "A4",
+            "width": 794,
+            "height": height,
+            "unit": "px",
+            "safe_margins": {"top": 24, "right": 24, "bottom": 24, "left": 24},
+            "bleed": {},
+            "background_behavior": "clip",
+        },
+    })
+    elements = [
+        _rectangle("page_bg", 0, 0, 794, height, 1, background="#FFFFFF", border=""),
+        _image("risklocker_logo", "risklocker_logo", 32, 24, 140, 40, 5),
+        _text("title_motor", "Motor Insurance | Quotation (Design 2)", 32, 80, 420, 28, 5, size=18, weight="800", color="#0F172A"),
+    ]
+    config["canvas"] = {**config["canvas"], "width": 794, "height": height, "elements": elements}
+    return validate_template_config(config)
+
+
+def ensure_design2_master_template(db, user, *, apply: bool = False, force: bool = False) -> dict:
+    """Create and publish the Design 2 (Modern 4-Column Grid) master template idempotently."""
+    templates = list(db.scalars(select(OutputTemplateConfig).where(OutputTemplateConfig.deleted_at.is_(None))).all())
+    current = next(
+        (
+            item for item in templates
+            if item.id == DESIGN2_TEMPLATE_ID or str((item.fixed_fields or {}).get("v7_master_key") or "") == DESIGN2_MASTER_KEY
+        ),
+        None,
+    )
+    spec_config = motor_modern_design_2_config()
+    spec_name = spec_config["template_name"]
+    report: dict = {"key": DESIGN2_MASTER_KEY, "created": False, "published": False, "template_id": None, "template_revision_id": None, "revision_number": None, "apply": apply}
+
+    if current is None:
+        report["created"] = True
+        if not apply:
+            return report
+        current = OutputTemplateConfig(
+            id=DESIGN2_TEMPLATE_ID,
+            name=spec_name,
+            insurance_type="Motor",
+            status="active",
+            fixed_fields=deepcopy(spec_config),
+        )
+        db.add(current)
+        db.commit()
+        db.refresh(current)
+    else:
+        existing_revs = list(db.scalars(select(TemplateRevision).where(TemplateRevision.template_id == current.id, TemplateRevision.state == "published")).all())
+        if existing_revs and not force:
+            latest = max(existing_revs, key=lambda r: r.revision_number)
+            report.update({"template_id": current.id, "template_revision_id": latest.id, "revision_number": latest.revision_number})
+            return report
+        if apply:
+            current.name = spec_name
+            current.fixed_fields = deepcopy(spec_config)
+            flag_modified(current, "fixed_fields")
+            current.revision += 1
+            db.commit()
+            db.refresh(current)
+
+    report["template_id"] = current.id
+    if apply:
+        rev = publish_template_revision(db, user, current.id, base_revision=current.revision)
+        report["published"] = True
+        report["template_revision_id"] = rev.id
+        report["revision_number"] = rev.revision_number
+    return report

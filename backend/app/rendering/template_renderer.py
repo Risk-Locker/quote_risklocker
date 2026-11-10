@@ -846,6 +846,23 @@ def render_quotation_html(
 
     if insurer_name:
         draft_fields = {**draft_fields, "insurance_company": {"value": insurer_name}}
+
+    is_design2 = bool(
+        config.get("layout_engine") == "design2"
+        or config.get("template_key") == "motor_modern_design_2"
+        or "design 2" in str(template_name or "").lower()
+        or "design2" in str(config.get("template_name") or config.get("name") or "").lower()
+    )
+    if is_design2:
+        from app.rendering.template_renderer_design2 import render_design2_html
+        return render_design2_html(
+            draft_fields=draft_fields,
+            template_config=config,
+            render_context=render_context,
+            resolved_assets=resolved_assets,
+            db=db,
+        )
+
     canvas = config.get("canvas") or {}
     width = int(canvas.get("width") or 794)
     height = int(canvas.get("height") or 1123)

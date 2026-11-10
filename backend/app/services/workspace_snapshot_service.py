@@ -66,7 +66,7 @@ from app.extraction.benefit_lines import is_spurious_benefit_line
 
 
 from app.services.workspace_common import (
-    SCALAR_DECISIONS, SELECTION_KEY_RE, _UUID_RE, BUSINESS_ROLES, PIN_SENSITIVE_FIELDS,
+    SCALAR_DECISIONS, SELECTION_KEY_RE, _UUID_RE, _is_valid_uuid_for_db, BUSINESS_ROLES, PIN_SENSITIVE_FIELDS,
     MONEY_FIELDS, DATE_FIELDS, TOTAL_SOURCES,
     _utcnow, _require_business_user, _session_and_draft, _rows_for_draft,
     _template_for_draft, _field_summary, generation_blockers
@@ -993,6 +993,8 @@ def template_selection_impact(
 ) -> dict:
     """Preview the deterministic effects of pinning another master revision."""
     _session, draft = _session_and_draft(db, user, session_id)
+    if not _is_valid_uuid_for_db(db, template_revision_id):
+        raise AppError("Choose a published template revision.", 422)
     target = db.get(TemplateRevision, template_revision_id)
     if target is None or target.state not in {"published", "compatibility"}:
         raise AppError("Choose a published template revision.", 422)

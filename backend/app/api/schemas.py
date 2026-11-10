@@ -703,6 +703,7 @@ class TemplateLivePreviewRequest(BaseModel):
     load_profile: Literal["minimum", "medium", "high"] = "medium"
     include_purchased_perils: bool = True
     benefit_preset_config: dict[str, Any] | None = None
+    render_mode: Literal["quotation", "schedule", "combined"] = "quotation"
 
 
 

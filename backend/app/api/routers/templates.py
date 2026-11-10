@@ -917,6 +917,9 @@ def admin_template_asset_delete(asset_id: str, db: Session = Depends(get_db), se
 @router.get("/admin/templates/{template_id}")
 def admin_template_detail(template_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
+    from app.services.workspace_common import _is_valid_uuid_for_db
+    if not _is_valid_uuid_for_db(db, template_id):
+        raise AppError("Template not found.", 404)
     template = db.get(OutputTemplateConfig, template_id)
     if not template:
         raise AppError("Template not found.", 404)
@@ -1300,7 +1303,8 @@ def admin_template_preview_render(
     )
     insurer = "BERJAYA SOMPO INSURANCE BERHAD"
 
-    if payload.session_id:
+    from app.services.workspace_common import _is_valid_uuid_for_db
+    if payload.session_id and _is_valid_uuid_for_db(db, payload.session_id):
         try:
             from app.services.workspace_snapshot_service import build_workspace_snapshot
             snap = build_workspace_snapshot(db, user, payload.session_id)
@@ -1327,14 +1331,26 @@ def admin_template_preview_render(
                 render_context["display_options"] = snap.get("display_options") or {}
                 render_context["total_premium_adjusted"] = snap.get("total_premium_adjusted")
         except Exception:
-            pass
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
     import copy
     tmpl_config = copy.deepcopy(payload.template_config or {})
     tmpl_name = str(tmpl_config.get("name") or "")
 
     if payload.template_id:
-        tmpl = db.query(OutputTemplateConfig).filter_by(id=payload.template_id).first()
+        tmpl = None
+        if _is_valid_uuid_for_db(db, payload.template_id):
+            tmpl = db.query(OutputTemplateConfig).filter_by(id=payload.template_id).first()
+        if not tmpl:
+            # Allow semantic master key fallback if a slug/key is passed
+            all_tmpls = db.query(OutputTemplateConfig).filter(OutputTemplateConfig.deleted_at.is_(None)).all()
+            tmpl = next(
+                (t for t in all_tmpls if str((t.fixed_fields or {}).get("v7_master_key") or "") == payload.template_id),
+                None,
+            )
         if tmpl and tmpl.fixed_fields:
             if not tmpl_config:
                 tmpl_config = copy.deepcopy(tmpl.fixed_fields)
@@ -1389,6 +1405,21 @@ def admin_template_preview_render(
         except Exception:
             pass
 
+    render_mode = payload.render_mode or "quotation"
+    if render_mode == "schedule":
+        from app.rendering.benefit_schedule_renderer import render_benefit_schedule_html
+        html = render_benefit_schedule_html(
+            draft_fields=draft_fields,
+            template_config=tmpl_config,
+            render_context={**render_context, "insurer_name": insurer},
+            resolved_assets=resolved_assets,
+            db=db,
+        )
+        return {"html": html}
+
+    if render_mode == "combined":
+        render_context["include_benefit_schedule"] = True
+
     html = render_quotation_html(
         draft_fields=draft_fields,
         template_name=tmpl_name,
@@ -1398,6 +1429,18 @@ def admin_template_preview_render(
         render_context=render_context,
         resolved_assets=resolved_assets,
     )
+    if render_mode == "combined" and 'class="d2-page"' not in html:
+        from app.rendering.benefit_schedule_renderer import DESIGN2_PAGE_CSS, render_design2_schedule_pages
+        sched_pages = render_design2_schedule_pages(
+            draft_fields=draft_fields,
+            template_config=tmpl_config,
+            render_context=render_context,
+            resolved_assets=resolved_assets,
+            db=db,
+            start_page_num=2,
+        )
+        injection = f'<style>{DESIGN2_PAGE_CSS}</style><div style="page-break-before:always;break-before:page;"></div>\n' + "\n".join(sched_pages)
+        html = html.replace("</body>", f"{injection}\n</body>") if "</body>" in html else f"{html}\n{injection}"
     return {"html": html}
 
 

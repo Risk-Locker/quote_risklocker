@@ -66,7 +66,7 @@ from app.extraction.benefit_lines import is_spurious_benefit_line
 
 
 from app.services.workspace_common import (
-    SCALAR_DECISIONS, SELECTION_KEY_RE, _UUID_RE, BUSINESS_ROLES, PIN_SENSITIVE_FIELDS,
+    SCALAR_DECISIONS, SELECTION_KEY_RE, _UUID_RE, _is_valid_uuid_for_db, BUSINESS_ROLES, PIN_SENSITIVE_FIELDS,
     MONEY_FIELDS, DATE_FIELDS, TOTAL_SOURCES,
     _utcnow, _require_business_user, _session_and_draft, _rows_for_draft,
     _template_for_draft, _field_summary, generation_blockers
@@ -1064,6 +1064,8 @@ def _apply_layout_override(db, draft: QuotationDraft, operation: dict) -> str:
     revision_id = str(operation.get("template_revision_id") or "")
     template_id = str(operation.get("template_id") or "")
     base_hash = str(operation.get("base_hash") or "")
+    if not _is_valid_uuid_for_db(db, revision_id):
+        raise AppError("The layout does not match the selected template revision.", 409)
     revision = db.get(TemplateRevision, revision_id)
     if (
         not revision
@@ -1087,6 +1089,8 @@ def _apply_template_selection(db, draft: QuotationDraft, operation: dict) -> str
     if operation.get("confirmed") is not True:
         raise AppError("Confirm the template impact before applying this change.", 422)
     revision_id = str(operation.get("template_revision_id") or "")
+    if not _is_valid_uuid_for_db(db, revision_id):
+        raise AppError("Choose a published template revision.", 422)
     revision = db.get(TemplateRevision, revision_id)
     if revision is None or revision.state != "published":
         raise AppError("Choose a published template revision.", 422)

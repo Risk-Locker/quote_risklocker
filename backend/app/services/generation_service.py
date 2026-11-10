@@ -443,7 +443,10 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
         "groups": cards.get("groups", []),
         "extras": extras,
         "assets": assets,
-        "display_options": draft.display_options if (draft.display_options and draft.display_options.get("enabled") is not None) else (config.get("display_options") or {}),
+        "display_options": {
+            **(config.get("display_options") or {}),
+            **(draft.display_options or {}),
+        },
     }
     return context, asset_hashes
 

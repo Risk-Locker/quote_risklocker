@@ -1,0 +1,310 @@
+"""Bespoke Dual-Tone Vector SVG Icon Library for Risklocker Design 2.
+
+All 24 canonical add-on concepts plus the Free Added Coverage compound gift+tick
+emblem, crafted to match the Illustrator master template (`#1D1D1B` charcoal +
+`#E52320` Risklocker red) on a crisp 48x48 coordinate grid.
+"""
+
+from __future__ import annotations
+
+_BLK = "#1D1D1B"
+_RED = "#E52320"
+
+
+def render_free_coverage_gift_svg(width: int = 28, height: int = 24) -> str:
+    """Compound white gift box with ribbon bow and overlapping #5ABA00 checkmark badge."""
+    return (
+        f'<svg width="{width}" height="{height}" viewBox="0 0 36 30" fill="none" '
+        'xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
+        # Left bow loop & right bow loop
+        '<path d="M13.5 8.5C10 8.5 8.2 6.8 8.2 5C8.2 3.3 9.7 2.2 11.4 2.2C13.6 2.2 15.1 5.2 15.6 8.5H13.5Z" '
+        'stroke="#FFFFFF" stroke-width="2.1" stroke-linejoin="round"/>'
+        '<path d="M17.7 8.5C21.2 8.5 23 6.8 23 5C23 3.3 21.5 2.2 19.8 2.2C17.6 2.2 16.1 5.2 15.6 8.5H17.7Z" '
+        'stroke="#FFFFFF" stroke-width="2.1" stroke-linejoin="round"/>'
+        # Gift lid (left + right halves split by vertical ribbon gap)
+        '<rect x="4" y="9" width="10.4" height="5" rx="1.2" fill="#FFFFFF"/>'
+        '<rect x="16.8" y="9" width="10.4" height="5" rx="1.2" fill="#FFFFFF"/>'
+        # Gift box body (left + right halves split by ribbon cross)
+        '<rect x="5.4" y="15.8" width="9" height="10.8" rx="1.2" fill="#FFFFFF"/>'
+        '<rect x="16.8" y="15.8" width="9" height="10.8" rx="1.2" fill="#FFFFFF"/>'
+        # Overlapping green circle checkmark on bottom-right
+        '<circle cx="25.5" cy="18.2" r="8.2" fill="#5ABA00" stroke="#E52320" stroke-width="1.4"/>'
+        '<path d="M21.8 18.2L24.4 20.8L29.4 15.6" stroke="#FFFFFF" stroke-width="2.3" '
+        'stroke-linecap="round" stroke-linejoin="round"/>'
+        "</svg>"
+    )
+
+
+def render_design2_icon_svg(icon_hint: str, size: int = 38) -> str:
+    """Returns crisp 48x48 dual-tone (#1D1D1B + #E52320) SVG markup scaled to `size`."""
+    s = str(size)
+    key = (icon_hint or "generic").strip().lower()
+
+    # Preserve legacy hint aliases cleanly
+    alias_map = {
+        "passengers": "llop",
+        "crane": "boom_damage",
+        "all_driver": "all_drivers",
+    }
+    key = alias_map.get(key, key)
+
+    bodies: dict[str, str] = {
+        # 01: Trapezoid windscreen outline + red jagged crack lower right
+        "windscreen": (
+            f'<polygon points="10,13 38,13 43,35 5,35" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.7" stroke-linejoin="round"/>'
+            f'<path d="M26 34L29.5 27L26.5 24.5L32 18.5" stroke="{_RED}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<path d="M29.5 27L34.5 28.5M28 22.5L23.5 21.5" stroke="{_RED}" stroke-width="1.8" stroke-linecap="round"/>'
+        ),
+        # 02: Flatbed tow truck (#1D1D1B) carrying red sedan (#E52320)
+        "towing": (
+            f'<path d="M6 27H30V31H6Z" fill="{_BLK}"/>'
+            f'<path d="M30 19H36.8L41.5 24.5V31H30V19Z" fill="{_BLK}"/>'
+            f'<path d="M32 21H36L39 24.5H32V21Z" fill="#FFFFFF"/>'
+            f'<path d="M8.5 26C9 21.8 11.4 19 15 19H21C24.2 19 26.2 21.5 27.5 23.5C28.8 24 29 25 29 26H8.5Z" fill="{_RED}"/>'
+            f'<path d="M12.5 20.6H19.5L22.2 23.2H11.2L12.5 20.6Z" fill="#FFFFFF"/>'
+            f'<circle cx="13.5" cy="31.8" r="3.4" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.3"/>'
+            f'<circle cx="35.5" cy="31.8" r="3.4" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.3"/>'
+            f'<circle cx="13.5" cy="31.8" r="1.2" fill="{_BLK}"/>'
+            f'<circle cx="35.5" cy="31.8" r="1.2" fill="{_BLK}"/>'
+        ),
+        # 03: Two front-view cars colliding + red jagged starburst
+        "llop": (
+            f'<path d="M5 24L8.5 17H21.5L24.5 24V31H5V24Z" fill="{_BLK}"/>'
+            f'<rect x="7" y="30" width="3.5" height="3.5" rx="0.8" fill="{_BLK}"/>'
+            f'<rect x="19" y="30" width="3.5" height="3.5" rx="0.8" fill="{_BLK}"/>'
+            f'<path d="M9.8 19H20.2L22 23H8L9.8 19Z" fill="#FFFFFF"/>'
+            f'<circle cx="9.2" cy="26.5" r="1.6" fill="#FFFFFF"/>'
+            f'<circle cx="20.2" cy="26.5" r="1.6" fill="#FFFFFF"/>'
+            f'<path d="M19 26L23 18.5H38.5L42.5 26V34H19V26Z" fill="{_BLK}" stroke="#FFFFFF" stroke-width="1.3"/>'
+            f'<rect x="21.5" y="33" width="3.8" height="3.5" rx="0.8" fill="{_BLK}"/>'
+            f'<rect x="36.2" y="33" width="3.8" height="3.5" rx="0.8" fill="{_BLK}"/>'
+            f'<path d="M24.4 20.6H37L39 24.8H22.4L24.4 20.6Z" fill="#FFFFFF"/>'
+            f'<circle cx="23.8" cy="29" r="1.8" fill="#FFFFFF"/>'
+            f'<circle cx="37.6" cy="29" r="1.8" fill="#FFFFFF"/>'
+            f'<path d="M23 16.5L20 11L24.5 13.5L27 8.5L29.5 13.5L34 11L31 16.5" fill="none" stroke="{_RED}" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"/>'
+        ),
+        # 04: Sedan hitting pedestrian (#1D1D1B car + #E52320 falling person & impact lines)
+        "llp": (
+            f'<path d="M17 28C18.5 23.2 21.8 20.5 27.5 20.5H36.5C40.5 20.5 43.2 23.2 44 26.5V32H17V28Z" fill="{_BLK}"/>'
+            f'<path d="M22.5 22.4H34.5L38 25.8H20.5L22.5 22.4Z" fill="#FFFFFF"/>'
+            f'<circle cx="23.5" cy="32.5" r="3.4" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.2"/>'
+            f'<circle cx="38.5" cy="32.5" r="3.4" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.2"/>'
+            f'<circle cx="10.2" cy="14.5" r="2.6" fill="{_RED}"/>'
+            f'<path d="M10.5 17.8L13.5 23.5L8.2 27L6.5 34.5M12.2 24.5L15.8 31.8M9.8 19.5L4.8 22.5M12.5 20L17.2 19" stroke="{_RED}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<path d="M16.5 16L14 12.5M18.8 18.5L18.8 14.5" stroke="{_RED}" stroke-width="1.8" stroke-linecap="round"/>'
+        ),
+        # 05: Car submerged in two water waves + red shield checkmark above
+        "special_perils": (
+            f'<path d="M11 29C12 24.5 15 22.5 19.5 22.5H29C33.5 22.5 36.2 24.8 37.2 29" fill="none" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round"/>'
+            f'<path d="M6 31.5Q10.5 28.5 15 31.5T24 31.5T33 31.5T42 31.5" fill="none" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round"/>'
+            f'<path d="M8 36.5Q12 34 16 36.5T24 36.5T32 36.5T40 36.5" fill="none" stroke="{_BLK}" stroke-width="2.1" stroke-linecap="round"/>'
+            f'<path d="M24 8L32.5 11.2V17.8C32.5 22.8 28.8 26.2 24 28C19.2 26.2 15.5 22.8 15.5 17.8V11.2L24 8Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.2" stroke-linejoin="round"/>'
+            f'<path d="M20.2 17.8L23 20.6L28.4 15.2" stroke="{_RED}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>'
+        ),
+        # 06: Circular betterment cycle arrows (#1D1D1B) around red 6-tooth cog (#E52320)
+        "betterment": (
+            f'<path d="M11 19A14 14 0 0 1 35.5 14.5" fill="none" stroke="{_BLK}" stroke-width="2.5" stroke-linecap="round"/>'
+            f'<polyline points="32.2,10.5 36.2,15.2 30.8,16.5" fill="none" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<path d="M37 29A14 14 0 0 1 12.5 33.5" fill="none" stroke="{_BLK}" stroke-width="2.5" stroke-linecap="round"/>'
+            f'<polyline points="15.8,37.5 11.8,32.8 17.2,31.5" fill="none" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<path d="M24 15.8L26.2 18.2L29.6 17.6L30.2 20.8L33 22.6L31.4 25.5L32.4 28.8L29.2 29.8L27.4 32.6L24 31.6L20.6 32.6L18.8 29.8L15.6 28.8L16.6 25.5L15 22.6L17.8 20.8L18.4 17.6L21.8 18.2Z" fill="{_RED}"/>'
+            f'<circle cx="24" cy="24.2" r="3.4" fill="#FFFFFF"/>'
+        ),
+        # 07: Two overlapping drivers + half-red shield bottom right
+        "all_drivers": (
+            f'<circle cx="26" cy="14" r="4.5" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.3"/>'
+            f'<circle cx="15.5" cy="20.5" r="4" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.3"/>'
+            f'<path d="M8.5 34.5C8.5 29.5 11.5 26.8 15.5 26.8C19.5 26.8 22.5 29.5 22.5 34.5" fill="none" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round"/>'
+            f'<path d="M21 21.5C22.5 20.6 24.2 20.2 26 20.2C28 20.2 29.8 20.7 31.2 21.8" fill="none" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round"/>'
+            f'<path d="M33.5 22.5L40 24.8V30.5C40 34.8 37.2 37.6 33.5 39C29.8 37.6 27 34.8 27 30.5V24.8L33.5 22.5Z" fill="#FFFFFF" stroke="{_RED}" stroke-width="2.2" stroke-linejoin="round"/>'
+            f'<path d="M33.5 22.5L40 24.8V30.5C40 34.8 37.2 37.6 33.5 39V22.5Z" fill="{_RED}"/>'
+        ),
+        # 08: Car engulfed by jagged red fire
+        "srcc": (
+            f'<path d="M19 20.5C20.5 16 22.5 12.2 25.5 9.5C25.2 13 27.2 14.5 28.5 12.5C29.8 15.5 32 13.5 32.8 10.5C35.2 14 36.2 17.8 34.8 21.5" fill="none" stroke="{_RED}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<path d="M9.5 25.5L13.5 19.5H27.5L32.5 25.5H37.5C39.2 25.5 40.5 26.8 40.5 28.5V33.5H7.5V27.5C7.5 26.4 8.4 25.5 9.5 25.5Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4" stroke-linejoin="round"/>'
+            f'<circle cx="14.5" cy="34.5" r="3.4" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4"/>'
+            f'<circle cx="33.5" cy="34.5" r="3.4" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4"/>'
+        ),
+        # 09: Paint spray gun (#1D1D1B) spraying red droplets (#E52320)
+        "respray": (
+            f'<rect x="14.5" y="10.5" width="7.5" height="9" rx="1" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.2"/>'
+            f'<path d="M18.2 19.5V23.2M13 10.5H23.5" stroke="{_BLK}" stroke-width="2.2" stroke-linecap="round"/>'
+            f'<path d="M8.5 23.2H27.5V27.2H21L14.5 38.2H9.5L15 27.2H8.5V23.2Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.2" stroke-linejoin="round"/>'
+            f'<path d="M22.5 27.2L20.2 32.5" stroke="{_BLK}" stroke-width="2" stroke-linecap="round"/>'
+            f'<circle cx="31.5" cy="24.5" r="1.2" fill="{_RED}"/>'
+            f'<circle cx="35.5" cy="22.2" r="1.4" fill="{_RED}"/>'
+            f'<circle cx="36" cy="25.2" r="1.3" fill="{_RED}"/>'
+            f'<circle cx="35.5" cy="28.2" r="1.4" fill="{_RED}"/>'
+            f'<circle cx="40" cy="20.2" r="1.3" fill="{_RED}"/>'
+            f'<circle cx="40.5" cy="24.8" r="1.5" fill="{_RED}"/>'
+            f'<circle cx="40" cy="29.5" r="1.3" fill="{_RED}"/>'
+        ),
+        # 10: NGV cylinder (#1D1D1B) with red gas flame inside
+        "gas_conversion": (
+            f'<rect x="18.5" y="9" width="11" height="4.5" rx="1" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.3"/>'
+            f'<rect x="13" y="13.5" width="22" height="25.5" rx="6" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5"/>'
+            f'<path d="M24 19.5C26.5 22.8 29.2 25.5 29.2 28.8C29.2 31.8 26.8 34 24 34C21.2 34 18.8 31.8 18.8 28.8C18.8 26.2 20.5 24 22 22.5C22 24 23 24.8 24 24.8C24 22.8 24 21 24 19.5Z" fill="{_RED}"/>'
+            f'<path d="M24 27.2C25 28.5 25.5 29.5 25.5 30.5A1.5 1.5 0 0 1 22.5 30.5C22.5 29.5 23.2 28.2 24 27.2Z" fill="#FFFFFF"/>'
+        ),
+        # 11: Calendar (#1D1D1B) with red "$" circle badge bottom-right
+        "cart": (
+            f'<rect x="9" y="12.5" width="24" height="22" rx="2.5" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4"/>'
+            f'<line x1="9" y1="19" x2="33" y2="19" stroke="{_BLK}" stroke-width="2.2"/>'
+            f'<line x1="15.5" y1="9" x2="15.5" y2="14.5" stroke="{_BLK}" stroke-width="2.5" stroke-linecap="round"/>'
+            f'<line x1="26.5" y1="9" x2="26.5" y2="14.5" stroke="{_BLK}" stroke-width="2.5" stroke-linecap="round"/>'
+            f'<circle cx="14.5" cy="24" r="1.4" fill="{_BLK}"/>'
+            f'<circle cx="20" cy="24" r="1.4" fill="{_BLK}"/>'
+            f'<circle cx="14.5" cy="29" r="1.4" fill="{_BLK}"/>'
+            f'<circle cx="20" cy="29" r="1.4" fill="{_BLK}"/>'
+            f'<circle cx="32.5" cy="31.5" r="8.2" fill="{_RED}"/>'
+            f'<text x="32.5" y="35.3" text-anchor="middle" font-family="Arial,sans-serif" font-size="11.5" font-weight="900" fill="#FFFFFF">$</text>'
+        ),
+        # 12: Car alloy rim/wheel (#1D1D1B) with red spoke wedges (#E52320)
+        "accessories": (
+            f'<circle cx="24" cy="24" r="14.5" fill="#FFFFFF" stroke="{_BLK}" stroke-width="3.4"/>'
+            f'<circle cx="24" cy="24" r="10.2" fill="none" stroke="{_BLK}" stroke-width="1.8"/>'
+            f'<circle cx="24" cy="24" r="3" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.2"/>'
+            f'<path d="M24 14L26.5 19.5H21.5Z" fill="{_RED}"/>'
+            f'<path d="M33.5 21L28.5 24.5L26.8 19.8Z" fill="{_RED}"/>'
+            f'<path d="M29.8 32.2L24.5 28.8L28.6 26Z" fill="{_RED}"/>'
+            f'<path d="M18.2 32.2L19.4 26L23.5 28.8Z" fill="{_RED}"/>'
+            f'<path d="M14.5 21L21.2 19.8L19.5 24.5Z" fill="{_RED}"/>'
+        ),
+        # 13: Shield (#1D1D1B) with crisp red "NCD" center label
+        "ncd": (
+            f'<path d="M24 9L37.5 13.5V23.8C37.5 32 31.6 37.6 24 40C16.4 37.6 10.5 32 10.5 23.8V13.5L24 9Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.6" stroke-linejoin="round"/>'
+            f'<text x="24" y="27.2" text-anchor="middle" font-family="Arial,sans-serif" font-size="10.5" font-weight="900" letter-spacing="0.4" fill="{_RED}">NCD</text>'
+        ),
+        # 14: Driver person silhouette (#1D1D1B) with red arm sling (#E52320)
+        "pa": (
+            f'<path d="M29 14L33 27.5" stroke="{_BLK}" stroke-width="3" stroke-linecap="round"/>'
+            f'<circle cx="21" cy="14" r="4.2" fill="{_BLK}"/>'
+            f'<path d="M14 23C14 20.5 16.5 19.5 21 19.5C25.5 19.5 27.8 20.8 27.8 23.5V31.5H14V23Z" fill="{_BLK}"/>'
+            f'<rect x="15" y="32" width="5" height="6.8" rx="1" fill="{_BLK}"/>'
+            f'<rect x="21.8" y="32" width="5" height="6.8" rx="1" fill="{_BLK}"/>'
+            f'<path d="M13.5 24L25 27.5L23.5 32.2L13.5 29Z" fill="{_RED}"/>'
+            f'<line x1="19.5" y1="19.5" x2="23.5" y2="27" stroke="{_RED}" stroke-width="2" stroke-linecap="round"/>'
+        ),
+        # 15: Tilted car key fob (#1D1D1B) with red wireless arcs top-right
+        "key_care": (
+            f'<g transform="rotate(-42 21 27)">'
+            f'<rect x="11" y="19" width="22" height="14" rx="5" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5"/>'
+            f'<circle cx="17" cy="26" r="2.2" fill="none" stroke="{_BLK}" stroke-width="2"/>'
+            f'<circle cx="25.5" cy="23.5" r="1.4" fill="{_RED}"/>'
+            f'<circle cx="25.5" cy="28.5" r="1.4" fill="{_BLK}"/>'
+            f'<line x1="28.5" y1="26" x2="30.5" y2="26" stroke="{_BLK}" stroke-width="2" stroke-linecap="round"/>'
+            '</g>'
+            f'<path d="M27.5 12.5A7.5 7.5 0 0 1 35 20" fill="none" stroke="{_RED}" stroke-width="2.2" stroke-linecap="round"/>'
+            f'<path d="M30.5 8.5A12 12 0 0 1 39.5 18" fill="none" stroke="{_RED}" stroke-width="2.2" stroke-linecap="round"/>'
+        ),
+        # 16: International towing — flatbed truck + red car + 3 round country flag badges
+        "international_towing": (
+            # 3 mini circular country badges above
+            f'<circle cx="14.5" cy="14" r="4.2" fill="{_BLK}"/>'
+            f'<rect x="10.8" y="13.2" width="7.4" height="1.6" fill="#FFFFFF"/>'
+            f'<circle cx="24" cy="13.5" r="4.2" fill="{_RED}"/>'
+            f'<rect x="20.2" y="13.8" width="7.6" height="3.6" fill="#FFFFFF"/>'
+            f'<circle cx="33.5" cy="14" r="4.2" fill="#FFFFFF" stroke="{_BLK}" stroke-width="1.3"/>'
+            f'<rect x="29.6" y="13" width="7.8" height="2" fill="{_RED}"/>'
+            # Tow truck + red car below
+            f'<path d="M6 29H30V33H6Z" fill="{_BLK}"/>'
+            f'<path d="M30 22H36.8L41.5 27V33H30V22Z" fill="{_BLK}"/>'
+            f'<path d="M32 23.8H36L38.8 27H32V23.8Z" fill="#FFFFFF"/>'
+            f'<path d="M8.5 28C9 24.4 11.4 22 14.8 22H20.8C23.8 22 25.8 24.2 27 26C28.2 26.5 28.5 27.3 28.5 28H8.5Z" fill="{_RED}"/>'
+            f'<circle cx="13.5" cy="34.2" r="3.2" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.2"/>'
+            f'<circle cx="35.5" cy="34.2" r="3.2" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.2"/>'
+        ),
+        # 17: EV wallbox charger (#1D1D1B rounded box + plug cord) + red lightning bolt
+        "ev_charger": (
+            f'<rect x="10" y="10" width="18" height="24" rx="3.2" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5"/>'
+            f'<path d="M20.5 15.5L15.5 22.8H19.8L18.2 28.8L23.5 21.2H19.2L20.5 15.5Z" fill="{_RED}"/>'
+            f'<path d="M19 34V37.2C19 39.2 20.8 40.5 23 40.5H31.5C33.8 40.5 35.5 39 35.5 36.8V26.5" fill="none" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round"/>'
+            f'<rect x="33" y="21" width="5" height="5.5" rx="1" fill="{_BLK}"/>'
+            f'<line x1="34.4" y1="18.2" x2="34.4" y2="21" stroke="{_BLK}" stroke-width="2" stroke-linecap="round"/>'
+            f'<line x1="36.6" y1="18.2" x2="36.6" y2="21" stroke="{_BLK}" stroke-width="2" stroke-linecap="round"/>'
+        ),
+        # 18: Lift-boom tow truck (#1D1D1B) towing tilted car + red flashing roof beacon
+        "ev_towing": (
+            f'<rect x="27" y="18.5" width="4" height="3.2" rx="1" fill="{_RED}"/>'
+            f'<path d="M24 17.5L21.5 15.5M29 16V13M34 17.5L36.5 15.5" stroke="{_RED}" stroke-width="1.9" stroke-linecap="round"/>'
+            f'<path d="M26 22H35.5L40 27.5V34H26V22Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.3" stroke-linejoin="round"/>'
+            f'<path d="M28.2 24H34.2L37.4 27.5H28.2V24Z" fill="{_BLK}"/>'
+            f'<line x1="16" y1="29" x2="26" y2="29" stroke="{_BLK}" stroke-width="2.5"/>'
+            f'<line x1="19" y1="22.5" x2="26" y2="27" stroke="{_BLK}" stroke-width="2.2" stroke-linecap="round"/>'
+            f'<g transform="rotate(14 14 28)">'
+            f'<path d="M5.5 27.5L8.2 22.5H17.5L21.2 27.5V31.5H5.5V27.5Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.1" stroke-linejoin="round"/>'
+            f'<circle cx="10.2" cy="32.2" r="2.6" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2"/>'
+            '</g>'
+            f'<circle cx="29.5" cy="34.5" r="3" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.2"/>'
+            f'<circle cx="37.2" cy="34.5" r="3" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.2"/>'
+        ),
+        # 19: EV charge cable circle (#1D1D1B plug + loop) with red lightning inside
+        "ev_liability": (
+            f'<path d="M12.5 34.5A14 14 0 1 1 35 33.5" fill="none" stroke="{_BLK}" stroke-width="2.6" stroke-linecap="round"/>'
+            f'<path d="M11 33.5L17.5 24.5L23 28.5L16.5 37.5Z" fill="{_BLK}"/>'
+            f'<line x1="20.5" y1="22.8" x2="23" y2="19.5" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round"/>'
+            f'<line x1="24" y1="25.5" x2="26.5" y2="22.2" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round"/>'
+            f'<path d="M29.8 25L25.2 31.2H28.8L27.5 36.5L32.8 29.8H29.2L29.8 25Z" fill="{_RED}"/>'
+        ),
+        # 20: Scooter / delivery rider (#1D1D1B) with solid red rear box (#E52320)
+        "ehailing": (
+            f'<line x1="7" y1="18.5" x2="12" y2="18.5" stroke="{_BLK}" stroke-width="2" stroke-linecap="round"/>'
+            f'<line x1="5.5" y1="22" x2="11" y2="22" stroke="{_BLK}" stroke-width="2" stroke-linecap="round"/>'
+            f'<rect x="13" y="18.5" width="8.5" height="7" rx="1.2" fill="{_RED}"/>'
+            f'<circle cx="27.5" cy="13.5" r="3.4" fill="{_BLK}"/>'
+            f'<path d="M25.5 18L29.5 21.5L34.5 22M26.5 18.5L24.5 25.5L29 29.5" stroke="{_BLK}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<path d="M14 29H35.5L33 21.5" fill="none" stroke="{_BLK}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<circle cx="17" cy="33" r="4" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5"/>'
+            f'<circle cx="35.5" cy="33" r="4" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5"/>'
+        ),
+        # 21: Seated passenger with diagonal seatbelt (#1D1D1B) + red impact spark
+        "non_fare_passenger": (
+            f'<circle cx="24" cy="14" r="4.2" fill="{_BLK}"/>'
+            f'<path d="M16.5 23.5C16.5 20.5 19.5 19.2 24 19.2C28.5 19.2 31.5 20.5 31.5 23.5V32.5H16.5V23.5Z" fill="{_BLK}"/>'
+            f'<path d="M18 32.5V39M30 32.5V39" stroke="{_BLK}" stroke-width="3.6" stroke-linecap="round"/>'
+            f'<line x1="16.5" y1="30.5" x2="31" y2="20" stroke="#FFFFFF" stroke-width="2.6" stroke-linecap="round"/>'
+            f'<path d="M14 23.5L9.5 20.5L13 26.5L8.5 29L13.5 30.5L11.5 34.5" fill="none" stroke="{_RED}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>'
+        ),
+        # 22: Construction worker in hard hat (#1D1D1B) + warning triangle beside it
+        "third_party_working": (
+            f'<path d="M13 17C13 13 16 10.5 20 10.5C24 10.5 27 13 27 17Z" fill="{_BLK}"/>'
+            f'<line x1="11.2" y1="17.2" x2="28.8" y2="17.2" stroke="{_BLK}" stroke-width="2.4" stroke-linecap="round"/>'
+            f'<path d="M14.5 18V21.8C14.5 24.5 17 26.5 20 26.5C23 26.5 25.5 24.5 25.5 21.8V18" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.2"/>'
+            f'<path d="M10.5 37V32.5C10.5 29.8 14 28.5 20 28.5C24 28.5 26 29.2 27.5 30.2V37H10.5Z" fill="{_BLK}"/>'
+            f'<polygon points="34.5,24 42.5,37.5 26.5,37.5" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.2" stroke-linejoin="round"/>'
+            f'<line x1="34.5" y1="29.5" x2="34.5" y2="33.2" stroke="{_RED}" stroke-width="2.1" stroke-linecap="round"/>'
+            f'<circle cx="34.5" cy="35.3" r="1.1" fill="{_RED}"/>'
+        ),
+        # 23: Suspended crane load over person inside red prohibition ring + slash
+        "boom_damage": (
+            f'<line x1="24" y1="12" x2="24" y2="16.5" stroke="{_BLK}" stroke-width="2.2"/>'
+            f'<rect x="19" y="16.5" width="10" height="5.5" rx="0.8" fill="{_BLK}"/>'
+            f'<circle cx="24" cy="26.5" r="2.2" fill="{_BLK}"/>'
+            f'<path d="M24 29.2V35.5M20.5 31.5H27.5M21.8 39L24 34.5L26.2 39" stroke="{_BLK}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<circle cx="24" cy="24" r="14.5" fill="none" stroke="{_RED}" stroke-width="2.8"/>'
+            f'<line x1="13.8" y1="13.8" x2="34.2" y2="34.2" stroke="{_RED}" stroke-width="2.8" stroke-linecap="round"/>'
+        ),
+        # 24: Upside-down overturned car (#1D1D1B) + red flames rising above
+        "overturning": (
+            f'<path d="M21 15.5C21.8 12.8 23.2 11.2 24.5 10C24.4 12.5 25.8 13.2 27 11.2C28 13.5 29.8 12.2 30.2 10.5C31.5 12.8 32 14.8 31 17" fill="none" stroke="{_RED}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<g transform="rotate(14 23 26)">'
+            f'<path d="M8.5 22.5H39.5V27.5L35 33.5H15.5L9.5 28V22.5Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.3" stroke-linejoin="round"/>'
+            f'<circle cx="14.5" cy="21.5" r="3" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.2"/>'
+            f'<circle cx="33.5" cy="21.5" r="3" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.2"/>'
+            '</g>'
+            f'<line x1="7" y1="36.5" x2="41" y2="36.5" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round"/>'
+        ),
+        # Fallback shield icon
+        "generic": (
+            f'<path d="M24 9L37 13.5V23.8C37 31.8 31.4 37.4 24 39.8C16.6 37.4 11 31.8 11 23.8V13.5L24 9Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5" stroke-linejoin="round"/>'
+            f'<path d="M18.5 24.2L22.2 27.8L30 19.8" stroke="{_RED}" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round"/>'
+        ),
+    }
+
+    body = bodies.get(key, bodies["generic"])
+    return (
+        f'<svg width="{s}" height="{s}" viewBox="0 0 48 48" fill="none" '
+        f'xmlns="http://www.w3.org/2000/svg" aria-hidden="true">{body}</svg>'
+    )
+

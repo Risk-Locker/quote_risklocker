@@ -18,6 +18,8 @@ import { SessionPhaseBar } from "@/components/session-phase-bar";
 import {
   type CanvasElement,
 } from "@/components/template-canvas/shared";
+import { Design2CanvasView } from "@/components/template-canvas/design2-canvas";
+import { buildUnifiedMatrixCards } from "@/lib/unified-addon-engine";
 import {
   useWorkspaceActions,
   useWorkspaceData,
@@ -251,11 +253,31 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
   const dispOpts = workspace.display_options as Record<string, unknown> | undefined;
   const shouldRound = dispOpts?.round_total !== false;
   const rawPremNum = parseFloat(String(values.premium || "").replace(/[^0-9.]/g, "")) || 0;
-  const effPremStr = shouldRound && rawPremNum > 0 ? Math.round(rawPremNum).toFixed(2) : values.premium;
+  const effPremNum = shouldRound && rawPremNum > 0 ? Math.round(rawPremNum) : rawPremNum;
+  const effPremStr = shouldRound && rawPremNum > 0 ? effPremNum.toFixed(2) : values.premium;
+  const rtNum = parseFloat(String(values.roadtax || "").replace(/[^0-9.]/g, "")) || 0;
+  const sfRaw = values.service_fee || values.runner_fee || "";
+  const sfNum = parseFloat(String(sfRaw).replace(/[^0-9.]/g, "")) || 0;
+  const extrasTotal = (workspace.extras || []).reduce((acc, ex) => {
+    const amt = (ex as Record<string, unknown>)?.price;
+    const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
+    const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : (typeof val === "number" ? val : 0);
+    return acc + (Number.isFinite(num) ? num : 0);
+  }, 0);
+  const calcTotal = effPremNum + extrasTotal + rtNum + sfNum;
+  const effTotalNum = shouldRound && calcTotal > 0 ? Math.round(calcTotal) : calcTotal;
+  const effTotalStr = effTotalNum > 0 ? effTotalNum.toFixed(2) : (values.total_amount || "0.00");
+
   const premium = formatMoney(effPremStr || "0.00");
   const roadtax = formatMoney(values.roadtax || "0.00");
-  const runnerFee = formatMoney(values.service_fee || values.runner_fee || "20.00");
-  const totalPayable = formatMoney(values.total_amount || "0.00");
+  const runnerFee = formatMoney(sfRaw || "0.00");
+  const totalPayable = formatMoney(effTotalStr);
+
+  const design2Fields: Record<string, unknown> = {
+    ...workspace.fields,
+    ...(effPremStr ? { premium: effPremStr, coverage_premium: effPremStr } : {}),
+    ...(effTotalStr ? { total_amount: effTotalStr, total_premium_adjusted: effTotalStr } : {}),
+  };
 
   const currentBenefits = workspace.benefit_cards?.current_benefits || [];
   const addonBenefits = workspace.benefit_cards?.available_addons || [];
@@ -264,6 +286,18 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
     ...currentBenefits.map(b => ({ ...b, isAddon: false })),
     ...addonBenefits.map(b => ({ ...b, isAddon: true }))
   ];
+
+  const isDesign2 = Boolean(
+    template?.config?.layout_engine === "design2" ||
+    template?.config?.template_key === "motor_modern_design_2" ||
+    String((template?.config as any)?.template_name || "").toLowerCase().includes("design 2") ||
+    String((template?.config as any)?.template_name || "").toLowerCase().includes("design2")
+  );
+  const design2IncludeSchedule = Boolean(dispOpts?.include_benefit_schedule);
+  const design2CardCount = isDesign2
+    ? buildUnifiedMatrixCards(currentBenefits, addonBenefits, undefined, 24).length
+    : 0;
+  const design2CanvasH = design2IncludeSchedule || design2CardCount > 24 ? 1123 * 2 + 16 : 1123;
   
   const dynamicCanvasHeight = Math.max(baseCanvasHeight, 350 + allBenefits.length * 56 + 100);
   const canvasHeight = dynamicCanvasHeight;
@@ -363,9 +397,9 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
           panelRef={leftPanelRef}
           collapsible={true}
           onResize={() => setIsSidebarCollapsed(leftPanelRef.current?.isCollapsed() ?? false)}
-          defaultSize={35} 
-          minSize={25} 
-          maxSize={50} 
+          defaultSize="34%" 
+          minSize="25%" 
+          maxSize="50%" 
           className="grid gap-4 content-start w-full"
         >
           
@@ -495,7 +529,7 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
         <Separator className="w-2 rounded-full bg-[var(--rl-border)] hover:bg-[var(--rl-red)] transition-colors opacity-50 hover:opacity-100 cursor-col-resize self-stretch hidden lg:block" />
 
         {/* Right Column: Complete High-Fidelity SVG Quotation Canvas */}
-        <Panel defaultSize={65} minSize={40} className="grid place-items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[#ececee] p-6 shadow-inner relative overflow-hidden w-full h-full">
+        <Panel defaultSize="66%" minSize="40%" className="grid place-items-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[#ececee] p-6 shadow-inner relative overflow-hidden w-full h-full">
           
           {/* Zoom & View Controls Bar */}
           <div className="mb-4 flex w-full max-w-[640px] items-center justify-between rounded-md bg-white/90 px-3 py-1.5 shadow-xs backdrop-blur-xs border border-neutral-200">
@@ -548,7 +582,7 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
             </div>
           </div>
 
-          {/* High-Fidelity Quotation SVG Canvas Container */}
+          {/* High-Fidelity Quotation Canvas Container */}
           <div
             ref={canvasContainerRef}
             className="w-full max-w-[640px] bg-white shadow-card rounded-[4px] overflow-auto border border-neutral-300 transition-all duration-200"
@@ -557,6 +591,19 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
               transformOrigin: "top center",
             }}
           >
+            {isDesign2 ? (
+              <div style={{ width: "640px", height: `${Math.round(design2CanvasH * (640 / 794))}px`, overflow: "hidden" }}>
+                <div style={{ width: "794px", transform: `scale(${640 / 794})`, transformOrigin: "top left" }}>
+                  <Design2CanvasView
+                    fields={design2Fields}
+                    currentBenefits={currentBenefits}
+                    availableAddons={addonBenefits}
+                    companyName={insuranceCompany}
+                    includeSchedule={design2IncludeSchedule}
+                  />
+                </div>
+              </div>
+            ) : (
             <svg
               viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
               className="w-full h-auto bg-white block"
@@ -694,6 +741,7 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
                 This quotation is generated electronically by RiskLocker and is valid subject to standard insurer underwriting terms.
               </text>
             </svg>
+            )}
           </div>
         </Panel>
 

@@ -88,6 +88,7 @@ export default function BenefitCardTemplatesPage() {
 
   // Live Final Customer A4 PDF Quotation Preview State
   const [docLoadProfile, setDocLoadProfile] = useState<"minimum" | "medium" | "high">("high");
+  const [docRenderMode, setDocRenderMode] = useState<"quotation" | "schedule" | "combined">("quotation");
   const [docIncludePerils, setDocIncludePerils] = useState<boolean>(true);
   const [docSelectedSessionId, setDocSelectedSessionId] = useState<string>("");
   const [docTemplates, setDocTemplates] = useState<Array<{ id: string; name: string }>>([]);
@@ -134,6 +135,7 @@ export default function BenefitCardTemplatesPage() {
             load_profile: docLoadProfile,
             include_purchased_perils: docIncludePerils,
             benefit_preset_config: customStyle,
+            render_mode: docRenderMode,
           }),
         });
         if (!cancelled) {
@@ -152,7 +154,19 @@ export default function BenefitCardTemplatesPage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [customStyle, docLoadProfile, docIncludePerils, docSelectedSessionId, docSelectedTemplateId]);
+  }, [customStyle, docLoadProfile, docIncludePerils, docSelectedSessionId, docSelectedTemplateId, docRenderMode]);
+
+  const docPageCount = useMemo(() => {
+    if (!docHtml) return 1;
+    const d2Matches = docHtml.match(/class="d2-page"/g) || [];
+    if (d2Matches.length > 0) {
+      return !docHtml.includes("data-d2-root") && docRenderMode === "combined"
+        ? 1 + d2Matches.length
+        : d2Matches.length;
+    }
+    return 1;
+  }, [docHtml, docRenderMode]);
+  const docTotalHeight = docPageCount * 1123;
 
   const handleOpenDocInNewTab = useCallback(() => {
     if (!docHtml) return;
@@ -2177,6 +2191,31 @@ export default function BenefitCardTemplatesPage() {
                         </select>
                       )}
 
+                      {/* Render Mode Switcher: Quotation / Schedule / Combined */}
+                      <div className="flex items-center gap-1 bg-slate-800 p-0.5 rounded border border-slate-700">
+                        <span className="text-slate-400 px-1.5 font-bold text-[10.5px]">SHEET:</span>
+                        {(
+                          [
+                            { id: "quotation", label: "Quotation" },
+                            { id: "schedule", label: "Schedule" },
+                            { id: "combined", label: "Quote + Schedule" },
+                          ] as const
+                        ).map((mode) => (
+                          <button
+                            key={mode.id}
+                            type="button"
+                            onClick={() => setDocRenderMode(mode.id)}
+                            className={`px-2 py-0.5 rounded text-[11px] font-bold transition-colors ${
+                              docRenderMode === mode.id
+                                ? "bg-rose-600 text-white shadow-xs"
+                                : "text-slate-400 hover:text-slate-200"
+                            }`}
+                          >
+                            {mode.label}
+                          </button>
+                        ))}
+                      </div>
+
                       {/* Purchased Perils Toggle */}
                       <button
                         type="button"
@@ -2252,11 +2291,12 @@ export default function BenefitCardTemplatesPage() {
                     <div
                       style={{
                         width: "794px",
-                        height: "1123px",
+                        height: `${docTotalHeight}px`,
+                        marginBottom: `-${Math.round(docTotalHeight * (1 - docZoom))}px`,
                         transform: `scale(${docZoom})`,
                         transformOrigin: "top center",
                       }}
-                      className="bg-white shadow-2xl relative shrink-0 overflow-hidden rounded-xs border border-slate-700"
+                      className="bg-white shadow-2xl relative shrink-0 rounded-xs border border-slate-700"
                     >
                       {docLoading && !docHtml && (
                         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/95 gap-3">
@@ -2276,7 +2316,8 @@ export default function BenefitCardTemplatesPage() {
                         <iframe
                           srcDoc={docHtml}
                           title="Authentic Customer PDF Quotation Preview"
-                          className="w-[794px] h-[1123px] border-0 select-auto pointer-events-auto bg-white"
+                          style={{ width: "794px", height: `${docTotalHeight}px` }}
+                          className="border-0 select-auto pointer-events-auto bg-white block"
                         />
                       )}
                     </div>
