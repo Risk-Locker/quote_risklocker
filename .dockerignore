@@ -1,0 +1,72 @@
+# Version control
+.git
+.gitignore
+.github
+
+# Environment and secrets (CRITICAL: ZERO .ENV IN DOCKER)
+.env
+.env.*
+.env.production
+.env.local
+.env.development
+.env.test
+
+# Virtual environments and Python cache
+.venv
+venv
+ENV
+env
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Node.js and Next.js build outputs
+node_modules
+frontend/node_modules
+.next
+frontend/.next
+.turbo
+*.tsbuildinfo
+
+# Testing, coverage, and temporary inspection artifacts
+.pytest_cache
+.coverage
+htmlcov
+.nyc_output
+coverage
+frontend/playwright-report
+frontend/test-results
+.qc-tmp
+backend/.qc-tmp
+
+# Storage and media
+storage/
+*.pdf
+*.xls
+*.xlsx
+*.rar
+*.sqlite
+*.db
+*.log
+
+# IDE & Editor artifacts
+.vscode
+.idea
+.claude
+.cursor
+.windsurfrules
+.clinerules
+.opencode
+.token-counter
+*.swp
+*.swo
+
+# Local agent artifacts & proposals
+.agents
+.skill-sources
+copy.md
+manual.md
+samples/
+

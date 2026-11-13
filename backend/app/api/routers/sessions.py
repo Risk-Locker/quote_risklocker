@@ -98,6 +98,7 @@ from app.api.schemas import (
     QuotationStatusUpdateRequest,
     BackfillConfirmRequest,
     VehicleOwnershipResolutionRequest,
+    UpdateSessionRequest,
 )
 from app.auth.cookies import clear_auth_cookies, set_auth_cookies
 from app.auth.rbac import can_view_owner_record, require_role
@@ -118,12 +119,14 @@ from app.models.tables import (
     ExtractionRecord,
     GeneratedPdfVersion,
     InsuranceCompany,
+    InsuranceTenure,
     Job,
     OurSpecial,
     OurSpecialVariant,
     OutputTemplateConfig,
     QuotationDraft,
     StorageConnection,
+    TenureComparisonEntry,
     UploadedFile,
     User,
     VehicleBrand,
@@ -420,6 +423,17 @@ async def upload_one(
         tenure_id=tenure_id,
         document_type=document_type,
     )
+    try:
+        from app.workers.fair_queue_worker import get_fair_share_queue
+        get_fair_share_queue().enqueue(
+            user_id=user.id,
+            document_id=queued.uploaded_file.id,
+            job_id=queued.job.id,
+            payload={"session_id": queued.session.id, "tenure_id": tenure_id},
+        )
+    except Exception:
+        pass
+
     return {
         "session_id": queued.session.id,
         "job_id": queued.job.id,
@@ -437,6 +451,20 @@ def job_detail(job_id: str, db: Session = Depends(get_db), _user: User = Depends
         raise AppError("Job not found.", 404)
     serialized = serialize_job(job)
     serialized["status"] = serialized.get("state")
+
+    try:
+        from app.workers.fair_queue_worker import get_fair_share_queue
+        queue = get_fair_share_queue()
+        q_pos = queue.get_queue_position(_user.id, job_id)
+        if q_pos.get("position", -1) != -1:
+            serialized["queue_position"] = q_pos["position"]
+            serialized["active_users_count"] = q_pos["active_users_count"]
+            serialized["other_users_count"] = q_pos["other_users_count"]
+            serialized["total_pending_jobs"] = q_pos["total_pending_jobs"]
+            serialized["items_ahead_for_user"] = q_pos["items_ahead_for_user"]
+    except Exception:
+        pass
+
     return {
         "job": serialized,
         "state": serialized.get("state"),
@@ -671,6 +699,94 @@ def sessions_bulk_download_zip(
 def session_detail(session_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     session = get_session(db, session_id)
     return {"session": serialize_session(session)}
+
+
+
+@router.patch("/sessions/{session_id}")
+def update_session(
+    session_id: str,
+    payload: UpdateSessionRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    session = get_session(db, session_id)
+    if not session or not can_view_owner_record(db, user, session.owner_id):
+        raise AppError("Session not found.", 404)
+
+    if payload.document_type:
+        target_type = payload.document_type.lower().strip()
+        if target_type not in ("covernote", "quotation"):
+            raise AppError("Invalid document_type. Must be 'covernote' or 'quotation'.", 400)
+        session.document_type = target_type
+
+        if session.tenure_id:
+            tenure = db.get(InsuranceTenure, session.tenure_id)
+            if tenure:
+                if target_type == "covernote":
+                    # Remove any existing comparison entry for this session
+                    entries = list(
+                        db.scalars(
+                            select(TenureComparisonEntry).where(
+                                TenureComparisonEntry.tenure_id == tenure.id,
+                                TenureComparisonEntry.session_id == session.id,
+                            )
+                        ).all()
+                    )
+                    for e in entries:
+                        db.delete(e)
+
+                    # Bind as active cover note
+                    tenure.covernote_session_id = session.id
+                    if session.coverage_start_date:
+                        tenure.coverage_start_date = session.coverage_start_date
+                    if session.coverage_end_date:
+                        tenure.coverage_end_date = session.coverage_end_date
+                        tenure.expiry_month = session.coverage_end_date.strftime("%Y-%m")
+                    if getattr(session, "company_id", None):
+                        tenure.winning_company_id = session.company_id
+                    if session.policy_number:
+                        tenure.policy_number = session.policy_number
+                    if session.draft and isinstance(session.draft.fields, dict):
+                        tot_val = (session.draft.fields.get("total_amount") or {}).get("value") or (session.draft.fields.get("total_payable") or {}).get("value")
+                        if tot_val:
+                            try:
+                                tenure.won_premium = float(str(tot_val).replace(",", "").replace("RM", "").strip())
+                            except (ValueError, TypeError):
+                                pass
+
+                    if tenure.stage in ("Quotations", "Material to Client", None, "draft"):
+                        tenure.stage = "Issue Policy"
+                        stage_hist = dict(tenure.stage_history or {})
+                        stage_hist["Issue Policy"] = datetime.now(timezone.utc).isoformat()
+                        tenure.stage_history = stage_hist
+                        tenure.stage_updated_at = datetime.now(timezone.utc)
+
+                    from app.services.insurance_tenure_service import create_next_year_renewal_tenure
+                    try:
+                        create_next_year_renewal_tenure(db=db, tenure=tenure, user_id=user.id)
+                    except Exception:
+                        pass
+                else: # target_type == "quotation"
+                    if tenure.covernote_session_id == session.id:
+                        tenure.covernote_session_id = None
+                    if tenure.stage == "Issue Policy":
+                        tenure.stage = "Quotations"
+                        tenure.stage_updated_at = datetime.now(timezone.utc)
+
+                    from app.services.insurance_tenure_service import remove_auto_created_next_year_tenure
+                    try:
+                        remove_auto_created_next_year_tenure(db=db, tenure=tenure)
+                    except Exception:
+                        pass
+
+    if payload.status:
+        session.status = payload.status
+    if payload.detected_company:
+        session.detected_company = payload.detected_company
+
+    db.commit()
+    return {"status": "success", "session": serialize_session(session), "document_type": session.document_type}
+
 
 
 

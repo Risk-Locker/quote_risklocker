@@ -17,7 +17,7 @@ from typing import Any
 from collections import defaultdict
 
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, selectinload, joinedload
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.tables import (
@@ -43,6 +43,10 @@ from app.models.tables import (
     UploadedFile,
     User,
     new_id,
+)
+from app.domain.motor.currency_rounding import (
+    apply_bnm_cash_rounding,
+    apply_whole_ringgit_rounding,
 )
 from app.services.customer_account_service import resolve_or_create_customer
 from app.services.benefit_evaluation_engine import BenefitEvaluationEngine, EvaluatedBenefit
@@ -104,7 +108,15 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
         - recommended sum insured / valuation matrix
         - NCD status
     """
-    tenure = db.get(InsuranceTenure, tenure_id)
+    tenure = db.scalars(
+        select(InsuranceTenure)
+        .options(
+            joinedload(InsuranceTenure.tracked_vehicle),
+            joinedload(InsuranceTenure.customer),
+            joinedload(InsuranceTenure.winning_company),
+        )
+        .where(InsuranceTenure.id == tenure_id)
+    ).first()
     if not tenure:
         raise ValueError(f"Tenure {tenure_id} not found")
 
@@ -119,11 +131,14 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
 
     needs_commit = False
 
-    # 2. Query all linked sessions under this tenure (with preloaded drafts)
+    # 2. Query all linked sessions under this tenure (with preloaded drafts & uploaded files)
     sessions = list(
         db.scalars(
             select(SessionModel)
-            .options(selectinload(SessionModel.draft))
+            .options(
+                selectinload(SessionModel.draft),
+                selectinload(SessionModel.uploaded_file),
+            )
             .where(
                 SessionModel.tenure_id == tenure_id,
                 SessionModel.status != "trash",
@@ -135,6 +150,7 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
 
     # Clean up any comparison entries erroneously created for Cover Note sessions or pointing to trashed/missing sessions
     valid_entries = []
+    seen_companies = {}
     for e in entries:
         if e.session_id:
             sess = session_map.get(e.session_id)
@@ -148,11 +164,19 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             db.delete(e)
             needs_commit = True
             continue
+
+        # Deduplicate multiple entries for the same underwriter under this tenure (Single Column per Insurer Invariant)
+        comp_key = str(e.company_id or e.company_name or "").strip().lower()
+        if comp_key in seen_companies:
+            db.delete(e)
+            needs_commit = True
+            continue
+        seen_companies[comp_key] = e
         valid_entries.append(e)
     entries = valid_entries
 
-    # Separate quotation sessions from cover note sessions
-    quote_sessions = [s for s in sessions if not is_covernote_document(s, db)]
+    # Separate quotation sessions from cover note sessions — only active, non-superseded quotation sessions form comparison columns
+    quote_sessions = [s for s in sessions if not is_covernote_document(s, db) and s.is_tenure_active is not False]
 
     # Auto-link Cover Note to tenure if not already assigned (exclude unlinked_covernote)
     if not tenure.covernote_session_id:
@@ -268,14 +292,20 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             jurisdiction="West Malaysia",
         )
 
-    if float(tenure.road_tax) > 0.0:
+    if tenure.include_road_tax is False:
+        road_tax_val = 0.0
+    elif float(tenure.road_tax) > 0.0:
         road_tax_val = float(tenure.road_tax)
     elif calculated_jpj_road_tax > 0.0:
         road_tax_val = calculated_jpj_road_tax
         tenure.road_tax = calculated_jpj_road_tax
         needs_commit = True
+    else:
+        road_tax_val = 0.0
 
-    if float(tenure.runner_fee) > 0.0:
+    if tenure.include_runner_fee is False:
+        runner_fee_val = 0.0
+    elif float(tenure.runner_fee) > 0.0:
         runner_fee_val = float(tenure.runner_fee)
     else:
         calc_runner = detect_runner_fee_from_id(cand_ic)
@@ -283,6 +313,8 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             runner_fee_val = calc_runner
             tenure.runner_fee = calc_runner
             needs_commit = True
+        else:
+            runner_fee_val = 0.0
 
     # 3. Resolve Vehicle Year of Manufacture (YOM) and Age
     veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if tenure.tracked_vehicle else None
@@ -360,6 +392,13 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     else:
         # Synchronize any quotation sessions under this tenure that don't have a comparison entry yet
         existing_sess_ids = {e.session_id for e in entries if e.session_id}
+        existing_comp_entries = {}
+        for e in entries:
+            if e.company_id:
+                existing_comp_entries[str(e.company_id).lower()] = e
+            if e.company_name:
+                existing_comp_entries[e.company_name.strip().lower()] = e
+
         unlinked_sessions = [s for s in quote_sessions if s.id not in existing_sess_ids]
         if unlinked_sessions:
             for idx, s in enumerate(unlinked_sessions):
@@ -387,45 +426,78 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                     is_comprehensive_private=True,
                 )
 
-                new_entry = TenureComparisonEntry(
-                    tenure_id=tenure_id,
-                    session_id=s.id,
-                    company_name=comp_name,
-                    company_id=getattr(s, "company_id", None),
-                    sum_insured=sum_ins,
-                    valuation_type=val_type,
-                    motor_premium=motor_prem,
-                    road_tax=float(tenure.road_tax),
-                    runner_fee=float(tenure.runner_fee),
-                    total_payable=tot_pay,
-                    towing_limit=b_res["towing_km"],
-                    towing_km=b_res["towing_km"],
-                    agreed_value=agreed,
-                    waiver_betterment=has_waiver,
-                    betterment_rate=bet_rate,
-                    betterment_display=bet_disp,
-                    excess=excess_val,
-                    rate_percentage=rate_val,
-                    windscreen_sum_insured=b_res["windscreen_sum_insured"],
-                    special_perils=b_res["special_perils"],
-                    llp_llop=b_res["llp_llop"],
-                    sort_order=len(entries) + idx,
-                    is_recommended=bool(
-                        (tenure.winning_quotation_ref and s.quotation_ref == tenure.winning_quotation_ref)
-                        or (tenure.winning_company_id and getattr(s, "company_id", None) == tenure.winning_company_id)
-                    ),
-                )
-                db.add(new_entry)
-                entries.append(new_entry)
+                c_id_key = str(getattr(s, "company_id", "") or "").lower()
+                c_name_key = comp_name.strip().lower()
+                existing_match = existing_comp_entries.get(c_id_key) or existing_comp_entries.get(c_name_key)
+
+                if existing_match:
+                    # In-place update of existing company column with the latest quotation
+                    existing_match.session_id = s.id
+                    existing_match.sum_insured = sum_ins
+                    existing_match.valuation_type = val_type
+                    existing_match.motor_premium = motor_prem
+                    existing_match.total_payable = tot_pay
+                    existing_match.towing_limit = b_res["towing_km"]
+                    existing_match.towing_km = b_res["towing_km"]
+                    existing_match.agreed_value = agreed
+                    existing_match.waiver_betterment = has_waiver
+                    existing_match.betterment_rate = bet_rate
+                    existing_match.betterment_display = bet_disp
+                    existing_match.excess = excess_val
+                    existing_match.rate_percentage = rate_val
+                    existing_match.windscreen_sum_insured = b_res["windscreen_sum_insured"]
+                    existing_match.special_perils = b_res["special_perils"]
+                    existing_match.llp_llop = b_res["llp_llop"]
+                    existing_match.version = s.tenure_version or (existing_match.version + 1)
+                else:
+                    new_entry = TenureComparisonEntry(
+                        tenure_id=tenure_id,
+                        session_id=s.id,
+                        company_name=comp_name,
+                        company_id=getattr(s, "company_id", None),
+                        sum_insured=sum_ins,
+                        valuation_type=val_type,
+                        motor_premium=motor_prem,
+                        road_tax=float(tenure.road_tax),
+                        runner_fee=float(tenure.runner_fee),
+                        total_payable=tot_pay,
+                        towing_limit=b_res["towing_km"],
+                        towing_km=b_res["towing_km"],
+                        agreed_value=agreed,
+                        waiver_betterment=has_waiver,
+                        betterment_rate=bet_rate,
+                        betterment_display=bet_disp,
+                        excess=excess_val,
+                        rate_percentage=rate_val,
+                        windscreen_sum_insured=b_res["windscreen_sum_insured"],
+                        special_perils=b_res["special_perils"],
+                        llp_llop=b_res["llp_llop"],
+                        sort_order=len(entries) + idx,
+                        version=s.tenure_version or 1,
+                        is_recommended=bool(
+                            (tenure.winning_quotation_ref and s.quotation_ref == tenure.winning_quotation_ref)
+                            or (tenure.winning_company_id and getattr(s, "company_id", None) == tenure.winning_company_id)
+                        ),
+                    )
+                    db.add(new_entry)
+                    entries.append(new_entry)
+                    if c_id_key:
+                        existing_comp_entries[c_id_key] = new_entry
+                    existing_comp_entries[c_name_key] = new_entry
             needs_commit = True
+
+        eff_tenure_rt = float(tenure.road_tax) if (tenure.include_road_tax is not False) else 0.0
+        eff_tenure_rf = float(tenure.runner_fee) if (tenure.include_runner_fee is not False) else 0.0
 
         # Parity check: synchronize fixed costs (road tax, runner fee) and fallback betterment rates without clobbering user edits
         for e in entries:
             # Sync road tax & runner fee from tenure if changed
-            if abs(float(e.road_tax) - float(tenure.road_tax)) > 0.01 or abs(float(e.runner_fee) - float(tenure.runner_fee)) > 0.01:
-                e.road_tax = float(tenure.road_tax)
-                e.runner_fee = float(tenure.runner_fee)
-                e.total_payable = float(e.motor_premium) + float(e.road_tax) + float(e.runner_fee)
+            if abs(float(e.road_tax) - eff_tenure_rt) > 0.01 or abs(float(e.runner_fee) - eff_tenure_rf) > 0.01:
+                e.road_tax = eff_tenure_rt
+                e.runner_fee = eff_tenure_rf
+                e.include_road_tax = (tenure.include_road_tax is not False)
+                e.include_runner_fee = (tenure.include_runner_fee is not False)
+                e.total_payable = float(e.motor_premium) + eff_tenure_rt + eff_tenure_rf
                 needs_commit = True
 
             quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now().year
@@ -453,19 +525,20 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
 
             if tow_is_corrupt and not e.is_manual and e.session_id:
                 s_cand = session_map.get(e.session_id)
-                s_cand_fields = s_cand.draft.fields if s_cand and s_cand.draft and isinstance(s_cand.draft.fields, dict) else {}
-                b_cand = _resolve_comparison_benefits(
-                    db,
-                    s_cand,
-                    getattr(s_cand, "company_id", None) or e.company_id,
-                    s_cand_fields,
-                    float(tenure.windscreen_target) if tenure.windscreen_target else None,
-                )
-                cand_tow = b_cand.get("towing_km")
-                if cand_tow:
-                    e.towing_km = cand_tow
-                    e.towing_limit = cand_tow
-                    needs_commit = True
+                if s_cand:
+                    s_cand_fields = s_cand.draft.fields if s_cand.draft and isinstance(s_cand.draft.fields, dict) else {}
+                    b_cand = _resolve_comparison_benefits(
+                        db,
+                        s_cand,
+                        getattr(s_cand, "company_id", None) or e.company_id,
+                        s_cand_fields,
+                        float(tenure.windscreen_target) if tenure.windscreen_target else None,
+                    )
+                    cand_tow = b_cand.get("towing_km")
+                    if cand_tow:
+                        e.towing_km = cand_tow
+                        e.towing_limit = cand_tow
+                        needs_commit = True
             elif tow_is_corrupt and is_rm_insurer:
                 if "qbe" in c_name_lower:
                     fallback_tow = "RM 500"
@@ -997,15 +1070,21 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
 
         raw_motor_prem = float(e.motor_premium)
         rounded_motor_prem = float(round(raw_motor_prem))
+        bnm_5c_motor_prem = float(apply_bnm_cash_rounding(raw_motor_prem))
         rt = float(e.road_tax)
         rf = float(e.runner_fee)
         exact_tot = float(e.total_payable) if e.total_payable is not None else (raw_motor_prem + rt + rf)
         rounded_tot = rounded_motor_prem + rt + rf
+        bnm_5c_tot = float(apply_bnm_cash_rounding(exact_tot))
+        whole_tot = float(apply_whole_ringgit_rounding(exact_tot))
+        whole_motor_prem = float(apply_whole_ringgit_rounding(raw_motor_prem))
 
         # Effective discount: entry-level discount if specified, else tenure-level quotation discount
         effective_discount = float(e.discount) if e.discount is not None else float(getattr(tenure, "quotation_discount", 0.0) or 0.0)
         net_exact_tot = max(0.0, exact_tot - effective_discount)
         net_rounded_tot = max(0.0, rounded_tot - round(effective_discount))
+        bnm_5c_net_tot = float(apply_bnm_cash_rounding(net_exact_tot))
+        whole_net_tot = float(apply_whole_ringgit_rounding(net_exact_tot))
 
         entry_dicts.append({
             "id": e.id,
@@ -1017,16 +1096,24 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "valuation_type": e.valuation_type,
             "motor_premium": float(e.motor_premium),
             "rounded_motor_premium": rounded_motor_prem,
+            "bnm_5cent_motor_premium": bnm_5c_motor_prem,
+            "whole_motor_premium": whole_motor_prem,
             "exact_motor_premium": raw_motor_prem,
             "road_tax": rt,
             "runner_fee": rf,
+            "include_road_tax": getattr(e, "include_road_tax", True) if getattr(e, "include_road_tax", None) is not None else (tenure.include_road_tax if tenure.include_road_tax is not None else True),
+            "include_runner_fee": getattr(e, "include_runner_fee", True) if getattr(e, "include_runner_fee", None) is not None else (tenure.include_runner_fee if tenure.include_runner_fee is not None else True),
             "discount": float(e.discount) if e.discount is not None else None,
             "effective_discount": effective_discount,
             "total_payable": float(e.total_payable) if e.total_payable is not None else exact_tot,
             "rounded_total_payable": rounded_tot,
+            "bnm_5cent_total_payable": bnm_5c_tot,
+            "whole_total_payable": whole_tot,
             "exact_total_payable": exact_tot,
             "net_total_payable": net_exact_tot,
             "rounded_net_total_payable": net_rounded_tot,
+            "bnm_5cent_net_total_payable": bnm_5c_net_tot,
+            "whole_net_total_payable": whole_net_tot,
             "towing_limit": e.towing_limit,
             "towing_km": e.towing_km or e.towing_limit,
             "agreed_value": e.agreed_value,
@@ -1103,8 +1190,15 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "original_filename": s_obj.uploaded_file.original_filename if (s_obj and s_obj.uploaded_file) else None,
         })
 
-    # 10. Group sessions into upload session timeline ribbon
-    sorted_sessions = sorted(sessions, key=lambda s: s.created_at or datetime.min.replace(tzinfo=timezone.utc))
+    # 10. Group sessions into upload session timeline ribbon — strictly filter to active, non-superseded quotation sessions
+    active_quote_sessions = [
+        s for s in sessions
+        if s.is_tenure_active is not False
+        and s.duplicate_resolution not in ("superseded", "superseded_pruned")
+        and s.status not in ("trash", "archived")
+        and not is_covernote_document(s, db)
+    ]
+    sorted_sessions = sorted(active_quote_sessions, key=lambda s: s.created_at or datetime.min.replace(tzinfo=timezone.utc))
     batches_map: dict[str, list[SessionModel]] = defaultdict(list)
     for s in sorted_sessions:
         b_idx = getattr(s, "batch_session_index", 1) or 1
@@ -1114,6 +1208,8 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
 
     upload_sessions = []
     for idx, (b_key, b_sess) in enumerate(batches_map.items()):
+        if not b_sess:
+            continue
         first_s = b_sess[0]
         upload_sessions.append({
             "session_id": first_s.id,
@@ -1306,6 +1402,15 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
     else:
         current_ncd_period = f"{current_year - 1} to {current_year}"
 
+    resolved_vtype = "Car"
+    for s in sessions:
+        if s.draft and isinstance(s.draft.fields, dict):
+            vt_obj = s.draft.fields.get("vehicle_type")
+            vt_val = vt_obj.get("value") if isinstance(vt_obj, dict) else vt_obj
+            if vt_val and str(vt_val).strip() and "综合" not in str(vt_val):
+                resolved_vtype = str(vt_val).strip()
+                break
+
     return {
         "tenure": {
             "id": tenure.id,
@@ -1340,14 +1445,17 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             "status": tenure.status,
             "road_tax": float(tenure.road_tax),
             "runner_fee": float(tenure.runner_fee),
+            "include_road_tax": tenure.include_road_tax if tenure.include_road_tax is not None else True,
+            "include_runner_fee": tenure.include_runner_fee if tenure.include_runner_fee is not None else True,
             "runner_fee_type": "passport" if (float(tenure.runner_fee) >= 20.0 or (cust_ic and cust_ic[0].isalpha() and not cust_ic.upper().startswith("PENDING-"))) else "mykad",
-            "fixed_costs_total": float(tenure.road_tax + tenure.runner_fee),
+            "fixed_costs_total": (float(tenure.road_tax) if tenure.include_road_tax is not False else 0.0) + (float(tenure.runner_fee) if tenure.include_runner_fee is not False else 0.0),
             "quotation_discount": float(getattr(tenure, "quotation_discount", 0.0) or 0.0),
             "windscreen_target": float(tenure.windscreen_target) if tenure.windscreen_target else None,
             "ncd_percentage": float(tenure.ncd_percentage) if tenure.ncd_percentage is not None else None,
             "car_brand": (tenure.tracked_vehicle.car_brand if tenure.tracked_vehicle else None) or waterfall_brand,
             "vehicle_model": veh_model or "Motor Vehicle",
-            "vehicle_type": "Comprehensive (综合险)",
+            "vehicle_type": resolved_vtype,
+            "coverage_type": "Comprehensive (综合险)",
         },
         "covernote_policy": covernote_policy,
         "unlinked_covernotes": unlinked_covernotes,
@@ -1410,6 +1518,8 @@ def update_tenure_fixed_costs(
     *,
     road_tax: float,
     runner_fee: float,
+    include_road_tax: bool | None = None,
+    include_runner_fee: bool | None = None,
     windscreen_target: float | None = None,
     ncd_percentage: float | None = None,
     current_ncd: float | None = None,
@@ -1423,13 +1533,32 @@ def update_tenure_fixed_costs(
     engine_no: str | None = None,
     chassis_no: str | None = None,
     vehicle_model: str | None = None,
+    vehicle_type: str | None = None,
     manufacture_year: int | None = None,
     quotation_discount: float | None = None,
 ) -> dict[str, Any]:
     """Update fixed tenure expenses (Road Tax & Runner Fee), coverage dates, vehicle specs, and recalculate total payables for all columns."""
-    tenure = db.get(InsuranceTenure, tenure_id)
+    tenure = db.scalars(
+        select(InsuranceTenure)
+        .options(
+            joinedload(InsuranceTenure.tracked_vehicle),
+            joinedload(InsuranceTenure.customer),
+            joinedload(InsuranceTenure.previous_tenure),
+        )
+        .where(InsuranceTenure.id == tenure_id)
+    ).first()
     if not tenure:
         raise ValueError(f"Tenure {tenure_id} not found")
+
+    if include_road_tax is not None:
+        tenure.include_road_tax = include_road_tax
+    elif road_tax == 0.0:
+        tenure.include_road_tax = False
+
+    if include_runner_fee is not None:
+        tenure.include_runner_fee = include_runner_fee
+    elif runner_fee == 0.0:
+        tenure.include_runner_fee = False
 
     tenure.road_tax = road_tax
     if quotation_discount is not None:
@@ -1504,12 +1633,19 @@ def update_tenure_fixed_costs(
                 if s.draft and isinstance(s.draft.fields, dict):
                     f = dict(s.draft.fields)
                     if customer_name and customer_name.strip():
-                        for name_k in ["customer_name", "policyholder_name", "client_name"]:
+                        for name_k in ["customer_name", "insured_name", "policyholder_name", "client_name"]:
                             if name_k in f:
                                 if isinstance(f[name_k], dict):
                                     f[name_k] = {**f[name_k], "value": cust.canonical_name}
                                 else:
                                     f[name_k] = cust.canonical_name
+                        f["customer_name"] = cust.canonical_name
+                        f["insured_name"] = cust.canonical_name
+                    if vehicle_type and vehicle_type.strip():
+                        if isinstance(f.get("vehicle_type"), dict):
+                            f["vehicle_type"] = {**f["vehicle_type"], "value": vehicle_type.strip()}
+                        else:
+                            f["vehicle_type"] = vehicle_type.strip()
                     if ic_no and ic_no.strip():
                         for ic_k in ["customer_ic_no", "ic_no", "nric_no", "id_number"]:
                             if ic_k in f:
@@ -1615,12 +1751,14 @@ def update_tenure_fixed_costs(
             if dt_end:
                 f["coverage_end_date"] = dt_end.isoformat()
             if customer_name and customer_name.strip():
-                for k in ["customer_name", "policyholder_name", "client_name"]:
+                for k in ["customer_name", "insured_name", "policyholder_name", "client_name"]:
                     if k in f:
                         if isinstance(f[k], dict):
                             f[k] = {**f[k], "value": customer_name.strip()}
                         else:
                             f[k] = customer_name.strip()
+                f["customer_name"] = customer_name.strip()
+                f["insured_name"] = customer_name.strip()
             if ic_no and ic_no.strip():
                 for k in ["customer_ic_no", "ic_no", "nric_no", "id_number"]:
                     if k in f:
@@ -1648,7 +1786,44 @@ def update_tenure_fixed_costs(
                     f["car_model"] = {**f["car_model"], "value": vehicle_model.strip()}
                 else:
                     f["car_model"] = vehicle_model.strip()
+            if vehicle_type and vehicle_type.strip():
+                if isinstance(f.get("vehicle_type"), dict):
+                    f["vehicle_type"] = {**f["vehicle_type"], "value": vehicle_type.strip()}
+                else:
+                    f["vehicle_type"] = vehicle_type.strip()
+
+            eff_road_tax = road_tax if (tenure.include_road_tax is not False) else 0.0
+            eff_runner_fee = float(tenure.runner_fee) if (tenure.include_runner_fee is not False) else 0.0
+
+            rt_str = f"{eff_road_tax:.2f}"
+            if isinstance(f.get("roadtax"), dict):
+                f["roadtax"] = {**f["roadtax"], "value": rt_str}
+            else:
+                f["roadtax"] = rt_str
+
+            sf_str = f"{eff_runner_fee:.2f}"
+            if isinstance(f.get("service_fee"), dict):
+                f["service_fee"] = {**f["service_fee"], "value": sf_str}
+            else:
+                f["service_fee"] = sf_str
+
+            raw_p = f.get("premium")
+            val_p = raw_p.get("value") if isinstance(raw_p, dict) else raw_p
+            try:
+                p_num = float(str(val_p).replace(",", "")) if val_p else 0.0
+            except (ValueError, TypeError):
+                p_num = 0.0
+            tot_num = p_num + eff_road_tax + eff_runner_fee
+            tot_str = f"{tot_num:.2f}"
+            if isinstance(f.get("total_amount"), dict):
+                f["total_amount"] = {**f["total_amount"], "value": tot_str}
+            else:
+                f["total_amount"] = tot_str
+
             s.draft.fields = f
+
+    eff_road_tax = road_tax if (tenure.include_road_tax is not False) else 0.0
+    eff_runner_fee = float(tenure.runner_fee) if (tenure.include_runner_fee is not False) else 0.0
 
     # Update all comparison entries under this tenure
     entries = list(
@@ -1657,9 +1832,11 @@ def update_tenure_fixed_costs(
         ).all()
     )
     for e in entries:
-        e.road_tax = road_tax
-        e.runner_fee = float(tenure.runner_fee)
-        e.total_payable = float(e.motor_premium) + road_tax + float(tenure.runner_fee)
+        e.road_tax = eff_road_tax
+        e.runner_fee = eff_runner_fee
+        e.include_road_tax = (tenure.include_road_tax is not False)
+        e.include_runner_fee = (tenure.include_runner_fee is not False)
+        e.total_payable = float(e.motor_premium) + eff_road_tax + eff_runner_fee
 
     db.commit()
     return get_marketing_comparison(db, tenure_id)
@@ -1674,7 +1851,15 @@ def refresh_tenure_ledger(db: Session, tenure_id: str) -> dict[str, Any]:
     updates runner fee, updates windscreen target, syncs comparison entries,
     and returns the freshly updated marketing comparison payload.
     """
-    tenure = db.get(InsuranceTenure, tenure_id)
+    tenure = db.scalars(
+        select(InsuranceTenure)
+        .options(
+            joinedload(InsuranceTenure.tracked_vehicle),
+            joinedload(InsuranceTenure.customer),
+            joinedload(InsuranceTenure.previous_tenure),
+        )
+        .where(InsuranceTenure.id == tenure_id)
+    ).first()
     if not tenure:
         raise ValueError(f"Tenure {tenure_id} not found")
 
@@ -1693,7 +1878,15 @@ def save_comparison_entry(
     payload: dict[str, Any],
 ) -> dict[str, Any]:
     """Save or update a single underwriter column in the comparison matrix."""
-    tenure = db.get(InsuranceTenure, tenure_id)
+    tenure = db.scalars(
+        select(InsuranceTenure)
+        .options(
+            joinedload(InsuranceTenure.tracked_vehicle),
+            joinedload(InsuranceTenure.customer),
+            joinedload(InsuranceTenure.previous_tenure),
+        )
+        .where(InsuranceTenure.id == tenure_id)
+    ).first()
     if not tenure:
         raise ValueError(f"Tenure {tenure_id} not found")
 
@@ -1809,9 +2002,13 @@ def save_comparison_entry(
             flag_modified(s_obj.draft, "fields")
 
     # Recompute fixed costs and total payable
-    entry.road_tax = float(tenure.road_tax)
-    entry.runner_fee = float(tenure.runner_fee)
-    entry.total_payable = float(entry.motor_premium) + entry.road_tax + entry.runner_fee
+    eff_rt = float(tenure.road_tax) if (tenure.include_road_tax is not False) else 0.0
+    eff_rf = float(tenure.runner_fee) if (tenure.include_runner_fee is not False) else 0.0
+    entry.road_tax = eff_rt
+    entry.runner_fee = eff_rf
+    entry.include_road_tax = (tenure.include_road_tax is not False)
+    entry.include_runner_fee = (tenure.include_runner_fee is not False)
+    entry.total_payable = float(entry.motor_premium) + eff_rt + eff_rf
 
     if float(entry.sum_insured) > 0:
         if not entry.is_manual or entry.rate_percentage is None or float(entry.rate_percentage) == 0.0 or ("basic_figure_amount" not in payload and "basic_premium" not in payload and "motor_premium" in payload):
@@ -1872,7 +2069,15 @@ def select_winner_and_generate_draft(
     and prepare the Quotation Builder draft.
     Allows multiple winners (e.g. 2 or 3 quotes) and clicking to deselect/unpick.
     """
-    tenure = db.get(InsuranceTenure, tenure_id)
+    tenure = db.scalars(
+        select(InsuranceTenure)
+        .options(
+            joinedload(InsuranceTenure.tracked_vehicle),
+            joinedload(InsuranceTenure.customer),
+            joinedload(InsuranceTenure.previous_tenure),
+        )
+        .where(InsuranceTenure.id == tenure_id)
+    ).first()
     if not tenure:
         raise ValueError(f"Tenure {tenure_id} not found")
 
@@ -2070,7 +2275,15 @@ def generate_quotation_for_entry(
     user_id: str,
 ) -> dict[str, Any]:
     """Generate or assign an official Risk-Locker quotation for ANY comparison column."""
-    tenure = db.get(InsuranceTenure, tenure_id)
+    tenure = db.scalars(
+        select(InsuranceTenure)
+        .options(
+            joinedload(InsuranceTenure.tracked_vehicle),
+            joinedload(InsuranceTenure.customer),
+            joinedload(InsuranceTenure.previous_tenure),
+        )
+        .where(InsuranceTenure.id == tenure_id)
+    ).first()
     if not tenure:
         raise ValueError(f"Tenure {tenure_id} not found")
 
@@ -2228,6 +2441,7 @@ def generate_quotation_for_entry(
     record_stage_timestamp(tenure, "Quotations")
 
     db.commit()
+
     return {
         "status": "success",
         "tenure_id": tenure.id,
@@ -2261,7 +2475,15 @@ def generate_all_quotations(
 
 def rescan_comparison_tenure(db: Session, tenure_id: str) -> dict[str, Any]:
     """Force re-extract and rescan all sessions and entries under a tenure."""
-    tenure = db.get(InsuranceTenure, tenure_id)
+    tenure = db.scalars(
+        select(InsuranceTenure)
+        .options(
+            joinedload(InsuranceTenure.tracked_vehicle),
+            joinedload(InsuranceTenure.customer),
+            joinedload(InsuranceTenure.previous_tenure),
+        )
+        .where(InsuranceTenure.id == tenure_id)
+    ).first()
     if not tenure:
         raise ValueError(f"Tenure {tenure_id} not found")
 

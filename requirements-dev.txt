@@ -1,0 +1,9 @@
+# Development, SAST, type checking, and property/contract fuzzing toolchain
+# Isolated from production runtime requirements.txt (never deployed to VPS).
+ruff==0.17.4
+bandit==1.9.4
+mypy==2.4.1
+pip-audit==2.10.1
+hypothesis>=6.170.14,<7
+schemathesis>=3.39.16,<4
+

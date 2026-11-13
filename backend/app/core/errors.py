@@ -27,6 +27,22 @@ class AppError(Exception):
         super().__init__(message)
 
 
+class AIExtractionUnavailableException(AppError):
+    def __init__(
+        self,
+        reason: str = "API Token Quota Exhausted or Rate-Limited",
+        status_code: int = status.HTTP_429_TOO_MANY_REQUESTS,
+        detail: str | None = None,
+    ):
+        msg = detail or f"AI Extraction Unavailable: API Token Quota Exhausted. Please verify API billing or switch keys. (Reason: {reason})"
+        super().__init__(
+            message=msg,
+            status_code=status_code,
+            extra={"code": "ai_quota_exhausted", "reason": reason},
+        )
+        self.reason = reason
+
+
 # Maps DB constraint name fragments → friendly messages.
 _CONSTRAINT_MESSAGES: list[tuple[str, str]] = [
     ("uq_benefit_concept_key", "A Global Benefit with this key already exists."),

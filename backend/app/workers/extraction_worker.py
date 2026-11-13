@@ -13,6 +13,7 @@ from app.services.vehicle_tracking_service import is_valid_malaysian_plate, pars
 
 from sqlalchemy import select
 
+from app.core.errors import AIExtractionUnavailableException
 from app.core.workspace import QC_TEMP_ROOT, REPOSITORY_ROOT, qc_temp_directory, resolve_qc_path
 from app.extraction.company_resolution import build_companies_payload, resolve_company
 from app.extraction.db_lookups import get_db_packs, get_correction_memory
@@ -232,6 +233,7 @@ def process_extraction_job(
             source_path,
             enhanced_reading=bool((job.payload or {}).get("enhanced_reading")),
             source_filename=uploaded.original_filename,
+            fail_closed=True,
             **context,
         )
 
@@ -328,6 +330,11 @@ def process_extraction_job(
         if isinstance(field, dict) and field.get("value") not in (None, "")
     }
     uploaded.status = draft.status
+    ai_warns = [w for w in (draft_data.get("warnings") or []) if "AI Notice:" in w]
+    if ai_warns:
+        curr_opts = dict(draft.display_options or {})
+        curr_opts["ai_warning"] = ai_warns[0]
+        draft.display_options = curr_opts
     uploaded.simple_issue = (
         "Cannot Read" if draft.status == RecordStatus.CANNOT_READ.value
         else "Please check this value." if draft.status == RecordStatus.CHECK_NEEDED.value
@@ -608,8 +615,13 @@ def process_extraction_job(
 
     # Detect whether this uploaded document is a Cover Note / Policy Schedule vs a Quotation
     raw_doc_text = str(full.get("raw_text") or full.get("ocr_text") or "")
+    doc_page_count = len(full.get("page_text") or [])
     from app.extraction.candidate_finder import detect_is_covernote
-    is_cn = (session.document_type == "covernote") or detect_is_covernote(text=raw_doc_text, filename=uploaded.original_filename)
+    is_cn = (session.document_type == "covernote") or detect_is_covernote(
+        text=raw_doc_text,
+        filename=uploaded.original_filename,
+        page_count=doc_page_count,
+    )
 
     curr_opts = draft.display_options or {}
 
@@ -727,6 +739,14 @@ def process_extraction_job(
             session.is_tenure_active = True
             if version > 1:
                 curr_opts["tenure_version_notice"] = f"Created revised version v{version} under {session.detected_company or 'insurer'}."
+                from app.services.session_service import archive_superseded_company_sessions
+                archive_superseded_company_sessions(
+                    db=db,
+                    tenure_id=tenure.id,
+                    company_id=getattr(session, "company_id", None),
+                    detected_company=session.detected_company,
+                    current_session_id=session.id,
+                )
     draft.display_options = curr_opts
 
     complete_job(
@@ -803,6 +823,22 @@ def run_one_job(
         db.rollback()
         fresh_job = db.get(Job, job.id) or job
         fail_job(db, fresh_job, worker_id=worker_id, code=exc.code, message=exc.safe_message)
+    except AIExtractionUnavailableException as exc:
+        logger.error(
+            "Job %s (%s) failed with AIExtractionUnavailableException: %s",
+            job.id,
+            job.job_type,
+            exc.message,
+        )
+        db.rollback()
+        fresh_job = db.get(Job, job.id) or job
+        fail_job(
+            db,
+            fresh_job,
+            worker_id=worker_id,
+            code="ai_quota_exhausted",
+            message=exc.message,
+        )
     except RenderJobProcessingError as exc:
         logger.error(
             "Job %s (%s) failed with RenderJobProcessingError: [%s] %s",

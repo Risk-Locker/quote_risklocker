@@ -374,6 +374,11 @@ def calculate_road_tax(
 
     norm_jur = _normalize_jurisdiction(jurisdiction)
 
+    # Auto-detect Commercial Vehicle if capacity denotes KG
+    if isinstance(cc, str) and "kg" in cc.lower():
+        if norm_vtype not in {"Lorry", "Truck", "Commercial"}:
+            norm_vtype = "Lorry"
+
     # Auto-detect Electric Vehicle if capacity denotes kW/Watts or is typical EV rating (e.g. 9.4 kW = 9400 Watts)
     is_ev_capacity = False
     if isinstance(cc, str) and ("kw" in cc.lower() or "watt" in cc.lower()):
@@ -753,4 +758,69 @@ def compute_rate(rule: RoadTaxRule, cc: int) -> float:
         if result is not None:
             return result
     return float(str(rule.base_rate)) if rule.base_rate is not None else 0.0
+
+
+def parse_engine_capacity(capacity: str | int | float | None) -> tuple[float, str]:
+    """Parse raw capacity input into (numeric_value, unit). Unit is 'cc', 'kw', or 'kg'."""
+    if capacity is None:
+        return 0.0, "cc"
+    val_str = str(capacity).strip().lower()
+    m = re.search(r"[\d.]+", val_str)
+    if not m:
+        return 0.0, "cc"
+    try:
+        num = float(m.group(0))
+    except ValueError:
+        return 0.0, "cc"
+    if "kg" in val_str:
+        return num, "kg"
+    if "kw" in val_str or "watt" in val_str:
+        return num, "kw"
+    if "cc" in val_str:
+        return num, "cc"
+    if num <= 35.0:
+        return num, "kw"
+    return num, "cc"
+
+
+def calculate_road_tax_unified(
+    capacity: str | int | float | None,
+    unit: str | None = None,
+    vehicle_type: str = "Car",
+    owner_type: str = "Individual",
+    jurisdiction: str = "West Malaysia",
+    db: Session | None = None,
+) -> dict[str, Any]:
+    """Calculate road tax and return structured result with unit and formatted display."""
+    raw_num, detected_unit = parse_engine_capacity(capacity)
+    final_unit = (unit or detected_unit or "cc").lower().strip()
+
+    if final_unit == "kw":
+        cc_token = f"{raw_num} kW"
+        vtype = vehicle_type if vehicle_type.startswith("EV") else "EVSaloonCar"
+    elif final_unit == "kg":
+        cc_token = f"{raw_num} KG"
+        vtype = "Lorry"
+    else:
+        cc_token = raw_num
+        vtype = vehicle_type if not vehicle_type.startswith("EV") and vehicle_type != "Lorry" else "Car"
+
+    tax = calculate_road_tax(
+        cc=cc_token,
+        vehicle_type=vtype,
+        owner_type=owner_type,
+        jurisdiction=jurisdiction,
+        db=db,
+    )
+    return {
+        "road_tax": tax,
+        "capacity": raw_num,
+        "unit": final_unit,
+        "vehicle_type": vtype,
+        "formatted_capacity": (
+            f"{raw_num:,.0f} KG" if final_unit == "kg"
+            else (f"{raw_num} kW" if final_unit == "kw" else f"{raw_num:,.0f} CC")
+        ),
+    }
+
 

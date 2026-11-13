@@ -20,6 +20,21 @@ jobs:
     name: Test backend and build frontend
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: risklocker_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout main
         uses: actions/checkout@v4
@@ -33,19 +48,37 @@ jobs:
           cache: pip
 
       - name: Install backend dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Install Playwright Chromium
         run: python -m playwright install --with-deps chromium
 
+      - name: Replay migrations against PostgreSQL 16
+        env:
+          APP_ENV: local
+          DATABASE_URL: postgresql://postgres:ci@127.0.0.1:5432/risklocker_ci
+          AUTH_HASH_SECRET: ci_test_secret_at_least_32_characters_long
+        run: |
+          PYTHONPATH=backend python -m app.db.migrations --allow-local
+          PYTHONPATH=backend python -c "from app.db.session import verify_schema_version; verify_schema_version(); print('Postgres 16 schema OK')"
+
       - name: Run backend tests
         env:
           # Tests replace the environment themselves (patch.dict clear=True);
-          # these dummies only satisfy import-time get_settings() calls.
+          # these dummies satisfy import-time get_settings() calls.
           APP_ENV: production
           DATABASE_URL: postgresql://postgres:ci@db.ci.supabase.co:5432/postgres?sslmode=require
           AUTH_HASH_SECRET: ci_test_secret_at_least_32_characters_long
+          RISKLOCKER_SKIP_DOTENV: "1"
+          RL_TEST_POSTGRES_URL: postgresql://postgres:ci@127.0.0.1:5432/risklocker_ci
         run: python -m pytest -q
+
+      - name: Run Python SAST & Type Checks
+        run: |
+          python -m ruff check backend/app
+          python -m bandit -r backend/app -q
+          python -m mypy backend/app/services/road_tax_engine.py backend/app/services/formula_evaluator.py backend/app/rendering/pdf_generator.py
+          python -m pip_audit -r requirements.txt
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -58,13 +91,33 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Lint frontend
+        working-directory: frontend
+        run: npm run lint
+
       - name: Type-check frontend
         working-directory: frontend
         run: npx tsc --noEmit
 
       - name: Build frontend
         working-directory: frontend
+        env:
+          NODE_OPTIONS: "--max-old-space-size=1536"
         run: npm run build
+
+      - name: Run frontend Playwright CI suite
+        working-directory: frontend
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e:ci
+
+      - name: Run Harness & Knowledge Base Integrity Checks
+        run: |
+          python commands/verify-brain.py
+          python commands/update-code-map.py --check
+          python commands/sync-agent-bridges.py --check
+          python commands/skills-manager.py doctor --check
+          python .agents/hooks/daily_radar.py --offline --dry-run --strict
 
   deploy:
     name: Deploy main to VPS
@@ -153,6 +206,9 @@ jobs:
             --exclude ".copilot/" \
             --exclude ".skill-sources/" \
             --exclude "/fix/" \
+            --exclude "requirements-dev.txt" \
+            --exclude "pyproject.toml" \
+            --exclude "tests/" \
             --exclude "*.log" \
             --exclude "*.db" \
             ./ "$VPS_USER@$VPS_HOST:${DEPLOY_PATH}/"

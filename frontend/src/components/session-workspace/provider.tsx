@@ -33,8 +33,9 @@ function _recalcAdjustedTotal(snapshot: WorkspaceSnapshot, nextExtras: Workspace
 
   const rtRaw = snapshot.fields?.roadtax;
   const rtVal = typeof rtRaw === "object" && rtRaw !== null ? (rtRaw as Record<string, unknown>).value : rtRaw;
+  const hasExplicitRT = rtVal !== undefined && rtVal !== null && String(rtVal).trim() !== "";
   let rt = parseFloat(String(rtVal ?? "").replace(/[^0-9.]/g, "")) || 0;
-  if (rt === 0) {
+  if (!hasExplicitRT && rt === 0) {
     const ccRaw = snapshot.fields?.engine_cc;
     const ccVal = typeof ccRaw === "object" && ccRaw !== null ? (ccRaw as Record<string, unknown>).value : ccRaw;
     const cleanCC = ccVal ? parseFloat(String(ccVal).replace(/[^0-9.]/g, "")) : 0;
@@ -121,9 +122,16 @@ function _recalcAdjustedTotal(snapshot: WorkspaceSnapshot, nextExtras: Workspace
     }
   }
 
+  if (dispOpts?.include_road_tax === false) {
+    rt = 0;
+  }
+
   const sfRaw = snapshot.fields?.service_fee;
   const sfVal = typeof sfRaw === "object" && sfRaw !== null ? (sfRaw as Record<string, unknown>).value : sfRaw;
-  const sf = parseFloat(String(sfVal ?? "").replace(/[^0-9.]/g, "")) || 0;
+  let sf = parseFloat(String(sfVal ?? "").replace(/[^0-9.]/g, "")) || 0;
+  if (dispOpts?.include_runner_fee === false) {
+    sf = 0;
+  }
 
   const extrasSum = nextExtras.reduce((acc, ex) => {
     const p = ex.price;

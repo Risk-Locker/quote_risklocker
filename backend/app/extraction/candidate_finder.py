@@ -142,7 +142,7 @@ def _compact_evidence(text: str, start: int, end: int) -> str:
     return re.sub(r"\s+", " ", text[max(0, start - 80) : min(len(text), end + 80)]).strip()
 
 
-def score_document_type(text: str, filename: str | None = None) -> tuple[str, float, dict]:
+def score_document_type(text: str, filename: str | None = None, page_count: int | None = None) -> tuple[str, float, dict]:
     """Score and classify whether an uploaded document is an official issued Cover Note vs a Quotation.
     Returns (document_type, total_score, breakdown).
     Decision threshold: total_score >= 50 -> 'covernote', else 'quotation'.
@@ -150,9 +150,18 @@ def score_document_type(text: str, filename: str | None = None) -> tuple[str, fl
     breakdown: dict[str, float] = {}
     total_score = 0.0
 
+    # 1. Structural Page Count Heuristic
+    if page_count is not None and page_count > 0:
+        if page_count in (1, 2, 3):
+            breakdown["page_count_quotation"] = -25.0
+            total_score -= 25.0
+        elif page_count >= 5:
+            breakdown["page_count_covernote"] = 35.0
+            total_score += 35.0
+
     if filename:
         fn_clean = re.sub(r"[_\-\s]+", " ", str(filename).lower()).strip()
-        # 1. Filename Cover Note indicators (+60)
+        # 2. Filename Cover Note indicators (+60)
         cn_fn_terms = [
             "covernote", "cover note", "e covernote", "e cover note",
             "notaperlindungan", "nota perlindungan", "sijil insurans",
@@ -165,7 +174,7 @@ def score_document_type(text: str, filename: str | None = None) -> tuple[str, fl
             breakdown["filename_covernote"] = 60.0
             total_score += 60.0
 
-        # 2. Filename Quotation indicators (-60)
+        # 3. Filename Quotation indicators (-60)
         quote_fn_terms = [
             "quotation", "quote", "sebut harga", "sebutharga",
             "proposal", "cadangan"
@@ -177,7 +186,7 @@ def score_document_type(text: str, filename: str | None = None) -> tuple[str, fl
 
     upper_sample = text[:4000].upper()
 
-    # 3. Text Header Signatures (+30 / -30)
+    # 4. Text Header Signatures (+30 / -30)
     cn_headers = [
         "COVER NOTE",
         "E-COVER NOTE",
@@ -187,6 +196,7 @@ def score_document_type(text: str, filename: str | None = None) -> tuple[str, fl
         "SIJIL INSURANS",
         "OFFICIAL COVER NOTE",
         "JADUAL POLISI",
+        "OFFICIAL RECEIPT AND SCHEDULE",
     ]
     if any(sig in upper_sample for sig in cn_headers):
         breakdown["header_covernote"] = 30.0
@@ -199,12 +209,14 @@ def score_document_type(text: str, filename: str | None = None) -> tuple[str, fl
         "CADANGAN INSURANS",
         "QUOTATION SCHEDULE",
         "PROPOSAL FORM",
+        "BORANG CADANGAN",
+        "CADANGAN TAKAFUL",
     ]
     if any(sig in upper_sample for sig in quote_headers):
         breakdown["header_quotation"] = -30.0
         total_score -= 30.0
 
-    # 4. Policy Number / Cover Note Number Regex (+20)
+    # 5. Policy Number / Cover Note Number Regex (+20)
     has_cn_num = bool(
         re.search(r"(?:COVER\s*NOTE\s*(?:NO\.?|NUMBER)|NO\.?\s*NOTA\s*PERLINDUNGAN)\s*[:#]?\s*[A-Z0-9/_\-]{5,}", upper_sample)
         or re.search(r"(?:POLICY\s*(?:NO\.?|NUMBER)|NO\.?\s*POLISI)\s*[:#]?\s*[A-Z0-9/_\-]{6,}", upper_sample)
@@ -213,7 +225,7 @@ def score_document_type(text: str, filename: str | None = None) -> tuple[str, fl
         breakdown["identifier_policy_no"] = 20.0
         total_score += 20.0
 
-    # 5. Explicit Quotation Disclaimers (-20)
+    # 6. Explicit Quotation Disclaimers & Validity (-25)
     quote_disclaimers = [
         "THIS IS A QUOTATION",
         "THIS IS NOT AN INSURANCE POLICY",
@@ -222,18 +234,21 @@ def score_document_type(text: str, filename: str | None = None) -> tuple[str, fl
         "VALID FOR 14 DAYS",
         "VALID FOR 30 DAYS",
         "SEBUTHARGA SAHAJA",
+        "QUOTATION ONLY",
+        "QUOTATION VALIDITY",
+        "TARIKH SAH QUOTATION",
     ]
     if any(disc in upper_sample for disc in quote_disclaimers):
-        breakdown["disclaimer_quotation"] = -20.0
-        total_score -= 20.0
+        breakdown["disclaimer_quotation"] = -25.0
+        total_score -= 25.0
 
     doc_type = "covernote" if total_score >= 50.0 else "quotation"
     return doc_type, total_score, breakdown
 
 
-def detect_is_covernote(text: str, filename: str | None = None) -> bool:
+def detect_is_covernote(text: str, filename: str | None = None, page_count: int | None = None) -> bool:
     """Classify whether an uploaded document is an official issued Cover Note / Policy Schedule vs a Quotation."""
-    doc_type, _score, _breakdown = score_document_type(text=text, filename=filename)
+    doc_type, _score, _breakdown = score_document_type(text=text, filename=filename, page_count=page_count)
     return doc_type == "covernote"
 
 

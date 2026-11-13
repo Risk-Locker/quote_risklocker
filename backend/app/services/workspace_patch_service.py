@@ -44,10 +44,12 @@ from app.models.tables import (
     InsuranceCompany,
     InsuranceProduct,
     InsuranceProductTier,
+    InsuranceTenure,
     OutputTemplateConfig,
     QuotationDraft,
     Session,
     TemplateRevision,
+    TenureComparisonEntry,
     UploadedFile,
     new_id,
 )
@@ -1257,6 +1259,79 @@ def apply_workspace_patch(
                     summary=save_desc,
                     status=session.quotation_status or "pending",
                 )
+
+        # Bidirectional cross-connection: sync workspace edits with linked InsuranceTenure & TenureComparisonEntry
+        if session and session.tenure_id:
+            tenure = db.get(InsuranceTenure, session.tenure_id)
+            if tenure:
+                f = draft.fields or {}
+                # 1. Road tax sync
+                if any("roadtax" in p for p in changed_paths):
+                    raw_rt = f.get("roadtax")
+                    val_rt = raw_rt.get("value") if isinstance(raw_rt, dict) else raw_rt
+                    try:
+                        if val_rt is not None and str(val_rt).strip() != "":
+                            parsed_rt = float(str(val_rt).replace(",", ""))
+                            tenure.road_tax = parsed_rt
+                    except (ValueError, TypeError):
+                        pass
+
+                # 2. Service/Runner fee sync
+                if any("service_fee" in p for p in changed_paths):
+                    raw_sf = f.get("service_fee")
+                    val_sf = raw_sf.get("value") if isinstance(raw_sf, dict) else raw_sf
+                    try:
+                        if val_sf is not None and str(val_sf).strip() != "":
+                            parsed_sf = float(str(val_sf).replace(",", ""))
+                            tenure.runner_fee = parsed_sf
+                    except (ValueError, TypeError):
+                        pass
+
+                # 3. Customer name sync
+                if any("customer_name" in p or "insured_name" in p or "policyholder_name" in p for p in changed_paths):
+                    raw_name = f.get("customer_name") or f.get("insured_name") or f.get("policyholder_name")
+                    val_name = raw_name.get("value") if isinstance(raw_name, dict) else raw_name
+                    if val_name and str(val_name).strip():
+                        tenure.customer_name = str(val_name).strip()
+
+                # 4. Vehicle specs sync
+                if any("vehicle_no" in p for p in changed_paths):
+                    raw_vno = f.get("vehicle_no")
+                    val_vno = raw_vno.get("value") if isinstance(raw_vno, dict) else raw_vno
+                    if val_vno and str(val_vno).strip():
+                        from app.services.vehicle_tracking_service import normalize_plate
+                        norm_plate = normalize_plate(str(val_vno).strip())
+                        if norm_plate:
+                            tenure.vehicle_no = norm_plate
+                            if tenure.tracked_vehicle:
+                                tenure.tracked_vehicle.vehicle_no = norm_plate
+
+                eff_rt = float(tenure.road_tax) if (tenure.include_road_tax is not False) else 0.0
+                eff_rf = float(tenure.runner_fee) if (tenure.include_runner_fee is not False) else 0.0
+
+                # 5. Sync comparison entries under this tenure
+                all_tenure_entries = list(
+                    db.scalars(
+                        select(TenureComparisonEntry).where(
+                            TenureComparisonEntry.tenure_id == tenure.id
+                        )
+                    ).all()
+                )
+                for ce in all_tenure_entries:
+                    if ce.session_id == session.id:
+                        raw_prem = f.get("premium")
+                        val_prem = raw_prem.get("value") if isinstance(raw_prem, dict) else raw_prem
+                        try:
+                            if val_prem is not None and str(val_prem).strip() != "":
+                                ce.motor_premium = float(str(val_prem).replace(",", ""))
+                        except (ValueError, TypeError):
+                            pass
+                    ce.road_tax = eff_rt
+                    ce.runner_fee = eff_rf
+                    ce.include_road_tax = (tenure.include_road_tax is not False)
+                    ce.include_runner_fee = (tenure.include_runner_fee is not False)
+                    ce.total_payable = float(ce.motor_premium) + eff_rt + eff_rf
+
         db.commit()
         db.refresh(draft)
     except AppError:

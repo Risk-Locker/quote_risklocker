@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from app.core.errors import AIExtractionUnavailableException
+
 
 EXTRACTION_TIMEOUT_SECONDS = 120
 EXTRACTION_MEMORY_BYTES = 1024 * 1024 * 1024
@@ -65,6 +67,8 @@ def _worker(
             **kwargs,
         )
         connection.send(("ok", result))
+    except AIExtractionUnavailableException as exc:
+        connection.send(("ai_unavailable", str(exc)))
     except Exception as exc:
         connection.send(("error", f"{exc.__class__.__name__}: {exc}"))
     finally:
@@ -136,6 +140,8 @@ def extract_with_limits(
             raise TimeoutError("PDF extraction exceeded the allowed time.")
         status, payload = parent.recv()
         process.join(timeout=5)
+        if status == "ai_unavailable":
+            raise AIExtractionUnavailableException(reason=str(payload), status_code=429)
         if status != "ok":
             raise RuntimeError(str(payload))
         return payload

@@ -1,55 +1,34 @@
-# AI Skill Routing
+# Agent Skills Registry, Repo Plugins & Cold Archive Contract
 
-Load a skill only when the current task matches its description below. Read the selected skill completely before using it. Skills guide work but never override `AGENTS.md`, `docs/BUSINESS-RULES.md`, tests, or user decisions.
+Load an **Agent Skill** cleanly via `using-superpowers` (`1%` threshold; **Fast Track** single-file CSS/copy tweaks skip heavy ceremony). Read the target `SKILL.md` completely before executing. Skills never override `AGENTS.md`, `docs/domain/BUSINESS-RULES.md`, tests, or owner decisions.
 
-## v7 Implementation Routing
+---
 
-- `using-superpowers` governs skill selection and workflow.
-- `test-driven-development` and `python-testing` govern every backend behavior change and regression contract.
-- `fastapi` governs API, schema, dependency, and response changes.
-- `security-best-practices` governs the approved Python/TypeScript security baseline.
-- `vercel-react-best-practices` and `vercel-composition-patterns` govern the persistent workspace and large React component boundaries.
-- `playwright-best-practices` governs checked-in browser, accessibility, role, upload, and canvas tests.
-- `systematic-debugging` must be loaded immediately when an implementation or verification failure is encountered.
-- The 2026-08-14 template-publication connection used brainstorming/writing-plans for the approved boundary, TDD/Python testing for contracts, FastAPI for API work, React/frontend-design guidance for Builder/Review integration, and systematic debugging for verification failures.
+## 1. Two-Tier Storage & Repo Plugins Inside `.agents/`
 
-## Installed Skills (`.agents/skills/`)
+Every repository skill and repo-scoped UI plugin lives inside **`.agents/`** (`commands/skills-manager.py`, `.agents/skills-lock.json`, `.agents/plugins/`):
 
-The `.agents/` folder is gitignored (see `.gitignore`) — skills live only in local installs. On a fresh clone, reinstall via the opencode skill manager before relying on them.
+| Layer | Location | Purpose | Prompt Token Impact |
+| :--- | :--- | :--- | :--- |
+| **Active Agent Skills** | `.agents/skills/<name>/` | Deep multi-file active skills auto-discovered at startup (`<= 50` soft cap under Max-Force Gemini 3.8 Flash High mode; live count in `docs/generated/SKILLS-INDEX.md`) | Compact metadata |
+| **Cold Skill Archive** | `.agents/skills-vault/<category>/<name>/` | Dormant packs (marketing/scroll UI, standalone Playwright CLI; live count in `docs/generated/SKILLS-INDEX.md`) ready to `mount` | **0 boot tokens** until mounted |
+| **Repo-Local UI Plugins** | `.agents/plugins/{risklocker-ui,ui-21st-dev}/` | Zero-key `shadcn@latest mcp` registry (enabled) + opt-in `21st.dev` (disabled) | Scoped to UI plugin toggles |
+| **Live Inventory** | [`docs/generated/SKILLS-INDEX.md`](../generated/SKILLS-INDEX.md) | Auto-generated complete Active + Cold catalog, token estimate & scope | Auto-synced (`skills-manager.py index`) |
 
-| Skill | Use when |
-| --- | --- |
-| `agent-browser` | Browser automation: navigate, fill forms, click, screenshots, scrape, test web apps, Electron apps, QA/dogfooding runs. |
-| `brainstorming` | ANY creative work — features, components, behavior changes — before implementation (explores intent/requirements/design). |
-| `customize-opencode` | Editing opencode's own config: opencode.json/.jsonc, `.opencode/`, agents, subagents, skills, plugins, MCP servers, permissions. |
-| `fastapi` | Working on FastAPI APIs, Pydantic models, dependencies, SSE streaming, serving frontends. |
-| `find-skills` | "How do I do X?", "find a skill for X" — discovering new installable skills. Mandatory before proposing a new skill. |
-| `frontend-design` | Building new UI or reshaping existing UI; aesthetic direction, typography, non-templated visual choices. |
-| `playwright-automation-fill-in-form` | Automating form filling with Playwright MCP. |
-| `playwright-best-practices` | Writing Playwright tests, fixing flaky tests, POM, CI/CD, mocking, auth/OAuth, uploads/downloads, multi-tab, mobile, annotations. |
-| `playwright-cli` | Browser interaction and Playwright test work via CLI. |
-| `playwright-explore-website` | Website exploration for testing (Playwright MCP). |
-| `python-testing` | Writing/reviewing Python tests, flaky tests, regression coverage, nox multi-version, free-threaded Python. |
-| `security-best-practices` | Explicit security review requests for python/js/ts/go code. |
-| `shadcn` | shadcn/ui projects: add/search/fix/debug components, registries, presets, `components.json`. |
-| `systematic-debugging` | ANY bug, test failure, or unexpected behavior — root-cause investigation before fixes (mandatory per AGENTS.md). |
-| `test-driven-development` | Implementing any feature or bugfix — write failing tests first. |
-| `using-superpowers` | Conversation start — establishes skill discovery and invocation. |
-| `vercel-composition-patterns` | React composition: compound components, prop proliferation cleanup, component-library APIs. |
-| `vercel-react-best-practices` | React/Next.js performance: data fetching, bundle optimization, rendering patterns. |
-| `web-design-guidelines` | "Review my UI", accessibility audit, UX review against Web Interface Guidelines. |
-| `webapp-testing` | Interacting with and testing local web apps via Playwright; frontend verification, UI debugging, screenshots. |
-| `writing-plans` | Multi-step tasks with a spec — before touching code, write the plan. |
+## 2. Category Routing Map (Active Skills + Cold Vault — see `SKILLS-INDEX.md`)
 
-## Skill Discovery Loop
+- **Governance, Freshness & Dispatch:** `using-superpowers`, `company-dispatch`, `dispatching-parallel-agents`, `live-reality-and-deprecation-gate`, `requesting-code-review`, `receiving-code-review`, `finishing-a-development-branch`
+- **Architecture, Clean Code, Reality & Planning:** `brainstorming`, `writing-plans`, `system-design-and-architecture`, `domain-interrogation-and-reality-gate`, `parallel-variant-tournament`, `clean-code-and-refactoring`, `postgres-ledger-migrations`
+- **Backend Testing, Debugging, Security & Domain:** `systematic-debugging`, `test-driven-development`, `python-testing`, `edge-case-and-scenario-matrix`, `verification-before-completion`, `security-best-practices`, `security-threat-model`, `malaysian-motor-insurance`
+- **Enterprise UI, Mobbin + `shadcn` & PDF Parity:** `enterprise-product-ui`, `apple-design`, `frontend-design`, `shadcn`, `web-design-guidelines`, `design2-pdf-parity`
+- **Browser & E2E Verification:** `webapp-testing`, `playwright`, `playwright-best-practices`, `agent-browser`
+- **Cold Vault (`.agents/skills-vault/`, 0 Boot Tokens — `mount` on demand):** `design-taste-frontend`, `gsap-framer-scroll-animation`, `playwright-cli`, `playwright-explore-website`, `playwright-automation-fill-in-form`
 
-1. When a capability is missing, load the `find-skills` skill and search.
-2. Install the skill (opencode skill manager); `.agents/` and `.skill-sources/` stay gitignored.
-3. Record the result here (add a row to the table) — that is part of the documentation duty.
+## 3. Repo-Local Default Rule & Daily Commands
 
-## Verification
-
-- Backend: `.venv\Scripts\python.exe -m pytest -q` (from repo root).
-- Frontend: `npx tsc --noEmit` and `npm run build` in `frontend/`.
-- Structure changed: `python commands/update-code-map.py --write`, then `--check` before finishing.
-- E2E/QA scripts: `/.qc-tmp/` (see `docs/OPERATIONS.md` runbook).
+- **Repo-Local Default (Mandatory):** Never install skills globally (`-g`, `--global`, `~/.gemini`, `~/.claude`, `~/.codex`, `~/.copilot`, `~/.agents`) unless the owner explicitly orders a global install. Always install into this repo using `commands/skills-manager.py`:
+  - Add local or `npx` skill to Active: `.\.venv\Scripts\python.exe commands/skills-manager.py install <path_or_pkg> [--from-npx] --scope universal`
+  - Add directly to Cold Vault (`0` boot tokens): `... install <path_or_pkg> --cold --category <cat>`
+  - Mount / unmount packs for a sprint: `.\.venv\Scripts\python.exe commands/skills-manager.py mount <name_or_cat>` / `unmount <name_or_cat>`
+  - Audit stray folders, broken links & lockfile freshness: `.\.venv\Scripts\python.exe commands/skills-manager.py doctor`
+  - Opt-in workstation NTFS junctions (if using legacy Claude/Cursor): `.\.venv\Scripts\python.exe commands/sync-agent-bridges.py --write --ide claude,cursor`

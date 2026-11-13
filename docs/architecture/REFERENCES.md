@@ -18,7 +18,13 @@ The active v7 Asset Library uses authorized `business_assets` records and conten
 
 ## Private Development References
 
-Customer and process examples are outside this repository at:
+Real customer quotations, covernotes, and layout PDFs pasted locally for manual testing or inspection belong inside the gitignored `samples/` directory at the repository root (never inside `.qc-tmp/`, which is regularly wiped by `commands/clean-repo-debris.ps1`):
+
+- `samples/quotations/<insurer>/` (`amgen-liberty`, `berjaya-sompo`, `etiqa`, `lonpac`, `qbe`, `stmb-takaful`, `tune-protect`) — real quotation PDFs and image scans grouped by underwriter.
+- `samples/covernotes/` — real Cover Note PDFs.
+- `samples/template-layouts/` — quotation template visual/layout PDF references (e.g., Design 2).
+
+Legacy external archive paths (older workstation):
 
 `C:\Users\user\Desktop\dev\quote\risklocker-reference-archive\process`
 
@@ -26,4 +32,4 @@ Additional former sample uploads are at:
 
 `C:\Users\user\Desktop\dev\quote\risklocker-reference-archive\samples`
 
-These are private development references only. Runtime code and automated tests must never depend on them. Add only anonymized, deterministic regression fixtures under `tests/fixtures/`.
+These are private development references only (never committed to Git because they contain customer PII). Runtime code and automated tests must never depend on them. Add only anonymized, deterministic regression fixtures under `tests/fixtures/`.

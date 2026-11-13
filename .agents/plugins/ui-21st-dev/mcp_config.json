@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "ui-21st-dev": {
+      "url": "https://21st.dev/api/mcp",
+      "headers": {
+        "x-api-key": "${TWENTYFIRST_API_KEY}"
+      },
+      "variables": [
+        {
+          "name": "TWENTYFIRST_API_KEY",
+          "title": "21st.dev API Key",
+          "description": "Optional API key from https://21st.dev/mcp. Leave plugin disabled if you only need free Mobbin + shadcn MCP."
+        }
+      ]
+    }
+  }
+}
+

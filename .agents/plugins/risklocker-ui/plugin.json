@@ -1,0 +1,12 @@
+{
+  "name": "risklocker-ui",
+  "displayName": "Risklocker UI (shadcn MCP + Design Tokens)",
+  "version": "1.0.0",
+  "description": "Zero-key local shadcn MCP registry access paired with Risklocker --rl-* enterprise fintech design tokens, Radix UI accessibility, and Design 2 PDF parity.",
+  "suggestedPrompts": [
+    "Look up an accessible shadcn Dialog, Sheet, or Table primitive to adapt into Risklocker --rl-* tokens",
+    "Compare existing frontend/src/components/ui primitives against shadcn registry accessibility defaults",
+    "Audit Design 2 preview canvas against Risklocker DESIGN-SYSTEM.md before modifying styles"
+  ]
+}
+

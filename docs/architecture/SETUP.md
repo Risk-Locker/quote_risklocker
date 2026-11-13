@@ -30,7 +30,7 @@ Three processes run under PM2 (see `ecosystem.config.cjs`; paths derive from `RL
 
 ## 4. Environment Configuration
 
-- Copy `.env.example` to `.env` on the VPS; the variable matrix lives in `docs/OPERATIONS.md`.
+- Copy `.env.example` to `.env` on the VPS; the variable matrix lives in `docs/architecture/OPERATIONS.md`.
 - Production values: `APP_ORIGIN`/`TRUSTED_HOSTS`/`CORS_ORIGINS=https://quote.risklocker.com`, `TRUSTED_PROXY_IPS=127.0.0.1` (nginx is on the same host), `SESSION_COOKIE_SECURE=true`.
 - Secrets stay backend-only: `AUTH_HASH_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`. CI never writes secrets; `.env` exists only on the VPS.
 
@@ -56,7 +56,7 @@ Three processes run under PM2 (see `ecosystem.config.cjs`; paths derive from `RL
 - **One-time VPS bootstrap (only this is manual; after it, the pipeline owns the box):** the deploy user + SSH key, the root `.env` (CI never writes secrets), nginx site + TLS cert, and an initial `deploy/setup-vps.sh` run for system packages. Everything after that comes from `main`.
 - **"Is the VPS on latest?" one command:** `cat /var/www/html/quote_risklocker/.deployed-commit` vs `git ls-remote https://github.com/Risk-Locker/quote_risklocker.git main` (the VPS `.git` is stale by design — deploys mirror files, not git).
 - **Migrations rule (hard):** migrations run ONLY from the deploy. `app.db.migrations` refuses to run when `APP_ENV != production` unless `--allow-local` is passed, so a local dev run can never advance the production database ahead of deployed code.
-- **Mandatory Pre-Commit & Pre-Push Parity Check:** Before committing, pushing to `origin main`, `origin v18`, `origin v19`, or any branch, or publishing a new branch, the agent MUST run the full local verification gate (backend pytest, frontend `npx tsc --noEmit`, frontend `npm run build`, schema verification). Never push unverified code to git; deployment failures on GitHub Actions or VPS are strictly prohibited.
+- **Mandatory Pre-Commit & Pre-Push Parity Check:** Before committing, pushing to `origin main`, `origin v18`, `origin v19`, or any branch, or publishing a new branch, the agent MUST run the full local 10/10 verification gate (`.\commands\verify-deploy-gate.ps1`: backend pytest, frontend `npx tsc --noEmit`, frontend `npm run build`, migration integrity, code map, KB integrity, IDE bridges, Skill Vault doctor, SAST `--strict --with-external` + tripwire log, and `daily_radar.py --strict`). Never push unverified code to git; deployment failures on GitHub Actions or VPS are strictly prohibited.
 - The test job installs Playwright Chromium (`python -m playwright install --with-deps chromium`) so `test_pdf_generation_smoke` renders a real PDF instead of skipping; `tests/conftest.py` creates `.qc-tmp/pytest` (the pytest `--basetemp`) because the gitignored folder does not exist on a clean runner.
 
 ## 9. One-Time VPS Setup
@@ -73,4 +73,4 @@ Run `deploy/setup-vps.sh` (as root, from the cloned repo at `/var/www/html/quote
 ## 11. When to Update This File
 
 - Any infrastructure change: new subdomain, VPS move, database/storage provider change, monitoring/HTTPS change.
-- Update `docs/OPERATIONS.md` env tables in the same change and log it in `docs/MEMORY.md`.
+- Update `docs/architecture/OPERATIONS.md` env tables in the same change and log it in `docs/core/STATE.md` (rotating older entries to `docs/history/MEMORY-YYYY-MM.md`).

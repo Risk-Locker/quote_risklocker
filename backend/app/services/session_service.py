@@ -291,3 +291,39 @@ def serialize_session(
         "created_at": session.created_at.isoformat() if session.created_at else None,
         "updated_at": session.updated_at.isoformat() if session.updated_at else None,
     }
+
+
+def archive_superseded_company_sessions(
+    db: Session,
+    tenure_id: str,
+    company_id: str | None,
+    detected_company: str | None,
+    current_session_id: str,
+) -> list[str]:
+    """Demote older sessions for the same insurer under this tenure."""
+    if not tenure_id:
+        return []
+
+    clean_comp = (detected_company or "").strip().lower()
+    query = select(SessionModel).where(
+        SessionModel.tenure_id == tenure_id,
+        SessionModel.id != current_session_id,
+        SessionModel.status != "trash",
+    )
+    older_sessions = list(db.scalars(query).all())
+    demoted_ids: list[str] = []
+
+    for old_s in older_sessions:
+        match = False
+        if company_id and getattr(old_s, "company_id", None) == company_id:
+            match = True
+        elif clean_comp and old_s.detected_company and old_s.detected_company.strip().lower() == clean_comp:
+            match = True
+
+        if match:
+            old_s.is_tenure_active = False
+            old_s.duplicate_resolution = "superseded"
+            demoted_ids.append(old_s.id)
+
+    return demoted_ids
+

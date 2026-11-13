@@ -1,0 +1,52 @@
+{
+  "risklocker-session-context": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "..\\.venv\\Scripts\\python.exe hooks/session_start_guard.py",
+        "timeout": 8
+      }
+    ]
+  },
+  "risklocker-freeze-and-path-guard": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": "write_file|edit_file|replace_file_content|multi_replace_file_content|write_to_file|create_file|patch_file|delete_file|rename_file|move_file|multi_edit|NotebookEdit|run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "..\\.venv\\Scripts\\python.exe hooks/freeze_and_path_guard.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "risklocker-static-tripwire": {
+    "enabled": true,
+    "PostToolUse": [
+      {
+        "matcher": "write_file|edit_file|replace_file_content|multi_replace_file_content|write_to_file|create_file|patch_file|rename_file|move_file|multi_edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "..\\.venv\\Scripts\\python.exe hooks/static_security_tripwire.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "risklocker-brain-stop-guard": {
+    "enabled": true,
+    "Stop": [
+      {
+        "type": "command",
+        "command": "..\\.venv\\Scripts\\python.exe hooks/brain_stop_guard.py",
+        "timeout": 15
+      }
+    ]
+  }
+}

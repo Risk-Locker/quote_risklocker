@@ -17,7 +17,7 @@
 
 Use `.env.example` (local development values) or `.env.production` (production VPS values) as the variable-name templates. Never commit live credentials or expose backend-only values in frontend environment variables.
 
-**The project `.env` is the source of truth:** `backend/app/core/config.py` loads it with `load_dotenv(override=True)`, so variables inherited from the shell (e.g. a stray `APP_ENV=production` in a terminal) can never shadow the project config. Reset a poisoned terminal with `Remove-Item Env:APP_ENV` or open a new one.
+**The project `.env` is the source of truth:** `backend/app/core/config.py` loads it with `load_dotenv(override=True)`, so variables inherited from the shell (e.g. a stray `APP_ENV=production` in a terminal) can never shadow the project config. Reset a poisoned terminal with `Remove-Item Env:APP_ENV` or open a new one. In automated CI/CD runners and hermetic test gates (`commands/verify-deploy-gate.ps1`), set `RISKLOCKER_SKIP_DOTENV=1` to prevent local developer `.env` files from overriding sealed container environment variables.
 
 **Malware scanner & structural inspection:** `REQUIRE_MALWARE_SCANNER` in `.env` controls whether an external scanner (Microsoft Defender on Windows or ClamAV on Linux) is mandatory. When `false` (default for internal staff workflows), upload security relies on the ultra-fast built-in `pikepdf` + `PyMuPDF` structural inspection engine to block all malicious PDF vectors (JS, launch actions, attachments, XFA forms, bombs). On Linux when ClamAV is enabled, `clamdscan` (daemon, ~40ms) is prioritized over standalone `clamscan` (~24s disk parse).
 
@@ -76,4 +76,4 @@ The three inactive settings are loaded by backend configuration but do not chang
 - Production `.env` values: `APP_ORIGIN`/`TRUSTED_HOSTS`/`CORS_ORIGINS=https://quote.risklocker.com`, `TRUSTED_PROXY_IPS=127.0.0.1` (nginx on the same host), `SESSION_COOKIE_SECURE=true`.
 - Migrations on the VPS: `PYTHONPATH=backend .venv/bin/python -m app.db.migrations` (idempotent; runs on every deploy).
 - CI/CD: `.github/workflows/deploy.yml` (tests + build on GitHub, then rsync + install + migrate + `pm2 startOrReload` on the VPS). Secrets: `VPS_HOST`, `VPS_PORT`, `VPS_USER`, `VPS_SSH_KEY_B64`.
-- One-time bootstrap: `deploy/setup-vps.sh` (see `docs/SETUP.md`).
+- One-time bootstrap: `deploy/setup-vps.sh` (see [SETUP.md](SETUP.md)).

@@ -37,6 +37,12 @@ class UserPasswordChangeRequest(StrictRequest):
     new_password: str = Field(min_length=8, max_length=255)
 
 
+class UpdateSessionRequest(BaseModel):
+    document_type: str | None = Field(default=None, description="'covernote' or 'quotation'")
+    status: str | None = None
+    detected_company: str | None = None
+
+
 # --- Drafts ---
 
 class DraftUpdateRequest(BaseModel):

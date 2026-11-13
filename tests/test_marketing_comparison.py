@@ -1177,15 +1177,19 @@ def test_covernote_separation_and_matrix_payload(db_session: Session):
         "sum_insured": "85000.00",
         "company_name": "Etiqa Takaful",
     }
-    sess_covernote.draft.extracted_data = {
-        "company_name": "Etiqa Takaful",
-        "sum_insured": 85000.0,
-        "total_payable": 2150.0,
-        "coverage_start_date": "2026-05-01",
-        "coverage_end_date": "2027-04-30",
-        "coverage_period_formatted": "01/05/2026 - 30/04/2027",
-        "canonical_perils_formatted": "Comprehensive · Windscreen · Flood",
-    }
+    setattr(
+        sess_covernote.draft,
+        "extracted_data",
+        {
+            "company_name": "Etiqa Takaful",
+            "sum_insured": 85000.0,
+            "total_payable": 2150.0,
+            "coverage_start_date": "2026-05-01",
+            "coverage_end_date": "2027-04-30",
+            "coverage_period_formatted": "01/05/2026 - 30/04/2027",
+            "canonical_perils_formatted": "Comprehensive · Windscreen · Flood",
+        },
+    )
     tenure.covernote_session_id = sess_covernote.id
     tenure.policy_number = "POL-ETIQA-88219"
     tenure.stage = "Issue Policy"
@@ -1643,6 +1647,632 @@ def test_marketing_comparison_rounds_motor_premium_and_total_payable(db_session)
     assert e["rounded_motor_premium"] == 510.0
     # Rounded total payable is rounded motor premium + fixed costs: 510.0 + 100.0 = 610.0
     assert e["rounded_total_payable"] == 610.0
+
+    # BNM 5-cent cash rounding: 510.47 ending in 7 rounds down to 510.45; 610.47 -> 610.45
+    assert e["bnm_5cent_motor_premium"] == 510.45
+    assert e["bnm_5cent_total_payable"] == 610.45
+    assert e["bnm_5cent_net_total_payable"] == 610.45
+
+
+@pytest.fixture
+def test_user(db_session: Session) -> User:
+    user = User(
+        id=new_id(),
+        email="staff_tester@local.test",
+        name="Staff Tester",
+        password_hash="local_test_hash",
+        role="staff",
+        status="active",
+    )
+    db_session.add(user)
+    db_session.commit()
+    return user
+
+
+def test_road_tax_can_be_zero_and_persisted_without_jpj_overwrite(db_session: Session, test_user: User):
+    """Clients who do not renew road tax through us can have Road Tax set to RM 0.00 without being overwritten."""
+    vehicle = TrackedVehicle(
+        id=new_id(),
+        vehicle_no="WXY1234",
+        car_brand="Proton",
+        car_model="Saga",
+        engine_cc="1332 cc",
+    )
+    db_session.add(vehicle)
+
+    tenure = InsuranceTenure(
+        id=new_id(),
+        vehicle_no="WXY1234",
+        customer_name="Ahmad Razif",
+        tracked_vehicle_id=vehicle.id,
+        road_tax=0.0,
+        runner_fee=50.0,
+        include_road_tax=False,
+        include_runner_fee=True,
+        coverage_start_date=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 4, 30, tzinfo=timezone.utc),
+        expiry_month="2027-04",
+    )
+    db_session.add(tenure)
+
+    entry = TenureComparisonEntry(
+        id=new_id(),
+        tenure_id=tenure.id,
+        company_name="Allianz",
+        sum_insured=35000.0,
+        motor_premium=1200.0,
+        road_tax=0.0,
+        runner_fee=50.0,
+        include_road_tax=False,
+        include_runner_fee=True,
+        total_payable=1250.0,
+        towing_limit="Unlimited",
+    )
+    db_session.add(entry)
+    db_session.commit()
+
+    res = get_marketing_comparison(db_session, tenure.id)
+
+    assert res["tenure"]["include_road_tax"] is False
+    assert res["tenure"]["road_tax"] == 0.0
+    assert res["tenure"]["runner_fee"] == 50.0
+    assert res["tenure"]["fixed_costs_total"] == 50.0
+
+    entries = res["entries"]
+    assert len(entries) == 1
+    assert entries[0]["road_tax"] == 0.0
+    assert entries[0]["runner_fee"] == 50.0
+    assert entries[0]["total_payable"] == 1250.0
+
+
+def test_include_road_tax_and_runner_fee_toggles(db_session: Session, test_user: User):
+    """Staff can toggle include_road_tax and include_runner_fee for commercial vehicles / lorries."""
+    vehicle = TrackedVehicle(
+        id=new_id(),
+        vehicle_no="BCE8899",
+        car_brand="Isuzu",
+        car_model="NPR Lorry",
+        engine_cc="2999 cc",
+    )
+    db_session.add(vehicle)
+
+    tenure = InsuranceTenure(
+        id=new_id(),
+        vehicle_no="BCE8899",
+        customer_name="Logistics Sdn Bhd",
+        tracked_vehicle_id=vehicle.id,
+        road_tax=300.0,
+        runner_fee=80.0,
+        include_road_tax=True,
+        include_runner_fee=True,
+        coverage_start_date=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 5, 31, tzinfo=timezone.utc),
+        expiry_month="2027-05",
+    )
+    db_session.add(tenure)
+
+    entry = TenureComparisonEntry(
+        id=new_id(),
+        tenure_id=tenure.id,
+        company_name="Kurnia Insurans (Malaysia) Berhad",
+        sum_insured=80000.0,
+        motor_premium=2500.0,
+        road_tax=300.0,
+        runner_fee=80.0,
+        total_payable=2880.0,
+        towing_limit="Unlimited",
+    )
+    db_session.add(entry)
+    db_session.commit()
+
+    updated = update_tenure_fixed_costs(
+        db_session,
+        tenure.id,
+        road_tax=300.0,
+        runner_fee=80.0,
+        include_road_tax=False,
+        include_runner_fee=False,
+    )
+
+    assert updated["tenure"]["include_road_tax"] is False
+    assert updated["tenure"]["include_runner_fee"] is False
+    assert updated["tenure"]["fixed_costs_total"] == 0.0
+
+    entries = updated["entries"]
+    assert entries[0]["road_tax"] == 0.0
+    assert entries[0]["runner_fee"] == 0.0
+    assert entries[0]["total_payable"] == 2500.0
+
+    updated2 = update_tenure_fixed_costs(
+        db_session,
+        tenure.id,
+        road_tax=300.0,
+        runner_fee=80.0,
+        include_road_tax=True,
+        include_runner_fee=False,
+    )
+
+    assert updated2["tenure"]["include_road_tax"] is True
+    assert updated2["tenure"]["include_runner_fee"] is False
+    assert updated2["tenure"]["fixed_costs_total"] == 300.0
+    assert updated2["entries"][0]["total_payable"] == 2800.0
+
+
+def test_bidirectional_sync_quotation_workspace_to_comparison_and_ledger(db_session: Session, test_user: User):
+    """Editing roadtax or runner fee in Quotation Workspace atomically propagates to Tenure and Comparison."""
+    from app.services.workspace_patch_service import apply_workspace_patch
+
+    vehicle = TrackedVehicle(
+        id=new_id(),
+        vehicle_no="VAA1122",
+        car_brand="Honda",
+        car_model="Civic",
+        engine_cc="1498 cc",
+    )
+    db_session.add(vehicle)
+
+    tenure = InsuranceTenure(
+        id=new_id(),
+        vehicle_no="VAA1122",
+        customer_name="Original Name",
+        tracked_vehicle_id=vehicle.id,
+        road_tax=90.0,
+        runner_fee=50.0,
+        include_road_tax=True,
+        include_runner_fee=True,
+        coverage_start_date=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 6, 30, tzinfo=timezone.utc),
+        expiry_month="2027-06",
+    )
+    db_session.add(tenure)
+
+    batch = Batch(id=new_id(), owner_id=test_user.id, name="Test Batch")
+    db_session.add(batch)
+
+    uploaded = UploadedFile(
+        id=new_id(),
+        batch_id=batch.id,
+        owner_id=test_user.id,
+        original_filename="sample_quote.pdf",
+        content_type="application/pdf",
+        storage_path="quotes/sample.pdf",
+    )
+    db_session.add(uploaded)
+
+    draft = QuotationDraft(
+        id=new_id(),
+        owner_id=test_user.id,
+        uploaded_file_id=uploaded.id,
+        revision=1,
+        fields={
+            "premium": "1500.00",
+            "roadtax": "90.00",
+            "service_fee": "50.00",
+            "total_amount": "1640.00",
+            "customer_name": "Original Name",
+            "vehicle_no": "VAA1122",
+        },
+    )
+    db_session.add(draft)
+
+    session = SessionModel(
+        id=new_id(),
+        owner_id=test_user.id,
+        uploaded_file_id=uploaded.id,
+        draft_id=draft.id,
+        tenure_id=tenure.id,
+        detected_company="Lonpac",
+        tenure_version=1,
+        is_tenure_active=True,
+    )
+    db_session.add(session)
+
+    comp_entry = TenureComparisonEntry(
+        id=new_id(),
+        tenure_id=tenure.id,
+        session_id=session.id,
+        company_name="Lonpac",
+        sum_insured=50000.0,
+        motor_premium=1500.0,
+        road_tax=90.0,
+        runner_fee=50.0,
+        total_payable=1640.0,
+        towing_limit="RM 400",
+    )
+    db_session.add(comp_entry)
+    db_session.commit()
+
+    apply_workspace_patch(
+        db_session,
+        test_user,
+        draft.id,
+        base_revision=1,
+        operations=[
+            {"op": "scalar_decision", "field": "roadtax", "decision": "edit", "value": "0.00"},
+            {"op": "scalar_decision", "field": "service_fee", "decision": "edit", "value": "70.00"},
+            {"op": "scalar_decision", "field": "customer_name", "decision": "edit", "value": "Tan Ah Kow"},
+        ],
+    )
+
+    db_session.refresh(tenure)
+    db_session.refresh(comp_entry)
+
+    assert tenure.road_tax == 0.0
+    assert tenure.runner_fee == 70.0
+    assert tenure.customer_name == "Tan Ah Kow"
+    assert comp_entry.road_tax == 0.0
+    assert comp_entry.runner_fee == 70.0
+    assert comp_entry.total_payable == 1570.0
+
+
+def test_comparison_fixed_costs_update_syncs_to_workspace_draft(db_session: Session, test_user: User):
+    """Editing fixed costs in Comparison Matrix propagates back to linked Quotation Workspace drafts."""
+    vehicle = TrackedVehicle(
+        id=new_id(),
+        vehicle_no="KAA5566",
+        car_brand="Toyota",
+        car_model="Vios",
+        engine_cc="1496 cc",
+    )
+    db_session.add(vehicle)
+
+    tenure = InsuranceTenure(
+        id=new_id(),
+        vehicle_no="KAA5566",
+        customer_name="Siti Nurhaliza",
+        tracked_vehicle_id=vehicle.id,
+        road_tax=90.0,
+        runner_fee=50.0,
+        include_road_tax=True,
+        include_runner_fee=True,
+        coverage_start_date=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 7, 31, tzinfo=timezone.utc),
+        expiry_month="2027-07",
+    )
+    db_session.add(tenure)
+
+    batch = Batch(id=new_id(), owner_id=test_user.id, name="Test Batch 2")
+    db_session.add(batch)
+
+    uploaded = UploadedFile(
+        id=new_id(),
+        batch_id=batch.id,
+        owner_id=test_user.id,
+        original_filename="sample_quote2.pdf",
+        content_type="application/pdf",
+        storage_path="quotes/sample2.pdf",
+    )
+    db_session.add(uploaded)
+
+    draft = QuotationDraft(
+        id=new_id(),
+        owner_id=test_user.id,
+        uploaded_file_id=uploaded.id,
+        revision=1,
+        fields={
+            "premium": "1200.00",
+            "roadtax": "90.00",
+            "service_fee": "50.00",
+            "total_amount": "1340.00",
+        },
+    )
+    db_session.add(draft)
+
+    session = SessionModel(
+        id=new_id(),
+        owner_id=test_user.id,
+        uploaded_file_id=uploaded.id,
+        draft_id=draft.id,
+        tenure_id=tenure.id,
+        detected_company="STMB",
+        tenure_version=1,
+        is_tenure_active=True,
+    )
+    db_session.add(session)
+
+    comp_entry = TenureComparisonEntry(
+        id=new_id(),
+        tenure_id=tenure.id,
+        session_id=session.id,
+        company_name="STMB",
+        sum_insured=40000.0,
+        motor_premium=1200.0,
+        road_tax=90.0,
+        runner_fee=50.0,
+        total_payable=1340.0,
+        towing_limit="100 km",
+    )
+    db_session.add(comp_entry)
+    db_session.commit()
+
+    update_tenure_fixed_costs(
+        db_session,
+        tenure.id,
+        road_tax=120.0,
+        runner_fee=60.0,
+        include_road_tax=True,
+        include_runner_fee=True,
+    )
+
+    db_session.refresh(draft)
+
+    assert draft.fields["roadtax"] == "120.00"
+    assert draft.fields["service_fee"] == "60.00"
+    assert draft.fields["total_amount"] == "1380.00"
+
+
+def test_vehicle_type_and_customer_name_cross_sync(db_session: Session, test_user: User):
+    """Updating vehicle_type or customer_name in comparison updates tenure and synchronizes to draft fields."""
+    vehicle = TrackedVehicle(
+        id=new_id(),
+        vehicle_no="JWW3344",
+        car_brand="Toyota",
+        car_model="Hilux",
+        engine_cc="2393 cc",
+    )
+    db_session.add(vehicle)
+
+    tenure = InsuranceTenure(
+        id=new_id(),
+        vehicle_no="JWW3344",
+        customer_name="Initial Name",
+        tracked_vehicle_id=vehicle.id,
+        road_tax=438.0,
+        runner_fee=50.0,
+        include_road_tax=True,
+        include_runner_fee=True,
+        coverage_start_date=datetime(2026, 9, 1, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 8, 31, tzinfo=timezone.utc),
+        expiry_month="2027-08",
+    )
+    db_session.add(tenure)
+
+    batch = Batch(id=new_id(), owner_id=test_user.id, name="Test Batch 3")
+    db_session.add(batch)
+
+    uploaded = UploadedFile(
+        id=new_id(),
+        batch_id=batch.id,
+        owner_id=test_user.id,
+        original_filename="hilux_quote.pdf",
+        content_type="application/pdf",
+        storage_path="quotes/hilux.pdf",
+    )
+    db_session.add(uploaded)
+
+    draft = QuotationDraft(
+        id=new_id(),
+        owner_id=test_user.id,
+        uploaded_file_id=uploaded.id,
+        revision=1,
+        fields={
+            "insured_name": "Initial Name",
+            "vehicle_type": "Car",
+            "premium": "2100.00",
+            "roadtax": "438.00",
+            "service_fee": "50.00",
+            "total_amount": "2588.00",
+        },
+    )
+    db_session.add(draft)
+
+    session = SessionModel(
+        id=new_id(),
+        owner_id=test_user.id,
+        uploaded_file_id=uploaded.id,
+        draft_id=draft.id,
+        tenure_id=tenure.id,
+        detected_company="Etiqa",
+        tenure_version=1,
+        is_tenure_active=True,
+    )
+    db_session.add(session)
+    db_session.commit()
+
+    update_tenure_fixed_costs(
+        db_session,
+        tenure.id,
+        customer_name="Chong Wei",
+        vehicle_type="Lorry",
+        road_tax=438.0,
+        runner_fee=50.0,
+        include_road_tax=True,
+        include_runner_fee=True,
+    )
+
+    db_session.refresh(tenure)
+    db_session.refresh(draft)
+
+    assert tenure.customer_name == "Chong Wei"
+    assert draft.fields["insured_name"] == "Chong Wei"
+    assert draft.fields["customer_name"] == "Chong Wei"
+    assert draft.fields["vehicle_type"] == "Lorry"
+
+    comp_data = get_marketing_comparison(db_session, tenure.id)
+    assert comp_data["tenure"]["vehicle_type"] == "Lorry"
+    assert comp_data["tenure"]["coverage_type"] == "Comprehensive (综合险)"
+
+
+def test_session_timeline_excludes_superseded_sessions_and_supports_whole_ringgit_rounding(db_session: Session, test_user: User):
+    """Session timeline must strictly exclude superseded sessions, and comparison entries provide whole ringgit ceiling."""
+    vehicle = TrackedVehicle(
+        id=new_id(),
+        vehicle_no="WXY9999",
+        car_brand="Toyota",
+        car_model="Vios",
+    )
+    db_session.add(vehicle)
+
+    tenure = InsuranceTenure(
+        id=new_id(),
+        tracked_vehicle_id=vehicle.id,
+        vehicle_no="WXY9999",
+        customer_name="Tan Ah Teck",
+        coverage_start_date=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 7, 31, tzinfo=timezone.utc),
+        expiry_month="2027-07",
+        road_tax=100.0,
+        runner_fee=50.0,
+        include_road_tax=True,
+        include_runner_fee=True,
+    )
+    db_session.add(tenure)
+
+    batch = Batch(id=new_id(), owner_id=test_user.id, name="Test Batch")
+    db_session.add(batch)
+
+    uf1 = UploadedFile(id=new_id(), batch_id=batch.id, owner_id=test_user.id, original_filename="am1.pdf", content_type="application/pdf", storage_path="q/1.pdf")
+    uf2 = UploadedFile(id=new_id(), batch_id=batch.id, owner_id=test_user.id, original_filename="am2.pdf", content_type="application/pdf", storage_path="q/2.pdf")
+    uf3 = UploadedFile(id=new_id(), batch_id=batch.id, owner_id=test_user.id, original_filename="qbe.pdf", content_type="application/pdf", storage_path="q/3.pdf")
+    db_session.add_all([uf1, uf2, uf3])
+
+    d1 = QuotationDraft(id=new_id(), owner_id=test_user.id, uploaded_file_id=uf1.id, revision=1, fields={})
+    d2 = QuotationDraft(id=new_id(), owner_id=test_user.id, uploaded_file_id=uf2.id, revision=1, fields={})
+    d3 = QuotationDraft(id=new_id(), owner_id=test_user.id, uploaded_file_id=uf3.id, revision=1, fields={})
+    db_session.add_all([d1, d2, d3])
+
+    # 1. Superseded AmAssurance v1 session
+    sess_v1 = SessionModel(
+        id=new_id(),
+        owner_id=test_user.id,
+        uploaded_file_id=uf1.id,
+        draft_id=d1.id,
+        tenure_id=tenure.id,
+        detected_company="AmAssurance",
+        tenure_version=1,
+        is_tenure_active=False,
+        duplicate_resolution="superseded",
+        batch_session_index=1,
+    )
+    db_session.add(sess_v1)
+
+    # 2. Active AmAssurance v2 session
+    sess_v2 = SessionModel(
+        id=new_id(),
+        owner_id=test_user.id,
+        uploaded_file_id=uf2.id,
+        draft_id=d2.id,
+        tenure_id=tenure.id,
+        detected_company="AmAssurance",
+        tenure_version=2,
+        is_tenure_active=True,
+        batch_session_index=1,
+    )
+    db_session.add(sess_v2)
+
+    # 3. Active QBE session
+    sess_qbe = SessionModel(
+        id=new_id(),
+        owner_id=test_user.id,
+        uploaded_file_id=uf3.id,
+        draft_id=d3.id,
+        tenure_id=tenure.id,
+        detected_company="QBE",
+        tenure_version=1,
+        is_tenure_active=True,
+        batch_session_index=2,
+    )
+    db_session.add(sess_qbe)
+
+    # Comparison entry with .29 cents
+    entry = TenureComparisonEntry(
+        id=new_id(),
+        tenure_id=tenure.id,
+        session_id=sess_v2.id,
+        company_name="AmAssurance",
+        sum_insured=50000.0,
+        motor_premium=1300.29,
+        road_tax=100.0,
+        runner_fee=50.0,
+        total_payable=1450.29,
+        towing_limit="365km",
+    )
+    db_session.add(entry)
+    db_session.commit()
+
+    comp_data = get_marketing_comparison(db_session, tenure.id)
+
+    # Timeline assertions
+    timeline = comp_data.get("upload_sessions", [])
+    all_timeline_session_ids = [q["session_id"] for batch in timeline for q in batch["quotes"]]
+
+    # Superseded session must NOT be in timeline
+    assert sess_v1.id not in all_timeline_session_ids
+    assert sess_v2.id in all_timeline_session_ids
+    assert sess_qbe.id in all_timeline_session_ids
+
+    # Whole ringgit rounding assertions
+    entries = comp_data.get("entries", [])
+    amgen_entry = next(e for e in entries if "AmAssurance" in e["company_name"])
+    assert amgen_entry["motor_premium"] == 1300.29
+    assert amgen_entry["whole_motor_premium"] == 1301.0
+    assert amgen_entry["whole_total_payable"] == 1451.0
+
+
+def test_engine_capacity_3_way_units_and_unified_calculator(db_session: Session):
+    """Test 3-way engine capacity parsing (CC, kW, KG) and unified JPJ road tax calculator."""
+    from app.services.road_tax_engine import calculate_road_tax_unified, parse_engine_capacity
+
+    # 1. Parse CC (ICE)
+    val_cc, unit_cc = parse_engine_capacity("1496 CC")
+    assert val_cc == 1496.0
+    assert unit_cc == "cc"
+
+    res_cc = calculate_road_tax_unified("1496 CC", unit="cc", vehicle_type="Car")
+    assert res_cc["road_tax"] == 90.0
+    assert res_cc["unit"] == "cc"
+    assert res_cc["formatted_capacity"] == "1,496 CC"
+
+    # 2. Parse kW (Electric Vehicle)
+    val_kw, unit_kw = parse_engine_capacity("150 kW")
+    assert val_kw == 150.0
+    assert unit_kw == "kw"
+
+    res_kw = calculate_road_tax_unified("150 kW", unit="kw", vehicle_type="EVSaloonCar")
+    assert res_kw["road_tax"] == 160.0
+    assert res_kw["unit"] == "kw"
+    assert res_kw["formatted_capacity"] == "150.0 kW"
+
+    # 3. Parse KG (Commercial Goods Vehicle / Lorry)
+    val_kg, unit_kg = parse_engine_capacity("3500 KG")
+    assert val_kg == 3500.0
+    assert unit_kg == "kg"
+
+    res_kg = calculate_road_tax_unified("3500 KG", unit="kg", vehicle_type="Lorry")
+    # <= 5000 KG is RM 480.00
+    assert res_kg["road_tax"] == 480.0
+    assert res_kg["unit"] == "kg"
+    assert res_kg["formatted_capacity"] == "3,500 KG"
+
+
+def test_toggle_fees_and_recalculation(db_session: Session):
+    """Test toggling road tax and runner fee and verifying that matrix totals update dynamically."""
+    tenure, _, _, _ = _seed_tenure_with_sessions(db_session)
+    comp_initial = get_marketing_comparison(db_session, tenure.id)
+    assert comp_initial["tenure"]["include_road_tax"] is True
+    assert comp_initial["tenure"]["include_runner_fee"] is True
+
+    # Exclude road tax, keep runner fee
+    updated = update_tenure_fixed_costs(
+        db_session,
+        tenure.id,
+        road_tax=90.0,
+        runner_fee=10.0,
+        include_road_tax=False,
+        include_runner_fee=True,
+    )
+    assert updated["tenure"]["include_road_tax"] is False
+    assert updated["tenure"]["include_runner_fee"] is True
+
+    # All entries under tenure should now exclude road tax from total_payable
+    for entry in updated["entries"]:
+        assert entry["road_tax"] == 0.0
+        assert entry["include_road_tax"] is False
+        assert entry["runner_fee"] == 10.0
+        assert entry["total_payable"] == round(entry["motor_premium"] + 10.0, 2)
+
+
+
 
 
 

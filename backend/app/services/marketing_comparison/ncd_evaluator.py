@@ -212,79 +212,33 @@ def calculate_betterment_rate(
     return get_standard_betterment_rate(age_in_years)
 
 
-def normalize_towing_km(raw_towing: Any, combined_text: str = "", company_name: str | None = None) -> str:
-    """Normalize towing benefit into clean numeric KM, RM currency cap, 'Unlimited', 'No towing', or preserve custom text."""
-    val_str = str(raw_towing or "").strip()
+from app.domain.motor.towing_matrix import resolve_towing_entitlement
+from app.domain.motor.winner_ranking_rules import apply_towing_advantage_rule
 
+
+def normalize_towing_km(raw_towing: Any, combined_text: str = "", company_name: str | None = None) -> str:
+    """Normalize towing benefit into authoritative Malaysian towing entitlement (RM, km, or Unlimited)."""
+    val_str = str(raw_towing or "").strip()
     if re.search(
         r"(?i)(?<!\d)0\s*km\b|\b(?:no towing|without towing|not included|tiada|nil)\b|^(?:none|no)$",
         val_str,
     ):
         return "No towing"
 
-    if any(
-        k in val_str.lower()
-        for k in ("unlimited", "24-hr unlimited", "24 hour unlimited", "tanpa had")
-    ):
-        return "Unlimited"
+    m_raw_num = re.match(r"^(\d+)$", val_str)
+    if m_raw_num:
+        val = int(m_raw_num.group(1))
+        comp_l = (company_name or "").lower()
+        if val in (200, 300, 400, 500, 600) and any(c in comp_l for c in ("qbe", "lonpac", "sompo", "tune")):
+            return f"RM {val}"
+        return f"{val} km"
 
-    # Preserve explicit RM currency limits
-    m_rm = re.search(r"^(?:RM|MYR)\s*([\d,]+(?:\.\d{2})?)", val_str, re.IGNORECASE)
-    if m_rm:
-        return f"RM {m_rm.group(1)}"
-
-    unlimited_triggers = [
-        "unlimited towing",
-        "24-hr unlimited",
-        "24 hour unlimited",
-        "tanpa had",
-        "motor pa plus",
-        "driver plus plan 4",
-        "driver plus 4",
-        "private car 365 plan",
-        "amdrive plus",
-        "oto 360",
-        "e-assist smart driver",
-        "sompo motor",
-        "motor easy bundle plan",
-        "autobuddy",
-    ]
-    if any(k in combined_text.lower() for k in unlimited_triggers):
-        return "Unlimited"
-
-    for text_source in (val_str, combined_text):
-        m = re.search(
-            r"(\d+)\s*(?:km|k\.m\.|kilomet(?:er|re)s?)\b", text_source, re.IGNORECASE
-        )
-        if m:
-            km = int(m.group(1))
-            if km > 0:
-                return f"{km} km"
-
-    m_num = re.match(r"^(\d+)$", val_str)
-    if m_num:
-        val = int(m_num.group(1))
-        if val > 0:
-            comp_l = (company_name or "").lower()
-            if val in (200, 300, 400, 500, 600) and any(c in comp_l for c in ("qbe", "lonpac", "sompo", "tune")):
-                return f"RM {val}"
-            return f"{val} km"
-
-    if val_str and val_str.lower() not in ("none", "null", "false", ""):
-        # Check if the string has RM anywhere
-        m_rm_inner = re.search(r"(?:RM|MYR)\s*(\d{2,4})", val_str, re.IGNORECASE)
-        if m_rm_inner:
-            return f"RM {m_rm_inner.group(1)}"
-        m_any = re.search(r"\b(\d{2,4})\b", val_str)
-        if m_any:
-            comp_l = (company_name or "").lower()
-            val = int(m_any.group(1))
-            if val in (200, 300, 400, 500, 600) and any(c in comp_l for c in ("qbe", "lonpac", "sompo", "tune")):
-                return f"RM {val}"
-            return f"{m_any.group(1)} km"
-        return val_str
-
-    return "Unlimited"
+    entitlement = resolve_towing_entitlement(
+        company_name=company_name,
+        package_or_rider=val_str,
+        raw_document_text=combined_text,
+    )
+    return entitlement.formatted
 
 
 def _towing_sort_value(towing_str: str | None) -> float:
@@ -292,9 +246,13 @@ def _towing_sort_value(towing_str: str | None) -> float:
     s = (towing_str or "").lower().strip()
     if "unlimited" in s:
         return -999999.0
-    m = re.search(r"(\d+)", s)
+    s_clean = s.replace(",", "")
+    m = re.search(r"(\d+)", s_clean)
     if m:
-        return -float(m.group(1))
+        num = float(m.group(1))
+        if "rm" in s:
+            num = num * 0.5
+        return -num
     return 0.0
 
 
@@ -330,6 +288,7 @@ def rank_comparison_entries(
         return (tot, exc, bet, tow)
 
     auto_sorted = sorted(auto_ranked, key=sort_key)
+    auto_sorted = apply_towing_advantage_rule(auto_sorted)
 
     used_ranks: set[int] = {
         e.manual_rank for e in manual_ranked if e.manual_rank is not None

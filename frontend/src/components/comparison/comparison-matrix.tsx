@@ -44,14 +44,20 @@ import {
   CloudArrowUp,
   ClipboardText,
   CheckCircle,
+  XCircle,
+  Lightning,
+  CurrencyDollar,
 } from "@phosphor-icons/react";
 import { toBlob, toPng } from "html-to-image";
 import { api, fileUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import type { RoundingMode } from "./types";
 import { ManualQuoteModal } from "./manual-quote-modal";
+import { FastQuoteModal } from "./components/FastQuoteModal";
 import { UnlinkCovernoteModal } from "./components/UnlinkCovernoteModal";
 import { DetectionLogsModal } from "./components/DetectionLogsModal";
 import { NcdEntitlementModal } from "./components/NcdEntitlementModal";
+import { AdjustFeesModal } from "./components/AdjustFeesModal";
 import { SnapshotPreviewModal } from "./components/SnapshotPreviewModal";
 import { SourcePdfViewerPane } from "./components/SourcePdfViewerPane";
 import { UnderwriterQuoteCard } from "./components/UnderwriterQuoteCard";
@@ -141,6 +147,8 @@ interface TenureSpec {
   status: string;
   road_tax: number;
   runner_fee: number;
+  include_road_tax?: boolean;
+  include_runner_fee?: boolean;
   runner_fee_type?: string;
   fixed_costs_total: number;
   quotation_discount?: number;
@@ -167,15 +175,23 @@ interface ComparisonEntry {
   motor_premium: number;
   rounded_motor_premium?: number | null;
   exact_motor_premium?: number | null;
+  bnm_5cent_motor_premium?: number | null;
+  whole_motor_premium?: number | null;
   road_tax: number;
   runner_fee: number;
+  include_road_tax?: boolean;
+  include_runner_fee?: boolean;
   discount?: number | null;
   effective_discount?: number | null;
   total_payable: number;
   rounded_total_payable?: number | null;
   exact_total_payable?: number | null;
+  bnm_5cent_total_payable?: number | null;
+  whole_total_payable?: number | null;
   net_total_payable?: number;
   rounded_net_total_payable?: number;
+  bnm_5cent_net_total_payable?: number;
+  whole_net_total_payable?: number | null;
   towing_limit: string;
   towing_km?: string;
   agreed_value: boolean;
@@ -355,7 +371,60 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [error, setError] = useState<string | null>(null);
   const [copiedWhatsapp, setCopiedWhatsapp] = useState(false);
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
+  const [isFastQuoteModalOpen, setIsFastQuoteModalOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<ComparisonEntry | null>(null);
+  const [roundingMode, setRoundingMode] = useState<RoundingMode>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("rl_rounding_mode");
+      if (saved === "exact" || saved === "5cent" || saved === "whole") return saved as RoundingMode;
+      if (saved === "bnm5") return "5cent";
+    }
+    return "exact";
+  });
+
+  const handleToggleRoundingMode = (mode: RoundingMode) => {
+    setRoundingMode(mode);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("rl_rounding_mode", mode);
+    }
+  };
+
+  const [showAdjustFeesModal, setShowAdjustFeesModal] = useState(false);
+  const [togglingFee, setTogglingFee] = useState<"road_tax" | "runner_fee" | null>(null);
+
+  const handleToggleFee = async (feeType: "road_tax" | "runner_fee") => {
+    if (!data?.tenure) return;
+    const currentIncRt = data.tenure.include_road_tax !== false;
+    const currentIncRf = data.tenure.include_runner_fee !== false;
+    const nextIncRt = feeType === "road_tax" ? !currentIncRt : currentIncRt;
+    const nextIncRf = feeType === "runner_fee" ? !currentIncRf : currentIncRf;
+
+    try {
+      setTogglingFee(feeType);
+      const updated = await api<any>(`/comparison/${tenureId}/toggle-fees`, {
+        method: "POST",
+        body: JSON.stringify({
+          include_road_tax: nextIncRt,
+          include_runner_fee: nextIncRf,
+          road_tax: data.tenure.road_tax,
+          runner_fee: data.tenure.runner_fee,
+        }),
+      });
+      setData(updated);
+      populateEditInputs(updated.tenure);
+      triggerStatus(
+        "success",
+        feeType === "road_tax" ? "Road Tax Toggled" : "Runner Fee Toggled",
+        feeType === "road_tax"
+          ? (nextIncRt ? `Road Tax included in totals (RM ${data.tenure.road_tax.toFixed(2)})` : "Road Tax excluded from quotation totals")
+          : (nextIncRf ? `Runner Fee included in totals (RM ${data.tenure.runner_fee.toFixed(2)})` : "Runner Fee excluded from quotation totals")
+      );
+    } catch (err: any) {
+      triggerStatus("error", "Failed to update fee", err.message || String(err));
+    } finally {
+      setTogglingFee(null);
+    }
+  };
   const [isUnlinkingCovernote, setIsUnlinkingCovernote] = useState(false);
   const [promotingEntryId, setPromotingEntryId] = useState<string | null>(null);
 
@@ -531,7 +600,9 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [vehicleNoInput, setVehicleNoInput] = useState("");
   const [carBrandInput, setCarBrandInput] = useState("");
   const [roadTaxInput, setRoadTaxInput] = useState("70");
+  const [includeRoadTaxInput, setIncludeRoadTaxInput] = useState(true);
   const [runnerFeeInput, setRunnerFeeInput] = useState("50");
+  const [includeRunnerFeeInput, setIncludeRunnerFeeInput] = useState(true);
   const [windscreenInput, setWindscreenInput] = useState("");
   const [quotationDiscountInput, setQuotationDiscountInput] = useState<string>("0");
   const [currentPolicyDiscount, setCurrentPolicyDiscount] = useState<number>(0);
@@ -540,6 +611,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [engineNoInput, setEngineNoInput] = useState("");
   const [chassisNoInput, setChassisNoInput] = useState("");
   const [vehicleModelInput, setVehicleModelInput] = useState("");
+  const [vehicleTypeInput, setVehicleTypeInput] = useState("Car");
   const [manufactureYearInput, setManufactureYearInput] = useState("");
   const [startDateInput, setStartDateInput] = useState("");
   const [endDateInput, setEndDateInput] = useState("");
@@ -603,13 +675,16 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     setCustomerNameInput(tenure.customer_name || "");
     setIcNoInput(tenure.ic_no || "");
     setRoadTaxInput(String(tenure.road_tax));
+    setIncludeRoadTaxInput(tenure.include_road_tax !== false);
     setRunnerFeeInput(String(tenure.runner_fee));
+    setIncludeRunnerFeeInput(tenure.include_runner_fee !== false);
     setWindscreenInput(tenure.windscreen_target ? String(tenure.windscreen_target) : "");
     setQuotationDiscountInput(tenure.quotation_discount != null ? String(tenure.quotation_discount) : "0");
     setEngineCcInput(tenure.engine_cc || "");
     setEngineNoInput(tenure.engine_no || "");
     setChassisNoInput(tenure.chassis_no || "");
     setVehicleModelInput(tenure.vehicle_model || "");
+    setVehicleTypeInput(tenure.vehicle_type || "Car");
     setManufactureYearInput(tenure.manufacture_year ? String(tenure.manufacture_year) : "");
     if (tenure.coverage_start_date) {
       setStartDateInput(tenure.coverage_start_date.split("T")[0]);
@@ -732,6 +807,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         body: JSON.stringify({
           road_tax: parseFloat(roadTaxInput) || 0,
           runner_fee: parseFloat(runnerFeeInput) || 0,
+          include_road_tax: includeRoadTaxInput,
+          include_runner_fee: includeRunnerFeeInput,
           windscreen_target: parseFloat(windscreenInput) || 0,
           quotation_discount: parseFloat(quotationDiscountInput) || 0,
           coverage_start_date: startDateInput || undefined,
@@ -744,6 +821,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           engine_no: engineNoInput || undefined,
           chassis_no: chassisNoInput || undefined,
           vehicle_model: vehicleModelInput || undefined,
+          vehicle_type: vehicleTypeInput || undefined,
           manufacture_year: parseInt(manufactureYearInput, 10) || undefined,
         }),
       });
@@ -1272,6 +1350,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         }}
         onPromoteToCovernote={handlePromoteToCovernote}
         onDeleteEntry={handleDeleteEntry}
+        roundingMode={roundingMode}
       />
     );
   };
@@ -1319,7 +1398,12 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               <p className="text-[11px] font-semibold text-[#454545]">
                 Roadtax and Runner fee :{" "}
                 <span className="font-mono font-bold text-[#1b1717]">
-                  RM {(tenure.road_tax + tenure.runner_fee).toFixed(2)}
+                  {tenure.include_road_tax === false && tenure.include_runner_fee === false
+                    ? "Excluded"
+                    : `RM ${(
+                        (tenure.include_road_tax !== false ? tenure.road_tax : 0) +
+                        (tenure.include_runner_fee !== false ? tenure.runner_fee : 0)
+                      ).toFixed(2)}`}
                 </span>
               </p>
             </div>
@@ -1517,49 +1601,52 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       )}
 
       {/* Top-Level Session Timeline Ribbon */}
-      {data.upload_sessions && data.upload_sessions.length > 0 && (
+      {data.upload_sessions && data.upload_sessions.filter((b) => b.quotes && b.quotes.length > 0).length > 0 && (
         <div className="rounded-2xl border border-[#e5e5ea] bg-white p-3 shadow-xs flex items-center gap-3 overflow-x-auto no-print print:hidden">
           <div className="flex items-center gap-1.5 text-xs font-bold text-[#1b1717] shrink-0 pl-1">
             <Clock size={16} weight="bold" className="text-[#6e6e73]" />
             <span>Session Timeline:</span>
           </div>
           <div className="flex items-center gap-2">
-            {data.upload_sessions.map((batch, idx) => {
-              const qNames = batch.quotes.map((q) => `${formatShortInsurerName(q.company_name)} v${q.version}`).join(", ");
-              const isHighlighted =
-                batch.quotes.some((q) => q.session_id === highlightedSessionId) ||
-                batch.session_id === highlightedSessionId;
-              const firstSid = batch.quotes[0]?.session_id || batch.session_id;
+            {data.upload_sessions
+              .filter((batch) => batch.quotes && batch.quotes.length > 0)
+              .map((batch, idx) => {
+                const qNames = batch.quotes.map((q) => formatShortInsurerName(q.company_name)).join(", ");
+                const isHighlighted =
+                  batch.quotes.some((q) => q.session_id === highlightedSessionId) ||
+                  batch.session_id === highlightedSessionId;
+                const firstSid = batch.quotes[0]?.session_id || batch.session_id;
 
-              return (
-                <div
-                  key={batch.session_id}
-                  onClick={() => setHighlightedSessionId(isHighlighted ? null : firstSid)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs cursor-pointer transition-all shrink-0 ${
-                    isHighlighted
-                      ? "bg-[#1b1717] text-white border-[#1b1717] shadow-sm"
-                      : "bg-[#f5f5f7] hover:bg-[#e5e5ea] text-[#1b1717] border-[#e5e5ea]"
-                  }`}
-                  title={
-                    batch.uploaded_at
-                      ? `Uploaded at ${new Date(batch.uploaded_at).toLocaleTimeString()}`
-                      : `Batch #${batch.batch_index || idx + 1}`
-                  }
-                >
-                  <span
-                    className={`size-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                      isHighlighted ? "bg-white text-[#1b1717]" : "bg-[#1b1717] text-white"
+                return (
+                  <button
+                    key={batch.session_id}
+                    type="button"
+                    onClick={() => setHighlightedSessionId(isHighlighted ? null : firstSid)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs cursor-pointer transition-all shrink-0 ${
+                      isHighlighted
+                        ? "bg-[#1b1717] text-white border-[#1b1717] shadow-sm"
+                        : "bg-[#f5f5f7] hover:bg-[#e5e5ea] text-[#1b1717] border-[#e5e5ea]"
                     }`}
+                    title={
+                      batch.uploaded_at
+                        ? `Uploaded at ${new Date(batch.uploaded_at).toLocaleTimeString()}`
+                        : `Batch #${batch.batch_index || idx + 1}`
+                    }
                   >
-                    {batch.batch_index || idx + 1}
-                  </span>
-                  <span className="font-semibold">{qNames || "Quotation Batch"}</span>
-                  <span className="text-[10px] opacity-70">
-                    ({batch.quotes.length} {batch.quotes.length === 1 ? "quote" : "quotes"})
-                  </span>
-                </div>
-              );
-            })}
+                    <span
+                      className={`size-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                        isHighlighted ? "bg-white text-[#1b1717]" : "bg-[#1b1717] text-white"
+                      }`}
+                    >
+                      {batch.batch_index || idx + 1}
+                    </span>
+                    <span className="font-semibold">{qNames || "Quotation Batch"}</span>
+                    <span className={`text-[10px] ${isHighlighted ? "text-neutral-300" : "opacity-70"}`}>
+                      ({batch.quotes.length} {batch.quotes.length === 1 ? "quote" : "quotes"})
+                    </span>
+                  </button>
+                );
+              })}
           </div>
         </div>
       )}
@@ -1670,15 +1757,214 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2 flex-wrap no-print print:hidden">
+        {/* Structured Action Clusters */}
+        <div className="flex items-center gap-2.5 flex-wrap no-print print:hidden shrink-0">
+          {/* Group 1: Client Share & Export Actions */}
+          <div className="flex items-center gap-1.5 bg-[#f5f5f7] p-1 rounded-xl border border-[#e5e5ea]">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleCopyWhatsapp}
+              icon={copiedWhatsapp ? <Check weight="bold" size={15} className="text-emerald-600" /> : <ChatCircleDots weight="bold" size={15} className="text-emerald-700" />}
+              className={`border-transparent text-xs font-semibold ${
+                copiedWhatsapp
+                  ? "bg-emerald-50 text-emerald-800 border-emerald-300"
+                  : "bg-white hover:bg-neutral-50 text-[#1b1717] shadow-2xs"
+              }`}
+              title="Copy WhatsApp comparison teaser text"
+            >
+              {copiedWhatsapp ? "Copied!" : "WhatsApp Teaser"}
+            </Button>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setSnapshotModalOpen(true)}
+              icon={<Camera size={15} weight="bold" className="text-[#1b1717]" />}
+              className="border-transparent bg-white hover:bg-neutral-50 text-[#1b1717] font-semibold text-xs shadow-2xs"
+              title="Export high-resolution comparison snapshot grid"
+            >
+              Snapshot
+            </Button>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => window.print()}
+              icon={<Printer weight="bold" size={15} className="text-[#1b1717]" />}
+              className="border-transparent bg-white hover:bg-neutral-50 text-[#1b1717] font-semibold text-xs shadow-2xs"
+              title="Print executive quotation comparison"
+            >
+              Print
+            </Button>
+          </div>
+
+          <div className="h-6 w-px bg-[#e5e5ea] hidden sm:block" />
+
+          {/* Group 2: Primary Quotation Ingestion */}
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setIsFastQuoteModalOpen(true)}
+              icon={<Lightning weight="fill" size={14} className="text-amber-500" />}
+              className="border-amber-300 bg-amber-50/70 hover:bg-amber-100/80 text-amber-950 font-bold text-xs shadow-2xs"
+              title="Fast 30-second manual quote entry for unreadable scans or portal quotes"
+            >
+              + Fast Quote
+            </Button>
+
+            <Link
+              href={`/upload?mode=comparison&tenure_id=${tenure.id}` as Route}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e5e5ea] bg-white hover:bg-neutral-50 text-xs font-semibold text-[#1b1717] transition-colors shadow-2xs cursor-pointer"
+              title="Upload underwriter quotation or cover note PDF for this vehicle"
+            >
+              <UploadSimple size={15} weight="bold" />
+              <span>Upload PDF</span>
+            </Link>
+
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setEditingEntry(null);
+                setIsManualModalOpen(true);
+              }}
+              icon={<Plus weight="bold" size={14} />}
+              className="bg-[#1b1717] hover:bg-black text-white font-semibold text-xs shadow-xs"
+              title="Manually enter an insurer quotation"
+            >
+              Add Insurer Quote
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Dedicated Pricing Display & Fixed Fee Controls Toolbar */}
+      <div className="rounded-2xl border border-[#e5e5ea] bg-white p-3.5 shadow-xs flex flex-col xl:flex-row items-start xl:items-center justify-between gap-3 no-print print:hidden">
+        {/* Left: Pricing & Currency Rounding Mode + Fee Quick Toggles */}
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Sub-Group A: Pricing Mode */}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-[#1b1717] shrink-0">
+              <CurrencyDollar size={18} weight="bold" className="text-[#1b1717]" />
+              <span>Pricing Display:</span>
+            </div>
+
+            <div className="flex items-center p-1 rounded-xl border border-[#e5e5ea] bg-[#f5f5f7] text-xs font-medium shrink-0 gap-1">
+              <button
+                type="button"
+                onClick={() => handleToggleRoundingMode("exact")}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer text-xs ${
+                  roundingMode === "exact"
+                    ? "bg-white text-[#1b1717] font-bold shadow-2xs border border-black/5"
+                    : "text-[#6e6e73] hover:text-[#1b1717]"
+                }`}
+                title="Display exact cents from underwriter quotation (.15)"
+              >
+                Exact Cents (.15)
+              </button>
+              <button
+                type="button"
+                onClick={() => handleToggleRoundingMode("5cent")}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer text-xs ${
+                  roundingMode === "5cent" || (roundingMode as string) === "bnm5"
+                    ? "bg-white text-[#1b1717] font-bold shadow-2xs border border-black/5"
+                    : "text-[#6e6e73] hover:text-[#1b1717]"
+                }`}
+                title="5 Cents cash rounding (.15)"
+              >
+                5 Cents (.15)
+              </button>
+              <button
+                type="button"
+                onClick={() => handleToggleRoundingMode("whole")}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer text-xs ${
+                  roundingMode === "whole"
+                    ? "bg-white text-[#1b1717] font-bold shadow-2xs border border-black/5"
+                    : "text-[#6e6e73] hover:text-[#1b1717]"
+                }`}
+                title="Round up to nearest whole Ringgit without cents (e.g. 1,300.29 -> 1,301)"
+              >
+                Whole RM (1,301)
+              </button>
+            </div>
+          </div>
+
+          <div className="h-6 w-px bg-[#e5e5ea] hidden sm:block" />
+
+          {/* Sub-Group B: Road Tax & Runner Fee 1-Click Toggles & Fix Button */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              disabled={togglingFee !== null}
+              onClick={() => handleToggleFee("road_tax")}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+                tenure.include_road_tax !== false
+                  ? "bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100/80 shadow-2xs"
+                  : "bg-[#f5f5f7] text-[#6e6e73] border-dashed border-[#e5e5ea] hover:bg-neutral-200"
+              }`}
+              title={tenure.include_road_tax !== false ? "Click to exclude Road Tax from comparison totals" : "Click to include Road Tax in comparison totals"}
+            >
+              {tenure.include_road_tax !== false ? (
+                <>
+                  <CheckCircle size={14} weight="fill" className="text-emerald-600" />
+                  <span>Road Tax: RM {tenure.road_tax.toFixed(2)}</span>
+                </>
+              ) : (
+                <>
+                  <XCircle size={14} weight="fill" className="text-neutral-400" />
+                  <span className="line-through">Road Tax (Excluded)</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              disabled={togglingFee !== null}
+              onClick={() => handleToggleFee("runner_fee")}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+                tenure.include_runner_fee !== false
+                  ? "bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100/80 shadow-2xs"
+                  : "bg-[#f5f5f7] text-[#6e6e73] border-dashed border-[#e5e5ea] hover:bg-neutral-200"
+              }`}
+              title={tenure.include_runner_fee !== false ? "Click to exclude Runner Fee from comparison totals" : "Click to include Runner Fee in comparison totals"}
+            >
+              {tenure.include_runner_fee !== false ? (
+                <>
+                  <CheckCircle size={14} weight="fill" className="text-emerald-600" />
+                  <span>Runner: RM {tenure.runner_fee.toFixed(2)}</span>
+                </>
+              ) : (
+                <>
+                  <XCircle size={14} weight="fill" className="text-neutral-400" />
+                  <span className="line-through">Runner Fee (Excluded)</span>
+                </>
+              )}
+            </button>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowAdjustFeesModal(true)}
+              icon={<PencilSimple size={14} weight="bold" className="text-[#1b1717]" />}
+              className="border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717] font-semibold text-xs shadow-2xs"
+              title="Fix or adjust Road Tax and Runner Fee amounts, or recalculate JPJ tariff"
+            >
+              Fix / Adjust Fees
+            </Button>
+          </div>
+        </div>
+
+        {/* Right: Matrix Utilities & Audit Diagnostics */}
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
           {hiddenCount > 0 && (
             <Button
               variant="secondary"
               size="sm"
               onClick={() => setShowHiddenCards(!showHiddenCards)}
-              icon={showHiddenCards ? <EyeSlash size={15} /> : <Eye size={15} />}
-              className="border-neutral-300 text-xs font-semibold bg-neutral-50 hover:bg-neutral-100"
+              icon={showHiddenCards ? <EyeSlash size={14} /> : <Eye size={14} />}
+              className="border-neutral-200 text-xs font-semibold bg-[#f5f5f7] hover:bg-neutral-200 text-[#1b1717]"
             >
               {showHiddenCards ? "Hide Inactive" : `${hiddenCount} hidden · Show All`}
             </Button>
@@ -1687,21 +1973,10 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           <Button
             variant="secondary"
             size="sm"
-            onClick={handleRescanQuotes}
-            loading={isRescanning}
-            icon={<ArrowsClockwise size={15} weight="bold" className={isRescanning ? "animate-spin text-[#ed1c24]" : "text-[#ed1c24]"} />}
-            className="border-2 border-[#1b1717] bg-[#f5f5f7] hover:bg-neutral-200 text-[#1b1717] font-bold"
-            title="Re-extract and re-sync values from all uploaded quotation PDFs, re-evaluating Betterment rules and windscreen targets"
-          >
-            Re-Analyze All Quotes
-          </Button>
-
-          <Button
-            variant="secondary"
-            size="sm"
             onClick={handleRerank}
             loading={reranking}
-            icon={<ArrowsClockwise size={15} weight="bold" />}
+            icon={<ArrowsClockwise size={14} weight="bold" />}
+            className="border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717] font-semibold text-xs"
             title="Recalculate dynamic ranking order based on visible cards and manual overrides"
           >
             Re-Rank
@@ -1710,65 +1985,24 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => setSnapshotModalOpen(true)}
-            icon={<Camera size={15} weight="bold" />}
-            className="border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717] font-semibold"
-            title="Export high-resolution comparison snapshot grid"
+            onClick={handleRescanQuotes}
+            loading={isRescanning}
+            icon={<ArrowsClockwise size={14} weight="bold" className={isRescanning ? "animate-spin text-[#ed1c24]" : "text-[#ed1c24]"} />}
+            className="border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717] font-semibold text-xs"
+            title="Re-extract and re-sync values from all uploaded quotation PDFs"
           >
-            Export Snapshot
+            Re-Analyze All Quotes
           </Button>
 
           <Button
             variant="secondary"
             size="sm"
             onClick={() => setShowDetectionLogsModal(true)}
-            icon={<ClipboardText size={15} weight="bold" className="text-blue-600" />}
-            className="border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717] font-semibold"
-            title="Inspect autonomous 100% precision detection audit: JPJ road tax math, perils pricing breakdown, and schedule policy excess"
+            icon={<ClipboardText size={14} weight="bold" className="text-blue-600" />}
+            className="border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717] font-semibold text-xs"
+            title="Inspect autonomous detection audit: JPJ road tax math, perils pricing breakdown, and schedule policy excess"
           >
             Detection Logs
-          </Button>
-
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleCopyWhatsapp}
-            icon={copiedWhatsapp ? <Check weight="bold" size={16} className="text-emerald-500" /> : <ChatCircleDots weight="bold" size={16} />}
-            className={copiedWhatsapp ? "border-emerald-500 bg-emerald-50 text-emerald-700" : ""}
-          >
-            {copiedWhatsapp ? "Copied WhatsApp Teaser!" : "Copy WhatsApp Teaser"}
-          </Button>
-
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => window.print()}
-            icon={<Printer weight="bold" size={16} />}
-          >
-            Print
-          </Button>
-
-          {/* Single Unified Upload PDF Action */}
-          <Link
-            href={`/upload?mode=comparison&tenure_id=${tenure.id}` as Route}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e5e5ea] bg-white hover:bg-neutral-50 text-xs font-semibold text-[#1b1717] transition-colors shadow-2xs"
-            title="Upload underwriter quotation or cover note PDF for this vehicle"
-          >
-            <UploadSimple size={15} weight="bold" />
-            <span>Upload PDF</span>
-          </Link>
-
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => {
-              setEditingEntry(null);
-              setIsManualModalOpen(true);
-            }}
-            icon={<Plus weight="bold" size={14} />}
-            className="bg-[#1b1717] hover:bg-black text-white font-semibold"
-          >
-            Add Insurer Quote
           </Button>
         </div>
       </div>
@@ -1824,8 +2058,12 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           setCarBrandInput={setCarBrandInput}
           roadTaxInput={roadTaxInput}
           setRoadTaxInput={setRoadTaxInput}
+          includeRoadTaxInput={includeRoadTaxInput}
+          setIncludeRoadTaxInput={setIncludeRoadTaxInput}
           runnerFeeInput={runnerFeeInput}
           setRunnerFeeInput={setRunnerFeeInput}
+          includeRunnerFeeInput={includeRunnerFeeInput}
+          setIncludeRunnerFeeInput={setIncludeRunnerFeeInput}
           windscreenInput={windscreenInput}
           setWindscreenInput={setWindscreenInput}
           quotationDiscountInput={quotationDiscountInput}
@@ -1838,6 +2076,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           setChassisNoInput={setChassisNoInput}
           vehicleModelInput={vehicleModelInput}
           setVehicleModelInput={setVehicleModelInput}
+          vehicleTypeInput={vehicleTypeInput}
+          setVehicleTypeInput={setVehicleTypeInput}
           manufactureYearInput={manufactureYearInput}
           setManufactureYearInput={setManufactureYearInput}
           startDateInput={startDateInput}
@@ -1912,24 +2152,31 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             )}
 
             {/* "+ Add Insurer Quote" Action Card */}
-            <div
-              onClick={() => {
-                setEditingEntry(null);
-                setIsManualModalOpen(true);
-              }}
-              className="w-[240px] shrink-0 rounded-2xl border-2 border-dashed border-[#e5e5ea] hover:border-[#1b1717] p-6 flex flex-col items-center justify-center text-center gap-3 cursor-pointer transition-colors bg-white group no-print print:hidden"
-            >
-              <div className="size-12 rounded-full bg-[#f5f5f7] flex items-center justify-center text-[#454545] group-hover:bg-[#1b1717] group-hover:text-white transition-colors">
-                <Plus size={22} weight="bold" />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-[#1b1717]">
-                  Add Insurer Quote
-                </p>
-                <p className="text-xs text-[#6e6e73] mt-0.5">
-                  Enter portal figures manually or adjust rates
-                </p>
-              </div>
+            <div className="w-[240px] shrink-0 rounded-2xl border-2 border-dashed border-[#e5e5ea] p-4 flex flex-col items-center justify-center text-center gap-2.5 bg-white group no-print print:hidden">
+              <button
+                type="button"
+                onClick={() => setIsFastQuoteModalOpen(true)}
+                className="w-full py-2.5 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors border border-amber-300 cursor-pointer"
+              >
+                <Lightning size={16} weight="fill" className="text-amber-600" />
+                <span>+ Fast Quote (30s)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingEntry(null);
+                  setIsManualModalOpen(true);
+                }}
+                className="w-full py-2 px-3 rounded-xl bg-[#f5f5f7] hover:bg-neutral-200/70 text-[#1b1717] font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors border border-[#e5e5ea] cursor-pointer"
+              >
+                <Plus size={15} weight="bold" />
+                <span>Standard Entry</span>
+              </button>
+
+              <p className="text-[10px] text-[#8e8e93] leading-tight">
+                Enter portal figures or unreadable scans in seconds
+              </p>
             </div>
           </div>
         </div>
@@ -2060,6 +2307,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         activeWinnerPeriod={activeWinnerPeriod}
         visibleRanksMap={visibleRanksMap}
         ncdData={data?.ncd}
+        roundingMode={roundingMode}
       />
 
       {/* 100% Precision Autonomous Detection Logs Modal */}
@@ -2086,6 +2334,16 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         tenureId={tenureId}
         tenureStartDate={tenure?.coverage_start_date}
         onUploadSuccess={() => fetchComparison()}
+      />
+
+      {/* 30-Second Fast Quote Manual Fallback Modal */}
+      <FastQuoteModal
+        isOpen={isFastQuoteModalOpen}
+        onClose={() => setIsFastQuoteModalOpen(false)}
+        tenure={tenure}
+        onSuccess={async () => {
+          await fetchComparison();
+        }}
       />
 
       {/* Unlink Cover Note Confirmation Modal with Download Option */}
@@ -2116,6 +2374,26 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         onSave={handleSaveNcd}
         isSaving={savingNcd}
       />
+
+      {/* Adjust Fees & Road Tax Fast Modal */}
+      {tenure && (
+        <AdjustFeesModal
+          isOpen={showAdjustFeesModal}
+          onClose={() => setShowAdjustFeesModal(false)}
+          tenureId={tenure.id}
+          initialRoadTax={tenure.road_tax}
+          initialRunnerFee={tenure.runner_fee}
+          initialIncludeRoadTax={tenure.include_road_tax !== false}
+          initialIncludeRunnerFee={tenure.include_runner_fee !== false}
+          engineCapacity={tenure.engine_cc}
+          vehicleType={tenure.vehicle_type}
+          onSaved={(updated) => {
+            setData(updated);
+            populateEditInputs(updated.tenure);
+            triggerStatus("success", "Fees Updated", "Road Tax & Runner Fee were successfully updated and all quotes recalculated.");
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -16,8 +16,8 @@ import {
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { formatShortInsurerName, formatBenefitCoverage } from "@/lib/benefit-utils";
-import { formatLlpLlop, isLlpLlopIncluded } from "../types";
-import type { ComparisonEntry, TenureSpec } from "../types";
+import { formatLlpLlop, isLlpLlopIncluded, formatMoneyWithRounding } from "../types";
+import type { ComparisonEntry, TenureSpec, RoundingMode } from "../types";
 
 export interface UnderwriterQuoteCardProps {
   entry: ComparisonEntry;
@@ -47,6 +47,7 @@ export interface UnderwriterQuoteCardProps {
   onEditEntry: (entry: ComparisonEntry) => void;
   onPromoteToCovernote: (entry: ComparisonEntry) => void;
   onDeleteEntry: (id: string, deleteCompany: boolean) => void;
+  roundingMode?: RoundingMode;
 }
 
 export function UnderwriterQuoteCard({
@@ -72,6 +73,7 @@ export function UnderwriterQuoteCard({
   onEditEntry,
   onPromoteToCovernote,
   onDeleteEntry,
+  roundingMode = "exact",
 }: UnderwriterQuoteCardProps) {
   const isWinner = entry.is_recommended;
 
@@ -216,7 +218,14 @@ export function UnderwriterQuoteCard({
                             ? "bg-[#1b1717] text-white shadow-xs"
                             : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-200/60"
                         }`}
-                        title={`v${q.version || 1} • RM ${(q.rounded_total_payable != null ? q.rounded_total_payable : Math.round(q.total_payable)).toFixed(2)}${isLatest ? " (Latest)" : ""}`}
+                        title={`v${q.version || 1} • RM ${formatMoneyWithRounding(
+                          roundingMode === "whole"
+                            ? (q.whole_total_payable ?? q.total_payable)
+                            : (roundingMode === "5cent" || roundingMode === "bnm5")
+                            ? (q.bnm_5cent_total_payable ?? q.exact_total_payable ?? q.total_payable)
+                            : (q.exact_total_payable ?? q.total_payable),
+                          roundingMode
+                        )}${isLatest ? " (Latest)" : ""}`}
                       >
                         <span>v{q.version || 1}</span>
                         {isLatest && <span className="text-[9px] opacity-75 font-normal">Latest</span>}
@@ -294,12 +303,19 @@ export function UnderwriterQuoteCard({
             <p
               className="font-mono text-sm font-bold text-[#1b1717]"
               title={
-                entry.exact_motor_premium && (entry.rounded_motor_premium ?? Math.round(entry.motor_premium)) !== entry.exact_motor_premium
+                entry.exact_motor_premium
                   ? `Exact cents: RM ${entry.exact_motor_premium.toFixed(2)}`
                   : undefined
               }
             >
-              RM {(entry.rounded_motor_premium != null ? entry.rounded_motor_premium : Math.round(entry.motor_premium)).toFixed(2)}
+              RM {formatMoneyWithRounding(
+                roundingMode === "whole"
+                  ? (entry.whole_motor_premium ?? entry.exact_motor_premium ?? entry.motor_premium)
+                  : (roundingMode === "5cent" || roundingMode === "bnm5")
+                  ? (entry.bnm_5cent_motor_premium ?? entry.exact_motor_premium ?? entry.motor_premium)
+                  : (entry.exact_motor_premium ?? entry.motor_premium),
+                roundingMode
+              )}
             </p>
           </div>
 
@@ -318,7 +334,14 @@ export function UnderwriterQuoteCard({
               <div>
                 <div className="flex items-center gap-1.5 mb-0.5">
                   <span className="text-xs text-neutral-400 line-through font-mono">
-                    RM {(entry.rounded_total_payable != null ? entry.rounded_total_payable : (Math.round(entry.motor_premium) + tenure.fixed_costs_total)).toFixed(2)}
+                    RM {formatMoneyWithRounding(
+                      roundingMode === "whole"
+                        ? (entry.whole_total_payable ?? entry.exact_total_payable ?? entry.total_payable)
+                        : (roundingMode === "5cent" || roundingMode === "bnm5")
+                        ? (entry.bnm_5cent_total_payable ?? entry.exact_total_payable ?? entry.total_payable)
+                        : (entry.exact_total_payable ?? entry.total_payable),
+                      roundingMode
+                    )}
                   </span>
                   <span className="bg-emerald-50 text-emerald-800 text-[10px] font-bold px-1.5 py-0.5 rounded border border-emerald-300">
                     - RM {(entry.effective_discount ?? tenure.quotation_discount ?? 0).toFixed(2)}
@@ -327,28 +350,48 @@ export function UnderwriterQuoteCard({
                 <p
                   className="font-mono text-lg font-black text-emerald-700"
                   title={
-                    entry.net_total_payable && entry.rounded_net_total_payable && entry.rounded_net_total_payable !== entry.net_total_payable
+                    entry.net_total_payable
                       ? `Exact cents: RM ${entry.net_total_payable.toFixed(2)}`
                       : undefined
                   }
                 >
-                  RM {(entry.rounded_net_total_payable != null ? entry.rounded_net_total_payable : Math.max(0, (entry.rounded_total_payable ?? Math.round(entry.total_payable)) - Math.round(entry.effective_discount ?? tenure.quotation_discount ?? 0))).toFixed(2)}
+                  RM {formatMoneyWithRounding(
+                    roundingMode === "whole"
+                      ? (entry.whole_net_total_payable ?? entry.net_total_payable ?? Math.max(0, (entry.whole_total_payable ?? entry.total_payable) - (entry.effective_discount ?? tenure.quotation_discount ?? 0)))
+                      : (roundingMode === "5cent" || roundingMode === "bnm5")
+                      ? (entry.bnm_5cent_net_total_payable ?? entry.net_total_payable ?? Math.max(0, (entry.bnm_5cent_total_payable ?? entry.total_payable) - (entry.effective_discount ?? tenure.quotation_discount ?? 0)))
+                      : (entry.net_total_payable ?? Math.max(0, (entry.exact_total_payable ?? entry.total_payable) - (entry.effective_discount ?? tenure.quotation_discount ?? 0))),
+                    roundingMode
+                  )}
                 </p>
               </div>
             ) : (
               <p
                 className="font-mono text-lg font-black text-[#1b1717]"
                 title={
-                  entry.exact_total_payable && (entry.rounded_total_payable ?? Math.round(entry.total_payable)) !== entry.exact_total_payable
+                  entry.exact_total_payable
                     ? `Exact cents: RM ${entry.exact_total_payable.toFixed(2)}`
                     : undefined
                 }
               >
-                RM {(entry.rounded_total_payable != null ? entry.rounded_total_payable : (Math.round(entry.motor_premium) + tenure.fixed_costs_total)).toFixed(2)}
+                RM {formatMoneyWithRounding(
+                  roundingMode === "whole"
+                    ? (entry.whole_total_payable ?? entry.exact_total_payable ?? entry.total_payable)
+                    : (roundingMode === "5cent" || roundingMode === "bnm5")
+                    ? (entry.bnm_5cent_total_payable ?? entry.exact_total_payable ?? entry.total_payable)
+                    : (entry.exact_total_payable ?? entry.total_payable),
+                  roundingMode
+                )}
               </p>
             )}
             <span className="text-[11px] text-[#6e6e73] font-medium block">
-              (Incl. RM {tenure.fixed_costs_total.toFixed(2)} Roadtax &amp; Runner fee)
+              {tenure.include_road_tax === false && tenure.include_runner_fee === false
+                ? "(Excl. Roadtax & Runner fee)"
+                : tenure.include_road_tax === false
+                ? `(Incl. RM ${tenure.runner_fee.toFixed(2)} Runner fee only)`
+                : tenure.include_runner_fee === false
+                ? `(Incl. RM ${tenure.road_tax.toFixed(2)} Roadtax only)`
+                : `(Incl. RM ${tenure.fixed_costs_total.toFixed(2)} Roadtax & Runner fee)`}
             </span>
           </div>
         </div>

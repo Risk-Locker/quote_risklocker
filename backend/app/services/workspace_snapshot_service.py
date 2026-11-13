@@ -405,6 +405,7 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
         "tenure_id": getattr(session, "tenure_id", None),
         "tenure_version": getattr(session, "tenure_version", 1),
         "is_tenure_active": getattr(session, "is_tenure_active", True),
+        "document_type": getattr(session, "document_type", "quotation"),
         "coverage_start_date": session.coverage_start_date.isoformat() if getattr(session, "coverage_start_date", None) else None,
         "coverage_end_date": session.coverage_end_date.isoformat() if getattr(session, "coverage_end_date", None) else None,
         "display_options": draft.display_options or {},

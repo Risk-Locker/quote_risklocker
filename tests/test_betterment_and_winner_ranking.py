@@ -172,3 +172,29 @@ def test_rank_comparison_entries_4tier_and_single_winner():
 
     # Invariant: exactly 1 winner recommended
     assert sum(1 for e in ranked if e.is_recommended) == 1
+
+
+def test_rank_comparison_entries_stmb_amgen_advantage():
+    stmb = TenureComparisonEntry(
+        id="stmb-1",
+        company_name="Syarikat Takaful Malaysia Am Berhad",
+        total_payable=1200.00,
+        excess=0.0,
+        betterment_rate=0.0,
+        towing_km="50 km",
+    )
+    amgen = TenureComparisonEntry(
+        id="amgen-1",
+        company_name="AmAssurance",
+        total_payable=1235.00,
+        excess=0.0,
+        betterment_rate=0.0,
+        towing_km="365km",
+    )
+    ranked = rank_comparison_entries([stmb, amgen])
+    assert ranked[0].id == "amgen-1"
+    assert ranked[0].rank == 1
+    assert ranked[0].is_recommended is True
+    assert "365km Towing" in (ranked[0].notes or "")
+    assert ranked[1].id == "stmb-1"
+    assert ranked[1].rank == 2

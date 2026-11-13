@@ -79,10 +79,12 @@ On a standard A4 portrait canvas (794px × 1123px):
 
 ---
 
-## 4. Multi-Phase Implementation Plan & Recommended Models
+## 4. Multi-Phase Implementation Plan & Model Execution
+
+> Executed under Max-Force `Gemini 3.8 Flash (High)` (`inherit` / `swarm` `parallel-variant-tournament` per `.agents/manifest.yaml` `v2.3` & `.agents/rules/05-live-reality-and-freshness.md`).
 
 ### Phase 1: Multi-Line Title Wrap & Dynamic Typography
-- **Recommended AI Model**: `Gemini 3.8 Flash` (fast styling, regex rules, CSS tokens).
+- **Assigned Execution Mode**: `07-frontend-ux-lead` + `06-backend-ledger-lead` (`Gemini 3.8 Flash (High)` / Fast-to-Deep Parity).
 - **Files to Modify**:
   - [backend/app/rendering/benefit_grid_renderer.py:388-408](file:///c:/Users/mahmud/Desktop/Code/risklocker/quote_risklocker/backend/app/rendering/benefit_grid_renderer.py#L388-L408)
   - [frontend/src/components/template-canvas/shared.tsx:1227-1279](file:///c:/Users/mahmud/Desktop/Code/risklocker/quote_risklocker/frontend/src/components/template-canvas/shared.tsx#L1227-L1279)
@@ -98,7 +100,7 @@ On a standard A4 portrait canvas (794px × 1123px):
 ---
 
 ### Phase 2: Backend Dynamic Proportional Row Height & Zero-Scale Unification
-- **Recommended AI Model**: `Gemini 3.1 Pro` (deep backend layout and rendering engine refactoring).
+- **Assigned Execution Mode**: `06-backend-ledger-lead` (`Gemini 3.8 Flash (High)` via `parallel-variant-tournament`).
 - **Files to Modify**:
   - [backend/app/rendering/benefit_grid_renderer.py:620-705](file:///c:/Users/mahmud/Desktop/Code/risklocker/quote_risklocker/backend/app/rendering/benefit_grid_renderer.py#L620-L705)
   - [backend/app/rendering/template_renderer.py:840-860](file:///c:/Users/mahmud/Desktop/Code/risklocker/quote_risklocker/backend/app/rendering/template_renderer.py#L840-L860)
@@ -114,7 +116,7 @@ On a standard A4 portrait canvas (794px × 1123px):
 ---
 
 ### Phase 3: Frontend Canvas Container Height & Preview Parity
-- **Recommended AI Model**: `Gemini 3.1 Pro` (TypeScript React canvas layout and review phase synchronization).
+- **Assigned Execution Mode**: `07-frontend-ux-lead` + `05-principal-designer` (`Gemini 3.8 Flash (High)`).
 - **Files to Modify**:
   - [frontend/src/components/template-canvas/shared.tsx:1860-2030](file:///c:/Users/mahmud/Desktop/Code/risklocker/quote_risklocker/frontend/src/components/template-canvas/shared.tsx#L1860-L2030)
   - [frontend/src/components/session-workspace/review-phase.tsx:670-710](file:///c:/Users/mahmud/Desktop/Code/risklocker/quote_risklocker/frontend/src/components/session-workspace/review-phase.tsx#L670-L710)
@@ -126,7 +128,7 @@ On a standard A4 portrait canvas (794px × 1123px):
 ---
 
 ### Phase 4: Dynamic 4-Column Auto-Balance for High Addon Density
-- **Recommended AI Model**: `Gemini 3.1 Pro` (adaptive column packing algorithm).
+- **Assigned Execution Mode**: `06-backend-ledger-lead` + `07-frontend-ux-lead` (`Gemini 3.8 Flash (High)` Design 2 parity pair).
 - **Files to Modify**:
   - [backend/app/rendering/benefit_grid_renderer.py:610-625](file:///c:/Users/mahmud/Desktop/Code/risklocker/quote_risklocker/backend/app/rendering/benefit_grid_renderer.py#L610-L625)
   - [frontend/src/components/template-canvas/shared.tsx:1855-1865](file:///c:/Users/mahmud/Desktop/Code/risklocker/quote_risklocker/frontend/src/components/template-canvas/shared.tsx#L1855-L1865)
@@ -139,7 +141,7 @@ On a standard A4 portrait canvas (794px × 1123px):
 ---
 
 ### Phase 5: Verification & Pre-Deploy Gate
-- **Recommended AI Model**: `Gemini 3.1 Pro` (hermetic test suite execution and gatekeeper).
+- **Assigned Execution Mode**: `09-qa-and-janitor-gate` (`Gemini 3.8 Flash (High)`).
 - **Tasks**:
   1. Run backend tests: `python -m pytest -q tests/test_template_renderer.py tests/test_dynamic_grid_renderer.py`.
   2. Run frontend type check: `npx tsc --noEmit`.

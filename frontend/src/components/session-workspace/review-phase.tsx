@@ -31,6 +31,7 @@ import {
   Plus,
   Sparkle,
   UserSwitch,
+  WarningCircle,
   X,
 } from "@phosphor-icons/react";
 import { toBlob, toPng } from "html-to-image";
@@ -829,18 +830,21 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     const ccStr = values.engine_cc || (workspace.fields?.engine_cc as WorkspaceField | undefined)?.value || "";
     const evCat = detectEVCategory(carBrand, carModel, ccStr);
 
-    if (vtype.startsWith("EV") || evCat) {
-      vtype = vtype.startsWith("EV") ? vtype : (evCat || "EVSaloonCar");
-      values.vehicle_type = vtype;
-    } else if (isNonSaloonCarModel(carModel) || vtype.toLowerCase().includes("nonsaloon") || vtype.toLowerCase().includes("non-saloon") || vtype.toLowerCase().includes("suv") || vtype.toLowerCase().includes("mpv")) {
-      vtype = "NonSaloonCar";
-      values.vehicle_type = "NonSaloonCar";
-    } else if (isCorp && (vtype === "Car" || vtype.toLowerCase().includes("saloon"))) {
-      vtype = "CompanyCar";
-      values.vehicle_type = "CompanyCar";
-    } else if (isCorp && vtype === "Motorcycle") {
-      vtype = "CompanyMotorcycle";
-      values.vehicle_type = "CompanyMotorcycle";
+    const hasExplicitVtype = !!(values.vehicle_type || (workspace.fields?.vehicle_type as WorkspaceField | undefined)?.value);
+    if (!hasExplicitVtype) {
+      if (vtype.startsWith("EV") || evCat) {
+        vtype = vtype.startsWith("EV") ? vtype : (evCat || "EVSaloonCar");
+        values.vehicle_type = vtype;
+      } else if (isNonSaloonCarModel(carModel) || vtype.toLowerCase().includes("nonsaloon") || vtype.toLowerCase().includes("non-saloon") || vtype.toLowerCase().includes("suv") || vtype.toLowerCase().includes("mpv")) {
+        vtype = "NonSaloonCar";
+        values.vehicle_type = "NonSaloonCar";
+      } else if (isCorp && (vtype === "Car" || vtype.toLowerCase().includes("saloon"))) {
+        vtype = "CompanyCar";
+        values.vehicle_type = "CompanyCar";
+      } else if (isCorp && vtype === "Motorcycle") {
+        vtype = "CompanyMotorcycle";
+        values.vehicle_type = "CompanyMotorcycle";
+      }
     }
     if (isCorp && !values.client_type) {
       values.client_type = "Company";
@@ -848,7 +852,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
     const isEV = vtype.startsWith("EV");
     const rawParsed = ccStr ? parseFloat(String(ccStr).replace(/[^0-9.]/g, "")) : (isEV ? null : inferCCFromCarModel(carModel));
-    if (rawParsed && rawParsed > 0) {
+    const rawStoredRT = (workspace.fields?.roadtax as WorkspaceField | undefined)?.value;
+    const hasStoredRT = rawStoredRT !== undefined && rawStoredRT !== null && String(rawStoredRT).trim() !== "";
+    const hasExplicitRT = values.roadtax !== undefined && values.roadtax !== null && String(values.roadtax).trim() !== "";
+    if (!hasStoredRT && !hasExplicitRT && rawParsed && rawParsed > 0) {
       if (isEV) {
         if (rawParsed >= 1000) {
           const kw = rawParsed / 1000;
@@ -866,10 +873,7 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         const baseType = vtype === "NonSaloonCar" ? "NonSaloonCar" : String(vtype).toLowerCase().includes("motor") ? "Motorcycle" : (String(vtype).toLowerCase().includes("lorry") || String(vtype).toLowerCase().includes("other")) ? "Lorry" : "Car";
         const computedRT = computeMalaysianRoadTax(parsedCC, baseType, isCompany ? "Company" : "Individual");
         if (computedRT > 0) {
-          const currentRT = parseFloat(String(values.roadtax || "").replace(/[^0-9.]/g, "")) || 0;
-          if (currentRT === 0 || currentRT > 10000 || (isCompany && currentRT < computedRT) || vtype === "NonSaloonCar") {
-            values.roadtax = computedRT.toFixed(2);
-          }
+          values.roadtax = computedRT.toFixed(2);
         }
       }
     }
@@ -881,8 +885,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     if (isRound && pNum > 0) {
       values.premium = effPremiumNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
-    const rtNum = parseFloat(String(values.roadtax || "").replace(/[^0-9.]/g, "")) || 0;
-    const sfNum = parseFloat(String(values.service_fee || "").replace(/[^0-9.]/g, "")) || 0;
+    const incRT = values.include_road_tax !== "false" && String((workspace.fields?.include_road_tax as WorkspaceField | undefined)?.value || "") !== "false";
+    const incRF = values.include_runner_fee !== "false" && String((workspace.fields?.include_runner_fee as WorkspaceField | undefined)?.value || "") !== "false";
+    const rtNum = incRT ? (parseFloat(String(values.roadtax || "").replace(/[^0-9.]/g, "")) || 0) : 0;
+    const sfNum = incRF ? (parseFloat(String(values.service_fee || "").replace(/[^0-9.]/g, "")) || 0) : 0;
     const extrasTotal = (workspace.extras || []).reduce((acc, ex) => {
       const amt = (ex as Record<string, unknown>)?.price;
       const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
@@ -1387,30 +1393,33 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
     let vtype = formValues["vehicle_type"] || fields["vehicle_type"] || "Car";
     const evCat = detectEVCategory(carBrand, carModel, ccStr);
 
-    if (vtype.startsWith("EV") || evCat) {
-      vtype = vtype.startsWith("EV") ? vtype : (evCat || "EVSaloonCar");
-      formValues["vehicle_type"] = vtype;
-      fields["vehicle_type"] = vtype;
-    } else if (isNonSaloonCarModel(carModel) || vtype.toLowerCase().includes("nonsaloon") || vtype.toLowerCase().includes("non-saloon") || vtype.toLowerCase().includes("suv") || vtype.toLowerCase().includes("mpv")) {
-      vtype = "NonSaloonCar";
-      formValues["vehicle_type"] = "NonSaloonCar";
-      fields["vehicle_type"] = "NonSaloonCar";
-    } else if (isCorp && (vtype === "Car" || vtype.toLowerCase().includes("saloon"))) {
-      vtype = "CompanyCar";
-      formValues["vehicle_type"] = "CompanyCar";
-      fields["vehicle_type"] = "CompanyCar";
+    const hasExplicitVtype = !!(formValues["vehicle_type"] || (workspace?.fields?.vehicle_type as WorkspaceField | undefined)?.value);
+    if (!hasExplicitVtype) {
+      if (vtype.startsWith("EV") || evCat) {
+        vtype = vtype.startsWith("EV") ? vtype : (evCat || "EVSaloonCar");
+        formValues["vehicle_type"] = vtype;
+        fields["vehicle_type"] = vtype;
+      } else if (isNonSaloonCarModel(carModel) || vtype.toLowerCase().includes("nonsaloon") || vtype.toLowerCase().includes("non-saloon") || vtype.toLowerCase().includes("suv") || vtype.toLowerCase().includes("mpv")) {
+        vtype = "NonSaloonCar";
+        formValues["vehicle_type"] = "NonSaloonCar";
+        fields["vehicle_type"] = "NonSaloonCar";
+      } else if (isCorp && (vtype === "Car" || vtype.toLowerCase().includes("saloon"))) {
+        vtype = "CompanyCar";
+        formValues["vehicle_type"] = "CompanyCar";
+        fields["vehicle_type"] = "CompanyCar";
+      }
     }
 
     const isEV = vtype.startsWith("EV");
     const rawParsed = ccStr ? parseFloat(String(ccStr).replace(/[^0-9.]/g, "")) : (isEV ? null : inferCCFromCarModel(carModel));
-    if (rawParsed && rawParsed > 0) {
+    const rawStoredRT = (workspace?.fields?.roadtax as WorkspaceField | undefined)?.value;
+    const hasStoredRT = rawStoredRT !== undefined && rawStoredRT !== null && String(rawStoredRT).trim() !== "";
+    const hasFormRT = formValues["roadtax"] !== undefined && formValues["roadtax"] !== null && String(formValues["roadtax"]).trim() !== "";
+    if (!hasStoredRT && !hasFormRT && rawParsed && rawParsed > 0) {
       if (isEV) {
         const computedRT = computeMalaysianRoadTax(rawParsed, vtype, "Individual");
         if (computedRT > 0) {
-          const currentRT = parseFloat(String(rtax || "").replace(/[^0-9.]/g, "")) || 0;
-          if (currentRT === 0) {
-            rtax = computedRT.toFixed(2);
-          }
+          rtax = computedRT.toFixed(2);
         }
       } else if (rawParsed <= 7000) {
         const parsedCC = Math.round(rawParsed);
@@ -1418,14 +1427,11 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         const baseType = vtype === "NonSaloonCar" ? "NonSaloonCar" : String(vtype).toLowerCase().includes("motor") ? "Motorcycle" : (String(vtype).toLowerCase().includes("lorry") || String(vtype).toLowerCase().includes("other")) ? "Lorry" : "Car";
         const computedRT = computeMalaysianRoadTax(parsedCC, baseType, isCompany ? "Company" : "Individual");
         if (computedRT > 0) {
-          const currentRT = parseFloat(String(rtax || "").replace(/[^0-9.]/g, "")) || 0;
-          if (currentRT === 0) {
-            rtax = computedRT.toFixed(2);
-          }
+          rtax = computedRT.toFixed(2);
         }
       }
     }
-    if (rtax) {
+    if (rtax !== undefined && rtax !== null && String(rtax).trim() !== "") {
       fields["roadtax"] = rtax;
       fields["road_tax_amount"] = rtax;
     }
@@ -1447,8 +1453,10 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
       fields["coverage_premium"] = roundedPremStr;
       fields["basic_premium_vehicle"] = roundedPremStr;
     }
-    const rtNum = parseFloat(String(fields["roadtax"] || "").replace(/[^0-9.]/g, "")) || 0;
-    const sfNum = parseFloat(String(fields["service_fee"] || "").replace(/[^0-9.]/g, "")) || 0;
+    const incRT = formValues["include_road_tax"] !== "false" && String((workspace?.fields?.include_road_tax as WorkspaceField | undefined)?.value || "") !== "false";
+    const incRF = formValues["include_runner_fee"] !== "false" && String((workspace?.fields?.include_runner_fee as WorkspaceField | undefined)?.value || "") !== "false";
+    const rtNum = incRT ? (parseFloat(String(fields["roadtax"] || "").replace(/[^0-9.]/g, "")) || 0) : 0;
+    const sfNum = incRF ? (parseFloat(String(fields["service_fee"] || "").replace(/[^0-9.]/g, "")) || 0) : 0;
     const extrasTotal = (workspace?.extras || []).reduce((acc, ex) => {
       const amt = (ex as Record<string, unknown>)?.price;
       const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
@@ -1705,29 +1713,6 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
 
         setFormValues((v) => ({ ...v, vehicle_type: newVtype }));
         commitFieldDirectly("vehicle_type", newVtype);
-
-        const currentCCStr = formValues["engine_cc"] || (workspace.fields["engine_cc"] as WorkspaceField | undefined)?.value;
-        const isEVType = newVtype.startsWith("EV");
-        const rawParsed = currentCCStr ? parseFloat(String(currentCCStr).replace(/[^0-9.]/g, "")) : (isEVType ? null : inferCCFromCarModel(formValues["car_model"] || (workspace.fields["car_model"] as WorkspaceField | undefined)?.value));
-        if (rawParsed && rawParsed > 0) {
-          if (isEVType) {
-            const computedRT = computeMalaysianRoadTax(rawParsed, newVtype, "Individual");
-            if (computedRT > 0) {
-              const rtFormatted = computedRT.toFixed(2);
-              setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
-              commitFieldDirectly("roadtax", rtFormatted);
-            }
-          } else if (rawParsed <= 7000) {
-            const parsedCC = Math.round(rawParsed);
-            const baseType = newVtype === "NonSaloonCar" ? "NonSaloonCar" : newVtype.toLowerCase().includes("motor") ? "Motorcycle" : (newVtype.toLowerCase().includes("lorry") || newVtype.toLowerCase().includes("other")) ? "Lorry" : "Car";
-            const computedRT = computeMalaysianRoadTax(parsedCC, baseType, "Individual");
-            if (computedRT > 0) {
-              const rtFormatted = computedRT.toFixed(2);
-              setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
-              commitFieldDirectly("roadtax", rtFormatted);
-            }
-          }
-        }
       }
     }
 
@@ -2394,6 +2379,24 @@ export function ReviewPhase({ id, onNext }: { id: string; onNext: () => void }) 
         >
 
           <section aria-label="Template configuration and extracted values" className="grid grid-cols-1 gap-4 content-start">
+            {/* AI Warning or Quota Exceeded Notification */}
+            {workspace.display_options?.ai_warning ? (
+              <div className="flex items-center gap-2 rounded-[var(--rl-radius-sm)] border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900 font-medium">
+                <WarningCircle size={16} weight="fill" className="text-amber-600 shrink-0" />
+                <span>{String(workspace.display_options.ai_warning)}</span>
+              </div>
+            ) : null}
+
+            {/* Missing Plate or Customer Name Banner */}
+            {(!formValues.customer_name && !formValues.insured_name) || formValues.vehicle_no === "UNPLATED" || formValues.vehicle_no === "N/A" ? (
+              <div className="flex items-center gap-2 rounded-[var(--rl-radius-sm)] border border-amber-300 bg-amber-50/70 p-2 text-xs text-amber-900 font-medium">
+                <WarningCircle size={15} weight="fill" className="text-amber-600 shrink-0" />
+                <span>
+                  <strong>Check Needed:</strong> Customer Name or Vehicle Registration was undetected in this document. Please verify the fields below.
+                </span>
+              </div>
+            ) : null}
+
             {/* Hierarchy & Quotation Context Overview Bar */}
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-2.5 text-xs shadow-xs">
               <div className="flex flex-wrap items-center gap-2">

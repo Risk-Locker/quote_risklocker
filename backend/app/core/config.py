@@ -12,7 +12,10 @@ from dotenv import load_dotenv
 
 # The project .env is the source of truth: override process-inherited variables
 # so a stray shell APP_ENV (or any variable) can never shadow the project config.
-load_dotenv(override=True)
+# Guarded by RISKLOCKER_SKIP_DOTENV=1 so CI test runners and verify-deploy-gate.ps1
+# can inject sealed dummy/test environments without being overwritten by .env.
+if os.getenv("RISKLOCKER_SKIP_DOTENV") != "1":
+    load_dotenv(override=True)
 
 
 @dataclass(frozen=True)
@@ -62,7 +65,7 @@ class Settings:
     trash_retention_days: int
     cors_origins: tuple[str, ...]
     gemini_api_keys: tuple[str, ...] = ()
-    gemini_model: str = "gemini-3.1-flash-lite-preview"
+    gemini_model: str = "gemini-3.5-flash-lite"
     gemini_max_rpd_per_key: int = 440
     gemini_max_rpm_per_key: int = 10
     gemini_max_tpm_per_key: int = 100_000
@@ -308,7 +311,7 @@ def get_settings() -> Settings:
         gemini_api_keys=tuple(
             k.strip() for k in (os.getenv("GEMINI_API_KEYS") or os.getenv("GEMINI_API_KEY") or "").split(",") if k.strip()
         ),
-        gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview").strip() or "gemini-3.1-flash-lite-preview",
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip() or "gemini-3.5-flash-lite",
         gemini_max_rpd_per_key=_bounded_int("GEMINI_MAX_RPD_PER_KEY", 460, 10, 5000),
         gemini_max_rpm_per_key=_bounded_int("GEMINI_MAX_RPM_PER_KEY", 12, 1, 60),
         gemini_max_tpm_per_key=_bounded_int("GEMINI_MAX_TPM_PER_KEY", 220_000, 1000, 1_000_000),

@@ -1,0 +1,376 @@
+{
+  "schema_version": "1.0",
+  "active_soft_limit": 50,
+  "skills": {
+    "agent-browser": {
+      "location": "active",
+      "path": ".agents/skills/agent-browser",
+      "category": "testing-browser",
+      "scope": "universal",
+      "source": "risklocker-custom",
+      "description_chars": 219,
+      "est_boot_tokens": 64,
+      "updated_at": "2026-11-11T16:02:03+08:00"
+    },
+    "clean-code-and-refactoring": {
+      "location": "active",
+      "path": ".agents/skills/clean-code-and-refactoring",
+      "category": "architecture",
+      "scope": "universal",
+      "source": "risklocker-custom",
+      "description_chars": 237,
+      "est_boot_tokens": 72,
+      "updated_at": "2026-11-11T16:02:03+08:00"
+    },
+    "design2-pdf-parity": {
+      "location": "active",
+      "path": ".agents/skills/design2-pdf-parity",
+      "category": "domain",
+      "scope": "project",
+      "source": "risklocker-custom",
+      "description_chars": 236,
+      "est_boot_tokens": 70,
+      "updated_at": "2026-11-11T16:02:03+08:00"
+    },
+    "malaysian-motor-insurance": {
+      "location": "active",
+      "path": ".agents/skills/malaysian-motor-insurance",
+      "category": "domain",
+      "scope": "project",
+      "source": "risklocker-custom",
+      "description_chars": 269,
+      "est_boot_tokens": 80,
+      "updated_at": "2026-11-11T12:58:06+08:00"
+    },
+    "playwright": {
+      "location": "active",
+      "path": ".agents/skills/playwright",
+      "category": "testing-browser",
+      "scope": "universal",
+      "source": "curated-global+risklocker",
+      "description_chars": 209,
+      "est_boot_tokens": 61,
+      "updated_at": "2026-11-11T16:02:03+08:00"
+    },
+    "postgres-ledger-migrations": {
+      "location": "active",
+      "path": ".agents/skills/postgres-ledger-migrations",
+      "category": "backend-db",
+      "scope": "project",
+      "source": "risklocker-custom",
+      "description_chars": 215,
+      "est_boot_tokens": 66,
+      "updated_at": "2026-11-11T12:58:06+08:00"
+    },
+    "python-testing": {
+      "location": "active",
+      "path": ".agents/skills/python-testing",
+      "category": "testing-browser",
+      "scope": "universal",
+      "source": "risklocker-custom",
+      "description_chars": 208,
+      "est_boot_tokens": 62,
+      "updated_at": "2026-11-11T16:02:03+08:00"
+    },
+    "security-best-practices": {
+      "location": "active",
+      "path": ".agents/skills/security-best-practices",
+      "category": "security",
+      "scope": "universal",
+      "source": "curated-global",
+      "description_chars": 226,
+      "est_boot_tokens": 68,
+      "updated_at": "2026-11-11T16:02:03+08:00"
+    },
+    "shadcn": {
+      "location": "active",
+      "path": ".agents/skills/shadcn",
+      "category": "frontend",
+      "scope": "universal",
+      "source": "risklocker-custom+radix",
+      "description_chars": 214,
+      "est_boot_tokens": 61,
+      "updated_at": "2026-11-11T16:02:03+08:00"
+    },
+    "system-design-and-architecture": {
+      "location": "active",
+      "path": ".agents/skills/system-design-and-architecture",
+      "category": "architecture",
+      "scope": "universal",
+      "source": "risklocker-custom",
+      "description_chars": 249,
+      "est_boot_tokens": 76,
+      "updated_at": "2026-11-11T16:02:03+08:00"
+    },
+    "systematic-debugging": {
+      "location": "active",
+      "path": ".agents/skills/systematic-debugging",
+      "category": "general",
+      "scope": "universal",
+      "source": "obra/superpowers",
+      "description_chars": 91,
+      "est_boot_tokens": 34,
+      "updated_at": "2026-11-11T16:02:03+08:00"
+    },
+    "test-driven-development": {
+      "location": "active",
+      "path": ".agents/skills/test-driven-development",
+      "category": "testing-browser",
+      "scope": "universal",
+      "source": "obra/superpowers",
+      "description_chars": 79,
+      "est_boot_tokens": 32,
+      "updated_at": "2026-11-11T16:02:03+08:00"
+    },
+    "verification-before-completion": {
+      "location": "active",
+      "path": ".agents/skills/verification-before-completion",
+      "category": "general",
+      "scope": "universal",
+      "source": "obra/superpowers",
+      "description_chars": 225,
+      "est_boot_tokens": 70,
+      "updated_at": "2026-11-11T16:02:03+08:00"
+    },
+    "domain-interrogation-and-reality-gate": {
+      "location": "vault/architecture",
+      "path": ".agents/skills-vault/architecture/domain-interrogation-and-reality-gate",
+      "category": "architecture",
+      "scope": "universal",
+      "source": "risklocker-custom",
+      "description_chars": 167,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:27+08:00"
+    },
+    "parallel-variant-tournament": {
+      "location": "vault/architecture",
+      "path": ".agents/skills-vault/architecture/parallel-variant-tournament",
+      "category": "architecture",
+      "scope": "universal",
+      "source": "risklocker-custom",
+      "description_chars": 164,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:27+08:00"
+    },
+    "apple-design": {
+      "location": "vault/design",
+      "path": ".agents/skills-vault/design/apple-design",
+      "category": "design",
+      "scope": "universal",
+      "source": "curated-global",
+      "description_chars": 247,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:31+08:00"
+    },
+    "enterprise-product-ui": {
+      "location": "vault/design",
+      "path": ".agents/skills-vault/design/enterprise-product-ui",
+      "category": "design",
+      "scope": "universal",
+      "source": "risklocker-custom",
+      "description_chars": 222,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:40+08:00"
+    },
+    "web-design-guidelines": {
+      "location": "vault/design",
+      "path": ".agents/skills-vault/design/web-design-guidelines",
+      "category": "design",
+      "scope": "universal",
+      "source": "vercel+risklocker",
+      "description_chars": 207,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:31+08:00"
+    },
+    "design-taste-frontend": {
+      "location": "vault/frontend",
+      "path": ".agents/skills-vault/frontend/design-taste-frontend",
+      "category": "frontend",
+      "scope": "universal",
+      "source": "curated-global",
+      "description_chars": 269,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-11T16:02:03+08:00"
+    },
+    "frontend-design": {
+      "location": "vault/frontend",
+      "path": ".agents/skills-vault/frontend/frontend-design",
+      "category": "frontend",
+      "scope": "universal",
+      "source": "curated-global",
+      "description_chars": 204,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:40+08:00"
+    },
+    "gsap-framer-scroll-animation": {
+      "location": "vault/frontend",
+      "path": ".agents/skills-vault/frontend/gsap-framer-scroll-animation",
+      "category": "frontend",
+      "scope": "universal",
+      "source": "curated-global",
+      "description_chars": 258,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-11T16:02:03+08:00"
+    },
+    "brainstorming": {
+      "location": "vault/general",
+      "path": ".agents/skills-vault/general/brainstorming",
+      "category": "general",
+      "scope": "universal",
+      "source": "obra/superpowers+risklocker",
+      "description_chars": 198,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:27+08:00"
+    },
+    "company-dispatch": {
+      "location": "vault/general",
+      "path": ".agents/skills-vault/general/company-dispatch",
+      "category": "general",
+      "scope": "universal",
+      "source": "risklocker-custom",
+      "description_chars": 218,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:31+08:00"
+    },
+    "dispatching-parallel-agents": {
+      "location": "vault/general",
+      "path": ".agents/skills-vault/general/dispatching-parallel-agents",
+      "category": "general",
+      "scope": "universal",
+      "source": "obra/superpowers",
+      "description_chars": 106,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:27+08:00"
+    },
+    "finishing-a-development-branch": {
+      "location": "vault/general",
+      "path": ".agents/skills-vault/general/finishing-a-development-branch",
+      "category": "general",
+      "scope": "universal",
+      "source": "obra/superpowers",
+      "description_chars": 101,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:27+08:00"
+    },
+    "live-reality-and-deprecation-gate": {
+      "location": "vault/general",
+      "path": ".agents/skills-vault/general/live-reality-and-deprecation-gate",
+      "category": "general",
+      "scope": "universal",
+      "source": "risklocker-custom",
+      "description_chars": 226,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:31+08:00"
+    },
+    "receiving-code-review": {
+      "location": "vault/general",
+      "path": ".agents/skills-vault/general/receiving-code-review",
+      "category": "general",
+      "scope": "universal",
+      "source": "obra/superpowers",
+      "description_chars": 234,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:27+08:00"
+    },
+    "requesting-code-review": {
+      "location": "vault/general",
+      "path": ".agents/skills-vault/general/requesting-code-review",
+      "category": "general",
+      "scope": "universal",
+      "source": "obra/superpowers",
+      "description_chars": 107,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:27+08:00"
+    },
+    "using-superpowers": {
+      "location": "vault/general",
+      "path": ".agents/skills-vault/general/using-superpowers",
+      "category": "general",
+      "scope": "universal",
+      "source": "obra/superpowers+risklocker",
+      "description_chars": 171,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:27+08:00"
+    },
+    "writing-plans": {
+      "location": "vault/general",
+      "path": ".agents/skills-vault/general/writing-plans",
+      "category": "general",
+      "scope": "universal",
+      "source": "obra/superpowers+risklocker",
+      "description_chars": 84,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:27+08:00"
+    },
+    "security-threat-model": {
+      "location": "vault/security",
+      "path": ".agents/skills-vault/security/security-threat-model",
+      "category": "security",
+      "scope": "universal",
+      "source": "curated-global",
+      "description_chars": 198,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:27+08:00"
+    },
+    "edge-case-and-scenario-matrix": {
+      "location": "vault/testing-browser",
+      "path": ".agents/skills-vault/testing-browser/edge-case-and-scenario-matrix",
+      "category": "testing-browser",
+      "scope": "universal",
+      "source": "risklocker-custom",
+      "description_chars": 248,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:27+08:00"
+    },
+    "playwright-automation-fill-in-form": {
+      "location": "vault/testing-browser",
+      "path": ".agents/skills-vault/testing-browser/playwright-automation-fill-in-form",
+      "category": "testing-browser",
+      "scope": "universal",
+      "source": "local-repo",
+      "description_chars": 111,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-11T16:02:03+08:00"
+    },
+    "playwright-best-practices": {
+      "location": "vault/testing-browser",
+      "path": ".agents/skills-vault/testing-browser/playwright-best-practices",
+      "category": "testing-browser",
+      "scope": "universal",
+      "source": "risklocker-custom",
+      "description_chars": 210,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:31+08:00"
+    },
+    "playwright-cli": {
+      "location": "vault/testing-browser",
+      "path": ".agents/skills-vault/testing-browser/playwright-cli",
+      "category": "testing-browser",
+      "scope": "universal",
+      "source": "local-repo",
+      "description_chars": 103,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-11T16:02:03+08:00"
+    },
+    "playwright-explore-website": {
+      "location": "vault/testing-browser",
+      "path": ".agents/skills-vault/testing-browser/playwright-explore-website",
+      "category": "testing-browser",
+      "scope": "universal",
+      "source": "local-repo",
+      "description_chars": 111,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-11T16:02:03+08:00"
+    },
+    "webapp-testing": {
+      "location": "vault/testing-browser",
+      "path": ".agents/skills-vault/testing-browser/webapp-testing",
+      "category": "testing-browser",
+      "scope": "universal",
+      "source": "curated-global+risklocker",
+      "description_chars": 204,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-12T18:11:31+08:00"
+    }
+  }
+}

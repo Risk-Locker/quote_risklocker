@@ -28,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { GeminiQuotaInfoButton, type GeminiQuota } from "@/components/gemini-quota-meter";
+import { QueueProgressBanner } from "@/components/upload/queue-progress-banner";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 import {
@@ -57,6 +58,9 @@ type JobStatus = {
   phase?: string;
   heartbeat_at?: string | null;
   elapsed_seconds?: number;
+  queue_position?: number;
+  other_users_count?: number;
+  active_users_count?: number;
   error?: { message?: string } | null;
 };
 
@@ -68,6 +72,8 @@ interface BulkFileItem {
   phase?: string;
   sessionId?: string;
   jobId?: string;
+  queuePosition?: number;
+  otherUsersCount?: number;
   tenureId?: string;
   plate?: string;
   insurer?: string;
@@ -809,6 +815,8 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                   status: "processing",
                   progress: Math.max(i.progress, currentJob.progress || 30),
                   phase: currentJob.phase,
+                  queuePosition: currentJob.queue_position,
+                  otherUsersCount: currentJob.other_users_count,
                 }
               : i
           )
@@ -1325,6 +1333,17 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
               </div>
             ) : null}
 
+            {loading ? (
+              <QueueProgressBanner
+                currentProcessingIndex={1}
+                totalItems={1}
+                queuePosition={job?.queue_position ?? 1}
+                otherUsersCount={job?.other_users_count ?? 0}
+                activePhase={job?.phase || "extracting"}
+                isFairShareActive={true}
+              />
+            ) : null}
+
             <div className="flex flex-wrap items-center gap-3 pt-1">
               <Button
                 type="submit"
@@ -1503,6 +1522,26 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                   </div>
                 )}
               </div>
+              {/* Fair-Share Elevator Queue Progress Banner */}
+              {bulkFiles.some((f) => f.status === "processing" || f.status === "uploading") && (
+                <div className="mb-2">
+                  {(() => {
+                    const activeItem = bulkFiles.find((f) => f.status === "processing" || f.status === "uploading");
+                    const activeIdx = bulkFiles.findIndex((f) => f.status === "processing" || f.status === "uploading");
+                    return (
+                      <QueueProgressBanner
+                        currentProcessingIndex={activeIdx !== -1 ? activeIdx + 1 : 1}
+                        totalItems={bulkFiles.length}
+                        queuePosition={activeItem?.queuePosition ?? 1}
+                        otherUsersCount={activeItem?.otherUsersCount ?? 0}
+                        activePhase={activeItem?.phase || "extracting"}
+                        isFairShareActive={true}
+                      />
+                    );
+                  })()}
+                </div>
+              )}
+
               {/* Checklist Rows */}
               <div className="grid gap-2.5">
                 {bulkFiles.map((item, idx) => {

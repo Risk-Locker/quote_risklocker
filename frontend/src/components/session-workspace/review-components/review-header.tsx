@@ -64,6 +64,41 @@ export function ReviewHeader({
   pdfLoading,
 }: ReviewHeaderProps) {
   const [redetecting, setRedetecting] = React.useState(false);
+  const [docType, setDocType] = React.useState<"quotation" | "covernote">(
+    workspace.document_type === "covernote" ? "covernote" : "quotation"
+  );
+  const [togglingDocType, setTogglingDocType] = React.useState(false);
+
+  React.useEffect(() => {
+    if (workspace.document_type) {
+      setDocType(workspace.document_type === "covernote" ? "covernote" : "quotation");
+    }
+  }, [workspace.document_type]);
+
+  const handleToggleDocumentType = async (newType: "quotation" | "covernote") => {
+    if (newType === docType || togglingDocType) return;
+    const confirmMsg =
+      newType === "covernote"
+        ? "Designate this document as the official Cover Note (Issued Policy)? This will anchor it as the active policy for this renewal and advance the stage to Issue Policy."
+        : "Revert this document to a Quotation? This will unbind it as the active Cover Note and return the tenure stage to Quotations.";
+    if (!window.confirm(confirmMsg)) return;
+
+    setTogglingDocType(true);
+    try {
+      const res = await api<{ status: string; document_type: string }>(`/sessions/${workspace.session_id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ document_type: newType }),
+      });
+      if (res?.status === "success") {
+        setDocType(newType);
+        workspace.document_type = newType;
+      }
+    } catch (err: any) {
+      alert("Failed to update document type: " + (err?.message || "Server error"));
+    } finally {
+      setTogglingDocType(false);
+    }
+  };
 
   const handleRedetect = async () => {
     if (!window.confirm("Re-detect this quotation? This will re-analyze the original PDF to pick up any missing fields or benefit lines.")) {
@@ -93,6 +128,35 @@ export function ReviewHeader({
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold text-[var(--rl-text-strong)]">Quotation Workspace</h1>
+            {/* 1-Click Document Type Toggle */}
+            <div className="inline-flex items-center rounded-md border border-[var(--rl-border)] bg-[var(--rl-surface-subtle)] p-0.5 text-xs font-semibold shadow-2xs">
+              <button
+                type="button"
+                onClick={() => handleToggleDocumentType("quotation")}
+                disabled={togglingDocType}
+                className={`px-2 py-0.5 rounded transition-colors ${
+                  docType === "quotation"
+                    ? "bg-white text-[var(--rl-text-strong)] shadow-xs font-bold"
+                    : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                }`}
+                title="Categorize as Quotation (Comparison option)"
+              >
+                Quotation
+              </button>
+              <button
+                type="button"
+                onClick={() => handleToggleDocumentType("covernote")}
+                disabled={togglingDocType}
+                className={`px-2 py-0.5 rounded transition-colors ${
+                  docType === "covernote"
+                    ? "bg-emerald-600 text-white shadow-xs font-bold"
+                    : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                }`}
+                title="Categorize as Official Cover Note (Issued Policy)"
+              >
+                Cover Note
+              </button>
+            </div>
             {workspace.is_test ? (
               <span
                 className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-900 border border-amber-500/30"

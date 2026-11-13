@@ -868,8 +868,14 @@ COMPANY_ALIASES_MAP = {
         "AmAssurance",
         "AmGeneral",
         "AmGen",
-        "Liberty General Insurance",
-        "Liberty Insurance",
+        "AmGeneral Insurance",
+    ],
+    "kurnia": [
+        "Kurnia",
+        "Kurnia Insurans",
+        "Kurnia Insurance",
+        "Kurnia Insurans (Malaysia) Berhad",
+        "Kurnia Auto Assist",
     ],
     "takaful-malaysia": [
         "Takaful Malaysia",

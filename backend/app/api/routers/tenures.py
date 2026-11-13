@@ -62,6 +62,8 @@ class CreateTenureRequest(BaseModel):
     notes: str | None = Field(None, description="Notes")
     road_tax: float = 0.0
     runner_fee: float = 0.0
+    include_road_tax: bool = True
+    include_runner_fee: bool = True
 
 
 class TenureStatusUpdateRequest(BaseModel):
@@ -231,6 +233,22 @@ def create_tenure(
         "coverage_start_date": tenure.coverage_start_date.isoformat(),
         "coverage_end_date": tenure.coverage_end_date.isoformat(),
     }
+
+
+@router.post("/{tenure_id}/prune-superseded")
+def prune_tenure_superseded_quotations(
+    tenure_id: str,
+    dry_run: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Maintenance endpoint to prune superseded quotation files for a tenure."""
+    tenure = db.get(InsuranceTenure, tenure_id)
+    if not tenure:
+        raise HTTPException(status_code=404, detail="Tenure not found")
+    from app.services.storage_janitor_service import prune_superseded_quotations
+    return prune_superseded_quotations(db=db, tenure_id=tenure_id, dry_run=dry_run)
+
 
 
 @router.get("/calendar-sessions")
@@ -886,6 +904,9 @@ def list_tenures(
             "miss_reason": t.miss_reason,
             "loss_reason_category": t.loss_reason_category,
             "road_tax": float(t.road_tax or 0.0),
+            "runner_fee": float(t.runner_fee or 0.0),
+            "include_road_tax": t.include_road_tax if t.include_road_tax is not None else True,
+            "include_runner_fee": t.include_runner_fee if t.include_runner_fee is not None else True,
             "sourced_quotes": sourced,
             "generated_quotations": gen_quotes,
             "is_projected": t.is_projected,

@@ -43,6 +43,8 @@ def _load_canonical_alias_map() -> dict:
     """
     seed_demo_path = COMMANDS / "seed-demo.py"
     spec = importlib.util.spec_from_file_location("seed_demo", seed_demo_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load module spec from {seed_demo_path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.COMPANY_ALIASES_MAP
@@ -69,6 +71,12 @@ COMPANY_SEED_DATA = [
         "name": "Tune Protect",
         "logo_asset_key": "company-logo:tune-protect",
         "detection_phrases": ["Tune Protect", "Tune Insurance", "Motor Easy"],
+    },
+    {
+        "slug": "kurnia",
+        "name": "Kurnia Insurans",
+        "logo_asset_key": "company-logo:kurnia",
+        "detection_phrases": ["Kurnia", "Kurnia Insurans", "Kurnia Insurance", "Kurnia Insurans (Malaysia) Berhad"],
     },
 ]
 

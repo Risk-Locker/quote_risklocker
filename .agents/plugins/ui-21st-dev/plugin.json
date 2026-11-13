@@ -1,0 +1,12 @@
+{
+  "name": "ui-21st-dev",
+  "displayName": "21st.dev Magic UI Registry (Opt-In)",
+  "version": "1.0.0",
+  "description": "Optional external 21st.dev Streamable HTTP MCP registry. Ships disabled by default; requires TWENTYFIRST_API_KEY and strict Risklocker --rl-* restyling.",
+  "disabled": true,
+  "suggestedPrompts": [
+    "Search 21st.dev for high-density enterprise drawer or table layouts to strip down to --rl-* tokens",
+    "Inspect accessible multi-step wizard components from 21st.dev for Risklocker restyling"
+  ]
+}
+

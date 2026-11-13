@@ -28,6 +28,8 @@ export interface TenureSpec {
   status: string;
   road_tax: number;
   runner_fee: number;
+  include_road_tax?: boolean;
+  include_runner_fee?: boolean;
   runner_fee_type?: string;
   fixed_costs_total: number;
   quotation_discount?: number;
@@ -54,15 +56,23 @@ export interface ComparisonEntry {
   motor_premium: number;
   rounded_motor_premium?: number | null;
   exact_motor_premium?: number | null;
+  bnm_5cent_motor_premium?: number | null;
+  whole_motor_premium?: number | null;
   road_tax: number;
   runner_fee: number;
+  include_road_tax?: boolean;
+  include_runner_fee?: boolean;
   discount?: number | null;
   effective_discount?: number | null;
   total_payable: number;
   rounded_total_payable?: number | null;
   exact_total_payable?: number | null;
+  bnm_5cent_total_payable?: number | null;
+  whole_total_payable?: number | null;
   net_total_payable?: number;
   rounded_net_total_payable?: number;
+  bnm_5cent_net_total_payable?: number;
+  whole_net_total_payable?: number | null;
   towing_limit: string;
   towing_km?: string;
   agreed_value: boolean;
@@ -212,4 +222,25 @@ export function isLlpLlopIncluded(val: string | null | undefined): boolean {
     trimmed !== "none" &&
     trimmed !== "not included"
   );
+}
+
+export type RoundingMode = "exact" | "5cent" | "whole" | "bnm5";
+
+export function formatMoneyWithRounding(
+  val: number | null | undefined,
+  mode: RoundingMode = "exact"
+): string {
+  if (val == null || isNaN(val)) return "0.00";
+  if (mode === "whole") {
+    const ceiled = Math.ceil(val);
+    return ceiled.toLocaleString("en-MY", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  }
+  if (mode === "5cent" || mode === "bnm5") {
+    const cents = Math.round(val * 100);
+    const lastDigit = Math.abs(cents) % 10;
+    const deltaMap: Record<number, number> = { 0: 0, 1: -1, 2: -2, 3: 2, 4: 1, 5: 0, 6: -1, 7: -2, 8: 2, 9: 1 };
+    const roundedCents = cents + (deltaMap[lastDigit] ?? 0);
+    return (roundedCents / 100).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  return val.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }

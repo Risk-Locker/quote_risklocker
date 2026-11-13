@@ -16,7 +16,7 @@ How the owner talks, how to interpret him, and how every interaction must run. T
  3. **Proactive UI Placement (Mentor Invariant)**: When the owner asks to add a button, link, badge, filter, or control without specifying its exact location in the UI, do NOT stall with questions or dump it blindly at the bottom. Inspect the target page and container hierarchy, choose the cleanest, most ergonomic UX home (e.g. table top-right action bar, card action row, vehicle details drawer header), integrate it seamlessly, and explain why.
  4. **Design/UX feedback** ("does this button border look okay? I don't like it") — never start changing things. Instead:
     - Analyze where and how the style is currently used across the app.
-    - Check whether the project already defines a design system (`docs/DESIGN-SYSTEM.md`); if styles deviate from it, say so.
+    - Check whether the project already defines a design system (`docs/architecture/DESIGN-SYSTEM.md`); if styles deviate from it, say so.
     - Research options (web + relevant skills) when the design system does not answer the question.
     - Present 6-8 concrete options with descriptions; the owner picks one or merges a few.
     - Only then execute.
@@ -27,11 +27,12 @@ How the owner talks, how to interpret him, and how every interaction must run. T
  6. **No Intermediate Git Checks**: Never execute `git status` or `git diff` during regular coding turns. Commits happen on the owner's schedule; running git checks on intermediate edits is purely wasted overhead.
  7. **Mentor Observations**: On deep feature deliveries, conclude with a concise `🧠 Mentor Observation` highlighting architecture alignment, component size health, or proactive UX improvements.
  8. **Never claim success without the tiered verification chain**: Fast-Track uses single-file checks; Deep-Track requires pytest, tsc, build, zero IDE problems, and verify-brain.
- 9. **Pre-Commit / Pre-Push / Branch Publish Verification Gate (Mandatory):** Whenever the owner or user prompts something related to committing, pushing (to `origin main`, `origin v18`, `origin v19`, or any branch), or creating and publishing a new branch, NEVER rush to run `git commit` or `git push` or touch git. The agent MUST first execute `.\commands\verify-deploy-gate.ps1`, mirroring `.github/workflows/deploy.yml` 1:1 so that deployment will pass without any build error, type error, test failure, or code error:
-    - Backend tests under sealed dummy CI environment: `.\commands\verify-deploy-gate.ps1` (all green, 100% hermetic with zero remote network calls)
-    - Frontend type-check: `npx tsc --noEmit` in `frontend/` (zero errors)
-    - Frontend production build: `npm run build` in `frontend/` (clean build)
-    - Schema integrity: `PYTHONPATH=backend .\.venv\Scripts\python.exe -c "from app.db.session import verify_schema_version; verify_schema_version(); print('schema OK')"`
-    - Zero IDE/lint diagnostics on touched files, code map freshness, and brain integrity: `.\.venv\Scripts\python.exe commands/verify-brain.py`
+ 9. **Pre-Commit / Pre-Push / Branch Publish Verification Gate (Mandatory):** Whenever the owner or user prompts something related to committing, pushing (to `origin main`, `origin v18`, `origin v19`, or any branch), or creating and publishing a new branch, NEVER rush to run `git commit` or `git push` or touch git. The agent MUST first execute `.\commands\verify-deploy-gate.ps1` (`10/10` local checks; `[1/10]`–`[3/10]` mirror `.github/workflows/deploy.yml`, `[4/10]`–`[10/10]` add hermetic migration, SAST & Harness gates queued for Phase B CI parity) so that deployment will pass without any build error, type error, test failure, or security defect:
+    - Backend tests under sealed dummy CI environment (`100%` hermetic with zero remote network calls)
+    - Frontend type-check (`npx tsc --noEmit` in `frontend/`, zero errors)
+    - Frontend production build (`npm run build` in `frontend/`, clean build)
+    - Offline migration integrity check (`001..N` contiguous, naming & SHA-256 checksums; run with `-LiveDb` for `verify_schema_version()`)
+    - Automated SAST, RBAC, Middleware, Storage & PII audit (`commands/security-audit.py --strict --with-external`, zero `CRITICAL`/`HIGH` findings) + clean `.agents/logs/tripwire-alerts.log`
+    - Zero IDE/lint diagnostics on touched files, code map freshness (`update-code-map.py --check`), Project Knowledge Base integrity (`verify-brain.py`), IDE bridge sync (`sync-agent-bridges.py --check`), skill vault hygiene (`skills-manager.py doctor --check`), and daily harness radar (`daily_radar.py --offline --dry-run --strict`).
     If ANY check fails, NEVER proceed to commit, push, or publish. Fix all errors first and re-verify until 100% green. Deployment must never fail downstream.
 

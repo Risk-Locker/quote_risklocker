@@ -110,4 +110,4 @@ All FastAPI endpoints return consistent, typed Pydantic response payloads:
 
 * **Zero Frontend Secrets**: Storage service-role keys, backend database URIs, API keys (Gemini, Resend), and cryptographic hash secrets must NEVER be prefixed with `NEXT_PUBLIC_` or sent in client responses.
 * **Session Hardening**: Cookies are `HttpOnly`, `SameSite=Lax`, and `Secure` in production. Rolling expiration with 8-hour idle timeout and 30-day absolute ceiling.
-* **Stateless Ephemeral PDFs**: Uploaded and generated PDF binaries are never persisted in the database or public directories. They are scanned, parsed, and immediately quarantined/cleaned up.
+* **Private Storage & Fail-Closed PDFs**: Uploaded and generated PDF binaries live strictly in the private Supabase Storage bucket (via server-only service-role credentials), never in PostgreSQL `BYTEA` columns, public directories, or temp fallback paths; transient scratch files are scanned in quarantine and cleaned up immediately.

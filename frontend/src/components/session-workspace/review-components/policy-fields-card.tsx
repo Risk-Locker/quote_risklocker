@@ -429,6 +429,36 @@ export function PolicyFieldsCard({
           <span className="truncate">{fieldLabel}</span>
           <div className="flex items-center gap-1.5 shrink-0">
             {needsCheck ? <span className="text-[10px] text-amber-700 font-bold">Check value</span> : null}
+            {field.name === "roadtax" ? (
+              <label className="flex items-center gap-1 text-[10px] text-[var(--rl-text-muted)] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formValues.include_road_tax !== "false"}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setFormValues((v) => ({ ...v, include_road_tax: checked ? "true" : "false" }));
+                    commitFieldDirectly("include_road_tax", checked ? "true" : "false");
+                  }}
+                  className="size-3 rounded border-[var(--rl-border)] text-[var(--rl-black)] focus:ring-0 cursor-pointer"
+                />
+                <span className="font-semibold">Include</span>
+              </label>
+            ) : null}
+            {field.name === "service_fee" ? (
+              <label className="flex items-center gap-1 text-[10px] text-[var(--rl-text-muted)] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formValues.include_runner_fee !== "false"}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setFormValues((v) => ({ ...v, include_runner_fee: checked ? "true" : "false" }));
+                    commitFieldDirectly("include_runner_fee", checked ? "true" : "false");
+                  }}
+                  className="size-3 rounded border-[var(--rl-border)] text-[var(--rl-black)] focus:ring-0 cursor-pointer"
+                />
+                <span className="font-semibold">Include</span>
+              </label>
+            ) : null}
             {field.name === "total_amount" ? (
               <button
                 type="button"
@@ -707,22 +737,6 @@ export function PolicyFieldsCard({
                     });
                   }
                 }
-
-                if (formValues["engine_cc"]) {
-                  const rawCC = parseFloat(String(formValues["engine_cc"]).replace(/[^0-9.]/g, ""));
-                  if (rawCC > 0) {
-                    const computedRT = computeMalaysianRoadTax(
-                      rawCC,
-                      newVtype,
-                      isCompany ? "Company" : "Individual"
-                    );
-                    if (computedRT > 0 && (!formValues["roadtax"] || parseFloat(formValues["roadtax"]) === 0)) {
-                      const rtFormatted = computedRT.toFixed(2);
-                      setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
-                      commitFieldDirectly("roadtax", rtFormatted);
-                    }
-                  }
-                }
               }}
               className={`text-xs font-medium transition-all duration-300 ${
                 syncHighlight &&
@@ -773,8 +787,16 @@ export function PolicyFieldsCard({
               </span>
             ) : null}
             <Input
+              disabled={
+                (field.name === "roadtax" && formValues.include_road_tax === "false") ||
+                (field.name === "service_fee" && formValues.include_runner_fee === "false")
+              }
               value={
-                field.kind === "total"
+                field.name === "roadtax" && formValues.include_road_tax === "false"
+                  ? "0.00"
+                  : field.name === "service_fee" && formValues.include_runner_fee === "false"
+                  ? "0.00"
+                  : field.kind === "total"
                   ? (formValues[field.name] !== undefined && formValues[field.name] !== "" ? formValues[field.name] : (previewFields[field.name] || ""))
                   : formValues[field.name] ?? ""
               }
@@ -790,7 +812,7 @@ export function PolicyFieldsCard({
                 field.name === "total_amount"
                   ? "font-bold text-[var(--rl-red)] bg-red-50/40 border-red-200"
                   : ""
-              } ${needsCheck ? "border-amber-400 bg-amber-50/50 ring-1 ring-amber-300" : ""}`}
+              } ${needsCheck ? "border-amber-400 bg-amber-50/50 ring-1 ring-amber-300" : ""} disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed`}
               onChange={(event) => {
                 const newVal = event.target.value;
                 if (previousValuesRef.current[field.name] === undefined) {
@@ -799,86 +821,32 @@ export function PolicyFieldsCard({
                 setFormValues((values) => ({ ...values, [field.name]: newVal }));
               }}
               onBlur={(event) => {
-                commitField(field, event.target.value);
-                if (
-                  field.name === "engine_cc" ||
-                  field.name === "car_model" ||
-                  field.name === "insured_name" ||
-                  field.name === "customer_name" ||
-                  field.name === "client_type"
-                ) {
-                  const custName = formValues["insured_name"] || formValues["customer_name"] || "";
-                  const isCorp =
-                    /(SDN\s*BHD|BHD|ENTERPRISE|TRADING|LTD|LLC|PLT|COMPANY|ENT\.|CORP|HOLDINGS|CO\.)/i.test(
-                      String(custName)
-                    ) || String(formValues["client_type"] || "").toLowerCase().includes("company");
-                  const carModel = formValues["car_model"] || "";
-                  const carBrand =
-                    formValues["car_brand"] ||
-                    (workspace.fields?.car_brand as WorkspaceField | undefined)?.value ||
-                    "";
-                  let vtype = formValues["vehicle_type"] || "Car";
-                  const evCat = detectEVCategory(carBrand, carModel, formValues["engine_cc"]);
+                const val = event.target.value;
+                commitField(field, val);
 
-                  if (vtype.startsWith("EV") || evCat) {
-                    vtype = vtype.startsWith("EV") ? vtype : evCat || "EVSaloonCar";
-                    setFormValues((v) => ({ ...v, vehicle_type: vtype }));
-                    commitFieldDirectly("vehicle_type", vtype);
-                  } else if (isNonSaloonCarModel(carModel) || vtype === "NonSaloonCar") {
-                    vtype = "NonSaloonCar";
-                    setFormValues((v) => ({ ...v, vehicle_type: "NonSaloonCar" }));
-                    commitFieldDirectly("vehicle_type", "NonSaloonCar");
-                  }
+                // Cross-sync customer name and insured name cleanly
+                if (field.name === "insured_name" && formValues["customer_name"] !== val) {
+                  setFormValues((v) => ({ ...v, customer_name: val }));
+                  commitFieldDirectly("customer_name", val);
+                } else if (field.name === "customer_name" && formValues["insured_name"] !== val) {
+                  setFormValues((v) => ({ ...v, insured_name: val }));
+                  commitFieldDirectly("insured_name", val);
+                }
 
-                  const isEV = vtype.startsWith("EV");
+                // Format engine CC when modified
+                if (field.name === "engine_cc" || field.name === "car_model") {
                   const currentCCStr =
                     formValues["engine_cc"] ||
-                    (field.name === "car_model"
-                      ? inferCCFromCarModel(formValues["car_model"])?.toString()
-                      : null);
+                    (field.name === "car_model" ? inferCCFromCarModel(val)?.toString() : null);
                   const rawParsed = currentCCStr
                     ? parseFloat(String(currentCCStr).replace(/[^0-9.]/g, ""))
                     : null;
-                  if (rawParsed && rawParsed > 0) {
-                    if (isEV) {
-                      const kw = rawParsed >= 1000 ? rawParsed / 1000 : rawParsed;
-                      const formattedPower = `${Number.isInteger(kw) ? kw : kw.toFixed(1)} kW`;
-                      setFormValues((values) => ({ ...values, engine_cc: formattedPower }));
-                      commitFieldDirectly("engine_cc", formattedPower);
-                      const computedRT = computeMalaysianRoadTax(rawParsed, vtype, "Individual");
-                      if (computedRT > 0 && (!formValues["roadtax"] || parseFloat(formValues["roadtax"]) === 0)) {
-                        const rtFormatted = computedRT.toFixed(2);
-                        setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
-                        commitFieldDirectly("roadtax", rtFormatted);
-                      }
-                    } else if (rawParsed <= 7000) {
-                      const parsedCC = Math.round(rawParsed);
-                      if (!formValues["engine_cc"] || !formValues["engine_cc"].includes("CC")) {
-                        setFormValues((values) => ({ ...values, engine_cc: `${parsedCC} CC` }));
-                        commitFieldDirectly("engine_cc", `${parsedCC} CC`);
-                      }
-                      const isCompany =
-                        isCorp ||
-                        vtype.toLowerCase().includes("company") ||
-                        vtype.toLowerCase().includes("corp");
-                      const baseType =
-                        vtype === "NonSaloonCar"
-                          ? "NonSaloonCar"
-                          : vtype.toLowerCase().includes("motor")
-                          ? "Motorcycle"
-                          : vtype.toLowerCase().includes("lorry") || vtype.toLowerCase().includes("other")
-                          ? "Lorry"
-                          : "Car";
-                      const computedRT = computeMalaysianRoadTax(
-                        parsedCC,
-                        baseType,
-                        isCompany ? "Company" : "Individual"
-                      );
-                      if (computedRT > 0 && (!formValues["roadtax"] || parseFloat(formValues["roadtax"]) === 0)) {
-                        const rtFormatted = computedRT.toFixed(2);
-                        setFormValues((values) => ({ ...values, roadtax: rtFormatted }));
-                        commitFieldDirectly("roadtax", rtFormatted);
-                      }
+                  if (rawParsed && rawParsed > 0 && rawParsed <= 7000) {
+                    const parsedCC = Math.round(rawParsed);
+                    if (!formValues["engine_cc"] || !formValues["engine_cc"].includes("CC")) {
+                      const formatted = `${parsedCC} CC`;
+                      setFormValues((values) => ({ ...values, engine_cc: formatted }));
+                      commitFieldDirectly("engine_cc", formatted);
                     }
                   }
                 }

@@ -3,7 +3,7 @@
 ## Non-Negotiable Constraints
 
 - Use Supabase/Postgres only for application data; SQLite and local persistent data fallbacks are prohibited.
-- Source and generated PDFs are fully stateless and ephemeral. Never persist PDF files or images in the database or storage buckets.
+- Source and generated PDFs are stored exclusively in the **private Supabase Storage bucket** (`backend/app/storage/`) using server-only service-role credentials until manual reference-aware purge. Never persist PDF binaries in PostgreSQL `BYTEA` columns, public web/git directories, or ephemeral fallback paths (`/.qc-tmp/stateless_generated/`).
 - Never expose service-role keys, backend credentials, storage keys, or provider URLs to the browser.
 - Never silently guess an uncertain extracted value. Mark it `Check Needed` for review.
 - Generate final PDFs deterministically from reviewed draft data and saved template configuration. Do not use AI-generated layout for final PDFs.
@@ -82,7 +82,7 @@
 ## Security and Retention
 
 - Uploads are PDF-only, size-limited, validated, quarantined in the OS temporary directory, malware-scanned when required, extraction-limited, and always cleaned up after processing.
-- Source and generated PDF binaries are completely stateless and ephemeral. They are provided for immediate download only and are never saved on the server.
-- There is no permanent trash or audit trail for PDF binaries because they are not persisted.
+- Source (`source/{year}/{month}/{session_id}/{file_id}.pdf`) and generated (`generated/{year}/{month}/{draft_id}/{version_id}.pdf`) PDFs live strictly inside the **private Supabase Storage bucket** via backend service-role credentials, and render workers must fail closed if private storage is unconfigured (never falling back to `.qc-tmp/stateless_generated/` or exposing public URLs).
+- Auto-expiry and automatic Trash purges are disabled; deletion uses reference-aware manual staff/admin purge workflows cleanly across DB metadata and private storage objects.
 - Referenced legacy data/assets remain hidden and immutable until compatibility/reference checks prove physical deletion safe.
 - SharePoint/OneDrive archive support is optional, backend-only, and requires Microsoft Entra credentials, checksum verification, and object metadata before activation.

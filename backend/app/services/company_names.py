@@ -19,10 +19,11 @@ OFFICIAL_INSURER_NAMES: dict[str, str] = {
     "SOMPO": "Berjaya Sompo Insurance Berhad",
     "TUNE": "Tune Insurance Malaysia Berhad",
     "TUNE_PROTECT": "Tune Insurance Malaysia Berhad",
-    "AMASSURANCE": "AmGeneral Insurance Berhad",
-    "AMGEN": "AmGeneral Insurance Berhad",
+    "AMASSURANCE": "AmAssurance",
+    "AMGEN": "AmAssurance",
     "AMGENERAL": "AmGeneral Insurance Berhad",
-    "KURNIA": "AmGeneral Insurance Berhad",
+    "KURNIA": "Kurnia Insurans (Malaysia) Berhad",
+    "KURNIA_INSURANS": "Kurnia Insurans (Malaysia) Berhad",
     "ALLIANZ": "Allianz General Insurance Company (Malaysia) Berhad",
     "ZURICH": "Zurich General Insurance Malaysia Berhad",
     "AIG": "AIG Malaysia Insurance Berhad",
@@ -70,7 +71,9 @@ def get_insurer_short_name(raw_name: str | None) -> str:
         return "Berjaya Sompo"
     if "TUNE" in upper:
         return "Tune Protect"
-    if "AMASSURANCE" in upper or "AMGEN" in upper or "KURNIA" in upper:
+    if "KURNIA" in upper:
+        return "Kurnia"
+    if "AMASSURANCE" in upper or "AMGEN" in upper:
         return "AmAssurance"
     if "ALLIANZ" in upper:
         return "Allianz"

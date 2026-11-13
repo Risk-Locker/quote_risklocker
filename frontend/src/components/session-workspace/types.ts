@@ -57,6 +57,7 @@ export type WorkspaceSnapshot = {
   uploaded_file_id: string;
   revision: number;
   status: string;
+  document_type?: "quotation" | "covernote" | string;
   is_test?: boolean;
   created_by?: string | null;
   created_by_email?: string | null;

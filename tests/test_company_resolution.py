@@ -17,13 +17,20 @@ from app.extraction.candidate_finder import find_candidates
 
 
 AM = "amassurance-company-id"
+KURNIA = "kurnia-company-id"
 QBE = "qbe-company-id"
 COMPANIES = [
     {
         "company_id": AM,
         "name": "AmAssurance",
-        "source_template_category": "Amgen / AmAssurance / Kurnia-style",
-        "aliases": ["AmAssurance", "AmGen", "AmGeneral", "AmGeneral Insurance", "Kurnia", "auto365"],
+        "source_template_category": "Amgen / AmAssurance-style",
+        "aliases": ["AmAssurance", "AmGen", "AmGeneral", "AmGeneral Insurance", "auto365"],
+    },
+    {
+        "company_id": KURNIA,
+        "name": "Kurnia Insurans",
+        "source_template_category": "Kurnia-style",
+        "aliases": ["Kurnia", "Kurnia Insurans", "Kurnia Insurance", "Kurnia Auto Assist"],
     },
     {
         "company_id": QBE,
@@ -43,7 +50,6 @@ COMPANIES = [
         "AmGeneral",
         "AM General Insurance Berhad",
         "AmGeneral Insurance",
-        "Kurnia",
         "auto365",
         "AmAssurance",
         "AMASSURANCE",
@@ -54,6 +60,23 @@ def test_variants_resolve_to_amassurance(variant: str):
     assert resolved["status"] == "matched"
     assert resolved["company_id"] == AM
     assert resolved["display_name"] == "AmAssurance"
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "Kurnia",
+        "KURNIA",
+        "Kurnia Insurans",
+        "Kurnia Insurance",
+        "Kurnia Auto Assist",
+    ],
+)
+def test_variants_resolve_to_kurnia(variant: str):
+    resolved = resolve_company(variant, COMPANIES)
+    assert resolved["status"] == "matched"
+    assert resolved["company_id"] == KURNIA
+    assert resolved["display_name"] == "Kurnia Insurans"
 
 
 def test_unrelated_tokens_never_match():

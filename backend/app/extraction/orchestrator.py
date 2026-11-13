@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 import re
 
+from app.core.errors import AIExtractionUnavailableException
 from app.extraction.candidate_finder import find_candidates
 from app.extraction.benefit_lines import extract_benefit_lines, is_spurious_benefit_line
 from app.extraction.draft_mapper import build_draft
@@ -28,6 +29,7 @@ class ExtractionOrchestrator:
         prompt_override: str | None = None,
         db_packs: list[dict] | None = None,
         db_corrections: list[dict] | None = None,
+        fail_closed: bool = False,
         **kwargs,
     ) -> dict:
         native = extract_native(file_path)
@@ -63,8 +65,18 @@ class ExtractionOrchestrator:
         gemini_res = None
         try:
             from app.extraction.gemini_extractor import extract_with_gemini_sync, get_key_pool
+
             pdf_bytes = file_path.read_bytes()
-            if get_key_pool().get_all_keys() and len(pdf_bytes) > 500:
+            pool_keys = get_key_pool().get_all_keys()
+            if not pool_keys:
+                if fail_closed:
+                    raise AIExtractionUnavailableException(
+                        reason="No GEMINI_API_KEY configured in pool.",
+                        status_code=503,
+                        detail="AI Extraction Unavailable: No GEMINI_API_KEY configured. Please verify API billing or switch keys.",
+                    )
+                warnings.append("AI Notice: No GEMINI_API_KEY configured. Extracted via native PDF/OCR fallback.")
+            elif len(pdf_bytes) > 500:
                 item_idx = abs(hash(source_filename or file_path.name)) % 100
                 gemini_res = extract_with_gemini_sync(
                     pdf_bytes,
@@ -78,6 +90,17 @@ class ExtractionOrchestrator:
                     prompt_override=prompt_override,
                     batch_item_index=item_idx,
                 )
+                if not gemini_res:
+                    if fail_closed:
+                        pool = get_key_pool()
+                        last_err = pool.get_last_error_message() or "API Token Quota Exhausted or Rate-Limited"
+                        status_code = 429 if any(k in last_err.lower() for k in ["429", "quota", "rate"]) else 503
+                        raise AIExtractionUnavailableException(
+                            reason=last_err,
+                            status_code=status_code,
+                            detail=f"AI Extraction Unavailable: API Token Quota Exhausted. Please verify API billing or switch keys. ({last_err})",
+                        )
+                    warnings.append("AI Notice: Gemini AI token quota expired or rate-limited. Extracted via native PDF/OCR fallback.")
             else:
                 gemini_res = None
             if gemini_res:
@@ -314,9 +337,17 @@ class ExtractionOrchestrator:
                                         ]
                                 except Exception:
                                     pass
+        except AIExtractionUnavailableException:
+            raise
         except Exception as exc:
             import logging
             logging.getLogger(__name__).warning("Gemini multimodal extraction note: %s", exc)
+            if fail_closed and any(term in str(exc).lower() for term in ["429", "quota", "rate limit", "resourceexhausted", "unauthenticated", "401", "403"]):
+                raise AIExtractionUnavailableException(
+                    reason=str(exc),
+                    status_code=429,
+                    detail=f"AI Extraction Unavailable: {exc}",
+                ) from exc
             warnings.append(f"Gemini multimodal extraction note: {exc}")
 
         fields, draft_warnings, draft_status = build_draft(candidates, benefit_lines=benefit_lines)

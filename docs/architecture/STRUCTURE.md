@@ -10,14 +10,18 @@ For historical release notes from v6 through v26, see [CHANGELOG-V6-V26.md](../h
 
 | Directory / File | Responsibility |
 | :--- | :--- |
-| `backend/` | FastAPI backend (Python 3.11): API routers, extraction pipeline, domain services, rendering engine |
+| `AGENTS.md` | Single canonical root contract across Antigravity, Codex CLI, OpenCode V2, Cursor, Windsurf, JetBrains & Claude Code `v2.1.277+`; scoped rules in `backend/`, `frontend/`, `migrations/` |
+| `.agents/` | **Agent Harness**: `manifest.yaml` (`v2.3`, `gemini-3.8-flash-high` `inherit` policy), 9 native Antigravity Subagents (`agents/`), 6 Rules (`rules/` incl. live freshness), Repo Plugins (`plugins/risklocker-ui` & `ui-21st-dev`), Active Deep Skills (`<= 50` soft cap) & Cold Vault (`skills-vault/`, live inventory in `docs/generated/SKILLS-INDEX.md`), `skills-lock.json`, Hooks (`hooks.json`, `hooks/`), Harness Memory (`memory/`), research runbook (`guides/`), audit logs (`logs/`), and daily proposals (`proposals/`) |
+| `.github/copilot-instructions.md` | Tracked Copilot bridge synced via `commands/sync-agent-bridges.py` (opt-in legacy IDE NTFS junctions `.claude/` / `.cursor/` remain gitignored & zero-copy via `--ide`) |
+| `backend/` | FastAPI backend (Python 3.12): API routers, extraction pipeline, domain services, rendering engine |
 | `frontend/` | Next.js 15.5 frontend (React 19, TypeScript): App router, session workspace, template canvas, comparisons |
 | `migrations/` | Ordered SQL migrations applied via Supabase / PostgreSQL migration runner |
 | `tests/` | Hermetic backend test suite (100% in-memory SQLite / mock based; zero live DB dependencies) |
-| `commands/` | Operational scripts: local server start (`start-*.ps1`), deploy gates (`verify-deploy-gate.ps1`), DB seeding |
-| `docs/` | 3-tier Agent Brain knowledge base, routing tables, and active logbooks |
+| `commands/` | Operational scripts: local server start (`start-*.ps1`), 10/10 deploy gate (`verify-deploy-gate.ps1`), AST SAST/RBAC/PII scanner (`security-audit.py`), skill vault CLI (`skills-manager.py`), bridge sync (`sync-agent-bridges.py`), radar registration (`register-daily-radar.ps1`), portable bootstrap (`init-ai-factory.py`), DB seeding |
+| `docs/` | **Project Knowledge Base**: 3-tier product & architecture specs, Tier 4 `docs/change/` plans, working memory (`STATE.md`), and auto-generated AST/skill maps (`CODEBASE-MAP.md`, `GRAPH_REPORT.md`, `SKILLS-INDEX.md`) |
 | `assets/` | Production branding, company logos, and benefit icon graphic assets |
-| `.qc-tmp/` | Gitignored in-repo temporary workspace: test output, QA run scripts, screenshots, and logs |
+| `samples/` | Gitignored local reference library for real quotation PDFs (`quotations/<insurer>/`), `covernotes/`, and `template-layouts/` (preserved by janitor) |
+| `.qc-tmp/` | Gitignored strictly ephemeral temporary workspace: test output, QA run scripts, screenshots, and logs (safe to wipe via `commands/clean-repo-debris.ps1`; preserves `graphify-out/` and `research-browser-profile/`) |
 | `.github/workflows/` | CI/CD pipeline (`deploy.yml`): pre-deploy verification gate and automated VPS deployment |
 | `deploy/` | Production infrastructure configs: Nginx reverse proxy and VPS bootstrap scripts |
 | `ecosystem.config.cjs` | PM2 process manager configuration (`rl-quote-api`, `rl-quote-worker`, `rl-quote-frontend`) |
@@ -132,4 +136,4 @@ frontend/src/
 2. **Hermetic Test Suite**: Tests in `tests/` must run against in-memory SQLite (`sqlite:///:memory:`) and never require live Postgres connections.
 3. **No Silent Guesses**: Never guess uncertain extracted values; staff manual edits always take priority over AI candidates.
 4. **Deploy Gate Parity**: Before committing or pushing, run `.\commands\verify-deploy-gate.ps1` to mirror CI/CD checks 1:1.
-5. **Agent Brain Discipline**: Record durable changes in topic docs and append a 1-line log entry to `docs/core/STATE.md` after every interaction.
+5. **Project Knowledge Base Discipline**: Record durable changes in topic docs and append a 1-line log entry to `docs/core/STATE.md` after every interaction.

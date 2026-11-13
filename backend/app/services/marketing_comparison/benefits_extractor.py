@@ -637,7 +637,7 @@ def _extract_windscreen_from_draft(f: dict[str, Any]) -> float | None:
 
 def _resolve_comparison_benefits(
     db: Session,
-    session: SessionModel,
+    session: SessionModel | None,
     company_id: str | None,
     f: dict[str, Any],
     windscreen_target: float | None = None,
@@ -653,7 +653,7 @@ def _resolve_comparison_benefits(
     tokens: list[str] = []
     
     # 1. Draft Benefit Selections
-    draft_id = session.draft_id
+    draft_id = session.draft_id if session else None
     selections: list[DraftBenefitSelection] = []
     if draft_id:
         selections = list(
@@ -682,7 +682,7 @@ def _resolve_comparison_benefits(
                 
     # 2. Extraction Benefit Lines & Extraction Record text
     ext_rec = None
-    if session.uploaded_file_id:
+    if session and session.uploaded_file_id:
         ext_lines = list(
             db.scalars(
                 select(ExtractionBenefitLine)
@@ -772,7 +772,7 @@ def _resolve_comparison_benefits(
     windscreen_amount: float | None = None
 
     # Priority 1: Check ExtractionBenefitLine records for explicit extracted limit
-    if session.uploaded_file_id:
+    if session and session.uploaded_file_id:
         ext_lines = list(
             db.scalars(
                 select(ExtractionBenefitLine)
@@ -943,7 +943,7 @@ def _resolve_comparison_benefits(
     seen_peril_names: set[str] = set()
 
     # 1. From ExtractionBenefitLine records
-    if session.uploaded_file_id:
+    if session and session.uploaded_file_id:
         ext_lines = list(
             db.scalars(
                 select(ExtractionBenefitLine)
@@ -1300,7 +1300,7 @@ def _extract_source_quotation_no(session: SessionModel | Any | None = None, draf
                 if m:
                     candidate = m.group(1).strip()
                     if _is_valid_extracted_qno(candidate):
-                        if session.draft and isinstance(session.draft.fields, dict):
+                        if session and session.draft and isinstance(session.draft.fields, dict):
                             session.draft.fields["quotation_no"] = {"value": candidate, "status": "ready", "message": ""}
                         return candidate
 

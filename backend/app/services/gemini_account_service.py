@@ -123,7 +123,7 @@ class GeminiAccount:
         return self.key[:6] + "..." + self.key[-4:]
 
 
-PARALLEL_MODELS: tuple[str, ...] = ("gemini-3.1-flash-lite", "gemini-3.5-flash-lite")
+PARALLEL_MODELS: tuple[str, ...] = ("gemini-3.5-flash-lite", "gemini-3.8-flash")
 
 
 class GeminiAccountManager:
@@ -950,7 +950,7 @@ class GeminiAccountManager:
                 "status_color": active_color,
                 "local_date": today_str,
                 "model": target_model,
-                "models": list(PARALLEL_MODELS) + ["gemini-3.1-flash-lite-preview"],
+                "models": list(PARALLEL_MODELS),
                 "active_account_index": self._active_index,
                 "active_account_label": active_acc.label if active_acc else "None",
                 "keys_count": len(self._accounts),

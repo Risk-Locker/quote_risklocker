@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "note": "ECC-inspired atomic project instincts learned from audit and session friction. Graduated to rules/skills only after verification.",
+  "instincts": [
+    {
+      "id": "instinct-preserve-ovh-local-only",
+      "confidence": 0.99,
+      "scope": "repo",
+      "rule": "Keep server IPs and local SSH key instructions strictly inside *.local.md files ignored by .gitignore.",
+      "source": "2026-11-11 Option 2 audit"
+    },
+    {
+      "id": "instinct-graph-before-grep",
+      "confidence": 0.96,
+      "scope": "repo",
+      "rule": "Consult docs/generated/GRAPH_REPORT.md and CODEBASE-MAP.md before scanning 3,000-line monoliths.",
+      "source": "2026-11-11 Graphify integration"
+    },
+    {
+      "id": "instinct-fast-track-preserve",
+      "confidence": 0.98,
+      "scope": "repo",
+      "rule": "Single-file CSS/token/copy tweaks always use Fast Track (<15s tsc check) and skip committee orchestration.",
+      "source": "INSTRUCTIONS.md Dual-Track invariant"
+    },
+    {
+      "id": "instinct-verify-on-disk-glob-safe",
+      "confidence": 0.95,
+      "scope": "windows-powershell",
+      "rule": "Use PowerShell -LiteralPath when inspecting Next.js dynamic routes containing [id] brackets.",
+      "source": "2026-11-10 repo inventory count fix"
+    }
+  ]
+}
+

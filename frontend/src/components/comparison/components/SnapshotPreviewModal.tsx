@@ -5,7 +5,8 @@ import { Camera, Copy, DownloadSimple, X } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { formatBenefitCoverage, formatShortInsurerName } from "@/lib/benefit-utils";
 import { formatLlpLlop, isLlpLlopIncluded } from "../types";
-import type { TenureSpec, ComparisonEntry } from "../types";
+import type { TenureSpec, ComparisonEntry, RoundingMode } from "../types";
+import { formatMoneyWithRounding } from "../types";
 
 interface SnapshotPreviewModalProps {
   isOpen: boolean;
@@ -23,6 +24,7 @@ interface SnapshotPreviewModalProps {
     current?: number | null;
     next?: number | null;
   };
+  roundingMode?: RoundingMode;
 }
 
 export function SnapshotPreviewModal({
@@ -38,6 +40,7 @@ export function SnapshotPreviewModal({
   activeWinnerPeriod,
   visibleRanksMap,
   ncdData,
+  roundingMode = "exact",
 }: SnapshotPreviewModalProps) {
   if (!isOpen) return null;
 
@@ -228,7 +231,14 @@ export function SnapshotPreviewModal({
                             <div className="pt-1 border-t border-neutral-100 flex justify-between items-baseline text-xs text-[#6e6e73]">
                               <span>Total Payable:</span>
                               <span className="font-mono font-medium line-through">
-                                RM {(card.rounded_total_payable != null ? card.rounded_total_payable : Math.round(card.total_payable)).toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                                RM {formatMoneyWithRounding(
+                                  roundingMode === "whole"
+                                    ? (card.whole_total_payable ?? card.exact_total_payable ?? card.total_payable)
+                                    : (roundingMode === "5cent" || roundingMode === "bnm5")
+                                    ? (card.bnm_5cent_total_payable ?? card.exact_total_payable ?? card.total_payable)
+                                    : (card.exact_total_payable ?? card.total_payable),
+                                  roundingMode
+                                )}
                               </span>
                             </div>
                             <div className="flex justify-between items-baseline text-xs text-emerald-700">
@@ -240,7 +250,14 @@ export function SnapshotPreviewModal({
                             <div className="pt-1 border-t border-emerald-100 flex justify-between items-baseline">
                               <span className="text-xs font-bold text-emerald-950">Net Payable:</span>
                               <span className="font-mono font-black text-base text-emerald-700">
-                                RM {(card.rounded_net_total_payable != null ? card.rounded_net_total_payable : Math.max(0, (card.rounded_total_payable ?? Math.round(card.total_payable)) - Math.round(card.effective_discount ?? tenure.quotation_discount ?? 0))).toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                                RM {formatMoneyWithRounding(
+                                  roundingMode === "whole"
+                                    ? (card.whole_net_total_payable ?? card.net_total_payable ?? Math.max(0, (card.whole_total_payable ?? card.total_payable) - (card.effective_discount ?? tenure.quotation_discount ?? 0)))
+                                    : (roundingMode === "5cent" || roundingMode === "bnm5")
+                                    ? (card.bnm_5cent_net_total_payable ?? card.net_total_payable ?? Math.max(0, (card.bnm_5cent_total_payable ?? card.total_payable) - (card.effective_discount ?? tenure.quotation_discount ?? 0)))
+                                    : (card.net_total_payable ?? Math.max(0, (card.exact_total_payable ?? card.total_payable) - (card.effective_discount ?? tenure.quotation_discount ?? 0))),
+                                  roundingMode
+                                )}
                               </span>
                             </div>
                           </>
@@ -248,7 +265,14 @@ export function SnapshotPreviewModal({
                           <div className="pt-1 border-t border-neutral-100 flex justify-between items-baseline">
                             <span className="text-xs font-bold text-[#1b1717]">Total Payable:</span>
                             <span className="font-mono font-black text-base text-[#1b1717]">
-                              RM {(card.rounded_total_payable != null ? card.rounded_total_payable : Math.round(card.total_payable)).toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                              RM {formatMoneyWithRounding(
+                                roundingMode === "whole"
+                                  ? (card.whole_total_payable ?? card.exact_total_payable ?? card.total_payable)
+                                  : (roundingMode === "5cent" || roundingMode === "bnm5")
+                                  ? (card.bnm_5cent_total_payable ?? card.exact_total_payable ?? card.total_payable)
+                                  : (card.exact_total_payable ?? card.total_payable),
+                                roundingMode
+                              )}
                             </span>
                           </div>
                         )}

@@ -1,0 +1,181 @@
+schema_version: "2.3"
+name: "agent-harness"
+description: "Max-Force Gemini 3.8 Flash (High) Agent Harness (Parallel Variant Tournaments, Automated SAST/Audit Gates, Native Antigravity Subagents, Skills Vault, Hooks, Memory) paired with a Project Knowledge Base."
+portable: true
+
+model_policy:
+  primary_model: "gemini-3.8-flash-high"
+  subagent_model_mode: "inherit"
+  swarm_model: "gemini-3.8-flash-high"
+  parallel_swarm_default: true
+  token_conservation: "uncapped_high_rigor"
+
+routing:
+  root_contract: "AGENTS.md"
+  knowledge_base_index: "docs/core/START-HERE.md"
+  working_memory: "docs/core/STATE.md"
+  freeze_lock_file: ".agents/.freeze.lock"
+  codebase_map: "docs/generated/CODEBASE-MAP.md"
+  ast_graph_report: "docs/generated/GRAPH_REPORT.md"
+  skills_lock: ".agents/skills-lock.json"
+  skills_index: "docs/generated/SKILLS-INDEX.md"
+  plugins_dir: ".agents/plugins"
+  live_freshness_rule: ".agents/rules/05-live-reality-and-freshness.md"
+  serialized_milestones_rule: ".agents/rules/06-serialized-milestones-and-authentic-verification.md"
+  edge_case_skill: ".agents/skills/edge-case-and-scenario-matrix/SKILL.md"
+  domain_interrogation_skill: ".agents/skills/domain-interrogation-and-reality-gate/SKILL.md"
+  tournament_skill: ".agents/skills/parallel-variant-tournament/SKILL.md"
+  security_auditor_cli: "commands/security-audit.py"
+
+tracks:
+  fast_track:
+    trigger: "CSS, padding, alignment, copy typos, color token fixes (zero DB/API/logic impact)"
+    bypass_roles: true
+    max_target_seconds: 15
+    checks:
+      - "cd frontend && npx tsc --noEmit"
+      - "STATE.md log append"
+  deep_track:
+    trigger: "Features, DB migrations, API contracts, pricing/tax math, AI pipelines, bugfixes, refactors"
+    require_approved_plan: true
+    require_model_per_phase: true
+    require_live_freshness_check: true
+    require_domain_interrogation_and_reality_gate: true
+    require_ten_point_edge_case_matrix: true
+    require_parallel_variant_tournament_for_core: true
+    pipeline:
+      - "1. 01-orchestrator-pm (routes Fast vs Deep Track + ask_question branching)"
+      - "2. 02-falcon-scout (live deprecation via search_web; Context7/github MCP delegated via Chief of Staff)"
+      - "3. domain-interrogation-and-reality-gate (40-factor checklist + Build-vs-Buy honesty table incl. OSS/Rule 00)"
+      - "4. edge-case-and-scenario-matrix + 03-mentor-architect (clean boundaries + 10-point guard-to-test matrix) [+ 05-principal-designer if UI]"
+      - "5. Owner approves implementation_plan.md"
+      - "6. 09-qa-and-janitor-gate (Red-First failing test + property fuzz anchor BEFORE branch fork)"
+      - "7. parallel-variant-tournament (swarm on branch with gemini-3.8-flash-high: 06/07/08 variants scored by lexicographic gates)"
+      - "8. 09-qa-and-janitor-gate executes security-audit.py --strict --with-external --json -> 04-security-auditor issues read-only PASS | BLOCKED veto"
+      - "9. 09-qa-and-janitor-gate (E2E, Playwright zoom/console check, debris purge, Knowledge Base sync, 10/10 verify-deploy-gate.ps1)"
+
+roles:
+  01-orchestrator-pm:
+    file: ".agents/agents/01-orchestrator-pm.md"
+    recommended_model: "inherit"
+    swarm_model: "gemini-3.8-flash-high"
+    main_agent: true
+    subagent: true
+    default_workspace: "inherit"
+    enable_write_tools: false
+    enable_subagent_tools: true
+    veto_scope: ["unplanned_deep_track", "missing_domain_interrogation", "skipped_red_first_test", "stale_model_or_missing_edge_matrix"]
+
+  02-falcon-scout:
+    file: ".agents/agents/02-falcon-scout.md"
+    recommended_model: "inherit"
+    swarm_model: "gemini-3.8-flash-high"
+    main_agent: false
+    subagent: true
+    default_workspace: "inherit"
+    enable_write_tools: false
+    enable_subagent_tools: false
+    mcp_delegation: "via_chief_of_staff_or_dynamic_subagent"
+    auth_profile_dir: ".qc-tmp/research-browser-profile"
+    veto_scope: ["unverified_external_dependency", "stale_deprecation_assumption", "captcha_bypass_attempt"]
+
+  03-mentor-architect:
+    file: ".agents/agents/03-mentor-architect.md"
+    recommended_model: "inherit"
+    swarm_model: "gemini-3.8-flash-high"
+    main_agent: false
+    subagent: true
+    default_workspace: "inherit"
+    enable_write_tools: false
+    enable_subagent_tools: false
+    veto_scope: ["schema_corruption", "dual_truth_logic", "architecture_drift", "bloat_dependency", "incomplete_edge_case_matrix", "unscored_tournament_winner"]
+
+  04-security-auditor:
+    file: ".agents/agents/04-security-auditor.md"
+    recommended_model: "inherit"
+    swarm_model: "gemini-3.8-flash-high"
+    main_agent: false
+    subagent: true
+    default_workspace: "inherit"
+    enable_write_tools: false
+    enable_subagent_tools: false
+    mcp_delegation: "via_chief_of_staff_or_dynamic_subagent"
+    veto_scope: ["missing_rbac", "eval_or_injection", "leaked_pii", "middleware_bypass", "unsafe_storage", "failed_sast_audit"]
+
+  05-principal-designer:
+    file: ".agents/agents/05-principal-designer.md"
+    recommended_model: "inherit"
+    swarm_model: "gemini-3.8-flash-high"
+    main_agent: false
+    subagent: true
+    default_workspace: "inherit"
+    enable_write_tools: false
+    enable_subagent_tools: false
+    mcp_delegation: "via_chief_of_staff_or_dynamic_subagent"
+    veto_scope: ["random_hex_colors", "modal_bloat", "landing_page_aesthetics_on_ledger", "design2_parity_break"]
+
+  06-backend-ledger-lead:
+    file: ".agents/agents/06-backend-ledger-lead.md"
+    recommended_model: "inherit"
+    swarm_model: "gemini-3.8-flash-high"
+    main_agent: false
+    subagent: true
+    default_workspace: "branch"
+    enable_write_tools: true
+    enable_subagent_tools: false
+    veto_scope: ["float_money", "mutating_http_get", "non_hermetic_test", "full_table_scan"]
+
+  07-frontend-ux-lead:
+    file: ".agents/agents/07-frontend-ux-lead.md"
+    recommended_model: "inherit"
+    swarm_model: "gemini-3.8-flash-high"
+    main_agent: false
+    subagent: true
+    default_workspace: "branch"
+    enable_write_tools: true
+    enable_subagent_tools: false
+    veto_scope: ["client_tax_math", "monolith_over_600_lines", "native_alert_confirm", "jspdf_screenshot_export"]
+
+  08-ai-extraction-lead:
+    file: ".agents/agents/08-ai-extraction-lead.md"
+    recommended_model: "inherit"
+    swarm_model: "gemini-3.8-flash-high"
+    main_agent: false
+    subagent: true
+    default_workspace: "branch"
+    enable_write_tools: true
+    enable_subagent_tools: false
+    veto_scope: ["middle_slice_pdf_truncation", "hardcoded_confidence", "unbounded_prompt_injection", "deprecated_gemini_model"]
+
+  09-qa-and-janitor-gate:
+    file: ".agents/agents/09-qa-and-janitor-gate.md"
+    recommended_model: "inherit"
+    swarm_model: "gemini-3.8-flash-high"
+    main_agent: false
+    subagent: true
+    default_workspace: "inherit"
+    enable_write_tools: true
+    enable_subagent_tools: true
+    mcp_delegation: "via_chief_of_staff_or_dynamic_subagent"
+    veto_scope: ["console_or_5xx_errors", "stale_code_map", "broken_verify_brain", "failed_deploy_gate", "failed_sast_audit"]
+
+ide_bridges:
+  canonical_active_skills_dir: ".agents/skills"
+  canonical_cold_vault_dir: ".agents/skills-vault"
+  canonical_agents_dir: ".agents/agents"
+  canonical_plugins_dir: ".agents/plugins"
+  skills_lockfile: ".agents/skills-lock.json"
+  active_skills_soft_cap: 50
+  tracked_adapters:
+    - ".github/copilot-instructions.md"
+  opt_in_gitignored_junctions:
+    - "claude -> .claude/skills, .claude/agents (single NTFS junctions via --ide claude)"
+    - "cursor -> .cursor/rules/*.mdc + .cursor/skills (single NTFS junction via --ide cursor)"
+    - "legacy-claude -> CLAUDE.md + .claude junctions (only for Claude Code < v2.1.277)"
+  native_auto_discovered:
+    - "AGENTS.md (Antigravity, Codex CLI, OpenCode V2, Cursor, Windsurf, JetBrains, Gemini CLI config, Claude Code v2.1.277+)"
+    - "backend/AGENTS.md, frontend/AGENTS.md, migrations/AGENTS.md"
+    - ".agents/rules/*.md (Antigravity native trigger rules)"
+    - ".agents/agents/*.md (Antigravity native mainAgent/subagent definitions)"
+    - ".agents/plugins/*/plugin.json (Antigravity repo-local plugins & MCP bundles)"
+    - ".agents/hooks.json (Antigravity native hooks)"

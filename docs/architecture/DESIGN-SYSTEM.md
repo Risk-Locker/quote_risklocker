@@ -83,7 +83,7 @@ All components live in `frontend/src/components/ui/`.
 
 ## Staff Language
 
-Use `Review / Edit`, `Please check this value.`, `Enhanced reading`, and `PDF Expired`. Use the approved statuses from [BUSINESS-RULES.md](BUSINESS-RULES.md). Do not reveal technical implementation terms to Staff.
+Use `Review / Edit`, `Please check this value.`, `Enhanced reading`, and `PDF Expired`. Use the approved statuses from [BUSINESS-RULES.md](../domain/BUSINESS-RULES.md). Do not reveal technical implementation terms to Staff.
 
 ## Component Definition Standards
 

@@ -65,6 +65,8 @@ def _parse_flexible_bool(v: Any) -> bool:
 class FixedCostsUpdateRequest(BaseModel):
     road_tax: float = Field(0.0, description="Road tax amount in MYR")
     runner_fee: float = Field(0.0, description="Runner / agent service fee in MYR")
+    include_road_tax: bool | None = Field(None, description="Whether to include road tax in comparisons and quotations")
+    include_runner_fee: bool | None = Field(None, description="Whether to include runner fee in comparisons and quotations")
     windscreen_target: float | None = Field(None, description="Windscreen coverage amount in MYR")
     ncd_percentage: float | None = Field(None, description="NCD percentage (e.g. 55.0)")
     current_ncd: float | None = Field(None, description="Current NCD percentage from previous policy term (e.g. 55.0)")
@@ -79,6 +81,7 @@ class FixedCostsUpdateRequest(BaseModel):
     chassis_no: str | None = Field(None, description="Chassis / VIN number")
     vehicle_model: str | None = Field(None, description="Vehicle make and model")
     car_model: str | None = Field(None, description="Car model alias")
+    vehicle_type: str | None = Field(None, description="Vehicle type (e.g. Car, NonSaloonCar, Lorry, Motorcycle, CompanyCar)")
     manufacture_year: int | None = Field(None, description="Vehicle year of manufacture (e.g. 2020)")
     quotation_discount: float | None = Field(None, description="Global quotation discount in MYR")
 
@@ -119,6 +122,43 @@ class ComparisonEntryUpsertRequest(BaseModel):
 class SelectWinnerRequest(BaseModel):
     entry_id: str = Field(..., description="ID of the winning comparison entry")
     force_state: bool | None = Field(None, description="Optional explicit boolean state; if None, toggles current state")
+
+
+class RoadTaxPreviewRequest(BaseModel):
+    capacity: str | float | int | None = None
+    unit: str | None = None
+    vehicle_type: str = "Car"
+    owner_type: str = "Individual"
+    jurisdiction: str = "West Malaysia"
+
+
+@router.post("/calculate-road-tax")
+def preview_road_tax(
+    payload: RoadTaxPreviewRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Calculate JPJ road tax preview dynamically based on engine capacity (CC, kW, KG) and vehicle type."""
+    from app.services.road_tax_engine import calculate_road_tax_unified
+    try:
+        return calculate_road_tax_unified(
+            capacity=payload.capacity,
+            unit=payload.unit,
+            vehicle_type=payload.vehicle_type,
+            owner_type=payload.owner_type,
+            jurisdiction=payload.jurisdiction,
+            db=db,
+        )
+    except Exception as e:
+        logger.exception("Failed to calculate road tax preview: %s", e)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+class ToggleFeesRequest(BaseModel):
+    include_road_tax: bool | None = None
+    include_runner_fee: bool | None = None
+    road_tax: float | None = None
+    runner_fee: float | None = None
 
 
 @router.get("/{tenure_id}")
@@ -167,6 +207,8 @@ def update_fixed_costs(
             tenure_id,
             road_tax=payload.road_tax,
             runner_fee=payload.runner_fee,
+            include_road_tax=payload.include_road_tax,
+            include_runner_fee=payload.include_runner_fee,
             windscreen_target=payload.windscreen_target,
             ncd_percentage=payload.ncd_percentage,
             current_ncd=payload.current_ncd,
@@ -180,6 +222,7 @@ def update_fixed_costs(
             engine_no=payload.engine_no,
             chassis_no=payload.chassis_no,
             vehicle_model=payload.vehicle_model or payload.car_model,
+            vehicle_type=payload.vehicle_type,
             manufacture_year=payload.manufacture_year,
             quotation_discount=payload.quotation_discount,
         )
@@ -189,6 +232,39 @@ def update_fixed_costs(
     except Exception as e:
         logger.exception("Failed to update fixed costs for tenure %s: %s", tenure_id, e)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update fixed costs")
+
+
+@router.post("/{tenure_id}/toggle-fees")
+def toggle_tenure_fees(
+    tenure_id: str,
+    payload: ToggleFeesRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Quickly toggle include_road_tax and/or include_runner_fee, or adjust fee amounts."""
+    tenure = db.get(InsuranceTenure, tenure_id)
+    if not tenure:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenure not found")
+
+    rt = payload.road_tax if payload.road_tax is not None else float(tenure.road_tax)
+    rf = payload.runner_fee if payload.runner_fee is not None else float(tenure.runner_fee)
+    inc_rt = payload.include_road_tax if payload.include_road_tax is not None else (tenure.include_road_tax is not False)
+    inc_rf = payload.include_runner_fee if payload.include_runner_fee is not None else (tenure.include_runner_fee is not False)
+
+    try:
+        return update_tenure_fixed_costs(
+            db,
+            tenure_id,
+            road_tax=rt,
+            runner_fee=rf,
+            include_road_tax=inc_rt,
+            include_runner_fee=inc_rf,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.exception("Failed to toggle fees for tenure %s: %s", tenure_id, e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to toggle fees")
 
 
 @router.post("/{tenure_id}/entry")

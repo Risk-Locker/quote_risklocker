@@ -1,82 +1,48 @@
-# Agent Brain System (Universal)
+# Project Instructions & Engineering Contract (`AGENTS.md`)
 
-This file plus the whole `docs/` folder is a portable agent brain. Copy `AGENTS.md` and `docs/` into any project, adapt the "Project-Specific" section and the docs files, and the system works as-is. The rules below are binding for every AI agent working in this repository.
+> Lean, pragmatic engineering contract for Gemini 3.8 Flash and IDE agents.
+> Follows Amazon-grade layered architecture: **Database -> Services -> API -> UI**.
+> Write code like a senior human engineer: cohesive blocks, zero hardcoding, zero slop.
 
-## 1. Reading Order (always)
+## 1. Core Operating Principles (Non-Negotiable)
 
-1. Read this file first.
-2. Read `docs/core/START-HERE.md` — it routes every request to the smallest relevant context.
-3. Read only the topic docs the routing table points to. The docs tell you exactly which folder, file, and line range to touch.
-4. Read code only after the docs located it. Never scan or grep the whole repo to build context; that is a waste and a failure of this system.
+1. **Zero Hardcoding in Application Code:**
+   - Business rules, company names, towing limits, NCD rates, and excess defaults belong in the **Database (PostgreSQL / models / seeds)**, NEVER hardcoded in Python `if/elif` branches or React components.
+   - If an underwriter changes terms, it must only require a database row update, zero code deployments.
 
-## 2. Working Memory & Logbook Duty (mandatory, every interaction)
+2. **Single Source of Truth (Zero Dual-Truth Math):**
+   - Financial, road tax, and discount calculations are authoritative **ONLY in backend `Decimal` services**.
+   - The frontend React UI renders data received from the API. It NEVER duplicates road tax formulas or calculates totals independently.
 
-- `docs/core/STATE.md` is the active working memory (<80 lines) containing the current sprint state and recent logs.
-- `docs/history/MEMORY-YYYY-MM.md` holds cold episodic log archives (e.g. `docs/history/MEMORY-2026-08.md`).
-- After EVERY interaction — including "hi", a question, or a rejected idea — append one ultra-short log entry to `docs/core/STATE.md`: `date · model · what was asked (1-2 lines, gist only) · what was done (1-2 lines, files changed with file:line) · pending items (if any)`. Max ~4 lines. No bullet points. Never paste prompts or code blocks.
-- When `docs/core/STATE.md` exceeds ~80 lines, rotate older entries into `docs/history/MEMORY-YYYY-MM.md`.
-- Updating `docs/core/STATE.md` is your responsibility. It never waits for git commit or push. Do it before finishing the interaction.
+3. **Human-Grade Cohesive Coding (No Frankenstein Micro-Patching):**
+   - When modifying a component or function, rewrite the cohesive block cleanly. Do not apply 20 tiny string patches that leave orphaned variables and broken event listeners.
+   - Keep files modular: Python services `<= 300` lines, React components `<= 300` lines.
+   - Delete dead code and unused imports immediately.
 
-## 3. Documentation Duty (mandatory)
+4. **Strict Garbage Collection (Clean as You Go):**
+   - NEVER dump temporary test files (`test_v6_*`, `test_v7_*`, `test_milestone_*`) in the root `tests/` directory.
+   - Integrate permanent tests into canonical test folders:
+     - `tests/unit/` (domain calculations, Decimal engines)
+     - `tests/integration/` (FastAPI endpoints, database workflows)
+     - `frontend/e2e/` (real Playwright browser tests)
+   - Delete all scratch scripts and temporary test files immediately after verification.
 
-- Docs are the map. Every durable fact must live in a doc with file:line references so future agents never need to hunt.
-- BEFORE executing a plan: record the plan and affected files in `docs/core/STATE.md`, and update any topic doc whose behavior will change.
-- AFTER executing: update every affected doc — `docs/core/STATE.md` (log entry), topic docs (behavior/routes/schema/env), `docs/architecture/STRUCTURE.md` (file add/delete), `docs/architecture/SETUP.md` (infrastructure), `docs/core/SKILLS.md` (skills used or added), and regenerate `docs/generated/CODEBASE-MAP.md` with `python commands/update-code-map.py --write` when structure changes.
-- Run `python commands/verify-brain.py` to ensure doc links and registries stay valid.
-- Undocumented work is unacceptable, even for one-line changes.
+5. **Authentic Verification (No Self-Grading Illusions):**
+   - A mocked in-memory SQLite test does NOT prove a web UI works.
+   - For UI changes, verify live interactive behavior (input focus, blur, state persistence).
 
-## 4. Temporary Files Convention
+## 2. Directory Structure & Runtime Reality
 
-- NEVER create files outside the repository (e.g., `%TEMP%`, `C:\Users\...`). No exceptions.
-- Anything temporary goes in a gitignored folder INSIDE the project. This project uses `/.qc-tmp/`.
-- If a new temporary folder is needed: append one line to `.gitignore` (e.g., `/.new-tmp/`), then create it. Never remove, edit, or comment out existing `.gitignore` lines — only append.
+- `backend/app/api/`: Thin HTTP routers (validate input, call service, return JSON).
+- `backend/app/services/`: Business workflows and database coordination.
+- `backend/app/domain/`: Pure domain calculation engines (Decimal math, zero HTTP).
+- `backend/app/models/`: SQLAlchemy ORM database tables.
+- `frontend/src/`: Next.js 15 React components, styled cleanly with `--rl-*` design tokens.
+- `migrations/`: Historical PostgreSQL schema evolution (never touch during runtime).
 
-## 5. Code Change & Dual-Track Execution Rules
+## 3. Pre-Commit Verification
 
-- **Smart Dual-Track Protocol**:
-  - ⚡ **Fast Track (Surgical Polish & Styling)**: When a request involves ONLY styling, button positioning, color tokens, typography, copy fixes, or minor visual tweaks:
-    - **NEVER** run `git status` or `git diff` (pure wasted overhead; commit happens only when explicitly prompted).
-    - **NEVER** run the full 6/6 deploy gate or backend `pytest` suite for pure CSS/HTML/copy changes.
-    - Validate solely with single-file typecheck (`npx tsc --noEmit` or IDE diagnostics on the touched file).
-    - Deliver instantaneous turnaround (5–10 seconds).
-  - 🛡️ **Deep Track (Features, Schema, API, Refactor, Deploy)**:
-    - Mandatory Implementation Plan Gate: NEVER touch, edit, or create multi-file feature code or configuration files without first creating an `implementation_plan.md` artifact and waiting for explicit user approval. **Every implementation plan MUST explicitly specify and recommend which AI model (e.g. Gemini 3.8 Flash for fast styling/docs, Gemini 3.1 Pro for deep backend refactoring) should be used for each phase of the plan.**
-    - Enforce the 4 Agent Council Roles: Mentor (architecture & UI placement), Anti-Slop Builder (helper reuse, no bloat), QA Gauntlet (exhaustive Playwright testing), and Janitor (debris cleanup).
-    - Full 6/6 pre-deploy gate (`.\commands\verify-deploy-gate.ps1`) before committing, pushing, or completing major milestones.
-- **Hermetic Test Suite Invariant**: All tests in `tests/` must be 100% hermetic (using in-memory SQLite engines or mocks). Tests must NEVER attempt live network database connections (`SessionLocal()`), so tests run safely in CI without mutating or depending on production data.
-- When code is deleted or commented out, mark it inline: `// RL-DISABLED <feature> — disabled <date>; restore when <condition>` so future agents know why and when to bring it back.
-- Match existing code style. No gratuitous comments; no refactors bundled into unrelated work.
-- Inspect and resolve all IDE problems, typechecker diagnostics (e.g. Pyright/TypeScript), and lint issues on any modified or newly created files after every change.
-- Commit and push only when the user explicitly asks. Documentation updates never depend on committing.
-- **Mandatory Pre-Commit & Pre-Push Gate**: When the user asks to commit, push (to `origin main`, `origin v18`, `origin v19`, or any branch), or create/publish a new branch, NEVER touch git or run commit/push commands immediately. You MUST first run the pre-deployment verification check via `.\commands\verify-deploy-gate.ps1`, mirroring `.github/workflows/deploy.yml` 1:1 (hermetic backend `pytest` under dummy CI environment, frontend `tsc --noEmit` and `npm run build`, schema verification, code map, brain verification). If ANY check fails, do NOT commit or push — fix all errors first so CI/CD deployment never fails downstream.
-
-## 6. Interaction & Principal Engineer Rules
-
-- Read `docs/core/INSTRUCTIONS.md` — it defines how the owner talks and how to interpret him.
-- NEVER take the owner's words literally. References, sarcasm, analogies, and examples are references to intent, not literal requirements. Do not invent or hunt for things the owner did not actually ask for.
-- **Principal Staff Engineer Active Ownership**: Act as a technical co-founder / principal engineer. When the owner requests a feature, do NOT execute it naively (which causes technical debt or schema corruption) and do NOT block it with bureaucratic warnings. Understand the underlying business intent, upgrade the architecture to match `docs/domain/SAAS-BLUEPRINT.md` (strict foreign keys, indexes, atomic transactions, error handling, UI empty states), and build it right the first time.
-- **Proactive UI Placement Rule (Mentor Duty)**: If the owner requests a new button, control, or feature without specifying where it belongs in the UI, do NOT ask vague questions or dump it at the bottom of the page. Analyze the route and component hierarchy, automatically integrate it into the most ergonomic parent container (e.g., table action bar, details drawer, modal header), and document why that location was selected.
-- **No Pointless Git Checks**: Do NOT run `git status` or `git diff` during intermediate coding iterations. Git checks belong strictly to explicit commit/push workflows.
-- Ask questions before big or ambiguous work. For design/UX changes, analyze first, research options, present 6-8 concrete options, get approval, then execute.
-
-## 7. Skills & Council Agents
-
-- Load a skill only when the task matches its description (`docs/core/SKILLS.md` registry). Read the selected skill completely before using it.
-- When a capability is missing, use the `find-skills` skill before proposing anything new, then record the result in `docs/core/SKILLS.md`.
-- Council Agent Personas live in `.agents/agents/` (`principal-architect.md`, `mentor.md`, `anti-slop.md`, `qa-gauntlet.md`, `janitor.md`). Mobilize their respective invariants during Deep Track work.
-
-## 8. Verification (Tiered by Risk)
-
-- **Fast Track (Cosmetic/Copy)**: Single-file `tsc` or IDE diagnostics check.
-- **Deep Track (Logic/API/Feature)**: Backend `python -m pytest -q` (green), frontend `npx tsc --noEmit` and `npm run build` (green), zero IDE/lint diagnostics on changed files, `python commands/verify-brain.py` (green), and `python commands/update-code-map.py --check` when structure changed.
-- **Commit / Push**: Full 6/6 pre-deploy gate (`.\commands\verify-deploy-gate.ps1`).
-- E2E/QA scripts live in `/.qc-tmp/` (see `docs/architecture/OPERATIONS.md` for the runbook) or execute via `commands/qa-crawl-page.mjs`.
-
-## 9. Project-Specific (adapt when copying to another project)
-
-- Stack: Next.js 15.5 frontend (`frontend/`), FastAPI backend (`backend/`), Supabase/Postgres (`migrations/`), private Supabase Storage for PDFs.
-- Dev servers: backend :8100, frontend :3000, started with `commands/start-backend.ps1` and `commands/start-frontend.ps1` (port file `.qc-tmp\backend-port.txt`).
-- Dev login: system@risklocker.com / almW8hsv&2jssy62(fwg6@#g.
-- Default motor template id `4a16bc96-7ca1-44db-be1b-c0a462e71e2f` — contains ONLY 5 image, 24 text, 11 variable, 4 group elements (no specials); E2E group tests must add text elements first.
-- Non-negotiable business rules (full list in `docs/domain/BUSINESS-RULES.md`): Supabase/Postgres only for app data; private Supabase Storage for persistent PDFs; never expose backend secrets to the frontend; never silently guess uncertain extracted values; deterministic PDF generation from reviewed drafts; no hardcoded fees; preserve Upload -> Check Values -> Generate PDF.
-
+Before completing tasks, ensure:
+- Pytest passes: `.\.venv\Scripts\pytest.exe tests/`
+- Frontend compiles cleanly: `cd frontend; npx tsc --noEmit`
+- Knowledge Base verified: `.\.venv\Scripts\python.exe commands/verify-brain.py`
