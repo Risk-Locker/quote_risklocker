@@ -270,6 +270,11 @@ jobs:
               exit 1
             }
 
+            # Map host.docker.internal to 127.0.0.1 in /etc/hosts if unmapped (for host processes hitting local containerized Postgres)
+            if ! grep -q "host.docker.internal" /etc/hosts 2>/dev/null; then
+              echo "127.0.0.1 host.docker.internal" | sudo tee -a /etc/hosts 2>/dev/null || true
+            fi
+
             # Backend: ensure the Python 3.12 venv exists and deps are current
             if [ ! -d .venv ]; then
               python3.12 -m venv .venv

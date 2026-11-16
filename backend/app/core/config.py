@@ -190,6 +190,12 @@ def _database_url(app_env: str) -> str:
         raise RuntimeError("SQLite is not supported. Use a Supabase/Postgres DATABASE_URL.")
     if not lowered.startswith(("postgresql://", "postgres://")):
         raise RuntimeError("DATABASE_URL must be a Supabase/Postgres connection string.")
+    if "host.docker.internal" in database_url:
+        import socket
+        try:
+            socket.gethostbyname("host.docker.internal")
+        except (socket.gaierror, OSError):
+            database_url = database_url.replace("host.docker.internal", "127.0.0.1")
     return database_url
 
 
@@ -225,6 +231,12 @@ def _storage_settings() -> tuple[str, str, str, str]:
     if driver != "supabase":
         raise RuntimeError("STORAGE_DRIVER must be 'supabase'. Persistent local PDF storage is not supported.")
     url = _required("SUPABASE_URL").rstrip("/")
+    if "host.docker.internal" in url:
+        import socket
+        try:
+            socket.gethostbyname("host.docker.internal")
+        except (socket.gaierror, OSError):
+            url = url.replace("host.docker.internal", "127.0.0.1")
     if not url.lower().startswith("https://") and not url.lower().startswith("http://"):
         raise RuntimeError("SUPABASE_URL must be an HTTP or HTTPS Supabase project URL.")
     service_key = _required("SUPABASE_SERVICE_ROLE_KEY")
