@@ -21,21 +21,21 @@ CANONICAL_24_CATALOG: list[dict[str, Any]] = [
     },
     {
         "id": "towing",
-        "title": "Unlimited Towing Distance",
-        "description": "Provides 24-hour free unlimited towing distance anywhere in Malaysia.",
+        "title": "Unlimited Towing",
+        "description": "24/7 emergency unlimited towing assistance all over Malaysia.",
         "default_value": "Unlimited",
         "icon_hint": "towing",
     },
     {
         "id": "llop",
-        "title": "Legal Liability Of Passengers",
+        "title": "Legal Liability of Passengers",
         "description": "Protects against third-party claims caused by passenger negligence.",
         "default_value": "",
         "icon_hint": "llop",
     },
     {
         "id": "llp",
-        "title": "Legal Liability To Passengers",
+        "title": "Legal Liability to Passengers",
         "description": "Protects driver from lawsuits for injury or death to passengers.",
         "default_value": "",
         "icon_hint": "llp",
@@ -48,23 +48,30 @@ CANONICAL_24_CATALOG: list[dict[str, Any]] = [
         "icon_hint": "special_perils",
     },
     {
-        "id": "betterment",
-        "title": "Waiver Of Betterment",
-        "description": "Waives betterment deduction on new replacement parts up to 10 years.",
-        "default_value": "",
-        "icon_hint": "betterment",
-    },
-    {
         "id": "all_drivers",
-        "title": "All Drivers",
-        "description": "Waives RM400 compulsory excess penalty for unnamed authorized drivers.",
+        "title": "All Drivers Excess Waiver",
+        "description": "Waives RM400 compulsory excess penalty for all authorized drivers.",
         "default_value": "",
         "icon_hint": "all_driver",
     },
     {
+        "id": "pa",
+        "title": "Motor PA Plus",
+        "description": "Named personal accident protection for driver and passengers.",
+        "default_value": "",
+        "icon_hint": "pa",
+    },
+    {
+        "id": "betterment",
+        "title": "Waiver of Betterment",
+        "description": "Waives betterment deduction on new parts for vehicles up to 15 years.",
+        "default_value": "Up to 15 Years",
+        "icon_hint": "betterment",
+    },
+    {
         "id": "srcc",
         "title": "Strike, Riot & Civil Commotion",
-        "description": "Covers physical damage caused by strikes, riots or public unrest.",
+        "description": "Covers physical loss or damage caused by strikes, riots or public unrest.",
         "default_value": "",
         "icon_hint": "srcc",
     },
@@ -92,7 +99,7 @@ CANONICAL_24_CATALOG: list[dict[str, Any]] = [
     {
         "id": "accessories",
         "title": "Vehicle Accessories Cover",
-        "description": "Covers fitted aftermarket accessories, dashcams, multimedia and rims.",
+        "description": "Covers installed aftermarket accessories, dashcams, multimedia and rims.",
         "default_value": "",
         "icon_hint": "accessories",
     },
@@ -104,13 +111,6 @@ CANONICAL_24_CATALOG: list[dict[str, Any]] = [
         "icon_hint": "ncd",
     },
     {
-        "id": "pa",
-        "title": "Driver Passenger Personal Accident",
-        "description": "Accidental Death, Permanent Disablement and Medical Expenses.",
-        "default_value": "",
-        "icon_hint": "pa",
-    },
-    {
         "id": "key_care",
         "title": "Key Care Replacement",
         "description": "Reimburses key and lock replacement up to RM1,000 following theft or loss.",
@@ -120,8 +120,8 @@ CANONICAL_24_CATALOG: list[dict[str, Any]] = [
     {
         "id": "international_towing",
         "title": "International Towing Assistance",
-        "description": "Up to 60km from Malaysia border.",
-        "default_value": "60 km",
+        "description": "Up to 50km from Malaysia border.",
+        "default_value": "50 km",
         "icon_hint": "international_towing",
     },
     {
@@ -147,14 +147,14 @@ CANONICAL_24_CATALOG: list[dict[str, Any]] = [
     },
     {
         "id": "ehailing",
-        "title": "Private Hire Car ( E-HAILING )",
+        "title": "Private Hire Car (E-Hailing)",
         "description": "Coverage while providing a legitimate E-Hailing Service.",
         "default_value": "",
         "icon_hint": "ehailing",
     },
     {
         "id": "non_fare_passenger",
-        "title": "Legal Liability To Non Fare Paying Passenger",
+        "title": "Legal Liability to Non-Fare Paying Passengers",
         "description": "Commercial Vehicle",
         "default_value": "",
         "icon_hint": "non_fare_passenger",
@@ -168,14 +168,14 @@ CANONICAL_24_CATALOG: list[dict[str, Any]] = [
     },
     {
         "id": "boom_damage",
-        "title": "Accidental Damage To Boom",
+        "title": "Accidental Damage to Boom",
         "description": "Commercial Vehicle - Crane",
         "default_value": "",
         "icon_hint": "boom_damage",
     },
     {
         "id": "overturning",
-        "title": "Damage By Overturning",
+        "title": "Damage by Overturning",
         "description": "Commercial Vehicle - Crane",
         "default_value": "",
         "icon_hint": "overturning",
@@ -289,24 +289,41 @@ _EXACT_ID_ALIASES: dict[str, str] = {
 
 
 def _normalize_benefit_code(name_or_id: str) -> str:
-    s = str(name_or_id or "").lower().strip()
+    s = (name_or_id or "").lower().strip()
     s = re.sub(r"[^a-z0-9]", "_", s)
     s = re.sub(r"_+", "_", s).strip("_")
     return s
 
 
-def format_addon_value(raw_val: Any) -> str:
-    """Normalizes coverage limits for compact card pills, suppressing empty/zero noise."""
-    if raw_val is None:
-        return ""
-    s = re.sub(r"\s+", " ", str(raw_val)).strip()
+def format_addon_value(raw_val: Any, val_override: Any = None) -> str:
+    """Normalizes coverage limits for compact card pills, enforcing super-short 2-4 words max."""
+    is_betterment_ctx = False
+    if val_override is not None:
+        if "betterment" in str(raw_val).lower():
+            is_betterment_ctx = True
+        actual_val = val_override
+    else:
+        actual_val = raw_val
+
+    if actual_val is None:
+        return "Up to 15 Years" if is_betterment_ctx else ""
+    s = re.sub(r"\s+", " ", str(actual_val)).strip()
     if not s:
-        return ""
+        return "Up to 15 Years" if is_betterment_ctx else ""
     low = s.lower().rstrip(" .")
     if low in _SUPPRESSED_VALUES:
-        return ""
+        return "Up to 15 Years" if is_betterment_ctx else ""
 
-    # Already has RM prefix? Check if zero, otherwise standardize RM x,xxx.xx formatting.
+    # 0. Betterment: Never display an RM monetary amount. Normalize to vehicle age limit or "Betterment Waived".
+    if is_betterment_ctx or "betterment" in low:
+        if re.match(r"(?i)^\s*rm\b", s):
+            return "Up to 15 Years"
+        m_bet = re.search(r"(?:up to\s+)?(\d+\s*(?:years?|yrs?))", s, re.IGNORECASE)
+        if m_bet:
+            return f"Up to {m_bet.group(1).title()}"
+        return "Betterment Waived"
+
+    # 1. Exact RM amount formatting: "RM 1000", "RM 1,000.00" -> "RM 1,000.00"
     rm_match = re.fullmatch(r"(?i)rm\s*([0-9][0-9,]*(?:\.[0-9]+)?)", s)
     if rm_match:
         try:
@@ -317,7 +334,7 @@ def format_addon_value(raw_val: Any) -> str:
         except Exception:
             return s
 
-    # Pure numeric coverage limit (e.g. "1000.0", "350000.0") -> RM x,xxx.xx
+    # 2. Pure numeric coverage limit (e.g. "1000.0", "350000.0") -> "RM 1,000.00"
     if re.fullmatch(r"[0-9][0-9,]*(?:\.[0-9]+)?", s):
         try:
             num = float(s.replace(",", ""))
@@ -327,13 +344,69 @@ def format_addon_value(raw_val: Any) -> str:
         except Exception:
             return s
 
-    # Compact common verbose betterment strings cleanly to 1 crisp line
-    if "up to 10 years" in low and "betterment" in low:
-        return "Up to 10 Years"
-    if len(s) > 28 and "up to " in low:
-        m = re.search(r"(up to [0-9]+\s+\w+)", s, re.IGNORECASE)
+    # 3. Betterment: Keep super short (e.g. "Up to 10 Years", "Betterment Waived")
+    if "betterment" in low or "up to " in low:
+        m = re.search(r"up to\s+(\d+\s*(?:years?|yrs?))", s, re.IGNORECASE)
         if m:
-            return m.group(1).title()
+            return f"Up to {m.group(1).title()}"
+        if "waiv" in low:
+            return "Betterment Waived"
+
+    # 4. Excess Waiver: e.g. "Compulsory RM400 excess waived" -> "RM 400.00 Waived"
+    if "excess" in low:
+        m = re.search(r"rm\s*([0-9][0-9,]*(?:\.[0-9]+)?)", s, re.IGNORECASE)
+        if m:
+            try:
+                num = float(m.group(1).replace(",", ""))
+                return f"RM {num:,.2f} Waived"
+            except Exception:
+                pass
+        if "waiv" in low:
+            return "Excess Waived"
+
+    # 5. Personal Accident (PA): e.g. "RM 10,000 per person" -> "RM 10,000 / pax"
+    if "per person" in low or "pax" in low:
+        m = re.search(r"rm\s*([0-9][0-9,]*(?:\.[0-9]+)?)", s, re.IGNORECASE)
+        if m:
+            try:
+                num = float(m.group(1).replace(",", ""))
+                return f"RM {num:,.2f} / pax"
+            except Exception:
+                pass
+
+    # 6. CART / Repair Time: e.g. "14 Days @ RM 100/day" -> "14 Days @ RM100"
+    m_cart = re.search(r"(\d+\s*days?)\s*@\s*rm\s*(\d+)", s, re.IGNORECASE)
+    if m_cart:
+        return f"{m_cart.group(1).title()} @ RM{m_cart.group(2)}"
+
+    # 7. Special Perils: e.g. "Full Sum Insured Coverage" -> "Full Sum Insured"
+    if "peril" in low or "flood" in low:
+        if "sum insured" in low or "full" in low:
+            return "Full Sum Insured"
+
+    # 8. Distance / Towing: e.g. "Unlimited Distance" -> "Unlimited"
+    if "unlimited" in low:
+        return "Unlimited"
+    m_km = re.search(r"(\d+)\s*km", s, re.IGNORECASE)
+    if m_km:
+        return f"{m_km.group(1)} km"
+
+    # 9. Embedded RM Extraction from verbose sentences:
+    # e.g. "Covers wall charger damage up to RM 12,000.00" -> "RM 12,000.00"
+    m_rm = re.search(r"(?i)\brm\s*([0-9][0-9,]*(?:\.[0-9]+)?)\b", s)
+    if m_rm:
+        try:
+            num = float(m_rm.group(1).replace(",", ""))
+            if num > 0:
+                return f"RM {num:,.2f}"
+        except Exception:
+            pass
+
+    # 10. General Word Clamping: Ensure coverage info is never longer than 4 words
+    words = s.split()
+    if len(words) > 4:
+        return " ".join(words[:4])
+
     return s
 
 
@@ -435,7 +508,7 @@ def _infer_icon_hint(item: dict[str, Any], matched_cat: dict[str, Any] | None) -
     if item.get("icon_hint") and item["icon_hint"] != "generic":
         return str(item["icon_hint"])
     if matched_cat and matched_cat.get("icon_hint"):
-        return str(matched_cat["icon_hint"])
+        return matched_cat["icon_hint"]
     txt = f"{item.get('id') or ''} {item.get('concept_key') or ''} {item.get('title') or item.get('label') or ''}".lower()
     if "ncd" in txt or "cashback" in txt:
         return "ncd"
@@ -514,36 +587,162 @@ def is_item_selected(
         return True
 
     if source_kind == "active":
-        # Active draft benefit rows that match a canonical matrix slot (e.g. Unlimited Towing included by insurer)
-        if matched_cat_id and item.get("is_extra") is not False:
+        # FOC / included perks stay in Free Added Coverage, not marked as purchased add-on riders
+        if item.get("cost_status") in ("included", "foc") and not item.get("is_extra") and not _positive_price(item):
+            return False
+        if matched_cat_id and item.get("is_extra") is True:
             return True
-        if matched_cat_id and item.get("selection_id"):
+        if matched_cat_id and item.get("selection_id") and (item.get("is_extra") or item.get("cost_status") == "paid" or _positive_price(item)):
             return True
 
     return False
 
 
+def detect_towing_upgrade(
+    active_benefits: list[dict[str, Any]] | None,
+    insurer_name: str = "",
+) -> dict[str, str] | None:
+    """Detect if an active paid rider upgrades towing entitlement based on Malaysian Motor Towing Reference."""
+    for raw in active_benefits or []:
+        if not (
+            raw.get("is_extra")
+            or raw.get("cost_status") == "paid"
+            or raw.get("is_selected") is True
+            or raw.get("selected") is True
+            or _positive_price(raw)
+        ):
+            continue
+        title = str(raw.get("title") or raw.get("label") or "").lower()
+        concept = str(raw.get("concept_key") or "").lower()
+        combined = f"{title} {concept}"
+
+        # 1. Etiqa + OTO 360
+        if "oto 360" in combined or "oto_360" in combined or "oto360" in combined:
+            return {
+                "title": "Unlimited Towing Assistance",
+                "limit": "Unlimited Mileage",
+                "description": "24/7 unlimited breakdown & accidental towing assistance. Upgraded via OTO 360.",
+                "rider": "OTO 360",
+            }
+
+        # 2. Takaful Malaysia / STMB + Motor PA Plus
+        if "motor pa plus" in combined or "motor_pa_plus" in combined or "pa plus" in combined:
+            if "plan 4" in combined or "p4" in combined:
+                return {
+                    "title": "Unlimited Towing Assistance",
+                    "limit": "Unlimited Mileage",
+                    "description": "24/7 unlimited towing assistance nationwide. Upgraded via Motor PA Plus.",
+                    "rider": "Motor PA Plus - Plan 4",
+                }
+            if "plan 3" in combined or "p3" in combined:
+                return {
+                    "title": "Extended Towing Assistance (300 km)",
+                    "limit": "300 km",
+                    "description": "24/7 extended towing assistance up to 300 km. Upgraded via Motor PA Plus.",
+                    "rider": "Motor PA Plus - Plan 3",
+                }
+            if "plan 2" in combined or "p2" in combined:
+                return {
+                    "title": "Extended Towing Assistance (200 km)",
+                    "limit": "200 km",
+                    "description": "24/7 extended towing assistance up to 200 km. Upgraded via Motor PA Plus.",
+                    "rider": "Motor PA Plus - Plan 2",
+                }
+            if "plan 1" in combined or "p1" in combined:
+                return {
+                    "title": "Extended Towing Assistance (100 km)",
+                    "limit": "100 km",
+                    "description": "24/7 extended towing assistance up to 100 km. Upgraded via Motor PA Plus.",
+                    "rider": "Motor PA Plus - Plan 1",
+                }
+
+        # 3. QBE + Driver Passenger Protector (N4)
+        if "driver passenger protector" in combined or "dpp" in combined or "n4" in combined:
+            return {
+                "title": "Unlimited Towing Assistance",
+                "limit": "Unlimited Mileage",
+                "description": "24/7 unlimited auto towing assistance. Upgraded via Driver Passenger Protector (N4).",
+                "rider": "Driver Passenger Protector (N4)",
+            }
+
+        # 4. Lonpac + E-Assist Smart Driver
+        if "e-assist" in combined or "smart driver" in combined:
+            if "plan 2" in combined or "ev" in combined:
+                return {
+                    "title": "Unlimited Towing Assistance",
+                    "limit": "Unlimited Mileage",
+                    "description": "24/7 unlimited breakdown towing nationwide. Upgraded via E-Assist Smart Driver.",
+                    "rider": "E-Assist Smart Driver - Plan 2",
+                }
+            if "plan 1" in combined:
+                return {
+                    "title": "Extended Towing Assistance (RM 1,000)",
+                    "limit": "RM 1,000",
+                    "description": "24/7 breakdown towing coverage up to RM 1,000. Upgraded via E-Assist Smart Driver.",
+                    "rider": "E-Assist Smart Driver - Plan 1",
+                }
+
+        # 5. Tune Protect + Motor Easy / AutoBuddy / Motor Shield
+        if "motor easy" in combined or "autobuddy" in combined or "motor shield" in combined:
+            return {
+                "title": "Unlimited Towing Assistance",
+                "limit": "Unlimited Mileage",
+                "description": "24/7 unlimited towing assistance nationwide. Upgraded via AutoBuddy / Motor Easy.",
+                "rider": "Motor Easy / AutoBuddy",
+            }
+
+        # 6. AmAssurance + Breakdown Towing Assistance
+        if "breakdown towing" in combined:
+            return {
+                "title": "Extended Towing Assistance (150 km)",
+                "limit": "150 km",
+                "description": "24/7 breakdown towing assistance up to 150 km. Upgraded via Breakdown Towing Assistance.",
+                "rider": "Breakdown Towing Assistance",
+            }
+
+    return None
+
+
 def extract_free_coverage_items(
     active_benefits: list[dict[str, Any]] | None,
+    insurer_name: str = "",
     *,
     limit: int = 6,
 ) -> list[dict[str, str]]:
-    """Extracts insurer FOC perks for the top-right 'Free Added Coverage' card without duplication."""
+    """Extracts insurer FOC perks for the top-right 'Free Added Coverage' card with in-place dynamic Towing upgrade."""
     seen_titles: set[str] = set()
     items: list[dict[str, str]] = []
+
+    # 1. Towing Dynamic In-Place Upgrade
+    towing_upgrade = detect_towing_upgrade(active_benefits, insurer_name)
+    if towing_upgrade:
+        items.append({
+            "title": towing_upgrade["title"],
+            "description": towing_upgrade["description"],
+        })
+        seen_titles.add(_normalize_benefit_code(towing_upgrade["title"]))
+        seen_titles.add("emergency_towing_assistance")
+        seen_titles.add("unlimited_towing_assistance")
+    else:
+        std_towing = {
+            "title": "Emergency Towing Assistance (RM 200.00)",
+            "description": "24/7 accidental towing service to nearest panel workshop or approved repairer.",
+        }
+        items.append(std_towing)
+        seen_titles.add("emergency_towing_assistance")
+        seen_titles.add(_normalize_benefit_code(std_towing["title"]))
+
     for raw in active_benefits or []:
         if raw.get("is_extra") or raw.get("cost_status") == "paid" or _positive_price(raw):
             continue
         matched_cat = _match_catalog_item(raw)
-        # If an FOC benefit occupies a canonical matrix add-on slot (like Unlimited Towing),
-        # keep it in the Add-On Upgrades ++ matrix rather than repeating it in Free Added Coverage.
         if matched_cat is not None:
             continue
         title = str(raw.get("title") or raw.get("label") or "").strip()
         if not title:
             continue
         norm_title = _normalize_benefit_code(title)
-        if norm_title in seen_titles:
+        if "towing" in norm_title or norm_title in seen_titles:
             continue
         seen_titles.add(norm_title)
         desc = str(raw.get("description") or raw.get("short_description") or "").strip()
@@ -556,7 +755,22 @@ def extract_free_coverage_items(
         items.append({"title": title, "description": desc})
         if len(items) >= limit:
             break
-    return items
+
+    # If fewer than 4 items, supplement with standard non-monetary insurer perks
+    fallbacks = [
+        {"title": "Legal Defense Costs", "description": "Reimburses court legal representation and defense fees up to RM2,000."},
+        {"title": "Drive-Less Save-More", "description": "Cash rebate up to 30% of base premium for low annual mileage."},
+        {"title": "Child Car Safety Seat", "description": "Reimburses replacement or repair of child safety seats in a crash."},
+    ]
+    for fb in fallbacks:
+        if len(items) >= limit:
+            break
+        fb_norm = _normalize_benefit_code(fb["title"])
+        if fb_norm not in seen_titles:
+            seen_titles.add(fb_norm)
+            items.append(fb)
+
+    return items[:limit]
 
 
 def sort_unified_addons(
@@ -596,7 +810,9 @@ def build_unified_matrix_cards(
     available_addons: list[dict[str, Any]] | None = None,
     selected_ids: set[str] | None = None,
     *,
-    fill_to_slots: int = 24,
+    fill_to_slots: int = 0,
+    max_slots: int = 24,
+    insurer_name: str = "",
 ) -> list[dict[str, Any]]:
     """Builds the unified Add-On Upgrades ++ card matrix for Design 2.
 
@@ -616,10 +832,46 @@ def build_unified_matrix_cards(
     ordered_active_ids: list[str] = []
 
     def _build_card_dict(item: dict[str, Any], cat_id: str, sel: bool, matched_cat: dict[str, Any] | None) -> dict[str, Any]:
-        raw_val = item.get("value") if item.get("value") not in (None, "") else item.get("coverage_limit")
-        formatted_val = format_addon_value(raw_val)
-        if not formatted_val and matched_cat:
-            formatted_val = format_addon_value(matched_cat.get("default_value"))
+        raw_val = item.get("value")
+        if raw_val in (None, ""):
+            raw_val = item.get("coverage_limit")
+        if raw_val in (None, "") and isinstance(item.get("typed_value"), dict):
+            raw_val = item["typed_value"].get("display_text")
+        if raw_val in (None, "") and isinstance(item.get("typed_value_override"), dict):
+            raw_val = item["typed_value_override"].get("display_text")
+
+        # Betterment protection: Never display an RM monetary amount for Waiver of Betterment
+        is_betterment = cat_id == "betterment" or (matched_cat and matched_cat.get("id") == "betterment")
+        if is_betterment:
+            if re.match(r"(?i)^\s*rm\b", str(raw_val or "").strip()):
+                raw_val = ""
+            comp_l = (insurer_name or "").lower()
+            default_years = (
+                "Up to 10 Years"
+                if ("qbe" in comp_l or any(k in comp_l for k in ("lonpac", "stmb", "takaful malaysia", "syarikat takaful")))
+                else "Up to 15 Years"
+            )
+            if not raw_val or raw_val in ("Up to 10 Years", "Up to 15 Years", "Standard"):
+                formatted_val = default_years
+            else:
+                formatted_val = format_addon_value("betterment", raw_val) or default_years
+        else:
+            formatted_val = format_addon_value(raw_val)
+            if not formatted_val and matched_cat:
+                formatted_val = format_addon_value(matched_cat.get("default_value"))
+
+        title_str = str(item.get("title") or item.get("label") or (matched_cat["title"] if matched_cat else cat_id.replace("_", " ").title()))
+
+        # Check if coverage limit is explicitly hidden (Windscreen is strictly mandatory on Malaysian motor quotes)
+        is_hide_cov = bool(
+            item.get("hide_coverage")
+            or item.get("show_coverage") is False
+            or (isinstance(item.get("typed_value"), dict) and item["typed_value"].get("hide_limit") is True)
+            or (isinstance(item.get("typed_value_override"), dict) and item["typed_value_override"].get("hide_limit") is True)
+        )
+        is_mandatory_cov = "windscreen" in cat_id.lower() or "windscreen" in title_str.lower()
+        if is_hide_cov and not is_mandatory_cov:
+            formatted_val = ""
 
         cost_status = (
             str(item.get("cost_status") or "paid")
@@ -629,7 +881,7 @@ def build_unified_matrix_cards(
         return {
             "id": cat_id,
             "code": cat_id,
-            "title": str(item.get("title") or item.get("label") or (matched_cat["title"] if matched_cat else cat_id.replace("_", " ").title())),
+            "title": title_str,
             "description": str(item.get("description") or item.get("short_description") or (matched_cat["description"] if matched_cat else "")),
             "value": formatted_val,
             "icon_hint": _infer_icon_hint(item, matched_cat),
@@ -637,6 +889,7 @@ def build_unified_matrix_cards(
             "cost_status": cost_status,
             "price": item.get("price") or item.get("optional_price"),
             "concept_key": str(item.get("concept_key") or cat_id),
+            "asset_id": item.get("asset_id") or (matched_cat.get("default_asset_id") if matched_cat else None),
         }
 
     def _push_item(item: dict[str, Any], source_kind: str) -> None:
@@ -648,8 +901,8 @@ def build_unified_matrix_cards(
             matched_cat_id=matched_cat["id"] if matched_cat else None,
         )
 
-        # Keep non-canonical unselected FOC perks strictly inside "Free Added Coverage"
-        if source_kind == "active" and matched_cat is None and not sel:
+        # Keep non-matrix unselected basic perks strictly inside "Free Added Coverage"
+        if source_kind == "active" and not sel:
             return
 
         cat_id = (
@@ -674,6 +927,8 @@ def build_unified_matrix_cards(
                     existing["price"] = new_card["price"]
                 if not existing.get("description") and new_card.get("description"):
                     existing["description"] = new_card["description"]
+                if not existing.get("asset_id") and new_card.get("asset_id"):
+                    existing["asset_id"] = new_card["asset_id"]
                 if sel and not existing.get("is_selected"):
                     existing["is_selected"] = True
                     existing["cost_status"] = new_card["cost_status"]
@@ -689,36 +944,75 @@ def build_unified_matrix_cards(
     for item in available_addons or []:
         _push_item(item, "available")
 
+    towing_upgraded = bool(detect_towing_upgrade(active_benefits))
     processed_cards: list[dict[str, Any]] = []
-    if fill_to_slots and fill_to_slots > 0:
-        seen_in_output: set[str] = set()
-        for cat in CANONICAL_24_CATALOG[:fill_to_slots]:
-            cat_id = cat["id"]
+    seen_in_output: set[str] = set()
+
+    # 1. Add provided canonical overrides (in canonical catalog sequence)
+    for cat in CANONICAL_24_CATALOG:
+        cat_id = cat["id"]
+        if (
+            cat_id == "towing"
+            and towing_upgraded
+            and not (cat_id in canonical_overrides and canonical_overrides[cat_id].get("is_selected"))
+        ):
+            continue
+        if cat_id in canonical_overrides:
             seen_in_output.add(cat_id)
-            if cat_id in canonical_overrides:
-                processed_cards.append(canonical_overrides[cat_id])
-            else:
-                is_cat_sel = bool(selected_ids and (cat_id in selected_ids or cat["title"] in selected_ids))
-                processed_cards.append(
-                    {
-                        "id": cat_id,
-                        "code": cat_id,
-                        "title": cat["title"],
-                        "description": cat["description"],
-                        "value": format_addon_value(cat.get("default_value")),
-                        "icon_hint": cat.get("icon_hint", "generic"),
-                        "is_selected": is_cat_sel,
-                        "cost_status": "paid" if is_cat_sel else "optional",
-                        "concept_key": cat_id,
-                    }
-                )
-        for cat_id in ordered_active_ids:
-            if cat_id not in seen_in_output:
-                seen_in_output.add(cat_id)
-                processed_cards.append(canonical_overrides[cat_id])
-    else:
-        for cat_id in ordered_active_ids:
             processed_cards.append(canonical_overrides[cat_id])
 
-    processed_cards.extend(custom_cards)
-    return sort_unified_addons(processed_cards, selected_ids=selected_ids)
+    # 2. Add active draft benefits matching other canonical slots
+    for cat_id in ordered_active_ids:
+        if cat_id not in seen_in_output and cat_id in canonical_overrides:
+            seen_in_output.add(cat_id)
+            processed_cards.append(canonical_overrides[cat_id])
+
+    # 3. Add custom active benefits and available addons provided for this quote
+    for custom in custom_cards:
+        c_id = custom.get("id") or custom.get("concept_key")
+        if c_id and c_id not in seen_in_output:
+            seen_in_output.add(c_id)
+            processed_cards.append(custom)
+
+    # 4. Fill remaining slots up to fill_to_slots from CANONICAL_24_CATALOG
+    if fill_to_slots and fill_to_slots > 0:
+        for cat in CANONICAL_24_CATALOG:
+            if len(processed_cards) >= fill_to_slots:
+                break
+            cat_id = cat["id"]
+            if (
+                cat_id == "towing"
+                and towing_upgraded
+                and not (cat_id in canonical_overrides and canonical_overrides[cat_id].get("is_selected"))
+            ):
+                continue
+            if cat_id not in seen_in_output:
+                seen_in_output.add(cat_id)
+                fill_val = format_addon_value(cat.get("default_value"))
+                if cat_id == "betterment":
+                    comp_l = (insurer_name or "").lower()
+                    fill_val = (
+                        "Up to 10 Years"
+                        if ("qbe" in comp_l or any(k in comp_l for k in ("lonpac", "stmb", "takaful malaysia", "syarikat takaful")))
+                        else "Up to 15 Years"
+                    )
+                processed_cards.append(
+                    {
+                        "id": cat["id"],
+                        "code": cat["id"],
+                        "title": cat["title"],
+                        "description": cat["description"],
+                        "value": fill_val,
+                        "icon_hint": cat.get("icon_hint", "generic"),
+                        "is_selected": False,
+                        "cost_status": "optional",
+                        "concept_key": cat["id"],
+                    }
+                )
+
+    sorted_cards = sort_unified_addons(processed_cards, selected_ids=selected_ids)
+    if fill_to_slots and fill_to_slots > 0:
+        return sorted_cards[:fill_to_slots]
+    if max_slots and max_slots > 0:
+        return sorted_cards[:max_slots]
+    return sorted_cards

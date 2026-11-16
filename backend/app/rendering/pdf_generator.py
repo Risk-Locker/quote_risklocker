@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 
@@ -24,6 +25,12 @@ def html_to_pdf(
     if width <= 0 or height <= 0:
         raise ValueError("PDF page dimensions must be positive.")
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        import asyncio
+        try:
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        except Exception:
+            pass
     try:
         from playwright.sync_api import Error as PlaywrightError
         from playwright.sync_api import TimeoutError as PlaywrightTimeout

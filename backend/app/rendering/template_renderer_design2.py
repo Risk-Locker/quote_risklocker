@@ -111,10 +111,13 @@ def render_design2_html(
     render_context = render_context or {}
     resolved_assets = resolved_assets or {}
 
-    cust_name = _get_val(draft_fields, "customer_name", "CHENG TECK KIOING")
-    quote_ref = _get_val(draft_fields, "quotation_reference", "RL260000314")
-    veh_plate = _get_val(draft_fields, "vehicle_no", "ANY 368")
+    cust_name = _get_val(draft_fields, "customer_name", "Valued Customer")
+    quote_ref = _get_val(draft_fields, "quotation_reference", "QT-PREVIEW")
+    veh_plate = _get_val(draft_fields, "vehicle_no", "ABC 1234")
     insurer = _get_val(draft_fields, "insurance_company", "ETIQA GENERAL INSURANCE BERHAD")
+    agency_acc_name = escape(_get_val(draft_fields, "agency_account_name") or template_config.get("agency_account_name") or "RISKLOCKER SDN. BHD.")
+    bank_name = escape(_get_val(draft_fields, "bank_name") or template_config.get("bank_name") or "Hong Leong Bank")
+    bank_acc = escape(_get_val(draft_fields, "bank_account_no") or template_config.get("bank_account_no") or "12300318500")
     car_model = _get_val(draft_fields, "car_model", "Tesla Model 3 Performance")
     period = _get_val(draft_fields, "cover_period", "04-06-2026 TO 03-06-2027")
     cov_type = _get_val(draft_fields, "coverage_type", "Comprehensive")
@@ -146,8 +149,8 @@ def render_design2_html(
     current_benefits = list(render_context.get("current_benefits") or [])
     available_addons = list(render_context.get("available_addons") or [])
 
-    # Extract deduplicated insurer FOC perks (excludes canonical upgrade addons & paid extras)
-    free_items = extract_free_coverage_items(current_benefits, limit=6)
+    # Extract deduplicated insurer FOC perks with dynamic in-place Towing upgrade
+    free_items = extract_free_coverage_items(current_benefits, insurer_name=insurer, limit=6)
     if not free_items and not current_benefits:
         free_items = [
             {"title": "Legal Defense Costs", "description": "Reimburses court legal representation and defense fees up to RM2,000."},
@@ -175,25 +178,24 @@ def render_design2_html(
     if not free_items_html:
         free_items_html = '<div style="grid-column: 1 / -1; font-size: 8px; color: #52525B;">Standard comprehensive policy benefits included under underwriter terms.</div>'
 
-    # Unified Add-On Matrix (Selected float to top 01..k, unselected follow ..24+)
+    # Unified Add-On Matrix (Selected float to top 01..k, unselected follow)
     raw_sel = render_context.get("selected_ids")
     selected_ids = set(raw_sel) if raw_sel else None
+    fill_to_slots = int(
+        render_context.get("fill_to_slots")
+        or template_config.get("fill_to_slots")
+        or (render_context.get("display_options") or {}).get("fill_to_slots")
+        or 0
+    )
     addon_cards = build_unified_matrix_cards(
         active_benefits=current_benefits,
         available_addons=available_addons,
         selected_ids=selected_ids,
-        fill_to_slots=24,
+        fill_to_slots=fill_to_slots,
+        insurer_name=insurer,
     )
 
     page1_cards = addon_cards[:24]
-    has_overflow = len(addon_cards) > 24
-    disp_opts = render_context.get("display_options") or {}
-    include_schedule = bool(
-        render_context.get("include_benefit_schedule")
-        or template_config.get("include_benefit_schedule")
-        or (disp_opts.get("include_benefit_schedule") if isinstance(disp_opts, dict) else False)
-        or has_overflow
-    )
 
     addon_grid_html = ""
     for card in page1_cards:
@@ -202,29 +204,33 @@ def render_design2_html(
         title = escape(card["title"])
         desc = escape(card.get("description") or "")
         val = escape(card.get("value") or "")
-        icon_svg = render_design2_icon_svg(card.get("icon_hint", "generic"), size=38)
+        # Always render the bespoke crisp 2D line-art SVG vector icon for Design 2
+        # (Rejecting raster 3D images/logos from database asset slots to maintain 1:1 parity with quotation_A9243A)
+        icon_media_html = render_design2_icon_svg(card.get("icon_hint", "generic"), size=38)
 
         indicator_html = (
-            '<svg width="14" height="14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#5ABA00"/><path d="m8.2 12.2 2.5 2.5 5-5.2" stroke="#FFF" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+            '<svg width="12.5" height="12.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#5ABA00"/><path d="m8.2 12.2 2.5 2.5 5-5.2" stroke="#FFF" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>'
             if is_sel
-            else '<div style="width: 10.5px; height: 10.5px; border: 1.8px solid #677184; border-radius: 1.5px; background: #FFFFFF;"></div>'
+            else '<div style="width: 10px; height: 10px; border: 1.6px solid #677184; border-radius: 1.5px; background: #FFFFFF;"></div>'
         )
+
+        desc_clamp = 1 if val else 2
 
         addon_grid_html += f"""
         <div class="d2-card">
-            <div style="flex: 0 0 38px; display: flex; align-items: center; justify-content: center; padding-left: 3px;">
-                {icon_svg}
+            <div style="flex: 0 0 38px; display: flex; align-items: center; justify-content: center; padding-left: 2px;">
+                {icon_media_html}
             </div>
-            <div style="flex: 1; min-width: 0; padding: 4.5px 5.5px 4.5px 2px; display: flex; flex-direction: column; justify-content: space-between;">
-                <div style="min-height: 0;">
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 3px;">
-                        <div style="font-size: 7.05px; font-weight: 700; color: #0F172A; line-height: 1.13; padding-top: 2px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">{title}</div>
-                        <div style="font-size: 6.1px; font-weight: 600; color: #94A3B8; flex-shrink: 0; line-height: 1;">{escape(serial)}</div>
+            <div style="flex: 1; min-width: 0; padding: 4px 5px 3px 2px; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;">
+                <div style="min-height: 0; overflow: hidden;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 2px;">
+                        <div style="font-size: 7.1px; font-weight: 700; color: #0F172A; line-height: 1.14; word-break: break-word; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">{title}</div>
+                        <div style="font-size: 6px; font-weight: 600; color: #94A3B8; flex-shrink: 0; line-height: 1; padding-top: 1px;">{escape(serial)}</div>
                     </div>
-                    {f'<div style="font-size: 6.9px; font-weight: 800; color: #16A34A; margin-top: 1px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{val}</div>' if val else ''}
-                    {f'<div style="font-size: 6.05px; color: #475569; line-height: 1.16; margin-top: 1px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">{desc}</div>' if desc else ''}
+                    {f'<div style="font-size: 6.8px; font-weight: 800; color: #5ABA00; margin-top: 1px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{val}</div>' if val else ''}
+                    {f'<div style="font-size: 5.9px; color: #475569; line-height: 1.14; margin-top: 1px; word-break: break-word; overflow: hidden; display: -webkit-box; -webkit-line-clamp: {desc_clamp}; -webkit-box-orient: vertical;">{desc}</div>' if desc else ''}
                 </div>
-                <div style="display: flex; justify-content: flex-end; align-items: center;">
+                <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: auto; padding-top: 1px; flex-shrink: 0;">
                     {indicator_html}
                 </div>
             </div>
@@ -233,20 +239,6 @@ def render_design2_html(
 
     footer_html = render_design2_footer_html(whatsapp_qr_uri)
     gift_svg = render_free_coverage_gift_svg(width=28, height=24)
-
-    schedule_pages_html = ""
-    if include_schedule:
-        sched_pages = render_design2_schedule_pages(
-            draft_fields=draft_fields,
-            template_config=template_config,
-            render_context=render_context,
-            resolved_assets=resolved_assets,
-            db=db,
-            addon_cards=addon_cards,
-            overflow_start_index=24,
-            start_page_num=2,
-        )
-        schedule_pages_html = "\n".join(sched_pages)
 
     insurer_badge_html = (
         f'<img src="{insurer_logo_uri}" style="max-height: 38px; max-width: 132px; width: auto; height: auto; object-fit: contain; display: block;" alt="{escape(insurer)}" />'
@@ -260,11 +252,27 @@ def render_design2_html(
         else '<div style="font-size: 10px; font-weight: 900; color: #E11D48;">DuitNow</div>'
     )
 
-    overflow_banner = (
-        f'<div style="font-size: 6.8px; font-weight: 700; color: #E52320; margin-top: 4px; text-align: right;">+ {len(addon_cards) - 24} additional add-ons &amp; full terms continued on Sheet 2 &rarr;</div>'
-        if has_overflow
-        else ""
+    display_opts = render_context.get("display_options") or {}
+    include_schedule = bool(
+        display_opts.get("include_benefit_schedule")
+        or render_context.get("include_benefit_schedule")
+        or len(addon_cards) > 24
     )
+    schedule_pages_html = ""
+    overflow_banner = ""
+    if include_schedule:
+        overflow_start = 24 if len(addon_cards) > 24 else 0
+        sched_pages = render_design2_schedule_pages(
+            draft_fields,
+            template_config=template_config,
+            render_context=render_context,
+            resolved_assets=resolved_assets,
+            db=db,
+            addon_cards=addon_cards,
+            overflow_start_index=overflow_start,
+            start_page_num=2,
+        )
+        schedule_pages_html = "\n".join(sched_pages)
 
     return f"""<!doctype html>
 <html lang="en">
@@ -443,9 +451,9 @@ body {{
                             <div style="font-size: 10.8px; font-weight: 800; color: #E52320; margin-bottom: 4px; line-height: 1.2; white-space: nowrap;">
                                 Company Bank Details <span style="font-size: 9.8px; font-weight: 700; color: #544F4E;">公司银行戶口</span>
                             </div>
-                            <div style="font-size: 11.4px; font-weight: 800; color: #0F172A; line-height: 1.28;">RISKLOCKER SDN.BHD.</div>
-                            <div style="font-size: 11.2px; font-weight: 400; color: #1E293B; line-height: 1.28;">Hong Leong Bank</div>
-                            <div style="font-size: 11.4px; font-weight: 400; color: #1E293B; letter-spacing: 0.2px; line-height: 1.28;">12300318500</div>
+                            <div style="font-size: 11.4px; font-weight: 800; color: #0F172A; line-height: 1.28;">{agency_acc_name}</div>
+                            <div style="font-size: 11.2px; font-weight: 400; color: #1E293B; line-height: 1.28;">{bank_name}</div>
+                            <div style="font-size: 11.4px; font-weight: 400; color: #1E293B; letter-spacing: 0.2px; line-height: 1.28;">{bank_acc}</div>
                         </div>
                         <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
                             {duitnow_badge_html}

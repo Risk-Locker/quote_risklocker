@@ -238,8 +238,8 @@ def _agency_bilingual_config() -> dict:
         _rectangle("pay_card_bg", 508, 134, 246, 92, 2, background="#FFFFFF", border=BORDER_COLOR, radius=6, group_id="grp_payment_card"),
         _text("pay_title", "Payment Method", 522, 142, 218, 14, 5, size=9.5, weight="700", color=LABEL_COLOR, group_id="grp_payment_card"),
         _image("bank_logo", "bank_logo", 522, 158, 96, 22, 5, group_id="grp_payment_card"),
-        _text("pay_acc_no", "12300318500", 522, 184, 218, 14, 5, size=10.5, weight="700", color=DARK, group_id="grp_payment_card"),
-        _text("pay_holder", "RiskLocker Sdn. Bhd.", 522, 200, 218, 14, 5, size=8.5, weight="600", color=MUTED_COLOR, group_id="grp_payment_card"),
+        _text("pay_acc_no", "0000 0000 0000", 522, 184, 218, 14, 5, size=10.5, weight="700", color=DARK, group_id="grp_payment_card"),
+        _text("pay_holder", "Authorized Insurance Agency", 522, 200, 218, 14, 5, size=8.5, weight="600", color=MUTED_COLOR, group_id="grp_payment_card"),
 
         # Card 2: Dedicated DuitNow QR (x=508, y=232, w=246, h=88)
         _rectangle("qr_card_bg", 508, 232, 246, 88, 2, background="#FFFFFF", border=BORDER_COLOR, radius=6, group_id="grp_qr_card"),
@@ -752,20 +752,21 @@ def _agency_mandarin_config() -> dict:
     return validate_template_config(config)
 
 
-def master_template_specs() -> list[dict]:
-    # Canonical motor templates: Bilingual, Bilingual v2, Bilingual v3, Bilingual v4, English, and Mandarin presets
-    return [
-        {"key": "agency_bilingual", "name": "Bilingual Agency Motor", "is_default": False, "config": _agency_bilingual_config()},
-        {"key": "agency_bilingual_v2", "name": "Bilingual Agency Motor v2", "is_default": False, "config": _agency_bilingual_v2_config()},
-        {"key": "agency_bilingual_v3", "name": "Bilingual Agency Motor v3", "is_default": False, "config": _agency_bilingual_v3_config()},
-        {"key": "agency_bilingual_v3_no_extras", "name": "Bilingual Agency Motor v3 (No Extras)", "is_default": False, "config": _agency_bilingual_v3_no_extras_config()},
-        {"key": "agency_bilingual_v3_lump_sum", "name": "Bilingual Agency Motor v3 (Lump Sum Extras)", "is_default": False, "config": _agency_bilingual_v3_lump_sum_config()},
-        {"key": "agency_bilingual_v4", "name": "Bilingual Agency Motor v4", "is_default": True, "config": _agency_bilingual_v4_config()},
-        {"key": "agency_bilingual_v4_no_extras", "name": "Bilingual Agency Motor v4 (No Extras)", "is_default": False, "config": _agency_bilingual_v4_no_extras_config()},
-        {"key": "agency_bilingual_v4_lump_sum", "name": "Bilingual Agency Motor v4 (Lump Sum Extras)", "is_default": False, "config": _agency_bilingual_v4_lump_sum_config()},
-        {"key": "agency_english", "name": "English Agency Motor", "is_default": False, "config": _agency_english_config()},
-        {"key": "agency_mandarin", "name": "Mandarin Agency Motor", "is_default": False, "config": _agency_mandarin_config()},
+def master_template_specs(*, active_only: bool = True) -> list[dict]:
+    # Canonical motor templates: Design 1 (Bilingual v4 legacy fallback)
+    specs = [
+        {"key": "agency_bilingual", "name": "Bilingual Agency Motor", "is_default": False, "is_deprecated": True, "config": _agency_bilingual_config()},
+        {"key": "agency_bilingual_v2", "name": "Bilingual Agency Motor v2", "is_default": False, "is_deprecated": True, "config": _agency_bilingual_v2_config()},
+        {"key": "agency_bilingual_v3", "name": "Bilingual Agency Motor v3", "is_default": False, "is_deprecated": True, "config": _agency_bilingual_v3_config()},
+        {"key": "agency_bilingual_v3_no_extras", "name": "Bilingual Agency Motor v3 (No Extras)", "is_default": False, "is_deprecated": True, "config": _agency_bilingual_v3_no_extras_config()},
+        {"key": "agency_bilingual_v3_lump_sum", "name": "Bilingual Agency Motor v3 (Lump Sum Extras)", "is_default": False, "is_deprecated": True, "config": _agency_bilingual_v3_lump_sum_config()},
+        {"key": "agency_bilingual_v4", "name": "Bilingual Agency Motor v4", "is_default": True, "is_deprecated": False, "config": _agency_bilingual_v4_config()},
+        {"key": "agency_bilingual_v4_no_extras", "name": "Bilingual Agency Motor v4 (No Extras)", "is_default": False, "is_deprecated": True, "config": _agency_bilingual_v4_no_extras_config()},
+        {"key": "agency_bilingual_v4_lump_sum", "name": "Bilingual Agency Motor v4 (Lump Sum Extras)", "is_default": False, "is_deprecated": True, "config": _agency_bilingual_v4_lump_sum_config()},
     ]
+    if active_only:
+        return [s for s in specs if not s.get("is_deprecated")]
+    return specs
 
 
 def ensure_master_templates(db, user, *, apply: bool = False, force: bool = False, target_keys: list[str] | None = None) -> dict:
@@ -774,7 +775,7 @@ def ensure_master_templates(db, user, *, apply: bool = False, force: bool = Fals
     revisions = list(db.scalars(select(TemplateRevision).options(defer(TemplateRevision.config))).all())
     report = {"created": [], "published": [], "retained": [], "default_cleared": [], "apply": apply}
     by_key = {str((item.fixed_fields or {}).get("v7_master_key") or ""): item for item in templates}
-    specs = [s for s in master_template_specs() if target_keys is None or s["key"] in target_keys]
+    specs = [s for s in master_template_specs(active_only=True) if target_keys is None or s["key"] in target_keys]
     for spec in specs:
         current = by_key.get(spec["key"])
         published = [item for item in revisions if current and item.template_id == current.id and item.state == "published"]
@@ -802,10 +803,18 @@ def ensure_master_templates(db, user, *, apply: bool = False, force: bool = Fals
             publish_template_revision(db, user, current.id, base_revision=current.revision)
 
     if apply:
-        bilingual = by_key.get("agency_bilingual_v4") or by_key.get("agency_bilingual_v3") or by_key.get("agency_bilingual")
+        # If motor_modern_design_2 or another design2 template is present, preserve it as default
+        design2_tmpl = by_key.get(DESIGN2_MASTER_KEY) or next((item for item in templates if (item.fixed_fields or {}).get("layout_engine") == "design2"), None)
+        if design2_tmpl:
+            bilingual = None
+        else:
+            bilingual = by_key.get("agency_bilingual_v4") or by_key.get("agency_bilingual_v3") or by_key.get("agency_bilingual")
         for item in templates + list(by_key.values()):
             config = deepcopy(item.fixed_fields or {})
-            wanted = bool(bilingual and item.id == bilingual.id)
+            if design2_tmpl:
+                wanted = bool(item.id == design2_tmpl.id)
+            else:
+                wanted = bool(bilingual and item.id == bilingual.id)
             if bool(config.get("is_default")) == wanted:
                 continue
             config["is_default"] = wanted
@@ -831,7 +840,10 @@ def motor_modern_design_2_config() -> dict:
         "v7_master_key": DESIGN2_MASTER_KEY,
         "template_key": DESIGN2_MASTER_KEY,
         "layout_engine": "design2",
-        "is_default": False,
+        "is_default": True,
+        "agency_account_name": "RISKLOCKER SDN. BHD.",
+        "bank_name": "Hong Leong Bank",
+        "bank_account_no": "12300318500",
         "locked": False,
         "assets": {
             "risklocker_logo": "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f",
@@ -902,6 +914,17 @@ def ensure_design2_master_template(db, user, *, apply: bool = False, force: bool
 
     report["template_id"] = current.id
     if apply:
+        # Clear is_default from all other templates so Design 2 is the primary default template
+        for item in templates:
+            if item.id == current.id:
+                continue
+            cfg = deepcopy(item.fixed_fields or {})
+            if cfg.get("is_default"):
+                cfg["is_default"] = False
+                item.fixed_fields = cfg
+                flag_modified(item, "fixed_fields")
+        db.commit()
+
         rev = publish_template_revision(db, user, current.id, base_revision=current.revision)
         report["published"] = True
         report["template_revision_id"] = rev.id

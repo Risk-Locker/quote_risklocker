@@ -307,3 +307,64 @@ def test_gemini_parallel_fleet_math_and_independent_model_quotas():
         assert ep["rpm_limit"] == 12
         assert ep["tpm_limit"] == 220_000
 
+
+def test_gemini_independent_key_pausing_and_dynamic_capacity_scaling():
+    mgr = GeminiAccountManager(
+        (
+            "AIzaSyKeyAlpha11111111111111111111111111",
+            "AIzaSyKeyBeta222222222222222222222222222",
+        )
+    )
+    mgr._max_rpd_per_key = 480
+    mgr._max_rpm_per_key = 13
+    mgr._max_tpm_per_key = 200_000
+    mgr._init_parallel_slots()
+
+    # 1. Initially both keys are active
+    stats = mgr.get_quota_stats()
+    assert stats["active_keys_count"] == 2
+    assert stats["status"] == "ready"
+    assert stats["status_label"] == "Fleet Online · All Keys Active"
+    assert stats["fleet_summary"]["fleet_rpd_limit"] == 4 * 480
+    assert stats["fleet_summary"]["fleet_rpm_limit"] == 4 * 13
+    for acc in stats["accounts"]:
+        assert acc["is_active"] is True
+        assert acc["status_label"] == "Active"
+
+    # 2. Pause Key 1 independently
+    key1_id = mgr.get_accounts()[0].id
+    mgr.set_account_paused(key1_id, paused=True)
+
+    stats1 = mgr.get_quota_stats()
+    assert stats1["active_keys_count"] == 1
+    assert stats1["status"] == "ready"
+    assert stats1["fleet_summary"]["active_parallel_endpoints"] == 2
+    assert stats1["fleet_summary"]["fleet_rpd_limit"] == 2 * 480
+    assert stats1["fleet_summary"]["fleet_rpm_limit"] == 2 * 13
+    # Check that endpoints for Key 1 are marked Off · Paused
+    key1_endpoints = [ep for ep in stats1["endpoints"] if ep["slot_id"].startswith("AIzaSy...1111")]
+    for ep in key1_endpoints:
+        assert ep["is_ready"] is False
+        assert ep["status_label"] == "Off · Paused"
+
+    # 3. Pause Key 2 independently as well -> Total Fleet Off
+    key2_id = mgr.get_accounts()[1].id
+    mgr.set_account_paused(key2_id, paused=True)
+
+    stats2 = mgr.get_quota_stats()
+    assert stats2["active_keys_count"] == 0
+    assert stats2["active"] is False
+    assert stats2["status"] == "paused"
+    assert stats2["status_label"] == "Fleet Offline (All Keys Paused)"
+    assert stats2["fleet_summary"]["active_parallel_endpoints"] == 0
+    assert stats2["fleet_summary"]["fleet_rpd_limit"] == 0
+    assert stats2["fleet_summary"]["fleet_rpm_limit"] == 0
+
+    # 4. Resume Key 1 -> Fleet partially online again
+    mgr.set_account_paused(key1_id, paused=False)
+    stats3 = mgr.get_quota_stats()
+    assert stats3["active_keys_count"] == 1
+    assert stats3["active"] is True
+    assert stats3["fleet_summary"]["active_parallel_endpoints"] == 2
+
+

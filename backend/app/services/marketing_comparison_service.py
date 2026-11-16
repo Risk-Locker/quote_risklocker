@@ -97,7 +97,7 @@ from app.services.marketing_comparison.covernote_classifier import (
 )
 
 
-def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
+def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = False) -> dict[str, Any]:
     """Retrieve or auto-hydrate the full marketing comparison matrix for an insurance tenure.
     
     Returns:
@@ -349,12 +349,15 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             raw_w = _extract_val(f.get("waiver_of_betterment"))
             has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
             quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now().year
+            reg_date = _extract_val(f.get("registration_date")) or _extract_val(f.get("reg_date"))
             has_waiver, bet_rate, bet_disp = evaluate_betterment_rules(
                 yom=veh_yom,
                 quote_year=quote_year,
                 company_name=comp_name,
                 has_betterment_peril=has_peril,
                 is_comprehensive_private=True,
+                registration_date=reg_date,
+                coverage_start_date=tenure.coverage_start_date,
             )
 
             entry = TenureComparisonEntry(
@@ -418,12 +421,15 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
                 raw_w = _extract_val(f.get("waiver_of_betterment"))
                 has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
                 quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now().year
+                reg_date = _extract_val(f.get("registration_date")) or _extract_val(f.get("reg_date"))
                 has_waiver, bet_rate, bet_disp = evaluate_betterment_rules(
                     yom=veh_yom,
                     quote_year=quote_year,
                     company_name=comp_name,
                     has_betterment_peril=has_peril,
                     is_comprehensive_private=True,
+                    registration_date=reg_date,
+                    coverage_start_date=tenure.coverage_start_date,
                 )
 
                 c_id_key = str(getattr(s, "company_id", "") or "").lower()
@@ -621,7 +627,7 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
         company_counts[key] += 1
         e.version = company_counts[key]
 
-    if needs_commit:
+    if needs_commit and allow_commit:
         db.commit()
 
 
@@ -978,7 +984,7 @@ def get_marketing_comparison(db: Session, tenure_id: str) -> dict[str, Any]:
             )
         ) or 0
 
-    if needs_commit:
+    if needs_commit and allow_commit:
         db.commit()
 
     # 7. Year reconciliation across multi-quote uploads: only flag if quotes belong to different calendar years
@@ -2539,12 +2545,15 @@ def rescan_comparison_tenure(db: Session, tenure_id: str) -> dict[str, Any]:
 
             raw_w = _extract_val(f.get("waiver_of_betterment"))
             has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
+            reg_date = _extract_val(f.get("registration_date")) or _extract_val(f.get("reg_date"))
             live_waiver, live_bet_rate, live_bet_disp = evaluate_betterment_rules(
                 yom=veh_yom,
                 quote_year=quote_year,
                 company_name=entry.company_name,
                 has_betterment_peril=has_peril,
                 is_comprehensive_private=True,
+                registration_date=reg_date,
+                coverage_start_date=tenure.coverage_start_date,
             )
             entry.betterment_rate = live_bet_rate
             entry.betterment_display = live_bet_disp

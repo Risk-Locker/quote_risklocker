@@ -12,6 +12,7 @@ import { Design2BenefitIconSvg, FreeCoverageGiftSvg } from "./design2-icons";
 
 export interface Design2CanvasProps {
   fields: Record<string, any>;
+  config?: Record<string, any>;
   currentBenefits?: any[];
   availableAddons?: any[];
   selectedIds?: Set<string> | string[];
@@ -39,6 +40,9 @@ const FIELD_ALIASES: Record<string, string[]> = {
   roadtax: ["roadtax", "road_tax_amount"],
   runner_fee: ["runner_fee", "service_fee"],
   total_amount: ["total_amount", "total_premium_adjusted", "gross_premium"],
+  agency_account_name: ["agency_account_name", "account_name", "company_bank_account_name"],
+  bank_name: ["bank_name", "company_bank_name"],
+  bank_account_no: ["bank_account_no", "account_no", "bank_acc_no", "company_bank_account_no"],
 };
 
 function getVal(fields: Record<string, any>, key: string, fallback: string = ""): string {
@@ -177,7 +181,32 @@ function GreenTickSvg({ size = 14 }: { size?: number }) {
   );
 }
 
-function Design2Footer({ whatsappQrSrc }: { whatsappQrSrc: string }) {
+function Design2CardIconMedia({
+  iconHint,
+  size = 38,
+}: {
+  assetId?: string;
+  iconHint?: string;
+  size?: number;
+}) {
+  // Always render the bespoke crisp 2D line-art SVG vector icon for Design 2
+  // (Rejecting raster 3D images/logos to maintain 1:1 parity with quotation_A9243A)
+  return <Design2BenefitIconSvg hint={iconHint} size={size} />;
+}
+
+function Design2Footer({
+  whatsappQrSrc,
+  agencyName = "RiskLocker",
+  agencyRegNo = "1535879-U",
+  agencyEmail = "admin@risklocker.com",
+  agencyPhone = "011 1011 6880 ( Office )",
+}: {
+  whatsappQrSrc: string;
+  agencyName?: string;
+  agencyRegNo?: string;
+  agencyEmail?: string;
+  agencyPhone?: string;
+}) {
   return (
     <div
       style={{
@@ -194,22 +223,22 @@ function Design2Footer({ whatsappQrSrc }: { whatsappQrSrc: string }) {
     >
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: "14.5px", fontWeight: 800, letterSpacing: "0.1px", lineHeight: 1.1 }}>
-          RISKLOCKER SDN. BHD.
+          {agencyName}
         </div>
         <div style={{ fontSize: "6.8px", fontWeight: 500, opacity: 0.92, marginTop: "2px", marginBottom: "6px" }}>
-          202301041962(1535879-U)
+          {agencyRegNo}
         </div>
         <div style={{ fontSize: "11.2px", fontWeight: 500, display: "flex", alignItems: "center", gap: "6px", lineHeight: 1.3 }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0 }}>
             <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
           </svg>
-          <span>admin@risklocker.com</span>
+          <span>{agencyEmail}</span>
         </div>
         <div style={{ fontSize: "11.2px", fontWeight: 500, display: "flex", alignItems: "center", gap: "6px", marginTop: "2px", lineHeight: 1.3 }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0 }}>
             <path d="M4 21h16v-2h-1V9h-5V4H5v15H4v2zm3-15h5v13H7V6zm7 5h3v8h-3v-8zM9 8h1.5v2H9V8zm0 3.5h1.5v2H9v-2zm0 3.5h1.5v2H9v-2z" />
           </svg>
-          <span>011 1011 6880 ( Office )</span>
+          <span>{agencyPhone}</span>
         </div>
       </div>
 
@@ -249,6 +278,7 @@ function Design2Footer({ whatsappQrSrc }: { whatsappQrSrc: string }) {
 
 export function Design2CanvasView({
   fields,
+  config,
   currentBenefits = [],
   availableAddons = [],
   selectedIds,
@@ -264,10 +294,10 @@ export function Design2CanvasView({
     return selectedIds instanceof Set ? selectedIds : new Set(selectedIds);
   }, [selectedIds]);
 
-  const quoteRef = getVal(fields, "quotation_reference", "RL260000314");
-  const vehPlate = getVal(fields, "vehicle_no", "ANY 368");
+  const quoteRef = getVal(fields, "quotation_reference", "QT-SAMPLE-001");
+  const vehPlate = getVal(fields, "vehicle_no", "ABC 1234");
   const insurer = getVal(fields, "insurance_company", companyName || "ETIQA GENERAL INSURANCE BERHAD");
-  const custName = getVal(fields, "customer_name", "CHENG TECK KIOING");
+  const custName = getVal(fields, "customer_name", "Valued Customer");
   const period = getVal(fields, "cover_period", "04-06-2026 TO 03-06-2027");
   const covType = getVal(fields, "coverage_type", "Comprehensive");
   const carModel = getVal(fields, "car_model", "Tesla Model 3 Performance");
@@ -305,26 +335,18 @@ export function Design2CanvasView({
   const logoSrc = useTrimmedLogoSrc(rawLogoSrc);
 
   const addonCards = useMemo(() => {
-    return buildUnifiedMatrixCards(currentBenefits, availableAddons, selSet, 24);
-  }, [currentBenefits, availableAddons, selSet]);
+    return buildUnifiedMatrixCards(currentBenefits, availableAddons, selSet, 0, 24, insurer);
+  }, [currentBenefits, availableAddons, selSet, insurer]);
 
   const freeItems = useMemo(() => {
-    const extracted = extractFreeCoverageItems(currentBenefits, 6);
-    if (extracted.length > 0 || currentBenefits.length > 0) {
-      return extracted;
-    }
-    return [
-      { title: "Legal Defense Costs", description: "Reimburses court legal representation and defense fees up to RM2,000." },
-      { title: "Emergency Towing Assistance", description: "24/7 accidental towing service to nearest approved repairer up to RM 200." },
-      { title: "Drive-Less Save-More", description: "Cash rebate up to 30% of base premium for low annual mileage." },
-      { title: "Child Car Safety Seat", description: "Reimburses replacement or repair of child safety seats in a crash." },
-    ];
+    return extractFreeCoverageItems(currentBenefits, 6);
   }, [currentBenefits]);
 
   const ncdDisplay = ncd.includes("%") ? ncd : `${ncd}%`;
   const page1Cards = addonCards.slice(0, 24);
   const overflowCards = addonCards.slice(24);
-  const showPage2 = includeSchedule || overflowCards.length > 0;
+  // Strictly single-page quotation: Sheet 2 disabled so document is 1 page only
+  const showPage2 = false;
   const selectedScheduleRows = useMemo(() => {
     return [
       ...freeItems.map((fi) => ({
@@ -582,9 +604,15 @@ export function Design2CanvasView({
                     <div style={{ fontSize: "10.8px", fontWeight: 800, color: "#E52320", marginBottom: "4px", lineHeight: 1.2, whiteSpace: "nowrap" }}>
                       Company Bank Details <span style={{ fontSize: "9.8px", fontWeight: 700, color: "#544F4E" }}>公司银行戶口</span>
                     </div>
-                    <div style={{ fontSize: "11.4px", fontWeight: 800, color: "#0F172A", lineHeight: 1.28 }}>RISKLOCKER SDN.BHD.</div>
-                    <div style={{ fontSize: "11.2px", fontWeight: 400, color: "#1E293B", lineHeight: 1.28 }}>Hong Leong Bank</div>
-                    <div style={{ fontSize: "11.4px", fontWeight: 400, color: "#1E293B", letterSpacing: "0.2px", lineHeight: 1.28 }}>12300318500</div>
+                    <div style={{ fontSize: "11.4px", fontWeight: 800, color: "#0F172A", lineHeight: 1.28 }}>
+                      {getVal(fields, "agency_account_name", String(config?.agency_account_name || "RISKLOCKER SDN. BHD."))}
+                    </div>
+                    <div style={{ fontSize: "11.2px", fontWeight: 400, color: "#1E293B", lineHeight: 1.28 }}>
+                      {getVal(fields, "bank_name", String(config?.bank_name || "Hong Leong Bank"))}
+                    </div>
+                    <div style={{ fontSize: "11.4px", fontWeight: 400, color: "#1E293B", letterSpacing: "0.2px", lineHeight: 1.28 }}>
+                      {getVal(fields, "bank_account_no", String(config?.bank_account_no || "12300318500"))}
+                    </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
                     <img
@@ -654,18 +682,18 @@ export function Design2CanvasView({
                   }}
                 >
                   <div style={{ flex: "0 0 38px", display: "flex", alignItems: "center", justifyContent: "center", paddingLeft: "3px" }}>
-                    <Design2BenefitIconSvg hint={card.icon_hint} size={38} />
+                    <Design2CardIconMedia assetId={card.asset_id} iconHint={card.icon_hint} size={38} />
                   </div>
-                  <div style={{ flex: 1, minWidth: 0, padding: "4.5px 5.5px 4.5px 2px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-                    <div style={{ minHeight: 0 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "3px" }}>
+                  <div style={{ flex: 1, minWidth: 0, padding: "4px 5px 3px 2px", display: "flex", flexDirection: "column", justifyContent: "space-between", overflow: "hidden" }}>
+                    <div style={{ minHeight: 0, overflow: "hidden" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "2px" }}>
                         <div
                           style={{
-                            fontSize: "7.05px",
+                            fontSize: "7.1px",
                             fontWeight: 700,
                             color: "#0F172A",
-                            lineHeight: 1.13,
-                            paddingTop: "2px",
+                            lineHeight: 1.14,
+                            wordBreak: "break-word",
                             overflow: "hidden",
                             display: "-webkit-box",
                             WebkitLineClamp: 2,
@@ -674,25 +702,26 @@ export function Design2CanvasView({
                         >
                           {card.title}
                         </div>
-                        <div style={{ fontSize: "6.1px", fontWeight: 600, color: "#94A3B8", flexShrink: 0, lineHeight: 1 }}>
+                        <div style={{ fontSize: "6px", fontWeight: 600, color: "#94A3B8", flexShrink: 0, lineHeight: 1, paddingTop: "1px" }}>
                           {card.serial_number}
                         </div>
                       </div>
                       {card.value && (
-                        <div style={{ fontSize: "6.9px", fontWeight: 800, color: "#16A34A", marginTop: "1px", lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        <div style={{ fontSize: "6.8px", fontWeight: 800, color: "#5ABA00", marginTop: "1px", lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                           {card.value}
                         </div>
                       )}
                       {card.description && (
                         <div
                           style={{
-                            fontSize: "6.05px",
+                            fontSize: "5.9px",
                             color: "#475569",
-                            lineHeight: 1.16,
+                            lineHeight: 1.14,
                             marginTop: "1px",
+                            wordBreak: "break-word",
                             overflow: "hidden",
                             display: "-webkit-box",
-                            WebkitLineClamp: 2,
+                            WebkitLineClamp: card.value ? 1 : 2,
                             WebkitBoxOrient: "vertical",
                           }}
                         >
@@ -700,18 +729,18 @@ export function Design2CanvasView({
                         </div>
                       )}
                     </div>
-                    <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center" }}>
+                    <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginTop: "auto", paddingTop: "1px", flexShrink: 0 }}>
                       {card.is_selected ? (
-                        <GreenTickSvg size={14} />
+                        <GreenTickSvg size={12.5} />
                       ) : (
-                        <div style={{ width: "10.5px", height: "10.5px", border: "1.8px solid #677184", borderRadius: "1.5px", background: "#FFFFFF" }} />
+                        <div style={{ width: "10px", height: "10px", border: "1.6px solid #677184", borderRadius: "1.5px", background: "#FFFFFF" }} />
                       )}
                     </div>
                   </div>
                 </div>
               ))}
             </div>
-            {overflowCards.length > 0 && (
+            {overflowCards.length > 0 && showPage2 && (
               <div style={{ fontSize: "6.8px", fontWeight: 700, color: "#E52320", marginTop: "4px", textAlign: "right" }}>
                 + {overflowCards.length} additional add-ons &amp; full terms continued on Sheet 2 &rarr;
               </div>
@@ -719,7 +748,10 @@ export function Design2CanvasView({
           </div>
         </div>
 
-        <Design2Footer whatsappQrSrc="/assets/whatsapp_qr.png" />
+        <Design2Footer
+          whatsappQrSrc="/assets/whatsapp_qr.png"
+          agencyName={getVal(fields, "agency_name", "RiskLocker")}
+        />
       </div>
 
       {/* PAGE 2: Overflow Continuation & Detailed Benefits Schedule */}
@@ -783,7 +815,7 @@ export function Design2CanvasView({
                       }}
                     >
                       <div style={{ flex: "0 0 40px", display: "flex", alignItems: "center", justifyContent: "center", paddingLeft: "4px" }}>
-                        <Design2BenefitIconSvg hint={card.icon_hint} size={36} />
+                        <Design2CardIconMedia assetId={card.asset_id} iconHint={card.icon_hint} size={36} />
                       </div>
                       <div style={{ flex: 1, minWidth: 0, padding: "4px 7px 4px 2px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
                         <div>
@@ -796,7 +828,7 @@ export function Design2CanvasView({
                             </div>
                           </div>
                           {card.value && (
-                            <div style={{ fontSize: "7px", fontWeight: 800, color: "#16A34A", marginTop: "1px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            <div style={{ fontSize: "7px", fontWeight: 800, color: "#5ABA00", marginTop: "1px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                               {card.value}
                             </div>
                           )}
@@ -836,7 +868,7 @@ export function Design2CanvasView({
                       </div>
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{ fontSize: "8.8px", fontWeight: 800, color: "#0F172A" }}>
-                          {row.title} {formatAddonValue(row.value) && <span style={{ color: "#16A34A", fontSize: "7.8px" }}>({formatAddonValue(row.value)})</span>}
+                          {row.title} {formatAddonValue(row.value) && <span style={{ color: "#5ABA00", fontSize: "7.8px" }}>({formatAddonValue(row.value)})</span>}
                         </div>
                         <div style={{ fontSize: "7.2px", color: "#475569", lineHeight: 1.25, marginTop: "1px" }}>{row.description}</div>
                       </div>
@@ -876,7 +908,7 @@ export function Design2CanvasView({
                           </div>
                           <div style={{ minWidth: 0 }}>
                             <div style={{ fontSize: "7.8px", fontWeight: 700, color: "#0F172A" }}>
-                              {oc.serial_number} · {oc.title} {formatAddonValue(oc.value) && <span style={{ color: "#16A34A" }}>({formatAddonValue(oc.value)})</span>}
+                              {oc.serial_number} · {oc.title} {formatAddonValue(oc.value) && <span style={{ color: "#5ABA00" }}>({formatAddonValue(oc.value)})</span>}
                             </div>
                             {oc.description && <div style={{ fontSize: "6.6px", color: "#64748B", lineHeight: 1.25 }}>{oc.description}</div>}
                           </div>
@@ -892,7 +924,10 @@ export function Design2CanvasView({
             })()}
           </div>
 
-          <Design2Footer whatsappQrSrc="/assets/whatsapp_qr.png" />
+          <Design2Footer
+          whatsappQrSrc="/assets/whatsapp_qr.png"
+          agencyName={getVal(fields, "agency_name", "RiskLocker")}
+        />
         </div>
       )}
     </div>

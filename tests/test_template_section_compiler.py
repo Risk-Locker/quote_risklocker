@@ -361,9 +361,9 @@ def test_right_container_qr_and_no_compulsory_excess():
     assert qr_container_idx < driver_container_idx
     assert rcs[qr_container_idx]["boxY"] < rcs[driver_container_idx]["boxY"]
 
-    # Verify bank account is strictly 12300318500
+    # Verify bank account is synthetic placeholder (PDPA F-11)
     pay_details = next(b for b in rcs[0]["blocks"] if b["id"] == "rc_b_pay_details")
-    assert "12300318500" in pay_details["text"]
+    assert "0000 0000 0000" in pay_details["text"]
     assert "12303105859" not in pay_details["text"]
 
 

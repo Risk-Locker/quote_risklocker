@@ -34,7 +34,11 @@ def _dynamic_benefit_grid(
             or bool(element.get("v4_mode"))
             or any(e.get("v4_mode") for e in (render_context.get("template_config", {}).get("canvas", {}).get("elements") or []))
         )
-        extras_mode = str(render_context.get("extras_mode") or "itemized").lower()
+        extras_mode = str(
+            (render_context or {}).get("display_options", {}).get("extras_mode")
+            or render_context.get("extras_mode")
+            or "itemized"
+        ).lower()
         if element.get("excludeExtras") or (not v4_mode and extras_mode in {"none", "lump_sum"}):
             cards = [c for c in current if not _get_helpers()[3](c)]
         else:
@@ -557,7 +561,12 @@ def _balance_benefit_grid_elements(elements: list[dict[str, Any]], render_contex
     """Dynamically balance the heights of coverage card, right containers, and benefit grids."""
     extras = list((render_context or {}).get("extras") or []) if render_context else []
     pib_elem = next((e for e in elements if e.get("id") == "premium_info_block" or e.get("type") == "premium-info-block"), None)
-    extras_mode = str((pib_elem or {}).get("extras_mode") or (render_context or {}).get("extras_mode") or "itemized").lower()
+    extras_mode = str(
+        (render_context or {}).get("display_options", {}).get("extras_mode")
+        or (pib_elem or {}).get("extras_mode")
+        or (render_context or {}).get("extras_mode")
+        or "itemized"
+    ).lower()
     pib_y = float(pib_elem.get("y") or 276.0) if pib_elem else 276.0
     if extras_mode == "none":
         total_pib_rows = 5

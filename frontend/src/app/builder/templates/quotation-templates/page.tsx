@@ -569,7 +569,11 @@ export default function QuotationTemplatesPage() {
         method: "POST",
         body: JSON.stringify({ name: newName.trim(), insurance_type: "Motor" }),
       });
-      window.location.assign(`/builder/templates/${result.template.id}/builder`);
+      setShowCreate(false);
+      setNewName("");
+      toast(`Created template "${result.template.name}".`, "success");
+      await load();
+      setPreview(result.template);
     } catch (reason) {
       setError(apiErrorMessage(reason));
       setCreating(false);
@@ -581,7 +585,8 @@ export default function QuotationTemplatesPage() {
     try {
       const result = await api<{ template: TemplateRecord }>(`/admin/templates/${template.id}/copy`, { method: "POST", body: "{}" });
       toast("Template cloned as a new editable draft.", "success");
-      window.location.assign(`/builder/templates/${result.template.id}/builder`);
+      await load();
+      setPreview(result.template);
     } catch (reason) {
       setError(apiErrorMessage(reason));
     }
@@ -691,28 +696,22 @@ export default function QuotationTemplatesPage() {
 
         <BuilderNav />
 
-        {/* Top Subtabs Navigation: Quotation Templates vs Benefit Templates */}
-        <div className="flex items-center gap-2 border-b border-[var(--rl-border)] pb-2">
-          <Link
-            href={"/builder/templates/quotation-templates" as Route}
-            className="flex items-center gap-2 rounded-t-[var(--rl-radius-sm)] bg-[var(--rl-black)] px-4 py-2 text-xs font-bold text-white shadow-sm transition-all"
-          >
-            <FilePdf size={16} weight="bold" />
-            <span>Quotation Templates</span>
-            {templates.length > 0 && (
-              <span className="ml-1 rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                {templates.length}
-              </span>
-            )}
-          </Link>
-
-          <Link
-            href={"/builder/templates/benefit-templates" as Route}
-            className="flex items-center gap-2 rounded-t-[var(--rl-radius-sm)] border border-transparent bg-transparent px-4 py-2 text-xs font-bold text-[var(--rl-text-muted)] transition-all hover:bg-neutral-100 hover:text-[var(--rl-text-strong)]"
-          >
-            <ShieldCheck size={16} weight="bold" />
-            <span>Benefit Templates</span>
-          </Link>
+        {/* Top Header Badge */}
+        <div className="flex items-center justify-between border-b border-[var(--rl-border)] pb-2">
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-2 rounded-[var(--rl-radius-sm)] bg-[var(--rl-black)] px-3 py-1.5 text-xs font-bold text-white shadow-xs">
+              <FilePdf size={15} weight="bold" />
+              <span>Quotation Master Templates</span>
+              {templates.length > 0 && (
+                <span className="ml-1 rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                  {templates.length}
+                </span>
+              )}
+            </span>
+          </div>
+          <span className="text-xs text-[var(--rl-text-muted)]">
+            Design 2 Modern Grid is active as system default
+          </span>
         </div>
 
         {error ? <div role="alert" className="border-l-2 border-[var(--rl-red)] bg-[var(--rl-red-light)] px-4 py-3 text-[13px] font-semibold text-[var(--rl-red)]">{error}</div> : null}
@@ -791,11 +790,6 @@ export default function QuotationTemplatesPage() {
                           ) : (
                             <Button variant="secondary" size="sm" icon={<CopySimple size={14} />} onClick={() => cloneTemplate(template)}>Clone</Button>
                           )}
-                          {!template.locked && template.status !== "retired" ? (
-                            <Link href={`/builder/templates/${template.id}/builder` as Route}>
-                              <Button size="sm" icon={<PencilSimple size={14} />}>Open</Button>
-                            </Link>
-                          ) : null}
                           {!template.locked && template.status !== "retired" ? (
                             <Button variant="ghost" size="sm" aria-label={`Delete ${template.name}`} icon={<Trash size={14} />} className="text-[var(--rl-red)]" onClick={() => setPendingDelete(template)}>
                               <span className="sr-only">Delete</span>

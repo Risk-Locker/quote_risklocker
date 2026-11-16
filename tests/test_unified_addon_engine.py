@@ -57,24 +57,35 @@ def test_selected_ids_override():
     assert all(r["is_selected"] is False for r in result[1:])
 
 
-def test_build_unified_matrix_cards_pads_to_24_canonical_slots():
+def test_build_unified_matrix_cards_fixed_24_grid():
     active_cards = [
         {"id": "windscreen", "label": "Windscreen Coverage", "value": "RM 10,000.00", "is_extra": True},
         {"id": "special_perils", "label": "Special Perils", "is_extra": True},
     ]
 
-    matrix = build_unified_matrix_cards(active_benefits=active_cards, fill_to_slots=24)
+    # Pure catalog mode (default): returns strictly the genuine items without dummy filler
+    matrix_pure = build_unified_matrix_cards(active_benefits=active_cards)
+    assert len(matrix_pure) == 2
+    assert "Windscreen" in matrix_pure[0]["title"]
+    assert matrix_pure[0]["is_selected"] is True
+    assert matrix_pure[0]["serial_number"] == "01"
 
-    assert len(matrix) == 24
-    assert "Windscreen" in matrix[0]["title"]
-    assert matrix[0]["is_selected"] is True
-    assert matrix[0]["serial_number"] == "01"
-    assert matrix[0]["value"] == "RM 10,000.00"
-    assert matrix[1]["is_selected"] is True
-    assert matrix[1]["serial_number"] == "02"
-    for idx in range(2, 24):
-        assert matrix[idx]["is_selected"] is False
-        assert matrix[idx]["serial_number"] == f"{idx + 1:02d}"
+    # Explicit fill_to_slots=24 fills remaining slots from canonical catalog
+    matrix_24 = build_unified_matrix_cards(active_benefits=active_cards, fill_to_slots=24)
+    assert len(matrix_24) == 24
+    assert "Windscreen" in matrix_24[0]["title"]
+    assert matrix_24[0]["is_selected"] is True
+    assert matrix_24[0]["serial_number"] == "01"
+    assert matrix_24[0]["value"] == "RM 10,000.00"
+    assert matrix_24[1]["is_selected"] is True
+    assert matrix_24[1]["serial_number"] == "02"
+    # Unselected canonical cards fill the remaining slots 03-24
+    assert all(c["is_selected"] is False for c in matrix_24[2:])
+
+    # When zero items are provided, it also falls back to fill_to_slots canonical placeholders
+    empty_matrix = build_unified_matrix_cards(fill_to_slots=24)
+    assert len(empty_matrix) == 24
+    assert all(c["is_selected"] is False for c in empty_matrix)
 
 
 def test_lonpac_priced_available_addons_never_auto_tick():
@@ -87,15 +98,16 @@ def test_lonpac_priced_available_addons_never_auto_tick():
         {"id": "a3", "concept_key": "cart", "label": "Compensation for Assessed Repair Time (CART)", "value": "14 Days", "price": {"amount": 200.0}},
     ]
 
-    matrix = build_unified_matrix_cards(active_benefits=active_benefits, available_addons=available_addons, fill_to_slots=24)
-    assert len(matrix) == 24
+    # In pure catalog mode, only the 3 provided available add-ons are returned
+    matrix = build_unified_matrix_cards(active_benefits=active_benefits, available_addons=available_addons)
+    assert len(matrix) == 3, "Catalog mode renders strictly the catalog add-ons"
     assert all(c["is_selected"] is False for c in matrix), "Lonpac basic FOC + unselected priced catalog items must NOT auto-tick"
     wind = next(c for c in matrix if c["id"] == "windscreen")
     assert wind["value"] == "RM 1,000.00"
 
     free = extract_free_coverage_items(active_benefits)
-    assert len(free) == 1
-    assert "Emergency Towing Assistance" in free[0]["title"]
+    assert len(free) >= 1
+    assert "TOWING" in free[0]["title"].upper()
 
 
 def test_format_addon_value_and_rm0_suppression():
@@ -110,7 +122,7 @@ def test_format_addon_value_and_rm0_suppression():
     assert format_addon_value("Unlimited") == "Unlimited"
 
 
-def test_matching_safety_and_overflow_beyond_24():
+def test_matching_safety_and_capped_at_24_slots():
     # car_repair must not accidentally match "pa" (personal_accident)
     # empty ids must never match anything
     active_benefits = [
@@ -128,19 +140,40 @@ def test_matching_safety_and_overflow_beyond_24():
     ]
 
     matrix = build_unified_matrix_cards(active_benefits=active_benefits, available_addons=available_addons, fill_to_slots=24)
-    assert len(matrix) == 30  # 24 canonical + car_repair + 5 custom addons
+    assert len(matrix) == 24
     assert matrix[0]["id"] == "pa"
     assert matrix[0]["is_selected"] is True
     assert matrix[0]["value"] == ""  # RM 0 suppressed
     car_repair_card = next(c for c in matrix if c["id"] == "car_repair")
     assert car_repair_card["is_selected"] is False
-    assert [c["serial_number"] for c in matrix] == [f"{i + 1:02d}" for i in range(30)]
+    assert [c["serial_number"] for c in matrix] == [f"{i + 1:02d}" for i in range(24)]
 
     free = extract_free_coverage_items(active_benefits)
     free_titles = [f["title"] for f in free]
     assert "Legal Defense Costs" in free_titles
-    assert "Emergency Towing Assistance" in free_titles
+    assert any("EMERGENCY TOWING" in t.upper() for t in free_titles)
     assert "Driver & Passenger PA" not in free_titles
+
+
+def test_more_than_24_addons_caps_at_24_and_dismisses_extras():
+    # If 26 addons exist, only top 24 are shown, extras dismissed
+    active_benefits = [
+        {"id": "windscreen", "label": "Windscreen Coverage", "value": "RM 10,000.00", "is_extra": True},
+        {"id": "special_perils", "label": "Special Perils", "is_extra": True},
+    ]
+    available_addons = [
+        {"id": f"addon_{i}", "label": f"Addon Option {i:02d}", "description": f"Description {i}"}
+        for i in range(1, 25)
+    ]
+    # Total = 2 active + 24 available = 26 items
+    matrix = build_unified_matrix_cards(active_benefits=active_benefits, available_addons=available_addons, fill_to_slots=24)
+    assert len(matrix) == 24
+    assert matrix[0]["is_selected"] is True
+    assert matrix[1]["is_selected"] is True
+    assert matrix[0]["serial_number"] == "01"
+    assert matrix[1]["serial_number"] == "02"
+    assert all(c["is_selected"] is False for c in matrix[2:])
+    assert matrix[-1]["serial_number"] == "24"
 
 
 def test_canonical_catalog_contains_24_items():

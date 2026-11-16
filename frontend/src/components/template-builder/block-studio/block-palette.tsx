@@ -26,7 +26,7 @@ export function BlockPalette({ onAddSection, onAddBlock }: BlockPaletteProps) {
     {
       type: "variable_with_title",
       label: "Variable with Title",
-      desc: "e.g. Insurer : QBE, Ref : RL260000308",
+      desc: "e.g. Insurer : QBE, Ref : QT-SAMPLE-001",
       icon: BracketsCurly,
     },
     {

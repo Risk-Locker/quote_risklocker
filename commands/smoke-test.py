@@ -17,6 +17,7 @@ import httpx  # noqa: E402
 from sqlalchemy import delete, select  # noqa: E402
 
 from app.core.config import get_settings  # noqa: E402
+from app.core.security import csrf_token_for_session  # noqa: E402
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.enums import AccountStatus, Role  # noqa: E402
 from app.models.tables import (  # noqa: E402
@@ -108,15 +109,18 @@ def run(base_url: str) -> None:
         owner_id = user.id
 
     try:
+        csrf_token = csrf_token_for_session(session_token, settings.auth_hash_secret)
         with httpx.Client(base_url=base_url.rstrip("/"), timeout=180) as client:
             client.cookies.set(settings.session_cookie_name, session_token)
+            client.cookies.set("risklocker_csrf", csrf_token)
+            client.headers["X-CSRF-Token"] = csrf_token
 
             with tempfile.TemporaryDirectory(prefix="risklocker-smoke-") as directory:
                 pdf_path = Path(directory) / "20260330_TST9000_Quotation_Etiqa.pdf"
                 create_smoke_pdf(pdf_path)
                 with pdf_path.open("rb") as handle:
                     upload = client.post(
-                        "/batches/upload",
+                        "/api/batches/upload",
                         files={"files": (pdf_path.name, handle, "application/pdf")},
                         data={"enhanced_reading": "false"},
                     )
@@ -126,7 +130,7 @@ def run(base_url: str) -> None:
                 raise RuntimeError(f"Smoke upload failed: {batch.get('failed_files')}")
             draft_id = batch["files"][0]["draft_id"]
 
-            detail = client.get(f"/drafts/{draft_id}")
+            detail = client.get(f"/api/drafts/{draft_id}")
             detail.raise_for_status()
             draft = detail.json()["draft"]
             template = next(
@@ -139,7 +143,7 @@ def run(base_url: str) -> None:
                 for key, field in draft["fields"].items()
             }
             save = client.patch(
-                f"/drafts/{draft_id}",
+                f"/api/drafts/{draft_id}",
                 json={
                     "fields": reviewed_fields,
                     "template_id": template["id"],
@@ -150,10 +154,10 @@ def run(base_url: str) -> None:
             )
             save.raise_for_status()
 
-            generate = client.post(f"/drafts/{draft_id}/generate", json={})
+            generate = client.post(f"/api/drafts/{draft_id}/generate", json={})
             generate.raise_for_status()
             version = generate.json()["version"]
-            content = client.get(f"/generated-versions/{version['id']}/content")
+            content = client.get(f"/api/generated-versions/{version['id']}/content")
             content.raise_for_status()
             if not content.content.startswith(b"%PDF"):
                 raise RuntimeError("Generated content is not a PDF.")

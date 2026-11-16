@@ -15,6 +15,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from dateutil.relativedelta import relativedelta
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
@@ -93,6 +94,24 @@ def compute_quotation_content_hash(
     return hashlib.sha256(raw_str.encode("utf-8")).hexdigest()
 
 
+def _calculate_policy_end_date(start_dt: datetime) -> datetime:
+    """Calculate exact policy anniversary end date (1 calendar year minus 1 day).
+
+    Leap-safe:
+    - 2024-02-29 -> 2025-02-28
+    - 2025-01-01 -> 2025-12-31
+    - 2026-06-15 -> 2027-06-14
+    """
+    if start_dt.month == 2 and start_dt.day == 29:
+        return start_dt.replace(year=start_dt.year + 1, month=2, day=28)
+    return start_dt + relativedelta(years=1) - timedelta(days=1)
+
+
+def _calculate_policy_start_date(end_dt: datetime) -> datetime:
+    """Calculate policy start date given end date (1 calendar year minus 1 day prior)."""
+    return end_dt - relativedelta(years=1) + timedelta(days=1)
+
+
 def normalize_tenure_dates(
     start_date: datetime | str | None,
     end_date: datetime | str | None,
@@ -123,12 +142,12 @@ def normalize_tenure_dates(
         end_dt = end_dt.replace(tzinfo=timezone.utc)
 
     if start_dt and not end_dt:
-        end_dt = start_dt + timedelta(days=364)
+        end_dt = _calculate_policy_end_date(start_dt)
     elif end_dt and not start_dt:
-        start_dt = end_dt - timedelta(days=364)
+        start_dt = _calculate_policy_start_date(end_dt)
     elif not start_dt and not end_dt:
         start_dt = now
-        end_dt = now + timedelta(days=364)
+        end_dt = _calculate_policy_end_date(now)
 
     assert start_dt is not None
     assert end_dt is not None
@@ -186,7 +205,10 @@ def resolve_or_create_tenure(
         )
 
     if not veh and (norm_plate or clean_chassis or clean_engine):
-        primary_veh_no = norm_plate if is_valid_malaysian_plate(norm_plate) else (clean_v if clean_v and not is_placeholder_plate else (f"CHASSIS: {clean_chassis}" if clean_chassis else (f"ENGINE: {clean_engine}" if clean_engine else "UNPLATED")))
+        if is_placeholder_plate and not clean_chassis and not clean_engine:
+            primary_veh_no = f"UNPLATED-{new_id()[:6].upper()}"
+        else:
+            primary_veh_no = norm_plate if is_valid_malaysian_plate(norm_plate) else (clean_v if clean_v and not is_placeholder_plate else (f"CHASSIS: {clean_chassis}" if clean_chassis else (f"ENGINE: {clean_engine}" if clean_engine else f"UNPLATED-{new_id()[:6].upper()}")))
         veh = TrackedVehicle(
             id=new_id(),
             vehicle_no=primary_veh_no,
@@ -684,14 +706,14 @@ def create_next_year_renewal_tenure(
     if tenure.coverage_end_date:
         start_date = tenure.coverage_end_date + timedelta(days=1)
     elif tenure.coverage_start_date:
-        start_date = tenure.coverage_start_date + timedelta(days=365)
+        start_date = _calculate_policy_end_date(tenure.coverage_start_date) + timedelta(days=1)
     else:
         start_date = datetime.now(timezone.utc)
 
     if start_date.tzinfo is None:
         start_date = start_date.replace(tzinfo=timezone.utc)
 
-    end_date = start_date + timedelta(days=364)
+    end_date = _calculate_policy_end_date(start_date)
     if end_date.tzinfo is None:
         end_date = end_date.replace(tzinfo=timezone.utc)
     expiry_month = end_date.strftime("%Y-%m")

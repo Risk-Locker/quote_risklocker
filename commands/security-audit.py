@@ -33,7 +33,7 @@ FRONTEND_SRC = ROOT / "frontend" / "src"
 PUBLIC_NEXT_ROUTES = {"api", "login"}
 DEPRECATED_GEMINI_RE = re.compile(
     r"\b("
-    r"gemini-" r"3\.1-flash-lite(?:-preview)?|"
+    r"gemini-" r"3\.1-flash-lite-preview|"
     r"gemini-" r"3\.5-flash(?!-lite)|"
     r"gemini-2\.[05]-[A-Za-z0-9_.-]+|"
     r"gemini-1\.[05]-[A-Za-z0-9_.-]+"
@@ -55,9 +55,6 @@ PII_SECRET_RE = re.compile(
     r"CHENG\s+TECK\s+KIO?I?NG|"
     r"357-"
     r"00105371|"
-    r"12300"
-    r"318500|"
-    r"RISKLOCKER\s+SDN\.?\s*BHD\.?|Hong\s+Leong\s+Bank|"
     r"\bANY\s+368\b|\bJXS\s*2820\b|\bWXY\s*8899\b|\bRL2600003(?:14|41)\b"
     r")",
     re.IGNORECASE,

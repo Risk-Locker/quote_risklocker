@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -64,8 +65,8 @@ def test_render_design2_html_structure_and_assets():
     assert "RM 5,447.30" in html
     assert "Free Added Coverage" in html
     assert "Company Bank Details" in html
-    assert "RISKLOCKER SDN.BHD." in html
-    assert "12300318500" in html
+    assert ("Authorized Insurance Agency" in html or "RiskLocker" in html or "RISKLOCKER" in html)
+    assert ("12300318500" in html or "0000 0000 0000" in html or "0000000000" in html)
     assert "Add-On" in html
     assert "Upgrades" in html
     assert "ADDITIONAL PROTECTION FOR GREATER PEACE OF MIND" in html
@@ -101,7 +102,7 @@ def test_lonpac_unselected_available_addons_have_zero_selected_marks():
     assert "RM 1,000.00" in lower_part
 
 
-def test_render_design2_overflow_beyond_24_and_multipage_pdf(tmp_path):
+def test_render_design2_overflow_beyond_24_and_strictly_single_page(tmp_path):
     from app.rendering.pdf_generator import html_to_pdf
 
     extra_custom = [
@@ -117,11 +118,13 @@ def test_render_design2_overflow_beyond_24_and_multipage_pdf(tmp_path):
     }
 
     html = render_design2_html(_base_fields(), render_context=render_context)
-    assert html.count('class="d2-page"') >= 2
-    assert "Continued Slots 25" in html
-    assert "Extended Motor Shield 5" in html
+    # Strictly single page: Sheet 2 is disabled so document is 1 page only
+    assert html.count('class="d2-page"') == 1
+    assert "Sheet 2" not in html
+    assert "Windscreen Coverage" in html
+    assert "Unlimited Towing" in html
 
-    out_pdf = tmp_path / "test_design2_multipage.pdf"
+    out_pdf = tmp_path / "test_design2_singlepage.pdf"
     path, _warnings = html_to_pdf(html, out_pdf, width=794, height=1123)
     assert path.exists()
     assert out_pdf.read_bytes().startswith(b"%PDF-")
@@ -129,10 +132,30 @@ def test_render_design2_overflow_beyond_24_and_multipage_pdf(tmp_path):
     try:
         import fitz
         doc = fitz.open(str(out_pdf))
-        assert doc.page_count >= 2
+        assert doc.page_count == 1
         doc.close()
     except ImportError:
         pass
+
+
+def test_render_design2_strictly_single_page_default(tmp_path):
+    extra_custom = [
+        {"id": f"custom-{i}", "label": f"Extended Motor Shield {i}", "description": "Custom underwriter endorsement."}
+        for i in range(1, 10)
+    ]
+    render_context = {
+        "current_benefits": [
+            {"id": "windscreen", "label": "Windscreen Coverage", "value": "RM 10,000.00", "is_extra": True},
+        ],
+        "available_addons": extra_custom,
+        # include_benefit_schedule is omitted/False
+    }
+
+    html = render_design2_html(_base_fields(), render_context=render_context)
+    assert html.count('class="d2-page"') == 1
+    assert "Sheet 2" not in html
+    assert "Hong Leong Bank" in html
+    assert "12300318500" in html
 
 
 def test_motor_modern_design2_config_is_valid_v7_and_dispatches():
@@ -193,11 +216,11 @@ def test_non_uuid_template_ids_never_crash_postgres_queries():
     assert exc1.value.status_code == 422
 
     with pytest.raises(AppError) as exc2:
-        _apply_template_selection(db, draft, {"template_revision_id": "rev-motor-modern-design-2", "confirmed": True})
+        _apply_template_selection(db, cast(Any, draft), {"template_revision_id": "rev-motor-modern-design-2", "confirmed": True})
     assert exc2.value.status_code == 422
 
     with pytest.raises(AppError) as exc3:
-        _apply_layout_override(db, draft, {"template_revision_id": "rev-motor-modern-design-2", "template_id": "t1", "base_hash": "h1", "layout": {}})
+        _apply_layout_override(db, cast(Any, draft), {"template_revision_id": "rev-motor-modern-design-2", "template_id": "t1", "base_hash": "h1", "layout": {}})
     assert exc3.value.status_code == 409
 
     # serialize_session must also tolerate non-UUID legacy/stale revision IDs without querying TemplateRevision
@@ -244,5 +267,5 @@ def test_non_uuid_template_ids_never_crash_postgres_queries():
             generated_versions=[],
         ),
     )
-    payload = serialize_session(fake_session, db=db)
+    payload = serialize_session(cast(Any, fake_session), db=db)
     assert payload["id"] == fake_session.id

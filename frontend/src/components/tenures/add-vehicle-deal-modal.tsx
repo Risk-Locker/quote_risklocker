@@ -9,6 +9,6 @@ export interface PersonInCharge {
   commission_rate: number;
 }
 
-export function AddVehicleDealModal(_props: any) {
+export function AddVehicleDealModal() {
   return null;
 }

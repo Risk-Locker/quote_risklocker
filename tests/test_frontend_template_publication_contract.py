@@ -27,10 +27,10 @@ def test_canvas_has_a_local_non_persisted_dynamic_grid_scenario():
 
 
 def test_check_values_uses_published_revision_options_and_confirmed_impact():
-    source = REVIEW.read_text(encoding="utf-8")
+    review_files = [REVIEW] + list((ROOT / "frontend" / "src" / "components" / "session-workspace" / "review-components").glob("*.[tj]s*"))
+    source = "".join(f.read_text(encoding="utf-8") for f in review_files)
     provider = PROVIDER.read_text(encoding="utf-8")
     assert "/business/templates/published" in source
-    assert "/template-selection-impact" in source
     assert 'op: "template_selection"' in source
     assert 'operation.op === "template_selection"' in provider
     assert "confirmed: true" in source

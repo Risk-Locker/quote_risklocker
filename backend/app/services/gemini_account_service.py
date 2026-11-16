@@ -11,7 +11,7 @@ from typing import Any, Sequence
 
 import httpx
 
-from app.core.config import get_settings
+from app.core.config import get_settings, resolve_active_gemini_model
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +113,7 @@ class GeminiAccount:
     last_error_message: str | None = None
     successful_calls: int = 0
     failed_calls: int = 0
+    is_paused: bool = False
 
     @property
     def masked_key(self) -> str:
@@ -123,18 +124,18 @@ class GeminiAccount:
         return self.key[:6] + "..." + self.key[-4:]
 
 
-PARALLEL_MODELS: tuple[str, ...] = ("gemini-3.5-flash-lite", "gemini-3.8-flash")
+PARALLEL_MODELS: tuple[str, ...] = ("gemini-3.1-flash-lite", "gemini-3.5-flash-lite")
 
 
 class GeminiAccountManager:
-    """Thread-safe multi-account Gemini manager enforcing 1,840 RPD, 48 RPM, 880k TPM across 4 parallel model endpoints (460 RPD buffer / 500 raw per endpoint)."""
+    """Thread-safe multi-account Gemini manager enforcing 1,920 RPD, 52 RPM, 800k TPM across 4 parallel model endpoints (480 RPD buffer / 500 raw per endpoint, 13 RPM, 200k TPM)."""
 
     def __init__(self, keys: tuple[str, ...] = ()):
         self._lock = threading.RLock()
         settings = get_settings()
-        self._max_rpd_per_key = getattr(settings, "gemini_max_rpd_per_key", 460)
-        self._max_rpm_per_key = getattr(settings, "gemini_max_rpm_per_key", 12)
-        self._max_tpm_per_key = getattr(settings, "gemini_max_tpm_per_key", 220_000)
+        self._max_rpd_per_key = getattr(settings, "gemini_max_rpd_per_key", 480)
+        self._max_rpm_per_key = getattr(settings, "gemini_max_rpm_per_key", 13)
+        self._max_tpm_per_key = getattr(settings, "gemini_max_tpm_per_key", 200_000)
         self._max_prompt_tokens = getattr(settings, "gemini_max_prompt_tokens", 60_000)
         self._max_accounts = getattr(settings, "gemini_max_accounts", 6)
 
@@ -209,26 +210,46 @@ class GeminiAccountManager:
                     except Exception as exc:
                         logger.debug("Could not read manual keys from DB: %s", exc)
 
+            paused_ids: set[str] = set()
+            if db is not None:
+                from app.models.tables import AppSetting
+
+                p_set = db.get(AppSetting, "gemini_paused_keys")
+                if p_set and isinstance(p_set.value, dict):
+                    paused_ids = set(p_set.value.get("paused_ids", []))
+                m_set = db.get(AppSetting, "gemini_model_config")
+                if m_set and isinstance(m_set.value, dict):
+                    par = m_set.value.get("parallel_models")
+                    if par:
+                        self._parallel_models = tuple(m for m in par if m in PARALLEL_MODELS)
+                    pri = m_set.value.get("primary_model")
+                    if pri and pri in PARALLEL_MODELS:
+                        self._primary_model = pri
+
             existing_by_key = {acc.key: acc for acc in self._accounts}
             new_accounts: list[GeminiAccount] = []
 
             # 1. Primary .env key(s)
             for idx, k in enumerate(env_keys):
+                acc_id = f"env_{idx}"
+                is_p = acc_id in paused_ids
                 if k in existing_by_key:
                     acc = existing_by_key[k]
                     acc.label = f"Account {idx + 1} (.env Primary)" if idx == 0 else f"Account {idx + 1} (.env)"
                     acc.source = "env"
+                    acc.is_paused = is_p
                     new_accounts.append(acc)
                 else:
                     new_accounts.append(
                         GeminiAccount(
-                            id=f"env_{idx}",
+                            id=acc_id,
                             key=k,
                             label=f"Account {idx + 1} (.env Primary)" if idx == 0 else f"Account {idx + 1} (.env)",
                             source="env",
                             status="ready",
                             status_label="Ready · Configured",
                             status_color="green",
+                            is_paused=is_p,
                         )
                     )
 
@@ -239,11 +260,13 @@ class GeminiAccountManager:
                     continue
                 acc_id = item.get("id") or f"manual_{idx}"
                 acc_label = item.get("label") or f"Account {len(new_accounts) + 1} (Manual)"
+                is_p = (acc_id in paused_ids) or bool(item.get("is_paused", False))
                 if k in existing_by_key:
                     acc = existing_by_key[k]
                     acc.id = acc_id
                     acc.label = acc_label
                     acc.source = "manual"
+                    acc.is_paused = is_p
                     new_accounts.append(acc)
                 else:
                     new_accounts.append(
@@ -256,6 +279,7 @@ class GeminiAccountManager:
                             status_label="Ready · Manual Key" if item.get("last_status") == "ready" else "Untested",
                             status_color="green" if item.get("last_status") == "ready" else "gray",
                             last_probed_at=item.get("last_probed_at"),
+                            is_paused=is_p,
                         )
                     )
 
@@ -309,14 +333,15 @@ class GeminiAccountManager:
     def _init_parallel_slots(self) -> None:
         """Initialize or sync 2 models x N keys parallel slots with independent per-model quota limits (500 RPD / 15 RPM raw; 460 RPD / 12 RPM / 220k TPM buffered)."""
         new_slots: dict[str, dict[str, Any]] = {}
-        n_models = max(len(PARALLEL_MODELS), 1)
+        active_models = getattr(self, "_parallel_models", PARALLEL_MODELS) or PARALLEL_MODELS
+        n_models = max(len(active_models), 1)
         # Google AI Studio quotas are per model per key:
         slot_rpm = self._max_rpm_per_key
         slot_tpm = self._max_tpm_per_key
         slot_rpd = self._max_rpd_per_key
 
         for acc_idx, acc in enumerate(self._accounts):
-            for mod_idx, mod_name in enumerate(PARALLEL_MODELS):
+            for mod_idx, mod_name in enumerate(active_models):
                 slot_id = f"{acc.id}::{mod_name}"
                 existing = self._parallel_slots.get(slot_id)
                 new_slots[slot_id] = {
@@ -353,6 +378,26 @@ class GeminiAccountManager:
                 slot_rpm_used = sum(1 for t in slot["request_timestamps_min"] if t >= now - 60)
                 slot_tpm_used = sum(tok for t, tok in slot["token_timestamps_min"] if t >= now - 60)
                 is_cooling = bool(slot["cooling_until"] and now < slot["cooling_until"])
+                acc = next((a for a in self._accounts if a.key == slot["key"]), None)
+                is_paused = bool(acc and acc.is_paused)
+
+                if is_paused:
+                    is_ready = False
+                    status_label = "Off · Paused"
+                    status_color = "gray"
+                elif is_cooling:
+                    is_ready = False
+                    status_label = "Cooling (60s)"
+                    status_color = "amber"
+                elif slot_rpm_used >= slot["rpm_limit"] or slot.get("request_count_today", 0) >= slot["rpd_limit"]:
+                    is_ready = False
+                    status_label = "At Limit"
+                    status_color = "amber"
+                else:
+                    is_ready = True
+                    status_label = "Ready"
+                    status_color = "green"
+
                 endpoints.append({
                     "slot_id": slot["slot_id"],
                     "slot_index": slot["slot_index"],
@@ -369,16 +414,20 @@ class GeminiAccountManager:
                     "rpd_limit": slot["rpd_limit"],
                     "rpd_remaining": max(0, slot["rpd_limit"] - slot.get("request_count_today", 0)),
                     "cooling_until": slot["cooling_until"],
-                    "is_ready": not is_cooling and slot_rpm_used < slot["rpm_limit"] and slot.get("request_count_today", 0) < slot["rpd_limit"],
-                    "status_label": "Cooling (60s)" if is_cooling else ("At Limit" if (slot_rpm_used >= slot["rpm_limit"] or slot.get("request_count_today", 0) >= slot["rpd_limit"]) else "Ready"),
-                    "status_color": "amber" if is_cooling else ("green" if (slot_rpm_used < slot["rpm_limit"] and slot.get("request_count_today", 0) < slot["rpd_limit"]) else "amber"),
+                    "is_paused": is_paused,
+                    "is_ready": is_ready,
+                    "status_label": status_label,
+                    "status_color": status_color,
                 })
             return endpoints
 
     def acquire_parallel_slot(
-        self, batch_item_index: int | None = None
+        self, batch_item_index: int | None = None, requested_model: str | None = None
     ) -> tuple[str, str, str] | None:
-        """Acquire a parallel endpoint slot (api_key, model_name, slot_id) honoring 48 RPM / 880k TPM / 1,840 RPD fleet math (460/endpoint buffer, 2,000 raw)."""
+        """Acquire a parallel endpoint slot (api_key, model_name, slot_id) honoring 52 RPM / 800k TPM / 1,920 RPD fleet math (480/endpoint buffer, 2,000 raw)."""
+        if requested_model is not None and requested_model not in PARALLEL_MODELS:
+            raise ValueError(f"Forbidden model tier: {requested_model}. Allowed models: {PARALLEL_MODELS}")
+
         with self._lock:
             self._check_daily_reset()
             now = time.time()
@@ -388,6 +437,8 @@ class GeminiAccountManager:
                 return None
 
             slots_list = sorted(self._parallel_slots.values(), key=lambda s: s["slot_index"])
+            if requested_model is not None:
+                slots_list = [s for s in slots_list if s["model"] == requested_model]
             n_slots = len(slots_list)
             if n_slots == 0:
                 return None
@@ -397,25 +448,30 @@ class GeminiAccountManager:
                 if slot["cooling_until"] and now >= slot["cooling_until"]:
                     slot["cooling_until"] = None
 
-            # Prefer round-robin slot based on batch_item_index (e.g. 0..11 for 12 files: 3 per model)
+            # Strict S = 2N round-robin equilibrium via PacerSentinel
+            from app.extraction.pacer_sentinel import get_pacer_sentinel, SAFE_RPM_CEILING, SAFE_TPM_CEILING, SAFE_RPD_CEILING
+
+            sentinel = get_pacer_sentinel(n_slots)
             if batch_item_index is not None:
                 pref_idx = abs(batch_item_index) % n_slots
-                ordered = [slots_list[pref_idx]] + [s for i, s in enumerate(slots_list) if i != pref_idx]
             else:
-                ordered = slots_list
+                pref_idx = sentinel.next_slot_index()
+
+            ordered = [slots_list[pref_idx]] + [s for i, s in enumerate(slots_list) if i != pref_idx]
 
             MIN_KEY_SPACING = 1.8
             best_candidate = None
 
             for slot in ordered:
                 acc = next((a for a in self._accounts if a.key == slot["key"]), None)
-                if not acc or acc.status in ("denied", "invalid_key"):
+                if not acc or acc.is_paused or acc.status in ("denied", "invalid_key"):
                     continue
                 # Key daily quota: supports len(PARALLEL_MODELS) * max_rpd_per_key across its models
                 if acc.request_count_today >= len(PARALLEL_MODELS) * self._max_rpd_per_key:
                     continue
-                # Slot daily quota: 460 RPD (buffered) for its specific model
-                if slot.get("request_count_today", 0) >= slot["rpd_limit"]:
+                # Slot daily quota: 480 RPD (buffered) for its specific model
+                effective_rpd = min(slot.get("rpd_limit", SAFE_RPD_CEILING), SAFE_RPD_CEILING)
+                if slot.get("request_count_today", 0) >= effective_rpd:
                     continue
                 if slot["cooling_until"] and now < slot["cooling_until"]:
                     continue
@@ -425,8 +481,10 @@ class GeminiAccountManager:
 
                 s_rpm = len(slot["request_timestamps_min"])
                 s_tpm = sum(tok for _, tok in slot["token_timestamps_min"])
+                effective_rpm = min(slot.get("rpm_limit", SAFE_RPM_CEILING), SAFE_RPM_CEILING)
+                effective_tpm = min(slot.get("tpm_limit", SAFE_TPM_CEILING), SAFE_TPM_CEILING)
 
-                if s_rpm < slot["rpm_limit"] and s_tpm < slot["tpm_limit"]:
+                if s_rpm < effective_rpm and s_tpm < effective_tpm:
                     time_since_last = now - getattr(acc, "last_dispatched_at", 0.0)
                     if time_since_last >= MIN_KEY_SPACING:
                         acc.last_dispatched_at = now
@@ -537,6 +595,16 @@ class GeminiAccountManager:
                 self._accounts[index].last_switch_reason = f"Manually selected Account {index + 1}"
                 logger.info("Manually switched active Gemini account to %d (%s)", index + 1, self._accounts[index].label)
                 return True
+            return False
+
+    def set_account_paused(self, account_id: str, paused: bool = True) -> bool:
+        """Pause or unpause an account without modifying or deleting its credentials."""
+        with self._lock:
+            for acc in self._accounts:
+                if acc.id == account_id:
+                    acc.is_paused = paused
+                    logger.info("Account %s (%s) paused state set to %s", acc.id, acc.label, paused)
+                    return True
             return False
 
     def get_next_key(self) -> str | None:
@@ -735,14 +803,15 @@ class GeminiAccountManager:
         import os, sys
 
         if os.getenv("APP_ENV") == "test" or "pytest" in sys.modules:
+            active_m = resolve_active_gemini_model(model)
             if "invalid" in key.lower():
-                return {"ok": False, "status_code": 400, "error": "API_KEY_INVALID", "latency_ms": 45, "model": model or "gemini-3.1-flash-lite-preview"}
+                return {"ok": False, "status_code": 400, "error": "API_KEY_INVALID", "latency_ms": 45, "model": active_m}
             if "denied" in key.lower() or "403" in key:
-                return {"ok": False, "status_code": 403, "error": "Project access denied", "latency_ms": 50, "model": model or "gemini-3.1-flash-lite-preview"}
-            return {"ok": True, "status_code": 200, "error": None, "latency_ms": 40, "model": model or "gemini-3.1-flash-lite-preview"}
+                return {"ok": False, "status_code": 403, "error": "Project access denied", "latency_ms": 50, "model": active_m}
+            return {"ok": True, "status_code": 200, "error": None, "latency_ms": 40, "model": active_m}
 
         settings = get_settings()
-        target_model = model or getattr(settings, "gemini_model", None) or "gemini-3.1-flash-lite-preview"
+        target_model = resolve_active_gemini_model(model or getattr(settings, "gemini_model", None))
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{target_model}:generateContent?key={key}"
         test_payload = {
             "contents": [{"parts": [{"text": "ping"}]}],
@@ -838,7 +907,7 @@ class GeminiAccountManager:
             self._check_daily_reset()
             now = time.time()
             settings = get_settings()
-            target_model = getattr(settings, "gemini_model", None) or "gemini-3.1-flash-lite-preview"
+            target_model = resolve_active_gemini_model(getattr(settings, "gemini_model", None))
 
             today_str = get_current_local_date()
             db_counts_by_account: dict[str, int] = {}
@@ -880,6 +949,10 @@ class GeminiAccountManager:
                 acc_rpm_limit = len(PARALLEL_MODELS) * self._max_rpm_per_key
                 acc_tpm_limit = len(PARALLEL_MODELS) * self._max_tpm_per_key
 
+                acc_is_active = not acc.is_paused and acc.status not in ("denied", "invalid_key")
+                acc_label = "Off · Paused" if acc.is_paused else ("Active" if acc.status in ("ready", "untested") else acc.status_label)
+                acc_color = "gray" if acc.is_paused else ("green" if acc.status in ("ready", "untested") else acc.status_color)
+
                 accounts_data.append(
                     {
                         "id": acc.id,
@@ -887,9 +960,9 @@ class GeminiAccountManager:
                         "label": acc.label,
                         "source": acc.source,
                         "masked_key": acc.masked_key,
-                        "status": acc.status,
-                        "status_label": acc.status_label,
-                        "status_color": acc.status_color,
+                        "status": "paused" if acc.is_paused else acc.status,
+                        "status_label": acc_label,
+                        "status_color": acc_color,
                         "rpm_used": a_rpm,
                         "rpm_limit": acc_rpm_limit,
                         "rpm_remaining": max(0, acc_rpm_limit - a_rpm),
@@ -907,60 +980,85 @@ class GeminiAccountManager:
                         "last_error_code": acc.last_error_code,
                         "successful_calls": acc.successful_calls,
                         "failed_calls": acc.failed_calls,
-                        "is_active": idx == self._active_index,
+                        "is_active": acc_is_active,
+                        "is_paused": acc.is_paused,
                     }
                 )
 
             if db_pool_rpd_used is not None and db_pool_rpd_used > pool_rpd_used:
                 pool_rpd_used = db_pool_rpd_used
 
-            active_acc = self._accounts[self._active_index] if 0 <= self._active_index < len(self._accounts) else None
-            active_status = active_acc.status if active_acc else "offline"
-            active_label = active_acc.status_label if active_acc else "Offline (No Keys)"
-            active_color = active_acc.status_color if active_acc else "gray"
-
-            if active_status == "untested" and active_acc:
-                active_status = "ready"
-                active_label = "Ready · Configured"
-                active_color = "green"
-
-            is_active = bool(
-                self._accounts
-                and not self._pool_cutoff_active
-                and any(a.status in ("ready", "untested", "cooling_rpm") for a in self._accounts)
-            )
-            total_accounts = max(len(self._accounts), 1)
             fleet_endpoints = self.get_fleet_endpoints()
-            total_endpoints = len(fleet_endpoints) if fleet_endpoints else (len(self._accounts) * len(PARALLEL_MODELS))
-            pool_rpd_limit = total_endpoints * self._max_rpd_per_key
-            pool_rpm_limit = total_endpoints * self._max_rpm_per_key
-            pool_tpm_limit = total_endpoints * self._max_tpm_per_key
-            raw_rpd_capacity = total_endpoints * 500
-            raw_rpm_capacity = total_endpoints * 15
+            active_accounts = [a for a in self._accounts if not a.is_paused and a.status not in ("denied", "invalid_key")]
+            active_keys_count = len(active_accounts)
+            total_keys_count = len(self._accounts)
+            models_count = len(PARALLEL_MODELS)
+            total_endpoints = total_keys_count * models_count
+            active_endpoints_count = active_keys_count * models_count
+
+            # Active limits scale dynamically with active (unpaused) keys
+            pool_rpd_limit = active_endpoints_count * self._max_rpd_per_key
+            pool_rpm_limit = active_endpoints_count * self._max_rpm_per_key
+            pool_tpm_limit = active_endpoints_count * self._max_tpm_per_key
+            raw_rpd_capacity = active_endpoints_count * 500
+            raw_rpm_capacity = active_endpoints_count * 15
             tokens_budget = 43_000
 
+            if not self._accounts:
+                overall_status = "offline"
+                overall_label = "Offline (No Keys)"
+                overall_color = "gray"
+                is_active = False
+            elif active_keys_count == 0:
+                overall_status = "paused"
+                overall_label = "Fleet Offline (All Keys Paused)"
+                overall_color = "gray"
+                is_active = False
+            elif self._pool_cutoff_active:
+                overall_status = "cutoff"
+                overall_label = "Fleet Quota Exceeded (Safety Cutoff)"
+                overall_color = "red"
+                is_active = False
+            elif active_keys_count == total_keys_count:
+                overall_status = "ready"
+                overall_label = "Fleet Online · All Keys Active"
+                overall_color = "green"
+                is_active = True
+            else:
+                overall_status = "ready"
+                overall_label = f"{active_endpoints_count}/{total_endpoints} Endpoints Active ({active_keys_count} Keys Active)"
+                overall_color = "green"
+                is_active = True
+
+            active_acc = self._accounts[self._active_index] if 0 <= self._active_index < len(self._accounts) else None
             active_rpm_used = sum(1 for t in active_acc.request_timestamps_min if t >= now - 60) if active_acc else 0
             active_rpd_used = active_acc.request_count_today if active_acc else 0
             rpd_rem = 0 if self._pool_cutoff_active else max(0, pool_rpd_limit - pool_rpd_used)
 
             return {
                 "active": is_active,
-                "status": active_status,
-                "status_label": active_label,
-                "status_color": active_color,
+                "status": overall_status,
+                "status_label": overall_label,
+                "status_color": overall_color,
                 "local_date": today_str,
-                "model": target_model,
-                "models": list(PARALLEL_MODELS),
+                "model": getattr(self, "_primary_model", target_model),
+                "models": list(getattr(self, "_parallel_models", PARALLEL_MODELS) or PARALLEL_MODELS),
+                "available_models": list(PARALLEL_MODELS),
+                "active_parallel_models": list(getattr(self, "_parallel_models", PARALLEL_MODELS) or PARALLEL_MODELS),
                 "active_account_index": self._active_index,
                 "active_account_label": active_acc.label if active_acc else "None",
-                "keys_count": len(self._accounts),
-                "key_count": len(self._accounts),
+                "keys_count": total_keys_count,
+                "key_count": total_keys_count,
+                "active_keys_count": active_keys_count,
                 "fleet_endpoints_count": len(fleet_endpoints),
+                "active_endpoints_count": active_endpoints_count,
                 "tokens_budget_per_request": tokens_budget,
                 "fleet_summary": {
-                    "keys_count": len(self._accounts),
-                    "models_per_key": len(PARALLEL_MODELS),
+                    "keys_count": total_keys_count,
+                    "active_keys_count": active_keys_count,
+                    "models_per_key": models_count,
                     "total_parallel_endpoints": total_endpoints,
+                    "active_parallel_endpoints": active_endpoints_count,
                     "fleet_rpd_limit": pool_rpd_limit,
                     "fleet_rpm_limit": pool_rpm_limit,
                     "fleet_tpm_limit": pool_tpm_limit,
@@ -1045,3 +1143,246 @@ def get_key_pool() -> GeminiAccountManager:
         _account_manager = GeminiAccountManager(settings.gemini_api_keys)
         _account_manager.sync_accounts()
     return _account_manager
+
+
+def get_historical_analytics(db: Any, time_range: str = "today") -> dict[str, Any]:
+    """Aggregate historical Gemini call metrics matching Google AI Studio rate limit dashboard."""
+    from datetime import datetime, timedelta, timezone
+    from collections import defaultdict
+    from sqlalchemy import select, func
+    from app.models.tables import GeminiApiCallLog
+    from app.extraction.pacer_sentinel import SAFE_RPM_CEILING, SAFE_TPM_CEILING, SAFE_RPD_CEILING
+
+    now = datetime.now(timezone.utc)
+    if time_range == "today":
+        today_str = now.strftime("%Y-%m-%d")
+        base_filter = GeminiApiCallLog.local_date == today_str
+    elif time_range == "last-1-day":
+        cutoff = now - timedelta(days=1)
+        base_filter = GeminiApiCallLog.created_at >= cutoff
+    elif time_range == "last-7-days":
+        cutoff = now - timedelta(days=7)
+        base_filter = GeminiApiCallLog.created_at >= cutoff
+    elif time_range == "last-28-days":
+        cutoff = now - timedelta(days=28)
+        base_filter = GeminiApiCallLog.created_at >= cutoff
+    else:
+        today_str = now.strftime("%Y-%m-%d")
+        base_filter = GeminiApiCallLog.local_date == today_str
+
+    # 1. Overall totals via single aggregation query
+    summary_stmt = select(
+        func.count(GeminiApiCallLog.id),
+        func.coalesce(func.sum(GeminiApiCallLog.total_tokens), 0),
+    ).where(base_filter)
+    summary_res = db.execute(summary_stmt).first()
+    total_calls = int(summary_res[0]) if summary_res and summary_res[0] is not None else 0
+    total_tokens = int(summary_res[1]) if summary_res and summary_res[1] is not None else 0
+
+    if total_calls == 0:
+        return {
+            "time_range": time_range,
+            "summary": {
+                "total_calls": 0,
+                "total_tokens": 0,
+                "models_active": 0,
+            },
+            "table": [],
+        }
+
+    # 2. Group totals per (account_id, model)
+    group_stmt = (
+        select(
+            GeminiApiCallLog.account_id,
+            GeminiApiCallLog.model,
+            func.count(GeminiApiCallLog.id).label("call_count"),
+            func.coalesce(func.sum(GeminiApiCallLog.total_tokens), 0).label("group_tokens"),
+            func.max(GeminiApiCallLog.api_key_masked).label("masked_key"),
+        )
+        .where(base_filter)
+        .group_by(GeminiApiCallLog.account_id, GeminiApiCallLog.model)
+    )
+    group_rows = db.execute(group_stmt).all()
+
+    # 3. Peak RPM/TPM via database minute-bucket grouping (zero RAM scans, zero O(N^2) loops)
+    is_sqlite = False
+    try:
+        bind = getattr(db, "bind", None)
+        if bind is None and hasattr(db, "get_bind"):
+            bind = db.get_bind()
+        if bind and getattr(bind.dialect, "name", "") == "sqlite":
+            is_sqlite = True
+    except Exception:
+        pass
+
+    if is_sqlite:
+        minute_bucket = func.strftime("%Y-%m-%d %H:%M", GeminiApiCallLog.created_at)
+    else:
+        minute_bucket = func.to_char(GeminiApiCallLog.created_at, "YYYY-MM-DD HH24:MI")
+
+    minute_stmt = (
+        select(
+            GeminiApiCallLog.account_id,
+            GeminiApiCallLog.model,
+            func.count(GeminiApiCallLog.id).label("minute_calls"),
+            func.coalesce(func.sum(GeminiApiCallLog.total_tokens), 0).label("minute_tokens"),
+        )
+        .where(base_filter)
+        .group_by(GeminiApiCallLog.account_id, GeminiApiCallLog.model, minute_bucket)
+    )
+    minute_rows = db.execute(minute_stmt).all()
+
+    peak_metrics: dict[tuple[str, str], dict[str, int]] = defaultdict(lambda: {"rpm": 0, "tpm": 0})
+    for row in minute_rows:
+        key = (str(row[0]), str(row[1]))
+        calls = int(row[2] or 0)
+        tokens = int(row[3] or 0)
+        if calls > peak_metrics[key]["rpm"]:
+            peak_metrics[key]["rpm"] = calls
+        if tokens > peak_metrics[key]["tpm"]:
+            peak_metrics[key]["tpm"] = tokens
+
+    table_rows: list[dict[str, Any]] = []
+    for row in group_rows:
+        acc_id = str(row[0])
+        model_name = str(row[1])
+        call_count = int(row[2] or 0)
+        group_tokens = int(row[3] or 0)
+        masked_key = str(row[4] or "")
+
+        key = (acc_id, model_name)
+        peak_rpm = peak_metrics[key]["rpm"]
+        peak_tpm = peak_metrics[key]["tpm"]
+
+        table_rows.append({
+            "account_id": acc_id,
+            "masked_key": masked_key,
+            "model": model_name,
+            "category": "Text-out models",
+            "call_count": call_count,
+            "total_tokens": group_tokens,
+            "peak_rpm": peak_rpm,
+            "rpm_limit": SAFE_RPM_CEILING,
+            "peak_tpm": peak_tpm,
+            "tpm_limit": SAFE_TPM_CEILING,
+            "rpd_limit": SAFE_RPD_CEILING,
+            "status": "Healthy",
+        })
+
+    return {
+        "time_range": time_range,
+        "summary": {
+            "total_calls": total_calls,
+            "total_tokens": total_tokens,
+            "models_active": len(table_rows),
+        },
+        "table": table_rows,
+    }
+
+
+def probe_google_live_model_catalog(key: str) -> tuple[bool, list[str], str | None]:
+    """Lightweight GET /v1beta/models probe to verify model presence without token cost."""
+    import urllib.request
+    import json
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "risklocker-quota-radar/2.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            model_names = [m.get("name", "").replace("models/", "") for m in data.get("models", [])]
+            return True, model_names, None
+    except Exception as exc:
+        return False, [], str(exc)
+
+
+def get_ai_quota_radar_snapshot(*, probe_live: bool = False, db: Any = None) -> dict[str, Any]:
+    """Generate comprehensive snapshot of live Gemini key pool, parallel models, and quotas."""
+    import json
+    from datetime import datetime, timezone
+    from pathlib import Path
+    from app.extraction.pacer_sentinel import SAFE_RPD_CEILING
+
+    pool = get_key_pool()
+    if db is not None:
+        pool.sync_accounts(db=db)
+    else:
+        from app.db.session import SessionLocal
+        with SessionLocal() as session:
+            pool.sync_accounts(db=session)
+
+    if probe_live:
+        pool.probe(force=True)
+
+    stats = pool.get_quota_stats()
+    accounts = stats.get("accounts", [])
+    endpoints = stats.get("endpoints", [])
+    today_str = get_current_local_date()
+
+    report: dict[str, Any] = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "local_date": today_str,
+        "overall_status": stats.get("status_label", "Unknown"),
+        "active_model": stats.get("model", "gemini-3.1-flash-lite"),
+        "parallel_models": list(stats.get("parallel_models", PARALLEL_MODELS)),
+        "key_count": len(accounts),
+        "total_endpoints": len(endpoints),
+        "total_rpd_used": stats.get("rpd_used", 0),
+        "total_rpd_limit": stats.get("rpd_limit", len(accounts) * len(PARALLEL_MODELS) * SAFE_RPD_CEILING),
+        "accounts": accounts,
+        "endpoints": endpoints,
+        "google_catalog_verified": False,
+        "alerts": [],
+    }
+
+    # Verify live Google catalog
+    primary_keys = pool.get_all_keys()
+    if primary_keys:
+        ok, available_models, err = probe_google_live_model_catalog(primary_keys[0])
+        if ok:
+            report["google_catalog_verified"] = True
+            for expected_model in PARALLEL_MODELS:
+                is_present = any(expected_model in m for m in available_models)
+                if not is_present:
+                    report["alerts"].append(
+                        f"[CRITICAL MODEL SHIFT] Google AI Studio does NOT list '{expected_model}' in live catalog! Possible upstream retirement!"
+                    )
+        else:
+            report["alerts"].append(
+                f"[LIVE PROBE WARNING] Failed to reach Google live models endpoint: {err}"
+            )
+    else:
+        report["alerts"].append(
+            "[CRITICAL] Zero Gemini API keys configured! System fail-closed blocks unverified uploads."
+        )
+
+    # Check for quota warnings
+    for acc in accounts:
+        used = acc.get("rpd_used", 0)
+        limit = acc.get("rpd_limit", SAFE_RPD_CEILING * len(PARALLEL_MODELS))
+        pct = (used / limit * 100) if limit > 0 else 0
+        if pct >= 90:
+            report["alerts"].append(
+                f"[CRITICAL] Account {acc.get('label')} has reached {used}/{limit} RPD ({pct:.1f}%). Near suspension threshold!"
+            )
+        elif pct >= 75:
+            report["alerts"].append(
+                f"[WARNING] Account {acc.get('label')} usage at {used}/{limit} RPD ({pct:.1f}%)."
+            )
+
+        if acc.get("status") in {"denied", "rate_limited", "cooling"}:
+            report["alerts"].append(
+                f"[ALERT] Account {acc.get('label')} status is '{acc.get('status_label')}' (Error: {acc.get('last_error')})"
+            )
+
+    try:
+        root_dir = Path(__file__).resolve().parent.parent.parent.parent
+        memory_dir = root_dir / ".agents" / "memory"
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        report_file = memory_dir / "ai-radar-latest.json"
+        report_file.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+    return report
+

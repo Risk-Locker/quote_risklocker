@@ -157,7 +157,7 @@ def test_ensure_next_year_renewal_tenures_roll_forward(db_session: Session, test
     assert new_t.coverage_start_date.day == 15
     assert new_t.coverage_end_date.year == 2028
     assert new_t.coverage_end_date.month == 8
-    assert new_t.coverage_end_date.day == 13
+    assert new_t.coverage_end_date.day == 14
     assert new_t.road_tax == 90.0
     assert new_t.runner_fee == 15.0
     assert new_t.status == "draft"

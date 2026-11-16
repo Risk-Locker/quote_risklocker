@@ -124,6 +124,8 @@ def _asset_summary(asset: BusinessAsset | None) -> dict | None:
         "status": asset.status,
         "revision": rev,
         "content_hash": getattr(asset, "content_hash", ""),
+        "has_transparency": getattr(asset, "has_transparency", None),
+        "created_at": asset.created_at.isoformat() if getattr(asset, "created_at", None) else None,
         "url": f"/business/assets/{asset.id}/content?profile=ui&v={rev}",
     }
 

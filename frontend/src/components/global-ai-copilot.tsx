@@ -105,7 +105,28 @@ type ChatAction =
       type: "catalog_diff";
       title?: string;
       company_id?: string;
-      preview: PreviewResponse;
+      preview?: PreviewResponse;
+      plan?: {
+        source_company: { id: string; name: string };
+        target_company: { id: string; name: string };
+        summary?: {
+          source_catalogs_count?: number;
+          target_catalogs_count?: number;
+          common_concepts_count?: number;
+          concepts_to_add_count?: number;
+          operations_count?: number;
+        };
+        operations: Array<{
+          action: "add_offering" | "update_plan_item";
+          catalog_id: string;
+          catalog_name: string;
+          concept_key: string;
+          concept_label: string;
+          source_value?: string | null;
+          target_value?: string | null;
+          action_label?: string;
+        }>;
+      };
     }
   | {
       type: "session_cleanup";
@@ -328,14 +349,25 @@ export function GlobalAiCopilot() {
         if (m.role === "assistant" && m.actions && m.actions.length > 0) {
           const actionSummaries = m.actions
             .map((act) => {
-              if (act.type === "catalog_diff" && act.preview?.operations_preview) {
-                const ops = act.preview.operations_preview
-                  .map(
-                    (op, idx) =>
-                      `[Item ${idx + 1}] ${op.action}: ${op.concept_label || op.concept_key} -> ${op.new_value || op.new_description || "updated"}`
-                  )
-                  .join("; ");
-                return `[Active Proposed Changes for ${act.company_id || "selected company"}: ${ops}]`;
+              if (act.type === "catalog_diff") {
+                if (act.preview?.operations_preview) {
+                  const ops = act.preview.operations_preview
+                    .map(
+                      (op, idx) =>
+                        `[Item ${idx + 1}] ${op.action}: ${op.concept_label || op.concept_key} -> ${op.new_value || op.new_description || "updated"}`
+                    )
+                    .join("; ");
+                  return `[Active Proposed Changes for ${act.company_id || "selected company"}: ${ops}]`;
+                }
+                if (act.plan?.operations) {
+                  const ops = act.plan.operations
+                    .map(
+                      (op, idx) =>
+                        `[Item ${idx + 1}] ${op.action}: ${op.concept_label || op.concept_key} (${op.target_value || "None"} -> ${op.source_value || "Covered"})`
+                    )
+                    .join("; ");
+                  return `[Active Proposed Catalog Diff ${act.title || ""}: ${ops}]`;
+                }
               }
               if (act.type === "session_cleanup") {
                 return `[Active Proposed Session Cleanup: ${act.redundant_count} duplicate sessions ready to clean]`;
@@ -387,11 +419,20 @@ export function GlobalAiCopilot() {
       // If catalog diff action present, pre-select all mutation indices
       if (res.actions) {
         res.actions.forEach((act, actIdx) => {
-          if (act.type === "catalog_diff" && act.preview?.mutations) {
-            setSelectedMutationIndices((prev) => ({
-              ...prev,
-              [`${assistantMsg.id}_${actIdx}`]: new Set(act.preview.mutations.map((_, i) => i)),
-            }));
+          if (act.type === "catalog_diff") {
+            if (act.preview?.mutations) {
+              const mutations = act.preview.mutations;
+              setSelectedMutationIndices((prev) => ({
+                ...prev,
+                [`${assistantMsg.id}_${actIdx}`]: new Set(mutations.map((_, i) => i)),
+              }));
+            } else if (act.plan?.operations) {
+              const operations = act.plan.operations;
+              setSelectedMutationIndices((prev) => ({
+                ...prev,
+                [`${assistantMsg.id}_${actIdx}`]: new Set(operations.map((_, i) => i)),
+              }));
+            }
           }
         });
       }
@@ -468,6 +509,42 @@ export function GlobalAiCopilot() {
         }
       );
       setCatalogSuccessMsg(res.message || `Successfully applied ${res.applied_count} catalog changes!`);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setApplyingCatalog(false);
+    }
+  }
+
+  // Execute catalog diff plan
+  async function handleApplyCatalogDiffPlan(
+    plan: any,
+    actionKey: string
+  ) {
+    if (!plan || applyingCatalog) return;
+    setApplyingCatalog(true);
+    setCatalogSuccessMsg(null);
+    try {
+      const selectedIndices = selectedMutationIndices[actionKey] || new Set();
+      const filteredOps = (plan.operations || []).filter((_: any, idx: number) =>
+        selectedIndices.has(idx)
+      );
+      const payloadPlan = {
+        ...plan,
+        operations: filteredOps,
+      };
+
+      const res = await api<{ message: string; created_revisions: number; additions: number; updates: number }>(
+        "/copilot/catalog/apply-diff-plan",
+        {
+          method: "POST",
+          body: JSON.stringify({ plan: payloadPlan }),
+        }
+      );
+      setCatalogSuccessMsg(
+        res.message ||
+          `Successfully applied catalog diff (${res.additions ?? 0} added, ${res.updates ?? 0} updated)!`
+      );
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
@@ -840,6 +917,160 @@ export function GlobalAiCopilot() {
 
                       // 2. Catalog Diff Action Card
                       if (act.type === "catalog_diff") {
+                        if (act.plan) {
+                          const planOps = act.plan.operations || [];
+                          const selectedIndices =
+                            selectedMutationIndices[actionKey] ??
+                            new Set(planOps.map((_, i) => i));
+                          return (
+                            <Card
+                              key={actIdx}
+                              className="p-3.5 border border-[var(--rl-border)] bg-white space-y-3 rounded-[var(--rl-radius-md)]"
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-6 h-6 rounded-[var(--rl-radius-sm)] bg-[var(--rl-black)] text-white flex items-center justify-center">
+                                    <GitBranch size={14} />
+                                  </div>
+                                  <div>
+                                    <h4 className="text-xs font-bold text-[var(--rl-text-strong)]">
+                                      {act.title || `Catalog Diff: ${act.plan.source_company?.name} → ${act.plan.target_company?.name}`}
+                                    </h4>
+                                    <p className="text-[10px] text-[var(--rl-text-muted)]">
+                                      Clone missing concepts & align plan values
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  {act.plan.summary && (
+                                    <>
+                                      <Badge variant="info" className="text-[10px] px-1.5 py-0.5">
+                                        {act.plan.summary.common_concepts_count ?? 0} Common
+                                      </Badge>
+                                      <Badge variant="default" className="text-[10px] px-1.5 py-0.5">
+                                        {act.plan.summary.concepts_to_add_count ?? 0} To Add
+                                      </Badge>
+                                    </>
+                                  )}
+                                  <Badge variant="info" className="text-[10px] px-1.5 py-0.5">
+                                    {planOps.length} Ops
+                                  </Badge>
+                                </div>
+                              </div>
+
+                              {/* Diff items list */}
+                              {planOps.length === 0 ? (
+                                <div className="p-3 bg-[var(--rl-surface-muted)] text-[var(--rl-text-muted)] text-xs rounded-[var(--rl-radius-sm)] text-center">
+                                  Catalogs are fully synchronized. No differences detected.
+                                </div>
+                              ) : (
+                                <div className="max-h-56 overflow-y-auto border border-[var(--rl-border)] rounded-[var(--rl-radius-sm)] divide-y divide-[var(--rl-border)]">
+                                  {planOps.map((op, opIdx) => {
+                                    const isChecked = selectedIndices.has(opIdx);
+                                    return (
+                                      <div
+                                        key={opIdx}
+                                        onClick={() => {
+                                          const next = new Set(selectedIndices);
+                                          if (next.has(opIdx)) next.delete(opIdx);
+                                          else next.add(opIdx);
+                                          setSelectedMutationIndices((prev) => ({
+                                            ...prev,
+                                            [actionKey]: next,
+                                          }));
+                                        }}
+                                        className={`p-2.5 text-xs flex items-start gap-2.5 cursor-pointer transition-colors ${
+                                          isChecked ? "bg-white" : "bg-[var(--rl-surface-muted)] opacity-60"
+                                        }`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={isChecked}
+                                          onChange={() => {}}
+                                          className="mt-0.5 rounded border-[var(--rl-border)] text-[var(--rl-black)] focus:ring-0"
+                                        />
+                                        <div className="flex-1 space-y-1">
+                                          <div className="flex items-center justify-between">
+                                            <span className="font-semibold text-[var(--rl-text-strong)]">
+                                              {op.concept_label || op.concept_key}
+                                            </span>
+                                            <span className="text-[10px] text-[var(--rl-text-muted)]">
+                                              {op.catalog_name}
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center gap-2 text-[11px]">
+                                            <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                              op.action === "add_offering" ? "bg-emerald-100 text-emerald-800" : "bg-sky-100 text-sky-800"
+                                            }`}>
+                                              {op.action === "add_offering" ? "Add Concept" : "Update Plan"}
+                                            </span>
+                                            {op.action === "update_plan_item" ? (
+                                              <>
+                                                <span className="line-through text-rose-600">
+                                                  {op.target_value || "None"}
+                                                </span>
+                                                <span className="text-[var(--rl-text-muted)]">→</span>
+                                                <span className="font-semibold text-emerald-600">
+                                                  {op.source_value}
+                                                </span>
+                                              </>
+                                            ) : (
+                                              <span className="font-semibold text-emerald-600">
+                                                + {op.source_value || "Covered"}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              {/* Apply execution */}
+                              {catalogSuccessMsg ? (
+                                <div className="p-2.5 rounded-[var(--rl-radius-sm)] bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+                                  <CheckCircle size={15} weight="fill" />
+                                  <span>{catalogSuccessMsg}</span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => handleDismissAction(actionKey)}
+                                    disabled={applyingCatalog}
+                                    className="h-8 text-xs px-3 text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] border border-[var(--rl-border)] bg-white cursor-pointer"
+                                  >
+                                    Dismiss
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleApplyCatalogDiffPlan(act.plan, actionKey)}
+                                    disabled={applyingCatalog || selectedIndices.size === 0 || planOps.length === 0}
+                                    className="flex-1 h-8 text-xs bg-[var(--rl-black)] hover:bg-[var(--rl-text-strong)] text-white gap-2 font-medium cursor-pointer"
+                                  >
+                                    {applyingCatalog ? (
+                                      <>
+                                        <ArrowsClockwise size={13} className="animate-spin" />
+                                        Applying Diff Plan...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Check size={13} />
+                                        Apply {selectedIndices.size} Updates to Database
+                                      </>
+                                    )}
+                                  </Button>
+                                </div>
+                              )}
+                            </Card>
+                          );
+                        }
+
+                        // Single-company preview flow
+                        if (!act.preview) return null;
                         const selectedIndices = selectedMutationIndices[actionKey] || new Set();
                         return (
                           <Card
@@ -951,7 +1182,7 @@ export function GlobalAiCopilot() {
                                   size="sm"
                                   onClick={() => handleDismissAction(actionKey)}
                                   disabled={applyingCatalog}
-                                  className="h-8 text-xs px-3 text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] border border-[var(--rl-border)] bg-white"
+                                  className="h-8 text-xs px-3 text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] border border-[var(--rl-border)] bg-white cursor-pointer"
                                 >
                                   Cancel
                                 </Button>
@@ -959,13 +1190,13 @@ export function GlobalAiCopilot() {
                                   size="sm"
                                   onClick={() =>
                                     handleApplyCatalogMutations(
-                                      act.preview,
+                                      act.preview!,
                                       act.company_id || selectedCompanyId,
                                       actionKey
                                     )
                                   }
                                   disabled={applyingCatalog || selectedIndices.size === 0}
-                                  className="flex-1 h-8 text-xs bg-[var(--rl-black)] hover:bg-[var(--rl-text-strong)] text-white gap-2 font-medium"
+                                  className="flex-1 h-8 text-xs bg-[var(--rl-black)] hover:bg-[var(--rl-text-strong)] text-white gap-2 font-medium cursor-pointer"
                                 >
                                   {applyingCatalog ? (
                                     <>

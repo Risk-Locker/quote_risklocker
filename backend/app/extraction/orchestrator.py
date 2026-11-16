@@ -113,11 +113,18 @@ class ExtractionOrchestrator:
                     if key in {"coverage_amount", "sum_insured"}:
                         keys_to_populate = ["coverage_amount", "sum_insured", "market_value", "agreed_value"]
                     for target_key in keys_to_populate:
+                        existing = candidates.get(target_key, [])
+                        norm_clean = re.sub(r"[\s,.-]", "", clean_val).lower()
+                        has_agreement = any(
+                            re.sub(r"[\s,.-]", "", str(c.value)).lower() == norm_clean
+                            for c in existing
+                        )
+                        calibrated_score = 0.98 if has_agreement else (0.88 if existing else 0.92)
                         gemini_candidate = CandidateValue(
                             field=target_key,
                             value=clean_val,
                             source_method="gemini_vision",
-                            score=0.99,
+                            score=calibrated_score,
                             page=1,
                             evidence=f"Gemini multimodal extraction: {clean_val}",
                         )

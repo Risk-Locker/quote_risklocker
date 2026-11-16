@@ -17,8 +17,10 @@ from app.core.errors import AIExtractionUnavailableException
 from app.core.workspace import QC_TEMP_ROOT, REPOSITORY_ROOT, qc_temp_directory, resolve_qc_path
 from app.extraction.company_resolution import build_companies_payload, resolve_company
 from app.extraction.db_lookups import get_db_packs, get_correction_memory
+from app.extraction.pacer_sentinel import PacerSentinel, get_pacer_sentinel
 from app.extraction.sandbox import extract_with_limits
 from app.models.enums import AccountStatus, RecordStatus
+from app.services.token_preflight_service import estimate_pdf_tokens
 from app.models.tables import (
     AppSetting,
     Batch,
@@ -156,6 +158,7 @@ def process_extraction_job(
     storage: SupabaseStorage | None = None,
     extractor=extract_with_limits,
     context_loader=load_extraction_context,
+    pacer: PacerSentinel | None = None,
 ) -> None:
     """Process one already-leased extraction job and atomically complete it."""
 
@@ -223,15 +226,49 @@ def process_extraction_job(
         logger.info("Job %s was cancelled before extraction started; aborting.", job.id)
         return
 
+    # Pre-flight token estimation to prevent quota overrun
+    token_info = estimate_pdf_tokens(source_bytes, filename=uploaded.original_filename)
+    estimated_tokens = token_info.get("estimated_tokens", 12_000)
+    is_eligible = token_info.get("is_eligible", True)
+
+    enhanced_reading = bool((job.payload or {}).get("enhanced_reading"))
+    if not is_eligible and enhanced_reading:
+        logger.warning(
+            "Job %s: file %s exceeds safe 200k TPM quota (~%d tokens across %d pages); falling back to deterministic extraction",
+            job.id,
+            uploaded.original_filename,
+            estimated_tokens,
+            token_info.get("page_count", 0),
+        )
+        enhanced_reading = False
+
+    # Autonomous Living Eye pacing before LLM extraction
+    active_pacer = pacer or get_pacer_sentinel()
+    slot_idx, pacing_delay = active_pacer.acquire(estimated_tokens=estimated_tokens)
+    if pacing_delay > 0:
+        logger.info(
+            "Job %s: PacerSentinel applied %.2fs breathing delay (slot=%d, tokens=%d)",
+            job.id,
+            pacing_delay,
+            slot_idx,
+            estimated_tokens,
+        )
+
+    # Check cancellation after pacing delay
+    db.refresh(job)
+    if job.cancelled_at is not None or job.state == "cancelled":
+        logger.info("Job %s was cancelled during pacing; aborting.", job.id)
+        return
+
     context = context_loader(db)
     heartbeat_job(db, job, worker_id=worker_id, progress=15, phase="extracting", lease_seconds=300)
-    logger.info("Job %s: executing extraction pipeline (enhanced_reading=%s)", job.id, bool((job.payload or {}).get("enhanced_reading")))
+    logger.info("Job %s: executing extraction pipeline (enhanced_reading=%s)", job.id, enhanced_reading)
     with qc_temp_directory("extract-") as directory:
         source_path = (directory / "source.pdf").resolve()
         source_path.write_bytes(source_bytes)
         result = extractor(
             source_path,
-            enhanced_reading=bool((job.payload or {}).get("enhanced_reading")),
+            enhanced_reading=enhanced_reading,
             source_filename=uploaded.original_filename,
             fail_closed=True,
             **context,
@@ -790,8 +827,14 @@ def run_one_job(
     *,
     worker_id: str,
     storage: SupabaseStorage | None = None,
+    pacer: PacerSentinel | None = None,
 ) -> Job | None:
     """Claim and synchronously run at most one heavy task."""
+    if storage is None:
+        try:
+            storage = SupabaseStorage(settings)
+        except Exception:
+            storage = None
 
     job = claim_next_job(db, worker_id=worker_id, lease_seconds=300)
     if job is None:
@@ -806,7 +849,7 @@ def run_one_job(
     )
     try:
         if job.job_type == "extract_pdf":
-            process_extraction_job(db, settings, job, worker_id=worker_id, storage=storage)
+            process_extraction_job(db, settings, job, worker_id=worker_id, storage=storage, pacer=pacer)
         elif job.job_type == "render_pdf":
             process_render_job(db, settings, job, worker_id=worker_id, storage=storage)
         else:

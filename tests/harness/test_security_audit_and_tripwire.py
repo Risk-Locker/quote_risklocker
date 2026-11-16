@@ -73,24 +73,26 @@ def test_security_audit_catch_proof_on_pre_phase_c_defects():
         )
         assert any(f.rule_id == "STORAGE_BYPASS" for f in findings), "Expected F-01 STORAGE_BYPASS to be flagged"
 
-    # F-03 Catch Proof (road_tax_engine.py NO_EVAL)
-    road_tax_path = ROOT / "backend" / "app" / "services" / "road_tax_engine.py"
-    if road_tax_path.is_file():
-        findings = audit.scan_python_source(
-            "backend/app/services/road_tax_engine.py",
-            road_tax_path.read_text(encoding="utf-8"),
-            call_graph,
-            router_mounts,
-            all_reexports,
-        )
-        assert any(f.rule_id == "NO_EVAL" for f in findings), "Expected F-03 NO_EVAL to be flagged"
+    # F-03 Catch Proof (road_tax_engine.py NO_EVAL on legacy eval formula)
+    eval_snippet = """
+def _eval_formula(self, formula: str, cc: float) -> float:
+    return float(eval(formula, {"__builtins__": {}}, {"cc": cc}))
+"""
+    findings = audit.scan_python_source(
+        "backend/app/services/road_tax_engine.py",
+        eval_snippet,
+        call_graph,
+        router_mounts,
+        all_reexports,
+    )
+    assert any(f.rule_id == "NO_EVAL" for f in findings), "Expected F-03 NO_EVAL to be flagged"
 
-    # F-04 Catch Proof (middleware.ts MIDDLEWARE_UNPROTECTED)
+    # F-04 Verification (middleware.ts fully covers protected routes post-Phase 1)
     mw_findings = audit._audit_frontend()
     unprotected_routes = {
         f.message.split("'")[1] for f in mw_findings if f.rule_id == "MIDDLEWARE_UNPROTECTED" and "'" in f.message
     }
     for route in ["/comparison", "/ledger", "/insights", "/ai-context"]:
-        assert route in unprotected_routes or route.lstrip("/") in unprotected_routes, (
-            f"Expected F-04 route '{route}' to be flagged as unprotected in Next.js middleware"
+        assert route not in unprotected_routes and route.lstrip("/") not in unprotected_routes, (
+            f"F-04 route '{route}' must be protected in Next.js middleware"
         )

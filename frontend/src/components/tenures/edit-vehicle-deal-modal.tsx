@@ -3,12 +3,9 @@
 import React, { useState, useEffect } from "react";
 import {
   Car,
-  IdentificationCard,
   User,
-  CurrencyDollar,
   X,
   CheckCircle,
-  Sparkle,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import type { TenureRow, PicItem } from "./tenure-timeline-ledger";
@@ -99,9 +96,10 @@ export function EditVehicleDealModal({
         client_preference_notes: clientPreferenceNotes.trim(),
       });
       onClose();
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
       console.error("Failed to update deal:", err);
-      alert("Failed to update deal: " + (err.message || "Unknown error"));
+      alert("Failed to update deal: " + msg);
     } finally {
       setSaving(false);
     }

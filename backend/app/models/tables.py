@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from uuid import uuid4
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint, text
@@ -416,7 +417,8 @@ class TrackedVehicle(Base, TimestampMixin):
     __tablename__ = "tracked_vehicles"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
-    vehicle_no: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
+    vehicle_no: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    is_provisional: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     car_brand: Mapped[str | None] = mapped_column(String(120), nullable=True)
     car_model: Mapped[str | None] = mapped_column(String(160), nullable=True)
     engine_cc: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -1010,6 +1012,8 @@ class BenefitCatalogRevision(Base, TimestampMixin):
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     published_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class CatalogOffering(Base, TimestampMixin):
@@ -1206,6 +1210,8 @@ class TemplateRevision(Base, TimestampMixin):
     config_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     published_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class Job(Base, TimestampMixin):
@@ -1413,4 +1419,75 @@ class GeminiApiCallLog(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     local_date: Mapped[str] = mapped_column(String(10), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+# ── Double-Entry Accounting Ledger (ACID Financial Models) ───────────────────
+
+class LedgerAccount(Base, TimestampMixin):
+    __tablename__ = "ledger_accounts"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    code: Mapped[str] = mapped_column(String(30), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    account_type: Mapped[str] = mapped_column(String(20), nullable=False)  # asset, liability, equity, revenue, expense
+    normal_side: Mapped[str] = mapped_column(String(6), nullable=False)    # debit, credit
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    lines: Mapped[list["JournalLine"]] = relationship(back_populates="account")
+
+
+class LedgerInvoice(Base, TimestampMixin):
+    __tablename__ = "ledger_invoices"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    tenure_id: Mapped[str] = mapped_column(ForeignKey("insurance_tenures.id", ondelete="RESTRICT"), nullable=False, index=True)
+    invoice_no: Mapped[str] = mapped_column(String(40), unique=True, nullable=False, index=True)
+    gross_premium: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
+    service_tax: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
+    stamp_duty: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
+    road_tax: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
+    runner_fee: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
+    discount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
+    total_receivable: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="issued", nullable=False)  # draft, issued, partially_paid, paid, void
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    tenure: Mapped["InsuranceTenure"] = relationship()
+    journal_entries: Mapped[list["JournalEntry"]] = relationship(back_populates="invoice")
+
+
+class JournalEntry(Base, TimestampMixin):
+    __tablename__ = "journal_entries"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    entry_no: Mapped[str] = mapped_column(String(40), unique=True, nullable=False, index=True)
+    tenure_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_tenures.id", ondelete="RESTRICT"), nullable=True, index=True)
+    invoice_id: Mapped[str | None] = mapped_column(ForeignKey("ledger_invoices.id", ondelete="RESTRICT"), nullable=True, index=True)
+    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(120), unique=True, nullable=False, index=True)
+    reverses_entry_id: Mapped[str | None] = mapped_column(ForeignKey("journal_entries.id", ondelete="RESTRICT"), nullable=True)
+    is_posted: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    lines: Mapped[list["JournalLine"]] = relationship(back_populates="entry", cascade="all, delete-orphan", order_by="JournalLine.sequence_order.asc()")
+    invoice: Mapped["LedgerInvoice | None"] = relationship(back_populates="journal_entries")
+    tenure: Mapped["InsuranceTenure | None"] = relationship()
+
+
+class JournalLine(Base):
+    __tablename__ = "journal_lines"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    journal_entry_id: Mapped[str] = mapped_column(ForeignKey("journal_entries.id", ondelete="RESTRICT"), nullable=False, index=True)
+    account_id: Mapped[str] = mapped_column(ForeignKey("ledger_accounts.id", ondelete="RESTRICT"), nullable=False, index=True)
+    debit_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
+    credit_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
+    memo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sequence_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    entry: Mapped["JournalEntry"] = relationship(back_populates="lines")
+    account: Mapped["LedgerAccount"] = relationship(back_populates="lines")
 

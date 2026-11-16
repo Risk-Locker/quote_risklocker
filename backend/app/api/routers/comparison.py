@@ -13,8 +13,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_user, settings_dep
+from app.auth.rbac import require_role
 from app.core.config import Settings
 from app.db.session import get_db
+from app.models.enums import Role
 from app.models.tables import InsuranceTenure, Session as SessionModel, TenureComparisonEntry, UploadedFile, User, new_id
 from app.services.marketing_comparison_service import (
     delete_comparison_entry,
@@ -139,6 +141,7 @@ def preview_road_tax(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Calculate JPJ road tax preview dynamically based on engine capacity (CC, kW, KG) and vehicle type."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     from app.services.road_tax_engine import calculate_road_tax_unified
     try:
         return calculate_road_tax_unified(
@@ -184,6 +187,7 @@ def refresh_ledger(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Re-extract customer & vehicle ledger from uploaded quotations via recency waterfall, recalculating road tax dynamically."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
         return refresh_tenure_ledger(db, tenure_id)
     except ValueError as e:
@@ -201,6 +205,7 @@ def update_fixed_costs(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Update tenure-level fixed costs and coverage dates."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
         return update_tenure_fixed_costs(
             db,
@@ -242,6 +247,7 @@ def toggle_tenure_fees(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Quickly toggle include_road_tax and/or include_runner_fee, or adjust fee amounts."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     tenure = db.get(InsuranceTenure, tenure_id)
     if not tenure:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenure not found")
@@ -275,6 +281,7 @@ def upsert_entry(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Create or update an underwriter comparison column."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
         return save_comparison_entry(db, tenure_id, payload.model_dump())
     except ValueError as e:
@@ -293,6 +300,7 @@ def delete_entry(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Delete a comparison column."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
         return delete_comparison_entry(db, tenure_id, entry_id, delete_all_versions=all_versions)
     except ValueError as e:
@@ -310,6 +318,7 @@ def reset_entry(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Reset a manual override back to original AI detected values for a specific entry."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
         return reset_comparison_entry_to_detected(db, tenure_id, entry_id)
     except ValueError as e:
@@ -327,6 +336,7 @@ def choose_winner(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Select or toggle the winning underwriter from comparison and prepare Quotation Builder draft."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
         return select_winner_and_generate_draft(
             db,
@@ -348,19 +358,15 @@ def get_whatsapp_teaser(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Generate executive Malaysian WhatsApp teaser text for client messaging."""
+    """Generate executive Malaysian WhatsApp teaser text for client messaging (pure read-only)."""
     try:
         teaser_text = format_whatsapp_teaser(db, tenure_id)
-        tenure = db.get(InsuranceTenure, tenure_id)
-        if tenure:
-            if tenure.stage in ("Quotations", "Prospecting", "draft", None):
-                tenure.stage = "Material to Client"
-            record_stage_timestamp(tenure, "Material to Client")
-            db.commit()
         return {"status": "success", "teaser_text": teaser_text}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
+        logger.exception("Failed to generate WhatsApp teaser for tenure %s: %s", tenure_id, e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to format teaser")
         logger.exception("Failed to generate WhatsApp teaser for tenure %s: %s", tenure_id, e)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to format teaser")
 
@@ -379,6 +385,7 @@ async def upload_comparison_quote(
     Enqueues the document, extracts quotation figures, and binds the session directly
     to the active insurance tenure so it immediately appears as a comparison column.
     """
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     tenure = db.get(InsuranceTenure, tenure_id)
     if not tenure:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenure {tenure_id} not found")
@@ -449,6 +456,7 @@ def generate_single_entry_quote(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Generate official Risk-Locker quotation for a specific comparison card."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
         return generate_quotation_for_entry(db, tenure_id, entry_id, user.id)
     except ValueError as e:
@@ -465,6 +473,7 @@ def generate_all_deal_quotes(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Generate official Risk-Locker quotations for all underwriter cards under this comparison deal."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
         results = generate_all_quotations(db, tenure_id, user.id)
         return {
@@ -482,6 +491,7 @@ def rescan_comparison(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Force re-extract and rescan all quotation sessions under this comparison tenure."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
         return rescan_comparison_tenure(db, tenure_id)
     except ValueError as e:
@@ -500,6 +510,7 @@ async def upload_previous_policy(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Upload a quotation or schedule PDF specifically for the previous policy year (e.g. 2025)."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     tenure = db.get(InsuranceTenure, tenure_id)
     if not tenure:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenure not found")

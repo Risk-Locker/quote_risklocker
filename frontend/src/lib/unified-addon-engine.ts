@@ -19,6 +19,7 @@ export interface UnifiedAddonCard {
   cost_status?: string;
   price?: any;
   concept_key?: string;
+  asset_id?: string;
 }
 
 export interface FreeCoverageItem {
@@ -42,21 +43,21 @@ export const CANONICAL_24_CATALOG: Array<{
   },
   {
     id: "towing",
-    title: "Unlimited Towing Distance",
-    description: "Provides 24-hour free unlimited towing distance anywhere in Malaysia.",
+    title: "Unlimited Towing",
+    description: "24/7 emergency unlimited towing assistance all over Malaysia.",
     default_value: "Unlimited",
     icon_hint: "towing",
   },
   {
     id: "llop",
-    title: "Legal Liability Of Passengers",
+    title: "Legal Liability of Passengers",
     description: "Protects against third-party claims caused by passenger negligence.",
     default_value: "",
     icon_hint: "llop",
   },
   {
     id: "llp",
-    title: "Legal Liability To Passengers",
+    title: "Legal Liability to Passengers",
     description: "Protects driver from lawsuits for injury or death to passengers.",
     default_value: "",
     icon_hint: "llp",
@@ -69,23 +70,30 @@ export const CANONICAL_24_CATALOG: Array<{
     icon_hint: "special_perils",
   },
   {
-    id: "betterment",
-    title: "Waiver Of Betterment",
-    description: "Waives betterment deduction on new replacement parts up to 10 years.",
-    default_value: "",
-    icon_hint: "betterment",
-  },
-  {
     id: "all_drivers",
-    title: "All Drivers",
-    description: "Waives RM400 compulsory excess penalty for unnamed authorized drivers.",
+    title: "All Drivers Excess Waiver",
+    description: "Waives RM400 compulsory excess penalty for all authorized drivers.",
     default_value: "",
     icon_hint: "all_driver",
   },
   {
+    id: "pa",
+    title: "Motor PA Plus",
+    description: "Named personal accident protection for driver and passengers.",
+    default_value: "",
+    icon_hint: "pa",
+  },
+  {
+    id: "betterment",
+    title: "Waiver of Betterment",
+    description: "Waives betterment deduction on new parts for vehicles up to 15 years.",
+    default_value: "Up to 15 Years",
+    icon_hint: "betterment",
+  },
+  {
     id: "srcc",
     title: "Strike, Riot & Civil Commotion",
-    description: "Covers physical damage caused by strikes, riots or public unrest.",
+    description: "Covers physical loss or damage caused by strikes, riots or public unrest.",
     default_value: "",
     icon_hint: "srcc",
   },
@@ -113,7 +121,7 @@ export const CANONICAL_24_CATALOG: Array<{
   {
     id: "accessories",
     title: "Vehicle Accessories Cover",
-    description: "Covers fitted aftermarket accessories, dashcams, multimedia and rims.",
+    description: "Covers installed aftermarket accessories, dashcams, multimedia and rims.",
     default_value: "",
     icon_hint: "accessories",
   },
@@ -125,13 +133,6 @@ export const CANONICAL_24_CATALOG: Array<{
     icon_hint: "ncd",
   },
   {
-    id: "pa",
-    title: "Driver Passenger Personal Accident",
-    description: "Accidental Death, Permanent Disablement and Medical Expenses.",
-    default_value: "",
-    icon_hint: "pa",
-  },
-  {
     id: "key_care",
     title: "Key Care Replacement",
     description: "Reimburses key and lock replacement up to RM1,000 following theft or loss.",
@@ -141,8 +142,8 @@ export const CANONICAL_24_CATALOG: Array<{
   {
     id: "international_towing",
     title: "International Towing Assistance",
-    description: "Up to 60km from Malaysia border.",
-    default_value: "60 km",
+    description: "Up to 50km from Malaysia border.",
+    default_value: "50 km",
     icon_hint: "international_towing",
   },
   {
@@ -168,14 +169,14 @@ export const CANONICAL_24_CATALOG: Array<{
   },
   {
     id: "ehailing",
-    title: "Private Hire Car ( E-HAILING )",
+    title: "Private Hire Car (E-Hailing)",
     description: "Coverage while providing a legitimate E-Hailing Service.",
     default_value: "",
     icon_hint: "ehailing",
   },
   {
     id: "non_fare_passenger",
-    title: "Legal Liability To Non Fare Paying Passenger",
+    title: "Legal Liability to Non-Fare Paying Passengers",
     description: "Commercial Vehicle",
     default_value: "",
     icon_hint: "non_fare_passenger",
@@ -189,14 +190,14 @@ export const CANONICAL_24_CATALOG: Array<{
   },
   {
     id: "boom_damage",
-    title: "Accidental Damage To Boom",
+    title: "Accidental Damage to Boom",
     description: "Commercial Vehicle - Crane",
     default_value: "",
     icon_hint: "boom_damage",
   },
   {
     id: "overturning",
-    title: "Damage By Overturning",
+    title: "Damage by Overturning",
     description: "Commercial Vehicle - Crane",
     default_value: "",
     icon_hint: "overturning",
@@ -321,6 +322,16 @@ export function formatAddonValue(rawVal: unknown): string {
   const low = s.toLowerCase().replace(/[ .]+$/, "");
   if (SUPPRESSED_VALUES.has(low)) return "";
 
+  // 0. Betterment: Never display an RM monetary amount. Normalize to vehicle age limit or "Betterment Waived".
+  if (low.includes("betterment")) {
+    const mBet = s.match(/(?:up to\s+)?(\d+\s*(?:years?|yrs?))/i);
+    if (mBet) {
+      return `Up to ${mBet[1].replace(/\b\w/g, (ch) => ch.toUpperCase())}`;
+    }
+    return "Betterment Waived";
+  }
+
+  // 1. Exact RM amount formatting: "RM 1000", "RM 1,000.00" -> "RM 1,000.00"
   const rmMatch = s.match(/^rm\s*([0-9][0-9,]*(?:\.[0-9]+)?)$/i);
   if (rmMatch) {
     const num = parseFloat(rmMatch[1].replace(/,/g, ""));
@@ -331,6 +342,7 @@ export function formatAddonValue(rawVal: unknown): string {
     return s;
   }
 
+  // 2. Pure numeric coverage limit (e.g. "1000.0", "350000.0") -> "RM 1,000.00"
   if (/^[0-9][0-9,]*(?:\.[0-9]+)?$/.test(s)) {
     const num = parseFloat(s.replace(/,/g, ""));
     if (!isNaN(num)) {
@@ -340,15 +352,80 @@ export function formatAddonValue(rawVal: unknown): string {
     return s;
   }
 
-  if (low.includes("up to 10 years") && low.includes("betterment")) {
-    return "Up to 10 Years";
-  }
-  if (s.length > 28 && low.includes("up to ")) {
-    const m = s.match(/(up to [0-9]+\s+\w+)/i);
+  // 3. Betterment: Keep super short (e.g. "Up to 10 Years", "Betterment Waived")
+  if (low.includes("betterment") || low.includes("up to ")) {
+    const m = s.match(/up to\s+(\d+\s*(?:years?|yrs?))/i);
     if (m) {
-      return m[1].replace(/\b\w/g, (ch) => ch.toUpperCase());
+      return `Up to ${m[1].replace(/\b\w/g, (ch) => ch.toUpperCase())}`;
+    }
+    if (low.includes("waiv")) {
+      return "Betterment Waived";
     }
   }
+
+  // 4. Excess Waiver: e.g. "Compulsory RM400 excess waived" -> "RM 400.00 Waived"
+  if (low.includes("excess")) {
+    const m = s.match(/rm\s*([0-9][0-9,]*(?:\.[0-9]+)?)/i);
+    if (m) {
+      const num = parseFloat(m[1].replace(/,/g, ""));
+      if (!isNaN(num)) {
+        return `RM ${num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Waived`;
+      }
+    }
+    if (low.includes("waiv")) {
+      return "Excess Waived";
+    }
+  }
+
+  // 5. Personal Accident (PA): e.g. "RM 10,000 per person" -> "RM 10,000 / pax"
+  if (low.includes("per person") || low.includes("pax")) {
+    const m = s.match(/rm\s*([0-9][0-9,]*(?:\.[0-9]+)?)/i);
+    if (m) {
+      const num = parseFloat(m[1].replace(/,/g, ""));
+      if (!isNaN(num)) {
+        return `RM ${num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / pax`;
+      }
+    }
+  }
+
+  // 6. CART / Repair Time: e.g. "14 Days @ RM 100/day" -> "14 Days @ RM100"
+  const mCart = s.match(/(\d+\s*days?)\s*@\s*rm\s*(\d+)/i);
+  if (mCart) {
+    return `${mCart[1].replace(/\b\w/g, (ch) => ch.toUpperCase())} @ RM${mCart[2]}`;
+  }
+
+  // 7. Special Perils: e.g. "Full Sum Insured Coverage" -> "Full Sum Insured"
+  if (low.includes("peril") || low.includes("flood")) {
+    if (low.includes("sum insured") || low.includes("full")) {
+      return "Full Sum Insured";
+    }
+  }
+
+  // 8. Distance / Towing: e.g. "Unlimited Distance" -> "Unlimited"
+  if (low.includes("unlimited")) {
+    return "Unlimited";
+  }
+  const mKm = s.match(/(\d+)\s*km/i);
+  if (mKm) {
+    return `${mKm[1]} km`;
+  }
+
+  // 9. Embedded RM Extraction from verbose sentences:
+  // e.g. "Covers wall charger damage up to RM 12,000.00" -> "RM 12,000.00"
+  const mRm = s.match(/\brm\s*([0-9][0-9,]*(?:\.[0-9]+)?)\b/i);
+  if (mRm) {
+    const num = parseFloat(mRm[1].replace(/,/g, ""));
+    if (!isNaN(num) && num > 0) {
+      return `RM ${num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+  }
+
+  // 10. General Word Clamping: Ensure coverage info is never longer than 4 words
+  const words = s.split(" ");
+  if (words.length > 4) {
+    return words.slice(0, 4).join(" ");
+  }
+
   return s;
 }
 
@@ -485,11 +562,121 @@ export function isBenefitSelected(
   if (item?.is_extra || item?.cost_status === "paid" || hasPositivePrice(item)) return true;
 
   if (sourceKind === "active") {
-    if (matchedCatId && item?.is_extra !== false) return true;
-    if (matchedCatId && item?.selection_id) return true;
+    // FOC / included perks stay in Free Added Coverage, not marked as purchased add-on riders
+    if (item?.cost_status === "included" || item?.cost_status === "foc" || item?.is_extra === false) {
+      if (!hasPositivePrice(item) && item?.is_extra !== true) return false;
+    }
+    if (matchedCatId && item?.is_extra === true) return true;
+    if (matchedCatId && item?.selection_id && (item?.is_extra || item?.cost_status === "paid" || hasPositivePrice(item))) return true;
   }
 
   return false;
+}
+
+export function detectTowingUpgrade(
+  activeBenefits: any[] = [],
+  insurerName: string = ""
+): { title: string; limit: string; description: string; rider: string } | null {
+  for (const raw of activeBenefits || []) {
+    if (
+      !raw?.is_extra &&
+      raw?.cost_status !== "paid" &&
+      raw?.is_selected !== true &&
+      raw?.selected !== true &&
+      !hasPositivePrice(raw)
+    ) {
+      continue;
+    }
+    const title = String(raw?.title || raw?.label || "").toLowerCase();
+    const concept = String(raw?.concept_key || "").toLowerCase();
+    const combined = `${title} ${concept}`;
+
+    if (combined.includes("oto 360") || combined.includes("oto_360") || combined.includes("oto360")) {
+      return {
+        title: "Unlimited Towing Assistance",
+        limit: "Unlimited Mileage",
+        description: "24/7 unlimited breakdown & accidental towing assistance. Upgraded via OTO 360.",
+        rider: "OTO 360",
+      };
+    }
+    if (combined.includes("motor pa plus") || combined.includes("motor_pa_plus") || combined.includes("pa plus")) {
+      if (combined.includes("plan 4") || combined.includes("p4")) {
+        return {
+          title: "Unlimited Towing Assistance",
+          limit: "Unlimited Mileage",
+          description: "24/7 unlimited towing assistance nationwide. Upgraded via Motor PA Plus.",
+          rider: "Motor PA Plus - Plan 4",
+        };
+      }
+      if (combined.includes("plan 3") || combined.includes("p3")) {
+        return {
+          title: "Extended Towing Assistance (300 km)",
+          limit: "300 km",
+          description: "24/7 extended towing assistance up to 300 km. Upgraded via Motor PA Plus.",
+          rider: "Motor PA Plus - Plan 3",
+        };
+      }
+      if (combined.includes("plan 2") || combined.includes("p2")) {
+        return {
+          title: "Extended Towing Assistance (200 km)",
+          limit: "200 km",
+          description: "24/7 extended towing assistance up to 200 km. Upgraded via Motor PA Plus.",
+          rider: "Motor PA Plus - Plan 2",
+        };
+      }
+      if (combined.includes("plan 1") || combined.includes("p1")) {
+        return {
+          title: "Extended Towing Assistance (100 km)",
+          limit: "100 km",
+          description: "24/7 extended towing assistance up to 100 km. Upgraded via Motor PA Plus.",
+          rider: "Motor PA Plus - Plan 1",
+        };
+      }
+    }
+    if (combined.includes("driver passenger protector") || combined.includes("dpp") || combined.includes("n4")) {
+      return {
+        title: "Unlimited Towing Assistance",
+        limit: "Unlimited Mileage",
+        description: "24/7 unlimited auto towing assistance. Upgraded via Driver Passenger Protector (N4).",
+        rider: "Driver Passenger Protector (N4)",
+      };
+    }
+    if (combined.includes("e-assist") || combined.includes("smart driver")) {
+      if (combined.includes("plan 2") || combined.includes("ev")) {
+        return {
+          title: "Unlimited Towing Assistance",
+          limit: "Unlimited Mileage",
+          description: "24/7 unlimited breakdown towing nationwide. Upgraded via E-Assist Smart Driver.",
+          rider: "E-Assist Smart Driver - Plan 2",
+        };
+      }
+      if (combined.includes("plan 1")) {
+        return {
+          title: "Extended Towing Assistance (RM 1,000)",
+          limit: "RM 1,000",
+          description: "24/7 breakdown towing coverage up to RM 1,000. Upgraded via E-Assist Smart Driver.",
+          rider: "E-Assist Smart Driver - Plan 1",
+        };
+      }
+    }
+    if (combined.includes("motor easy") || combined.includes("autobuddy") || combined.includes("motor shield")) {
+      return {
+        title: "Unlimited Towing Assistance",
+        limit: "Unlimited Mileage",
+        description: "24/7 unlimited towing assistance nationwide. Upgraded via AutoBuddy / Motor Easy.",
+        rider: "Motor Easy / AutoBuddy",
+      };
+    }
+    if (combined.includes("breakdown towing")) {
+      return {
+        title: "Extended Towing Assistance (150 km)",
+        limit: "150 km",
+        description: "24/7 breakdown towing assistance up to 150 km. Upgraded via Breakdown Towing Assistance.",
+        rider: "Breakdown Towing Assistance",
+      };
+    }
+  }
+  return null;
 }
 
 export function extractFreeCoverageItems(
@@ -498,13 +685,33 @@ export function extractFreeCoverageItems(
 ): FreeCoverageItem[] {
   const seen = new Set<string>();
   const items: FreeCoverageItem[] = [];
+
+  // 1. Towing Dynamic In-Place Upgrade
+  const towingUpgrade = detectTowingUpgrade(activeBenefits);
+  if (towingUpgrade) {
+    items.push({
+      title: towingUpgrade.title,
+      description: towingUpgrade.description,
+    });
+    seen.add(normalizeCode(towingUpgrade.title));
+    seen.add("emergency_towing_assistance");
+    seen.add("unlimited_towing_assistance");
+  } else {
+    items.push({
+      title: "Emergency Towing Assistance (RM 200.00)",
+      description: "24/7 accidental towing service to nearest panel workshop or approved repairer.",
+    });
+    seen.add("emergency_towing_assistance");
+    seen.add("emergency_towing_assistance_rm_200_00");
+  }
+
   for (const raw of activeBenefits || []) {
     if (raw?.is_extra || raw?.cost_status === "paid" || hasPositivePrice(raw)) continue;
     if (matchCatalogItem(raw) !== null) continue;
     const title = String(raw?.title || raw?.label || "").trim();
     if (!title) continue;
     const norm = normalizeCode(title);
-    if (seen.has(norm)) continue;
+    if (norm.includes("towing") || seen.has(norm)) continue;
     seen.add(norm);
     let desc = String(raw?.description || raw?.short_description || "").trim();
     const val = formatAddonValue(raw?.value ?? raw?.coverage_limit);
@@ -518,7 +725,22 @@ export function extractFreeCoverageItems(
     items.push({ title, description: desc });
     if (items.length >= limit) break;
   }
-  return items;
+
+  const fallbacks: FreeCoverageItem[] = [
+    { title: "Legal Defense Costs", description: "Reimburses court legal representation and defense fees up to RM2,000." },
+    { title: "Drive-Less Save-More", description: "Cash rebate up to 30% of base premium for low annual mileage." },
+    { title: "Child Car Safety Seat", description: "Reimburses replacement or repair of child safety seats in a crash." },
+  ];
+  for (const fb of fallbacks) {
+    if (items.length >= limit) break;
+    const norm = normalizeCode(fb.title);
+    if (!seen.has(norm)) {
+      seen.add(norm);
+      items.push(fb);
+    }
+  }
+
+  return items.slice(0, limit);
 }
 
 export function sortUnifiedAddons(
@@ -544,6 +766,7 @@ export function sortUnifiedAddons(
       cost_status: item.cost_status,
       price: item.price,
       concept_key: item.concept_key,
+      asset_id: item.asset_id,
     };
     if (sel) {
       selected.push(card);
@@ -562,29 +785,78 @@ export function sortUnifiedAddons(
 export function buildUnifiedMatrixCards(
   activeBenefits: any[] = [],
   availableAddons: any[] = [],
-  selectedIds?: Set<string>,
-  fillToSlots: number = 24
+  selectedIds?: Set<string> | string[] | null,
+  fillToSlots: number = 0,
+  maxSlots: number = 24,
+  insurerName: string = ""
 ): UnifiedAddonCard[] {
+  const selSet =
+    selectedIds instanceof Set
+      ? selectedIds
+      : Array.isArray(selectedIds)
+      ? new Set(selectedIds)
+      : undefined;
   const canonicalOverrides: Record<string, any> = {};
   const customCards: any[] = [];
   const seenCustomIds = new Set<string>();
   const orderedActiveIds: string[] = [];
 
   const buildCardObj = (item: any, catId: string, sel: boolean, matched: any) => {
-    const rawVal = item.value !== undefined && item.value !== "" ? item.value : item.coverage_limit;
-    let formattedVal = formatAddonValue(rawVal);
-    if (!formattedVal && matched?.default_value) {
-      formattedVal = formatAddonValue(matched.default_value);
+    let rawVal = item.value !== undefined && item.value !== "" ? item.value : item.coverage_limit;
+    if ((rawVal === undefined || rawVal === "") && typeof item.typed_value === "object" && item.typed_value?.display_text) {
+      rawVal = item.typed_value.display_text;
     }
+    if ((rawVal === undefined || rawVal === "") && typeof item.typed_value_override === "object" && item.typed_value_override?.display_text) {
+      rawVal = item.typed_value_override.display_text;
+    }
+
+    // Betterment protection: Never display an RM monetary amount for Waiver of Betterment
+    const isBetterment = catId === "betterment" || (matched && matched.id === "betterment");
+    let formattedVal = "";
+    if (isBetterment) {
+      if (typeof rawVal === "string" && /^\s*rm\b/i.test(rawVal.trim())) {
+        rawVal = "";
+      }
+      const compL = (insurerName || "").toLowerCase();
+      const defaultYears = (compL.includes("qbe") || compL.includes("lonpac") || compL.includes("stmb") || compL.includes("takaful"))
+        ? "Up to 10 Years"
+        : "Up to 15 Years";
+      if (!rawVal || rawVal === "Up to 10 Years" || rawVal === "Up to 15 Years" || rawVal === "Standard") {
+        formattedVal = defaultYears;
+      } else {
+        formattedVal = formatAddonValue(rawVal) || defaultYears;
+      }
+    } else {
+      formattedVal = formatAddonValue(rawVal);
+      if (!formattedVal && matched?.default_value) {
+        formattedVal = formatAddonValue(matched.default_value);
+      }
+    }
+
+    const titleStr = String(item.title || item.label || matched?.title || catId);
+
+    // Check if coverage limit is explicitly hidden (Windscreen is strictly mandatory on Malaysian motor quotes)
+    const isHideCov = Boolean(
+      item.hide_coverage ||
+      item.show_coverage === false ||
+      (typeof item.typed_value === "object" && item.typed_value?.hide_limit === true) ||
+      (typeof item.typed_value_override === "object" && item.typed_value_override?.hide_limit === true)
+    );
+    const isMandatoryCov = catId.toLowerCase().includes("windscreen") || titleStr.toLowerCase().includes("windscreen");
+    if (isHideCov && !isMandatoryCov) {
+      formattedVal = "";
+    }
+
     const costStatus = sel
       ? String(item.cost_status || "paid")
       : item.cost_status === "included"
       ? "included"
       : "optional";
+    const assetId = item.asset_id || item.default_asset_id || matched?.default_asset_id;
     return {
       id: catId,
       code: catId,
-      title: String(item.title || item.label || matched?.title || catId),
+      title: titleStr,
       description: String(item.description || item.short_description || matched?.description || ""),
       value: formattedVal,
       icon_hint: inferIconHint(item, matched),
@@ -592,14 +864,16 @@ export function buildUnifiedMatrixCards(
       cost_status: costStatus,
       price: item.price ?? item.optional_price,
       concept_key: item.concept_key || catId,
+      asset_id: assetId || undefined,
     };
   };
 
   const pushItem = (item: any, sourceKind: "active" | "available") => {
     const matched = matchCatalogItem(item);
-    const sel = isBenefitSelected(item, selectedIds, sourceKind, matched?.id);
+    const sel = isBenefitSelected(item, selSet, sourceKind, matched?.id);
 
-    if (sourceKind === "active" && !matched && !sel) {
+    // Keep non-matrix unselected basic perks strictly inside "Free Added Coverage"
+    if (sourceKind === "active" && !sel) {
       return;
     }
 
@@ -616,6 +890,7 @@ export function buildUnifiedMatrixCards(
         if (!existing.value && nextCard.value) existing.value = nextCard.value;
         if (!existing.price && nextCard.price) existing.price = nextCard.price;
         if (!existing.description && nextCard.description) existing.description = nextCard.description;
+        if (!existing.asset_id && nextCard.asset_id) existing.asset_id = nextCard.asset_id;
         if (sel && !existing.is_selected) {
           existing.is_selected = true;
           existing.cost_status = nextCard.cost_status;
@@ -635,40 +910,82 @@ export function buildUnifiedMatrixCards(
     pushItem(item, "available");
   }
 
+  const towingUpgraded = Boolean(detectTowingUpgrade(activeBenefits));
   const processed: any[] = [];
-  if (fillToSlots > 0) {
-    const seenInOutput = new Set<string>();
-    for (const cat of CANONICAL_24_CATALOG.slice(0, fillToSlots)) {
+  const seenInOutput = new Set<string>();
+
+  // 1. Add provided canonical overrides (in canonical catalog sequence)
+  for (const cat of CANONICAL_24_CATALOG) {
+    if (
+      cat.id === "towing" &&
+      towingUpgraded &&
+      !canonicalOverrides[cat.id]?.is_selected
+    ) {
+      continue;
+    }
+    if (canonicalOverrides[cat.id]) {
       seenInOutput.add(cat.id);
-      if (canonicalOverrides[cat.id]) {
-        processed.push(canonicalOverrides[cat.id]);
-      } else {
-        const isCatSel = Boolean(selectedIds && (selectedIds.has(cat.id) || selectedIds.has(cat.title)));
+      processed.push(canonicalOverrides[cat.id]);
+    }
+  }
+
+  // 2. Add active draft benefits matching other canonical slots
+  for (const cid of orderedActiveIds) {
+    if (!seenInOutput.has(cid) && canonicalOverrides[cid]) {
+      seenInOutput.add(cid);
+      processed.push(canonicalOverrides[cid]);
+    }
+  }
+
+  // 3. Add custom active benefits and available addons provided for this quote
+  for (const custom of customCards) {
+    const cId = custom.id || custom.concept_key;
+    if (cId && !seenInOutput.has(cId)) {
+      seenInOutput.add(cId);
+      processed.push(custom);
+    }
+  }
+
+  // 4. Fill remaining slots up to fillToSlots from CANONICAL_24_CATALOG
+  if (fillToSlots > 0) {
+    for (const cat of CANONICAL_24_CATALOG) {
+      if (processed.length >= fillToSlots) {
+        break;
+      }
+      if (
+        cat.id === "towing" &&
+        towingUpgraded &&
+        !canonicalOverrides[cat.id]?.is_selected
+      ) {
+        continue;
+      }
+      if (!seenInOutput.has(cat.id)) {
+        seenInOutput.add(cat.id);
+        let fillVal = formatAddonValue(cat.default_value);
+        if (cat.id === "betterment") {
+          const compL = (insurerName || "").toLowerCase();
+          fillVal = (compL.includes("qbe") || compL.includes("lonpac") || compL.includes("stmb") || compL.includes("takaful"))
+            ? "Up to 10 Years"
+            : "Up to 15 Years";
+        }
         processed.push({
           id: cat.id,
           code: cat.id,
           title: cat.title,
           description: cat.description,
-          value: formatAddonValue(cat.default_value),
+          value: fillVal,
           icon_hint: cat.icon_hint,
-          is_selected: isCatSel,
-          cost_status: isCatSel ? "paid" : "optional",
+          is_selected: false,
+          cost_status: "optional",
           concept_key: cat.id,
         });
       }
     }
-    for (const cid of orderedActiveIds) {
-      if (!seenInOutput.has(cid)) {
-        seenInOutput.add(cid);
-        processed.push(canonicalOverrides[cid]);
-      }
-    }
-  } else {
-    for (const cid of orderedActiveIds) {
-      processed.push(canonicalOverrides[cid]);
-    }
   }
 
-  processed.push(...customCards);
-  return sortUnifiedAddons(processed, selectedIds);
+  const sortedCards = sortUnifiedAddons(processed, selSet);
+  if (fillToSlots > 0) {
+    return sortedCards.slice(0, fillToSlots);
+  }
+  return sortedCards;
 }

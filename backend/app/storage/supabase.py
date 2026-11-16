@@ -70,7 +70,9 @@ class SupabaseStorage:
     @property
     def bucket(self) -> str:
         if self._bucket is None:
-            self._bucket = self.settings.supabase_storage_bucket
+            self._bucket = getattr(self.settings, "supabase_storage_bucket", None)
+            if not self._bucket:
+                raise StorageError("Supabase storage bucket is not configured.")
         return self._bucket
 
     @property
@@ -182,11 +184,11 @@ class SupabaseStorage:
     def upload_pdf(self, object_key: str, data: bytes) -> StoredPdf:
         """Compatibility/source upload; new callers should use the typed method."""
 
-        source_limit = int(getattr(self.settings, "max_source_pdf_bytes", self.settings.max_upload_bytes))
+        source_limit = int(getattr(self.settings, "max_source_pdf_bytes", getattr(self.settings, "max_upload_bytes", 15_000_000)))
         return self._upload_pdf_with_limit(object_key, data, source_limit)
 
     def upload_generated_pdf(self, object_key: str, data: bytes) -> StoredPdf:
-        maximum = int(getattr(self.settings, "max_generated_pdf_bytes", self.settings.max_upload_bytes))
+        maximum = int(getattr(self.settings, "max_generated_pdf_bytes", getattr(self.settings, "max_upload_bytes", 15_000_000)))
         return self._upload_pdf_with_limit(object_key, data, maximum)
 
     def upload_asset(self, object_key: str, data: bytes, content_type: str) -> StoredPdf:

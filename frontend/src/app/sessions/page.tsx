@@ -339,10 +339,10 @@ export default function SessionsPage() {
               return (
                 <div
                   key={s.id}
-                  className="bg-white rounded-xl border border-neutral-200/80 hover:border-neutral-400 p-4 shadow-2xs hover:shadow-xs transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 group"
+                  className="bg-white rounded-xl border border-neutral-200/80 hover:border-neutral-400 p-4 shadow-2xs hover:shadow-xs transition-all flex flex-col xl:flex-row xl:items-center justify-between gap-4 group"
                 >
                   {/* Left: Vehicle Plate / Chassis & Customer */}
-                  <div className="flex items-start gap-3.5 min-w-[280px]">
+                  <div className="flex items-start gap-3.5 min-w-[280px] shrink-0">
                     <div className="size-10 rounded-xl bg-neutral-100 border border-neutral-200 flex items-center justify-center text-neutral-800 shrink-0 group-hover:bg-[#1b1717] group-hover:text-white transition-colors">
                       <Car size={20} weight="bold" />
                     </div>
@@ -399,34 +399,37 @@ export default function SessionsPage() {
                   </div>
 
                   {/* Middle: Insurer, Quotation Ref & Premium */}
-                  <div className="flex-1 min-w-[220px]">
+                  <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs font-extrabold text-neutral-900 px-2 py-0.5 rounded bg-neutral-100 border border-neutral-200">
+                      <span className="text-xs font-extrabold text-neutral-900 px-2 py-0.5 rounded bg-neutral-100 border border-neutral-200 shrink-0">
                         {s.detected_company || "Unknown Insurer"}
                       </span>
                       {s.quotation_ref && (
-                        <span className="font-mono text-xs font-bold text-blue-700">
+                        <span className="font-mono text-xs font-bold text-blue-700 shrink-0">
                           {s.quotation_ref}
                         </span>
                       )}
                       {s.template_name && (
-                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded flex items-center gap-1">
-                          <FileText size={11} weight="bold" />
-                          {s.template_name}
+                        <span
+                          className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded inline-flex items-center gap-1 max-w-[280px] truncate"
+                          title={s.template_name}
+                        >
+                          <FileText size={11} weight="bold" className="shrink-0" />
+                          <span className="truncate">{s.template_name}</span>
                         </span>
                       )}
                     </div>
 
-                    <div className="mt-1 flex items-baseline gap-2">
+                    <div className="mt-1 flex items-baseline gap-2 flex-wrap">
                       {s.total_premium ? (
-                        <span className="text-sm font-black font-mono text-emerald-700">
+                        <span className="text-sm font-black font-mono text-emerald-700 shrink-0">
                           RM {s.total_premium}
                         </span>
                       ) : (
-                        <span className="text-xs text-neutral-400 italic">No price calculated</span>
+                        <span className="text-xs text-neutral-400 italic shrink-0">No price calculated</span>
                       )}
                       {s.vehicle_model && (
-                        <span className="text-[11px] text-neutral-500">
+                        <span className="text-[11px] text-neutral-500 truncate max-w-sm" title={s.vehicle_model}>
                           · {s.vehicle_model}
                         </span>
                       )}
@@ -434,7 +437,7 @@ export default function SessionsPage() {
                   </div>
 
                   {/* Right: Quick Action Buttons */}
-                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap xl:justify-end">
                     {/* Inline Re-detection Feedback */}
                     {redetectFeedback?.id === s.id && (
                       <span

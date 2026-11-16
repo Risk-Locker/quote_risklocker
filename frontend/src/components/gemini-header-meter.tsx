@@ -9,6 +9,8 @@ import {
   CheckCircle,
   Gear,
   Lightning,
+  Pause,
+  Play,
   ShieldCheck,
   Sparkle,
   Warning,
@@ -17,6 +19,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
+import { useToast } from "@/components/ui/toast";
 
 export type GeminiAccountItem = {
   id: string;
@@ -45,6 +48,7 @@ export type GeminiAccountItem = {
   successful_calls: number;
   failed_calls: number;
   is_active: boolean;
+  is_paused?: boolean;
 };
 
 export type GeminiEndpointItem = {
@@ -61,8 +65,9 @@ export type GeminiEndpointItem = {
   tpm_remaining: number;
   cooling_until?: number | null;
   is_ready: boolean;
+  is_paused?: boolean;
   status_label: string;
-  status_color: "green" | "amber" | "red";
+  status_color: "green" | "amber" | "red" | "gray";
 };
 
 export type GeminiQuotaStats = {
@@ -76,15 +81,21 @@ export type GeminiQuotaStats = {
   active_account_label?: string;
   keys_count?: number;
   key_count?: number;
+  active_keys_count?: number;
   fleet_endpoints_count?: number;
+  active_endpoints_count?: number;
   tokens_budget_per_request?: number;
   fleet_summary?: {
     keys_count: number;
+    active_keys_count?: number;
     models_per_key: number;
     total_parallel_endpoints: number;
+    active_parallel_endpoints?: number;
     fleet_rpd_limit: number;
     fleet_rpm_limit: number;
     fleet_tpm_limit: number;
+    raw_rpd_capacity?: number;
+    raw_rpm_capacity?: number;
     tokens_per_request_budget: number;
   };
   endpoints?: GeminiEndpointItem[];
@@ -108,11 +119,13 @@ export type GeminiQuotaStats = {
 };
 
 export function GeminiHeaderMeter() {
+  const { toast } = useToast();
   const [stats, setStats] = useState<GeminiQuotaStats | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [probing, setProbing] = useState(false);
+  const [probingIdx, setProbingIdx] = useState<number | null>(null);
   const [probeResult, setProbeResult] = useState<string | null>(null);
-  const [switching, setSwitching] = useState<number | null>(null);
+  const [pausingId, setPausingId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   async function loadLimits() {
@@ -165,43 +178,75 @@ export function GeminiHeaderMeter() {
     }
   }
 
-  async function handleSwitchAccount(idx: number, e: React.MouseEvent) {
+  async function handleProbeKey(idx: number, e: React.MouseEvent) {
     e.stopPropagation();
-    setSwitching(idx);
+    setProbingIdx(idx);
+    setProbeResult(null);
     try {
-      const res = await api<{ ok: boolean; gemini: GeminiQuotaStats }>("/settings/gemini/switch-account", {
+      const res = await api<{ gemini: GeminiQuotaStats }>("/settings/gemini/probe", {
         method: "POST",
         body: JSON.stringify({ account_index: idx }),
       });
       if (res?.gemini) {
         setStats(res.gemini);
+        const targetAcc = res.gemini.accounts?.[idx];
+        setProbeResult(
+          targetAcc?.status === "ready" || res.gemini.status === "ready"
+            ? `Key ${idx + 1} live verified: HTTP 200 OK`
+            : `Key ${idx + 1} status: ${targetAcc?.status_label || res.gemini.status_label || "Error"}`
+        );
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to switch account");
+      setProbeResult(err instanceof Error ? err.message : "Probe connection failed");
     } finally {
-      setSwitching(null);
+      setProbingIdx(null);
+    }
+  }
+
+  async function handleTogglePause(keyId: string, currentPaused: boolean, e: React.MouseEvent) {
+    e.stopPropagation();
+    setPausingId(keyId);
+    try {
+      const res = await api<{ ok: boolean; is_paused: boolean; gemini: GeminiQuotaStats }>(
+        `/settings/gemini/keys/${keyId}/toggle-pause`,
+        {
+          method: "POST",
+          body: JSON.stringify({ paused: !currentPaused }),
+        }
+      );
+      if (res?.gemini) {
+        setStats(res.gemini);
+        toast(
+          res.is_paused ? "Key turned off (resting). Fleet capacity scaled down." : "Key resumed to active fleet.",
+          "success"
+        );
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to toggle key status", "error");
+    } finally {
+      setPausingId(null);
     }
   }
 
   if (!stats) return null;
 
   const accounts = stats.accounts || [];
-  const activeIdx = stats.active_account_index ?? 0;
-  const activeAcc = accounts[activeIdx] || accounts[0];
   const endpoints = stats.endpoints || [];
 
-  const color = stats.status_color || "gray";
-  const fleetRpdLimit = stats.fleet_summary?.fleet_rpd_limit ?? stats.pool_rpd_limit ?? stats.rpd_limit ?? 1840;
-  const fleetRpdUsed = stats.pool_rpd_used ?? stats.rpd_used ?? 0;
-  const fleetRpmLimit = stats.fleet_summary?.fleet_rpm_limit ?? stats.pool_rpm_limit ?? stats.rpm_limit ?? 48;
-  const fleetRpmUsed = stats.pool_rpm_used ?? stats.rpm_used ?? 0;
-  const fleetTpmLimit = stats.fleet_summary?.fleet_tpm_limit ?? stats.tpm_limit ?? 880_000;
-  const tokensBudget = stats.fleet_summary?.tokens_per_request_budget ?? stats.tokens_budget_per_request ?? 43_000;
-  const totalEndpoints = stats.fleet_summary?.total_parallel_endpoints ?? (endpoints.length > 0 ? endpoints.length : 4);
+  const activeKeysCount = stats.active_keys_count ?? stats.fleet_summary?.active_keys_count ?? accounts.filter((a) => !a.is_paused).length;
+  const activeEndpointsCount = stats.active_endpoints_count ?? stats.fleet_summary?.active_parallel_endpoints ?? endpoints.filter((ep) => ep.is_ready && !ep.is_paused).length;
   const totalKeys = stats.fleet_summary?.keys_count ?? stats.key_count ?? stats.keys_count ?? (accounts.length > 0 ? accounts.length : 2);
+  const totalEndpoints = stats.fleet_summary?.total_parallel_endpoints ?? (endpoints.length > 0 ? endpoints.length : 4);
 
-  const rpdPercent = Math.min(100, Math.round((fleetRpdUsed / fleetRpdLimit) * 100));
-  const rpmPercent = Math.min(100, Math.round((fleetRpmUsed / fleetRpmLimit) * 100));
+  const color = stats.status_color || (activeKeysCount === 0 ? "gray" : "green");
+  const fleetRpdLimit = stats.fleet_summary?.fleet_rpd_limit ?? stats.pool_rpd_limit ?? stats.rpd_limit ?? 1920;
+  const fleetRpdUsed = stats.pool_rpd_used ?? stats.rpd_used ?? 0;
+  const fleetRpmLimit = stats.fleet_summary?.fleet_rpm_limit ?? stats.pool_rpm_limit ?? stats.rpm_limit ?? 52;
+  const fleetRpmUsed = stats.pool_rpm_used ?? stats.rpm_used ?? 0;
+  const tokensBudget = stats.fleet_summary?.tokens_per_request_budget ?? stats.tokens_budget_per_request ?? 43_000;
+
+  const rpdPercent = fleetRpdLimit > 0 ? Math.min(100, Math.round((fleetRpdUsed / fleetRpdLimit) * 100)) : 0;
+  const rpmPercent = fleetRpmLimit > 0 ? Math.min(100, Math.round((fleetRpmUsed / fleetRpmLimit) * 100)) : 0;
 
   return (
     <div className="relative" ref={containerRef}>
@@ -239,7 +284,9 @@ export function GeminiHeaderMeter() {
         {/* Compact Meter Details */}
         <span className="font-semibold text-gray-900 flex items-center gap-1">
           <Sparkle size={12} weight="fill" className="text-amber-500" />
-          <span>Fleet: {totalKeys} Keys · {totalEndpoints} Endpoints</span>
+          <span>
+            Fleet: {activeKeysCount}/{totalKeys} Keys · {activeEndpointsCount}/{totalEndpoints} Endpoints
+          </span>
         </span>
         <span className="text-gray-300">|</span>
         <span className="font-mono text-[10px] text-gray-700 font-semibold" title={`Fleet Total: ${fleetRpdUsed} used of ${fleetRpdLimit} daily requests`}>
@@ -265,7 +312,9 @@ export function GeminiHeaderMeter() {
                 <Sparkle size={14} weight="fill" />
               </span>
               <div>
-                <h3 className="text-xs font-bold text-gray-900">Gemini AI Parallel Fleet ({totalEndpoints} Endpoints)</h3>
+                <h3 className="text-xs font-bold text-gray-900">
+                  Gemini AI Parallel Fleet ({activeEndpointsCount}/{totalEndpoints} Active)
+                </h3>
                 <span className="text-[10px] font-mono text-gray-500">
                   {totalKeys} Keys × 2 Models · Parallel Dispatching
                 </span>
@@ -287,8 +336,16 @@ export function GeminiHeaderMeter() {
                 <Lightning size={13} weight="fill" className="text-amber-500" />
                 Fleet Aggregate Limits
               </span>
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-mono">
-                {stats.status_label || "Ready · Parallel"}
+              <span
+                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full font-mono ${
+                  activeKeysCount === 0
+                    ? "bg-gray-200 text-gray-700"
+                    : activeKeysCount === totalKeys
+                    ? "bg-emerald-100 text-emerald-800"
+                    : "bg-sky-100 text-sky-800"
+                }`}
+              >
+                {stats.status_label || (activeKeysCount === 0 ? "Fleet Offline (All Keys Paused)" : `${activeEndpointsCount}/${totalEndpoints} Online`)}
               </span>
             </div>
 
@@ -355,12 +412,16 @@ export function GeminiHeaderMeter() {
                 endpoints.map((ep, idx) => (
                   <div
                     key={ep.slot_id || idx}
-                    className="flex items-center justify-between rounded-lg border border-gray-150 bg-gray-50/50 px-2.5 py-1.5 text-xs"
+                    className={`flex items-center justify-between rounded-lg border px-2.5 py-1.5 text-xs transition-opacity ${
+                      ep.is_paused ? "border-gray-200 bg-gray-50/40 opacity-60" : "border-gray-150 bg-gray-50/50"
+                    }`}
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <span
                         className={`size-2 shrink-0 rounded-full ${
-                          ep.status_color === "green"
+                          ep.is_paused
+                            ? "bg-gray-400"
+                            : ep.status_color === "green"
                             ? "bg-emerald-500"
                             : ep.status_color === "amber"
                             ? "bg-amber-500"
@@ -374,17 +435,23 @@ export function GeminiHeaderMeter() {
                           <span className="font-mono text-indigo-700 font-semibold">{ep.model.replace("gemini-2.5-", "")}</span>
                         </div>
                         <div className="font-mono text-[9px] text-gray-500">
-                          {ep.rpm_used}/{ep.rpm_limit} RPM · {(ep.tpm_used || 0).toLocaleString()}/{(ep.tpm_limit || 110000).toLocaleString()} TPM
+                          {ep.is_paused
+                            ? "Key Turned Off · Slot Inactive"
+                            : `${ep.rpm_used}/${ep.rpm_limit} RPM · ${(ep.tpm_used || 0).toLocaleString()}/{(ep.tpm_limit || 200000).toLocaleString()} TPM`}
                         </div>
                       </div>
                     </div>
 
                     <span
                       className={`text-[9px] font-semibold px-1.5 py-0.5 rounded shrink-0 ${
-                        ep.is_ready ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+                        ep.is_paused
+                          ? "bg-gray-200 text-gray-700"
+                          : ep.is_ready
+                          ? "bg-emerald-100 text-emerald-800"
+                          : "bg-amber-100 text-amber-800"
                       }`}
                     >
-                      {ep.status_label || (ep.is_ready ? "Ready" : "Cooling")}
+                      {ep.status_label || (ep.is_paused ? "Off · Paused" : ep.is_ready ? "Ready" : "Cooling")}
                     </span>
                   </div>
                 ))
@@ -396,59 +463,103 @@ export function GeminiHeaderMeter() {
             </div>
           </div>
 
-          {/* Account Switcher Section (if more than 1 account) */}
-          {accounts.length > 1 && (
-            <div className="mt-3">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1.5">
-                Switch Active Account
+          {/* Fleet Keys & Independent Controls Section */}
+          <div className="mt-3">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                Fleet Keys (Independent Controls)
               </span>
-              <div className="space-y-1">
-                {accounts.map((acc, idx) => (
+              <span className="text-[9px] text-gray-400 font-mono">
+                {activeKeysCount}/{totalKeys} Active
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              {accounts.map((acc, idx) => {
+                const isPaused = !!acc.is_paused;
+                const isPausing = pausingId === acc.id;
+                const isProbingThis = probingIdx === idx;
+
+                return (
                   <div
                     key={acc.id}
-                    className={`flex items-center justify-between rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
-                      idx === activeIdx
-                        ? "border-emerald-200 bg-emerald-50/50"
-                        : "border-gray-100 hover:bg-gray-50"
+                    className={`flex items-center justify-between rounded-lg border px-2.5 py-2 text-xs transition-colors ${
+                      isPaused ? "border-gray-200 bg-gray-50/40" : "border-emerald-200 bg-emerald-50/20"
                     }`}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
                       <span
-                        className={`size-2 rounded-full ${
-                          acc.status_color === "green"
+                        className={`size-2 shrink-0 rounded-full ${
+                          isPaused
+                            ? "bg-amber-400"
+                            : acc.status_color === "green"
                             ? "bg-emerald-500"
                             : acc.status_color === "amber"
                             ? "bg-amber-500"
                             : "bg-gray-400"
                         }`}
                       />
-                      <div>
-                        <div className="font-medium text-gray-800 text-[11px]">{acc.label}</div>
-                        <div className="font-mono text-[9px] text-gray-400">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-semibold text-gray-900 text-[11px] truncate">{acc.label}</span>
+                          {isPaused ? (
+                            <span className="text-[9px] font-semibold text-amber-800 bg-amber-100 px-1.5 py-0.2 rounded shrink-0">
+                              Off · Paused
+                            </span>
+                          ) : (
+                            <span className="text-[9px] font-semibold text-emerald-700 bg-emerald-100 px-1.5 py-0.2 rounded shrink-0">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                        <div className="font-mono text-[9px] text-gray-500 truncate">
                           {acc.rpd_used}/{acc.rpd_limit} RPD · {acc.masked_key}
                         </div>
                       </div>
                     </div>
 
-                    {idx === activeIdx ? (
-                      <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">
-                        Active
-                      </span>
-                    ) : (
+                    <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                      {/* Individual Test Button */}
                       <button
                         type="button"
-                        disabled={switching !== null}
-                        onClick={(e) => handleSwitchAccount(idx, e)}
-                        className="text-[10px] font-medium text-gray-700 hover:text-gray-900 border border-gray-200 hover:bg-white rounded px-2 py-0.5 transition-colors cursor-pointer"
+                        disabled={isProbingThis || isPaused}
+                        onClick={(e) => handleProbeKey(idx, e)}
+                        title={isPaused ? "Key is turned off — turn on to test" : `Test ${acc.label} live against Google`}
+                        className="text-[10px] font-medium text-gray-700 hover:text-gray-900 border border-gray-200 hover:bg-white rounded px-1.5 py-0.5 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
                       >
-                        {switching === idx ? "Switching..." : "Select"}
+                        <ArrowsClockwise size={10} className={isProbingThis ? "animate-spin" : ""} />
+                        <span>{isProbingThis ? "..." : "Test"}</span>
                       </button>
-                    )}
+
+                      {/* Independent On/Off Toggle Button */}
+                      <button
+                        type="button"
+                        disabled={isPausing}
+                        onClick={(e) => handleTogglePause(acc.id, isPaused, e)}
+                        title={isPaused ? `Turn on ${acc.label} into active fleet` : `Turn off (pause) ${acc.label}`}
+                        className={`text-[10px] font-semibold border rounded px-2 py-0.5 transition-colors cursor-pointer flex items-center gap-1 ${
+                          isPaused
+                            ? "bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700"
+                            : "bg-white border-gray-200 text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                        }`}
+                      >
+                        {isPausing ? (
+                          "..."
+                        ) : isPaused ? (
+                          <>
+                            <Play size={10} weight="fill" /> Turn On
+                          </>
+                        ) : (
+                          <>
+                            <Pause size={10} weight="fill" /> Turn Off
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
-          )}
+          </div>
 
           {/* Actions & Footer */}
           <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-xs">
@@ -459,7 +570,7 @@ export function GeminiHeaderMeter() {
               className="inline-flex items-center gap-1.5 text-[11px] font-medium text-gray-700 hover:text-gray-900 border border-gray-200 hover:bg-gray-50 rounded-lg px-2.5 py-1 transition-colors cursor-pointer"
             >
               <ArrowsClockwise size={12} weight="bold" className={probing ? "animate-spin" : ""} />
-              {probing ? "Testing..." : "Test Active Key"}
+              {probing ? "Testing..." : "Test Active Fleet"}
             </button>
 
             <Link

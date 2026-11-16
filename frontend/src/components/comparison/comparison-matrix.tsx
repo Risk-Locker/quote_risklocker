@@ -548,7 +548,24 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [splitModeByCompany, setSplitModeByCompany] = useState<Record<string, boolean>>({});
   const [expandedBreakdownId, setExpandedBreakdownId] = useState<Record<string, boolean>>({});
   const [rescanningQuoteId, setRescanningQuoteId] = useState<string | null>(null);
+  const [isRescanning, setIsRescanning] = useState(false);
   const [showDetectionLogsModal, setShowDetectionLogsModal] = useState(false);
+  const [rescanElapsedSeconds, setRescanElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (isRescanning || rescanningQuoteId) {
+      setRescanElapsedSeconds(0);
+      interval = setInterval(() => {
+        setRescanElapsedSeconds((prev) => prev + 1);
+      }, 1000);
+    } else {
+      setRescanElapsedSeconds(0);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isRescanning, rescanningQuoteId]);
 
   // 30-Second Real-Time Process Notification Toast
   const [operationStatus, setOperationStatus] = useState<{
@@ -619,7 +636,6 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [selectingWinnerId, setSelectingWinnerId] = useState<string | null>(null);
   const [generatingQuoteEntryId, setGeneratingQuoteEntryId] = useState<string | null>(null);
   const [generatingAllQuotes, setGeneratingAllQuotes] = useState(false);
-  const [isRescanning, setIsRescanning] = useState(false);
   const [isUploadingPrevPolicy, setIsUploadingPrevPolicy] = useState(false);
   const [editingRankEntryId, setEditingRankEntryId] = useState<string | null>(null);
   const [editingBasicFigureEntryId, setEditingBasicFigureEntryId] = useState<string | null>(null);
@@ -1333,12 +1349,23 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         onRescanQuote={async (quoteEntry) => {
           try {
             setRescanningQuoteId(quoteEntry.id);
+            triggerStatus(
+              "loading",
+              `Re-Analyzing ${quoteEntry.company_name || "Quotation"}`,
+              "Verifying policy benefits, excess schedules, and pricing against underwriter catalog with zero hallucinations...",
+              "Analyzing"
+            );
             const updated = await api<any>(`/comparison/${tenureId}/rescan`, {
               method: "POST",
             });
             setData(updated);
+            triggerStatus(
+              "success",
+              "Analysis Complete",
+              `Verified ${quoteEntry.company_name || "Quotation"} against underwriter catalog.`
+            );
           } catch (err: any) {
-            alert("Failed to re-analyze quote: " + (err.message || String(err)));
+            triggerStatus("error", "Re-Analysis Failed", err.message || String(err));
           } finally {
             setRescanningQuoteId(null);
           }
@@ -1401,9 +1428,9 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                   {tenure.include_road_tax === false && tenure.include_runner_fee === false
                     ? "Excluded"
                     : `RM ${(
-                        (tenure.include_road_tax !== false ? tenure.road_tax : 0) +
-                        (tenure.include_runner_fee !== false ? tenure.runner_fee : 0)
-                      ).toFixed(2)}`}
+                      (tenure.include_road_tax !== false ? tenure.road_tax : 0) +
+                      (tenure.include_runner_fee !== false ? tenure.runner_fee : 0)
+                    ).toFixed(2)}`}
                 </span>
               </p>
             </div>
@@ -1425,861 +1452,854 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
 
         {/* 3-Stage Action Stepper Bar */}
         <div id="tour-stepper" className="rounded-2xl border border-[#e5e5ea] bg-white p-3 shadow-xs no-print print:hidden">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
-          {/* Stage 1: Compare Underwriters */}
-          <div className="flex items-center gap-3 p-3 rounded-xl bg-[#f5f5f7]">
-            <span className="size-6 rounded-full bg-[#1b1717] text-white font-bold flex items-center justify-center text-xs shrink-0">
-              1
-            </span>
-            <div className="min-w-0">
-              <span className="font-bold text-[#1b1717] block truncate text-xs">Compare Underwriters</span>
-              <span className="text-[11px] text-[#6e6e73] block truncate">
-                {entries.length} quote(s) compiled · Review terms &amp; benefits
-              </span>
-            </div>
-          </div>
-
-          {/* Stage 2: Select Recommendation(s) */}
-          <div className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${hasWinners ? "bg-emerald-50 border border-emerald-200" : "bg-[#f5f5f7]"}`}>
-            <span className={`size-6 rounded-full font-bold flex items-center justify-center text-xs shrink-0 ${hasWinners ? "bg-emerald-600 text-white" : "bg-[#e5e5ea] text-[#454545]"}`}>
-              2
-            </span>
-            <div className="min-w-0">
-              <span className={`font-bold block truncate text-xs ${hasWinners ? "text-emerald-950" : "text-[#454545]"}`}>
-                {winnerEntries.length === 0
-                  ? "Select Recommendation(s)"
-                  : winnerEntries.length === 1
-                  ? `Recommended: ${formatShortInsurerName(winnerEntries[0].company_name)}`
-                  : `${winnerEntries.length} Recommendations Selected ★`}
-              </span>
-              <span className="text-[11px] text-[#6e6e73] block truncate">
-                {winnerEntries.length === 0
-                  ? "Click any quote to recommend"
-                  : winnerEntries.map((w) => formatShortInsurerName(w.company_name)).join(", ")}
-              </span>
-            </div>
-          </div>
-
-          {/* Stage 3: Review & Issue Quotation */}
-          <div className={`flex items-center justify-between p-3 rounded-xl transition-colors ${hasWinners ? "bg-rose-50 border border-rose-200" : "bg-[#f5f5f7]"}`}>
-            <div className="flex items-center gap-3 min-w-0">
-              <span className={`size-6 rounded-full font-bold flex items-center justify-center text-xs shrink-0 ${hasWinners ? "bg-[#ed1c24] text-white" : "bg-[#e5e5ea] text-[#454545]"}`}>
-                3
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
+            {/* Stage 1: Compare Underwriters */}
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-[#f5f5f7]">
+              <span className="size-6 rounded-full bg-[#1b1717] text-white font-bold flex items-center justify-center text-xs shrink-0">
+                1
               </span>
               <div className="min-w-0">
-                <span className="font-bold text-[#1b1717] block truncate text-xs">
-                  {winnerEntries.length > 1
-                    ? `Issue ${winnerEntries.length} Quotations`
+                <span className="font-bold text-[#1b1717] block truncate text-xs">Compare Underwriters</span>
+                <span className="text-[11px] text-[#6e6e73] block truncate">
+                  {entries.length} quote(s) compiled · Review terms &amp; benefits
+                </span>
+              </div>
+            </div>
+
+            {/* Stage 2: Select Recommendation(s) */}
+            <div className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${hasWinners ? "bg-emerald-50 border border-emerald-200" : "bg-[#f5f5f7]"}`}>
+              <span className={`size-6 rounded-full font-bold flex items-center justify-center text-xs shrink-0 ${hasWinners ? "bg-emerald-600 text-white" : "bg-[#e5e5ea] text-[#454545]"}`}>
+                2
+              </span>
+              <div className="min-w-0">
+                <span className={`font-bold block truncate text-xs ${hasWinners ? "text-emerald-950" : "text-[#454545]"}`}>
+                  {winnerEntries.length === 0
+                    ? "Select Recommendation(s)"
                     : winnerEntries.length === 1
-                    ? `Issue ${formatShortInsurerName(winnerEntries[0].company_name)} Quotation`
-                    : "Review & Issue Quotation"}
+                      ? `Recommended: ${formatShortInsurerName(winnerEntries[0].company_name)}`
+                      : `${winnerEntries.length} Recommendations Selected ★`}
                 </span>
                 <span className="text-[11px] text-[#6e6e73] block truncate">
                   {winnerEntries.length === 0
-                    ? "Select recommendation first"
-                    : "Client-ready quotation ready to build"}
+                    ? "Click any quote to recommend"
+                    : winnerEntries.map((w) => formatShortInsurerName(w.company_name)).join(", ")}
                 </span>
               </div>
             </div>
 
-            {/* Direct Links for Selected Winners */}
-            {winnerEntries.length === 1 && winnerEntries[0].session_id && (
-              <Link
-                href={`/sessions/${winnerEntries[0].session_id}/review` as Route}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs font-bold text-[#ed1c24] hover:text-[#c4171e] px-3 py-1.5 rounded-lg bg-white shadow-xs border border-rose-200 shrink-0 transition-colors hover:bg-rose-50"
-              >
-                <span>Open Quote</span>
-                <ArrowRight size={13} weight="bold" />
-              </Link>
-            )}
-
-            {winnerEntries.length > 1 && (
-              <div className="flex items-center gap-1.5 shrink-0">
-                {winnerEntries.map((w) =>
-                  w.session_id ? (
-                    <Link
-                      key={w.id}
-                      href={`/sessions/${w.session_id}/review` as Route}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={`Open ${w.company_name} quote review`}
-                      className="inline-flex items-center gap-1 text-[11px] font-bold text-[#ed1c24] hover:text-[#c4171e] px-2 py-1 rounded-md bg-white shadow-2xs border border-rose-200 transition-colors hover:bg-rose-50"
-                    >
-                      <span>{formatShortInsurerName(w.company_name)}</span>
-                      <ArrowRight size={10} weight="bold" />
-                    </Link>
-                  ) : null
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Duplicate Quote Alert Banner */}
-      {data.duplicate_alerts && data.duplicate_alerts.length > 0 && (
-        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 shadow-xs space-y-3 no-print print:hidden">
-          <div className="flex items-center gap-2 text-amber-900 font-bold text-sm">
-            <WarningCircle size={18} weight="fill" className="text-amber-600" />
-            <span>Duplicate Quotation Version Detected</span>
-          </div>
-          <div className="space-y-2">
-            {data.duplicate_alerts.map((dup) => (
-              <div
-                key={dup.session_id}
-                className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-amber-200"
-              >
-                <div className="text-xs text-neutral-800">
-                  <span className="font-bold">{dup.company_name}</span> · Quoted{" "}
-                  <strong className="font-mono">RM {Math.round(dup.total_payable || 0).toFixed(2)}</strong> (Date: {dup.quotation_date || "N/A"})
-                  <span className="ml-2 text-neutral-500 font-mono text-[11px]">[{dup.file_name || "Quotation.pdf"}]</span>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={resolvingDuplicateId === dup.session_id}
-                    onClick={() => handleResolveDuplicate(dup.session_id, "replace")}
-                    className="text-xs font-semibold hover:border-black"
-                  >
-                    Replace Previous
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={resolvingDuplicateId === dup.session_id}
-                    onClick={() => handleResolveDuplicate(dup.session_id, "keep")}
-                    className="text-xs font-semibold hover:border-black"
-                  >
-                    Keep Both
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={resolvingDuplicateId === dup.session_id}
-                    onClick={() => handleResolveDuplicate(dup.session_id, "remove")}
-                    className="text-xs font-semibold text-rose-600 hover:border-rose-300"
-                  >
-                    Remove
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Disqualified Documents Due to Plate Mismatch Banner */}
-      {data.disqualified_documents && data.disqualified_documents.length > 0 && (
-        <div className="rounded-2xl border border-rose-300 bg-rose-50 p-4 text-xs text-rose-950 shadow-xs flex items-start justify-between gap-3 no-print print:hidden">
-          <div className="space-y-1">
-            <p className="font-bold flex items-center gap-1.5 text-rose-900">
-              <WarningCircle size={16} weight="bold" className="text-rose-600" />
-              {data.disqualified_documents.length} Uploaded File(s) Disqualified Due to Plate Mismatch
-            </p>
-            <p className="text-rose-800 leading-relaxed">
-              The following file(s) did not match target vehicle plate{" "}
-              <strong className="font-mono font-bold text-rose-950">{tenure.vehicle_no}</strong> and were routed out of this matrix to prevent cross-vehicle rate contamination:
-            </p>
-            <div className="flex flex-wrap gap-2 pt-1 font-mono text-[11px]">
-              {data.disqualified_documents.map((doc, idx) => (
-                <span
-                  key={idx}
-                  className="px-2 py-1 bg-white rounded border border-rose-200 text-rose-900 font-semibold shadow-2xs"
-                >
-                  {doc.file_name} → Plate: <span className="font-bold">{doc.plate_detected || doc.extracted_plate || "UNKNOWN"}</span> ({doc.company_name || "Underwriter"})
+            {/* Stage 3: Review & Issue Quotation */}
+            <div className={`flex items-center justify-between p-3 rounded-xl transition-colors ${hasWinners ? "bg-rose-50 border border-rose-200" : "bg-[#f5f5f7]"}`}>
+              <div className="flex items-center gap-3 min-w-0">
+                <span className={`size-6 rounded-full font-bold flex items-center justify-center text-xs shrink-0 ${hasWinners ? "bg-[#ed1c24] text-white" : "bg-[#e5e5ea] text-[#454545]"}`}>
+                  3
                 </span>
-              ))}
-            </div>
-          </div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-rose-800 bg-rose-200/70 px-2 py-1 rounded shrink-0">
-            Disqualified
-          </span>
-        </div>
-      )}
-
-      {/* Top-Level Session Timeline Ribbon */}
-      {data.upload_sessions && data.upload_sessions.filter((b) => b.quotes && b.quotes.length > 0).length > 0 && (
-        <div className="rounded-2xl border border-[#e5e5ea] bg-white p-3 shadow-xs flex items-center gap-3 overflow-x-auto no-print print:hidden">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-[#1b1717] shrink-0 pl-1">
-            <Clock size={16} weight="bold" className="text-[#6e6e73]" />
-            <span>Session Timeline:</span>
-          </div>
-          <div className="flex items-center gap-2">
-            {data.upload_sessions
-              .filter((batch) => batch.quotes && batch.quotes.length > 0)
-              .map((batch, idx) => {
-                const qNames = batch.quotes.map((q) => formatShortInsurerName(q.company_name)).join(", ");
-                const isHighlighted =
-                  batch.quotes.some((q) => q.session_id === highlightedSessionId) ||
-                  batch.session_id === highlightedSessionId;
-                const firstSid = batch.quotes[0]?.session_id || batch.session_id;
-
-                return (
-                  <button
-                    key={batch.session_id}
-                    type="button"
-                    onClick={() => setHighlightedSessionId(isHighlighted ? null : firstSid)}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs cursor-pointer transition-all shrink-0 ${
-                      isHighlighted
-                        ? "bg-[#1b1717] text-white border-[#1b1717] shadow-sm"
-                        : "bg-[#f5f5f7] hover:bg-[#e5e5ea] text-[#1b1717] border-[#e5e5ea]"
-                    }`}
-                    title={
-                      batch.uploaded_at
-                        ? `Uploaded at ${new Date(batch.uploaded_at).toLocaleTimeString()}`
-                        : `Batch #${batch.batch_index || idx + 1}`
-                    }
-                  >
-                    <span
-                      className={`size-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                        isHighlighted ? "bg-white text-[#1b1717]" : "bg-[#1b1717] text-white"
-                      }`}
-                    >
-                      {batch.batch_index || idx + 1}
-                    </span>
-                    <span className="font-semibold">{qNames || "Quotation Batch"}</span>
-                    <span className={`text-[10px] ${isHighlighted ? "text-neutral-300" : "opacity-70"}`}>
-                      ({batch.quotes.length} {batch.quotes.length === 1 ? "quote" : "quotes"})
-                    </span>
-                  </button>
-                );
-              })}
-          </div>
-        </div>
-      )}
-
-      {/* 30-Second Real-Time Process Notification Toast */}
-      {operationStatus && (
-        <div
-          className={`rounded-xl border p-4 shadow-sm flex items-start justify-between gap-3 no-print animate-in fade-in slide-in-from-top-2 duration-200 ${
-            operationStatus.type === "loading"
-              ? "bg-amber-50 border-amber-200 text-amber-900"
-              : operationStatus.type === "success"
-              ? "bg-emerald-50 border-emerald-200 text-emerald-900"
-              : operationStatus.type === "error"
-              ? "bg-rose-50 border-rose-200 text-rose-900"
-              : "bg-blue-50 border-blue-200 text-blue-900"
-          }`}
-        >
-          <div className="flex items-start gap-3">
-            <div className="mt-0.5 shrink-0">
-              {operationStatus.type === "loading" ? (
-                <CircleNotch size={20} weight="bold" className="animate-spin text-amber-600" />
-              ) : operationStatus.type === "success" ? (
-                <CheckCircle size={20} weight="fill" className="text-emerald-600" />
-              ) : operationStatus.type === "error" ? (
-                <WarningCircle size={20} weight="fill" className="text-rose-600" />
-              ) : (
-                <Info size={20} weight="fill" className="text-blue-600" />
-              )}
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h4 className="text-xs font-bold uppercase tracking-wider">{operationStatus.title}</h4>
-                {operationStatus.step && (
-                  <span className="text-[10px] font-semibold bg-white/70 px-2 py-0.5 rounded-full border border-black/5">
-                    {operationStatus.step}
+                <div className="min-w-0">
+                  <span className="font-bold text-[#1b1717] block truncate text-xs">
+                    {winnerEntries.length > 1
+                      ? `Issue ${winnerEntries.length} Quotations`
+                      : winnerEntries.length === 1
+                        ? `Issue ${formatShortInsurerName(winnerEntries[0].company_name)} Quotation`
+                        : "Review & Issue Quotation"}
                   </span>
-                )}
+                  <span className="text-[11px] text-[#6e6e73] block truncate">
+                    {winnerEntries.length === 0
+                      ? "Select recommendation first"
+                      : "Client-ready quotation ready to build"}
+                  </span>
+                </div>
               </div>
-              <p className="text-xs mt-0.5 opacity-90 leading-relaxed font-medium">{operationStatus.message}</p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setOperationStatus(null)}
-            className="text-neutral-400 hover:text-neutral-700 p-1 rounded transition-colors cursor-pointer shrink-0"
-            title="Dismiss notification"
-          >
-            <X size={16} weight="bold" />
-          </button>
-        </div>
-      )}
 
-      {/* Vehicle Info & Action Header */}
-      <div className="rounded-2xl border border-[#e5e5ea] bg-white p-5 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3 flex-wrap">
-            {tenure.is_plate_undetected || tenure.vehicle_no === "N/A" ? (
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="rounded-lg bg-neutral-100 px-3 py-1 font-mono text-sm font-bold text-neutral-600 border border-neutral-300">
-                  N/A
-                </span>
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
-                  <span className="size-2 rounded-full bg-amber-500 animate-pulse" />
-                  <span>Plate Undetected · Tracking by Chassis: {tenure.chassis_no || "N/A"}</span>
-                </span>
-              </div>
-            ) : (
-              <span className="rounded-lg bg-[#f5f5f7] px-3 py-1 font-mono text-sm font-bold text-[#1b1717] border border-[#e5e5ea]">
-                {tenure.vehicle_no}
-              </span>
-            )}
-            <h1 className="text-xl font-bold tracking-tight text-[#1b1717]">
-              {tenure.customer_name}
-            </h1>
-            <span className="inline-flex items-center gap-1.5 rounded-lg bg-rose-50 px-2.5 py-1 text-xs font-bold text-rose-700 border border-rose-200/90 shadow-2xs">
-              <span className="size-1.5 rounded-full bg-rose-500 animate-pulse" />
-              <span>Expiry Date: {formatExpiryDateDisplay(tenure, previous_policy)}</span>
-            </span>
-          </div>
-          <div className="text-xs text-[#6e6e73] mt-2 flex items-center gap-2 flex-wrap">
-            <span>Period: <strong className="text-[#1b1717] font-mono">{activeWinnerPeriod}</strong></span>
-            <span>•</span>
-            <span>Model: <strong className="text-[#1b1717]">{tenure.vehicle_model || "Motor Vehicle"}</strong> ({tenure.engine_cc || "N/A"})</span>
-            {(tenure.formatted_ic || tenure.ic_no) && (
-              <>
-                <span>•</span>
-                <span>IC: <strong className="text-[#1b1717] font-mono">{tenure.formatted_ic || tenure.ic_no}</strong></span>
-              </>
-            )}
-            {tenure.birth_date && (
-              <>
-                <span>•</span>
-                <span>DOB: <strong className="text-[#1b1717] font-mono">{new Date(tenure.birth_date).toLocaleDateString("en-MY", { day: "2-digit", month: "2-digit", year: "numeric" })}</strong></span>
-              </>
-            )}
-            {tenure.customer_age != null && (
-              <span>({tenure.customer_age} yo{tenure.customer_gender ? `, ${tenure.customer_gender}` : ""}{tenure.nric_state ? `, ${tenure.nric_state}` : ""})</span>
-            )}
-            <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-tight ${
-              (tenure.runner_fee_type === "passport" || tenure.runner_fee >= 20.0)
-                ? "bg-purple-100 text-purple-800 border border-purple-200"
-                : "bg-blue-100 text-blue-800 border border-blue-200"
-            }`}>
-              {(tenure.runner_fee_type === "passport" || tenure.runner_fee >= 20.0)
-                ? `Passport (RM ${tenure.runner_fee.toFixed(2)})`
-                : `MyKad (RM ${tenure.runner_fee.toFixed(2)})`}
-            </span>
-          </div>
-        </div>
-
-        {/* Structured Action Clusters */}
-        <div className="flex items-center gap-2.5 flex-wrap no-print print:hidden shrink-0">
-          {/* Group 1: Client Share & Export Actions */}
-          <div className="flex items-center gap-1.5 bg-[#f5f5f7] p-1 rounded-xl border border-[#e5e5ea]">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleCopyWhatsapp}
-              icon={copiedWhatsapp ? <Check weight="bold" size={15} className="text-emerald-600" /> : <ChatCircleDots weight="bold" size={15} className="text-emerald-700" />}
-              className={`border-transparent text-xs font-semibold ${
-                copiedWhatsapp
-                  ? "bg-emerald-50 text-emerald-800 border-emerald-300"
-                  : "bg-white hover:bg-neutral-50 text-[#1b1717] shadow-2xs"
-              }`}
-              title="Copy WhatsApp comparison teaser text"
-            >
-              {copiedWhatsapp ? "Copied!" : "WhatsApp Teaser"}
-            </Button>
-
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setSnapshotModalOpen(true)}
-              icon={<Camera size={15} weight="bold" className="text-[#1b1717]" />}
-              className="border-transparent bg-white hover:bg-neutral-50 text-[#1b1717] font-semibold text-xs shadow-2xs"
-              title="Export high-resolution comparison snapshot grid"
-            >
-              Snapshot
-            </Button>
-
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => window.print()}
-              icon={<Printer weight="bold" size={15} className="text-[#1b1717]" />}
-              className="border-transparent bg-white hover:bg-neutral-50 text-[#1b1717] font-semibold text-xs shadow-2xs"
-              title="Print executive quotation comparison"
-            >
-              Print
-            </Button>
-          </div>
-
-          <div className="h-6 w-px bg-[#e5e5ea] hidden sm:block" />
-
-          {/* Group 2: Primary Quotation Ingestion */}
-          <div className="flex items-center gap-1.5">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setIsFastQuoteModalOpen(true)}
-              icon={<Lightning weight="fill" size={14} className="text-amber-500" />}
-              className="border-amber-300 bg-amber-50/70 hover:bg-amber-100/80 text-amber-950 font-bold text-xs shadow-2xs"
-              title="Fast 30-second manual quote entry for unreadable scans or portal quotes"
-            >
-              + Fast Quote
-            </Button>
-
-            <Link
-              href={`/upload?mode=comparison&tenure_id=${tenure.id}` as Route}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e5e5ea] bg-white hover:bg-neutral-50 text-xs font-semibold text-[#1b1717] transition-colors shadow-2xs cursor-pointer"
-              title="Upload underwriter quotation or cover note PDF for this vehicle"
-            >
-              <UploadSimple size={15} weight="bold" />
-              <span>Upload PDF</span>
-            </Link>
-
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => {
-                setEditingEntry(null);
-                setIsManualModalOpen(true);
-              }}
-              icon={<Plus weight="bold" size={14} />}
-              className="bg-[#1b1717] hover:bg-black text-white font-semibold text-xs shadow-xs"
-              title="Manually enter an insurer quotation"
-            >
-              Add Insurer Quote
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* Dedicated Pricing Display & Fixed Fee Controls Toolbar */}
-      <div className="rounded-2xl border border-[#e5e5ea] bg-white p-3.5 shadow-xs flex flex-col xl:flex-row items-start xl:items-center justify-between gap-3 no-print print:hidden">
-        {/* Left: Pricing & Currency Rounding Mode + Fee Quick Toggles */}
-        <div className="flex items-center gap-3 flex-wrap">
-          {/* Sub-Group A: Pricing Mode */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-[#1b1717] shrink-0">
-              <CurrencyDollar size={18} weight="bold" className="text-[#1b1717]" />
-              <span>Pricing Display:</span>
-            </div>
-
-            <div className="flex items-center p-1 rounded-xl border border-[#e5e5ea] bg-[#f5f5f7] text-xs font-medium shrink-0 gap-1">
-              <button
-                type="button"
-                onClick={() => handleToggleRoundingMode("exact")}
-                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer text-xs ${
-                  roundingMode === "exact"
-                    ? "bg-white text-[#1b1717] font-bold shadow-2xs border border-black/5"
-                    : "text-[#6e6e73] hover:text-[#1b1717]"
-                }`}
-                title="Display exact cents from underwriter quotation (.15)"
-              >
-                Exact Cents (.15)
-              </button>
-              <button
-                type="button"
-                onClick={() => handleToggleRoundingMode("5cent")}
-                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer text-xs ${
-                  roundingMode === "5cent" || (roundingMode as string) === "bnm5"
-                    ? "bg-white text-[#1b1717] font-bold shadow-2xs border border-black/5"
-                    : "text-[#6e6e73] hover:text-[#1b1717]"
-                }`}
-                title="5 Cents cash rounding (.15)"
-              >
-                5 Cents (.15)
-              </button>
-              <button
-                type="button"
-                onClick={() => handleToggleRoundingMode("whole")}
-                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer text-xs ${
-                  roundingMode === "whole"
-                    ? "bg-white text-[#1b1717] font-bold shadow-2xs border border-black/5"
-                    : "text-[#6e6e73] hover:text-[#1b1717]"
-                }`}
-                title="Round up to nearest whole Ringgit without cents (e.g. 1,300.29 -> 1,301)"
-              >
-                Whole RM (1,301)
-              </button>
-            </div>
-          </div>
-
-          <div className="h-6 w-px bg-[#e5e5ea] hidden sm:block" />
-
-          {/* Sub-Group B: Road Tax & Runner Fee 1-Click Toggles & Fix Button */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <button
-              type="button"
-              disabled={togglingFee !== null}
-              onClick={() => handleToggleFee("road_tax")}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
-                tenure.include_road_tax !== false
-                  ? "bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100/80 shadow-2xs"
-                  : "bg-[#f5f5f7] text-[#6e6e73] border-dashed border-[#e5e5ea] hover:bg-neutral-200"
-              }`}
-              title={tenure.include_road_tax !== false ? "Click to exclude Road Tax from comparison totals" : "Click to include Road Tax in comparison totals"}
-            >
-              {tenure.include_road_tax !== false ? (
-                <>
-                  <CheckCircle size={14} weight="fill" className="text-emerald-600" />
-                  <span>Road Tax: RM {tenure.road_tax.toFixed(2)}</span>
-                </>
-              ) : (
-                <>
-                  <XCircle size={14} weight="fill" className="text-neutral-400" />
-                  <span className="line-through">Road Tax (Excluded)</span>
-                </>
+              {/* Direct Links for Selected Winners */}
+              {winnerEntries.length === 1 && winnerEntries[0].session_id && (
+                <Link
+                  href={`/sessions/${winnerEntries[0].session_id}/review` as Route}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-[#ed1c24] hover:text-[#c4171e] px-3 py-1.5 rounded-lg bg-white shadow-xs border border-rose-200 shrink-0 transition-colors hover:bg-rose-50"
+                >
+                  <span>Open Quote</span>
+                  <ArrowRight size={13} weight="bold" />
+                </Link>
               )}
-            </button>
 
-            <button
-              type="button"
-              disabled={togglingFee !== null}
-              onClick={() => handleToggleFee("runner_fee")}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
-                tenure.include_runner_fee !== false
-                  ? "bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100/80 shadow-2xs"
-                  : "bg-[#f5f5f7] text-[#6e6e73] border-dashed border-[#e5e5ea] hover:bg-neutral-200"
-              }`}
-              title={tenure.include_runner_fee !== false ? "Click to exclude Runner Fee from comparison totals" : "Click to include Runner Fee in comparison totals"}
-            >
-              {tenure.include_runner_fee !== false ? (
-                <>
-                  <CheckCircle size={14} weight="fill" className="text-emerald-600" />
-                  <span>Runner: RM {tenure.runner_fee.toFixed(2)}</span>
-                </>
-              ) : (
-                <>
-                  <XCircle size={14} weight="fill" className="text-neutral-400" />
-                  <span className="line-through">Runner Fee (Excluded)</span>
-                </>
+              {winnerEntries.length > 1 && (
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {winnerEntries.map((w) =>
+                    w.session_id ? (
+                      <Link
+                        key={w.id}
+                        href={`/sessions/${w.session_id}/review` as Route}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={`Open ${w.company_name} quote review`}
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-[#ed1c24] hover:text-[#c4171e] px-2 py-1 rounded-md bg-white shadow-2xs border border-rose-200 transition-colors hover:bg-rose-50"
+                      >
+                        <span>{formatShortInsurerName(w.company_name)}</span>
+                        <ArrowRight size={10} weight="bold" />
+                      </Link>
+                    ) : null
+                  )}
+                </div>
               )}
-            </button>
-
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setShowAdjustFeesModal(true)}
-              icon={<PencilSimple size={14} weight="bold" className="text-[#1b1717]" />}
-              className="border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717] font-semibold text-xs shadow-2xs"
-              title="Fix or adjust Road Tax and Runner Fee amounts, or recalculate JPJ tariff"
-            >
-              Fix / Adjust Fees
-            </Button>
-          </div>
-        </div>
-
-        {/* Right: Matrix Utilities & Audit Diagnostics */}
-        <div className="flex items-center gap-2 flex-wrap shrink-0">
-          {hiddenCount > 0 && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setShowHiddenCards(!showHiddenCards)}
-              icon={showHiddenCards ? <EyeSlash size={14} /> : <Eye size={14} />}
-              className="border-neutral-200 text-xs font-semibold bg-[#f5f5f7] hover:bg-neutral-200 text-[#1b1717]"
-            >
-              {showHiddenCards ? "Hide Inactive" : `${hiddenCount} hidden · Show All`}
-            </Button>
-          )}
-
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleRerank}
-            loading={reranking}
-            icon={<ArrowsClockwise size={14} weight="bold" />}
-            className="border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717] font-semibold text-xs"
-            title="Recalculate dynamic ranking order based on visible cards and manual overrides"
-          >
-            Re-Rank
-          </Button>
-
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleRescanQuotes}
-            loading={isRescanning}
-            icon={<ArrowsClockwise size={14} weight="bold" className={isRescanning ? "animate-spin text-[#ed1c24]" : "text-[#ed1c24]"} />}
-            className="border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717] font-semibold text-xs"
-            title="Re-extract and re-sync values from all uploaded quotation PDFs"
-          >
-            Re-Analyze All Quotes
-          </Button>
-
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setShowDetectionLogsModal(true)}
-            icon={<ClipboardText size={14} weight="bold" className="text-blue-600" />}
-            className="border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717] font-semibold text-xs"
-            title="Inspect autonomous detection audit: JPJ road tax math, perils pricing breakdown, and schedule policy excess"
-          >
-            Detection Logs
-          </Button>
-        </div>
-      </div>
-
-      {/* Date Reconciliation Conflict Banner (Non-blocking) */}
-      {data.date_conflict?.has_conflict && (
-        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-950 shadow-xs flex items-start justify-between gap-3 no-print print:hidden">
-          <div className="space-y-1">
-            <p className="font-bold flex items-center gap-1.5 text-amber-900">
-              <CalendarBlank size={16} weight="bold" className="text-amber-700" />
-              Coverage Date Reconciliation Variance Detected
-            </p>
-            <p className="text-amber-800 leading-relaxed">
-              {data.date_conflict.message}
-            </p>
-            <div className="flex items-center gap-2 pt-1 font-mono text-[11px]">
-              <span className="font-bold text-amber-900">Detected dates:</span>
-              {data.date_conflict.unique_dates?.map((d) => (
-                <span key={d} className="px-1.5 py-0.5 bg-amber-100 rounded border border-amber-200">
-                  {d}
-                </span>
-              ))}
             </div>
           </div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 bg-amber-200/70 px-2 py-1 rounded">
-            Non-Blocking
-          </span>
         </div>
-      )}
 
-      {/* Main 3-Pane Excel Comparison Grid */}
-      <div className="grid grid-cols-1 xl:grid-cols-[280px_minmax(0,1fr)_280px] print:grid-cols-[240px_minmax(0,1fr)_220px] gap-4 items-start">
-        {/* ============================================================== */}
-        {/* LEFT PANE: Customer Dossier & Vehicle Fixed Costs              */}
-        {/* ============================================================== */}
-        <CustomerVehicleLedgerPane
-          tenure={tenure}
-          covernotePolicy={data.covernote_policy}
-          vehicleAge={data.vehicle_age}
-          decodedIc={decodedIc}
-          activeWinnerPeriod={activeWinnerPeriod}
-          editingFixedCosts={editingFixedCosts}
-          setEditingFixedCosts={setEditingFixedCosts}
-          refreshingLedger={refreshingLedger}
-          onRefreshLedger={handleRefreshLedger}
-          customerNameInput={customerNameInput}
-          setCustomerNameInput={setCustomerNameInput}
-          icNoInput={icNoInput}
-          setIcNoInput={setIcNoInput}
-          vehicleNoInput={vehicleNoInput}
-          setVehicleNoInput={setVehicleNoInput}
-          carBrandInput={carBrandInput}
-          setCarBrandInput={setCarBrandInput}
-          roadTaxInput={roadTaxInput}
-          setRoadTaxInput={setRoadTaxInput}
-          includeRoadTaxInput={includeRoadTaxInput}
-          setIncludeRoadTaxInput={setIncludeRoadTaxInput}
-          runnerFeeInput={runnerFeeInput}
-          setRunnerFeeInput={setRunnerFeeInput}
-          includeRunnerFeeInput={includeRunnerFeeInput}
-          setIncludeRunnerFeeInput={setIncludeRunnerFeeInput}
-          windscreenInput={windscreenInput}
-          setWindscreenInput={setWindscreenInput}
-          quotationDiscountInput={quotationDiscountInput}
-          setQuotationDiscountInput={setQuotationDiscountInput}
-          engineCcInput={engineCcInput}
-          setEngineCcInput={setEngineCcInput}
-          engineNoInput={engineNoInput}
-          setEngineNoInput={setEngineNoInput}
-          chassisNoInput={chassisNoInput}
-          setChassisNoInput={setChassisNoInput}
-          vehicleModelInput={vehicleModelInput}
-          setVehicleModelInput={setVehicleModelInput}
-          vehicleTypeInput={vehicleTypeInput}
-          setVehicleTypeInput={setVehicleTypeInput}
-          manufactureYearInput={manufactureYearInput}
-          setManufactureYearInput={setManufactureYearInput}
-          startDateInput={startDateInput}
-          endDateInput={endDateInput}
-          onStartDateChange={handleStartDateChange}
-          onEndDateChange={handleEndDateChange}
-          savingFixedCosts={savingFixedCosts}
-          onSaveFixedCosts={handleSaveFixedCosts}
-          onPopulateEditInputs={() => populateEditInputs(tenure)}
-        />
-
-        {/* ============================================================== */}
-        {/* CENTER PANE: Dynamic Side-by-Side Underwriter Columns           */}
-        {/* ============================================================== */}
-        <div id="tour-comparison-matrix" className="min-w-0 overflow-x-auto pb-4 print:overflow-visible print:w-full">
-          <div className="flex gap-4 min-w-max print:min-w-0 print:flex-wrap">
-            {companyGroups.map((group) => {
-              const activeIds = getActiveEntryIdsForGroup(group);
-              const activeEntries = group.entries.filter(
-                (e) => activeIds.includes(e.id) && (showHiddenCards || !e.is_hidden)
-              );
-              const entriesToRender =
-                activeEntries.length > 0
-                  ? activeEntries
-                  : group.entries.filter((e) => showHiddenCards || !e.is_hidden).slice(0, 1);
-
-              return entriesToRender.map((entry) =>
-                renderUnderwriterCard(entry, group, activeIds)
-              );
-            })}
-
-            {/* Empty State: Marketing Comparison Table Dropzone */}
-            {companyGroups.length === 0 && (
-              <>
-                <div className="flex-1 min-w-[340px] max-w-[540px] p-8 rounded-2xl border-2 border-dashed border-[#e5e5ea] bg-white text-center flex flex-col items-center justify-center gap-4">
-                  <div className="size-14 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center">
-                    <Columns size={28} weight="duotone" />
+        {/* Duplicate Quote Alert Banner */}
+        {data.duplicate_alerts && data.duplicate_alerts.length > 0 && (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 shadow-xs space-y-3 no-print print:hidden">
+            <div className="flex items-center gap-2 text-amber-900 font-bold text-sm">
+              <WarningCircle size={18} weight="fill" className="text-amber-600" />
+              <span>Duplicate Quotation Version Detected</span>
+            </div>
+            <div className="space-y-2">
+              {data.duplicate_alerts.map((dup) => (
+                <div
+                  key={dup.session_id}
+                  className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-amber-200"
+                >
+                  <div className="text-xs text-neutral-800">
+                    <span className="font-bold">{dup.company_name}</span> · Quoted{" "}
+                    <strong className="font-mono">RM {Math.round(dup.total_payable || 0).toFixed(2)}</strong> (Date: {dup.quotation_date || "N/A"})
+                    <span className="ml-2 text-neutral-500 font-mono text-[11px]">[{dup.file_name || "Quotation.pdf"}]</span>
                   </div>
-                  <div>
-                    <h3 className="text-base font-bold text-[#1b1717]">
-                      {isCompilingBatch || (data?.pending_jobs_count && data.pending_jobs_count > 0)
-                        ? "Extracting Quotation Documents..."
-                        : `${tenure.coverage_start_date ? new Date(tenure.coverage_start_date).getFullYear() : "2027"} Renewal Intake Workspace`}
-                    </h3>
-                    <p className="text-xs text-[#6e6e73] max-w-sm mt-1 leading-relaxed">
-                      {isCompilingBatch || (data?.pending_jobs_count && data.pending_jobs_count > 0)
-                        ? "Our extraction pipeline is reading underwriter PDFs, extracting sums insured, motor premiums, and benefit riders. This matrix will refresh automatically."
-                        : `Showing previous year policy details as baseline for ${tenure.vehicle_no}. Upload incoming underwriter quotation PDFs or enter portal quotes manually.`}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2 pt-2">
-                    <Link
-                      href={`/upload?mode=comparison&tenure_id=${tenureId}` as Route}
-                      className="bg-[#1b1717] hover:bg-black text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer inline-flex items-center gap-1.5"
-                    >
-                      <UploadSimple size={14} weight="bold" />
-                      <span>Upload PDF</span>
-                    </Link>
+                  <div className="flex items-center gap-2 shrink-0">
                     <Button
-                      type="button"
                       variant="secondary"
-                      onClick={() => fetchComparison()}
-                      className="text-xs font-semibold px-3 py-2 rounded-xl cursor-pointer"
+                      size="sm"
+                      disabled={resolvingDuplicateId === dup.session_id}
+                      onClick={() => handleResolveDuplicate(dup.session_id, "replace")}
+                      className="text-xs font-semibold hover:border-black"
                     >
-                      <ArrowsClockwise size={14} weight="bold" className="mr-1" />
-                      Refresh
+                      Replace Previous
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={resolvingDuplicateId === dup.session_id}
+                      onClick={() => handleResolveDuplicate(dup.session_id, "keep")}
+                      className="text-xs font-semibold hover:border-black"
+                    >
+                      Keep Both
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={resolvingDuplicateId === dup.session_id}
+                      onClick={() => handleResolveDuplicate(dup.session_id, "remove")}
+                      className="text-xs font-semibold text-rose-600 hover:border-rose-300"
+                    >
+                      Remove
                     </Button>
                   </div>
                 </div>
-              </>
-            )}
+              ))}
+            </div>
+          </div>
+        )}
 
-            {/* "+ Add Insurer Quote" Action Card */}
-            <div className="w-[240px] shrink-0 rounded-2xl border-2 border-dashed border-[#e5e5ea] p-4 flex flex-col items-center justify-center text-center gap-2.5 bg-white group no-print print:hidden">
-              <button
-                type="button"
-                onClick={() => setIsFastQuoteModalOpen(true)}
-                className="w-full py-2.5 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors border border-amber-300 cursor-pointer"
+        {/* Disqualified Documents Due to Plate Mismatch Banner */}
+        {data.disqualified_documents && data.disqualified_documents.length > 0 && (
+          <div className="rounded-2xl border border-rose-300 bg-rose-50 p-4 text-xs text-rose-950 shadow-xs flex items-start justify-between gap-3 no-print print:hidden">
+            <div className="space-y-1">
+              <p className="font-bold flex items-center gap-1.5 text-rose-900">
+                <WarningCircle size={16} weight="bold" className="text-rose-600" />
+                {data.disqualified_documents.length} Uploaded File(s) Disqualified Due to Plate Mismatch
+              </p>
+              <p className="text-rose-800 leading-relaxed">
+                The following file(s) did not match target vehicle plate{" "}
+                <strong className="font-mono font-bold text-rose-950">{tenure.vehicle_no}</strong> and were routed out of this matrix to prevent cross-vehicle rate contamination:
+              </p>
+              <div className="flex flex-wrap gap-2 pt-1 font-mono text-[11px]">
+                {data.disqualified_documents.map((doc, idx) => (
+                  <span
+                    key={idx}
+                    className="px-2 py-1 bg-white rounded border border-rose-200 text-rose-900 font-semibold shadow-2xs"
+                  >
+                    {doc.file_name} → Plate: <span className="font-bold">{doc.plate_detected || doc.extracted_plate || "UNKNOWN"}</span> ({doc.company_name || "Underwriter"})
+                  </span>
+                ))}
+              </div>
+            </div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-rose-800 bg-rose-200/70 px-2 py-1 rounded shrink-0">
+              Disqualified
+            </span>
+          </div>
+        )}
+
+        {/* Top-Level Session Timeline Ribbon */}
+        {data.upload_sessions && data.upload_sessions.filter((b) => b.quotes && b.quotes.length > 0).length > 0 && (
+          <div className="rounded-2xl border border-[#e5e5ea] bg-white p-3 shadow-xs flex items-center gap-3 overflow-x-auto no-print print:hidden">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-[#1b1717] shrink-0 pl-1">
+              <Clock size={16} weight="bold" className="text-[#6e6e73]" />
+              <span>Session Timeline:</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {data.upload_sessions
+                .filter((batch) => batch.quotes && batch.quotes.length > 0)
+                .map((batch, idx) => {
+                  const qNames = batch.quotes.map((q) => formatShortInsurerName(q.company_name)).join(", ");
+                  const isHighlighted =
+                    batch.quotes.some((q) => q.session_id === highlightedSessionId) ||
+                    batch.session_id === highlightedSessionId;
+                  const firstSid = batch.quotes[0]?.session_id || batch.session_id;
+
+                  return (
+                    <button
+                      key={batch.session_id}
+                      type="button"
+                      onClick={() => setHighlightedSessionId(isHighlighted ? null : firstSid)}
+                      className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs cursor-pointer transition-all shrink-0 ${isHighlighted
+                        ? "bg-[#1b1717] text-white border-[#1b1717] shadow-sm"
+                        : "bg-[#f5f5f7] hover:bg-[#e5e5ea] text-[#1b1717] border-[#e5e5ea]"
+                        }`}
+                      title={
+                        batch.uploaded_at
+                          ? `Uploaded at ${new Date(batch.uploaded_at).toLocaleTimeString()}`
+                          : `Batch #${batch.batch_index || idx + 1}`
+                      }
+                    >
+                      <span
+                        className={`size-4 rounded-full flex items-center justify-center text-[10px] font-bold ${isHighlighted ? "bg-white text-[#1b1717]" : "bg-[#1b1717] text-white"
+                          }`}
+                      >
+                        {batch.batch_index || idx + 1}
+                      </span>
+                      <span className="font-semibold">{qNames || "Quotation Batch"}</span>
+                      <span className={`text-[10px] ${isHighlighted ? "text-neutral-300" : "opacity-70"}`}>
+                        ({batch.quotes.length} {batch.quotes.length === 1 ? "quote" : "quotes"})
+                      </span>
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+        )}
+
+        {/* 30-Second Real-Time Process Notification Toast */}
+        {operationStatus && (
+          <div
+            className={`rounded-xl border p-4 shadow-sm flex items-start justify-between gap-3 no-print animate-in fade-in slide-in-from-top-2 duration-200 ${operationStatus.type === "loading"
+              ? "bg-amber-50 border-amber-200 text-amber-900"
+              : operationStatus.type === "success"
+                ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+                : operationStatus.type === "error"
+                  ? "bg-rose-50 border-rose-200 text-rose-900"
+                  : "bg-blue-50 border-blue-200 text-blue-900"
+              }`}
+          >
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 shrink-0">
+                {operationStatus.type === "loading" ? (
+                  <CircleNotch size={20} weight="bold" className="animate-spin text-amber-600" />
+                ) : operationStatus.type === "success" ? (
+                  <CheckCircle size={20} weight="fill" className="text-emerald-600" />
+                ) : operationStatus.type === "error" ? (
+                  <WarningCircle size={20} weight="fill" className="text-rose-600" />
+                ) : (
+                  <Info size={20} weight="fill" className="text-blue-600" />
+                )}
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wider">{operationStatus.title}</h4>
+                  {operationStatus.step && (
+                    <span className="text-[10px] font-semibold bg-white/70 px-2 py-0.5 rounded-full border border-black/5">
+                      {operationStatus.step}
+                      {operationStatus.type === "loading" && rescanElapsedSeconds > 0
+                        ? ` (${String(Math.floor(rescanElapsedSeconds / 60)).padStart(2, "0")}:${String(rescanElapsedSeconds % 60).padStart(2, "0")})`
+                        : ""}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs mt-0.5 opacity-90 leading-relaxed font-medium">{operationStatus.message}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setOperationStatus(null)}
+              className="text-neutral-400 hover:text-neutral-700 p-1 rounded transition-colors cursor-pointer shrink-0"
+              title="Dismiss notification"
+            >
+              <X size={16} weight="bold" />
+            </button>
+          </div>
+        )}
+
+        {/* Vehicle Info & Action Header */}
+        <div className="rounded-2xl border border-[#e5e5ea] bg-white p-5 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-3 flex-wrap">
+              {tenure.is_plate_undetected || tenure.vehicle_no === "N/A" ? (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="rounded-lg bg-neutral-100 px-3 py-1 font-mono text-sm font-bold text-neutral-600 border border-neutral-300">
+                    N/A
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
+                    <span className="size-2 rounded-full bg-amber-500 animate-pulse" />
+                    <span>Plate Undetected · Tracking by Chassis: {tenure.chassis_no || "N/A"}</span>
+                  </span>
+                </div>
+              ) : (
+                <span className="rounded-lg bg-[#f5f5f7] px-3 py-1 font-mono text-sm font-bold text-[#1b1717] border border-[#e5e5ea]">
+                  {tenure.vehicle_no}
+                </span>
+              )}
+              <h1 className="text-xl font-bold tracking-tight text-[#1b1717]">
+                {tenure.customer_name}
+              </h1>
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-rose-50 px-2.5 py-1 text-xs font-bold text-rose-700 border border-rose-200/90 shadow-2xs">
+                <span className="size-1.5 rounded-full bg-rose-500 animate-pulse" />
+                <span>Expiry Date: {formatExpiryDateDisplay(tenure, previous_policy)}</span>
+              </span>
+            </div>
+            <div className="text-xs text-[#6e6e73] mt-2 flex items-center gap-2 flex-wrap">
+              <span>Period: <strong className="text-[#1b1717] font-mono">{activeWinnerPeriod}</strong></span>
+              <span>•</span>
+              <span>Model: <strong className="text-[#1b1717]">{tenure.vehicle_model || "Motor Vehicle"}</strong> ({tenure.engine_cc || "N/A"})</span>
+              {(tenure.formatted_ic || tenure.ic_no) && (
+                <>
+                  <span>•</span>
+                  <span>IC: <strong className="text-[#1b1717] font-mono">{tenure.formatted_ic || tenure.ic_no}</strong></span>
+                </>
+              )}
+              {tenure.birth_date && (
+                <>
+                  <span>•</span>
+                  <span>DOB: <strong className="text-[#1b1717] font-mono">{new Date(tenure.birth_date).toLocaleDateString("en-MY", { day: "2-digit", month: "2-digit", year: "numeric" })}</strong></span>
+                </>
+              )}
+              {tenure.customer_age != null && (
+                <span>({tenure.customer_age} yo{tenure.customer_gender ? `, ${tenure.customer_gender}` : ""}{tenure.nric_state ? `, ${tenure.nric_state}` : ""})</span>
+              )}
+              <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-tight ${(tenure.runner_fee_type === "passport" || tenure.runner_fee >= 20.0)
+                ? "bg-purple-100 text-purple-800 border border-purple-200"
+                : "bg-blue-100 text-blue-800 border border-blue-200"
+                }`}>
+                {(tenure.runner_fee_type === "passport" || tenure.runner_fee >= 20.0)
+                  ? `Passport (RM ${tenure.runner_fee.toFixed(2)})`
+                  : `MyKad (RM ${tenure.runner_fee.toFixed(2)})`}
+              </span>
+            </div>
+          </div>
+
+          {/* Structured Action Clusters */}
+          <div className="flex items-center gap-2.5 flex-wrap no-print print:hidden shrink-0">
+            {/* Group 1: Client Share & Export Actions */}
+            <div className="flex items-center gap-1.5 bg-[#f5f5f7] p-1 rounded-xl border border-[#e5e5ea]">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleCopyWhatsapp}
+                icon={copiedWhatsapp ? <Check weight="bold" size={15} className="text-emerald-600" /> : <ChatCircleDots weight="bold" size={15} className="text-emerald-700" />}
+                className={`border-transparent text-xs font-semibold ${copiedWhatsapp
+                  ? "bg-emerald-50 text-emerald-800 border-emerald-300"
+                  : "bg-white hover:bg-neutral-50 text-[#1b1717] shadow-2xs"
+                  }`}
+                title="Copy WhatsApp comparison teaser text"
               >
-                <Lightning size={16} weight="fill" className="text-amber-600" />
-                <span>+ Fast Quote (30s)</span>
-              </button>
+                {copiedWhatsapp ? "Copied!" : "WhatsApp Teaser"}
+              </Button>
 
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setSnapshotModalOpen(true)}
+                icon={<Camera size={15} weight="bold" className="text-[#1b1717]" />}
+                className="border-transparent bg-white hover:bg-neutral-50 text-[#1b1717] font-semibold text-xs shadow-2xs"
+                title="Export high-resolution comparison snapshot grid"
+              >
+                Snapshot
+              </Button>
+
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => window.print()}
+                icon={<Printer weight="bold" size={15} className="text-[#1b1717]" />}
+                className="border-transparent bg-white hover:bg-neutral-50 text-[#1b1717] font-semibold text-xs shadow-2xs"
+                title="Print executive quotation comparison"
+              >
+                Print
+              </Button>
+            </div>
+
+            <div className="h-6 w-px bg-[#e5e5ea] hidden sm:block" />
+
+            {/* Group 2: Primary Quotation Ingestion */}
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setIsFastQuoteModalOpen(true)}
+                icon={<Lightning weight="fill" size={14} className="text-amber-500" />}
+                className="border-amber-300 bg-amber-50/70 hover:bg-amber-100/80 text-amber-950 font-bold text-xs shadow-2xs"
+                title="Fast 30-second manual quote entry for unreadable scans or portal quotes"
+              >
+                + Fast Quote
+              </Button>
+
+              <Link
+                href={`/upload?mode=comparison&tenure_id=${tenure.id}` as Route}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e5e5ea] bg-white hover:bg-neutral-50 text-xs font-semibold text-[#1b1717] transition-colors shadow-2xs cursor-pointer"
+                title="Upload underwriter quotation or cover note PDF for this vehicle"
+              >
+                <UploadSimple size={15} weight="bold" />
+                <span>Upload PDF</span>
+              </Link>
+
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={() => {
                   setEditingEntry(null);
                   setIsManualModalOpen(true);
                 }}
-                className="w-full py-2 px-3 rounded-xl bg-[#f5f5f7] hover:bg-neutral-200/70 text-[#1b1717] font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors border border-[#e5e5ea] cursor-pointer"
+                icon={<Plus weight="bold" size={14} />}
+                className="bg-[#1b1717] hover:bg-black text-white font-semibold text-xs shadow-xs"
+                title="Manually enter an insurer quotation"
               >
-                <Plus size={15} weight="bold" />
-                <span>Standard Entry</span>
+                Add Insurer Quote
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* Dedicated Pricing Display & Fixed Fee Controls Toolbar */}
+        <div className="rounded-2xl border border-[#e5e5ea] bg-white p-3.5 shadow-xs flex flex-col xl:flex-row items-start xl:items-center justify-between gap-3 no-print print:hidden">
+          {/* Left: Pricing & Currency Rounding Mode + Fee Quick Toggles */}
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* Sub-Group A: Pricing Mode */}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-[#1b1717] shrink-0">
+                <CurrencyDollar size={18} weight="bold" className="text-[#1b1717]" />
+                <span>Pricing Display:</span>
+              </div>
+
+              <div className="flex items-center p-1 rounded-xl border border-[#e5e5ea] bg-[#f5f5f7] text-xs font-medium shrink-0 gap-1">
+                <button
+                  type="button"
+                  onClick={() => handleToggleRoundingMode("exact")}
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer text-xs ${roundingMode === "exact"
+                    ? "bg-white text-[#1b1717] font-bold shadow-2xs border border-black/5"
+                    : "text-[#6e6e73] hover:text-[#1b1717]"
+                    }`}
+                  title="Display exact cents from underwriter quotation (.15)"
+                >
+                  Exact Cents (.15)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleToggleRoundingMode("5cent")}
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer text-xs ${roundingMode === "5cent" || (roundingMode as string) === "bnm5"
+                    ? "bg-white text-[#1b1717] font-bold shadow-2xs border border-black/5"
+                    : "text-[#6e6e73] hover:text-[#1b1717]"
+                    }`}
+                  title="5 Cents cash rounding (.15)"
+                >
+                  5 Cents (.15)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleToggleRoundingMode("whole")}
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer text-xs ${roundingMode === "whole"
+                    ? "bg-white text-[#1b1717] font-bold shadow-2xs border border-black/5"
+                    : "text-[#6e6e73] hover:text-[#1b1717]"
+                    }`}
+                  title="Round up to nearest whole Ringgit without cents (e.g. 1,300.29 -> 1,301)"
+                >
+                  Whole RM (1,301)
+                </button>
+              </div>
+            </div>
+
+            <div className="h-6 w-px bg-[#e5e5ea] hidden sm:block" />
+
+            {/* Sub-Group B: Road Tax & Runner Fee 1-Click Toggles & Fix Button */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                disabled={togglingFee !== null}
+                onClick={() => handleToggleFee("road_tax")}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${tenure.include_road_tax !== false
+                  ? "bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100/80 shadow-2xs"
+                  : "bg-[#f5f5f7] text-[#6e6e73] border-dashed border-[#e5e5ea] hover:bg-neutral-200"
+                  }`}
+                title={tenure.include_road_tax !== false ? "Click to exclude Road Tax from comparison totals" : "Click to include Road Tax in comparison totals"}
+              >
+                {tenure.include_road_tax !== false ? (
+                  <>
+                    <CheckCircle size={14} weight="fill" className="text-emerald-600" />
+                    <span>Road Tax: RM {tenure.road_tax.toFixed(2)}</span>
+                  </>
+                ) : (
+                  <>
+                    <XCircle size={14} weight="fill" className="text-neutral-400" />
+                    <span className="line-through">Road Tax (Excluded)</span>
+                  </>
+                )}
               </button>
 
-              <p className="text-[10px] text-[#8e8e93] leading-tight">
-                Enter portal figures or unreadable scans in seconds
-              </p>
+              <button
+                type="button"
+                disabled={togglingFee !== null}
+                onClick={() => handleToggleFee("runner_fee")}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${tenure.include_runner_fee !== false
+                  ? "bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100/80 shadow-2xs"
+                  : "bg-[#f5f5f7] text-[#6e6e73] border-dashed border-[#e5e5ea] hover:bg-neutral-200"
+                  }`}
+                title={tenure.include_runner_fee !== false ? "Click to exclude Runner Fee from comparison totals" : "Click to include Runner Fee in comparison totals"}
+              >
+                {tenure.include_runner_fee !== false ? (
+                  <>
+                    <CheckCircle size={14} weight="fill" className="text-emerald-600" />
+                    <span>Runner: RM {tenure.runner_fee.toFixed(2)}</span>
+                  </>
+                ) : (
+                  <>
+                    <XCircle size={14} weight="fill" className="text-neutral-400" />
+                    <span className="line-through">Runner Fee (Excluded)</span>
+                  </>
+                )}
+              </button>
+
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowAdjustFeesModal(true)}
+                icon={<PencilSimple size={14} weight="bold" className="text-[#1b1717]" />}
+                className="border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717] font-semibold text-xs shadow-2xs"
+                title="Fix or adjust Road Tax and Runner Fee amounts, or recalculate JPJ tariff"
+              >
+                Fix / Adjust Fees
+              </Button>
             </div>
+          </div>
+
+          {/* Right: Matrix Utilities & Audit Diagnostics */}
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
+            {hiddenCount > 0 && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowHiddenCards(!showHiddenCards)}
+                icon={showHiddenCards ? <EyeSlash size={14} /> : <Eye size={14} />}
+                className="border-neutral-200 text-xs font-semibold bg-[#f5f5f7] hover:bg-neutral-200 text-[#1b1717]"
+              >
+                {showHiddenCards ? "Hide Inactive" : `${hiddenCount} hidden · Show All`}
+              </Button>
+            )}
+
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleRerank}
+              loading={reranking}
+              icon={<ArrowsClockwise size={14} weight="bold" />}
+              className="border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717] font-semibold text-xs"
+              title="Recalculate dynamic ranking order based on visible cards and manual overrides"
+            >
+              Re-Rank
+            </Button>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleRescanQuotes}
+              loading={isRescanning}
+              icon={<ArrowsClockwise size={14} weight="bold" className={isRescanning ? "animate-spin text-[#ed1c24]" : "text-[#ed1c24]"} />}
+              className="border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717] font-semibold text-xs"
+              title="Re-extract and re-sync values from all uploaded quotation PDFs"
+            >
+              Re-Analyze All Quotes
+            </Button>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowDetectionLogsModal(true)}
+              icon={<ClipboardText size={14} weight="bold" className="text-blue-600" />}
+              className="border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717] font-semibold text-xs"
+              title="Inspect autonomous detection audit: JPJ road tax math, perils pricing breakdown, and schedule policy excess"
+            >
+              Detection Logs
+            </Button>
           </div>
         </div>
 
-        {/* ============================================================== */}
-        {/* RIGHT PANE: Previous Policy & Valuation Matrix                 */}
-        {/* ============================================================== */}
-        <PreviousPolicyValuationPane
-          tenure={tenure}
-          previous_policy={previous_policy}
-          covernote_policy={data.covernote_policy}
-          recommended_sum_insured={recommended_sum_insured}
-          ncd={ncd}
-          tenureId={tenureId}
-          isUnlinkingCovernote={isUnlinkingCovernote}
-          onOpenNcdModal={handleOpenNcdModal}
-          onUnlinkCovernote={handleUnlinkCovernote}
-        />
-      </div>
-
-      {/* ============================================================== */}
-      {/* BOTTOM SECTION: Generated Risk-Locker Quotations               */}
-      {/* ============================================================== */}
-      {data.generated_quotations && data.generated_quotations.length > 0 && (
-        <div className="rounded-2xl border border-[#e5e5ea] bg-white p-6 shadow-sm no-print print:hidden">
-          <div className="flex items-center justify-between pb-4 border-b border-[#e5e5ea] mb-4">
-            <div>
-              <h3 className="text-base font-bold text-[#1b1717] flex items-center gap-2">
-                <FilePdf size={20} weight="fill" className="text-[#ed1c24]" />
-                Generated Risk-Locker Quotations
-              </h3>
-              <p className="text-xs text-[#6e6e73] mt-0.5">
-                Official branded client quotations generated from this marketing comparison
+        {/* Date Reconciliation Conflict Banner (Non-blocking) */}
+        {data.date_conflict?.has_conflict && (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-950 shadow-xs flex items-start justify-between gap-3 no-print print:hidden">
+            <div className="space-y-1">
+              <p className="font-bold flex items-center gap-1.5 text-amber-900">
+                <CalendarBlank size={16} weight="bold" className="text-amber-700" />
+                Coverage Date Reconciliation Variance Detected
               </p>
+              <p className="text-amber-800 leading-relaxed">
+                {data.date_conflict.message}
+              </p>
+              <div className="flex items-center gap-2 pt-1 font-mono text-[11px]">
+                <span className="font-bold text-amber-900">Detected dates:</span>
+                {data.date_conflict.unique_dates?.map((d) => (
+                  <span key={d} className="px-1.5 py-0.5 bg-amber-100 rounded border border-amber-200">
+                    {d}
+                  </span>
+                ))}
+              </div>
             </div>
-            <span className="rounded-full bg-[#f5f5f7] border border-[#e5e5ea] px-3 py-1 text-xs font-bold text-[#1b1717]">
-              {data.generated_quotations.length} Issued
+            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 bg-amber-200/70 px-2 py-1 rounded">
+              Non-Blocking
             </span>
           </div>
+        )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {data.generated_quotations.map((gq) => (
-              <div
-                key={gq.session_id}
-                className="p-4 rounded-xl border border-[#e5e5ea] bg-[#f5f5f7]/50 hover:bg-[#f5f5f7] transition-all space-y-3"
-              >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="font-mono text-xs font-bold text-[#1b1717] bg-white px-2 py-0.5 rounded border border-[#e5e5ea]">
-                        {gq.quotation_ref || gq.reference_number || "Draft Quote"}
-                      </span>
-                      <span className="rounded bg-blue-50 text-blue-700 border border-blue-200 font-bold px-1.5 py-0.5 text-[10px]">
-                        v{gq.version_number || 1}
-                      </span>
+        {/* Main 3-Pane Excel Comparison Grid */}
+        <div className="grid grid-cols-1 xl:grid-cols-[280px_minmax(0,1fr)_280px] print:grid-cols-[240px_minmax(0,1fr)_220px] gap-4 items-start">
+          {/* ============================================================== */}
+          {/* LEFT PANE: Customer Dossier & Vehicle Fixed Costs              */}
+          {/* ============================================================== */}
+          <CustomerVehicleLedgerPane
+            tenure={tenure}
+            covernotePolicy={data.covernote_policy}
+            vehicleAge={data.vehicle_age}
+            decodedIc={decodedIc}
+            activeWinnerPeriod={activeWinnerPeriod}
+            editingFixedCosts={editingFixedCosts}
+            setEditingFixedCosts={setEditingFixedCosts}
+            refreshingLedger={refreshingLedger}
+            onRefreshLedger={handleRefreshLedger}
+            customerNameInput={customerNameInput}
+            setCustomerNameInput={setCustomerNameInput}
+            icNoInput={icNoInput}
+            setIcNoInput={setIcNoInput}
+            vehicleNoInput={vehicleNoInput}
+            setVehicleNoInput={setVehicleNoInput}
+            carBrandInput={carBrandInput}
+            setCarBrandInput={setCarBrandInput}
+            roadTaxInput={roadTaxInput}
+            setRoadTaxInput={setRoadTaxInput}
+            includeRoadTaxInput={includeRoadTaxInput}
+            setIncludeRoadTaxInput={setIncludeRoadTaxInput}
+            runnerFeeInput={runnerFeeInput}
+            setRunnerFeeInput={setRunnerFeeInput}
+            includeRunnerFeeInput={includeRunnerFeeInput}
+            setIncludeRunnerFeeInput={setIncludeRunnerFeeInput}
+            windscreenInput={windscreenInput}
+            setWindscreenInput={setWindscreenInput}
+            quotationDiscountInput={quotationDiscountInput}
+            setQuotationDiscountInput={setQuotationDiscountInput}
+            engineCcInput={engineCcInput}
+            setEngineCcInput={setEngineCcInput}
+            engineNoInput={engineNoInput}
+            setEngineNoInput={setEngineNoInput}
+            chassisNoInput={chassisNoInput}
+            setChassisNoInput={setChassisNoInput}
+            vehicleModelInput={vehicleModelInput}
+            setVehicleModelInput={setVehicleModelInput}
+            vehicleTypeInput={vehicleTypeInput}
+            setVehicleTypeInput={setVehicleTypeInput}
+            manufactureYearInput={manufactureYearInput}
+            setManufactureYearInput={setManufactureYearInput}
+            startDateInput={startDateInput}
+            endDateInput={endDateInput}
+            onStartDateChange={handleStartDateChange}
+            onEndDateChange={handleEndDateChange}
+            savingFixedCosts={savingFixedCosts}
+            onSaveFixedCosts={handleSaveFixedCosts}
+            onPopulateEditInputs={() => populateEditInputs(tenure)}
+          />
+
+          {/* ============================================================== */}
+          {/* CENTER PANE: Dynamic Side-by-Side Underwriter Columns           */}
+          {/* ============================================================== */}
+          <div id="tour-comparison-matrix" className="min-w-0 overflow-x-auto pb-4 print:overflow-visible print:w-full">
+            <div className="flex gap-4 min-w-max print:min-w-0 print:flex-wrap">
+              {companyGroups.map((group) => {
+                const activeIds = getActiveEntryIdsForGroup(group);
+                const activeEntries = group.entries.filter(
+                  (e) => activeIds.includes(e.id) && (showHiddenCards || !e.is_hidden)
+                );
+                const entriesToRender =
+                  activeEntries.length > 0
+                    ? activeEntries
+                    : group.entries.filter((e) => showHiddenCards || !e.is_hidden).slice(0, 1);
+
+                return entriesToRender.map((entry) =>
+                  renderUnderwriterCard(entry, group, activeIds)
+                );
+              })}
+
+              {/* Empty State: Marketing Comparison Table Dropzone */}
+              {companyGroups.length === 0 && (
+                <>
+                  <div className="flex-1 min-w-[340px] max-w-[540px] p-8 rounded-2xl border-2 border-dashed border-[#e5e5ea] bg-white text-center flex flex-col items-center justify-center gap-4">
+                    <div className="size-14 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                      <Columns size={28} weight="duotone" />
                     </div>
-                    <p className="text-xs font-bold text-[#1b1717] mt-1.5 uppercase">
-                      {gq.company_name}
-                    </p>
-                  </div>
-                  <div className="text-right flex flex-col items-end gap-1">
-                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                      {gq.status}
-                    </span>
-                    {gq.created_at && (
-                      <span className="text-[10px] text-[#6e6e73]">
-                        {new Date(gq.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      </span>
-                    )}
-                  </div>
-                </div>
+                    <div>
+                      <h3 className="text-base font-bold text-[#1b1717]">
+                        {isCompilingBatch || (data?.pending_jobs_count && data.pending_jobs_count > 0)
+                          ? "Extracting Quotation Documents..."
+                          : `${tenure.coverage_start_date ? new Date(tenure.coverage_start_date).getFullYear() : "2027"} Renewal Intake Workspace`}
+                      </h3>
+                      <p className="text-xs text-[#6e6e73] max-w-sm mt-1 leading-relaxed">
+                        {isCompilingBatch || (data?.pending_jobs_count && data.pending_jobs_count > 0)
+                          ? "Our extraction pipeline is reading underwriter PDFs, extracting sums insured, motor premiums, and benefit riders. This matrix will refresh automatically."
+                          : `Showing previous year policy details as baseline for ${tenure.vehicle_no}. Upload incoming underwriter quotation PDFs or enter portal quotes manually.`}
+                      </p>
+                    </div>
 
-                <div className="flex items-baseline justify-between text-xs pt-1 border-t border-[#e5e5ea]/80">
-                  <span className="text-[#6e6e73]">Total Payable:</span>
-                  <span className="font-mono font-bold text-sm text-[#1b1717]">
-                    RM {Math.round(gq.total_payable).toLocaleString("en-MY", { minimumFractionDigits: 2 })}
-                  </span>
-                </div>
+                    <div className="flex items-center gap-2 pt-2">
+                      <Link
+                        href={`/upload?mode=comparison&tenure_id=${tenureId}` as Route}
+                        className="bg-[#1b1717] hover:bg-black text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer inline-flex items-center gap-1.5"
+                      >
+                        <UploadSimple size={14} weight="bold" />
+                        <span>Upload PDF</span>
+                      </Link>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => fetchComparison()}
+                        className="text-xs font-semibold px-3 py-2 rounded-xl cursor-pointer"
+                      >
+                        <ArrowsClockwise size={14} weight="bold" className="mr-1" />
+                        Refresh
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
 
-                <div className="flex items-center gap-2 pt-1">
-                  <Link
-                    href={`/sessions/${gq.session_id}/review` as Route}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1 text-center py-1.5 px-2.5 rounded-lg text-xs font-bold text-white bg-[#1b1717] hover:bg-black transition-colors"
-                  >
-                    Review Quote
-                  </Link>
-                  <a
-                    href={`/api/sessions/${gq.session_id}/pdf`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="py-1.5 px-3 rounded-lg text-xs font-bold text-[#1b1717] bg-white hover:bg-neutral-100 border border-[#e5e5ea] transition-colors flex items-center gap-1"
-                  >
-                    <FilePdf size={14} className="text-[#ed1c24]" />
-                    PDF
-                  </a>
-                </div>
+              {/* "+ Add Insurer Quote" Action Card */}
+              <div className="w-[240px] shrink-0 rounded-2xl border-2 border-dashed border-[#e5e5ea] p-4 flex flex-col items-center justify-center text-center gap-2.5 bg-white group no-print print:hidden">
+                <button
+                  type="button"
+                  onClick={() => setIsFastQuoteModalOpen(true)}
+                  className="w-full py-2.5 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors border border-amber-300 cursor-pointer"
+                >
+                  <Lightning size={16} weight="fill" className="text-amber-600" />
+                  <span>+ Fast Quote (30s)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingEntry(null);
+                    setIsManualModalOpen(true);
+                  }}
+                  className="w-full py-2 px-3 rounded-xl bg-[#f5f5f7] hover:bg-neutral-200/70 text-[#1b1717] font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors border border-[#e5e5ea] cursor-pointer"
+                >
+                  <Plus size={15} weight="bold" />
+                  <span>Standard Entry</span>
+                </button>
+
+                <p className="text-[10px] text-[#8e8e93] leading-tight">
+                  Enter portal figures or unreadable scans in seconds
+                </p>
               </div>
-            ))}
+            </div>
           </div>
+
+          {/* ============================================================== */}
+          {/* RIGHT PANE: Previous Policy & Valuation Matrix                 */}
+          {/* ============================================================== */}
+          <PreviousPolicyValuationPane
+            tenure={tenure}
+            previous_policy={previous_policy}
+            covernote_policy={data.covernote_policy}
+            recommended_sum_insured={recommended_sum_insured}
+            ncd={ncd}
+            tenureId={tenureId}
+            isUnlinkingCovernote={isUnlinkingCovernote}
+            onOpenNcdModal={handleOpenNcdModal}
+            onUnlinkCovernote={handleUnlinkCovernote}
+          />
         </div>
-      )}
+
+        {/* ============================================================== */}
+        {/* BOTTOM SECTION: Generated Risk-Locker Quotations               */}
+        {/* ============================================================== */}
+        {data.generated_quotations && data.generated_quotations.length > 0 && (
+          <div className="rounded-2xl border border-[#e5e5ea] bg-white p-6 shadow-sm no-print print:hidden">
+            <div className="flex items-center justify-between pb-4 border-b border-[#e5e5ea] mb-4">
+              <div>
+                <h3 className="text-base font-bold text-[#1b1717] flex items-center gap-2">
+                  <FilePdf size={20} weight="fill" className="text-[#ed1c24]" />
+                  Generated Risk-Locker Quotations
+                </h3>
+                <p className="text-xs text-[#6e6e73] mt-0.5">
+                  Official branded client quotations generated from this marketing comparison
+                </p>
+              </div>
+              <span className="rounded-full bg-[#f5f5f7] border border-[#e5e5ea] px-3 py-1 text-xs font-bold text-[#1b1717]">
+                {data.generated_quotations.length} Issued
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {data.generated_quotations.map((gq) => (
+                <div
+                  key={gq.session_id}
+                  className="p-4 rounded-xl border border-[#e5e5ea] bg-[#f5f5f7]/50 hover:bg-[#f5f5f7] transition-all space-y-3"
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-mono text-xs font-bold text-[#1b1717] bg-white px-2 py-0.5 rounded border border-[#e5e5ea]">
+                          {gq.quotation_ref || gq.reference_number || "Draft Quote"}
+                        </span>
+                        <span className="rounded bg-blue-50 text-blue-700 border border-blue-200 font-bold px-1.5 py-0.5 text-[10px]">
+                          v{gq.version_number || 1}
+                        </span>
+                      </div>
+                      <p className="text-xs font-bold text-[#1b1717] mt-1.5 uppercase">
+                        {gq.company_name}
+                      </p>
+                    </div>
+                    <div className="text-right flex flex-col items-end gap-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        {gq.status}
+                      </span>
+                      {gq.created_at && (
+                        <span className="text-[10px] text-[#6e6e73]">
+                          {new Date(gq.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-baseline justify-between text-xs pt-1 border-t border-[#e5e5ea]/80">
+                    <span className="text-[#6e6e73]">Total Payable:</span>
+                    <span className="font-mono font-bold text-sm text-[#1b1717]">
+                      RM {Math.round(gq.total_payable).toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <Link
+                      href={`/sessions/${gq.session_id}/review` as Route}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 text-center py-1.5 px-2.5 rounded-lg text-xs font-bold text-white bg-[#1b1717] hover:bg-black transition-colors"
+                    >
+                      Review Quote
+                    </Link>
+                    <a
+                      href={`/api/sessions/${gq.session_id}/pdf`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="py-1.5 px-3 rounded-lg text-xs font-bold text-[#1b1717] bg-white hover:bg-neutral-100 border border-[#e5e5ea] transition-colors flex items-center gap-1"
+                    >
+                      <FilePdf size={14} className="text-[#ed1c24]" />
+                      PDF
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Source PDF Viewer Pane (Docked or Floating Overlay) */}

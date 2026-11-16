@@ -15,7 +15,7 @@ from app.services.template_revision_service import validate_template_config  # n
 
 
 def test_clean_insurer_independent_masters_are_defined():
-    specs = master_template_specs()
+    specs = master_template_specs(active_only=False)
     assert [item["key"] for item in specs] == [
         "agency_bilingual",
         "agency_bilingual_v2",
@@ -25,8 +25,6 @@ def test_clean_insurer_independent_masters_are_defined():
         "agency_bilingual_v4",
         "agency_bilingual_v4_no_extras",
         "agency_bilingual_v4_lump_sum",
-        "agency_english",
-        "agency_mandarin",
     ]
     assert [item["name"] for item in specs] == [
         "Bilingual Agency Motor",
@@ -37,10 +35,8 @@ def test_clean_insurer_independent_masters_are_defined():
         "Bilingual Agency Motor v4",
         "Bilingual Agency Motor v4 (No Extras)",
         "Bilingual Agency Motor v4 (Lump Sum Extras)",
-        "English Agency Motor",
-        "Mandarin Agency Motor",
     ]
-    assert [item["is_default"] for item in specs] == [False, False, False, False, False, True, False, False, False, False]
+    assert [item["is_default"] for item in specs] == [False, False, False, False, False, True, False, False]
     assert [item["config"]["page_profile"]["height"] for item in specs] == [1123] * len(specs)
 
 
@@ -86,7 +82,7 @@ def test_agency_bilingual_v3_structure_and_authorized_driver():
     from app.services.master_template_service import master_template_specs
     from app.rendering.template_renderer import render_quotation_html
 
-    spec = next(item for item in master_template_specs() if item["key"] == "agency_bilingual_v3")
+    spec = next(item for item in master_template_specs(active_only=False) if item["key"] == "agency_bilingual_v3")
     assert spec is not None
     assert spec["name"] == "Bilingual Agency Motor v3"
 
@@ -135,7 +131,7 @@ def test_agency_bilingual_v3_no_extras_structure_and_rendering():
     from app.services.master_template_service import master_template_specs
     from app.rendering.template_renderer import render_quotation_html
 
-    spec = next(item for item in master_template_specs() if item["key"] == "agency_bilingual_v3_no_extras")
+    spec = next(item for item in master_template_specs(active_only=False) if item["key"] == "agency_bilingual_v3_no_extras")
     assert spec is not None
     assert spec["name"] == "Bilingual Agency Motor v3 (No Extras)"
     assert spec["config"]["extras_mode"] == "none"
@@ -193,7 +189,7 @@ def test_agency_bilingual_v3_lump_sum_structure_and_rendering():
     from app.services.master_template_service import master_template_specs
     from app.rendering.template_renderer import render_quotation_html
 
-    spec = next(item for item in master_template_specs() if item["key"] == "agency_bilingual_v3_lump_sum")
+    spec = next(item for item in master_template_specs(active_only=False) if item["key"] == "agency_bilingual_v3_lump_sum")
     assert spec is not None
     assert spec["name"] == "Bilingual Agency Motor v3 (Lump Sum Extras)"
     assert spec["config"]["extras_mode"] == "lump_sum"

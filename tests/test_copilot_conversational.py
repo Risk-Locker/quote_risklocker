@@ -707,8 +707,7 @@ def test_copilot_context_payload_datetime_json_serialization(db_session: Session
     # Calling chat_with_copilot with mock API key
     from app.extraction.gemini_extractor import get_key_pool
     pool = get_key_pool()
-    pool._keys = ["fake-api-key"]
-    pool._index = 0
+    monkeypatch.setattr(pool, "get_next_key", lambda: "fake-api-key-12345")
 
     res = chat_with_copilot(db_session, user, message="check if there are duplicate sessions")
     assert "Found 1 duplicate set" in res["reply"]

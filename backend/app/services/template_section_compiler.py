@@ -81,7 +81,7 @@ def default_right_containers() -> list[dict[str, Any]]:
                 {
                     "id": "rc_b_pay_details",
                     "type": "text",
-                    "text": "Bank Details : 12300318500\nRiskLocker Sdn. Bhd.",
+                    "text": "Bank Details : 0000 0000 0000\nAuthorized Insurance Agency",
                     "fontSize": 8.5,
                     "fontWeight": "600",
                     "color": "#475569",
@@ -381,9 +381,9 @@ def extract_sections_from_canvas(elements: list[dict[str, Any]], saved_sections:
         },
         "rightContainers": rc_default,
         "footer": {
-            "bankName": "Hong Leong Bank",
-            "accountNo": "12300318500",
-            "accountHolder": "Risklocker Sdn. Bhd.",
+            "bankName": "Primary Commercial Bank",
+            "accountNo": "0000 0000 0000",
+            "accountHolder": "Authorized Insurance Agency",
             "termsNotice": str(terms_elem.get("text", "*Terms and Condition Applied")) if terms_elem else "*Terms and Condition Applied",
         },
     }
@@ -745,7 +745,7 @@ def compile_sections_to_canvas(
                 sub_h = 28.0
 
                 if pay_details:
-                    text = str(pay_details.get("text", "Bank Details : 12300318500\nRiskLocker Sdn. Bhd."))
+                    text = str(pay_details.get("text", "Bank Details : 0000 0000 0000\nAuthorized Insurance Agency"))
                     fs = float(pay_details.get("fontSize", 8.5))
                     compiled_right_blocks.append({
                         "id": str(pay_details.get("id")),

@@ -314,13 +314,13 @@ def list_page_profiles(db, user) -> list[dict]:
     return [serialize_page_profile(profile) for profile in profiles]
 
 
-def list_published_templates(db, user) -> list[dict]:
+def list_published_templates(db, user, *, include_deprecated: bool = False) -> list[dict]:
     """Return one insurer-independent option per master: its latest published revision."""
     _require_business_user(user)
     templates = {
         item.id: item
         for item in db.scalars(select(OutputTemplateConfig)).all()
-        if not item.deleted_at and item.status == "active"
+        if not item.deleted_at and item.status in ("active", "deprecated" if include_deprecated else "active")
     }
     latest: dict[str, TemplateRevision] = {}
     
@@ -342,11 +342,20 @@ def list_published_templates(db, user) -> list[dict]:
         if profile is None:
             continue
         template = templates[template_id]
+        tmpl_name = str((revision.config or {}).get("template_name") or template.name)
+        is_deprecated = bool(
+            template.status in ("deprecated", "archived")
+            or (template.fixed_fields or {}).get("is_deprecated")
+            or (revision.config or {}).get("is_deprecated")
+            or any(v in tmpl_name for v in ["(No Extras)", "(Lump Sum Extras)"])
+        )
+        if is_deprecated and not include_deprecated:
+            continue
         is_default = bool((template.fixed_fields or {}).get("is_default"))
         result.append({
             "template_id": template.id,
             "template_revision_id": revision.id,
-            "name": str((revision.config or {}).get("template_name") or template.name),
+            "name": tmpl_name,
             "revision_number": revision.revision_number,
             "config_hash": revision.config_hash,
             "page_profile": serialize_page_profile(profile),

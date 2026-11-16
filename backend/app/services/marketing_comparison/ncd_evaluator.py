@@ -57,35 +57,18 @@ def calculate_ncd_pair(
 def calculate_vehicle_age(
     manufacture_year: int | None, coverage_start_date: datetime | str | None
 ) -> int:
-    """Calculate vehicle age in years anchored on 1 Jan of manufacture year.
+    """Calculate vehicle age in completed years anchored on registration/manufacture date.
 
-    Malaysian Scale Rule:
-    Start year = coverage_start_date.year.
-    Completed calendar years = start_year - manufacture_year.
-    If coverage starts after Jan 1 (month > 1 or day > 1), vehicle is entering its next year of age (+1).
-    Example: YOM 2020, coverage 08 Feb 2026 -> 2026 - 2020 = 6 years;
-    Since 08 Feb > 01 Jan, vehicle is in 7th year -> age is 7 years.
+    Uses exact completed calendar years via dateutil.relativedelta. A vehicle aged
+    9 years 11 months 29 days is strictly 9 completed years, NOT 10 years.
     """
     if not manufacture_year or manufacture_year <= 1900:
         return 0
-    dt: datetime
-    if isinstance(coverage_start_date, str):
-        try:
-            clean_s = coverage_start_date.split("T")[0].strip()
-            dt = datetime.strptime(clean_s, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        except Exception:
-            dt = datetime.now(timezone.utc)
-    elif isinstance(coverage_start_date, datetime):
-        dt = coverage_start_date
-    else:
-        dt = datetime.now(timezone.utc)
+    from app.domain.betterment_engine import calculate_exact_vehicle_age
+    from datetime import date
 
-    completed = dt.year - manufacture_year
-    if completed < 0:
-        return 0
-    if dt.month > 1 or dt.day > 1:
-        return completed + 1
-    return completed
+    reg_date = date(manufacture_year, 1, 1)
+    return calculate_exact_vehicle_age(reg_date, coverage_start_date)
 
 
 def get_standard_betterment_rate(age_in_years: int) -> tuple[float, str]:
@@ -147,18 +130,39 @@ def evaluate_betterment_rules(
     company_name: str | None = None,
     has_betterment_peril: bool = False,
     is_comprehensive_private: bool = True,
+    registration_date: Any = None,
+    coverage_start_date: Any = None,
 ) -> tuple[bool, float, str]:
-    """Evaluate Waiver of Betterment and Betterment Co-Payment Rate based on underwriting rules."""
+    """Evaluate Waiver of Betterment and Betterment Co-Payment Rate based on underwriting rules.
+    
+    Uses exact completed calendar years via calculate_exact_vehicle_age when registration_date is available.
+    """
+    from app.domain.betterment_engine import calculate_exact_vehicle_age
+
     quote_y = quote_year or datetime.now().year
     veh_yom = yom if (yom and yom > 1900) else None
-    veh_age = max(0, quote_y - veh_yom) if veh_yom else 0
+
+    if registration_date:
+        veh_age = calculate_exact_vehicle_age(registration_date, coverage_start_date or f"{quote_y}-01-01")
+        is_under_5 = veh_age < 5
+        is_under_10 = veh_age < 10
+        is_under_15 = veh_age < 15
+    elif veh_yom:
+        veh_age = max(0, quote_y - veh_yom)
+        is_under_5 = (veh_yom + 4) > quote_y
+        is_under_10 = (veh_yom + 9) > quote_y
+        is_under_15 = (veh_yom + 14) > quote_y
+    else:
+        veh_age = 0
+        is_under_5 = False
+        is_under_10 = True  # When age is unknown, peril waiver defaults to True if insurer supports it
+        is_under_15 = True
 
     # 1st Condition:
-    # 1.2 IF YEAR OF MAKE + 4 > QUOTATION DATE, then WAIVER OF BETTERMENT = YES (0% betterment)
-    if veh_yom and (veh_yom + 4) > quote_y:
+    # Vehicles under 5 completed years are exempt from betterment co-payment (0%)
+    if is_under_5:
         return True, 0.0, "No (0%)"
 
-    # 1.1 IF YEAR OF MAKE + 4 <= QUOTATION DATE, then WAIVER OF BETTERMENT = NO initially
     comp_lower = (company_name or "").lower()
     is_qbe = "qbe" in comp_lower
     is_tune_sompo_amgen_etiqa = any(
@@ -168,9 +172,9 @@ def evaluate_betterment_rules(
         x in comp_lower for x in ("lonpac", "stmb", "takaful malaysia", "syarikat takaful")
     )
 
-    # 2nd Condition:
+    # 2nd Condition: QBE comprehensive private waiver up to 10 completed years
     if is_qbe and is_comprehensive_private:
-        if veh_yom and (veh_yom + 9) > quote_y:
+        if (registration_date and is_under_10) or (veh_yom and is_under_10):
             return True, 0.0, "No (0%)"
         else:
             rate, disp = get_standard_betterment_rate(veh_age)
@@ -183,19 +187,19 @@ def evaluate_betterment_rules(
 
     # Perils added: check insurance company
     if is_tune_sompo_amgen_etiqa:
-        if not veh_yom or (veh_yom + 14) > quote_y:
+        if is_under_15:
             return True, 0.0, "No (0%)"
         else:
             rate, disp = get_standard_betterment_rate(veh_age)
             return False, rate, disp
     elif is_lonpac_stmb:
-        if not veh_yom or (veh_yom + 9) > quote_y:
+        if is_under_10:
             return True, 0.0, "No (0%)"
         else:
             rate, disp = get_standard_betterment_rate(veh_age)
             return False, rate, disp
     else:
-        if not veh_yom or (veh_yom + 9) > quote_y:
+        if is_under_10:
             return True, 0.0, "No (0%)"
         else:
             rate, disp = get_standard_betterment_rate(veh_age)

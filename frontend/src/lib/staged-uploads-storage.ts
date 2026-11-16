@@ -15,6 +15,10 @@ export interface StoredStagedItem {
   premium?: string | number;
   ref?: string;
   error?: string;
+  estimatedTokens?: number;
+  pageCount?: number;
+  isEligible?: boolean;
+  warning?: string;
   updatedAt?: number;
 }
 
@@ -72,6 +76,10 @@ export async function saveStagedQueue(items: StoredStagedItem[]): Promise<void> 
       premium: i.premium,
       ref: i.ref,
       error: i.error,
+      estimatedTokens: i.estimatedTokens,
+      pageCount: i.pageCount,
+      isEligible: i.isEligible,
+      warning: i.warning,
       updatedAt: now,
     }));
     if (metaList.length === 0) {
@@ -109,6 +117,10 @@ export async function saveStagedQueue(items: StoredStagedItem[]): Promise<void> 
         premium: item.premium,
         ref: item.ref,
         error: item.error,
+        estimatedTokens: item.estimatedTokens,
+        pageCount: item.pageCount,
+        isEligible: item.isEligible,
+        warning: item.warning,
         updatedAt: now,
       });
     }
@@ -157,6 +169,10 @@ export async function loadStagedQueue(): Promise<StoredStagedItem[]> {
               premium: r.premium,
               ref: r.ref,
               error: r.error,
+              estimatedTokens: r.estimatedTokens,
+              pageCount: r.pageCount,
+              isEligible: r.isEligible,
+              warning: r.warning,
               updatedAt: r.updatedAt,
             };
           });

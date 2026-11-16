@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Route } from "next";
+import { useToast } from "@/components/ui/toast";
 import {
   Users,
   UserCheck,
@@ -64,6 +65,7 @@ interface PicItem {
 
 export default function ClientRecordsPage() {
   const router = useRouter();
+  const { toast } = useToast();
   const [activeTab, setActiveTab] = useState<"clients" | "pics">("clients");
 
   // Clients Tab State
@@ -200,7 +202,7 @@ export default function ClientRecordsPage() {
       loadClients();
     } catch (err) {
       console.error("Failed to update client account:", err);
-      alert("Failed to update client account. Please check your connection.");
+      toast("Failed to update client account. Please check your connection.", "error");
     } finally {
       setSavingClient(false);
     }

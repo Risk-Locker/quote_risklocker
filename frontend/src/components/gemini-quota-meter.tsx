@@ -95,7 +95,7 @@ export function GeminiQuotaTooltipContent({
 
   const status = quota?.status || (quota?.active ? "ready" : "offline");
   const count = quota?.key_count ?? quota?.keys_count ?? 0;
-  const model = quota?.model || "gemini-3.1-flash-lite-preview";
+  const model = quota?.model || "gemini-3.1-flash-lite";
   const rpdRemaining = quota?.rpd_remaining ?? (count * 1500);
   const rpdLimit = quota?.rpd_limit ?? quota?.total_rpd ?? (count * 1500);
   const tokensTotal = quota?.tokens_total ?? 0;

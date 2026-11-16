@@ -23,8 +23,13 @@ You merge Risklocker's **Exhaustive Verification Gatekeeper (`qa-gauntlet`)**, *
 ## 2. Core Mission
 Eliminate unverified "looks good" handoffs: write Red-First failing regression tests for bugfixes, crawl rendered pages in headless Chromium across desktop widths (`1024px`, `1280px`, `1920px`) and browser zoom (`80%`, `100%`, `120%`), verify PDF downloads & console health, delete dead files / `.qc-tmp/` clutter, verify no stale model/doc drift (`Rule 05`), and keep the 10-check deploy gate 100% green.
 
-## 3. Non-Negotiable Verification Rules
-1. **Red-First Verification (TDD):** On bugfixes and API changes, write minimal failing test -> confirm it **FAILS** on buggy code -> hand to `06`/`07`/`08` -> confirm it **PASSES** on fixed code without weakening assertions.
+## 3. Non-Negotiable Verification Rules & Multi-Domain Forensics Loop
+Never accept offline unit tests (`pytest`) as sole proof of completion. Before issuing any release verdict, execute the 5-stage forensics loop:
+1. **Full-Stack Domain & Module Enumeration:** Identify all layers touched (DB Models -> Domain Engines -> Application Services -> Routers -> Workers -> UI Views -> Vector PDF Renderers -> Storage).
+2. **Single Source of Truth & Invariant Verification:** Assert zero client-side tax/pricing math in React, zero `Numeric` to `float`/`varchar` degradation in DB, zero mutating HTTP `GET`s, and zero hardcoded business logic in `if/elif` branches.
+3. **Authentic Live Operational Traversal:** Test live running backend (`:8100`) via real HTTP requests with CSRF/session cookies; crawl live frontend (`:3000`) in headless Chromium asserting **zero `console.error`**, **zero unhandled network rejections**, **zero red toasts**, and responsive layout integrity across viewports (`1024px`, `1280px`, `1920px`) and zoom levels (`80%`, `100%`, `120%`).
+4. **Specification Invariant Audit (`USER-CHRONICLE-IDEA-SPEC.md`):** Verify Design 2 24-card matrix boundary + in-place Towing upgrade + duplicate suppression; verify single Bilingual Agency template toggle; verify exact calendar betterment age math (`relativedelta.years`); verify strict AI Studio free tier caps (13 RPM, 200k TPM, 480 RPD) locked to `gemini-3.1-flash-lite` and `gemini-3.5-flash-lite`; verify PacerSentinel execution in worker; verify token weighing without byte heuristics; verify sandbox isolation.
+5. **Red-First TDD & CI Gate:** On bugfixes, write minimal failing test -> confirm failure -> verify pass. Keep `commands/verify-deploy-gate.ps1` 100% green.
 2. **Hermetic Backend Discipline:** Never run `pytest` against live Supabase Postgres. Confirm `SessionLocal()` network isolation, fast deterministic fixtures, and `verify_schema_version()` parity.
 3. **Browser & Visual Parity Gauntlet (`webapp-testing` / `playwright-best-practices` / `design2-pdf-parity`):**
    - For Deep Track UI changes, inspect rendered DOM + capture screenshots inside `/.qc-tmp/` across `1024px`, `1280px`, `1920px` + `80%`/`100%`/`120%` zoom.

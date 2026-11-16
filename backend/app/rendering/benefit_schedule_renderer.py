@@ -96,6 +96,11 @@ def get_company_logo_data_uri(insurer_name: str) -> str:
     for key, rel_path in mapping.items():
         if key in norm:
             uri = _local_file_data_uri(rel_path)
+            if not uri:
+                for ext in [".png", ".webp", ".jpeg", ".jpg"]:
+                    uri = _local_file_data_uri(f"frontend/public/assets/companies/{key}{ext}")
+                    if uri:
+                        break
             if uri:
                 return uri
     return ""
@@ -117,6 +122,8 @@ def get_design2_asset_uris(
         "assets/RL Logo/risklocker logo horizontal square with black text good for white bg.png"
     )
     if not rl_logo_uri:
+        rl_logo_uri = _local_file_data_uri("frontend/public/assets/brand/logo-horizontal-black.png")
+    if not rl_logo_uri:
         rl_id = cfg_assets.get("risklocker_logo") or "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f"
         rl_logo_uri = resolved_assets.get("risklocker_logo") or resolved_assets.get(rl_id) or ""
         if not rl_logo_uri:
@@ -125,13 +132,17 @@ def get_design2_asset_uris(
 
     # 2. DuitNow Badge + Clean Pink DuitNow QR
     duitnow_badge_uri = _local_file_data_uri("assets/duitnow/Duit Now Logo Vector.svg .png")
+    if not duitnow_badge_uri:
+        duitnow_badge_uri = _local_file_data_uri("frontend/public/assets/duitnow_badge.png")
+
     duitnow_qr_uri = _local_file_data_uri("assets/QR/qr.jpeg")
     if not duitnow_qr_uri:
-        qr_id = cfg_assets.get("bank_qr") or cfg_assets.get("duitnow_qr") or "c4003185-0000-4000-8000-000000000001"
-        duitnow_qr_uri = resolved_assets.get("bank_qr") or resolved_assets.get("duitnow_qr") or resolved_assets.get(qr_id) or ""
+        duitnow_qr_uri = _local_file_data_uri("frontend/public/assets/duitnow_qr.jpeg")
 
     # 3. Transparent White Footer WhatsApp QR
     whatsapp_qr_uri = _local_file_data_uri("assets/QR/whatsapp_qr.png")
+    if not whatsapp_qr_uri:
+        whatsapp_qr_uri = _local_file_data_uri("frontend/public/assets/whatsapp_qr.png")
     if not whatsapp_qr_uri:
         whatsapp_qr_uri = duitnow_qr_uri
 
@@ -167,7 +178,11 @@ def get_design2_asset_uris(
     }
 
 
-def render_design2_footer_html(whatsapp_qr_uri: str) -> str:
+def render_design2_footer_html(
+    whatsapp_qr_uri: str,
+    agency_name: str = "RiskLocker",
+    agency_reg_no: str = "1535879-U",
+) -> str:
     """Shared full-width Risklocker red footer bar (108px, 3-column with vertical white dividers)."""
     qr_img = (
         f'<img src="{whatsapp_qr_uri}" style="width: 64px; height: 64px; object-fit: contain; display: block; flex-shrink: 0;" alt="WhatsApp QR" />'
@@ -177,8 +192,8 @@ def render_design2_footer_html(whatsapp_qr_uri: str) -> str:
     return f"""
     <div class="d2-footer">
         <div style="min-width: 0;">
-            <div style="font-size: 14.5px; font-weight: 800; letter-spacing: 0.1px; line-height: 1.1;">RISKLOCKER SDN. BHD.</div>
-            <div style="font-size: 6.8px; font-weight: 500; opacity: 0.92; margin-top: 2px; margin-bottom: 6px;">202301041962(1535879-U)</div>
+            <div style="font-size: 14.5px; font-weight: 800; letter-spacing: 0.1px; line-height: 1.1;">{escape(agency_name)}</div>
+            <div style="font-size: 6.8px; font-weight: 500; opacity: 0.92; margin-top: 2px; margin-bottom: 6px;">{escape(agency_reg_no)}</div>
             <div style="font-size: 11.2px; font-weight: 500; display: flex; align-items: center; gap: 6px; line-height: 1.3;">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink: 0;"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
                 <span>admin@risklocker.com</span>
@@ -284,8 +299,8 @@ def render_design2_schedule_pages(
     """Builds A4 `<div class="d2-page">` sheets for Page 2+ Benefits Schedule & overflow cards."""
     template_config = template_config or {}
     render_context = render_context or {}
-    quote_ref = _extract_field(draft_fields, ("quotation_reference", "quotation_ref", "quote_ref"), "RL260000314").rstrip(" -:_/")
-    veh_plate = _extract_field(draft_fields, ("vehicle_no", "vehicle_plate", "car_plate"), "ANY 368")
+    quote_ref = _extract_field(draft_fields, ("quotation_reference", "quotation_ref", "quote_ref"), "QT-PREVIEW").rstrip(" -:_/")
+    veh_plate = _extract_field(draft_fields, ("vehicle_no", "vehicle_plate", "car_plate"), "ABC 1234")
     cust_name = _extract_field(draft_fields, ("customer_name", "insured_name"), "VALUED CLIENT")
     insurer = _extract_field(draft_fields, ("insurance_company", "company_name", "insurer_name"), "ETIQA GENERAL INSURANCE BERHAD")
 
@@ -297,7 +312,7 @@ def render_design2_schedule_pages(
         addon_cards = build_unified_matrix_cards(
             active_benefits=current_benefits,
             available_addons=available_addons,
-            fill_to_slots=24,
+            fill_to_slots=0,
         )
 
     overflow_cards = addon_cards[overflow_start_index:] if len(addon_cards) > overflow_start_index else []
@@ -337,7 +352,20 @@ def render_design2_schedule_pages(
         ov_cards_html = ""
         for card in overflow_cards:
             is_sel = card["is_selected"]
-            icon_svg = render_design2_icon_svg(card.get("icon_hint", "generic"), size=36)
+            asset_id = card.get("asset_id")
+            asset_uri = resolved_assets.get(str(asset_id)) if (asset_id and resolved_assets) else None
+            if not asset_uri and asset_id and db:
+                try:
+                    from app.services.template_assets import asset_data_uri
+                    asset_uri = asset_data_uri(db, str(asset_id))
+                    if asset_uri and resolved_assets is not None:
+                        resolved_assets[str(asset_id)] = asset_uri
+                except Exception:
+                    asset_uri = None
+            if asset_uri:
+                icon_media = f'<img src="{asset_uri}" style="width:36px;height:36px;object-fit:contain;display:block;" alt="{escape(card["title"])}" />'
+            else:
+                icon_media = render_design2_icon_svg(card.get("icon_hint", "generic"), size=36)
             indicator = (
                 '<svg width="14" height="14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#5ABA00"/><path d="m8.2 12.2 2.5 2.5 5-5.2" stroke="#FFF" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>'
                 if is_sel
@@ -346,14 +374,14 @@ def render_design2_schedule_pages(
             val = escape(card.get("value") or "")
             ov_cards_html += f"""
             <div style="background:#F8F9FC;border-radius:6px;box-shadow:0 1px 2px rgba(15,23,42,0.05);height:62px;display:flex;align-items:stretch;overflow:hidden;">
-                <div style="flex:0 0 40px;display:flex;align-items:center;justify-content:center;padding-left:4px;">{icon_svg}</div>
+                <div style="flex:0 0 40px;display:flex;align-items:center;justify-content:center;padding-left:4px;">{icon_media}</div>
                 <div style="flex:1;min-width:0;padding:4px 7px 4px 2px;display:flex;flex-direction:column;justify-content:space-between;position:relative;">
                     <div>
                         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:3px;">
                             <div style="font-size:7.4px;font-weight:700;color:#0F172A;line-height:1.12;padding-top:2px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">{escape(card['title'])}</div>
                             <div style="font-size:6.2px;font-weight:600;color:#94A3B8;flex-shrink:0;line-height:1;">{escape(card['serial_number'])}</div>
                         </div>
-                        {f'<div style="font-size:7px;font-weight:800;color:#16A34A;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{val}</div>' if val else ''}
+                        {f'<div style="font-size:7px;font-weight:800;color:#5ABA00;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{val}</div>' if val else ''}
                         <div style="font-size:6.2px;color:#475569;line-height:1.15;margin-top:1px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">{escape(card.get('description') or '')}</div>
                     </div>
                     <div style="display:flex;justify-content:flex-end;align-items:center;">{indicator}</div>
@@ -385,7 +413,7 @@ def render_design2_schedule_pages(
                     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                         <span style="font-size:7.5px;font-weight:800;color:#94A3B8;">#{idx:02d}</span>
                         <span style="font-size:9px;font-weight:800;color:#0F172A;">{escape(row['title'])}</span>
-                        {f'<span style="font-size:8px;font-weight:800;color:#16A34A;background:#ECFDF5;padding:1px 5px;border-radius:4px;">{escape(val)}</span>' if val else ''}
+                        {f'<span style="font-size:8px;font-weight:800;color:#5ABA00;background:#ECFDF5;padding:1px 5px;border-radius:4px;">{escape(val)}</span>' if val else ''}
                     </div>
                     <div style="font-size:7.4px;color:#475569;line-height:1.3;margin-top:2px;">{escape(row.get('description') or 'Subject to master policy terms and endorsements.')}</div>
                 </div>
@@ -433,7 +461,7 @@ def render_design2_schedule_pages(
                 <div style="display:flex;align-items:flex-start;gap:6px;min-width:0;flex:1;">
                     <div style="flex-shrink:0;margin-top:1px;">{render_design2_icon_svg(oc.get('icon_hint', 'generic'), size=13)}</div>
                     <div style="min-width:0;">
-                        <div style="font-size:7.8px;font-weight:700;color:#0F172A;">{escape(oc['serial_number'])} · {escape(oc['title'])} {f'<span style="color:#16A34A;">({escape(val)})</span>' if val else ''}</div>
+                        <div style="font-size:7.8px;font-weight:700;color:#0F172A;">{escape(oc['serial_number'])} · {escape(oc['title'])} {f'<span style="color:#5ABA00;">({escape(val)})</span>' if val else ''}</div>
                         <div style="font-size:6.6px;color:#64748B;line-height:1.25;">{escape(oc.get('description') or '')}</div>
                     </div>
                 </div>
@@ -510,7 +538,7 @@ def render_design2_schedule_pages(
                     <div style="display:flex;align-items:flex-start;gap:7px;min-width:0;flex:1;">
                         <div style="flex-shrink:0;margin-top:1px;">{render_design2_icon_svg(oc.get('icon_hint', 'generic'), size=13)}</div>
                         <div style="min-width:0;">
-                            <div style="font-size:7.8px;font-weight:700;color:#0F172A;">{escape(oc['serial_number'])} · {escape(oc['title'])} {f'<span style="color:#16A34A;">({escape(val)})</span>' if val else ''}</div>
+                            <div style="font-size:7.8px;font-weight:700;color:#0F172A;">{escape(oc['serial_number'])} · {escape(oc['title'])} {f'<span style="color:#5ABA00;">({escape(val)})</span>' if val else ''}</div>
                             <div style="font-size:6.6px;color:#64748B;line-height:1.25;">{escape(oc.get('description') or '')}</div>
                         </div>
                     </div>
@@ -589,7 +617,7 @@ def render_benefit_schedule_html(
     db: Any = None,
 ) -> str:
     """Renders a standalone full HTML document for the Benefits & Endorsements Schedule."""
-    quote_ref = _extract_field(draft_fields, ("quotation_reference", "quotation_ref", "quote_ref"), "RL260000314").rstrip(" -:_/")
+    quote_ref = _extract_field(draft_fields, ("quotation_reference", "quotation_ref", "quote_ref"), "QT-PREVIEW").rstrip(" -:_/")
     pages = render_design2_schedule_pages(
         draft_fields=draft_fields,
         template_config=template_config,

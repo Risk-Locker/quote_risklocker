@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from app.core.config import get_settings
+from app.core.config import get_settings, resolve_active_gemini_model
 from app.extraction.gemini_extractor import get_key_pool
 
 logger = logging.getLogger(__name__)
@@ -213,7 +213,7 @@ def simplify_vehicle_name_with_ai(
         return det_brand, det_model, det_combined
 
     settings = get_settings()
-    configured_model = settings.gemini_model or "gemini-3.1-flash-lite-preview"
+    configured_model = resolve_active_gemini_model(settings.gemini_model)
     prompt = (
         "You are an expert Malaysian automotive naming normalizer.\n"
         "Given this raw automotive insurance schedule vehicle string:\n"

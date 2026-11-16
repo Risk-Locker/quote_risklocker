@@ -59,6 +59,7 @@ type GenerationJob = {
   elapsed_seconds?: number;
   attempt?: number;
   error?: { message?: string } | null;
+  result?: { version_id?: string; version_number?: number } | null;
 };
 
 function fieldValues(fields: Record<string, { value?: string | null }>): Record<string, string> {
@@ -146,10 +147,7 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
       }
 
       generationCancelledRef.current = false;
-      if (generationRequestRef.current?.revision !== saved.revision) {
-        generationRequestRef.current = { revision: saved.revision, key: crypto.randomUUID() };
-      }
-      const idempotencyKey = generationRequestRef.current.key;
+      const idempotencyKey = crypto.randomUUID();
 
       const requested = await api<{ job?: { id: string }; version?: { id: string } }>(
         `/sessions/${id}/versions`,
@@ -160,6 +158,7 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
         }
       );
 
+      let completedVersionId: string | undefined = requested.version?.id;
       const jobId = requested.job?.id;
       if (jobId) {
         setGenerationJob({ id: jobId, state: "queued", phase: "queued", progress: 0 });
@@ -170,6 +169,7 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
           setGenerationJob(status.job);
           if (status.job.state === "completed") {
             completed = true;
+            completedVersionId = status.job.result?.version_id;
             break;
           }
           if (status.job.state === "failed" || status.job.state === "cancelled") {
@@ -183,12 +183,10 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
       await reload();
       generationRequestRef.current = null;
 
-      if (requested.version?.id) {
-        triggerBrowserDownload(fileUrl(`/versions/${requested.version.id}/pdf?download=true`));
-      } else if (latestVersion) {
-        triggerBrowserDownload(fileUrl(`/versions/${latestVersion.id}/pdf?download=true`));
+      if (completedVersionId) {
+        triggerBrowserDownload(fileUrl(`/versions/${completedVersionId}/pdf?download=true`));
       } else {
-        window.print();
+        triggerBrowserDownload(fileUrl(`/sessions/${id}/pdf?download=true`));
       }
     } catch (error) {
       setActionError(apiErrorMessage(error));
@@ -242,7 +240,7 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
 
   const values = fieldValues(workspace.fields);
   const customerName = values.customer_name || "VALUED CUSTOMER";
-  const vehicleNo = values.vehicle_no || "WXY 8899";
+  const vehicleNo = values.vehicle_no || "ABC 1234";
   const carModel = values.car_model || "Motor Vehicle";
   const vehicleType = values.vehicle_type || "Car";
   const insuranceCompany = values.insurance_company || workspace.pinned_names?.company_name || "Motor Insurance";
@@ -251,22 +249,9 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
   const valuationType = values.valuation_type || "Market Value";
   const sumInsured = formatMoney(values.coverage_amount || values.sum_insured || "0.00");
   const dispOpts = workspace.display_options as Record<string, unknown> | undefined;
-  const shouldRound = dispOpts?.round_total !== false;
-  const rawPremNum = parseFloat(String(values.premium || "").replace(/[^0-9.]/g, "")) || 0;
-  const effPremNum = shouldRound && rawPremNum > 0 ? Math.round(rawPremNum) : rawPremNum;
-  const effPremStr = shouldRound && rawPremNum > 0 ? effPremNum.toFixed(2) : values.premium;
-  const rtNum = parseFloat(String(values.roadtax || "").replace(/[^0-9.]/g, "")) || 0;
+  const effPremStr = values.premium || "0.00";
   const sfRaw = values.service_fee || values.runner_fee || "";
-  const sfNum = parseFloat(String(sfRaw).replace(/[^0-9.]/g, "")) || 0;
-  const extrasTotal = (workspace.extras || []).reduce((acc, ex) => {
-    const amt = (ex as Record<string, unknown>)?.price;
-    const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
-    const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : (typeof val === "number" ? val : 0);
-    return acc + (Number.isFinite(num) ? num : 0);
-  }, 0);
-  const calcTotal = effPremNum + extrasTotal + rtNum + sfNum;
-  const effTotalNum = shouldRound && calcTotal > 0 ? Math.round(calcTotal) : calcTotal;
-  const effTotalStr = effTotalNum > 0 ? effTotalNum.toFixed(2) : (values.total_amount || "0.00");
+  const effTotalStr = values.total_amount || values.total_premium_adjusted || values.gross_premium || "0.00";
 
   const premium = formatMoney(effPremStr || "0.00");
   const roadtax = formatMoney(values.roadtax || "0.00");
@@ -297,7 +282,7 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
   const design2CardCount = isDesign2
     ? buildUnifiedMatrixCards(currentBenefits, addonBenefits, undefined, 24).length
     : 0;
-  const design2CanvasH = design2IncludeSchedule || design2CardCount > 24 ? 1123 * 2 + 16 : 1123;
+  const design2CanvasH = design2IncludeSchedule ? 1123 * 2 + 16 : 1123;
   
   const dynamicCanvasHeight = Math.max(baseCanvasHeight, 350 + allBenefits.length * 56 + 100);
   const canvasHeight = dynamicCanvasHeight;
@@ -591,157 +576,17 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
               transformOrigin: "top center",
             }}
           >
-            {isDesign2 ? (
-              <div style={{ width: "640px", height: `${Math.round(design2CanvasH * (640 / 794))}px`, overflow: "hidden" }}>
-                <div style={{ width: "794px", transform: `scale(${640 / 794})`, transformOrigin: "top left" }}>
-                  <Design2CanvasView
-                    fields={design2Fields}
-                    currentBenefits={currentBenefits}
-                    availableAddons={addonBenefits}
-                    companyName={insuranceCompany}
-                    includeSchedule={design2IncludeSchedule}
-                  />
-                </div>
+            <div style={{ width: "640px", height: `${Math.round(design2CanvasH * (640 / 794))}px`, overflow: "hidden" }}>
+              <div style={{ width: "794px", transform: `scale(${640 / 794})`, transformOrigin: "top left" }}>
+                <Design2CanvasView
+                  fields={design2Fields}
+                  currentBenefits={currentBenefits}
+                  availableAddons={addonBenefits}
+                  companyName={insuranceCompany}
+                  includeSchedule={design2IncludeSchedule}
+                />
               </div>
-            ) : (
-            <svg
-              viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
-              className="w-full h-auto bg-white block"
-              role="img"
-              aria-label={`Preview of ${insuranceCompany} Quotation`}
-            >
-              {/* White A4 Page Background */}
-              <rect x="0" y="0" width={canvasWidth} height={canvasHeight} fill="#ffffff" />
-
-              {/* Top Logo / Header Section */}
-              <rect x="32" y="32" width="140" height="40" fill="#f0f0f2" rx="4" />
-              <text x="44" y="56" fontSize="13" fontWeight="bold" fill="#1b1717" fontFamily="Inter, sans-serif">
-                RISK LOCKER
-              </text>
-
-              {/* Insurer Header Badge */}
-              <rect x={canvasWidth - 172} y="32" width="140" height="40" fill="#f0f0f2" rx="4" />
-              <text
-                x={canvasWidth - 102}
-                y="56"
-                fontSize="12"
-                fontWeight="bold"
-                fill="#1b1717"
-                textAnchor="middle"
-                fontFamily="Inter, sans-serif"
-              >
-                {insuranceCompany.slice(0, 20)}
-              </text>
-
-              {/* Red Header Divider Line */}
-              <line x1="32" y1="88" x2={canvasWidth - 32} y2="88" stroke="#ed1c24" strokeWidth="2.5" />
-
-              {/* Quotation Title & Total Payable Header */}
-              <text x="32" y="120" fontSize="18" fontWeight="bold" fill="#1b1717" fontFamily="Manrope, sans-serif">
-                Motor Insurance Quotation
-              </text>
-              <text x={canvasWidth - 32} y="108" fontSize="10" fontWeight="bold" fill="#6e6e73" textAnchor="end" fontFamily="Inter, sans-serif">
-                TOTAL PAYABLE
-              </text>
-              <text x={canvasWidth - 32} y="126" fontSize="18" fontWeight="bold" fill="#ed1c24" textAnchor="end" fontFamily="Inter, sans-serif">
-                {totalPayable}
-              </text>
-
-              {/* Policy Details Main Grid Box */}
-              <rect x="32" y="140" width={canvasWidth - 64} height="74" fill="#fafafc" stroke="#e5e5ea" strokeWidth="1" rx="4" />
-              
-              {/* Column 1: Customer & Coverage */}
-              <text x="44" y="160" fontSize="9" fontWeight="bold" fill="#8e8e93" fontFamily="Inter, sans-serif">INSURED NAME</text>
-              <text x="44" y="174" fontSize="11" fontWeight="bold" fill="#ed1c24" fontFamily="Inter, sans-serif">{customerName.slice(0, 28)}</text>
-              <text x="44" y="194" fontSize="9" fontWeight="bold" fill="#8e8e93" fontFamily="Inter, sans-serif">COVERAGE</text>
-              <text x="44" y="205" fontSize="10" fontWeight="600" fill="#1b1717" fontFamily="Inter, sans-serif">{coverageType.slice(0, 28)}</text>
-
-              {/* Column 2: Vehicle & Period */}
-              <text x="280" y="160" fontSize="9" fontWeight="bold" fill="#8e8e93" fontFamily="Inter, sans-serif">VEHICLE MODEL</text>
-              <text x="280" y="174" fontSize="11" fontWeight="bold" fill="#ed1c24" fontFamily="Inter, sans-serif">{carModel.slice(0, 24)}</text>
-              <text x="280" y="194" fontSize="9" fontWeight="bold" fill="#8e8e93" fontFamily="Inter, sans-serif">PERIOD OF COVER</text>
-              <text x="280" y="205" fontSize="10" fontWeight="600" fill="#1b1717" fontFamily="Inter, sans-serif">{coverPeriod}</text>
-
-              {/* Column 3: Registration & Type */}
-              <text x="540" y="160" fontSize="9" fontWeight="bold" fill="#8e8e93" fontFamily="Inter, sans-serif">VEHICLE NO / PLATE</text>
-              <text x="540" y="174" fontSize="11" fontWeight="bold" fill="#ed1c24" fontFamily="Inter, sans-serif">{vehicleNo}</text>
-              <text x="540" y="194" fontSize="9" fontWeight="bold" fill="#8e8e93" fontFamily="Inter, sans-serif">VEHICLE TYPE</text>
-              <text x="540" y="205" fontSize="10" fontWeight="600" fill="#1b1717" fontFamily="Inter, sans-serif">{vehicleType}</text>
-
-              {/* Premium Breakdown Summary Bar */}
-              <rect x="32" y="226" width={canvasWidth - 64} height="36" fill="#ffffff" stroke="#e5e5ea" strokeWidth="1" rx="4" />
-              
-              <text x="44" y="248" fontSize="9" fontWeight="bold" fill="#6e6e73" fontFamily="Inter, sans-serif">
-                PREMIUM: <tspan fill="#1b1717" fontWeight="bold">{premium}</tspan>
-              </text>
-              <text x="240" y="248" fontSize="9" fontWeight="bold" fill="#6e6e73" fontFamily="Inter, sans-serif">
-                ROAD TAX: <tspan fill="#1b1717" fontWeight="bold">{roadtax}</tspan>
-              </text>
-              <text x="420" y="248" fontSize="9" fontWeight="bold" fill="#6e6e73" fontFamily="Inter, sans-serif">
-                RUNNER FEE: <tspan fill="#1b1717" fontWeight="bold">{runnerFee}</tspan>
-              </text>
-              <text x={canvasWidth - 44} y="248" fontSize="10" fontWeight="bold" fill="#ed1c24" textAnchor="end" fontFamily="Inter, sans-serif">
-                NET PAYABLE: {totalPayable}
-              </text>
-
-              {/* Benefits Section Divider */}
-              <line x1="32" y1="274" x2={canvasWidth - 32} y2="274" stroke="#e5e5ea" strokeWidth="1" />
-              <text x="32" y="292" fontSize="11" fontWeight="bold" fill="#1b1717" fontFamily="Manrope, sans-serif">
-                INCLUDED COMPREHENSIVE BENEFITS &amp; SPECIALS
-              </text>
-
-              {/* Render Benefit Cards List */}
-              {allBenefits.map((b, idx) => {
-                const x = 32;
-                const y = 304 + idx * 56;
-                const w = canvasWidth - 64;
-                const h = 48;
-                
-                const title = (b.label || "Special Cover").slice(0, 45);
-                const coverage = (b.value || (b.isAddon ? "Optional" : "FOC")).slice(0, 28);
-                const desc = (b.description || "Comprehensive benefit inclusion subject to policy terms.").slice(0, 85);
-                
-                const rawPrice = typeof b.price === "object" && b.price !== null ? (b.price as any).amount : b.price;
-                const price = b.isAddon && rawPrice ? formatMoney(rawPrice as string | number) : "";
-
-                return (
-                  <g key={b.card_key || idx}>
-                    <rect x={x} y={y} width={w} height={h} fill="#fcfcfd" stroke="#e5e5ea" strokeWidth="1" rx="4" />
-                    
-                    {/* Image Placeholder */}
-                    <circle cx={x + 24} cy={y + 24} r="12" fill={b.isAddon ? "#eff6ff" : "#ecfdf5"} />
-                    <text x={x + 24} y={y + 28} fontSize="12" fontWeight="bold" fill={b.isAddon ? "#3b82f6" : "#059669"} textAnchor="middle" fontFamily="Inter, sans-serif">
-                      {b.isAddon ? "+" : "✓"}
-                    </text>
-                    
-                    {/* Title & Short Description */}
-                    <text x={x + 48} y={y + 20} fontSize="11" fontWeight="bold" fill="#1b1717" fontFamily="Inter, sans-serif">
-                      {title}
-                    </text>
-                    <text x={x + 48} y={y + 36} fontSize="9" fill="#6e6e73" fontFamily="Inter, sans-serif">
-                      {desc}
-                    </text>
-                    
-                    {/* Coverage Amount - Dark Color */}
-                    <text x={x + w - 100} y={y + 28} fontSize="11" fontWeight="bold" fill="#1b1717" fontFamily="Inter, sans-serif" textAnchor="end">
-                      {coverage}
-                    </text>
-                    
-                    {/* Price - Red Color */}
-                    <text x={x + w - 16} y={y + 28} fontSize="12" fontWeight="bold" fill="#ed1c24" fontFamily="Inter, sans-serif" textAnchor="end">
-                      {price}
-                    </text>
-                  </g>
-                );
-              })}
-
-              {/* Footer Note */}
-              <rect x="32" y={canvasHeight - 60} width={canvasWidth - 64} height="36" fill="#f5f5f7" rx="4" />
-              <text x={canvasWidth / 2} y={canvasHeight - 38} fontSize="9" fill="#8e8e93" textAnchor="middle" fontFamily="Inter, sans-serif">
-                This quotation is generated electronically by RiskLocker and is valid subject to standard insurer underwriting terms.
-              </text>
-            </svg>
-            )}
+            </div>
           </div>
         </Panel>
 

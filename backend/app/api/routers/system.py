@@ -101,7 +101,7 @@ from app.api.schemas import (
 )
 from app.auth.cookies import clear_auth_cookies, set_auth_cookies
 from app.auth.rbac import can_view_owner_record, require_role
-from app.core.config import Settings
+from app.core.config import Settings, resolve_active_gemini_model
 from app.core.errors import AppError
 from app.extraction.company_resolution import build_companies_payload, resolve_company
 from app.db.session import get_db
@@ -822,6 +822,7 @@ def runner_fee_get(db: Session = Depends(get_db), user: User = Depends(current_u
 
 @router.post("/admin/settings/runner-fee")
 def runner_fee_set(payload: dict, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
     amount = set_runner_fee_default(db, user, float(payload.get("amount", 20.0)))
     return {"amount": amount}
 
@@ -883,7 +884,7 @@ def settings_gemini_probe(
     pool = get_key_pool()
     pool.sync_accounts(db=db)
     account_idx = payload.get("account_index") if payload and isinstance(payload, dict) else None
-    target_model = getattr(settings, "gemini_model", None) or "gemini-3.1-flash-lite-preview"
+    target_model = resolve_active_gemini_model(getattr(settings, "gemini_model", None))
     result = pool.probe(force=True, model=target_model, account_index=account_idx)
     return {"gemini": result}
 
@@ -943,7 +944,7 @@ def settings_gemini_add_key(
         raise AppError(f"Maximum limit of {settings.gemini_max_accounts} accounts reached. Remove an existing key first.", 400)
 
     # LIVE PROBE GATE: Probe key against Google Generative Language API before saving!
-    target_model = getattr(settings, "gemini_model", None) or "gemini-3.1-flash-lite-preview"
+    target_model = resolve_active_gemini_model(getattr(settings, "gemini_model", None))
     probe_res = pool.probe_single_key(raw_key, model=target_model)
 
     if not probe_res.get("ok"):
@@ -1030,6 +1031,246 @@ def settings_gemini_delete_key(
         "message": "API key successfully removed from pool.",
         "gemini": pool.get_quota_stats(),
     }
+
+
+@router.get("/settings/gemini/analytics")
+def settings_gemini_analytics(
+    time_range: str = "today",
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Historical rate limit and token consumption analytics matching Google AI Studio dashboard."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    from app.services.gemini_account_service import get_historical_analytics
+
+    return get_historical_analytics(db=db, time_range=time_range)
+
+
+@router.post("/settings/gemini/keys/{key_id}/toggle-pause")
+def settings_gemini_toggle_pause(
+    key_id: str,
+    payload: dict | None = Body(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Safely toggle paused/resting state for an account without mutating or deleting credentials."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    from app.extraction.gemini_extractor import get_key_pool
+
+    explicit_pause = payload.get("paused") if payload and isinstance(payload, dict) else None
+
+    # Persistent storage of paused accounts across both .env and manual pools
+    setting_paused = db.get(AppSetting, "gemini_paused_keys")
+    if not setting_paused:
+        setting_paused = AppSetting(key="gemini_paused_keys", value={"paused_ids": []})
+        db.add(setting_paused)
+    paused_ids = list(setting_paused.value.get("paused_ids", [])) if isinstance(setting_paused.value, dict) else []
+
+    if explicit_pause is True:
+        if key_id not in paused_ids:
+            paused_ids.append(key_id)
+        is_paused_now = True
+    elif explicit_pause is False:
+        if key_id in paused_ids:
+            paused_ids.remove(key_id)
+        is_paused_now = False
+    else:
+        if key_id in paused_ids:
+            paused_ids.remove(key_id)
+            is_paused_now = False
+        else:
+            paused_ids.append(key_id)
+            is_paused_now = True
+
+    setting_paused.value = {"paused_ids": paused_ids}
+
+    # Also update in manual keys AppSetting if present
+    setting = db.get(AppSetting, "gemini_manual_api_keys")
+    if setting and isinstance(setting.value, dict):
+        current_val = dict(setting.value)
+        keys_list = list(current_val.get("keys", []))
+        for k in keys_list:
+            if k.get("id") == key_id:
+                k["is_paused"] = is_paused_now
+                break
+        current_val["keys"] = keys_list
+        setting.value = current_val
+
+    db.commit()
+
+    pool = get_key_pool()
+    pool.set_account_paused(key_id, paused=is_paused_now)
+    pool.sync_accounts(db=db)
+
+    return {
+        "ok": True,
+        "key_id": key_id,
+        "is_paused": is_paused_now,
+        "gemini": pool.get_quota_stats(),
+    }
+
+
+@router.get("/settings/gemini/model-config")
+def get_gemini_model_config(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Return currently active primary and parallel Gemini models."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
+    from app.services.gemini_account_service import PARALLEL_MODELS
+
+    setting = db.get(AppSetting, "gemini_model_config")
+    val = setting.value if setting and isinstance(setting.value, dict) else {}
+    primary = val.get("primary_model") or resolve_active_gemini_model()
+    parallel = val.get("parallel_models") or list(PARALLEL_MODELS)
+    return {
+        "primary_model": primary,
+        "parallel_models": parallel,
+        "available_models": list(PARALLEL_MODELS),
+    }
+
+
+@router.get("/settings/gemini/eligible-models")
+def get_gemini_eligible_models(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Return live qualified, eligible, and banned Gemini models for AI fleet management."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
+    from app.extraction.model_discovery_service import get_verified_eligible_models
+    from app.services.gemini_account_service import get_key_pool
+
+    pool = get_key_pool()
+    keys = pool.get_all_keys()
+    primary_key = keys[0] if keys else None
+
+    result = get_verified_eligible_models(api_key=primary_key)
+
+    setting = db.get(AppSetting, "gemini_model_config")
+    val = setting.value if setting and isinstance(setting.value, dict) else {}
+    primary = val.get("primary_model") or resolve_active_gemini_model()
+    parallel = val.get("parallel_models") or ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite"]
+
+    decorated_eligible = []
+    for m in result.get("eligible_models", []):
+        m_copy = dict(m)
+        m_copy["is_active"] = m["id"] in parallel
+        m_copy["is_primary"] = m["id"] == primary
+        decorated_eligible.append(m_copy)
+
+    return {
+        "ok": True,
+        "source": result.get("source"),
+        "probe_error": result.get("probe_error"),
+        "primary_model": primary,
+        "parallel_models": parallel,
+        "eligible_models": decorated_eligible,
+        "banned_models": result.get("banned_models", []),
+    }
+
+
+@router.post("/settings/gemini/model-config")
+def update_gemini_model_config(
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Update active primary and parallel Gemini model selection."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    from app.extraction.model_discovery_service import get_verified_eligible_models
+    from app.services.gemini_account_service import PARALLEL_MODELS, get_key_pool
+
+    primary = payload.get("primary_model")
+    parallel = payload.get("parallel_models")
+
+    eligible_res = get_verified_eligible_models()
+    allowed_ids = {m["id"] for m in eligible_res.get("eligible_models", [])}
+    allowed_ids.update(PARALLEL_MODELS)
+
+    if primary and primary not in allowed_ids:
+        raise AppError(f"Model '{primary}' is not in verified production tier.", 400)
+
+    setting = db.get(AppSetting, "gemini_model_config")
+    if not setting:
+        setting = AppSetting(key="gemini_model_config", value={})
+        db.add(setting)
+
+    val = dict(setting.value) if isinstance(setting.value, dict) else {}
+    if primary:
+        val["primary_model"] = primary
+    if parallel is not None:
+        filtered_parallel = [m for m in parallel if m in allowed_ids]
+        if not filtered_parallel:
+            raise AppError("At least one verified model must remain active in the parallel pool.", 400)
+        val["parallel_models"] = filtered_parallel
+
+    setting.value = val
+    db.commit()
+
+    pool = get_key_pool()
+    pool.sync_accounts(db=db)
+
+    return {
+        "ok": True,
+        "primary_model": val.get("primary_model", "gemini-3.1-flash-lite"),
+        "parallel_models": val.get("parallel_models", list(PARALLEL_MODELS)),
+        "gemini": pool.get_quota_stats(),
+    }
+
+
+@router.post("/settings/gemini/radar-sentinel/trigger")
+def trigger_gemini_radar_sentinel(
+    force: bool = True,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Trigger the idle-period model & quota radar background sentinel check."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    from app.workers.model_radar_sentinel import run_model_radar_sentinel
+
+    result = run_model_radar_sentinel(db=db, force=force)
+    return {"ok": True, "sentinel": result}
+
+
+@router.get("/settings/gemini/quota-radar")
+def get_gemini_quota_radar(
+    refresh: bool = False,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Return latest 20-minute autonomous quota radar status snapshot or run on-demand."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
+    import json
+    from pathlib import Path
+    from app.services.gemini_account_service import get_ai_quota_radar_snapshot
+
+    # If not explicitly refreshing, try reading existing fresh snapshot (< 20 mins old)
+    if not refresh:
+        try:
+            root_dir = Path(__file__).resolve().parent.parent.parent.parent
+            report_file = root_dir / ".agents" / "memory" / "ai-radar-latest.json"
+            if report_file.exists():
+                data = json.loads(report_file.read_text(encoding="utf-8"))
+                return {"ok": True, "radar": data, "cached": True}
+        except Exception:
+            pass
+
+    report = get_ai_quota_radar_snapshot(probe_live=refresh, db=db)
+    return {"ok": True, "radar": report, "cached": False}
+
+
+@router.post("/settings/gemini/quota-radar/run")
+def trigger_gemini_quota_radar(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Manually trigger immediate live Google catalog and quota radar check."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    from app.services.gemini_account_service import get_ai_quota_radar_snapshot
+
+    report = get_ai_quota_radar_snapshot(probe_live=True, db=db)
+    return {"ok": True, "radar": report}
+
 
 
 

@@ -185,7 +185,7 @@ STANDARD_ROAD_TAX_RULES = [
     {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1601, "max_cc": 1800, "base_rate": 200.00, "formula": "200 + ((cc - 1600) * 0.40)", "source": "JPJ Schedule (Peninsular)"},
     {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 1801, "max_cc": 2000, "base_rate": 280.00, "formula": "280 + ((cc - 1800) * 0.50)", "source": "JPJ Schedule (Peninsular)"},
     {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 2001, "max_cc": 2500, "base_rate": 380.00, "formula": "380 + ((cc - 2000) * 1.00)", "source": "JPJ Schedule (Peninsular)"},
-    {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 2501, "max_cc": 3000, "base_rate": 840.00, "formula": "840 + ((cc - 2500) * 2.50)", "source": "JPJ Schedule (Peninsular)"},
+    {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 2501, "max_cc": 3000, "base_rate": 880.00, "formula": "880 + ((cc - 2500) * 2.50)", "source": "JPJ Schedule (Peninsular)"},
     {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "West Malaysia", "min_cc": 3001, "max_cc": None, "base_rate": 2130.00, "formula": "2130 + ((cc - 3000) * 4.50)", "source": "JPJ Schedule (Peninsular)"},
 
     # Company Car (West Malaysia)
@@ -362,7 +362,7 @@ STANDARD_ROAD_TAX_RULES = [
     {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "Labuan", "min_cc": 1601, "max_cc": 1800, "base_rate": 100.00, "formula": "100 + ((cc - 1600) * 0.20)", "source": "JPJ Labuan Duty-Free Concession"},
     {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "Labuan", "min_cc": 1801, "max_cc": 2000, "base_rate": 140.00, "formula": "140 + ((cc - 1800) * 0.25)", "source": "JPJ Labuan Duty-Free Concession"},
     {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "Labuan", "min_cc": 2001, "max_cc": 2500, "base_rate": 190.00, "formula": "190 + ((cc - 2000) * 0.50)", "source": "JPJ Labuan Duty-Free Concession"},
-    {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "Labuan", "min_cc": 2501, "max_cc": 3000, "base_rate": 420.00, "formula": "420 + ((cc - 2500) * 1.25)", "source": "JPJ Labuan Duty-Free Concession"},
+    {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "Labuan", "min_cc": 2501, "max_cc": 3000, "base_rate": 440.00, "formula": "440 + ((cc - 2500) * 1.25)", "source": "JPJ Labuan Duty-Free Concession"},
     {"vehicle_type": "Car", "owner_type": "Individual", "jurisdiction": "Labuan", "min_cc": 3001, "max_cc": None, "base_rate": 1065.00, "formula": "1065 + ((cc - 3000) * 2.25)", "source": "JPJ Labuan Duty-Free Concession"},
 
     {"vehicle_type": "Car", "owner_type": "Company", "jurisdiction": "Labuan", "min_cc": 1, "max_cc": 1000, "base_rate": 10.00, "formula": None, "source": "JPJ Labuan Duty-Free Concession"},

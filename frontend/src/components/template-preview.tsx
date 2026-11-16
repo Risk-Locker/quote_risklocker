@@ -69,9 +69,9 @@ export function TemplatePreview({ template, packageName }: { template: TemplateC
           <div className="border-2 border-rl-black p-2 text-right">
             <strong>{payment.method || "Payment Method"}</strong>
             <div>Bank details</div>
-            <div>{payment.account || "12300318500"}</div>
-            <div>{payment.account_name || "Risklocker Sdn. Bhd."}</div>
-            <div>{payment.bank || "Hong Leong Bank"}</div>
+            <div>{payment.account || "0000 0000 0000"}</div>
+            <div>{payment.account_name || "Authorized Insurance Agency"}</div>
+            <div>{payment.bank || "Commercial Bank"}</div>
           </div>
           <div className="border-2 border-rl-black p-2 text-center font-bold">{config.driver_box?.label || "All Driver"}</div>
         </div>

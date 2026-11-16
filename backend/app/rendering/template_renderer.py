@@ -362,7 +362,12 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
     row_height = float(element.get("rowHeight") or 14)
     labels = element.get("labels") or {}
     extras = list((render_context or {}).get("extras") or [])
-    extras_mode = str(element.get("extras_mode") or (render_context or {}).get("extras_mode") or "itemized").lower()
+    extras_mode = str(
+        (render_context or {}).get("display_options", {}).get("extras_mode")
+        or element.get("extras_mode")
+        or (render_context or {}).get("extras_mode")
+        or "itemized"
+    ).lower()
     rows: list[tuple[str, str, str, str]] = []  # (kind, label, middle_val, right_val)
 
     v4_mode = bool(element.get("v4_mode"))
@@ -780,9 +785,9 @@ def _element_html(
             prefix = str(element.get("prefix") or "")
             raw_val = _variable_value(fields, config, var_id)
             if not raw_val and eid == "ref_val":
-                raw_val = "RL260000341"
+                raw_val = "QT-PREVIEW"
             elif not raw_val and eid == "vehicle_no_val":
-                raw_val = "JXS2820"
+                raw_val = "ABC 1234"
             elif not raw_val and eid == "header_insurer_name":
                 raw_val = "QBE INSURANCE (MALAYSIA) BERHAD"
             val_style = "font-size:10px;font-weight:700;color:#ED1C24"
@@ -842,7 +847,11 @@ def render_quotation_html(
     
     render_context = dict(render_context or {})
     if "extras_mode" not in render_context:
-        render_context["extras_mode"] = str(config.get("extras_mode") or "itemized").lower()
+        render_context["extras_mode"] = str(
+            (render_context.get("display_options") or {}).get("extras_mode")
+            or config.get("extras_mode")
+            or "itemized"
+        ).lower()
 
     if insurer_name:
         draft_fields = {**draft_fields, "insurance_company": {"value": insurer_name}}

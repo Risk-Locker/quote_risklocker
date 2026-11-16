@@ -11,7 +11,7 @@ from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.config import Settings
+from app.core.config import Settings, resolve_active_gemini_model
 from app.services.document_security import scanner_status
 from app.storage.supabase import SupabaseStorage
 
@@ -73,7 +73,7 @@ def check_gemini_api(settings: Settings, db: Session | None = None) -> tuple[str
     pool_desc = f"{count} key{'s' if count > 1 else ''} in pool ({', '.join(masked)})"
 
     status = stats.get("status")
-    model = settings.gemini_model or "gemini-3.1-flash-lite-preview"
+    model = resolve_active_gemini_model(settings.gemini_model)
 
     if status in ("ready", "untested"):
         return "Ready", f"Connected to {model} · Live Verified · {pool_desc}"

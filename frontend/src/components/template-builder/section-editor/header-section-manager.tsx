@@ -14,7 +14,7 @@ interface HeaderSectionManagerProps {
 const DEFAULT_ROWS: Array<"ref" | "vehicle" | "insurer"> = ["ref", "vehicle", "insurer"];
 
 const ROW_LABELS: Record<"ref" | "vehicle" | "insurer", { title: string; defaultLabel: string; sampleVal: string }> = {
-  ref: { title: "Quotation Reference", defaultLabel: "Quotation ref :", sampleVal: "RL260000334" },
+  ref: { title: "Quotation Reference", defaultLabel: "Quotation ref :", sampleVal: "QT-SAMPLE-001" },
   vehicle: { title: "Vehicle Number", defaultLabel: "Vehicle no. :", sampleVal: "JLY8828" },
   insurer: { title: "Insurer Company Name", defaultLabel: "Insurer :", sampleVal: "AMGENERAL INSURANCE BERHAD" },
 };

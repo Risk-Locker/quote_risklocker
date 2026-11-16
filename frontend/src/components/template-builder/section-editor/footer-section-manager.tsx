@@ -40,7 +40,7 @@ export function FooterSectionManager({ footer, onChange }: FooterSectionManagerP
             <Input
               value={footer.bankName || ""}
               onChange={(e) => handleChange("bankName", e.target.value)}
-              placeholder="e.g. Hong Leong Bank"
+              placeholder="e.g. Maybank / CIMB"
             />
           </div>
 
@@ -51,7 +51,7 @@ export function FooterSectionManager({ footer, onChange }: FooterSectionManagerP
             <Input
               value={footer.accountNo || ""}
               onChange={(e) => handleChange("accountNo", e.target.value)}
-              placeholder="e.g. 12300318500"
+              placeholder="e.g. 514012345678"
             />
           </div>
         </div>
@@ -63,7 +63,7 @@ export function FooterSectionManager({ footer, onChange }: FooterSectionManagerP
           <Input
             value={footer.accountHolder || ""}
             onChange={(e) => handleChange("accountHolder", e.target.value)}
-            placeholder="e.g. Risklocker Sdn. Bhd."
+            placeholder="e.g. Agency Name Sdn. Bhd."
           />
         </div>
       </div>

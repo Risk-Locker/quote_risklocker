@@ -58,7 +58,7 @@ const navSections: NavSection[] = [
     title: "STUDIO & CONFIG",
     staffRestricted: true,
     items: [
-      { href: "/builder/templates/quotation-templates" as Route, label: "Builder", icon: Wrench, staffRestricted: true },
+      { href: "/builder/templates/quotation-templates" as Route, label: "Studio", icon: Wrench, staffRestricted: true },
       { href: "/extraction/company-detection" as Route, label: "Extraction & Aliases", icon: FunnelSimple, staffRestricted: true },
       { href: "/settings/system-checks", label: "Settings", icon: Gear, staffRestricted: true },
     ],

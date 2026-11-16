@@ -40,5 +40,9 @@ export const config = {
     "/trash/:path*",
     "/client-records/:path*",
     "/inbox/:path*",
+    "/comparison/:path*",
+    "/ledger/:path*",
+    "/insights/:path*",
+    "/ai-context/:path*",
   ],
 };

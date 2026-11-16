@@ -26,10 +26,27 @@ When an architectural plan or feature request requires significant changes (e.g.
 
 ---
 
-## 2. Authentic Real-World Live Verification Gate
+## 2. Autonomous Multi-Domain Lifecycle Forensics Gate
 
-Offline unit tests with in-memory SQLite and mocks are necessary, but **NEVER sufficient** on their own to prove a feature works in production. Every milestone must pass **Authentic Verification**:
+Offline unit tests with in-memory SQLite and mocks are necessary, but **NEVER sufficient** on their own to prove a feature works in production ("complimentary bread"). Every verification pass MUST autonomously execute this 5-stage forensics loop without waiting for the user to prompt it:
 
+### Stage 1: Full-Stack Domain & Module Discovery
+Before asserting anything works or is ready, the agent must enumerate all domains and modules across the entire stack:
+- `Database Models`: PostgreSQL tables, migration parity, column constraints, `Numeric` types.
+- `Pure Domain Engines`: Actuarial calculators, Decimal math, NCD tiers, Betterment calendar logic, zero HTTP.
+- `Application Services`: Business coordination, idempotency keys, customer deduplication, workspace patches.
+- `FastAPI Routers`: Input schemas, RBAC guards, HTTP verb purity (strict read-only `GET`).
+- `Background Workers`: Durable job polling, PacerSentinel delays, abort/cancellation tokens, Supabase Storage uploads.
+- `Frontend Views & Canvas`: Next.js 15 App Router, React 19 client components, Design 2 live canvas parity.
+- `External APIs & Pacing`: Google AI Studio rate limits (13 RPM, 200k TPM, 480 RPD), token weighing.
+
+### Stage 2: Single Source of Truth & Invariant Verification
+- **Zero Client-Side Math**: Verify React components NEVER calculate road tax, betterment, totals, or discounts independently. The backend `Decimal` API is the sole mathematical authority.
+- **Monetary Precision**: Confirm monetary columns in PostgreSQL and Python models use `Numeric(12, 2)` / `Decimal`, NEVER IEEE-754 `float` or plain text `varchar`.
+- **Zero Mutating `GET`s**: Verify `GET` endpoints never call `db.commit()` or `db.flush()`. All mutations require `POST`, `PUT`, `PATCH`, or `DELETE`.
+- **Zero Hardcoded Underwriter Rules**: Verify underwriter catalogs, towing limits, and excess schedules exist in database tables/seeds, NEVER hardcoded in Python `if/elif` branches or React components.
+
+### Stage 3: Authentic Real-World Live Verification
 1. **Live Local API Gauntlet (Real HTTP Requests):**
    - Test endpoints against the live running backend (`http://127.0.0.1:8100` via `httpx` or dedicated verification scripts).
    - Assert real cookie handling, real CSRF protection (`X-CSRF-Token` & cookie binding), payload validation, and response serialization.
@@ -53,6 +70,34 @@ Offline unit tests with in-memory SQLite and mocks are necessary, but **NEVER su
      - Visual alignment, optical typography, and `--rl-*` design tokens intact.
      - Responsive stability across `1024x768`, `1280x800`, and `1920x1080` viewports at `80%`, `100%`, and `120%` zoom.
 
+4. **Real Worker & Storage Execution:**
+   - Verify extraction and render workers execute real jobs against durable Postgres tables.
+   - Verify Playwright Chromium vector PDFs are uploaded to private Supabase Storage, asserting zero fallback to local ephemeral `/tmp` in production.
+   - Verify cancellation tokens abort worker execution when uploads are canceled.
+
+### Stage 4: Specification Invariant Audit (`USER-CHRONICLE-IDEA-SPEC.md`)
+Cross-check against the user's permanent serial idea specification:
+- **Design 2 24-Card Boundary**: Fixed 24 cards matrix; dynamic in-place Towing card upgrade (`EMERGENCY` -> `UNLIMITED`); suppress duplicate unselected towing card in bottom matrix.
+- **Single Bilingual Agency Template**: One template with interactive quotation page toggle (`[ Itemized | Lump Sum | None ]`).
+- **Exact Calendar Betterment Age**: Full date math via `relativedelta.years` (where 9y 11m 29d = 9 completed years at 35% tariff scale).
+- **Google AI Studio Quota Shields**: 13 RPM, 200k TPM, 480 RPD caps locked strictly to `gemini-3.1-flash-lite` and `gemini-3.5-flash-lite`. Zero calls to `gemini-3.8-flash` or preview models.
+- **Living Eye Pacer**: Verify PacerSentinel delay is actually executed inside the extraction worker loop.
+- **Accurate Token Weighing**: Reject naive `file.size / 65,000` byte heuristics.
+- **Sandbox Isolation**: Isolated `is_sandbox: bool` ledger and records for testing/training.
+
+### Stage 5: 10-Point Edge Case & Failure-Mode Analysis
+Run before declaring any feature or bugfix ready:
+- Empty/null/whitespace inputs
+- Boundary numbers (0.00, negative, max limits)
+- Leap dates (Feb 29) & timezone bounds
+- Concurrency & double-click submission
+- RBAC / IDOR / CSRF integrity
+- Malformed inputs / OCR errors / prompt injection boundaries
+- Network timeout & transaction rollback
+- Responsive zoom & keyboard accessibility
+- Legacy unmigrated rows
+- Indexed SQL queries (zero `_rows()` full-table scans)
+
 ---
 
 ## 3. Living System Learning & Knowledge Base Synchronization
@@ -75,4 +120,18 @@ A system that does not update its working memory and use cases with each feature
    - Synchronize affected documentation in `docs/domain/BUSINESS-RULES.md`, `docs/domain/SAAS-BLUEPRINT.md`, and `docs/architecture/`.
    - Append a concise 1–2 line milestone entry to `docs/core/STATE.md` (keep `<80` lines).
    - Add permanent regression test cases to `tests/` covering the newly enumerated use cases so future sprints can never silently break them.
+
+---
+
+## 4. On-Demand Context Telemetry & Fresh-Chat Handover Protocol
+
+1. **Context Telemetry (On-Demand Only):**
+   - Run `commands/chat-token-telemetry.py` ONLY when requested by the user or when active context exceeds 250k tokens to guide a fresh chat handover (`Ctrl+L`). Avoid dumping repetitive telemetry tables on normal chat turns.
+
+2. **Fresh-Chat Handover Protocol ($\ge 250\text{k}$ tokens or Milestone Completion):**
+   - High conversation context (>250k tokens) and multi-step conversations (>500 steps) increase token processing latency and risk automatic platform compaction pauses.
+   - Upon completing a milestone or when active context exceeds 250k tokens:
+     1. Present a concise, evidence-backed verification report.
+     2. Update `docs/core/STATE.md` and `docs/plans/`.
+     3. Provide the user with the exact prompt to start a fresh chat (`Ctrl+L` -> `Run docs/plans/...`) so work continues at maximum speed with zero context loss.
 

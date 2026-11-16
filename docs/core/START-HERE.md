@@ -104,11 +104,26 @@ External chat tools without workspace access should be given this file plus the 
 | :--- | :--- | :--- |
 | `docs/SDLC/SYSTEM-ANALYSIS-AND-CORE-USECASES.md` | Core use cases, architectural forensic analysis & SDLC review | Core features or SDLC roadmap change |
 
+### Active Implementation Plans (`docs/plans/`)
+| Document | Purpose | Update when |
+| :--- | :--- | :--- |
+| `docs/plans/2026-11-13-ai-fleet-and-template-lifecycle.md` | AI Fleet quota equilibrium, living pacer, towing dynamic upgrade & template lifecycle plan | Active sprint tasks change or complete |
+| `docs/plans/2026-11-14-phase-1-critical-p0-backend-and-security-hotfixes.md` | Critical P0 backend, storage, RBAC, AST formula evaluator & road tax monotonicity plan | Active sprint tasks change or complete |
+| `docs/plans/2026-11-14-phase-2-db-schema-and-double-entry-ledger.md` | Database schema hardening, immutability restoration, partial indexes & double-entry ledger | Active sprint tasks change or complete |
+| `docs/plans/2026-11-14-phase-3-backend-engines-and-api-purity.md` | Backend core engines, query performance, leap-safe calendar dates & API purity | Active sprint tasks change or complete |
+| `docs/plans/2026-11-14-phase-4-frontend-demonolithization-and-ux.md` | Frontend de-monolithization, Playwright vector PDF export & PII cleansing | Active sprint tasks change or complete |
+| `docs/plans/2026-11-15-phase-5-ai-pipeline-hardening-and-verification.md` | AI pipeline hardening, Gemini model lockdown & 10/10 verification gauntlet | Active sprint tasks change or complete |
+| `docs/plans/2026-11-15-master-remediation-and-features-plan.md` | Master remediation of 7 domains, dynamic Gemini model selection, catalog studio assistant & token telemetry | Active sprint tasks change or complete |
+| `docs/plans/2026-11-15-fleet-independent-key-controls.md` | Gemini AI Parallel Fleet independent key controls, Active multi-key status, kill-switches & dynamic capacity scaling | Active sprint tasks change or complete |
+| `docs/plans/2026-11-15-design2-precision-and-builder-consolidation-plan.md` | Design 2 precision, "Template as Builder" view/unview toggles, ghost template cleanup & studio modernization | Active sprint tasks change or complete |
+| `docs/plans/2026-11-16-pre-commit-hygiene-and-gate-readiness-plan.md` | Pre-commit repository hygiene, agency bank details harmonization & 10/10 gate readiness | Active sprint tasks change or complete |
+
 ### History & Generated Tooling
 | Document | Purpose | Update when |
 | :--- | :--- | :--- |
 | `docs/history/MEMORY-YYYY-MM.md` | Monthly archive of past interaction log entries | Monthly or when `docs/core/STATE.md` is rotated |
 | `docs/history/CHANGELOG-V6-V26.md` | Historical architectural additions and versioned changelogs (v6-v26) | Historical archive reference |
+| `docs/history/USER-CHRONICLE-IDEA-SPEC.md` | Historical user discussions and serial chronicles | Reference archive |
 | `docs/generated/CODEBASE-MAP.md` | AST-generated symbol, route, and line map | Run `python commands/update-code-map.py --write` |
 | `docs/generated/GRAPH_REPORT.md` | Graphify AST community, god-node & dependency hub report (`--code-only`) | Re-run Graphify `extract` + `cluster-only` after major refactors |
 | `docs/generated/SKILLS-INDEX.md` | Auto-generated Active vs Cold Skill Vault catalog, scope & boot token summary | Run `python commands/skills-manager.py index` (or `install`/`mount`/`unmount`) |

@@ -47,7 +47,7 @@ function LedgerContent() {
   }, [searchParams]);
 
   return (
-    <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6 space-y-6">
+    <div className="w-full max-w-full min-w-0 px-1 sm:px-3 md:px-4 py-3 sm:py-5 space-y-5">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-neutral-200/80 pb-5">
         <div>

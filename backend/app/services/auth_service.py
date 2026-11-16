@@ -106,6 +106,17 @@ def serialize_user(user: User, is_online: bool = False) -> dict:
     }
 
 
+def create_session(
+    db: Session,
+    settings: Settings,
+    user: User | str,
+    user_agent: str | None = None,
+    ip_address: str | None = None,
+) -> tuple[AuthSession, str]:
+    user_id = user.id if hasattr(user, "id") else str(user)
+    return _create_session(db, settings, user_id, user_agent, ip_address)
+
+
 def _create_session(
     db: Session,
     settings: Settings,

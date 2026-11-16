@@ -66,8 +66,8 @@ def test_calculate_road_tax_private_car():
     assert calculate_road_tax(1998, vehicle_type="Car", owner_type="Individual") == 379.00
     # 2001-2500: 380 + 1.00 * (2494 - 2000) = 380 + 494 = 874.00
     assert calculate_road_tax(2494, vehicle_type="Car", owner_type="Individual") == 874.00
-    # 2501-3000: 840 + 2.50 * (2997 - 2500) = 840 + 1242.50 = 2082.50
-    assert calculate_road_tax(2997, vehicle_type="Car", owner_type="Individual") == 2082.50
+    # 2501-3000: 880 + 2.50 * (2997 - 2500) = 880 + 1242.50 = 2122.50 (authoritative JPJ schedule)
+    assert calculate_road_tax(2997, vehicle_type="Car", owner_type="Individual") == 2122.50
     # >3000: 2130 + 4.50 * (3456 - 3000) = 2130 + 2052 = 4182.00
     assert calculate_road_tax(3456, vehicle_type="Car", owner_type="Individual") == 4182.00
 

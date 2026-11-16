@@ -1539,7 +1539,7 @@ ${aiMarkdownTable}`;
     quotation_reference: "RL-202609-00101",
     issue_date: new Date().toLocaleDateString("en-GB"),
     insured_name: "Ahmad Bin Abdullah",
-    id_number: "900101-14-1234",
+    id_number: "900101-XX-XXXX",
     postcode: "50480",
     coverage_type: "Comprehensive",
     sum_insured: "RM 55,000.00",

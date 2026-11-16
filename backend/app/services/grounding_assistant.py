@@ -11,7 +11,7 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
+from app.core.config import get_settings, resolve_active_gemini_model
 from app.extraction.gemini_extractor import get_key_pool
 from app.models.tables import (
     BenefitConcept,
@@ -187,7 +187,7 @@ def answer_grounding_query(
     # If keys exist, call Gemini with tight token limits
     if all_keys:
         api_key = pool.get_next_key()
-        model_name = getattr(settings, "gemini_model", None) or "gemini-3.5-flash"
+        model_name = resolve_active_gemini_model(getattr(settings, "gemini_model", None))
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
         payload = {
             "system_instruction": {"parts": [{"text": system_instruction}]},

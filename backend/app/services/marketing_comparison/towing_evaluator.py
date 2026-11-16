@@ -228,13 +228,13 @@ def resolve_insurer_towing_limit(
 
         if has_pa_plus:
             # Plan 1 (100 km), Plan 2 (200 km), Plan 3 (300 km), Plan 4 (Unlimited)
-            if any(p in text for p in ("plan 4", "pelan 4", "plan d", "unlimited", "4")):
+            if re.search(r"\b(?:plan|pelan)\s*(?:4|d)\b|\bunlimited\b|\bpa\s*plus\s*4\b|\bpa\+\s*4\b", text):
                 return "Unlimited"
-            if any(p in text for p in ("plan 3", "pelan 3", "plan c", "300 km", "300")):
+            if re.search(r"\b(?:plan|pelan)\s*(?:3|c)\b|\b300\s*km\b|\bpa\s*plus\s*3\b|\bpa\+\s*3\b", text):
                 return "300 km"
-            if any(p in text for p in ("plan 2", "pelan 2", "plan b", "200 km", "200")):
+            if re.search(r"\b(?:plan|pelan)\s*(?:2|b)\b|\b200\s*km\b|\bpa\s*plus\s*2\b|\bpa\+\s*2\b", text):
                 return "200 km"
-            if any(p in text for p in ("plan 1", "pelan 1", "plan a", "100 km", "100")):
+            if re.search(r"\b(?:plan|pelan)\s*(?:1|a)\b|\b100\s*km\b|\bpa\s*plus\s*1\b|\bpa\+\s*1\b", text):
                 return "100 km"
             return "100 km"
 
@@ -292,4 +292,6 @@ def resolve_insurer_towing_limit(
     if is_tune:
         return "RM 300"
 
-    return "Unlimited"
+    if is_rm_based:
+        return "RM 200"
+    return "50 km"

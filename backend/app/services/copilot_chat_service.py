@@ -91,6 +91,27 @@ def _find_target_company(
     return None
 
 
+def _find_multiple_companies(db: Session, text: str) -> list[InsuranceCompany]:
+    """Find all matching active insurance companies mentioned in text in order of appearance."""
+    companies = list(db.scalars(select(InsuranceCompany).where(InsuranceCompany.status == "active")).all())
+    found: list[InsuranceCompany] = []
+    t_lower = text.lower()
+    for comp in companies:
+        matched = False
+        if comp.slug and comp.slug.lower() in t_lower:
+            matched = True
+        elif comp.name.lower() in t_lower:
+            matched = True
+        else:
+            first_word = comp.name.lower().split()[0]
+            if len(first_word) >= 3 and re.search(rf"\b{re.escape(first_word)}\b", t_lower):
+                matched = True
+
+        if matched and comp not in found:
+            found.append(comp)
+    return found
+
+
 def get_catalog_status_facts(
     db: Session,
     company_id: str | None = None,
@@ -728,12 +749,39 @@ def _build_deterministic_response(
     parsed_mutations: list[dict[str, Any]],
     dataset_facts: dict[str, Any] | None = None,
     profile_facts: dict[str, Any] | None = None,
+    diff_plan: dict[str, Any] | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     """Generate a high-quality deterministic response if Gemini is unavailable or offline."""
     q_lower = query.lower()
     actions: list[dict[str, Any]] = []
     df = dataset_facts or {}
     pf = profile_facts or {}
+
+    # Underwriter catalog diff / clone proposal
+    if diff_plan:
+        summary = diff_plan.get("summary", {})
+        src_name = diff_plan.get("source_company", {}).get("name", "Source Insurer")
+        tgt_name = diff_plan.get("target_company", {}).get("name", "Target Insurer")
+        to_add = summary.get("to_add_count", 0)
+        common = summary.get("common_count", 0)
+        actions_list = diff_plan.get("actions", [])
+
+        action_bullets = "\n".join(
+            f"- **Add {a['concept_name']}**: Propose value `{a.get('proposed_value') or 'Included'}` (Role: `{a.get('role', 'optional')}`)"
+            for a in actions_list[:5]
+        )
+        if len(actions_list) > 5:
+            action_bullets += f"\n- ... and {len(actions_list) - 5} more benefit(s)"
+
+        reply = (
+            f"### Underwriter Catalog Comparison: {src_name} vs {tgt_name}\n\n"
+            f"- **Common Benefits**: **{common}** matching concepts between both companies.\n"
+            f"- **Missing in {tgt_name}**: **{to_add}** unique benefits found in {src_name} available to clone.\n\n"
+            f"**Proposed Additions to {tgt_name}:**\n"
+            f"{action_bullets}\n\n"
+            f"A structured **Catalog Diff Plan** has been prepared below. Review the proposed additions and click **Apply Changes to Database** to clone these benefits into {tgt_name}."
+        )
+        return reply, actions
     # 0a. Benefit Profiles Count & Details ("how many profiles are there")
     if any(k in q_lower for k in ["how many profile", "how many proile", "profiles are there", "profiles for the builder", "benefit profile", "visual profile", "builder/benefits", "how many profiles"]):
         cf = pf.get("catalog_profiles", {})
@@ -1045,6 +1093,23 @@ def chat_with_copilot(
             "preview": diff_preview,
         })
 
+    # Check for underwriter catalog comparison or cloning intent across multiple companies
+    diff_plan: dict[str, Any] | None = None
+    multi_comps = _find_multiple_companies(db, cleaned_query)
+    if len(multi_comps) >= 2 and any(k in cleaned_query.lower() for k in ["compare", "diff", "clone", "copy", "missing", "vs", "versus"]):
+        source_c = multi_comps[0]
+        target_c = multi_comps[1]
+        try:
+            from app.services.catalog_diff_service import generate_clone_diff_plan
+            diff_plan = generate_clone_diff_plan(db, source_c.id, target_c.id)
+            actions.append({
+                "type": "catalog_diff",
+                "title": f"Catalog Diff: {source_c.name} → {target_c.name}",
+                "plan": diff_plan,
+            })
+        except Exception as e:
+            logger.warning(f"Error computing catalog diff plan: {e}")
+
     if all_keys:
         try:
             active_cat_name = profile_facts.get("catalog_profiles", {}).get("active_profile_name", "Master Unified Profile")
@@ -1097,48 +1162,65 @@ def chat_with_copilot(
                 "ground_truth_dataset_analytics": dataset_facts,
                 "ground_truth_profile_and_image_facts": profile_facts,
                 "parsed_catalog_mutations": parsed_operations,
+                "catalog_diff_plan": diff_plan,
             }
+
+            from app.extraction.pacer_sentinel import get_pacer_sentinel
+            from app.core.config import resolve_active_gemini_model
+            import time
 
             api_key = pool.get_next_key()
-            settings = get_settings()
-            model_name = getattr(settings, "gemini_model", None) or "gemini-3.1-flash-lite"
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+            if api_key:
+                model_name = resolve_active_gemini_model()
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
 
-            contents: list[dict[str, Any]] = []
-            if history:
-                for h in history[-6:]:
-                    contents.append({
-                        "role": "user" if h.get("role") == "user" else "model",
-                        "parts": [{"text": h.get("content", "")}],
-                    })
+                contents: list[dict[str, Any]] = []
+                if history:
+                    for h in history[-6:]:
+                        contents.append({
+                            "role": "user" if h.get("role") == "user" else "model",
+                            "parts": [{"text": h.get("content", "")}],
+                        })
 
-            contents.append({
-                "role": "user",
-                "parts": [{"text": f"GROUND TRUTH CONTEXT:\n{json.dumps(context_payload, indent=2, default=str)}\n\nUSER QUESTION: {cleaned_query}"}],
-            })
+                contents.append({
+                    "role": "user",
+                    "parts": [{"text": f"GROUND TRUTH CONTEXT:\n{json.dumps(context_payload, indent=2, default=str)}\n\nUSER QUESTION: {cleaned_query}"}],
+                })
 
-            payload = {
-                "system_instruction": {"parts": [{"text": system_prompt}]},
-                "contents": contents,
-                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 600},
-            }
+                payload = {
+                    "system_instruction": {"parts": [{"text": system_prompt}]},
+                    "contents": contents,
+                    "generationConfig": {"temperature": 0.2, "maxOutputTokens": 600},
+                }
 
-            with httpx.Client(timeout=8.0) as client:
-                res = client.post(url, json=payload)
-                if res.status_code == 200:
-                    data = res.json()
-                    candidates = data.get("candidates", [])
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts", [])
-                        if parts:
-                            reply_text = parts[0].get("text", "").strip()
+                estimated_tokens = len(json.dumps(context_payload, default=str)) // 4
+                sentinel = get_pacer_sentinel()
+                sentinel.acquire(estimated_tokens=estimated_tokens)
+
+                start_t = time.perf_counter()
+                with httpx.Client(timeout=8.0) as client:
+                    res = client.post(url, json=payload)
+                    duration = time.perf_counter() - start_t
+                    if res.status_code == 200:
+                        data = res.json()
+                        candidates = data.get("candidates", [])
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts", [])
+                            if parts:
+                                reply_text = parts[0].get("text", "").strip()
         except Exception as err:
             logger.warning(f"Gemini conversational API call failed: {err}")
 
     # Fallback to deterministic synthesis if Gemini didn't return text
     if not reply_text:
         det_reply, det_actions = _build_deterministic_response(
-            cleaned_query, catalog_facts, session_facts, parsed_operations, dataset_facts, profile_facts
+            cleaned_query,
+            catalog_facts,
+            session_facts,
+            parsed_operations,
+            dataset_facts,
+            profile_facts,
+            diff_plan=diff_plan,
         )
         reply_text = det_reply
         if not actions:

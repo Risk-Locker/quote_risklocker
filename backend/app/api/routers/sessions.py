@@ -102,7 +102,7 @@ from app.api.schemas import (
 )
 from app.auth.cookies import clear_auth_cookies, set_auth_cookies
 from app.auth.rbac import can_view_owner_record, require_role
-from app.core.config import Settings
+from app.core.config import Settings, resolve_active_gemini_model
 from app.core.errors import AppError
 from app.extraction.company_resolution import build_companies_payload, resolve_company
 from app.db.session import get_db
@@ -1220,7 +1220,7 @@ def session_extract_gemini(
         "success": True,
         "message": f"Gemini AI extracted {len(fields)} fields successfully.",
         "quota": {
-            "model": getattr(settings, "gemini_model", "gemini-3.5-flash") or "gemini-3.5-flash",
+            "model": resolve_active_gemini_model(getattr(settings, "gemini_model", None)),
             "keys_count": stats["keys_count"],
             "rpm_limit": stats["rpm_limit"],
             "rpm_used": stats["rpm_used"],

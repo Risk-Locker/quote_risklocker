@@ -136,9 +136,11 @@ def process_render_job(
 
     draft = db.get(QuotationDraft, snapshot.draft_id)
     session = db.get(Session, job.session_id) if job.session_id else None
-    if not draft or not session or session.draft_id != draft.id:
+    if not draft or (session and session.draft_id != draft.id):
         raise JobProcessingError("render_workspace_missing", "The quotation workspace is unavailable.")
-    storage_client = storage or SupabaseStorage(settings)
+    storage_client = storage
+    if storage_client is None and getattr(settings, "supabase_url", None) and getattr(settings, "supabase_storage_bucket", None):
+        storage_client = SupabaseStorage(settings)
     heartbeat_job(db, job, worker_id=worker_id, progress=10, phase="resolving_assets", lease_seconds=300)
     try:
         resolved_assets = _resolve_assets(snapshot, storage_client)
@@ -192,7 +194,7 @@ def process_render_job(
     filename = _filename(str(context.get("source_filename") or "quotation.pdf"), next_number)
     now = datetime.now(timezone.utc)
     object_key = f"generated/{now:%Y}/{now:%m}/{snapshot.draft_id}/v{next_number}-{uuid4()}.pdf"
-    if storage is not None:
+    if storage_client is not None:
         try:
             stored = storage_client.upload_generated_pdf(object_key, data)
             stored_key = stored.object_key
@@ -203,6 +205,8 @@ def process_render_job(
         except StorageError as exc:
             raise JobProcessingError("generated_storage_unavailable", "PDF storage is temporarily unavailable.") from exc
     else:
+        if getattr(settings, "app_env", "") == "production":
+            raise JobProcessingError("generated_storage_required", "Durable PDF storage is required in production.")
         try:
             ephemeral_dir = QC_TEMP_ROOT / "stateless_generated"
             ephemeral_dir.mkdir(parents=True, exist_ok=True)
@@ -249,7 +253,7 @@ def process_render_job(
     try:
         complete_job(db, job, worker_id, {"version_id": version.id, "version_number": next_number})
     except Exception:
-        if storage is not None:
+        if storage_client is not None:
             storage_client.delete_pdf(stored_key)
         else:
             Path(stored_key).unlink(missing_ok=True)

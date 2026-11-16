@@ -61,12 +61,16 @@ __all__ = ['list_business_assets', 'list_business_asset_categories', '_find_coll
 
 
 def list_business_assets(
-    db, user, *, search: str, kind: str | None, category: str | None = None, page: int, page_size: int
+    db, user, *, search: str, kind: str | None, category: str | None = None,
+    sort_by: str = "created_at", sort_order: str = "desc",
+    is_transparent: bool | None = None,
+    page: int, page_size: int
 ) -> dict:
     _require_business(user)
+    from app.models.tables import BenefitConcept
     query = select(BusinessAsset)
     count_query = select(func.count()).select_from(BusinessAsset)
-    predicates = []
+    predicates = [BusinessAsset.status.in_(["active", "unassigned"])]
     if search.strip():
         pattern = f"%{search.strip()}%"
         predicates.append(or_(BusinessAsset.label.ilike(pattern), BusinessAsset.original_filename.ilike(pattern)))
@@ -74,12 +78,38 @@ def list_business_assets(
         predicates.append(BusinessAsset.asset_kind == kind)
     if category and category.strip():
         predicates.append(BusinessAsset.category == category.strip())
+    if is_transparent is not None:
+        predicates.append(BusinessAsset.has_transparency.is_(is_transparent))
     for predicate in predicates:
         query = query.where(predicate)
         count_query = count_query.where(predicate)
     total = int(db.scalar(count_query) or 0)
-    rows = db.scalars(query.order_by(BusinessAsset.label).limit(page_size).offset((page - 1) * page_size)).all()
-    return {"items": [_asset_summary(row) for row in rows], "total": total, "page": page, "page_size": page_size}
+
+    if sort_by == "created_at":
+        order_col = BusinessAsset.created_at.desc() if sort_order == "desc" else BusinessAsset.created_at.asc()
+    elif sort_by == "label":
+        order_col = BusinessAsset.label.desc() if sort_order == "desc" else BusinessAsset.label.asc()
+    else:
+        order_col = BusinessAsset.created_at.desc()
+
+    rows = db.scalars(query.order_by(order_col, BusinessAsset.id).limit(page_size).offset((page - 1) * page_size)).all()
+
+    asset_ids = [row.id for row in rows]
+    concept_map: dict[str, list[str]] = {}
+    if asset_ids:
+        concepts = db.scalars(select(BenefitConcept).where(BenefitConcept.default_asset_id.in_(asset_ids))).all()
+        for c in concepts:
+            if c.default_asset_id:
+                concept_map.setdefault(c.default_asset_id, []).append(c.label)
+
+    items = []
+    for row in rows:
+        summary = _asset_summary(row)
+        if summary:
+            summary["mapped_concepts"] = concept_map.get(row.id, [])
+            items.append(summary)
+
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 

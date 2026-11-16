@@ -13,17 +13,17 @@ from app.services.marketing_comparison_service import (
 
 
 def test_calculate_vehicle_age():
-    # 2020 YOM with 08 Feb 2026 = 6 completed years, Feb > Jan -> in 7th year -> 7 years
+    # 2020 YOM with 08 Feb 2026 = 6 completed years (anchored 01 Jan 2020) -> 6 years
     age_feb = calculate_vehicle_age(2020, datetime(2026, 2, 8, tzinfo=timezone.utc))
-    assert age_feb == 7
+    assert age_feb == 6
 
     # 2020 YOM with 01 Jan 2026 = exact 6 completed years -> 6 years
     age_jan1 = calculate_vehicle_age(2020, datetime(2026, 1, 1, tzinfo=timezone.utc))
     assert age_jan1 == 6
 
-    # 2023 YOM with 08 Feb 2026 = 3 completed years + 1 -> 4 years
+    # 2023 YOM with 08 Feb 2026 = 3 completed years -> 3 years
     age_new = calculate_vehicle_age(2023, "2026-02-08")
-    assert age_new == 4
+    assert age_new == 3
 
     # Invalid / empty
     assert calculate_vehicle_age(None, "2026-02-08") == 0

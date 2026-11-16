@@ -8,6 +8,9 @@ import {
   Eye,
   EyeSlash,
   Key,
+  Moon,
+  Pause,
+  Play,
   Plus,
   ShieldCheck,
   Sparkle,
@@ -25,9 +28,22 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import type { GeminiAccountItem, GeminiQuotaStats } from "@/components/gemini-header-meter";
+import { GeminiAnalyticsChart } from "@/components/gemini-analytics-chart";
+import { GeminiQuotaRadarCard } from "@/components/gemini-quota-radar-card";
+import { GeminiModelSwitcher } from "@/components/gemini-model-switcher";
+
+interface NotificationItem {
+  id: string;
+  event_type: string;
+  title: string;
+  body: string;
+  read_at: string | null;
+  created_at: string;
+}
 
 export default function SettingsAiEnginePage() {
   const [stats, setStats] = useState<GeminiQuotaStats | null>(null);
+  const [modelAlerts, setModelAlerts] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const { toast } = useToast();
@@ -42,7 +58,45 @@ export default function SettingsAiEnginePage() {
   // Testing & Deleting state
   const [testingIdx, setTestingIdx] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [switchingIdx, setSwitchingIdx] = useState<number | null>(null);
+  const [pausingId, setPausingId] = useState<string | null>(null);
+
+  async function handleTogglePause(keyId: string, currentPaused: boolean) {
+    setPausingId(keyId);
+    try {
+      const res = await api<{ ok: boolean; is_paused: boolean; gemini: GeminiQuotaStats }>(
+        `/settings/gemini/keys/${keyId}/toggle-pause`,
+        {
+          method: "POST",
+          body: JSON.stringify({ paused: !currentPaused }),
+        }
+      );
+      if (res?.ok) {
+        toast(
+          res.is_paused ? "Account put to rest (sleeping). Quota preserved." : "Account resumed to active fleet.",
+          "info"
+        );
+        if (res.gemini) {
+          setStats(res.gemini);
+        } else {
+          loadData();
+        }
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to toggle account rest state.", "error");
+    } finally {
+      setPausingId(null);
+    }
+  }
+
+  async function handleDismissAlert(notifId: string) {
+    try {
+      await api(`/notifications/${notifId}/read`, { method: "PATCH" });
+      setModelAlerts((prev) => prev.filter((n) => n.id !== notifId));
+      toast("Alert acknowledged and dismissed.", "info");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to dismiss alert.", "error");
+    }
+  }
 
   async function loadData() {
     setLoading(true);
@@ -56,6 +110,18 @@ export default function SettingsAiEnginePage() {
       setError(err instanceof Error ? err.message : "Failed to load Gemini fleet settings.");
     } finally {
       setLoading(false);
+    }
+
+    try {
+      const notifRes = await api<{ notifications: NotificationItem[] }>("/notifications");
+      if (notifRes?.notifications) {
+        const unreadAlerts = notifRes.notifications.filter(
+          (n) => n.event_type === "ai_model_alert" && !n.read_at
+        );
+        setModelAlerts(unreadAlerts);
+      }
+    } catch {
+      // Ignore notification fetch errors
     }
   }
 
@@ -151,28 +217,10 @@ export default function SettingsAiEnginePage() {
     }
   }
 
-  async function handleSetActive(idx: number) {
-    setSwitchingIdx(idx);
-    try {
-      const res = await api<{ ok: boolean; gemini: GeminiQuotaStats }>("/settings/gemini/switch-account", {
-        method: "POST",
-        body: JSON.stringify({ account_index: idx }),
-      });
-      if (res?.gemini) {
-        setStats(res.gemini);
-        toast(`Active account switched to Account ${idx + 1}`, "success");
-      }
-    } catch (err) {
-      toast(err instanceof Error ? err.message : "Failed to switch active account.", "error");
-    } finally {
-      setSwitchingIdx(null);
-    }
-  }
-
   const accounts = stats?.accounts || [];
   const activeIdx = stats?.active_account_index ?? 0;
   const poolRpdUsed = stats?.pool_rpd_used ?? 0;
-  const poolRpdLimit = stats?.pool_rpd_limit ?? accounts.length * 440;
+  const poolRpdLimit = stats?.pool_rpd_limit ?? accounts.length * 480;
   const poolPercent = poolRpdLimit > 0 ? Math.min(100, Math.round((poolRpdUsed / poolRpdLimit) * 100)) : 0;
 
   return (
@@ -243,8 +291,11 @@ export default function SettingsAiEnginePage() {
             <div className="p-4">
               <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block">Active Lite Model</span>
               <div className="mt-1 flex items-baseline gap-2">
-                <span className="text-base font-bold font-mono text-gray-900 truncate">
-                  {stats?.model || "gemini-3.1-flash-lite-preview"}
+                <span
+                  className="text-sm font-bold font-mono text-gray-900 break-all"
+                  title={stats?.model || "gemini-3.1-flash-lite"}
+                >
+                  {stats?.model || "gemini-3.1-flash-lite"}
                 </span>
               </div>
               <span className="mt-2 text-[11px] text-emerald-600 font-medium flex items-center gap-1">
@@ -268,7 +319,59 @@ export default function SettingsAiEnginePage() {
           </Card>
         </div>
 
-        {/* Card 1: Add New Gemini API Key with Mandatory Live Google Probe Gate */}
+        {/* Actionable Model Alert Banner if shifts detected */}
+        {modelAlerts.length > 0 && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 shadow-xs grid gap-3">
+            {modelAlerts.map((alert) => (
+              <div key={alert.id} className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <WarningOctagon size={20} weight="fill" className="text-amber-600 mt-0.5 shrink-0" />
+                  <div>
+                    <h3 className="text-sm font-bold text-amber-900">{alert.title}</h3>
+                    <p className="text-xs text-amber-800 mt-1 whitespace-pre-line leading-relaxed font-mono">
+                      {alert.body}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="h-8 text-xs border-amber-400 text-amber-900 hover:bg-amber-100"
+                    onClick={() => {
+                      const switcher = document.getElementById("ai-model-switcher-section");
+                      switcher?.scrollIntoView({ behavior: "smooth" });
+                    }}
+                  >
+                    Review & Switch Models
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 text-xs text-amber-800 hover:text-amber-950"
+                    onClick={() => handleDismissAlert(alert.id)}
+                  >
+                    Acknowledge & Dismiss
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Autonomous 20-Minute Quota Radar Sentinel Card */}
+        <GeminiQuotaRadarCard onRefreshData={loadData} />
+
+        {/* Model Activation & Parallel Fleet Controls */}
+        <div id="ai-model-switcher-section">
+          <GeminiModelSwitcher onConfigChanged={(updatedStats) => {
+            if (updatedStats) setStats(updatedStats);
+            else loadData();
+          }} />
+        </div>
+
+        {/* Card: Add New Gemini API Key with Mandatory Live Google Probe Gate */}
         <Card>
           <div className="p-5">
             <div className="flex items-center justify-between pb-3 border-b border-gray-100">
@@ -353,25 +456,25 @@ export default function SettingsAiEnginePage() {
                   {validating ? "Validating with Google API..." : "Validate & Confirm Key"}
                 </Button>
                 <span className="text-[11px] text-gray-500">
-                  Adds +440 RPD / +10 RPM safe capacity upon confirmation.
+                  Adds +480 RPD / +13 RPM safe capacity upon confirmation.
                 </span>
               </div>
             </form>
           </div>
         </Card>
 
-        {/* Card 2: Configured Accounts & Quota Health Table */}
+        {/* Card: Configured Accounts & Quota Health Table */}
         <Card>
           <div className="p-5">
             <div className="flex items-center justify-between pb-3 border-b border-gray-100">
               <div>
                 <h2 className="text-base font-bold text-gray-900">Configured Fleet Accounts & Quota Health</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Individual account state, daily call counters, sliding-minute metrics, and actions.
+                  Individual account state, daily call counters, sliding-minute metrics, and direct active/rest toggles.
                 </p>
               </div>
               <Badge variant="default" className="font-mono text-xs">
-                {accounts.length} Active / {stats?.pool_rpd_limit ?? accounts.length * 440} RPD Fleet Cap
+                {accounts.length} Configured / {poolRpdLimit} RPD Fleet Cap
               </Badge>
             </div>
 
@@ -390,21 +493,23 @@ export default function SettingsAiEnginePage() {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {accounts.map((acc, idx) => {
-                    const isActive = idx === activeIdx;
-                    const rpdPct = Math.min(100, Math.round((acc.rpd_used / acc.rpd_limit) * 100));
+                    const isPaused = !!acc.is_paused;
+                    const rpdPct = acc.rpd_limit > 0 ? Math.min(100, Math.round((acc.rpd_used / acc.rpd_limit) * 100)) : 0;
 
                     return (
                       <tr
                         key={acc.id}
-                        className={`hover:bg-gray-50/80 transition-colors ${
-                          isActive ? "bg-emerald-50/30 font-medium" : ""
+                        className={`transition-colors ${
+                          isPaused ? "bg-gray-50/40 text-gray-500" : "hover:bg-gray-50/80"
                         }`}
                       >
                         <td className="py-3 px-3">
                           <div className="flex items-center gap-2">
                             <span
                               className={`size-2 rounded-full shrink-0 ${
-                                acc.status_color === "green"
+                                isPaused
+                                  ? "bg-amber-400"
+                                  : acc.status_color === "green"
                                   ? "bg-emerald-500"
                                   : acc.status_color === "amber"
                                   ? "bg-amber-500"
@@ -441,19 +546,25 @@ export default function SettingsAiEnginePage() {
                         </td>
 
                         <td className="py-3 px-3">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                              acc.status_color === "green"
-                                ? "bg-emerald-100 text-emerald-800"
-                                : acc.status_color === "amber"
-                                ? "bg-amber-100 text-amber-800"
-                                : acc.status_color === "red"
-                                ? "bg-rose-100 text-rose-800"
-                                : "bg-gray-200 text-gray-700"
-                            }`}
-                          >
-                            {acc.status_label || acc.status}
-                          </span>
+                          {isPaused ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 flex items-center gap-1 w-fit">
+                              <Moon size={11} weight="fill" /> Off · Paused
+                            </span>
+                          ) : (
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-semibold flex items-center gap-1 w-fit ${
+                                acc.status_color === "green"
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : acc.status_color === "amber"
+                                  ? "bg-amber-100 text-amber-800"
+                                  : acc.status_color === "red"
+                                  ? "bg-rose-100 text-rose-800"
+                                  : "bg-gray-200 text-gray-700"
+                              }`}
+                            >
+                              <CheckCircle size={11} weight="fill" /> Active
+                            </span>
+                          )}
                         </td>
 
                         <td className="py-3 px-3">
@@ -479,30 +590,40 @@ export default function SettingsAiEnginePage() {
 
                         <td className="py-3 px-3 text-right">
                           <div className="flex items-center justify-end gap-1.5">
-                            {isActive ? (
-                              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded">
-                                Active
-                              </span>
-                            ) : (
-                              <button
-                                type="button"
-                                disabled={switchingIdx !== null}
-                                onClick={() => handleSetActive(idx)}
-                                className="text-[11px] font-medium text-gray-700 hover:text-gray-900 border border-gray-200 hover:bg-white px-2 py-1 rounded transition-colors cursor-pointer"
-                              >
-                                {switchingIdx === idx ? "..." : "Make Active"}
-                              </button>
-                            )}
-
                             <button
                               type="button"
-                              disabled={testingIdx === idx}
+                              disabled={testingIdx === idx || isPaused}
                               onClick={() => handleTestKey(idx)}
-                              title="Test this API key live against Google"
-                              className="text-[11px] font-medium text-gray-700 hover:text-gray-900 border border-gray-200 hover:bg-white px-2 py-1 rounded transition-colors cursor-pointer flex items-center gap-1"
+                              title={isPaused ? "Turn on this key to test" : "Test this API key live against Google"}
+                              className="text-[11px] font-medium text-gray-700 hover:text-gray-900 border border-gray-200 hover:bg-white px-2 py-1 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
                             >
                               <ArrowsClockwise size={12} className={testingIdx === idx ? "animate-spin" : ""} />
                               {testingIdx === idx ? "Testing..." : "Test"}
+                            </button>
+
+                            {/* Independent On/Off (Turn Off / Turn On) button for ANY key */}
+                            <button
+                              type="button"
+                              disabled={pausingId === acc.id}
+                              onClick={() => handleTogglePause(acc.id, isPaused)}
+                              title={isPaused ? "Turn on this key into the active fleet" : "Turn off (rest) this key"}
+                              className={`text-[11px] font-semibold border px-2.5 py-1 rounded transition-colors cursor-pointer flex items-center gap-1 ${
+                                isPaused
+                                  ? "bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700"
+                                  : "bg-white border-gray-200 text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                              }`}
+                            >
+                              {pausingId === acc.id ? (
+                                "..."
+                              ) : isPaused ? (
+                                <>
+                                  <Play size={11} weight="fill" /> Turn On
+                                </>
+                              ) : (
+                                <>
+                                  <Pause size={11} weight="fill" /> Turn Off
+                                </>
+                              )}
                             </button>
 
                             {acc.source === "manual" ? (
@@ -517,7 +638,7 @@ export default function SettingsAiEnginePage() {
                               </button>
                             ) : (
                               <span
-                                title="Primary key defined in .env cannot be deleted from the UI"
+                                title="Primary key defined in .env cannot be deleted from the UI, but can be paused/rested"
                                 className="text-gray-300 p-1 cursor-not-allowed"
                               >
                                 <Trash size={14} weight="regular" />
@@ -534,7 +655,10 @@ export default function SettingsAiEnginePage() {
           </div>
         </Card>
 
-        {/* Card 3: Multi-Account Safety Guard Policies */}
+        {/* Google AI Studio Rate Limit Parity & Sliding Metric History */}
+        <GeminiAnalyticsChart />
+
+        {/* Card: Multi-Account Safety Guard Policies */}
         <Card>
           <div className="p-5">
             <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
@@ -543,30 +667,30 @@ export default function SettingsAiEnginePage() {
             </h2>
             <div className="mt-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
               <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-3">
-                <span className="font-bold text-gray-900 block mb-1">1. 440 RPD Hard Cap</span>
+                <span className="font-bold text-gray-900 block mb-1">1. 480 RPD Hard Cap</span>
                 <p className="text-gray-600 leading-relaxed text-[11px]">
-                  Each account stops sending requests at 440 calls/day, leaving a 60-call buffer under Google's 500 daily quota to avoid hard account bans.
+                  Each endpoint stops sending requests at 480 calls/day, strictly below Google's 500 daily quota line to eliminate ban risks.
                 </p>
               </div>
 
               <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-3">
-                <span className="font-bold text-gray-900 block mb-1">2. 10 RPM Burst Guard</span>
+                <span className="font-bold text-gray-900 block mb-1">2. 13 RPM Burst Guard</span>
                 <p className="text-gray-600 leading-relaxed text-[11px]">
-                  Sliding 60-second window throttles at 10 requests/min, leaving 5 RPM buffer. Auto-switches to standby accounts during upload spikes.
+                  Sliding 60-second window throttles at 13 requests/min with adaptive breathing delays. Auto-switches across parallel slots during upload bursts.
                 </p>
               </div>
 
               <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-3">
-                <span className="font-bold text-gray-900 block mb-1">3. 100k TPM Token Guard</span>
+                <span className="font-bold text-gray-900 block mb-1">3. 200k TPM Token Guard</span>
                 <p className="text-gray-600 leading-relaxed text-[11px]">
-                  Accumulates input & output tokens per minute. Caps at 100,000 tokens/min (out of 250k Google limit) to prevent token exhaustion.
+                  Calculates input and output token consumption in real-time. Over-capacity documents automatically downgrade to preserve quota.
                 </p>
               </div>
 
               <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-3">
-                <span className="font-bold text-gray-900 block mb-1">4. Zero-Downtime Fallback</span>
+                <span className="font-bold text-gray-900 block mb-1">4. Fail-Closed Invariant</span>
                 <p className="text-gray-600 leading-relaxed text-[11px]">
-                  If all accounts reach 440 RPD (up to 2,640 calls/day), AI calls freeze completely and deterministic regex/OCR extracts values without errors.
+                  If all Gemini accounts reach their cap or go offline, PDF quotation uploads fail-closed to protect against unverified OCR hallucinations.
                 </p>
               </div>
             </div>

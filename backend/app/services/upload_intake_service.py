@@ -117,26 +117,19 @@ async def create_queued_upload(
         )
         
         # --- Pre-flight PDF Token Estimator ---
+        token_estimate = 0
+        pdf_page_count = 0
         if upload.filename and upload.filename.lower().endswith(".pdf"):
-            import fitz  # PyMuPDF
-            from app.services.gemini_account_service import get_key_pool
-            
-            try:
-                # fitz.Document can open from memory if we give it stream and filename/extension hint
-                with fitz.open(stream=data, filetype="pdf") as doc:
-                    page_count = doc.page_count
-                
-                # Gemini charges a base of ~258 tokens per page processed as image
-                estimated_tokens = page_count * 258
-                
-                # Check available requests in the active pool
-                manager = get_key_pool()
-                health = manager.get_health()
-                
-                if health.get("pool_rpd_remaining", 0) <= 0:
-                    logger.warning("AI token quota (RPD) reached for today; PDF intake accepted for deterministic OCR/regex fallback.")
-            except Exception:
-                pass  # If it's not a valid PDF, we'll catch it in the extraction job instead of blocking upload entirely.
+            from app.services.token_preflight_service import estimate_pdf_tokens
+
+            preflight = estimate_pdf_tokens(data, filename=upload.filename)
+            if not preflight["is_eligible"]:
+                raise AppError(
+                    preflight["warning"] or "PDF exceeds safe token limits for AI extraction",
+                    status_code=400,
+                )
+            token_estimate = preflight["estimated_tokens"]
+            pdf_page_count = preflight["page_count"]
         # --------------------------------------
 
     except ValueError as exc:
@@ -241,6 +234,8 @@ async def create_queued_upload(
                 "node_host": socket.gethostname(),
                 "storage_provider": storage_provider,
                 "tenure_id": tenure_id,
+                "token_estimate": token_estimate,
+                "page_count": pdf_page_count,
             },
             result={},
             safe_error={},

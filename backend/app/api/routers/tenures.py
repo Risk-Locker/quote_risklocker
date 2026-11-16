@@ -1450,6 +1450,26 @@ def delete_tenure_endpoint(
     return {"success": True, "deleted_tenure_id": tenure_id}
 
 
+@router.get("/yoy-stats")
+def get_tenure_yoy_stats_alias(
+    show_hidden: bool = False,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Alias for /stats/yoy to satisfy ledger statistics queries."""
+    return get_tenure_yoy_stats(show_hidden=show_hidden, db=db, user=user)
+
+
+@router.get("/pics")
+def get_tenure_pics_alias(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Retrieve person-in-charge directory for tenure filtering."""
+    from app.services.pic_service import list_pics
+    return {"pics": list_pics(db)}
+
+
 @router.get("/{tenure_id}")
 def get_tenure(
     tenure_id: str,

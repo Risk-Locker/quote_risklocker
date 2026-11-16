@@ -65,10 +65,10 @@ class Settings:
     trash_retention_days: int
     cors_origins: tuple[str, ...]
     gemini_api_keys: tuple[str, ...] = ()
-    gemini_model: str = "gemini-3.5-flash-lite"
-    gemini_max_rpd_per_key: int = 440
-    gemini_max_rpm_per_key: int = 10
-    gemini_max_tpm_per_key: int = 100_000
+    gemini_model: str = "gemini-3.1-flash-lite"
+    gemini_max_rpd_per_key: int = 480
+    gemini_max_rpm_per_key: int = 13
+    gemini_max_tpm_per_key: int = 200_000
     gemini_max_prompt_tokens: int = 60_000
     gemini_max_accounts: int = 6
 
@@ -311,10 +311,23 @@ def get_settings() -> Settings:
         gemini_api_keys=tuple(
             k.strip() for k in (os.getenv("GEMINI_API_KEYS") or os.getenv("GEMINI_API_KEY") or "").split(",") if k.strip()
         ),
-        gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip() or "gemini-3.5-flash-lite",
-        gemini_max_rpd_per_key=_bounded_int("GEMINI_MAX_RPD_PER_KEY", 460, 10, 5000),
-        gemini_max_rpm_per_key=_bounded_int("GEMINI_MAX_RPM_PER_KEY", 12, 1, 60),
-        gemini_max_tpm_per_key=_bounded_int("GEMINI_MAX_TPM_PER_KEY", 220_000, 1000, 1_000_000),
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite").strip() or "gemini-3.1-flash-lite",
+        gemini_max_rpd_per_key=_bounded_int("GEMINI_MAX_RPD_PER_KEY", 480, 10, 480),
+        gemini_max_rpm_per_key=_bounded_int("GEMINI_MAX_RPM_PER_KEY", 13, 1, 13),
+        gemini_max_tpm_per_key=_bounded_int("GEMINI_MAX_TPM_PER_KEY", 200_000, 1000, 200_000),
         gemini_max_prompt_tokens=_bounded_int("GEMINI_MAX_PROMPT_TOKENS", 60_000, 1000, 1_000_000),
         gemini_max_accounts=_bounded_int("GEMINI_MAX_ACCOUNTS", 6, 1, 20),
     )
+
+
+def resolve_active_gemini_model(model_name: str | None = None) -> str:
+    """Returns a verified active Gemini model tier, strictly preventing retired or unverified models."""
+    verified = ("gemini-3.1-flash-lite", "gemini-3.5-flash-lite")
+    if model_name and model_name in verified:
+        return model_name
+    settings = get_settings()
+    configured = getattr(settings, "gemini_model", None)
+    if configured and configured in verified:
+        return configured
+    return "gemini-3.1-flash-lite"
+

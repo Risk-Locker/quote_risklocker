@@ -34,7 +34,7 @@ NPM_WATCH = ["next", "react", "tailwindcss"]
 # Verified deprecated / shutdown Gemini endpoints (Rule 05 / F-14)
 DEPRECATED_GEMINI_RE = re.compile(
     r"\b("
-    r"gemini-" r"3\.1-flash-lite(?:-preview)?|"
+    r"gemini-" r"3\.1-flash-lite-preview|"
     r"gemini-" r"3\.5-flash(?!-lite)|"
     r"gemini-2\.[05]-[A-Za-z0-9_.-]+|"
     r"gemini-1\.[05]-[A-Za-z0-9_.-]+"

@@ -86,14 +86,24 @@ def _idempotency_key(value: str) -> str:
 
 
 def _existing_request(db, user, draft: QuotationDraft, key: str, revision: int) -> dict | None:
-    for version in _for_draft(db, GeneratedPdfVersion, draft.id):
-        if version.idempotency_key == key:
-            if version.draft_revision != revision:
-                raise AppError("This idempotency key belongs to another draft revision.", 409)
-            return {"created": False, "job": None, "version": version}
-    for job in _rows(db, Job):
-        if job.job_type != "render_pdf" or job.idempotency_key != key:
-            continue
+    version = db.scalar(
+        select(GeneratedPdfVersion).where(
+            GeneratedPdfVersion.draft_id == draft.id,
+            GeneratedPdfVersion.idempotency_key == key,
+        )
+    )
+    if version is not None:
+        if version.draft_revision != revision:
+            raise AppError("This idempotency key belongs to another draft revision.", 409)
+        return {"created": False, "job": None, "version": version}
+
+    job = db.scalar(
+        select(Job).where(
+            Job.job_type == "render_pdf",
+            Job.idempotency_key == key,
+        )
+    )
+    if job is not None:
         if job.owner_id != user.id:
             raise AppError("This idempotency key is already in use.", 409)
         payload = job.payload or {}
@@ -329,6 +339,38 @@ def _snapshot_assets(db, config: dict, cards: dict, draft: QuotationDraft) -> tu
     return config, {"manifest": manifest, "embedded": embedded}, hashes
 
 
+def get_company_catalog_key(company: Any) -> str:
+    """Resolve canonical insurer key for benefit catalog lookup.
+
+    Checks slug, then name, before falling back to etiqa.
+    """
+    if not company:
+        return "etiqa"
+    slug = (getattr(company, "slug", "") or "").strip().lower()
+    if slug:
+        return slug
+    name = (getattr(company, "name", "") or "").strip().lower()
+    if "etiqa" in name:
+        return "etiqa"
+    if "lonpac" in name:
+        return "lonpac"
+    if "allianz" in name:
+        return "allianz"
+    if "qbe" in name:
+        return "qbe"
+    if "amgen" in name or "amassurance" in name:
+        return "amassurance"
+    if "takaful" in name or "stmb" in name:
+        return "takaful_malaysia"
+    if "kurnia" in name:
+        return "kurnia"
+    if "sompo" in name:
+        return "berjaya_sompo"
+    if "tune" in name:
+        return "tune_protect"
+    return name.split()[0] if name else "etiqa"
+
+
 def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateRevision) -> tuple[dict, dict]:
     page = db.get(TemplatePageProfile, revision.page_profile_id)
     template = db.get(OutputTemplateConfig, revision.template_id)
@@ -348,7 +390,7 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
     eval_context = extract_evaluation_context(draft.fields or {}, extras_section.get("extras", []))
     company = getattr(draft, "company", None)
     product = getattr(draft, "product", None)
-    insurer_key = str(getattr(company, "company_key", "") or "etiqa") if company else "etiqa"
+    insurer_key = get_company_catalog_key(company)
     product_type = str(getattr(product, "name", "private_car") or "private_car") if product else "private_car"
     insurer_catalog = get_catalog_for_product(insurer_key, product_type)
 
@@ -499,9 +541,8 @@ def request_version_generation(
 
     context, asset_hashes = build_render_snapshot_context(db, draft, revision)
     context_hash = canonical_context_hash(context)
-    snapshot = next(
-        (item for item in _rows(db, RenderSnapshot) if item.context_hash == context_hash),
-        None,
+    snapshot = db.scalar(
+        select(RenderSnapshot).where(RenderSnapshot.context_hash == context_hash)
     )
     if snapshot is None:
         snapshot = RenderSnapshot(
@@ -587,7 +628,7 @@ def request_preview_render(db, user, session_id: str, *, draft_revision: int) ->
         raise AppError("Choose a published template before previewing.", 409)
     context, asset_hashes = build_render_snapshot_context(db, draft, revision)
     context_hash = canonical_context_hash(context)
-    snapshot = next((item for item in _rows(db, RenderSnapshot) if item.context_hash == context_hash), None)
+    snapshot = db.scalar(select(RenderSnapshot).where(RenderSnapshot.context_hash == context_hash))
     if snapshot is None:
         snapshot = RenderSnapshot(
             id=new_id(), draft_id=draft.id, draft_revision=draft.revision,

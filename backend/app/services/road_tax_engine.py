@@ -15,16 +15,69 @@ from app.models.tables import RoadTaxRule
 
 logger = logging.getLogger(__name__)
 
-_SAFE_FORMULA_RE = re.compile(r"^[\d\s+\-*/().,cc]*$")
+import ast
+
+_ALLOWED_OPERATORS = {
+    ast.Add: lambda a, b: a + b,
+    ast.Sub: lambda a, b: a - b,
+    ast.Mult: lambda a, b: a * b,
+    ast.Div: lambda a, b: (a / b) if b != 0 else None,
+}
+
+_ALLOWED_UNARY_OPERATORS = {
+    ast.UAdd: lambda a: +a,
+    ast.USub: lambda a: -a,
+}
+
+
+def _eval_ast_node(node: ast.AST, cc: int) -> float | None:
+    if isinstance(node, ast.Expression):
+        return _eval_ast_node(node.body, cc)
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, (int, float)):
+            return float(node.value)
+        return None
+    if isinstance(node, ast.Name):
+        if node.id == "cc":
+            return float(cc)
+        return None
+    if isinstance(node, ast.BinOp):
+        op_func = _ALLOWED_OPERATORS.get(type(node.op))
+        if op_func is None:
+            return None
+        left = _eval_ast_node(node.left, cc)
+        right = _eval_ast_node(node.right, cc)
+        if left is None or right is None:
+            return None
+        try:
+            res = op_func(left, right)
+            return float(res) if res is not None else None
+        except (ZeroDivisionError, OverflowError, ValueError):
+            return None
+    if isinstance(node, ast.UnaryOp):
+        op_func = _ALLOWED_UNARY_OPERATORS.get(type(node.op))
+        if op_func is None:
+            return None
+        operand = _eval_ast_node(node.operand, cc)
+        if operand is None:
+            return None
+        try:
+            return float(op_func(operand))
+        except (OverflowError, ValueError):
+            return None
+    return None
 
 
 def _eval_formula(formula: str, cc: int) -> float | None:
-    if not formula or not _SAFE_FORMULA_RE.match(formula):
+    if not formula or not isinstance(formula, str):
+        return None
+    clean_formula = formula.strip()
+    if not clean_formula:
         return None
     try:
-        namespace = {"cc": cc}
-        return float(eval(formula, {"__builtins__": {}}, namespace))
-    except (ValueError, TypeError, SyntaxError, NameError) as exc:
+        parsed = ast.parse(clean_formula, mode="eval")
+        return _eval_ast_node(parsed, cc)
+    except (SyntaxError, MemoryError, RecursionError) as exc:
         logger.warning("Road-tax formula evaluation failed for %r with cc=%s: %s", formula, cc, exc)
         return None
 
@@ -39,7 +92,7 @@ _WEST_MY_PRIVATE_CAR_RATES = (
     (1800, 200.00, 0.40, 1600),
     (2000, 280.00, 0.50, 1800),
     (2500, 380.00, 1.00, 2000),
-    (3000, 840.00, 2.50, 2500),
+    (3000, 880.00, 2.50, 2500),
     (float("inf"), 2130.00, 4.50, 3000),
 )
 
@@ -150,7 +203,7 @@ _LABUAN_PRIVATE_CAR_RATES = (
     (1800, 100.00, 0.20, 1600),
     (2000, 140.00, 0.25, 1800),
     (2500, 190.00, 0.50, 2000),
-    (3000, 420.00, 1.25, 2500),
+    (3000, 440.00, 1.25, 2500),
     (float("inf"), 1065.00, 2.25, 3000),
 )
 

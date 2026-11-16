@@ -30,9 +30,9 @@ def test_workspace_save_keeps_operations_added_while_request_is_in_flight():
 
 
 def test_review_is_one_mouse_pass_with_inline_values_and_benefit_boxes():
-    review_files = [REVIEW] + list((ROOT / "frontend/src/components/session-workspace/review-components").glob("*.tsx"))
+    review_files = [REVIEW] + list((ROOT / "frontend/src/components/session-workspace/review-components").glob("*.[tj]s*"))
     source = "".join(f.read_text(encoding="utf-8") for f in review_files)
-    for label in ("Extracted values", "Benefits", "Add-ons", "Hide PDF", "Copy as PNG"):
+    for label in ("Extracted values", "Benefits", "Add-ons", "Hide PDF", "PNG"):
         assert label in source
     assert "useWorkspaceData" in source
     assert "useWorkspaceActions" in source

@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
@@ -55,7 +56,7 @@ def test_render_standalone_benefit_schedule_html():
     assert "Optional Add-On Upgrades Reference" in html
     assert "RM 8,000.00" in html
     assert "Sheet 1/" in html
-    assert "RISKLOCKER SDN. BHD." in html
+    assert "RiskLocker" in html
 
 
 def test_render_design2_combined_via_display_options():
@@ -68,16 +69,22 @@ def test_render_design2_combined_via_display_options():
 
 
 def test_render_design2_schedule_pages_overflow_and_pagination():
-    large_addons = [
-        {"id": f"opt-{i}", "label": f"Extended Underwriter Protection #{i}", "description": "Full extended endorsement terms apply."}
-        for i in range(1, 22)
+    mock_cards = [
+        {"id": f"card-{i}", "title": f"Extended Underwriter Protection #{i}", "serial_number": f"{i:02d}", "is_selected": i <= 2}
+        for i in range(1, 46)
     ]
     ctx = {
         "current_benefits": _sample_context()["current_benefits"],
-        "available_addons": large_addons,
+        "available_addons": [],
     }
-    pages = render_design2_schedule_pages(_sample_fields(), render_context=ctx, overflow_start_index=24, start_page_num=2)
-    # 21 custom items -> slots 25..45 overflow + remaining optional pagination creates 2 schedule sheets
+    pages = render_design2_schedule_pages(
+        _sample_fields(),
+        render_context=ctx,
+        addon_cards=mock_cards,
+        overflow_start_index=24,
+        start_page_num=2,
+    )
+    # 45 total cards -> slots 25..45 overflow + remaining optional pagination creates 2 schedule sheets
     assert len(pages) == 2
     assert "Continued Slots 25" in pages[0]
     assert "Sheet 2/3" in pages[0]
@@ -127,8 +134,8 @@ def test_admin_preview_render_modes_hermetic():
             load_profile="medium",
             render_mode="schedule",
         ),
-        db=db,
-        user=user,
+        db=cast(Any, db),
+        user=cast(Any, user),
     )
     assert "Benefits &amp; Endorsements Schedule" in sched_res["html"]
     assert sched_res["html"].count('class="d2-page"') == 1
@@ -139,8 +146,8 @@ def test_admin_preview_render_modes_hermetic():
             load_profile="medium",
             render_mode="combined",
         ),
-        db=db,
-        user=user,
+        db=cast(Any, db),
+        user=cast(Any, user),
     )
     assert "Benefits &amp; Endorsements Schedule" in comb_res["html"]
     assert 'class="d2-page"' in comb_res["html"]
@@ -152,7 +159,7 @@ def test_admin_preview_render_modes_hermetic():
             load_profile="high",
             render_mode="combined",
         ),
-        db=db,
-        user=user,
+        db=cast(Any, db),
+        user=cast(Any, user),
     )
     assert d2_res["html"].count('class="d2-page"') >= 2

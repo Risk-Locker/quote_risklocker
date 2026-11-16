@@ -16,3 +16,6 @@ trigger: always_on
 3. **Exhaustive Edge-Case & Scenario Gate (Before Any Deep-Track Implementation):**
    - Before writing implementation code for any new feature or bugfix, complete the 10-point **Edge-Case & Failure-Mode Matrix** (`.agents/skills/edge-case-and-scenario-matrix/SKILL.md`) covering: empty/null/whitespace inputs, `Decimal` rounding & negative/zero bounds, timezone/Feb-29 leap boundaries, concurrency/double-submit/deadlocks, cross-tenant RBAC/IDOR/CSRF, malformed PDF/OCR/Unicode inputs, timeout/partial-failure rollback, responsive zoom (`80%–120%` & `1024px`) + keyboard states, legacy unmigrated rows, and indexed SQL scaling.
 
+4. **On-Demand Context Telemetry:**
+   - Report token telemetry (`commands/chat-token-telemetry.py`) ONLY when requested by the user or when diagnosing performance issues. Avoid repetitive telemetry dumps during normal conversation.
+

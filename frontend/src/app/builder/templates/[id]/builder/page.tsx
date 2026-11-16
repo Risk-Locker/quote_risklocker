@@ -94,9 +94,9 @@ export default function TemplateBuilderPage({
       if (sessionsRes.sessions?.length) {
         const mapped: CustomerSessionPreview[] = sessionsRes.sessions.map((s) => ({
           id: s.id,
-          quotation_reference: s.quotation_ref || "RL260000313",
-          customer_name: s.insured_name || "CHENG TECK KIONG",
-          vehicle_no: s.vehicle_plate || "ANY 368",
+          quotation_reference: s.quotation_ref || "QT-SAMPLE-001",
+          customer_name: s.insured_name || "Valued Customer",
+          vehicle_no: s.vehicle_plate || "ABC 1234",
           car_model: s.vehicle_model || "Tesla Model 3 Performance",
           insurance_company: s.detected_company || "BERJAYA SOMPO INSURANCE BERHAD",
           coverage_type: "Comprehensive",

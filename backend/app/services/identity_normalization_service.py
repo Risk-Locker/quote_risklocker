@@ -54,7 +54,7 @@ def parse_nric_details(nric: str | None) -> dict[str, Any]:
 
     Returns dict with:
         - valid: bool
-        - formatted: str (e.g. 700322-08-5316)
+        - formatted: str (e.g. 700322-08-XXXX)
         - birth_date: str (YYYY-MM-DD)
         - age: int
         - gender: 'male' | 'female'

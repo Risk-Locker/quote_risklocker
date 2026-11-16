@@ -98,39 +98,6 @@ if (-not $port) {
     exit 1
 }
 
-Write-Host "Starting Risklocker frontend on http://127.0.0.1:$port ..."
-
-# Production is the default daily experience: build once, then serve the fast
-# server. Use `npm run dev` (Turbopack) for feature development.
-$buildId = Join-Path $PSScriptRoot "..\frontend\.next\BUILD_ID"
-$requiresBuild = -not (Test-Path $buildId)
-if (-not $requiresBuild) {
-    $buildTime = (Get-Item -LiteralPath $buildId).LastWriteTimeUtc
-    $sourceRoots = @(
-        (Join-Path $PSScriptRoot "..\frontend\src"),
-        (Join-Path $PSScriptRoot "..\frontend\public")
-    )
-    $sourceFiles = foreach ($sourceRoot in $sourceRoots) {
-        if (Test-Path -LiteralPath $sourceRoot) {
-            Get-ChildItem -LiteralPath $sourceRoot -Recurse -File
-        }
-    }
-    $configFiles = @("package.json", "package-lock.json", "next.config.ts", "tailwind.config.ts", "tsconfig.json") |
-        ForEach-Object { Join-Path $PSScriptRoot "..\frontend\$_" } |
-        Where-Object { Test-Path -LiteralPath $_ } |
-        ForEach-Object { Get-Item -LiteralPath $_ }
-    $requiresBuild = @($sourceFiles + $configFiles | Where-Object { $_.LastWriteTimeUtc -gt $buildTime }).Count -gt 0
-}
-if ($requiresBuild) {
-    Write-Host "Frontend source changed - creating a current production build..." -ForegroundColor Yellow
-    Push-Location (Join-Path $PSScriptRoot "..\frontend")
-    npm run build
-    if ($LASTEXITCODE -ne 0) {
-        Pop-Location
-        Write-Host "Frontend build failed." -ForegroundColor Red
-        exit 1
-    }
-    Pop-Location
-}
-
-npm.cmd run start -- --hostname 127.0.0.1 --port $port
+Write-Host "Starting Risklocker frontend in lightweight dev mode on http://127.0.0.1:$port ..." -ForegroundColor Cyan
+Set-Location (Join-Path $root "frontend")
+npm.cmd run dev -- -p $port -H 127.0.0.1

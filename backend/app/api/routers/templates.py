@@ -409,6 +409,9 @@ def business_assets(
     search: str = Query(default="", max_length=200),
     kind: str | None = Query(default=None, max_length=40),
     category: str | None = Query(default=None, max_length=120),
+    sort_by: str = Query(default="created_at", pattern="^(created_at|label)$"),
+    sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
+    is_transparent: bool | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -421,6 +424,9 @@ def business_assets(
             search=search,
             kind=kind,
             category=category,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            is_transparent=is_transparent,
             page=page,
             page_size=page_size,
         )
@@ -840,14 +846,17 @@ def admin_templates(db: Session = Depends(get_db), user: User = Depends(current_
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
     items = list(
         db.scalars(
-            select(OutputTemplateConfig).where(OutputTemplateConfig.deleted_at.is_(None))
+            select(OutputTemplateConfig).where(
+                OutputTemplateConfig.deleted_at.is_(None),
+                OutputTemplateConfig.status == "active",
+            )
         ).all()
     )
     templates = serialize_templates_batch(db, items)
     def _admin_sort_key(item: dict) -> tuple:
         name = item.get("name", "").lower()
         is_def = not item.get("is_default", False)
-        priority = 0 if "v4" in name else (1 if "v3" in name else 2)
+        priority = 0 if ("design 2" in name or item.get("layout_engine") == "design2") else (1 if "v4" in name else 2)
         return (is_def, priority, name.casefold())
 
     templates.sort(key=_admin_sort_key)
@@ -1267,9 +1276,9 @@ def _build_preview_profile_data(
         "extras_mode": "itemized",
     }
     draft_fields = {
-        "quotation_reference": {"value": "RL260000313"},
-        "customer_name": {"value": "CHENG TECK KIONG"},
-        "vehicle_no": {"value": "ANY 368"},
+        "quotation_reference": {"value": "QT-SAMPLE-001"},
+        "customer_name": {"value": "Valued Customer"},
+        "vehicle_no": {"value": "ABC 1234"},
         "car_model": {"value": "Tesla Model 3 Performance"},
         "insurance_company": {"value": insurer_name},
         "coverage_type": {"value": "Comprehensive"},

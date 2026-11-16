@@ -46,7 +46,7 @@ export function LiveSimulator({ elements, assets, config }: LiveSimulatorProps) 
             service_fee: "0.00",
             total_amount: "1,338.50",
             valid_until: "30 Days",
-            quotation_reference: "RL260000412",
+            quotation_reference: "QT-SIM-001",
           },
           extras: [],
           benefitCount: 6,
@@ -55,7 +55,7 @@ export function LiveSimulator({ elements, assets, config }: LiveSimulatorProps) 
       case "heavy_10_extras":
         return {
           fields: {
-            customer_name: "LIM CHENG BOK (HOLDINGS) SDN. BHD.",
+            customer_name: "ENTERPRISE FLEET HOLDINGS SDN. BHD.",
             vehicle_no: "WXY 9999",
             insurance_company: "BERJAYA SOMPO INSURANCE BERHAD",
             coverage_type: "Comprehensive",
@@ -72,7 +72,7 @@ export function LiveSimulator({ elements, assets, config }: LiveSimulatorProps) 
             service_fee: "0.00",
             total_amount: "12,452.10",
             valid_until: "14 Days",
-            quotation_reference: "RL260000499",
+            quotation_reference: "QT-SIM-002",
           },
           extras: [
             { label: "Windscreen Damage Protection (RM 10,000)", price: { amount: 1500.0 } },
@@ -92,8 +92,8 @@ export function LiveSimulator({ elements, assets, config }: LiveSimulatorProps) 
       case "ev_saloon":
         return {
           fields: {
-            customer_name: "CHENG TECK KIONG",
-            vehicle_no: "ANY 368",
+            customer_name: "SAMPLE CLIENT",
+            vehicle_no: "WXY 1234",
             insurance_company: "BERJAYA SOMPO INSURANCE BERHAD",
             coverage_type: "Comprehensive",
             cover_period: "04-06-2026 to 03-06-2027",
@@ -109,7 +109,7 @@ export function LiveSimulator({ elements, assets, config }: LiveSimulatorProps) 
             service_fee: "0.00",
             total_amount: "4,673.21",
             valid_until: "30 Days",
-            quotation_reference: "RL260000313",
+            quotation_reference: "QT-SIM-003",
           },
           extras: [
             { label: "Motorcycle PA Protection", price: { amount: 150.0 } },
@@ -139,7 +139,7 @@ export function LiveSimulator({ elements, assets, config }: LiveSimulatorProps) 
             service_fee: "0.00",
             total_amount: "11,860.00",
             valid_until: "14 Days",
-            quotation_reference: "RL260000999",
+            quotation_reference: "QT-SIM-004",
           },
           extras: [
             { label: "Executive Protection Package", price: { amount: 800.0 } },
@@ -152,8 +152,8 @@ export function LiveSimulator({ elements, assets, config }: LiveSimulatorProps) 
       default:
         return {
           fields: {
-            customer_name: "CHENG TECK KIONG",
-            vehicle_no: "ANY 368",
+            customer_name: "SAMPLE CLIENT",
+            vehicle_no: "WXY 1234",
             insurance_company: "BERJAYA SOMPO INSURANCE BERHAD",
             coverage_type: "Comprehensive",
             cover_period: "04-06-2026 to 03-06-2027",
@@ -169,7 +169,7 @@ export function LiveSimulator({ elements, assets, config }: LiveSimulatorProps) 
             service_fee: "0.00",
             total_amount: "4,673.21",
             valid_until: "30 Days",
-            quotation_reference: "RL260000313",
+            quotation_reference: "QT-SIM-005",
           },
           extras: [
             { label: "Motorcycle PA Protection", price: { amount: 150.0 } },

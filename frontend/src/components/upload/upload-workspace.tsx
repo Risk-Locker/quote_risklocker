@@ -80,6 +80,59 @@ interface BulkFileItem {
   premium?: string | number;
   ref?: string;
   error?: string;
+  estimatedTokens?: number;
+  pageCount?: number;
+  isEligible?: boolean;
+  warning?: string;
+}
+
+async function detectPdfPages(file: File): Promise<number> {
+  try {
+    const slice = file.slice(0, Math.min(file.size, 512 * 1024));
+    const arrayBuffer = await slice.arrayBuffer();
+    const decoder = new TextDecoder("latin1");
+    const text = decoder.decode(arrayBuffer);
+
+    // Look for /Type /Pages /Count (\d+)
+    const countMatches = [...text.matchAll(/\/Type\s*\/Pages[\s\S]*?\/Count\s+(\d+)/g)];
+    if (countMatches.length > 0) {
+      const counts = countMatches.map((m) => parseInt(m[1], 10)).filter((n) => !isNaN(n));
+      if (counts.length > 0) return Math.max(...counts);
+    }
+    const pageMatches = text.match(/\/Type\s*\/Page\b/g);
+    if (pageMatches && pageMatches.length > 0) {
+      return pageMatches.length;
+    }
+  } catch {
+    // Fall back to size estimate
+  }
+  return 1;
+}
+
+function estimateStagedFileTokens(file: File, explicitPages?: number): {
+  estimatedTokens: number;
+  pageCount: number;
+  isEligible: boolean;
+  warning?: string;
+} {
+  // Use explicit detected pages if available; otherwise conservative 1.5MB/page scan heuristic
+  const estPages =
+    explicitPages !== undefined && explicitPages > 0
+      ? explicitPages
+      : Math.min(6, Math.max(1, Math.round(file.size / 1_500_000)));
+
+  // Insurance quotations average ~2,500 text tokens + 2,000 image tokens = 4,500 per page
+  const tokensPerPage = 4_500;
+  const estimatedTokens = Math.round(8_500 + estPages * tokensPerPage);
+  const isEligible = estimatedTokens <= 200_000;
+  return {
+    estimatedTokens,
+    pageCount: estPages,
+    isEligible,
+    warning: isEligible
+      ? undefined
+      : `Exceeds safe 200k TPM quota window (~${Math.round(estimatedTokens / 1000)}k tokens across ${estPages} pages)`,
+  };
 }
 
 const MAX_JOB_WAIT_MS = 15 * 60 * 1000;
@@ -382,6 +435,10 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
   async function submitSingle(event: React.FormEvent) {
     event.preventDefault();
     if (!file || loading) return;
+    if (!gemini?.active) {
+      setError("Gemini AI is required for accurate 100% quotation extraction. Please configure an active Gemini key in Settings before uploading.");
+      return;
+    }
     if (!idempotencyKey.current) idempotencyKey.current = crypto.randomUUID();
     cancelRequested.current = false;
     setLoading(true);
@@ -529,12 +586,42 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
         );
       }
 
-      const newItems: BulkFileItem[] = toAdd.map((f) => ({
-        id: crypto.randomUUID(),
-        file: f,
-        status: "staged",
-        progress: 0,
-      }));
+      const newItems: BulkFileItem[] = toAdd.map((f) => {
+        const est = estimateStagedFileTokens(f);
+        return {
+          id: crypto.randomUUID(),
+          file: f,
+          status: "staged",
+          progress: 0,
+          estimatedTokens: est.estimatedTokens,
+          pageCount: est.pageCount,
+          isEligible: est.isEligible,
+          warning: est.warning,
+        };
+      });
+
+      // Asynchronously refine page count and token limits via binary PDF inspection
+      newItems.forEach((item) => {
+        detectPdfPages(item.file)
+          .then((detectedPages) => {
+            if (detectedPages > 0) {
+              setBulkFiles((current) =>
+                current.map((curr) => {
+                  if (curr.id !== item.id) return curr;
+                  const refined = estimateStagedFileTokens(curr.file, detectedPages);
+                  return {
+                    ...curr,
+                    pageCount: refined.pageCount,
+                    estimatedTokens: refined.estimatedTokens,
+                    isEligible: refined.isEligible,
+                    warning: refined.warning,
+                  };
+                })
+              );
+            }
+          })
+          .catch(() => {});
+      });
 
       return [...prev, ...newItems];
     });
@@ -585,12 +672,21 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
 
   async function startBulkUpload() {
     if (bulkFiles.length === 0 || bulkProcessing) return;
+    if (!gemini?.active) {
+      setBulkNotice("Gemini AI is required for accurate 100% quotation extraction. Please configure an active Gemini key in Settings before uploading.");
+      return;
+    }
     setBulkProcessing(true);
     setBulkNotice("");
 
-    const stagedItems = bulkFiles.filter((f) => f.status === "staged" || f.status === "failed");
+    const stagedItems = bulkFiles.filter(
+      (f) => (f.status === "staged" || f.status === "failed") && f.isEligible !== false
+    );
     if (stagedItems.length === 0) {
       setBulkProcessing(false);
+      if (bulkFiles.some((f) => f.isEligible === false)) {
+        setBulkNotice("All remaining staged files exceed the 200k TPM safe ceiling and cannot be processed.");
+      }
       return;
     }
 
@@ -1348,12 +1444,18 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
               <Button
                 type="submit"
                 loading={loading}
-                disabled={!file || loading}
+                disabled={!file || loading || !gemini?.active}
                 size="md"
                 className="bg-[var(--rl-black)] hover:bg-black text-white font-semibold px-6 shadow-xs gap-2"
               >
                 <Sparkle aria-hidden="true" size={16} weight="fill" />
-                {loading ? "Preparing & Extracting with AI..." : error && file ? "Retry Upload" : "Upload & Extract"}
+                {!gemini?.active
+                  ? "AI Engine Unavailable — Key Required"
+                  : loading
+                  ? "Preparing & Extracting with AI..."
+                  : error && file
+                  ? "Retry Upload"
+                  : "Upload & Extract"}
               </Button>
               {loading ? (
                 <Button type="button" variant="secondary" size="md" onClick={cancelPreparation}>
@@ -1522,6 +1624,32 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                   </div>
                 )}
               </div>
+
+              {/* Live Staging Fleet Meter */}
+              {bulkFiles.some((f) => f.status === "staged") && (
+                <div className="flex flex-wrap items-center gap-3 p-3 rounded-[var(--rl-radius-sm)] bg-[var(--rl-bg)] border border-[var(--rl-border)] text-xs text-[var(--rl-text-muted)]">
+                  <div className="flex items-center gap-1.5 font-semibold text-[var(--rl-text-strong)]">
+                    <Sparkle size={14} weight="fill" className="text-amber-500" />
+                    <span>Live Staging Fleet Meter:</span>
+                  </div>
+                  <span>
+                    Total Staged: <strong className="text-[var(--rl-text-strong)] font-mono">{bulkFiles.filter((f) => f.status === "staged").length} files</strong>
+                  </span>
+                  <span>·</span>
+                  <span>
+                    Estimated Batch Tokens: <strong className="text-[var(--rl-text-strong)] font-mono">~{Math.round(bulkFiles.filter((f) => f.status === "staged").reduce((acc, f) => acc + (f.estimatedTokens || 12000), 0) / 1000)}k</strong>
+                  </span>
+                  <span>·</span>
+                  <span>
+                    Safe Processing Cadence: <strong className="text-emerald-700 font-mono">~{(Math.max(1, Math.ceil(bulkFiles.filter((f) => f.status === "staged").length / 52)) * 1.0).toFixed(1)} min</strong>
+                  </span>
+                  {bulkFiles.some((f) => f.isEligible === false) && (
+                    <span className="text-[var(--rl-red)] font-semibold flex items-center gap-1">
+                      (⚠️ {bulkFiles.filter((f) => f.isEligible === false).length} disqualified file{bulkFiles.filter((f) => f.isEligible === false).length > 1 ? "s" : ""} over 200k tokens)
+                    </span>
+                  )}
+                </div>
+              )}
               {/* Fair-Share Elevator Queue Progress Banner */}
               {bulkFiles.some((f) => f.status === "processing" || f.status === "uploading") && (
                 <div className="mb-2">
@@ -1572,21 +1700,34 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                             <p className="truncate text-[13px] font-semibold text-[var(--rl-text-strong)]">
                               {item.file.name}
                             </p>
-                            {item.status === "staged" && (
-                              <span className="inline-flex items-center gap-1 rounded bg-indigo-50 border border-indigo-200/70 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-indigo-800" title="Assigned parallel model endpoint">
-                                <Sparkle size={10} weight="fill" className="text-amber-500" />
-                                {(() => {
-                                  const totalSlots = gemini?.fleet_summary?.total_parallel_endpoints || gemini?.endpoints?.length || 4;
-                                  const slotIdx = idx % totalSlots;
-                                  const ep = gemini?.endpoints?.[slotIdx];
-                                  if (ep) {
-                                    return `${ep.account_label.replace("Account ", "Key ")} · ${ep.model.replace("gemini-2.5-", "")}`;
-                                  }
-                                  const keyNum = Math.floor(slotIdx / 2) + 1;
-                                  const modelStr = slotIdx % 2 === 0 ? "flash" : "flash-lite";
-                                  return `Key ${keyNum} · ${modelStr}`;
-                                })()}
+                            {item.status === "staged" && item.isEligible === false && (
+                              <span
+                                className="inline-flex items-center gap-1 rounded bg-red-50 border border-red-200 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-red-700"
+                                title={item.warning || "Exceeds safe 200k TPM quota window"}
+                              >
+                                ⚠️ Disqualified: ~{Math.round((item.estimatedTokens || 240000) / 1000)}k tokens exceeds 200k/min safe ceiling
                               </span>
+                            )}
+                            {item.status === "staged" && item.isEligible !== false && (
+                              <>
+                                <span className="inline-flex items-center gap-1 rounded bg-slate-100 border border-slate-200/80 px-1.5 py-0.5 font-mono text-[10px] font-medium text-slate-700" title="Estimated pre-flight token weight">
+                                  ~{Math.round((item.estimatedTokens || 12000) / 1000)}k tokens ({item.pageCount || 1}p)
+                                </span>
+                                <span className="inline-flex items-center gap-1 rounded bg-indigo-50 border border-indigo-200/70 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-indigo-800" title="Assigned parallel model endpoint">
+                                  <Sparkle size={10} weight="fill" className="text-amber-500" />
+                                  {(() => {
+                                    const totalSlots = gemini?.fleet_summary?.total_parallel_endpoints || gemini?.endpoints?.length || 4;
+                                    const slotIdx = idx % totalSlots;
+                                    const ep = gemini?.endpoints?.[slotIdx];
+                                    if (ep) {
+                                      return `${ep.account_label.replace("Account ", "Key ")} · ${ep.model.replace("gemini-", "")}`;
+                                    }
+                                    const keyNum = Math.floor(slotIdx / 2) + 1;
+                                    const modelStr = slotIdx % 2 === 0 ? "3.1-lite" : "3.5-lite";
+                                    return `Key ${keyNum} · ${modelStr}`;
+                                  })()}
+                                </span>
+                              </>
                             )}
                             {item.plate && (
                               <span className="rounded bg-black px-1.5 py-0.5 font-mono text-[11px] font-bold text-white uppercase tracking-wider">
@@ -1759,10 +1900,13 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                     <Button
                       type="button"
                       onClick={startBulkUpload}
+                      disabled={!gemini?.active || bulkFiles.length === 0}
                       className="bg-[var(--rl-black)] hover:bg-black text-white font-semibold px-6 gap-2"
                     >
                       <Sparkle size={16} weight="fill" />
-                      Upload &amp; Extract All ({bulkFiles.length} Quotation{bulkFiles.length > 1 ? "s" : ""})
+                      {!gemini?.active
+                        ? "AI Engine Unavailable — Key Required"
+                        : `Upload & Extract All (${bulkFiles.length} Quotation${bulkFiles.length > 1 ? "s" : ""})`}
                     </Button>
                   )}
 

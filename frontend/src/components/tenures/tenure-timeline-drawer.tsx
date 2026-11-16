@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import type { Route } from "next";
 import {
@@ -13,16 +13,58 @@ import {
   CaretDown,
   CaretUp,
   Columns,
-  ShieldCheck,
-  CheckCircle,
 } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
+
+interface SourcedQuote {
+  session_id: string;
+  version?: number;
+  total_payable?: number | string;
+  sum_insured?: number | string;
+  is_active?: boolean;
+  created_at?: string;
+}
+
+interface GeneratedQuotation {
+  session_id: string;
+  quotation_ref: string;
+  company: string;
+  total_payable?: number | string;
+}
+
+interface ActivityLogItem {
+  id: string;
+  event_type: string;
+  summary?: string;
+  actor_name?: string;
+  details?: Record<string, unknown>;
+  created_at?: string;
+  [key: string]: any;
+}
+
+interface TenureDetailData {
+  vehicle_no?: string;
+  customer_name?: string;
+  policy_number?: string;
+  coverage_start_date?: string;
+  coverage_end_date?: string;
+  expiry_month?: string;
+  won_premium?: number | string;
+  winning_quotation_ref?: string;
+  last_activity_at?: string;
+  stage?: string;
+  sourced_quotes_by_company?: Record<string, SourcedQuote[]>;
+  generated_risklocker_quotations?: GeneratedQuotation[];
+  activities?: ActivityLogItem[];
+  [key: string]: any;
+}
 
 export interface TenureTimelineDrawerProps {
   tenureId: string;
   isOpen: boolean;
   onClose: () => void;
   onRefresh?: () => void;
+  onUpdate?: () => void;
 }
 
 export function TenureTimelineDrawer({
@@ -31,27 +73,27 @@ export function TenureTimelineDrawer({
   onClose,
 }: TenureTimelineDrawerProps) {
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<TenureDetailData | null>(null);
   const [expandedCompany, setExpandedCompany] = useState<string | null>(null);
 
-  async function loadDetail() {
+  const loadDetail = useCallback(async () => {
     if (!tenureId) return;
     setLoading(true);
     try {
-      const res = await api<any>(`/tenures/${tenureId}`);
+      const res = await api<TenureDetailData>(`/tenures/${tenureId}`);
       setData(res);
     } catch (err) {
       console.error("Failed to load tenure detail:", err);
     } finally {
       setLoading(false);
     }
-  }
+  }, [tenureId]);
 
   useEffect(() => {
     if (isOpen && tenureId) {
       loadDetail();
     }
-  }, [isOpen, tenureId]);
+  }, [isOpen, tenureId, loadDetail]);
 
   if (!isOpen) return null;
 
@@ -153,8 +195,8 @@ export function TenureTimelineDrawer({
                 </div>
 
                 <div className="space-y-3 pt-1">
-                  {Object.entries(data.sourced_quotes_by_company || {}).map(([company, quotes]: [string, any]) => {
-                    const activeQuote = quotes.find((q: any) => q.is_active) || quotes[quotes.length - 1];
+                  {Object.entries(data.sourced_quotes_by_company || {}).map(([company, quotes]: [string, SourcedQuote[]]) => {
+                    const activeQuote = quotes.find((q: SourcedQuote) => q.is_active) || quotes[quotes.length - 1];
                     const hasHistory = quotes.length > 1;
                     const isExpanded = expandedCompany === company;
 
@@ -209,7 +251,7 @@ export function TenureTimelineDrawer({
                         {isExpanded && hasHistory && (
                           <div className="mt-2 pt-2 border-t border-neutral-200/60 space-y-1.5 text-xs bg-white p-2.5 rounded-lg">
                             <span className="text-[10px] font-bold uppercase text-neutral-400">Version History</span>
-                            {quotes.map((q: any) => (
+                            {quotes.map((q: SourcedQuote) => (
                               <div key={q.session_id} className="flex items-center justify-between text-neutral-600 py-1 border-b border-neutral-100 last:border-none">
                                 <div className="flex items-center gap-2">
                                   <span className="font-bold text-neutral-800">v{q.version}</span>
@@ -262,7 +304,7 @@ export function TenureTimelineDrawer({
                   </div>
                 ) : (
                   <div className="space-y-2 pt-1">
-                    {data.generated_risklocker_quotations.map((g: any) => (
+                    {data.generated_risklocker_quotations.map((g: GeneratedQuotation) => (
                       <div
                         key={g.session_id}
                         className="flex items-center justify-between p-3 bg-neutral-50/70 border border-neutral-200/80 rounded-xl text-xs"
@@ -307,7 +349,7 @@ export function TenureTimelineDrawer({
                       No activity entries recorded yet for this tenure.
                     </div>
                   ) : (
-                    data.activities.map((act: any) => {
+                    data.activities.map((act: ActivityLogItem) => {
                       let timeStr = "";
                       if (act.created_at) {
                         try {

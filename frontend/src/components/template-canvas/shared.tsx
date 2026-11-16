@@ -138,6 +138,27 @@ export type CanvasElement = {
   name?: string;
   parentId?: string;
   order?: number;
+  autoFourCol?: boolean;
+  adaptiveColumns?: boolean;
+  extras_mode?: string;
+  extrasMode?: string;
+  [key: string]: unknown;
+};
+
+export type BenefitItem = {
+  id?: string;
+  concept_id?: string;
+  concept_key?: string;
+  label?: string;
+  title?: string;
+  is_extra?: boolean;
+  badge?: string;
+  cost_status?: string;
+  price?: unknown;
+  optional_price?: unknown;
+  typed_value?: { semantic_role?: string; value?: unknown };
+  detected_cost?: string | number;
+  [key: string]: unknown;
 };
 
 export const SHAPE_CLIP: Record<string, string> = {
@@ -154,8 +175,6 @@ type TemplateConfig = {
   assets?: Record<string, string>;
   canvas?: { width?: number; height?: number };
 };
-
-type BenefitCard = { icon?: string; title?: string; subtitle?: string; lines?: string[]; asset_id?: string };
 
 export const shapeRadii: Record<string, string> = {
   rounded: "12px",
@@ -506,7 +525,6 @@ export function CanvasElementView({
     padding: isSpecial ? "8px" : style.padding ? `${style.padding}px` : undefined,
   };
   const handles = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
-  const scenarioLayout = packFixedGrid(scenarioCount, element.w, element.h, element.packing);
   const density = {
     comfortable: { padding: 7, gap: 6,  icon: 24, label: 11,   value: 10,  desc: 8.5 },
     normal:      { padding: 5, gap: 5,  icon: 22, label: 10.5, value: 9.5, desc: 8   },
@@ -538,7 +556,7 @@ export function CanvasElementView({
             {slot === "risklocker_logo" ? (
               <img className="h-full w-full object-contain object-left" src={fileUrl("/business/assets/e9685e1f-ac95-410c-a2e9-eccb7ca35d5f/content?profile=ui")} alt="Risklocker" />
             ) : slot === "bank_logo" ? (
-              <img className="h-full w-full object-contain" src={fileUrl("/business/assets/2168eaee-3e56-4903-8c4f-841f01ff2407/content?profile=ui")} alt="Hong Leong Bank" />
+              <img className="h-full w-full object-contain" src={fileUrl("/business/assets/2168eaee-3e56-4903-8c4f-841f01ff2407/content?profile=ui")} alt="Bank Logo" />
             ) : slot === "duitnow_payment_details" || slot === "bank_qr_layout_dark" || slot === "bank_qr_layout" || slot === "qr_code" ? (
               <img className="h-full w-full object-contain" src={fileUrl("/assets/bank_qr_layout_dark.jpg")} alt="Bank QR Details" />
             ) : slot === "insurer_logo" ? (
@@ -617,8 +635,8 @@ export function CanvasElementView({
             const prefix = element.prefix || "";
             const isInsurer = (element.componentRole === "header_insurer_name" || eid === "header_insurer_name");
             let val = raw !== null ? formatVariableValue(raw, "", element.suffix || "") : "";
-            if (!val && (element.componentRole === "ref_val" || eid === "ref_val")) val = "RL260000341";
-            else if (!val && (element.componentRole === "vehicle_no_val" || eid === "vehicle_no_val")) val = "JXS2820";
+            if (!val && (element.componentRole === "ref_val" || eid === "ref_val")) val = "QT-SAMPLE-001";
+            else if (!val && (element.componentRole === "vehicle_no_val" || eid === "vehicle_no_val")) val = "ABC 1234";
             else if (!val && (element.componentRole === "header_insurer_name" || eid === "header_insurer_name")) val = "QBE INSURANCE (MALAYSIA) BERHAD";
             return (
               <div className="w-full h-full flex items-center justify-end text-right overflow-hidden whitespace-nowrap">
@@ -675,12 +693,18 @@ export function CanvasElementView({
             }
             return false;
           };
+          const effectiveExtrasMode = String(
+            (benefitData?.displayOptions as any)?.extras_mode ||
+            (element as any).extras_mode ||
+            (element as any).extrasMode ||
+            "itemized"
+          ).toLowerCase();
           const items = benefitData
             ? (isAddons
                 ? benefitData.available_addons || []
                 : isExtras
                   ? currentCards.filter(checkPaid)
-                  : ((element as any).excludeExtras || (element as any).extras_mode === "none" || (element as any).extras_mode === "lump_sum")
+                  : ((element as any).excludeExtras || effectiveExtrasMode === "none" || effectiveExtrasMode === "lump_sum")
                     ? currentCards.filter((b: any) => !checkPaid(b))
                     : currentCards)
             : [];
@@ -1424,7 +1448,12 @@ export function CanvasElementView({
       {element.type === "premium-info-block" ? (
         (() => {
           const extras = benefitData?.extras || [];
-          const extrasMode = String((element as any).extras_mode || (element as any).extrasMode || "itemized").toLowerCase();
+          const extrasMode = String(
+            (benefitData?.displayOptions as any)?.extras_mode ||
+            (element as any).extras_mode ||
+            (element as any).extrasMode ||
+            "itemized"
+          ).toLowerCase();
           const fmtMoney = (price?: { amount?: number | string; currency?: string; value?: number | string }) => {
             const amount = price?.amount ?? price?.value;
             if (amount === undefined || amount === null || amount === "") return "";
@@ -1760,7 +1789,7 @@ function EditableText({ initial, onCommit }: { initial: string; onCommit: (text:
     const sel = window.getSelection();
     sel?.removeAllRanges();
     sel?.addRange(range);
-  }, []);
+  }, [initial]);
   return (
     <div
       ref={ref}
@@ -1787,12 +1816,14 @@ function EditableText({ initial, onCommit }: { initial: string; onCommit: (text:
   );
 }
 
-export function isPaidExtraBenefitCard(c: any): boolean {
-  if (c?.is_extra || c?.badge || c?.cost_status === "paid") return true;
-  const p = c?.price ?? c?.optional_price;
+export function isPaidExtraBenefitCard(c?: BenefitItem | Record<string, unknown> | null): boolean {
+  if (!c) return false;
+  if (c.is_extra || c.badge || c.cost_status === "paid") return true;
+  const p = c.price ?? c.optional_price;
   if (p !== null && p !== undefined) {
     if (typeof p === "object") {
-      const amt = p.amount ?? p.value;
+      const pObj = p as { amount?: unknown; value?: unknown };
+      const amt = pObj.amount ?? pObj.value;
       const n = typeof amt === "string" ? parseFloat(amt.replace(/,/g, "")) : Number(amt);
       if (Number.isFinite(n) && n > 0) return true;
     } else if (typeof p === "number" && Number.isFinite(p) && p > 0) {
@@ -1802,14 +1833,14 @@ export function isPaidExtraBenefitCard(c: any): boolean {
       if (Number.isFinite(n) && n > 0) return true;
     }
   }
-  const tv = c?.typed_value;
+  const tv = c.typed_value as { semantic_role?: string; value?: unknown } | undefined;
   if (tv && typeof tv === "object") {
     if (tv.semantic_role === "premium") {
       const n = parseFloat(String(tv.value || "").replace(/[^0-9.]/g, ""));
       if (Number.isFinite(n) && n > 0) return true;
     }
   }
-  if (c?.detected_cost) {
+  if (c.detected_cost) {
     const n = parseFloat(String(c.detected_cost).replace(/[^0-9.]/g, ""));
     if (Number.isFinite(n) && n > 0) return true;
   }
@@ -1819,15 +1850,21 @@ export function isPaidExtraBenefitCard(c: any): boolean {
 export function balanceBenefitGridElements(
   elements: CanvasElement[],
   benefitData?: {
-    current_benefits?: any[];
-    available_addons?: any[];
-    extras?: any[];
-    groups?: any[];
+    current_benefits?: BenefitItem[];
+    available_addons?: BenefitItem[];
+    extras?: BenefitItem[];
+    groups?: unknown[];
+    displayOptions?: { extras_mode?: string; [key: string]: unknown };
   },
 ): CanvasElement[] {
   const extras = benefitData?.extras || [];
   const pibElem = elements.find((e) => (e.componentRole === "premium_info_block" || e.id === "premium_info_block") || e.type === "premium-info-block");
-  const extrasMode = String((pibElem as any)?.extras_mode || (pibElem as any)?.extrasMode || "itemized").toLowerCase();
+  const extrasMode = String(
+    benefitData?.displayOptions?.extras_mode ||
+    pibElem?.extras_mode ||
+    pibElem?.extrasMode ||
+    "itemized"
+  ).toLowerCase();
   const pibY = pibElem ? Number(pibElem.y || 276) : 276;
   const totalPibRows = extrasMode === "none" ? 5 : (extrasMode === "lump_sum" ? (extras.length > 0 ? 6 : 5) : (extras.length > 0 ? extras.length + 6 : 5));
   const contentBottom = pibY + (totalPibRows * 14);
@@ -1845,15 +1882,15 @@ export function balanceBenefitGridElements(
 
   const currentCards = benefitData?.current_benefits || [];
   const currentConceptIds = new Set(
-    currentCards.map((c: any) => String(c?.concept_id || "")).filter(Boolean)
+    currentCards.map((c: BenefitItem) => String(c?.concept_id || "")).filter(Boolean)
   );
   const currentConceptKeys = new Set(
-    currentCards.map((c: any) => String(c?.concept_key || "")).filter(Boolean)
+    currentCards.map((c: BenefitItem) => String(c?.concept_key || "")).filter(Boolean)
   );
   const currentLabels = new Set(
-    currentCards.map((c: any) => String(c?.label || "").trim().toLowerCase()).filter(Boolean)
+    currentCards.map((c: BenefitItem) => String(c?.label || "").trim().toLowerCase()).filter(Boolean)
   );
-  const addonCards = (benefitData?.available_addons || []).filter((c: any) => {
+  const addonCards = (benefitData?.available_addons || []).filter((c: BenefitItem) => {
     if (c?.concept_id && currentConceptIds.has(String(c.concept_id))) return false;
     if (c?.concept_key && currentConceptKeys.has(String(c.concept_key))) return false;
     if (c?.label && currentLabels.has(String(c.label).trim().toLowerCase())) return false;
@@ -1865,7 +1902,7 @@ export function balanceBenefitGridElements(
   // Separate true FOC benefits from purchased extras / priced add-ons
   const extrasCards = currentCards.filter(isPaidExtra);
   const focCards = extrasCards.length > 0
-    ? currentCards.filter((c: any) => !isPaidExtra(c))
+    ? currentCards.filter((c: BenefitItem) => !isPaidExtra(c))
     : currentCards;
 
   const grid1 = elements.find((e) => e.type === "benefit-grid" && e.gridKind === "current_benefits");
@@ -1897,14 +1934,13 @@ export function balanceBenefitGridElements(
   const n1 = items1.length;
   const nExt = hasExtrasSection ? itemsExt.length : 0;
   const n2 = items2.length;
-  const totalCards = n1 + nExt + n2;
 
   const baseCols = Math.max(1, Number(grid1.columns || 3));
   const effectiveCols = baseCols;
   const extrasCols = nExt <= 2 ? Math.min(2, effectiveCols) : effectiveCols;
 
   const grid2Cols = Number(grid2.columns || 0);
-  const autoPackAddons4Col = Boolean((grid2 as any)?.autoFourCol || (grid2 as any)?.adaptiveColumns) && n2 >= 9;
+  const autoPackAddons4Col = Boolean(grid2?.autoFourCol || grid2?.adaptiveColumns) && n2 >= 9;
   const addonsCols = autoPackAddons4Col ? 4 : (grid2Cols > 0 ? grid2Cols : effectiveCols);
 
   const rows1 = n1 > 0 ? Math.ceil(n1 / effectiveCols) : 0;
@@ -1920,9 +1956,9 @@ export function balanceBenefitGridElements(
   const totalRowGaps = (Math.max(0, rows1 - 1) + Math.max(0, rowsExt - 1) + Math.max(0, rows2 - 1)) * cardGap;
   const pureCardsH = Math.max(40, cardsAvailH - totalRowGaps);
 
-  const customIconSz = Number((grid1 as any)?.iconSize || (grid2 as any)?.iconSize || 0);
-  const customTitleSz = Number((grid1 as any)?.titleSize || (grid2 as any)?.titleSize || 0);
-  const uniformH = Number((grid1 as any)?.uniformHeight || (grid1 as any)?.rowHeight || 0);
+  const customIconSz = Number(grid1?.iconSize || grid2?.iconSize || 0);
+  const customTitleSz = Number(grid1?.titleSize || grid2?.titleSize || 0);
+  const uniformH = Number(grid1?.uniformHeight || grid1?.rowHeight || 0);
   const minCardNeeded = Math.max(28, customIconSz > 0 ? customIconSz + 18 : 28, customTitleSz > 0 ? customTitleSz + 28 : 28);
   const rawRowH = pureCardsH / totalRows;
   let targetRowH = isMinimal ? Math.min(38, Math.max(28, rawRowH)) : Math.min(74, Math.max(46, rawRowH));
@@ -2021,10 +2057,10 @@ export function balanceBenefitGridElements(
     } else if (e.type === "benefit-grid" && e.gridKind === "current_benefits") {
       e.y = yG1;
       e.h = h1;
-      (e as any).rowHeight = targetRowH;
-      (e as any).columns = effectiveCols;
+      e.rowHeight = targetRowH;
+      e.columns = effectiveCols;
       if (hasExtrasSection) {
-        (e as any).excludeExtras = true;
+        e.excludeExtras = true;
       }
       adjusted.push(e);
 
@@ -2075,8 +2111,8 @@ export function balanceBenefitGridElements(
     } else if (e.type === "benefit-grid" && e.gridKind === "available_addons") {
       e.y = yG2;
       e.h = h2;
-      (e as any).rowHeight = targetRowH;
-      (e as any).columns = addonsCols;
+      e.rowHeight = targetRowH;
+      e.columns = addonsCols;
     }
     adjusted.push(e);
   }

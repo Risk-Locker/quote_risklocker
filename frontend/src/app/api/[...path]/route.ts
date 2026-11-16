@@ -29,30 +29,63 @@ function configuredBackendOrigin(): URL {
 async function proxy(request: NextRequest, context: RouteContext): Promise<Response> {
   try {
     const origin = configuredBackendOrigin();
-    const { path } = await context.params;
-    const encodedPath = path.map(encodeURIComponent).join("/");
+    const resolvedParams = await context.params;
+    const pathSegments = resolvedParams?.path || [];
+    const encodedPath = Array.isArray(pathSegments)
+      ? pathSegments.map(encodeURIComponent).join("/")
+      : String(pathSegments);
     const target = new URL(`/api/${encodedPath}${request.nextUrl.search}`, origin);
+
     const headers = new Headers(request.headers);
     headers.delete("host");
-    headers.delete("content-length");
     for (const header of HOP_BY_HOP_HEADERS) headers.delete(header);
+
+    let body: BodyInit | undefined = undefined;
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      const buffer = await request.arrayBuffer();
+      if (buffer.byteLength > 0) {
+        body = buffer;
+      }
+    }
 
     const upstream = await fetch(target, {
       method: request.method,
       headers,
-      body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
+      body,
       redirect: "manual",
       cache: "no-store",
-      duplex: "half",
-    } as RequestInit & { duplex: "half" });
-    const responseHeaders = new Headers(upstream.headers);
-    for (const header of HOP_BY_HOP_HEADERS) responseHeaders.delete(header);
-    return new Response(upstream.body, {
+    });
+
+    const responseHeaders = new Headers();
+    upstream.headers.forEach((value, key) => {
+      const lower = key.toLowerCase();
+      if (!HOP_BY_HOP_HEADERS.has(lower) && lower !== "set-cookie") {
+        responseHeaders.set(key, value);
+      }
+    });
+
+    if (typeof upstream.headers.getSetCookie === "function") {
+      const setCookies = upstream.headers.getSetCookie();
+      for (const cookie of setCookies) {
+        responseHeaders.append("set-cookie", cookie);
+      }
+    } else {
+      const setCookie = upstream.headers.get("set-cookie");
+      if (setCookie) {
+        responseHeaders.set("set-cookie", setCookie);
+      }
+    }
+
+    const isNullBodyStatus = upstream.status === 204 || upstream.status === 205 || upstream.status === 304;
+    const responseBody = isNullBodyStatus ? null : await upstream.arrayBuffer();
+
+    return new Response(responseBody, {
       status: upstream.status,
       statusText: upstream.statusText,
       headers: responseHeaders,
     });
-  } catch {
+  } catch (err) {
+    console.error("[api-proxy] Error forwarding request to backend:", err);
     return Response.json(
       { error: { code: "dependency_unavailable", message: "The application service is temporarily unavailable." } },
       { status: 503 },

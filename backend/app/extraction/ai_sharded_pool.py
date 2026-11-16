@@ -19,12 +19,13 @@ logger = logging.getLogger(__name__)
 
 # Authoritative verified active model tiers (Rule 05)
 VERIFIED_ACTIVE_MODELS: tuple[str, ...] = (
+    "gemini-3.1-flash-lite",
     "gemini-3.5-flash-lite",
-    "gemini-3.8-flash",
 )
 
-SAFE_RPM_LIMIT_PER_SLOT: int = 12
-SAFE_RPD_LIMIT_PER_SLOT: int = 450
+SAFE_RPM_LIMIT_PER_SLOT: int = 13
+SAFE_RPD_LIMIT_PER_SLOT: int = 480
+SAFE_TPM_LIMIT_PER_SLOT: int = 200_000
 SECONDS_PER_DAY: float = 86400.0
 
 

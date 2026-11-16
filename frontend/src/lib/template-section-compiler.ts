@@ -224,7 +224,7 @@ export function defaultRightContainers(): ContainerBlockConfig[] {
         {
           id: "rc_b_pay_details",
           type: "text",
-          text: "Bank Details : 12300318500\nRiskLocker Sdn. Bhd.",
+          text: "Bank Details : 0000 0000 0000\nAuthorized Insurance Agency",
           fontSize: 8.5,
           fontWeight: "600",
           color: "#475569",
@@ -570,9 +570,9 @@ export function extractSectionsFromCanvas(
   const paymentTextElem = elements.find((e) => e.id === "payment_text" || e.id === "text_3yr0mvi");
   const termsElem = elements.find((e) => e.id === "terms");
 
-  let bankName = "Hong Leong Bank";
-  let accountNo = "12300318500";
-  let accountHolder = "Risklocker Sdn. Bhd.";
+  let bankName = "Primary Commercial Bank";
+  let accountNo = "0000 0000 0000";
+  let accountHolder = "Authorized Insurance Agency";
 
   if (paymentTextElem?.text) {
     const lines = paymentTextElem.text.split("\n");
@@ -1085,7 +1085,7 @@ export function compileSectionsToCanvas(
             w: leftW,
             h: subH,
             z: 3,
-            text: payDetails.text || "Bank Details : 12300318500\nRiskLocker Sdn. Bhd.",
+            text: payDetails.text || "Bank Details : 0000 0000 0000\nAuthorized Insurance Agency",
             style: {
               fontSize,
               fontWeight: (payDetails.fontWeight ?? "600") as any,
@@ -1506,9 +1506,9 @@ export function getPresetSections(preset: "bilingual" | "english" | "mandarin"):
       },
       rightContainers: defaultRightContainers(),
       footer: {
-        bankName: "Hong Leong Bank",
-        accountNo: "12300318500",
-        accountHolder: "RiskLocker Sdn. Bhd.",
+        bankName: "Primary Commercial Bank",
+        accountNo: "0000 0000 0000",
+        accountHolder: "Authorized Insurance Agency",
         termsNotice: "*Terms and Conditions Apply",
       },
     };
@@ -1535,9 +1535,9 @@ export function getPresetSections(preset: "bilingual" | "english" | "mandarin"):
       },
       rightContainers: defaultRightContainers(),
       footer: {
-        bankName: "Hong Leong Bank",
-        accountNo: "12300318500",
-        accountHolder: "RiskLocker Sdn. Bhd.",
+        bankName: "Primary Commercial Bank",
+        accountNo: "0000 0000 0000",
+        accountHolder: "Authorized Insurance Agency",
         termsNotice: "*适用条款及细则",
       },
     };
@@ -1553,9 +1553,9 @@ export function getPresetSections(preset: "bilingual" | "english" | "mandarin"):
     },
     rightContainers: defaultRightContainers(),
     footer: {
-      bankName: "Hong Leong Bank",
-      accountNo: "12300318500",
-      accountHolder: "RiskLocker Sdn. Bhd.",
+      bankName: "Primary Commercial Bank",
+      accountNo: "0000 0000 0000",
+      accountHolder: "Authorized Insurance Agency",
       termsNotice: "*Terms & Conditions Apply",
     },
   };
