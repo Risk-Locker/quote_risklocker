@@ -29,6 +29,7 @@ import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import type { GeminiAccountItem, GeminiQuotaStats } from "@/components/gemini-header-meter";
 import { GeminiAnalyticsChart } from "@/components/gemini-analytics-chart";
+import { GeminiTimelineCalendar } from "@/components/gemini-timeline-calendar";
 import { GeminiQuotaRadarCard } from "@/components/gemini-quota-radar-card";
 import { GeminiModelSwitcher } from "@/components/gemini-model-switcher";
 
@@ -654,6 +655,9 @@ export default function SettingsAiEnginePage() {
             </div>
           </div>
         </Card>
+
+        {/* Live Timeline, Pacific Time Cycle Countdown & Minute-Level Token Activity */}
+        <GeminiTimelineCalendar />
 
         {/* Google AI Studio Rate Limit Parity & Sliding Metric History */}
         <GeminiAnalyticsChart />

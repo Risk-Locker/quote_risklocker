@@ -27,7 +27,7 @@
 - Modify: `backend/app/api/routers/system.py:1060-1070`
 - Test: tests/integration/test_gemini_timeline_api.py
 
-- [ ] **Step 1: Write integration test for timeline API**
+- [x] **Step 1: Write integration test for timeline API**
 
 ```python
 import pytest
@@ -45,16 +45,16 @@ def test_gemini_timeline_endpoint_returns_cycle_and_logs(client: TestClient, adm
     assert "daily_history" in data
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.\.venv\Scripts\pytest.exe tests/integration/test_gemini_timeline_api.py -v`
 Expected: FAIL (404 Not Found)
 
-- [ ] **Step 3: Implement `get_fleet_timeline_data()` and wire router**
+- [x] **Step 3: Implement `get_fleet_timeline_data()` and wire router**
 
 In `gemini_account_service.py`, build `get_fleet_timeline_data(db)` querying `GeminiApiCallLog` and calculating next PT midnight in MYT. Add `@router.get("/settings/gemini/timeline")` in `system.py`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `.\.venv\Scripts\pytest.exe tests/integration/test_gemini_timeline_api.py -v`
 Expected: PASS
@@ -67,20 +67,20 @@ Expected: PASS
 - Create: frontend/src/components/gemini-timeline-calendar.tsx
 - Modify: `frontend/src/app/settings/ai-engine/page.tsx:30-100`
 
-- [ ] **Step 5: Build `GeminiTimelineCalendar` component**
+- [x] **Step 5: Build `GeminiTimelineCalendar` component**
 Render:
 1. Cycle reset status card with countdown timer to 4:00 PM MYT.
 2. Minute-level token cost graph (bars with animated pulse on new calls).
 3. Searchable call ledger table showing exact timestamp, purpose, tokens, latency, and status.
 
-- [ ] **Step 6: Integrate into `frontend/src/app/settings/ai-engine/page.tsx`**
+- [x] **Step 6: Integrate into `frontend/src/app/settings/ai-engine/page.tsx`**
 
-- [ ] **Step 7: Verify TypeScript compilation**
+- [x] **Step 7: Verify TypeScript compilation**
 
 Run: `cd frontend; npx tsc --noEmit`
 Expected: PASS with 0 errors
 
-- [ ] **Step 8: Commit Milestone 3 changes**
+- [x] **Step 8: Commit Milestone 3 changes**
 
 ```bash
 git add backend/app/services/gemini_account_service.py backend/app/api/routers/system.py frontend/src/components/gemini-timeline-calendar.tsx frontend/src/app/settings/ai-engine/page.tsx tests/integration/test_gemini_timeline_api.py

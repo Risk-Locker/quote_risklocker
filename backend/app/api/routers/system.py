@@ -1060,6 +1060,18 @@ def settings_gemini_analytics(
     return get_historical_analytics(db=db, time_range=time_range)
 
 
+@router.get("/settings/gemini/timeline")
+def settings_gemini_timeline(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Return visual timeline, minute-level buckets, and Google PT cycle reset countdown."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
+    from app.services.gemini_account_service import get_fleet_timeline_data
+
+    return get_fleet_timeline_data(db=db)
+
+
 @router.post("/settings/gemini/keys/{key_id}/toggle-pause")
 def settings_gemini_toggle_pause(
     key_id: str,

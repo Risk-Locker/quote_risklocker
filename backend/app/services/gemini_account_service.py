@@ -1405,3 +1405,122 @@ def get_ai_quota_radar_snapshot(*, probe_live: bool = False, db: Any = None) -> 
 
     return report
 
+
+def get_fleet_timeline_data(db: Any) -> dict[str, Any]:
+    """Compile visual timeline and calendar analytics for Google AI Studio quota management."""
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import select, func, desc, case
+    from app.models.tables import GeminiApiCallLog
+
+    now_utc = datetime.now(timezone.utc)
+    now_pt = now_utc.astimezone(PT_TZ)
+    current_pt_date = now_pt.strftime("%Y-%m-%d")
+
+    # Calculate exact next midnight in Pacific Time
+    next_midnight_pt = (now_pt + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    seconds_until_reset = max(0, int((next_midnight_pt - now_pt).total_seconds()))
+    hours = seconds_until_reset // 3600
+    minutes = (seconds_until_reset % 3600) // 60
+    next_reset_myt = next_midnight_pt.astimezone(LOCAL_TZ)
+    reset_time_str = next_reset_myt.strftime("%I:%M %p")
+    cycle_reset_display = f"Resets at {reset_time_str} MYT (in {hours}h {minutes}m)"
+
+    current_cycle = {
+        "pt_date": current_pt_date,
+        "local_now_myt": now_utc.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %I:%M:%S %p"),
+        "next_reset_pt": next_midnight_pt.isoformat(),
+        "next_reset_myt": next_reset_myt.isoformat(),
+        "seconds_until_reset": seconds_until_reset,
+        "cycle_reset_display": cycle_reset_display,
+    }
+
+    # 1. Recent raw timeline calls (up to 100)
+    logs_stmt = (
+        select(GeminiApiCallLog)
+        .order_by(desc(GeminiApiCallLog.created_at))
+        .limit(100)
+    )
+    raw_logs = db.execute(logs_stmt).scalars().all()
+
+    timeline = []
+    for log in raw_logs:
+        purpose = "Quotation Extraction"
+        if log.endpoint_slot and "probe" in log.endpoint_slot.lower():
+            purpose = "Model Health Probe"
+        elif log.error_message and "copilot" in log.error_message.lower():
+            purpose = "Copilot Assistant"
+
+        created_myt = log.created_at.astimezone(LOCAL_TZ) if log.created_at.tzinfo else log.created_at.replace(tzinfo=timezone.utc).astimezone(LOCAL_TZ)
+        timeline.append(
+            {
+                "id": str(log.id),
+                "timestamp": created_myt.strftime("%Y-%m-%d %H:%M:%S"),
+                "iso_timestamp": log.created_at.isoformat() if log.created_at else None,
+                "account_id": log.account_id,
+                "api_key_masked": log.api_key_masked or "AIza••••••••",
+                "model": log.model,
+                "endpoint_slot": log.endpoint_slot,
+                "purpose": purpose,
+                "status_code": log.status_code,
+                "is_success": log.is_success,
+                "prompt_tokens": log.prompt_tokens,
+                "candidate_tokens": log.candidate_tokens,
+                "total_tokens": log.total_tokens,
+                "latency_ms": log.latency_ms,
+                "error_message": log.error_message,
+                "local_date": log.local_date,
+            }
+        )
+
+    # 2. Minute-level buckets for the past 60 minutes
+    minute_map: dict[str, dict[str, int]] = {}
+    for i in range(59, -1, -1):
+        m_time = (now_utc - timedelta(minutes=i)).astimezone(LOCAL_TZ)
+        m_key = m_time.strftime("%H:%M")
+        minute_map[m_key] = {"calls": 0, "total_tokens": 0, "prompt_tokens": 0, "candidate_tokens": 0}
+
+    cutoff_60m = now_utc - timedelta(minutes=60)
+    bucket_logs = [log for log in raw_logs if log.created_at and (log.created_at if log.created_at.tzinfo else log.created_at.replace(tzinfo=timezone.utc)) >= cutoff_60m]
+    for log in bucket_logs:
+        log_myt = log.created_at.astimezone(LOCAL_TZ) if log.created_at.tzinfo else log.created_at.replace(tzinfo=timezone.utc).astimezone(LOCAL_TZ)
+        m_key = log_myt.strftime("%H:%M")
+        if m_key in minute_map:
+            minute_map[m_key]["calls"] += 1
+            minute_map[m_key]["total_tokens"] += log.total_tokens or 0
+            minute_map[m_key]["prompt_tokens"] += log.prompt_tokens or 0
+            minute_map[m_key]["candidate_tokens"] += log.candidate_tokens or 0
+
+    minute_buckets = [
+        {"minute": k, **v} for k, v in minute_map.items()
+    ]
+
+    # 3. Daily history breakdown by PT cycle date (past 14 cycles)
+    daily_stmt = (
+        select(
+            GeminiApiCallLog.local_date,
+            func.count(GeminiApiCallLog.id).label("calls"),
+            func.coalesce(func.sum(GeminiApiCallLog.total_tokens), 0).label("tokens"),
+            func.sum(case((GeminiApiCallLog.is_success == False, 1), else_=0)).label("errors"),
+        )
+        .group_by(GeminiApiCallLog.local_date)
+        .order_by(desc(GeminiApiCallLog.local_date))
+        .limit(14)
+    )
+    daily_rows = db.execute(daily_stmt).fetchall()
+    daily_history = [
+        {
+            "date": str(r[0]),
+            "calls": int(r[1]),
+            "tokens": int(r[2]),
+            "errors": int(r[3] or 0),
+        }
+        for r in daily_rows
+    ]
+
+    return {
+        "current_cycle": current_cycle,
+        "timeline": timeline,
+        "minute_buckets": minute_buckets,
+        "daily_history": daily_history,
+    }
+
