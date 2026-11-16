@@ -549,6 +549,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [expandedBreakdownId, setExpandedBreakdownId] = useState<Record<string, boolean>>({});
   const [rescanningQuoteId, setRescanningQuoteId] = useState<string | null>(null);
   const [isRescanning, setIsRescanning] = useState(false);
+  const [reranking, setReranking] = useState(false);
   const [showDetectionLogsModal, setShowDetectionLogsModal] = useState(false);
   const [rescanElapsedSeconds, setRescanElapsedSeconds] = useState(0);
 
@@ -567,6 +568,18 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     };
   }, [isRescanning, rescanningQuoteId]);
 
+  // Operational Hard-Timeout Safeguard (clears any stuck analyzing / ranking state after 60s)
+  useEffect(() => {
+    if (!isRescanning && !rescanningQuoteId && !reranking) return;
+    const safetyTimer = setTimeout(() => {
+      setIsRescanning(false);
+      setRescanningQuoteId(null);
+      setReranking(false);
+      setOperationStatus((prev) => (prev?.type === "loading" ? null : prev));
+    }, 60000);
+    return () => clearTimeout(safetyTimer);
+  }, [isRescanning, rescanningQuoteId, reranking]);
+
   // 30-Second Real-Time Process Notification Toast
   const [operationStatus, setOperationStatus] = useState<{
     id: string;
@@ -577,10 +590,17 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   } | null>(null);
 
   useEffect(() => {
-    if (!operationStatus || operationStatus.type === "loading") return;
+    if (!operationStatus) return;
+    // Loading toasts auto-dismiss after 45s safety timeout to prevent stuck analyzing/ranking state
+    const timeoutMs = operationStatus.type === "loading" ? 45000 : 30000;
     const timer = setTimeout(() => {
       setOperationStatus(null);
-    }, 30000); // 30s persistent display as requested
+      if (operationStatus.type === "loading") {
+        setIsRescanning(false);
+        setRescanningQuoteId(null);
+        setReranking(false);
+      }
+    }, timeoutMs);
     return () => clearTimeout(timer);
   }, [operationStatus]);
 
@@ -604,7 +624,6 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [highlightedSessionId, setHighlightedSessionId] = useState<string | null>(null);
   const [snapshotModalOpen, setSnapshotModalOpen] = useState(false);
   const [resolvingDuplicateId, setResolvingDuplicateId] = useState<string | null>(null);
-  const [reranking, setReranking] = useState(false);
   const snapshotGridRef = useRef<HTMLDivElement>(null);
   const [copyingSnapshot, setCopyingSnapshot] = useState(false);
   const [downloadingSnapshot, setDownloadingSnapshot] = useState(false);
@@ -1358,7 +1377,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             const updated = await api<any>(`/comparison/${tenureId}/rescan`, {
               method: "POST",
             });
-            setData(updated);
+            if (updated) setData(updated);
+            await fetchComparison(true);
             triggerStatus(
               "success",
               "Analysis Complete",

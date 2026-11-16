@@ -24,7 +24,7 @@
 - Modify: `frontend/src/components/comparison/comparison-matrix.tsx:1085-1110`
 - Modify: `frontend/src/components/comparison/components/UnderwriterQuoteCard.tsx:535-555`
 
-- [ ] **Step 1: Update `useEffect` for `operationStatus` in `comparison-matrix.tsx`**
+- [x] **Step 1: Update `useEffect` for `operationStatus` in `comparison-matrix.tsx`**
 
 ```tsx
   useEffect(() => {
@@ -38,15 +38,15 @@
   }, [operationStatus]);
 ```
 
-- [ ] **Step 2: Guarantee reset in `handleRescanQuotes` and `handleRerank`**
+- [x] **Step 2: Guarantee reset in `handleRescanQuotes` and `handleRerank`**
 Verify all catch blocks trigger `triggerStatus("error", ...)` and finally blocks reset loading states cleanly.
 
-- [ ] **Step 3: Run TypeScript compilation**
+- [x] **Step 3: Run TypeScript compilation**
 
 Run: `cd frontend; npx tsc --noEmit`
 Expected: PASS with 0 errors
 
-- [ ] **Step 4: Commit Milestone 5 changes**
+- [x] **Step 4: Commit Milestone 5 changes**
 
 ```bash
 git add frontend/src/components/comparison/

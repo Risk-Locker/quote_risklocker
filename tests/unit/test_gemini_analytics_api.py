@@ -8,6 +8,7 @@ from app.models.tables import Base, GeminiApiCallLog, new_id
 from app.services.gemini_account_service import (
     get_historical_analytics,
     GeminiAccountManager,
+    get_current_pt_cycle_date,
 )
 
 
@@ -30,7 +31,7 @@ def db_session():
 def test_historical_analytics_grouping_and_metrics(db_session: Session):
     """Verify get_historical_analytics groups by (account_id, model) and aggregates peak RPM/TPM matching Google AI Studio."""
     now = datetime.now(timezone.utc)
-    local_date = now.strftime("%Y-%m-%d")
+    local_date = get_current_pt_cycle_date()
 
     # Insert 3 calls for (acc_1, gemini-3.1-flash-lite) within 10 seconds of each other
     for i in range(3):
@@ -136,7 +137,7 @@ def test_historical_analytics_time_ranges(db_session: Session):
             status_code=200,
             is_success=True,
             total_tokens=5_000,
-            local_date=now.strftime("%Y-%m-%d"),
+            local_date=get_current_pt_cycle_date(),
             created_at=now - timedelta(hours=2),
         )
     )
