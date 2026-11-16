@@ -92,3 +92,16 @@ Beyond the immediate `SUPABASE_URL` failure, our empirical diagnostic audit of `
 1. Commit fixes on branch `v30.3`.
 2. Merge into `main` and push to `origin/main` and `origin/v30.3`.
 3. Actively monitor the GitHub Actions run via `gh run watch` until the deployment completes with `success`.
+
+---
+
+## 4. VPS Deploy Pipeline Acceleration (Speed Optimization)
+
+**Observed Bottleneck:** Deployment runs previously took 12m–16m, with 5m50s spent on the VPS executing redundant installations on every single commit.
+
+**Optimizations Applied (`.github/workflows/deploy.yml`):**
+1. **ClamAV Service Check:** Skip 47-second `apt-get` and 300s signature wait if `clamav-daemon` is already active and CVD signatures are present.
+2. **Pip Requirements Hash:** Compute `sha256sum requirements.txt` and skip `pip install` when unchanged (saves 15–20s).
+3. **Playwright Chromium Fast Check:** Verify Chromium executable launchability before running `playwright install --with-deps chromium` (saves 30–45s).
+4. **Frontend Lockfile Hash:** Compute `sha256sum package-lock.json` and skip `npm ci` when dependencies are unchanged (saves 60–90s).
+5. **Expected Time Savings:** ~3 to 4 minutes reduction on every code deployment.
