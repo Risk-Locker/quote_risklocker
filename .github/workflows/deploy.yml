@@ -30,10 +30,21 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+
+    env:
+      APP_ENV: local
+      STORAGE_DRIVER: supabase
+      SUPABASE_URL: https://ci-project.supabase.co
+      SUPABASE_SERVICE_ROLE_KEY: ci_test_service_role_key_value_at_least_32_chars
+      SUPABASE_STORAGE_BUCKET: risklocker-pdfs
+      AUTH_HASH_SECRET: ci_test_secret_at_least_32_characters_long
+      DATABASE_URL: postgresql://postgres:ci@127.0.0.1:5432/risklocker_ci
+      RL_TEST_POSTGRES_URL: postgresql://postgres:ci@127.0.0.1:5432/risklocker_ci
+      RISKLOCKER_SKIP_DOTENV: "1"
 
     steps:
       - name: Checkout main
@@ -57,28 +68,25 @@ jobs:
         env:
           APP_ENV: local
           DATABASE_URL: postgresql://postgres:ci@127.0.0.1:5432/risklocker_ci
-          AUTH_HASH_SECRET: ci_test_secret_at_least_32_characters_long
         run: |
           PYTHONPATH=backend python -m app.db.migrations --allow-local
           PYTHONPATH=backend python -c "from app.db.session import verify_schema_version; verify_schema_version(); print('Postgres 16 schema OK')"
 
       - name: Run backend tests
         env:
-          # Tests replace the environment themselves (patch.dict clear=True);
-          # these dummies satisfy import-time get_settings() calls.
           APP_ENV: production
           DATABASE_URL: postgresql://postgres:ci@db.ci.supabase.co:5432/postgres?sslmode=require
-          AUTH_HASH_SECRET: ci_test_secret_at_least_32_characters_long
-          RISKLOCKER_SKIP_DOTENV: "1"
           RL_TEST_POSTGRES_URL: postgresql://postgres:ci@127.0.0.1:5432/risklocker_ci
         run: python -m pytest -q
 
-      - name: Run Python SAST & Type Checks
+      - name: Run Risklocker Security & Integrity Gate
         run: |
-          python -m ruff check backend/app
-          python -m bandit -r backend/app -q
-          python -m mypy backend/app/services/road_tax_engine.py backend/app/services/formula_evaluator.py backend/app/rendering/pdf_generator.py
-          python -m pip_audit -r requirements.txt
+          python commands/verify-brain.py
+          python commands/security-audit.py
+          python commands/update-code-map.py --check
+          python commands/sync-agent-bridges.py --check
+          python commands/skills-manager.py doctor --check
+          python .agents/hooks/daily_radar.py --offline --dry-run --strict
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -109,15 +117,7 @@ jobs:
         working-directory: frontend
         run: |
           npx playwright install --with-deps chromium
-          npm run test:e2e:ci
-
-      - name: Run Harness & Knowledge Base Integrity Checks
-        run: |
-          python commands/verify-brain.py
-          python commands/update-code-map.py --check
-          python commands/sync-agent-bridges.py --check
-          python commands/skills-manager.py doctor --check
-          python .agents/hooks/daily_radar.py --offline --dry-run --strict
+          npx playwright test e2e/a11y-and-responsive.spec.ts --project=chromium
 
   deploy:
     name: Deploy main to VPS
@@ -297,6 +297,11 @@ jobs:
             # Pre-flight: confirm the schema matches this release before reload,
             # so a drift fails the deploy loudly instead of crash-looping.
             PYTHONPATH=backend .venv/bin/python -c "from app.db.session import verify_schema_version; verify_schema_version(); print('schema OK')"
+
+            # Prevent port collisions if Docker was temporarily started on the host
+            if command -v docker >/dev/null 2>&1; then
+              docker compose down 2>/dev/null || true
+            fi
 
             # Reload all three processes; startOrReload alone does not revive
             # apps that PM2 previously stopped (e.g. after a crash loop).

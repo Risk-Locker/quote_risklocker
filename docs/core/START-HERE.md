@@ -73,6 +73,7 @@ External chat tools without workspace access should be given this file plus the 
 | `docs/domain/PROJECT-DIAGRAM.md` | Visual user workflow & system boundary diagram | Major user flows or system integrations change |
 | `docs/domain/benefits/BENEFITS-CONFIGURATION.md` | Canonical 51-concept insurer & vehicle matrix | Insurer benefit configurations or seed lists change |
 | `docs/domain/benefits/INSURER-CATALOG-DETAILS.md` | Detailed breakdown per insurer plan and rider | In-depth insurer plan details change |
+| `docs/domain/benefits/COMMERCIAL-LORRY-CATALOG-COMPARISON.md` | Commercial lorry/truck vs private car benefit catalog comparison | Commercial vehicle benefit rules change |
 | `docs/benefits/concise/all_benefits.md` | Master normalized 79-benefit catalog across all 7 insurers | Expanded benefit catalogs change |
 | `docs/benefits/concise/company_all_benefits-v4.md` | Insurer-specific breakdown (Defaults vs Add-ons) across all 7 underwriters | Insurer benefit catalogs change |
 | `docs/benefits/concise/current_all_benefits_12092026.md` | Active insurer benefit profile catalog (11/09/2026 snapshot) without OD/TPPD in Comprehensive | Active insurer profile versions change |
@@ -117,6 +118,7 @@ External chat tools without workspace access should be given this file plus the 
 | `docs/plans/2026-11-15-fleet-independent-key-controls.md` | Gemini AI Parallel Fleet independent key controls, Active multi-key status, kill-switches & dynamic capacity scaling | Active sprint tasks change or complete |
 | `docs/plans/2026-11-15-design2-precision-and-builder-consolidation-plan.md` | Design 2 precision, "Template as Builder" view/unview toggles, ghost template cleanup & studio modernization | Active sprint tasks change or complete |
 | `docs/plans/2026-11-16-pre-commit-hygiene-and-gate-readiness-plan.md` | Pre-commit repository hygiene, agency bank details harmonization & 10/10 gate readiness | Active sprint tasks change or complete |
+| `docs/plans/2026-11-16-ci-cd-pipeline-hardening-and-deploy-monitoring-plan.md` | CI/CD deployment pipeline hardening, runner environment variables & mandatory deploy monitoring | Active sprint tasks change or complete |
 
 ### History & Generated Tooling
 | Document | Purpose | Update when |

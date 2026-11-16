@@ -46,6 +46,10 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - BACKEND_API_ORIGIN=http://quote-api:8100
+    depends_on:
+      - quote-api
     ports:
       - "127.0.0.1:3000:3000"
     deploy:

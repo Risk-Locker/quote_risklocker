@@ -12,7 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, File, Form, Header, Query, Request, Response as FastAPIResponse, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse, Response
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
@@ -378,22 +378,36 @@ router = APIRouter()
 
 
 @router.get("/health")
-def health(settings: Settings = Depends(settings_dep)) -> dict:
+def health(settings: Settings = Depends(settings_dep)) -> JSONResponse:
     db_host = "Unknown"
     db_url = getattr(settings, "database_url", None)
     if db_url:
         parts = db_url.split('@') if isinstance(db_url, str) else str(db_url).split('@')
         if len(parts) > 1:
             db_host = parts[-1].split('/')[0]
-            
-    return {
-        "status": "Ready", 
-        "app": getattr(settings, "app_name", "Risklocker Quotation Converter"),
-        "env": getattr(settings, "app_env", "local"),
-        "supabase_url": getattr(settings, "supabase_url", ""),
-        "database_host": db_host,
-        "storage_bucket": getattr(settings, "supabase_storage_bucket", ""),
-    }
+
+    db_ok = True
+    db_error = None
+    try:
+        from app.db.session import SessionLocal
+        with SessionLocal() as db:
+            db.execute(text("SELECT 1"))
+    except Exception as exc:
+        db_ok = False
+        db_error = str(exc)
+
+    return JSONResponse(
+        status_code=200 if db_ok else 503,
+        content={
+            "status": "Ready" if db_ok else "Degraded",
+            "database": "connected" if db_ok else f"disconnected: {db_error}",
+            "app": getattr(settings, "app_name", "Risklocker Quotation Converter"),
+            "env": getattr(settings, "app_env", "local"),
+            "supabase_url": getattr(settings, "supabase_url", ""),
+            "database_host": db_host,
+            "storage_bucket": getattr(settings, "supabase_storage_bucket", ""),
+        },
+    )
 
 
 
