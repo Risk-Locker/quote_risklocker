@@ -25,18 +25,18 @@
 - Create: frontend/src/app/builder/assets/components/AssetDetailsModal.tsx
 - Modify: `frontend/src/app/builder/assets/page.tsx:860-1150`
 
-- [ ] **Step 1: Create `AssetDetailsModal.tsx`**
+- [x] **Step 1: Create `AssetDetailsModal.tsx`**
 Build the inspection modal showing:
 1. Preview image with zoom-on-hover.
 2. Detailed metadata table: ID, Key, Uploaded At, File Size (`formatBytes`), Resolution (`W × H`), MIME Type, Transparency badge.
 3. One-click "Copy Image URL" button with clipboard write.
 4. "Download" and "Delete" actions.
 
-- [ ] **Step 2: Update `frontend/src/app/builder/assets/page.tsx`**
+- [x] **Step 2: Update `frontend/src/app/builder/assets/page.tsx`**
 1. Make search & filter toolbar `sticky top-0 z-20 bg-white/95 backdrop-blur-sm shadow-xs`.
 2. Wire `onClick` on asset card to open `AssetDetailsModal` when not in multi-select mode.
 
-- [ ] **Step 3: Run TypeScript compiler**
+- [x] **Step 3: Run TypeScript compiler**
 
 Run: `cd frontend; npx tsc --noEmit`
 Expected: PASS with 0 errors
@@ -45,41 +45,9 @@ Expected: PASS with 0 errors
 
 ### Task 2: Clean Up Test Asset Debris in Backend
 
-**Files:**
-- Create: `scripts/cleanup_dummy_test_assets.py`
-
-- [ ] **Step 4: Write cleanup script**
-
-```python
-from app.db.session import SessionLocal
-from app.models.tables import BusinessAsset
-
-def cleanup_test_assets():
-    db = SessionLocal()
-    try:
-        test_assets = db.query(BusinessAsset).filter(
-            BusinessAsset.label.ilike("Test Label%") | 
-            BusinessAsset.label.ilike("Test Insurer Logo%") | 
-            BusinessAsset.label.ilike("Test Logo%")
-        ).all()
-        print(f"Found {len(test_assets)} dummy test assets to clean up.")
-        for a in test_assets:
-            db.delete(a)
-        db.commit()
-        print("Cleanup completed successfully.")
-    finally:
-        db.close()
-
-if __name__ == "__main__":
-    cleanup_test_assets()
-```
-
-- [ ] **Step 5: Run cleanup script**
-
-Run: `.\.venv\Scripts\python.exe scripts/cleanup_dummy_test_assets.py`
-Expected: Successfully deletes dummy test assets.
-
-- [ ] **Step 6: Commit Milestone 4 changes**
+- [x] **Step 4: Execute database cleanup of dummy assets and categorize real logos**
+- [x] **Step 5: Verify cleanup in PostgreSQL**
+- [x] **Step 6: Commit Milestone 4 changes**
 
 ```bash
 git add frontend/src/app/builder/assets/ scripts/cleanup_dummy_test_assets.py

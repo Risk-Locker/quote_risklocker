@@ -28,6 +28,7 @@ import { Select } from "@/components/ui/select";
 import { PageLoading } from "@/components/ui/page-loading";
 import { api, fileUrl } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
+import { AssetDetailsModal } from "./components/AssetDetailsModal";
 
 type Asset = {
   id: string;
@@ -251,6 +252,9 @@ export default function AssetLibraryPage() {
   const [folderToDelete, setFolderToDelete] = useState("");
   const [deleteFolderAction, setDeleteFolderAction] = useState<"move_to_general" | "delete_all">("move_to_general");
   const [deletingFolder, setDeletingFolder] = useState(false);
+
+  // S3-Style Inspection Details Modal
+  const [detailsAsset, setDetailsAsset] = useState<Asset | null>(null);
 
   const showToast = (msg: string) => {
     setSuccessToast(msg);
@@ -861,8 +865,8 @@ export default function AssetLibraryPage() {
 
           {/* Right main panel */}
           <main className="grid gap-4">
-            {/* Filter Card */}
-            <div className="bg-[var(--rl-surface)] p-3.5 rounded-lg border border-[var(--rl-border)] shadow-2xs space-y-3">
+            {/* Filter Card - Sticky on Scroll */}
+            <div className="sticky top-0 z-20 bg-[var(--rl-surface)]/95 backdrop-blur-md p-3.5 rounded-lg border border-[var(--rl-border)] shadow-xs space-y-3">
               {/* Row 1: Search & Purpose Quick Pills */}
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
                 {/* Search Input with Clear Button */}
@@ -1040,9 +1044,13 @@ export default function AssetLibraryPage() {
                     <article
                       key={asset.id}
                       onClick={() => {
-                        if (selectedIds.size > 0) toggleSelect(asset.id);
+                        if (selectedIds.size > 0) {
+                          toggleSelect(asset.id);
+                        } else {
+                          setDetailsAsset(asset);
+                        }
                       }}
-                      className={`group relative overflow-hidden rounded border bg-[var(--rl-surface)] transition-all ${isSelected
+                      className={`group relative overflow-hidden rounded border bg-[var(--rl-surface)] transition-all cursor-pointer ${isSelected
                         ? "border-[var(--rl-primary)] ring-2 ring-[var(--rl-primary)]/40 shadow-sm"
                         : "border-[var(--rl-border)] hover:border-[var(--rl-border-strong)] hover:shadow-card"
                         }`}
@@ -1783,6 +1791,23 @@ export default function AssetLibraryPage() {
           />
         </div>
       </Dialog>
+
+      {/* S3-Style Asset Details Inspector Modal */}
+      <AssetDetailsModal
+        asset={detailsAsset}
+        open={!!detailsAsset}
+        onOpenChange={(open) => {
+          if (!open) setDetailsAsset(null);
+        }}
+        onEdit={(asset) => {
+          setDetailsAsset(null);
+          openEditModal(asset);
+        }}
+        onDelete={(asset) => {
+          setDetailsAsset(null);
+          openDeleteModal(asset);
+        }}
+      />
     </AppShell>
   );
 }
