@@ -133,7 +133,10 @@ def _ensure_ledger(connection: Connection) -> None:
             """
         )
     )
-    connection.execute(text("REVOKE ALL PRIVILEGES ON TABLE public.schema_migrations FROM anon, authenticated"))
+    try:
+        connection.execute(text("REVOKE ALL PRIVILEGES ON TABLE public.schema_migrations FROM anon, authenticated"))
+    except SQLAlchemyError:
+        pass
     connection.execute(text("ALTER TABLE public.schema_migrations ENABLE ROW LEVEL SECURITY"))
 
 

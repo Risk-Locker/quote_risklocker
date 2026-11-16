@@ -69,6 +69,7 @@ jobs:
           APP_ENV: local
           DATABASE_URL: postgresql://postgres:ci@127.0.0.1:5432/risklocker_ci
         run: |
+          python -c "import psycopg; conn = psycopg.connect('${{ env.DATABASE_URL }}'); conn.execute('DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = \'anon\') THEN CREATE ROLE anon; END IF; IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = \'authenticated\') THEN CREATE ROLE authenticated; END IF; END \$\$;'); conn.commit(); conn.close(); print('CI roles provisioned')"
           PYTHONPATH=backend python -m app.db.migrations --allow-local
           PYTHONPATH=backend python -c "from app.db.session import verify_schema_version; verify_schema_version(); print('Postgres 16 schema OK')"
 
