@@ -33,10 +33,10 @@
 - Modify: `backend/app/rendering/template_renderer_design2.py:315-330`
 - Modify: `backend/app/rendering/benefit_schedule_renderer.py:590-670`
 
-- [ ] **Step 1: Write unit test asserting font stack in rendered HTML**
-- [ ] **Step 2: Update CSS font-family rules in `template_renderer_design2.py`**
-- [ ] **Step 3: Update CSS font-family rules in `benefit_schedule_renderer.py`**
-- [ ] **Step 4: Verify test passes**
+- [x] **Step 1: Write unit test asserting font stack in rendered HTML**
+- [x] **Step 2: Update CSS font-family rules in `template_renderer_design2.py`**
+- [x] **Step 3: Update CSS font-family rules in `benefit_schedule_renderer.py`**
+- [x] **Step 4: Verify test passes**
 
 ---
 
@@ -46,6 +46,6 @@
 - Modify: `frontend/src/components/template-canvas/design2-canvas.tsx:380-400`
 - Modify: `frontend/src/components/template-canvas/design2-canvas.tsx:765-780`
 
-- [ ] **Step 5: Update canvas typography styles**
-- [ ] **Step 6: Verify TypeScript compilation (`npx tsc --noEmit`)**
-- [ ] **Step 7: Commit Milestone 6 changes**
+- [x] **Step 5: Update canvas typography styles**
+- [x] **Step 6: Verify TypeScript compilation (`npx tsc --noEmit`)**
+- [x] **Step 7: Commit Milestone 6 changes**

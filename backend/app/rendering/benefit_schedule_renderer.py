@@ -594,7 +594,7 @@ DESIGN2_PAGE_CSS = """
     justify-content: space-between;
     background: #FFFFFF;
     color: #0F172A;
-    font-family: 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+    font-family: 'Helvetica', 'Helvetica Light', -apple-system, BlinkMacSystemFont, Arial, 'Source Han Sans CN', 'Source Han Sans SC', 'Noto Sans SC', 'SimSun', sans-serif;
     overflow: hidden;
     page-break-after: always;
     break-after: page;
@@ -648,7 +648,7 @@ def render_benefit_schedule_html(
 <title>Benefits & Endorsements Schedule - {escape(quote_ref)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
 <style>
 @page {{ size: 794px 1123px; margin: 0; }}
 * {{ box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
@@ -656,7 +656,7 @@ body {{
     margin: 0;
     padding: 0;
     width: 794px;
-    font-family: 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+    font-family: 'Helvetica', 'Helvetica Light', -apple-system, BlinkMacSystemFont, Arial, 'Source Han Sans CN', 'Source Han Sans SC', 'Noto Sans SC', 'SimSun', sans-serif;
     color: #0F172A;
     background: #FFFFFF;
 }}
@@ -667,6 +667,8 @@ body {{
     flex-direction: column;
     justify-content: space-between;
     background: #FFFFFF;
+    color: #0F172A;
+    font-family: 'Helvetica', 'Helvetica Light', -apple-system, BlinkMacSystemFont, Arial, 'Source Han Sans CN', 'Source Han Sans SC', 'Noto Sans SC', 'SimSun', sans-serif;
     overflow: hidden;
     page-break-after: always;
     break-after: page;

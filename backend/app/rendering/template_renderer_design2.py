@@ -305,15 +305,20 @@ def render_design2_html(
 <title>Motor Insurance Quotation - {escape(quote_ref)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
 <style>
+:root {{
+    --d2-font-body: 'Helvetica', 'Helvetica Light', -apple-system, BlinkMacSystemFont, Arial, 'Source Han Sans CN', 'Source Han Sans SC', 'Noto Sans SC', 'SimSun', sans-serif;
+    --d2-font-heading: 'Helvetica Bold', 'Helvetica', Arial, 'Source Han Sans SC', 'Source Han Sans CN', 'Noto Sans SC', sans-serif;
+    --d2-font-notes: 'Calibri Italic', 'Calibri', 'Helvetica', Arial, 'Source Han Sans CN', sans-serif;
+}}
 @page {{ size: 794px 1123px; margin: 0; }}
 * {{ box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
 body {{
     margin: 0;
     padding: 0;
     width: 794px;
-    font-family: 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+    font-family: var(--d2-font-body);
     color: #0F172A;
     background: #FFFFFF;
 }}
@@ -324,6 +329,8 @@ body {{
     flex-direction: column;
     justify-content: space-between;
     background: #FFFFFF;
+    color: #0F172A;
+    font-family: var(--d2-font-body);
     overflow: hidden;
     page-break-after: always;
     break-after: page;
@@ -497,7 +504,7 @@ body {{
                 <div style="font-size: 24.5px; font-weight: 900; letter-spacing: -0.4px; line-height: 1;">
                     <span style="color: #E52320;">Add-On</span> <span style="color: #1D1D1B;">Upgrades</span> <span style="color: #E52320;">++</span>
                 </div>
-                <div style="font-size: 11.2px; font-weight: 700; font-style: italic; color: #353331; letter-spacing: 0.2px; text-transform: uppercase;">
+                <div style="font-size: 11.2px; font-weight: 700; font-style: italic; font-family: var(--d2-font-notes); color: #353331; letter-spacing: 0.2px; text-transform: uppercase;">
                     ADDITIONAL PROTECTION FOR GREATER PEACE OF MIND
                 </div>
             </div>

@@ -24,6 +24,12 @@ export interface Design2CanvasProps {
   height?: number;
 }
 
+export const D2_CANVAS_FONT_FAMILY =
+  "'Helvetica', 'Helvetica Light', -apple-system, BlinkMacSystemFont, Arial, 'Source Han Sans CN', 'Source Han Sans SC', 'Noto Sans SC', 'SimSun', sans-serif";
+
+export const D2_CANVAS_NOTES_FONT_FAMILY =
+  "'Calibri', 'Calibri Italic', 'Helvetica', Arial, 'Source Han Sans CN', sans-serif";
+
 const FIELD_ALIASES: Record<string, string[]> = {
   customer_name: ["customer_name", "insured_name"],
   quotation_reference: ["quotation_reference", "quotation_ref", "quote_ref", "reference_no", "quote_no"],
@@ -382,7 +388,7 @@ export function Design2CanvasView({
           justifyContent: "space-between",
           background: "#FFFFFF",
           color: "#0F172A",
-          fontFamily: "'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, Arial, sans-serif",
+          fontFamily: D2_CANVAS_FONT_FAMILY,
           boxSizing: "border-box",
           overflow: "hidden",
         }}
@@ -662,7 +668,7 @@ export function Design2CanvasView({
                 <span style={{ color: "#1D1D1B" }}>Upgrades</span>{" "}
                 <span style={{ color: "#E52320" }}>++</span>
               </div>
-              <div style={{ fontSize: "11.2px", fontWeight: 700, fontStyle: "italic", color: "#353331", letterSpacing: "0.2px", textTransform: "uppercase" }}>
+              <div style={{ fontSize: "11.2px", fontWeight: 700, fontStyle: "italic", fontFamily: D2_CANVAS_NOTES_FONT_FAMILY, color: "#353331", letterSpacing: "0.2px", textTransform: "uppercase" }}>
                 ADDITIONAL PROTECTION FOR GREATER PEACE OF MIND
               </div>
             </div>
@@ -767,7 +773,7 @@ export function Design2CanvasView({
             justifyContent: "space-between",
             background: "#FFFFFF",
             color: "#0F172A",
-            fontFamily: "'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, Arial, sans-serif",
+            fontFamily: D2_CANVAS_FONT_FAMILY,
             boxSizing: "border-box",
             overflow: "hidden",
             boxShadow: "0 4px 14px rgba(0,0,0,0.08)",
