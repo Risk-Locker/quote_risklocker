@@ -49,6 +49,7 @@ PRESERVE_UPPERCASE = {
     "CKD", "CBU", "AV", "X", "RS", "GT", "TRD", "GLI", "SE", "V", "E", "G", "J",
     "TGDI", "TSI", "TDI", "VTEC", "M", "AMG", "S", "L", "TC-P", "TC", "VTI",
     "CX", "CR", "HR", "BR", "MX", "GLS", "GLX", "AT", "MT",
+    "BLM", "FLX", "SV", "LE", "XLE", "CRF", "CBU", "TSI", "TFSI", "CRDI",
 }
 
 # Proper brand name capitalizations
@@ -159,13 +160,19 @@ def clean_vehicle_tokens_deterministic(raw_brand: str | None, raw_model: str | N
     formatted_tokens: list[str] = []
     for tok in deduped:
         tok_up = tok.upper()
-        if tok_up in PRESERVE_UPPERCASE or (len(tok_up) <= 3 and tok_up.isupper() and not tok_up.isdigit()):
+        m_code = re.match(r"^([A-Z]\d+)([A-Z]{1,3})$", tok_up)
+        if m_code:
+            formatted_tokens.append(f"{m_code.group(1)}-{m_code.group(2)}")
+        elif tok_up in PRESERVE_UPPERCASE or (len(tok_up) <= 3 and tok_up.isupper() and not tok_up.isdigit()):
             formatted_tokens.append(tok_up)
         elif "-" in tok:
-            sub = [p.upper() if p.upper() in PRESERVE_UPPERCASE else p.capitalize() for p in tok.split("-")]
+            sub = [p.upper() if (p.upper() in PRESERVE_UPPERCASE or bool(re.search(r"\d", p)) or len(p) <= 3) else p.capitalize() for p in tok.split("-")]
             formatted_tokens.append("-".join(sub))
         elif re.search(r"\d+(?:\.\d+)?kw$", tok, re.IGNORECASE):
             formatted_tokens.append(re.sub(r"(?i)kw$", "kW", tok))
+        elif re.search(r"[A-Za-z]", tok) and re.search(r"\d", tok) and len(tok) <= 6:
+            # Short alphanumeric model code (e.g. E350, 330i, X50, BLM)
+            formatted_tokens.append(tok_up)
         else:
             formatted_tokens.append(tok.capitalize())
 

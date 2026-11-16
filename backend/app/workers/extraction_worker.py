@@ -354,8 +354,14 @@ def process_extraction_job(
         qref_val = session.quotation_ref if session.quotation_ref and str(session.quotation_ref).startswith("RL") else generate_quotation_reference(db)
         session.quotation_ref = qref_val
     fields["quotation_reference"] = {"value": qref_val, "status": "ready", "message": ""}
+
+    # Referee Fact-Checking & Consistency Gate
+    from app.extraction.referee import audit_and_reconcile_draft
+    raw_evidence = f"{values.get('raw_text', '')} {values.get('ocr_text', '')}"
+    fields, referee_notices = audit_and_reconcile_draft(fields, raw_text=raw_evidence)
+
     draft.fields = fields
-    draft.warnings = draft_data.get("warnings") or []
+    draft.warnings = list(draft_data.get("warnings") or []) + referee_notices
     draft.status = draft_data.get("status") or RecordStatus.CHECK_NEEDED.value
     draft.scalar_decisions = {
         name: {

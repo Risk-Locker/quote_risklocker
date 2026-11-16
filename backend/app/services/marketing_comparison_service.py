@@ -194,13 +194,16 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         reverse=True,
     )
 
-    # Gather candidate customer IC / passport for runner fee detection
+    # Gather candidate customer name and IC / passport for runner fee detection
+    cand_cust = tenure.customer_name or ""
     cand_ic = ""
     for s in sessions_desc:
         if s.draft and isinstance(s.draft.fields, dict):
             f = s.draft.fields
             if not cand_ic:
                 cand_ic = _safe_str(f.get("ic_no") or f.get("nric") or f.get("ic_or_brn") or f.get("passport_no"))
+            if not cand_cust:
+                cand_cust = _safe_str(f.get("customer_name") or f.get("insured_name"))
 
     # Detect road tax and runner fee with JPJ Mathematical Engine integration
     from app.services.road_tax_service import calculate_road_tax
@@ -274,7 +277,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             fallback_vtype = "EVSaloonCar"
 
     entity_type, resolved_vtype = classify_client_entity(
-        customer_name="",
+        customer_name=cand_cust,
         ic_or_brn=cand_ic,
         ai_client_type=detected_client_type,
         current_vehicle_type=detected_vtype or inferred_vtype or fallback_vtype,
@@ -282,6 +285,8 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         car_brand=detected_brand,
         capacity_str=raw_capacity_token,
     )
+
+    is_comp_private = (resolved_vtype in ("Car", "NonSaloonCar", "EVSaloonCar", "EVNonSaloonCar") and entity_type == "Private")
 
     calculated_jpj_road_tax = 0.0
     if final_cc:
@@ -355,7 +360,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 quote_year=quote_year,
                 company_name=comp_name,
                 has_betterment_peril=has_peril,
-                is_comprehensive_private=True,
+                is_comprehensive_private=is_comp_private,
                 registration_date=reg_date,
                 coverage_start_date=tenure.coverage_start_date,
             )
@@ -427,7 +432,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                     quote_year=quote_year,
                     company_name=comp_name,
                     has_betterment_peril=has_peril,
-                    is_comprehensive_private=True,
+                    is_comprehensive_private=is_comp_private,
                     registration_date=reg_date,
                     coverage_start_date=tenure.coverage_start_date,
                 )
@@ -512,7 +517,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 quote_year=quote_year,
                 company_name=e.company_name,
                 has_betterment_peril=e.waiver_betterment,
-                is_comprehensive_private=True,
+                is_comprehensive_private=is_comp_private,
             )
             if e.betterment_rate is None or e.betterment_display is None:
                 e.betterment_rate = fallback_bet_rate
@@ -1461,7 +1466,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "car_brand": (tenure.tracked_vehicle.car_brand if tenure.tracked_vehicle else None) or waterfall_brand,
             "vehicle_model": veh_model or "Motor Vehicle",
             "vehicle_type": resolved_vtype,
-            "coverage_type": "Comprehensive (综合险)",
+            "coverage_type": "Commercial Vehicle Comprehensive (商用车辆综合险)" if (is_commercial_veh or resolved_vtype == "Lorry") else "Comprehensive (综合险)",
         },
         "covernote_policy": covernote_policy,
         "unlinked_covernotes": unlinked_covernotes,
@@ -2516,6 +2521,10 @@ def rescan_comparison_tenure(db: Session, tenure_id: str) -> dict[str, Any]:
     veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if tenure.tracked_vehicle else None
     quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now().year
 
+    tv_type = getattr(tenure.tracked_vehicle, "vehicle_type", "Car") if tenure.tracked_vehicle else "Car"
+    from app.extraction.entity_classifier import is_corporate_name
+    is_rescan_comp_private = (tv_type in ("Car", "NonSaloonCar", "EVSaloonCar", "EVNonSaloonCar") and not is_corporate_name(tenure.customer_name))
+
     detected_ws = None
     for s in sessions:
         f = s.draft.fields if s.draft and isinstance(s.draft.fields, dict) else {}
@@ -2551,7 +2560,7 @@ def rescan_comparison_tenure(db: Session, tenure_id: str) -> dict[str, Any]:
                 quote_year=quote_year,
                 company_name=entry.company_name,
                 has_betterment_peril=has_peril,
-                is_comprehensive_private=True,
+                is_comprehensive_private=is_rescan_comp_private,
                 registration_date=reg_date,
                 coverage_start_date=tenure.coverage_start_date,
             )

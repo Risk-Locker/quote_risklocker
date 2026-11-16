@@ -695,8 +695,16 @@ export function CustomerVehicleLedgerPane({
               <div className="flex justify-between">
                 <span className="text-[#6e6e73]">Brand &amp; Model:</span>
                 <span className="font-semibold text-[#1b1717]">
-                  {tenure.car_brand ? `${tenure.car_brand} ` : ""}
-                  {tenure.vehicle_model}
+                  {(() => {
+                    const brand = (tenure.car_brand || "").trim();
+                    const model = (tenure.vehicle_model || "").trim();
+                    if (!brand) return model || "Motor Vehicle";
+                    if (!model) return brand;
+                    if (model.toLowerCase().startsWith(brand.toLowerCase())) {
+                      return model;
+                    }
+                    return `${brand} ${model}`;
+                  })()}
                 </span>
               </div>
               <div className="flex justify-between">

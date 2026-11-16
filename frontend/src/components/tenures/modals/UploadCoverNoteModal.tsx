@@ -82,7 +82,13 @@ export function CoverNoteUploadModal({
               <div>
                 <span className="text-neutral-500 block text-[10px]">Vehicle Model:</span>
                 <span className="text-neutral-800 truncate block">
-                  {[tenure.car_brand, tenure.car_model].filter(Boolean).join(" ") || "—"}
+                  {(() => {
+                    const b = (tenure.car_brand || "").trim();
+                    const m = (tenure.car_model || "").trim();
+                    if (!b) return m || "—";
+                    if (!m) return b;
+                    return m.toLowerCase().startsWith(b.toLowerCase()) ? m : `${b} ${m}`;
+                  })()}
                 </span>
               </div>
             </div>

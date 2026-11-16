@@ -578,6 +578,11 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
         if isinstance(f_data, dict) and ("detected_value" not in f_data or f_data.get("detected_value") is None):
             f_data["detected_value"] = f_data.get("value")
 
+    # Referee Fact-Checking Pass
+    from app.extraction.referee import audit_and_reconcile_draft
+    fields, ref_notices = audit_and_reconcile_draft(fields)
+    warnings.extend(ref_notices)
+
     check_count = sum(1 for field in fields.values() if field.get("status") == "check_needed")
     if check_count:
         warnings.append("Please check highlighted values before generating.")
