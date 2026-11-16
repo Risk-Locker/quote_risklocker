@@ -18,14 +18,14 @@
 
 ## Serialized Milestones Roadmap
 
-| Milestone | Title | Net LOC Budget | Primary Touched Subsystems | Plan Document |
-| :--- | :--- | :--- | :--- | :--- |
-| **M1** | **Extraction Referee Gate & Vehicle Naming Fixes** | ~350 LOC | `backend/app/extraction/`, `backend/app/services/vehicle_simplifier_service.py`, `frontend/src/components/comparison/` | `docs/plans/milestone-1-extraction-referee-and-naming.md` |
-| **M2** | **AI Fleet Google PT Quota Window & Batch Assigner** | ~380 LOC | `backend/app/services/gemini_account_service.py`, `backend/app/extraction/pacer_sentinel.py`, `backend/app/services/token_preflight_service.py` | `docs/plans/milestone-2-ai-fleet-pt-calendar-and-pacing.md` |
-| **M3** | **AI Fleet Monitoring Dashboard (Calendar & Timeline)** | ~400 LOC | `frontend/src/app/settings/ai-engine/`, `frontend/src/components/` | `docs/plans/milestone-3-ai-fleet-monitoring-dashboard.md` |
-| **M4** | **Assets Library UX (Sticky Toolbar, Inspector Modal & Cleanup)** | ~450 LOC | `frontend/src/app/builder/assets/page.tsx`, `backend/app/services/business_asset_service.py` | `docs/plans/milestone-4-assets-library-ux-and-cleanup.md` |
-| **M5** | **Marketing Comparison State Hardening & Auto-Dismiss** | ~200 LOC | `frontend/src/components/comparison/comparison-matrix.tsx`, `UnderwriterQuoteCard.tsx` | `docs/plans/milestone-5-marketing-comparison-state-hardening.md` |
-| **M6** | **Design 2 Quotation Typography & Exact Font Pairing** | ~220 LOC | `backend/app/rendering/template_renderer_design2.py`, `benefit_schedule_renderer.py`, `frontend/src/components/template-canvas/design2-canvas.tsx` | `docs/plans/milestone-6-design2-typography-and-fonts.md` |
+| Milestone | Title | Net LOC Budget | Primary Touched Subsystems | Plan Document | Status |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **M1** | **Extraction Referee Gate & Vehicle Naming Fixes** | ~350 LOC | `backend/app/extraction/`, `backend/app/services/vehicle_simplifier_service.py`, `frontend/src/components/comparison/` | `docs/plans/milestone-1-extraction-referee-and-naming.md` | **Completed (`88b1164`)** |
+| **M2** | **AI Fleet Google PT Quota Window & Batch Assigner** | ~380 LOC | `backend/app/services/gemini_account_service.py`, `backend/app/extraction/pacer_sentinel.py`, `backend/app/services/token_preflight_service.py` | `docs/plans/milestone-2-ai-fleet-pt-calendar-and-pacing.md` | **Completed (`76652b6`)** |
+| **M3** | **AI Fleet Monitoring Dashboard (Calendar & Timeline)** | ~400 LOC | `frontend/src/app/settings/ai-engine/`, `frontend/src/components/` | `docs/plans/milestone-3-ai-fleet-monitoring-dashboard.md` | **Completed (`74d01d6`)** |
+| **M4** | **Assets Library UX (Sticky Toolbar, Inspector Modal & Cleanup)** | ~450 LOC | `frontend/src/app/builder/assets/page.tsx`, `backend/app/services/business_asset_service.py` | `docs/plans/milestone-4-assets-library-ux-and-cleanup.md` | **Completed (`e504525`)** |
+| **M5** | **Marketing Comparison State Hardening & Auto-Dismiss** | ~200 LOC | `frontend/src/components/comparison/comparison-matrix.tsx`, `UnderwriterQuoteCard.tsx` | `docs/plans/milestone-5-marketing-comparison-state-hardening.md` | **Completed (`59e7158`)** |
+| **M6** | **Design 2 Quotation Typography & Exact Font Pairing** | ~220 LOC | `backend/app/rendering/template_renderer_design2.py`, `benefit_schedule_renderer.py`, `frontend/src/components/template-canvas/design2-canvas.tsx` | `docs/plans/milestone-6-design2-typography-and-fonts.md` | **Completed (`910dcd5`)** |
 
 ---
 
