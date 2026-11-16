@@ -522,8 +522,6 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
         if gp_val and st_val and "premium" in fields:
             try:
                 calc_prem = Decimal(str(gp_val).replace(",", "")) + Decimal(str(st_val).replace(",", ""))
-                if extras_cost > 0 and calc_prem > extras_cost:
-                    calc_prem -= extras_cost
                 if not p_val or (bp_val and str(p_val) == str(bp_val)):
                     fields["premium"]["value"] = f"{calc_prem:.2f}"
                     fields["premium"]["status"] = "ready"
@@ -531,26 +529,19 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
             except Exception:
                 pass
 
-        # If total_amount in PDF was the insurer total contribution / total payable (e.g. 2,922.85)
-        # and optional extras were detected, net out extras so premium is the true base insurance premium:
-        # Insurance Premium = Final Price (Total Contribution) - Extras
+        # If total_amount in PDF was the insurer total contribution / total payable
         if t_val and "premium" in fields:
             try:
                 tot_num = Decimal(str(t_val).replace(",", ""))
-                if extras_cost > 0:
-                    base_p = tot_num - extras_cost
-                    if base_p > 0:
-                        fields["premium"]["value"] = f"{base_p:.2f}"
-                        fields["premium"]["status"] = "ready"
-                        p_val = f"{base_p:.2f}"
-                elif bp_val and str(p_val) == str(bp_val) and str(t_val) != str(bp_val):
-                    fields["premium"]["value"] = str(t_val)
-                    fields["premium"]["status"] = "ready"
-                    p_val = str(t_val)
-                elif not p_val or str(p_val) in {"0", "0.00"}:
+                if not p_val or str(p_val) in {"0", "0.00"} or (bp_val and str(p_val) == str(bp_val) and str(t_val) != str(bp_val)):
                     fields["premium"]["value"] = f"{tot_num:.2f}"
                     fields["premium"]["status"] = "ready"
                     p_val = f"{tot_num:.2f}"
+                elif p_val:
+                    p_dec = Decimal(str(p_val).replace(",", ""))
+                    if p_dec == tot_num:
+                        fields["premium"]["value"] = f"{tot_num:.2f}"
+                        p_val = f"{tot_num:.2f}"
 
                 # Always preserve extracted total_amount as the Final Price / Total Payable from PDF
                 if "total_amount" in fields:
@@ -566,7 +557,7 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
             try:
                 r_num = Decimal(str(r_val).replace(",", "")) if str(r_val).strip() else Decimal("0")
                 s_num = Decimal(str(s_val).replace(",", "")) if str(s_val).strip() else Decimal("0")
-                tot = Decimal(str(p_val).replace(",", "")) + extras_cost + r_num + s_num
+                tot = Decimal(str(p_val).replace(",", "")) + r_num + s_num
                 fields["total_amount"]["value"] = f"{tot:.2f}"
                 fields["total_amount"]["status"] = "ready"
             except Exception:

@@ -546,26 +546,41 @@ export function ManualQuoteModal({
         {/* Tab 2: Manual Portal Entry Form */}
         {(activeTab === "manual" || initialData) && (
           <form onSubmit={handleManualSubmit} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
-            {/* Insurer Selection */}
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
-                Underwriter Company
-              </label>
-              <select
-                value={companyName}
-                onChange={(e) => setCompanyName(e.target.value)}
-                className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm font-medium text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
-              >
-                {companyName && !COMMON_INSURERS.includes(companyName) && companyName !== "Other" && (
-                  <option value={companyName}>{companyName}</option>
-                )}
-                {COMMON_INSURERS.map((ins) => (
-                  <option key={ins} value={ins}>
-                    {ins}
-                  </option>
-                ))}
-                <option value="Other">Other / Custom Insurer</option>
-              </select>
+            {/* Insurer Selection & Quotation Ref */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
+                  Underwriter Company
+                </label>
+                <select
+                  value={companyName}
+                  onChange={(e) => setCompanyName(e.target.value)}
+                  className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm font-medium text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
+                >
+                  {companyName && !COMMON_INSURERS.includes(companyName) && companyName !== "Other" && (
+                    <option value={companyName}>{companyName}</option>
+                  )}
+                  {COMMON_INSURERS.map((ins) => (
+                    <option key={ins} value={ins}>
+                      {ins}
+                    </option>
+                  ))}
+                  <option value="Other">Other / Custom Insurer</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
+                  Quotation Ref No.
+                </label>
+                <input
+                  type="text"
+                  value={sourceQuotationNo}
+                  onChange={(e) => setSourceQuotationNo(e.target.value)}
+                  placeholder="e.g. QM12390133, QC590226-001"
+                  className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm font-mono text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
+                />
+              </div>
             </div>
 
             {companyName === "Other" && (
@@ -617,25 +632,41 @@ export function ManualQuoteModal({
               </div>
             </div>
 
-            {/* Motor Premium */}
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
-                Gross Motor Premium (RM)
-              </label>
-              <input
-                type="text"
-                step="0.01"
-                placeholder="e.g. 1850.50"
-                value={motorPremium}
-                onChange={(e) => setMotorPremium(e.target.value)}
-                className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm font-mono text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
-              />
-              <span className="text-[11px] text-[#6e6e73] mt-1 block">
-                Total payable will automatically include tenure Road Tax and Runner Fee
-              </span>
-            </div>
+            {/* Financials: Net Motor Premium & Policy Excess */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
+                  Net Motor Premium (RM)
+                </label>
+                <input
+                  type="text"
+                  step="0.01"
+                  placeholder="e.g. 1850.50"
+                  value={motorPremium}
+                  onChange={(e) => setMotorPremium(e.target.value)}
+                  className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm font-mono text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
+                />
+              </div>
 
-            {/* Perils & Endorsements */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
+                  Policy Excess (RM)
+                </label>
+                <input
+                  type="text"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={excess}
+                  onChange={(e) => setExcess(e.target.value)}
+                  className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm font-mono text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
+                />
+              </div>
+            </div>
+            <span className="text-[11px] text-[#6e6e73] block -mt-2">
+              Total payable is calculated automatically: Net Premium + Road Tax + Runner Fee (RM 20.00)
+            </span>
+
+            {/* Key Perils & Endorsements */}
             <div className="grid grid-cols-2 gap-3 pt-1">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
@@ -652,23 +683,6 @@ export function ManualQuoteModal({
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
-                  Excess (RM)
-                </label>
-                <input
-                  type="text"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={excess}
-                  onChange={(e) => setExcess(e.target.value)}
-                  className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm font-mono text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
-                />
-              </div>
-            </div>
-
-            {/* Windscreen & Special Perils */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
                   Windscreen Coverage (RM)
                 </label>
                 <input
@@ -680,7 +694,10 @@ export function ManualQuoteModal({
                   className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm font-mono text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
                 />
               </div>
+            </div>
 
+            {/* Special Perils & Legal Liability */}
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
                   Special Perils / Flood
@@ -693,10 +710,7 @@ export function ManualQuoteModal({
                   className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
                 />
               </div>
-            </div>
 
-            {/* Legal Liability & Notes */}
-            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
                   LLP / LLOP (Passenger)
@@ -709,19 +723,20 @@ export function ManualQuoteModal({
                   className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
                 />
               </div>
+            </div>
 
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
-                  Notes / Endorsements
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Workshop panel only"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
-                />
-              </div>
+            {/* Notes / Endorsements */}
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
+                Notes / Endorsements
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Workshop panel only, 24/7 hotline"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
+              />
             </div>
 
             {/* Checkbox Features */}
@@ -858,64 +873,18 @@ export function ManualQuoteModal({
                     </div>
                   </div>
 
-                  {/* 3. Quotation Reference & Raw PDF Detection Audit */}
-                  <div className="space-y-2 pt-1 border-t border-[#e5e5ea]">
-                    <div className="flex items-center justify-between border-b border-[#e5e5ea] pb-1">
-                      <span className="font-bold text-[#1b1717] uppercase tracking-wider text-[11px]">
-                        Insurer Quotation Ref &amp; Detection Audit
-                      </span>
-                      <span className="text-[10px] text-[#6e6e73]">
-                        Verified from uploaded insurer schedule
-                      </span>
-                    </div>
-
-                    {/* Quotation Reference Input */}
-                    <div>
-                      <label className="block text-[10px] font-bold text-[#6e6e73] uppercase mb-1">
-                        Insurer Quotation Reference No.
-                      </label>
-                      <input
-                        type="text"
-                        value={sourceQuotationNo}
-                        onChange={(e) => setSourceQuotationNo(e.target.value)}
-                        placeholder="e.g. QM12390133, FL22026M-00867209-001, QC590226-001"
-                        className="w-full rounded-md border border-[#e5e5ea] bg-white px-2.5 py-1.5 text-xs font-mono font-bold text-[#1b1717] focus:outline-none focus:ring-1 focus:ring-[#1b1717]"
-                      />
-                    </div>
-
-                    {/* Customer & Policyholder Info */}
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="p-2 rounded-lg bg-white border border-[#e5e5ea]">
-                        <span className="text-[10px] text-[#6e6e73] block">Customer Name</span>
-                        <span className="font-semibold text-[#1b1717] truncate block" title={initialData?.customer_name || "—"}>
-                          {initialData?.customer_name || "—"}
-                        </span>
-                      </div>
-
-                      <div className="p-2 rounded-lg bg-white border border-[#e5e5ea]">
-                        <span className="text-[10px] text-[#6e6e73] block">IC / Business Reg No.</span>
-                        <span className="font-semibold text-[#1b1717]">
-                          {initialData?.ic_or_brn || "—"}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Customer Address */}
-                    {initialData?.customer_address && (
-                      <div className="p-2 rounded-lg bg-white border border-[#e5e5ea]">
-                        <span className="text-[10px] text-[#6e6e73] block">Customer Address</span>
-                        <span className="text-[11px] text-[#1b1717] whitespace-pre-line">
-                          {initialData.customer_address}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Detected Perils & Benefits List */}
-                    {initialData?.detailed_perils && initialData.detailed_perils.length > 0 && (
-                      <div className="p-2 rounded-lg bg-white border border-[#e5e5ea] space-y-1">
-                        <span className="text-[10px] text-[#6e6e73] font-bold uppercase block">
+                  {/* 3. Detected Perils & Benefits List */}
+                  {initialData?.detailed_perils && initialData.detailed_perils.length > 0 && (
+                    <div className="space-y-2 pt-1 border-t border-[#e5e5ea]">
+                      <div className="flex items-center justify-between border-b border-[#e5e5ea] pb-1">
+                        <span className="font-bold text-[#1b1717] uppercase tracking-wider text-[11px]">
                           Detected Riders &amp; Perils ({initialData.detailed_perils.length})
                         </span>
+                        <span className="text-[10px] text-[#6e6e73]">
+                          Extracted from underwriter schedule
+                        </span>
+                      </div>
+                      <div className="p-2 rounded-lg bg-white border border-[#e5e5ea] space-y-1">
                         <div className="space-y-1 max-h-36 overflow-y-auto">
                           {initialData.detailed_perils.map((dp: any, idx: number) => (
                             <div key={idx} className="flex items-center justify-between text-[11px] py-0.5 border-b border-neutral-100 last:border-0">
@@ -934,30 +903,8 @@ export function ManualQuoteModal({
                           ))}
                         </div>
                       </div>
-                    )}
-
-                    {/* Auxiliary Vehicle Specs */}
-                    <div className="grid grid-cols-3 gap-2 text-xs">
-                      <div className="p-1.5 rounded bg-white border border-[#e5e5ea]">
-                        <span className="text-[10px] text-[#6e6e73] block">Chassis No.</span>
-                        <span className="font-mono text-[11px] font-semibold text-[#1b1717] truncate block" title={initialData?.chassis_no || "—"}>
-                          {initialData?.chassis_no || "—"}
-                        </span>
-                      </div>
-                      <div className="p-1.5 rounded bg-white border border-[#e5e5ea]">
-                        <span className="text-[10px] text-[#6e6e73] block">Engine No.</span>
-                        <span className="font-mono text-[11px] font-semibold text-[#1b1717] truncate block" title={initialData?.engine_no || "—"}>
-                          {initialData?.engine_no || "—"}
-                        </span>
-                      </div>
-                      <div className="p-1.5 rounded bg-white border border-[#e5e5ea]">
-                        <span className="text-[10px] text-[#6e6e73] block">Capacity / Unit</span>
-                        <span className="font-mono text-[11px] font-semibold text-[#1b1717]">
-                          {initialData?.engine_cc || "—"}
-                        </span>
-                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
             </div>

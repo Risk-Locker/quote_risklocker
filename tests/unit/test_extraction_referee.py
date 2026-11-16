@@ -70,3 +70,27 @@ def test_vehicle_name_simplifier_preserves_alphanumeric_codes():
     brand2, model2, combined2 = clean_vehicle_tokens_deterministic("PROTON", "PROTON SAGA BLM 1.3")
     assert "BLM" in combined2
     assert "Blm" not in combined2
+
+
+def test_referee_sanitizes_third_party_sum_insured():
+    fields = {
+        "coverage_type": {"value": "Third Party", "status": "ready"},
+        "sum_insured": {"value": "7,906,208.00", "status": "ready"},
+        "gross_premium": {"value": "334.55", "status": "ready"},
+    }
+    reconciled, notices = audit_and_reconcile_draft(fields)
+    assert reconciled["sum_insured"]["value"] == "0.00"
+    assert any("Third Party policy cannot have Own Damage sum insured" in n for n in notices)
+
+
+def test_referee_sanitizes_chassis_number_contamination():
+    fields = {
+        "coverage_type": {"value": "Comprehensive", "status": "ready"},
+        "sum_insured": {"value": "7,906,208.00", "status": "ready"},
+        "chassis_no": {"value": "EJ7906208", "status": "ready"},
+        "gross_premium": {"value": "334.55", "status": "ready"},
+    }
+    reconciled, notices = audit_and_reconcile_draft(fields)
+    assert reconciled["sum_insured"]["value"] == "0.00"
+    assert any("contaminated by vehicle chassis/engine digits" in n for n in notices)
+

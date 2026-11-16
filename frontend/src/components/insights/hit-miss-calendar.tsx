@@ -21,6 +21,7 @@ import {
 } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { formatBrandAndModel } from "@/lib/vehicle-utils";
 
 interface ActivityItem {
   id: string;
@@ -681,9 +682,10 @@ export function HitMissCalendar() {
                         {vehicleHistory.vehicle?.vehicle_no}
                       </span>
                       <p className="text-xs text-neutral-500 mt-0.5">
-                        {[vehicleHistory.vehicle?.car_brand, vehicleHistory.vehicle?.car_model]
-                          .filter(Boolean)
-                          .join(" ") || "Vehicle"}
+                        {formatBrandAndModel(
+                          vehicleHistory.vehicle?.car_brand,
+                          vehicleHistory.vehicle?.car_model
+                        ) || "Vehicle"}
                       </p>
                     </div>
                     <div className="text-right">

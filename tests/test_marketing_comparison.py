@@ -453,20 +453,16 @@ def test_dict_wrapped_extraction_fields_and_auto_healing(db_session: Session):
 def test_detect_runner_fee_from_id_helper():
     from app.services.marketing_comparison_service import detect_runner_fee_from_id
 
-    # Passport tests -> RM 20.00
+    # Universal flat runner fee: RM 20.00 across the entire platform
     assert detect_runner_fee_from_id("K1584766Z") == 20.0
     assert detect_runner_fee_from_id("A12345678") == 20.0
     assert detect_runner_fee_from_id("p9876543") == 20.0
-
-    # Malaysian MyKad tests -> RM 10.00
-    assert detect_runner_fee_from_id("881205015522") == 10.0
-    assert detect_runner_fee_from_id("900101-14-5567") == 10.0
-    assert detect_runner_fee_from_id("020304011234") == 10.0
-
-    # Default fallback
-    assert detect_runner_fee_from_id(None) == 10.0
-    assert detect_runner_fee_from_id("") == 10.0
-    assert detect_runner_fee_from_id("   ") == 10.0
+    assert detect_runner_fee_from_id("881205015522") == 20.0
+    assert detect_runner_fee_from_id("900101-14-5567") == 20.0
+    assert detect_runner_fee_from_id("020304011234") == 20.0
+    assert detect_runner_fee_from_id(None) == 20.0
+    assert detect_runner_fee_from_id("") == 20.0
+    assert detect_runner_fee_from_id("   ") == 20.0
 
 
 def test_runner_fee_auto_assignment_in_tenure(db_session: Session):
@@ -1058,8 +1054,8 @@ def test_refresh_tenure_ledger_and_plate_undetected_chassis_tracking(db_session:
 
     # EV road tax dynamically calculated: for 9.4 kW EV Saloon Car -> RM 20.00
     assert t["road_tax"] == 20.00
-    assert t["runner_fee"] == 10.00
-    assert t["fixed_costs_total"] == 30.00  # Roadtax + Runner fee = RM 30.00 (NOT 60.00)
+    assert t["runner_fee"] == 20.00
+    assert t["fixed_costs_total"] == 40.00  # Roadtax + Universal Runner fee = RM 40.00
 
     # Quotation ref populated with true underwriter reference
     assert len(refreshed["entries"]) == 1
@@ -2090,7 +2086,7 @@ def test_vehicle_type_and_customer_name_cross_sync(db_session: Session, test_use
 
     comp_data = get_marketing_comparison(db_session, tenure.id)
     assert comp_data["tenure"]["vehicle_type"] == "Lorry"
-    assert comp_data["tenure"]["coverage_type"] == "Comprehensive (综合险)"
+    assert comp_data["tenure"]["coverage_type"] == "Commercial Vehicle Comprehensive (商用车辆综合险)"
 
 
 def test_session_timeline_excludes_superseded_sessions_and_supports_whole_ringgit_rounding(db_session: Session, test_user: User):

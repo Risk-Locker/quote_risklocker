@@ -448,8 +448,12 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
       setFormValues((prev) => {
         const rawP = field.name === "premium" ? parseFloat(current.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["premium"] || "").replace(/[^0-9.]/g, "")) || 0;
         const p = roundTotal && rawP > 0 ? Math.round(rawP) : rawP;
-        const rt = field.name === "roadtax" ? parseFloat(current.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["roadtax"] || "").replace(/[^0-9.]/g, "")) || 0;
-        const sf = field.name === "service_fee" ? parseFloat(current.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["service_fee"] || "").replace(/[^0-9.]/g, "")) || 0;
+        const incRT = prev["include_road_tax"] !== "false";
+        const incRF = prev["include_runner_fee"] !== "false";
+        const rawRT = field.name === "roadtax" ? parseFloat(current.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["roadtax"] || "").replace(/[^0-9.]/g, "")) || 0;
+        const rawRF = field.name === "service_fee" ? parseFloat(current.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["service_fee"] || "").replace(/[^0-9.]/g, "")) || 0;
+        const rt = incRT ? rawRT : 0;
+        const sf = incRF ? rawRF : 0;
         const extrasTotal = (workspace?.extras || []).reduce((acc, ex) => {
           const amt = (ex as Record<string, unknown>)?.price;
           const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
@@ -475,6 +479,40 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
 
   function commitFieldDirectly(name: string, value: string) {
     if (value === undefined) return;
+    if (name === "include_road_tax" || name === "include_runner_fee") {
+      const boolVal = value !== "false";
+      queueOperation(
+        { op: "update_display_options", options: { [name]: boolVal } },
+        `options.${name}`
+      );
+      decideField(name, "edit", value);
+      decideField("total_amount", "clear", "");
+      setFormValues((prev) => {
+        const rawP = parseFloat(String(prev["premium"] || "").replace(/[^0-9.]/g, "")) || 0;
+        const p = roundTotal && rawP > 0 ? Math.round(rawP) : rawP;
+        const isIncRT = name === "include_road_tax" ? boolVal : prev["include_road_tax"] !== "false";
+        const isIncRF = name === "include_runner_fee" ? boolVal : prev["include_runner_fee"] !== "false";
+        const rawRT = parseFloat(String(prev["roadtax"] || "").replace(/[^0-9.]/g, "")) || 0;
+        const rawRF = parseFloat(String(prev["service_fee"] || "").replace(/[^0-9.]/g, "")) || 0;
+        const rt = isIncRT ? rawRT : 0;
+        const sf = isIncRF ? rawRF : 0;
+        const extrasTotal = (workspace?.extras || []).reduce((acc, ex) => {
+          const amt = (ex as Record<string, unknown>)?.price;
+          const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
+          const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : (typeof val === "number" ? val : 0);
+          return acc + (Number.isFinite(num) ? num : 0);
+        }, 0);
+        const rawTot = p + rt + sf + extrasTotal;
+        const finalTot = roundTotal && rawTot > 0 ? Math.round(rawTot) : rawTot;
+        return {
+          ...prev,
+          [name]: value,
+          total_amount: finalTot > 0 ? finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "",
+        };
+      });
+      scheduleSave();
+      return;
+    }
     if (value.trim() === "") {
       decideField(name, "clear", "");
       if (name === "sum_insured") {

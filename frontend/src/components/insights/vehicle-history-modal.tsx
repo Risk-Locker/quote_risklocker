@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Car, Clock, User, X, CheckCircle } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { formatBrandAndModel } from "@/lib/vehicle-utils";
 
 interface VehicleHistoryResponse {
   found: boolean;
@@ -109,7 +110,7 @@ export function VehicleHistoryModal({
                 <div className="flex justify-between">
                   <span className="text-neutral-500">Model:</span>
                   <span className="font-semibold text-neutral-900">
-                    {[data.vehicle?.car_brand, data.vehicle?.car_model].filter(Boolean).join(" ") || "—"}
+                    {formatBrandAndModel(data.vehicle?.car_brand, data.vehicle?.car_model) || "—"}
                   </span>
                 </div>
                 <div className="flex justify-between">

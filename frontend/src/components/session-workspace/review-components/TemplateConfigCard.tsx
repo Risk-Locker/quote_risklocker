@@ -247,7 +247,10 @@ export function TemplateConfigCard({
 
             <label className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
               <span className="flex items-center justify-between">
-                <span>Product / Package</span>
+                <span className="flex items-center gap-1.5">
+                  <span>Product / Package</span>
+                  {pinLoading ? <span className="text-[10px] text-emerald-600 font-normal animate-pulse">(syncing...)</span> : null}
+                </span>
                 {syncHighlight && syncHighlight.field === "product_package" && Date.now() - syncHighlight.timestamp < 6000 ? (
                   <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 border border-emerald-300 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 shadow-xs animate-pulse">
                     <span className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider">Auto-selected</span>
@@ -263,7 +266,7 @@ export function TemplateConfigCard({
               </span>
               <Select
                 value={workspace.pinned.product_id || ""}
-                disabled={pinLoading || !productOptions.length}
+                disabled={!productOptions.length}
                 onChange={(event) => handlePackageSelect(event.target.value)}
                 className={`transition-all duration-300 ${
                   syncHighlight && syncHighlight.field === "product_package" && Date.now() - syncHighlight.timestamp < 6000

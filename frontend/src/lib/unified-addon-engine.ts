@@ -204,6 +204,71 @@ export const CANONICAL_24_CATALOG: Array<{
   },
 ];
 
+export const FALLBACK_ICE_PERKS_CATALOG: Array<{
+  id: string;
+  title: string;
+  description: string;
+  default_value: string;
+  icon_hint: string;
+}> = [
+  {
+    id: "child_seat",
+    title: "Child Car Safety Seat",
+    description: "Reimburses replacement of damaged child car safety seat up to RM500.",
+    default_value: "RM 500.00",
+    icon_hint: "child_seat",
+  },
+  {
+    id: "inconvenience_allowance",
+    title: "Inconvenience Allowance",
+    description: "Lump sum cash payout for travel inconvenience during vehicle repairs.",
+    default_value: "RM 500.00",
+    icon_hint: "allowance",
+  },
+  {
+    id: "car_replacement",
+    title: "Courtesy Car Replacement",
+    description: "Temporary courtesy car replacement while vehicle is under workshop repair.",
+    default_value: "Up to 14 Days",
+    icon_hint: "car_replacement",
+  },
+  {
+    id: "rim_tyre",
+    title: "Rim & Tyre Protection",
+    description: "Covers accidental tyre puncture or alloy wheel rim kerb damage.",
+    default_value: "RM 1,000.00",
+    icon_hint: "rim_tyre",
+  },
+  {
+    id: "flood_allowance",
+    title: "Flood Relief Allowance",
+    description: "Immediate cash relief payout upon flood damage claims.",
+    default_value: "RM 1,000.00",
+    icon_hint: "flood",
+  },
+  {
+    id: "airbag_replacement",
+    title: "Airbag Replacement Cover",
+    description: "Reimburses genuine OEM airbag modules following collision deployment.",
+    default_value: "Up to Sum Insured",
+    icon_hint: "airbag",
+  },
+  {
+    id: "ambulance_fees",
+    title: "Emergency Ambulance Service",
+    description: "Reimbursement of emergency ambulance transport charges up to RM500.",
+    default_value: "RM 500.00",
+    icon_hint: "pa",
+  },
+  {
+    id: "legal_defense",
+    title: "Legal Representation & Defense",
+    description: "Covers court legal defense counsel costs up to RM2,000.",
+    default_value: "RM 2,000.00",
+    icon_hint: "legal_defense",
+  },
+];
+
 const CANONICAL_BY_ID: Record<string, (typeof CANONICAL_24_CATALOG)[number]> = Object.fromEntries(
   CANONICAL_24_CATALOG.map((c) => [c.id, c])
 );
@@ -690,7 +755,30 @@ export const COMMERCIAL_EXCLUDED_MATRIX_IDS = new Set([
   "child_seat",
 ]);
 
-export const PRIVATE_CAR_EXCLUDED_MATRIX_IDS = new Set<string>();
+export const PRIVATE_CAR_EXCLUDED_MATRIX_IDS = new Set([
+  "non_fare_passenger",
+  "third_party_working",
+  "boom_damage",
+  "overturning",
+]);
+
+export const ICE_EXCLUDED_MATRIX_IDS = new Set([
+  "ev_wall_charger",
+  "ev_out_of_charge",
+  "ev_charger_liability",
+]);
+
+export function isEVVehicle(
+  vehicleType: string = "",
+  carModel: string = "",
+  fields?: Record<string, any>
+): boolean {
+  let raw = `${vehicleType || ""} ${carModel || ""}`.toLowerCase();
+  if (fields) {
+    raw += ` ${fields.vehicle_type || ""} ${fields.powertrain || ""} ${fields.engine_cc || ""}`.toLowerCase();
+  }
+  return raw.includes("ev") || raw.includes("electric") || raw.includes("zev") || raw.includes("bev") || raw.includes("kw");
+}
 
 export const COMMERCIAL_KEYWORDS = [
   "lorry", "truck", "hino", "fuso", "canter", "rigid", "trailer", "tipper",
@@ -749,10 +837,14 @@ export function extractFreeCoverageItems(
 
   for (const raw of activeBenefits || []) {
     if (raw?.is_extra || raw?.cost_status === "paid" || hasPositivePrice(raw)) continue;
-    if (matchCatalogItem(raw) !== null) continue;
     const title = String(raw?.title || raw?.label || "").trim();
     if (!title) continue;
     const norm = normalizeCode(title);
+    const matched = matchCatalogItem(raw);
+    if (matched !== null) {
+      const isSpecialPerils = norm.includes("special_perils") || norm.includes("convulsion") || norm.includes("flood") || raw?.concept_key === "special-perils";
+      if (!isSpecialPerils) continue;
+    }
     if (isComm && (norm.includes("towing") || norm.includes("roadside") || norm.includes("assist"))) continue;
     if (norm.includes("towing") || seen.has(norm)) continue;
     seen.add(norm);
@@ -781,14 +873,19 @@ export function extractFreeCoverageItems(
       ]
     : [
         { title: "Legal Defense Costs", description: "Reimburses court legal representation and defense fees up to RM2,000." },
-        { title: "Drive-Less Save-More", description: "Cash rebate up to 30% of base premium for low annual mileage." },
-        { title: "Child Car Safety Seat", description: "Reimburses replacement or repair of child safety seats in a crash." },
+        ...(insL.includes("takaful") || insL.includes("stmb")
+          ? [{ title: "No Claim Cashback", description: "Distributable surplus profit-sharing distribution via Hibah if no claims." }]
+          : insL.includes("sompo") || insL.includes("allianz") || insL.includes("kurnia") || insL.includes("amassurance") || insL.includes("liberty") || insL.includes("etiqa")
+          ? [{ title: "Panel Repair Workmanship Warranty", description: "12-month repair quality warranty from approved repairers." }]
+          : []),
       ];
 
   for (const fb of fallbacks) {
     if (items.length >= finalLimit) break;
     const norm = normalizeCode(fb.title);
     if (!seen.has(norm)) {
+      if (norm.includes("warranty") && Array.from(seen).some((s) => s.includes("warranty"))) continue;
+      if (norm.includes("legal") && Array.from(seen).some((s) => s.includes("legal"))) continue;
       seen.add(norm);
       items.push(fb);
     }
@@ -848,7 +945,14 @@ export function buildUnifiedMatrixCards(
   fields?: Record<string, any>
 ): UnifiedAddonCard[] {
   const isComm = isCommercialVehicle(vehicleType, carModel, fields);
-  const excludedIds = isComm ? COMMERCIAL_EXCLUDED_MATRIX_IDS : PRIVATE_CAR_EXCLUDED_MATRIX_IDS;
+  const isEv = isEVVehicle(vehicleType, carModel, fields);
+  const excludedIds = new Set(
+    isComm
+      ? [...COMMERCIAL_EXCLUDED_MATRIX_IDS]
+      : !isEv
+      ? [...PRIVATE_CAR_EXCLUDED_MATRIX_IDS, ...ICE_EXCLUDED_MATRIX_IDS]
+      : [...PRIVATE_CAR_EXCLUDED_MATRIX_IDS]
+  );
 
   const selSet =
     selectedIds instanceof Set
@@ -1014,9 +1118,9 @@ export function buildUnifiedMatrixCards(
     }
   }
 
-  // 4. Fill remaining slots up to fillToSlots from CANONICAL_24_CATALOG
+  // 4. Fill remaining slots up to fillToSlots from CANONICAL_24_CATALOG and FALLBACK_ICE_PERKS_CATALOG
   if (fillToSlots > 0) {
-    for (const cat of CANONICAL_24_CATALOG) {
+    for (const cat of [...CANONICAL_24_CATALOG, ...FALLBACK_ICE_PERKS_CATALOG]) {
       if (processed.length >= fillToSlots) {
         break;
       }
@@ -1046,7 +1150,7 @@ export function buildUnifiedMatrixCards(
           value: fillVal,
           icon_hint: cat.icon_hint,
           is_selected: false,
-          cost_status: "optional",
+          cost_status: "paid",
           concept_key: cat.id,
         });
       }

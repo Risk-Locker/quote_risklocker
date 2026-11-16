@@ -312,7 +312,7 @@ class InsuranceTenure(Base, TimestampMixin, SoftDeleteMixin):
     miss_reason: Mapped[str | None] = mapped_column(String(100), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     road_tax: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0.00, server_default=text("0.00"))
-    runner_fee: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0.00, server_default=text("0.00"))
+    runner_fee: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=20.00, server_default=text("20.00"))
     include_road_tax: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     include_runner_fee: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     windscreen_target: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
@@ -371,6 +371,9 @@ class InsuranceTenure(Base, TimestampMixin, SoftDeleteMixin):
 
 class TenureComparisonEntry(Base, TimestampMixin):
     __tablename__ = "tenure_comparison_entries"
+    __table_args__ = (
+        Index("ix_tenure_comp_tenure_company", "tenure_id", "company_name"),
+    )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
     tenure_id: Mapped[str] = mapped_column(ForeignKey("insurance_tenures.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -381,7 +384,7 @@ class TenureComparisonEntry(Base, TimestampMixin):
     valuation_type: Mapped[str] = mapped_column(String(20), nullable=False, default="market_value", server_default=text("'market_value'"))
     motor_premium: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0.00, server_default=text("0.00"))
     road_tax: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0.00, server_default=text("0.00"))
-    runner_fee: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0.00, server_default=text("0.00"))
+    runner_fee: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=20.00, server_default=text("20.00"))
     include_road_tax: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     include_runner_fee: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     total_payable: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0.00, server_default=text("0.00"))
@@ -411,6 +414,14 @@ class TenureComparisonEntry(Base, TimestampMixin):
     tenure: Mapped["InsuranceTenure"] = relationship(back_populates="comparison_entries")
     session: Mapped["Session | None"] = relationship()
     company: Mapped["InsuranceCompany | None"] = relationship()
+
+    @property
+    def revision(self) -> int:
+        return self.version
+
+    @revision.setter
+    def revision(self, value: int) -> None:
+        self.version = value
 
 
 class TrackedVehicle(Base, TimestampMixin):
@@ -1160,7 +1171,17 @@ class DraftSourceLineDecision(Base, TimestampMixin):
 
 class DraftBenefitSelection(Base, TimestampMixin):
     __tablename__ = "draft_benefit_selections"
-    __table_args__ = (UniqueConstraint("draft_id", "selection_key", name="uq_draft_benefit_selection_key"),)
+    __table_args__ = (
+        UniqueConstraint("draft_id", "selection_key", name="uq_draft_benefit_selection_key"),
+        Index(
+            "uq_draft_benefit_selection_concept",
+            "draft_id",
+            "concept_id",
+            unique=True,
+            postgresql_where=text("concept_id IS NOT NULL AND superseded_by_id IS NULL AND state = 'current'"),
+            sqlite_where=text("concept_id IS NOT NULL AND superseded_by_id IS NULL AND state = 'current'"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
     draft_id: Mapped[str] = mapped_column(ForeignKey("quotation_drafts.id", ondelete="CASCADE"), nullable=False, index=True)

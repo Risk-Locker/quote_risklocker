@@ -578,13 +578,13 @@ export function Design2CanvasView({
                             <GreenTickSvg size={15} />
                           </div>
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: "8.5px", fontWeight: 700, color: "#0F172A", lineHeight: 1.15 }}>{fi.title}</div>
+                            <div style={{ fontSize: "9.8px", fontWeight: 800, color: "#0F172A", lineHeight: 1.18 }}>{fi.title}</div>
                             {fi.description && (
                               <div
                                 style={{
-                                  fontSize: "7.2px",
-                                  color: "#52525B",
-                                  lineHeight: 1.24,
+                                  fontSize: "8.2px",
+                                  color: "#1E293B",
+                                  lineHeight: 1.25,
                                   marginTop: "2px",
                                   overflow: "hidden",
                                   display: "-webkit-box",
@@ -696,10 +696,10 @@ export function Design2CanvasView({
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "2px" }}>
                         <div
                           style={{
-                            fontSize: "7.1px",
-                            fontWeight: 700,
+                            fontSize: "8.2px",
+                            fontWeight: 750,
                             color: "#0F172A",
-                            lineHeight: 1.14,
+                            lineHeight: 1.15,
                             wordBreak: "break-word",
                             overflow: "hidden",
                             display: "-webkit-box",
@@ -709,26 +709,26 @@ export function Design2CanvasView({
                         >
                           {card.title}
                         </div>
-                        <div style={{ fontSize: "6px", fontWeight: 600, color: "#94A3B8", flexShrink: 0, lineHeight: 1, paddingTop: "1px" }}>
+                        <div style={{ fontSize: "6.8px", fontWeight: 700, color: "#334155", flexShrink: 0, lineHeight: 1, paddingTop: "1px" }}>
                           {card.serial_number}
                         </div>
                       </div>
                       {card.value && (
-                        <div style={{ fontSize: "6.8px", fontWeight: 800, color: "#5ABA00", marginTop: "1px", lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        <div style={{ fontSize: "7.6px", fontWeight: 800, color: "#15803D", marginTop: "1px", lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                           {card.value}
                         </div>
                       )}
                       {card.description && (
                         <div
                           style={{
-                            fontSize: "5.9px",
-                            color: "#475569",
-                            lineHeight: 1.14,
+                            fontSize: "7.0px",
+                            color: "#0F172A",
+                            lineHeight: 1.18,
                             marginTop: "1px",
                             wordBreak: "break-word",
                             overflow: "hidden",
                             display: "-webkit-box",
-                            WebkitLineClamp: card.value ? 1 : 2,
+                            WebkitLineClamp: 2,
                             WebkitBoxOrient: "vertical",
                           }}
                         >

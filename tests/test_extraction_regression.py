@@ -139,8 +139,8 @@ def test_quotation_final_price_and_insurance_premium_netting():
     fields, _, _ = build_draft(candidates, benefit_lines=benefit_lines)
     # Total Payable is preserved as Final Price
     assert fields["total_amount"]["value"] == "2922.85"
-    # Insurance Premium is Final Price - Extras (2922.85 - 845.35 = 2077.50)
-    assert fields["premium"]["value"] == "2077.50"
+    # Insurance Premium is preserved directly as true underwriter net contribution (zero fake subtraction)
+    assert fields["premium"]["value"] == "2922.85"
     # Unmentioned roadtax/runner fee are not auto-injected
     assert fields["roadtax"]["value"] == ""
     assert fields["service_fee"]["value"] == ""

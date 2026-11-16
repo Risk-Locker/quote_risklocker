@@ -620,7 +620,7 @@ def request_preview_render(db, user, session_id: str, *, draft_revision: int) ->
     selections = _for_draft(db, DraftBenefitSelection, draft.id)
     fatal_blockers = [
         b for b in generation_blockers(draft, decisions, selections, template_revision=revision)
-        if b.get("code") not in {"scalar_check_needed", "missing_catalog"}
+        if b.get("code") not in {"scalar_check_needed", "missing_catalog", "unresolved_source_line", "missing_benefit_value"}
     ]
     if fatal_blockers:
         raise AppError("Resolve every generation blocker before rendering the final preview.", 409)

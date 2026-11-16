@@ -380,7 +380,7 @@ class ExtractionOrchestrator:
             }
             for fl in fallback_lines:
                 fl_lbl = (fl.get("normalized_label") or fl.get("raw_label") or "").lower().strip()
-                if fl_lbl and not any(fl_lbl in ex or ex in fl_lbl for ex in existing_labels):
+                if fl_lbl and not is_spurious_benefit_line(fl_lbl) and not any(fl_lbl in ex or ex in fl_lbl for ex in existing_labels):
                     fl["line_id"] = f"det_{len(benefit_lines) + 1}"
                     benefit_lines.append(fl)
                     existing_labels.add(fl_lbl)

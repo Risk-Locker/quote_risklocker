@@ -355,6 +355,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
             quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now().year
             reg_date = _extract_val(f.get("registration_date")) or _extract_val(f.get("reg_date"))
+            cov_type_val = _extract_val(f.get("coverage_type")) or getattr(s, "coverage_type", None)
             has_waiver, bet_rate, bet_disp = evaluate_betterment_rules(
                 yom=veh_yom,
                 quote_year=quote_year,
@@ -363,6 +364,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 is_comprehensive_private=is_comp_private,
                 registration_date=reg_date,
                 coverage_start_date=tenure.coverage_start_date,
+                coverage_type=cov_type_val,
             )
 
             entry = TenureComparisonEntry(
@@ -427,6 +429,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
                 quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now().year
                 reg_date = _extract_val(f.get("registration_date")) or _extract_val(f.get("reg_date"))
+                cov_type_val = _extract_val(f.get("coverage_type")) or getattr(s, "coverage_type", None)
                 has_waiver, bet_rate, bet_disp = evaluate_betterment_rules(
                     yom=veh_yom,
                     quote_year=quote_year,
@@ -435,6 +438,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                     is_comprehensive_private=is_comp_private,
                     registration_date=reg_date,
                     coverage_start_date=tenure.coverage_start_date,
+                    coverage_type=cov_type_val,
                 )
 
                 c_id_key = str(getattr(s, "company_id", "") or "").lower()
@@ -512,12 +516,16 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 needs_commit = True
 
             quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now().year
+            e_cov_type = getattr(e, "coverage_type", None)
+            if not e_cov_type and e.session and e.session.draft and isinstance(e.session.draft.fields, dict):
+                e_cov_type = _extract_val(e.session.draft.fields.get("coverage_type"))
             has_waiver_fallback, fallback_bet_rate, fallback_bet_disp = evaluate_betterment_rules(
                 yom=veh_yom,
                 quote_year=quote_year,
                 company_name=e.company_name,
                 has_betterment_peril=e.waiver_betterment,
                 is_comprehensive_private=is_comp_private,
+                coverage_type=e_cov_type,
             )
             if e.betterment_rate is None or e.betterment_display is None:
                 e.betterment_rate = fallback_bet_rate
@@ -630,7 +638,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
     for e in sorted(entries, key=_entry_sort_key):
         key = (e.company_name or "Unknown").strip().lower()
         company_counts[key] += 1
-        e.version = company_counts[key]
+        e.version = max(e.version or 1, company_counts[key])
 
     if needs_commit and allow_commit:
         db.commit()
@@ -1150,6 +1158,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "manual_rank": e.manual_rank,
             "rank": e.rank or 1,
             "version": e.version or 1,
+            "revision": getattr(e, "revision", 1) or 1,
             "uploaded_at": e.uploaded_at.isoformat() if e.uploaded_at else (e.created_at.isoformat() if e.created_at else None),
             "is_manual": e.is_manual,
             "sort_order": e.sort_order,
@@ -1548,307 +1557,33 @@ def update_tenure_fixed_costs(
     manufacture_year: int | None = None,
     quotation_discount: float | None = None,
 ) -> dict[str, Any]:
-    """Update fixed tenure expenses (Road Tax & Runner Fee), coverage dates, vehicle specs, and recalculate total payables for all columns."""
-    tenure = db.scalars(
-        select(InsuranceTenure)
-        .options(
-            joinedload(InsuranceTenure.tracked_vehicle),
-            joinedload(InsuranceTenure.customer),
-            joinedload(InsuranceTenure.previous_tenure),
-        )
-        .where(InsuranceTenure.id == tenure_id)
-    ).first()
-    if not tenure:
-        raise ValueError(f"Tenure {tenure_id} not found")
+    """Update fixed tenure expenses, coverage dates, vehicle specs, and recalculate total payables for all columns."""
+    from app.services.tenure_identity_sync_service import sync_tenure_identity_transaction
 
-    if include_road_tax is not None:
-        tenure.include_road_tax = include_road_tax
-    elif road_tax == 0.0:
-        tenure.include_road_tax = False
-
-    if include_runner_fee is not None:
-        tenure.include_runner_fee = include_runner_fee
-    elif runner_fee == 0.0:
-        tenure.include_runner_fee = False
-
-    tenure.road_tax = road_tax
-    if quotation_discount is not None:
-        tenure.quotation_discount = max(0.0, float(quotation_discount))
-    if runner_fee > 0.0:
-        tenure.runner_fee = runner_fee
-    elif ic_no and ic_no.strip():
-        tenure.runner_fee = detect_runner_fee_from_id(ic_no.strip())
-    else:
-        tenure.runner_fee = runner_fee
-    if windscreen_target is not None:
-        tenure.windscreen_target = windscreen_target
-    if ncd_percentage is not None:
-        tenure.ncd_percentage = ncd_percentage
-    if current_ncd is not None:
-        if tenure.previous_tenure:
-            tenure.previous_tenure.ncd_percentage = current_ncd
-        cur_json = dict(tenure.recommended_sum_insured_json or {})
-        cur_json["current_ncd"] = current_ncd
-        tenure.recommended_sum_insured_json = cur_json
-
-    if customer_name and customer_name.strip():
-        tenure.customer_name = customer_name.strip()
-
-    norm_vehicle_plate = None
-    if vehicle_no and vehicle_no.strip():
-        from app.services.vehicle_tracking_service import normalize_plate
-        norm_vehicle_plate = normalize_plate(vehicle_no.strip())
-        if norm_vehicle_plate:
-            tenure.vehicle_no = norm_vehicle_plate
-
-    # Link/resolve CustomerAccount and persist government ID & propagate across tenures
-    if (ic_no and ic_no.strip()) or (customer_name and customer_name.strip()):
-        cust = tenure.customer or (db.get(CustomerAccount, tenure.customer_id) if tenure.customer_id else None)
-        if not cust:
-            cust, _ = resolve_or_create_customer(
-                db,
-                raw_name=customer_name or tenure.customer_name,
-                raw_id=ic_no,
-            )
-        if cust:
-            tenure.customer_id = cust.id
-            if customer_name and customer_name.strip():
-                cust.canonical_name = customer_name.strip()
-            if ic_no and ic_no.strip():
-                from app.services.identity_normalization_service import normalize_government_id
-                norm_id, norm_type = normalize_government_id(ic_no.strip())
-                cust.id_number = norm_id or ic_no.strip()
-                if norm_type:
-                    cust.id_type = norm_type
-            from sqlalchemy import update, or_
-            db.execute(
-                update(InsuranceTenure)
-                .where(InsuranceTenure.customer_id == cust.id)
-                .values(customer_name=cust.canonical_name)
-            )
-
-            # Also propagate customer name, IC and vehicle plate to all quotation drafts under this customer/tenure
-            sessions_to_sync = list(
-                db.scalars(
-                    select(SessionModel).where(
-                        or_(
-                            SessionModel.customer_id == cust.id,
-                            SessionModel.tenure_id == tenure.id,
-                        )
-                    )
-                ).all()
-            )
-            for s in sessions_to_sync:
-                if s.customer_id != cust.id:
-                    s.customer_id = cust.id
-                if s.draft and isinstance(s.draft.fields, dict):
-                    f = dict(s.draft.fields)
-                    if customer_name and customer_name.strip():
-                        for name_k in ["customer_name", "insured_name", "policyholder_name", "client_name"]:
-                            if name_k in f:
-                                if isinstance(f[name_k], dict):
-                                    f[name_k] = {**f[name_k], "value": cust.canonical_name}
-                                else:
-                                    f[name_k] = cust.canonical_name
-                        f["customer_name"] = cust.canonical_name
-                        f["insured_name"] = cust.canonical_name
-                    if vehicle_type and vehicle_type.strip():
-                        if isinstance(f.get("vehicle_type"), dict):
-                            f["vehicle_type"] = {**f["vehicle_type"], "value": vehicle_type.strip()}
-                        else:
-                            f["vehicle_type"] = vehicle_type.strip()
-                    if ic_no and ic_no.strip():
-                        for ic_k in ["customer_ic_no", "ic_no", "nric_no", "id_number"]:
-                            if ic_k in f:
-                                if isinstance(f[ic_k], dict):
-                                    f[ic_k] = {**f[ic_k], "value": cust.id_number}
-                                else:
-                                    f[ic_k] = cust.id_number
-                    if norm_vehicle_plate:
-                        for v_k in ["vehicle_no", "registration_no", "veh_reg_no"]:
-                            if v_k in f:
-                                if isinstance(f[v_k], dict):
-                                    f[v_k] = {**f[v_k], "value": norm_vehicle_plate}
-                                else:
-                                    f[v_k] = norm_vehicle_plate
-                    s.draft.fields = f
-
-    tv = tenure.tracked_vehicle
-    if not tv and tenure.tracked_vehicle_id:
-        tv = db.get(TrackedVehicle, tenure.tracked_vehicle_id)
-        if tv:
-            tenure.tracked_vehicle = tv
-    if norm_vehicle_plate:
-        existing_tv = db.scalar(select(TrackedVehicle).where(TrackedVehicle.vehicle_no == norm_vehicle_plate))
-        if existing_tv:
-            tenure.tracked_vehicle = existing_tv
-            tenure.tracked_vehicle_id = existing_tv.id
-            tv = existing_tv
-        elif tv:
-            tv.vehicle_no = norm_vehicle_plate
-        else:
-            tv = TrackedVehicle(vehicle_no=norm_vehicle_plate)
-            db.add(tv)
-            db.flush()
-            tenure.tracked_vehicle = tv
-            tenure.tracked_vehicle_id = tv.id
-    elif not tv and tenure.vehicle_no:
-        tv = db.scalar(select(TrackedVehicle).where(TrackedVehicle.vehicle_no == tenure.vehicle_no))
-        if not tv:
-            tv = TrackedVehicle(vehicle_no=tenure.vehicle_no)
-            db.add(tv)
-            db.flush()
-        tenure.tracked_vehicle = tv
-        tenure.tracked_vehicle_id = tv.id
-
-    if tv:
-        if car_brand and car_brand.strip():
-            tv.car_brand = car_brand.strip()
-        if manufacture_year and manufacture_year > 1900:
-            tv.manufacture_year = manufacture_year
-        if engine_cc and engine_cc.strip():
-            tv.engine_cc = engine_cc.strip()
-        if vehicle_model and vehicle_model.strip():
-            tv.car_model = vehicle_model.strip()
-            if not (car_brand and car_brand.strip()):
-                from app.services.vehicle_simplifier_service import CANONICAL_BRANDS
-                v_upper = vehicle_model.strip().upper()
-                for k, b in CANONICAL_BRANDS.items():
-                    if v_upper == k or v_upper.startswith(k + " "):
-                        tv.car_brand = b
-                        break
-        if engine_no and engine_no.strip():
-            tv.engine_no = engine_no.strip()
-        if chassis_no and chassis_no.strip():
-            tv.chassis_no = chassis_no.strip()
-
-    # Date manipulation & synchronization
-    dt_start = None
-    dt_end = None
-    if coverage_start_date:
-        try:
-            clean_s = coverage_start_date.split("T")[0].strip()
-            if clean_s:
-                dt_start = datetime.strptime(clean_s, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                tenure.coverage_start_date = dt_start
-        except Exception as e:
-            logger.warning("Could not parse coverage_start_date '%s': %s", coverage_start_date, e)
-
-    if coverage_end_date:
-        try:
-            clean_e = coverage_end_date.split("T")[0].strip()
-            if clean_e:
-                dt_end = datetime.strptime(clean_e, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                tenure.coverage_end_date = dt_end
-                tenure.expiry_month = dt_end.strftime("%Y-%m")
-        except Exception as e:
-            logger.warning("Could not parse coverage_end_date '%s': %s", coverage_end_date, e)
-
-    # Propagate updated coverage dates and metadata to linked sessions
-    linked_sessions = list(
-        db.scalars(
-            select(SessionModel).where(SessionModel.tenure_id == tenure_id)
-        ).all()
+    sync_tenure_identity_transaction(
+        db,
+        tenure_id,
+        road_tax=road_tax,
+        runner_fee=runner_fee,
+        include_road_tax=include_road_tax,
+        include_runner_fee=include_runner_fee,
+        windscreen_target=windscreen_target,
+        ncd_percentage=ncd_percentage,
+        current_ncd=current_ncd,
+        coverage_start_date=coverage_start_date,
+        coverage_end_date=coverage_end_date,
+        customer_name=customer_name,
+        ic_or_brn=ic_no,
+        vehicle_no=vehicle_no,
+        car_brand=car_brand,
+        car_model=vehicle_model,
+        engine_cc=engine_cc,
+        engine_no=engine_no,
+        chassis_no=chassis_no,
+        vehicle_type=vehicle_type,
+        manufacture_year=manufacture_year,
+        quotation_discount=quotation_discount,
     )
-    for s in linked_sessions:
-        if dt_start:
-            s.coverage_start_date = dt_start
-        if dt_end:
-            s.coverage_end_date = dt_end
-        if s.draft and isinstance(s.draft.fields, dict):
-            f = dict(s.draft.fields)
-            if dt_start:
-                f["coverage_start_date"] = dt_start.isoformat()
-            if dt_end:
-                f["coverage_end_date"] = dt_end.isoformat()
-            if customer_name and customer_name.strip():
-                for k in ["customer_name", "insured_name", "policyholder_name", "client_name"]:
-                    if k in f:
-                        if isinstance(f[k], dict):
-                            f[k] = {**f[k], "value": customer_name.strip()}
-                        else:
-                            f[k] = customer_name.strip()
-                f["customer_name"] = customer_name.strip()
-                f["insured_name"] = customer_name.strip()
-            if ic_no and ic_no.strip():
-                for k in ["customer_ic_no", "ic_no", "nric_no", "id_number"]:
-                    if k in f:
-                        if isinstance(f[k], dict):
-                            f[k] = {**f[k], "value": ic_no.strip()}
-                        else:
-                            f[k] = ic_no.strip()
-            if engine_cc and engine_cc.strip():
-                if isinstance(f.get("engine_cc"), dict):
-                    f["engine_cc"] = {**f["engine_cc"], "value": engine_cc.strip()}
-                else:
-                    f["engine_cc"] = engine_cc.strip()
-            if engine_no and engine_no.strip():
-                if isinstance(f.get("engine_number"), dict):
-                    f["engine_number"] = {**f["engine_number"], "value": engine_no.strip()}
-                else:
-                    f["engine_number"] = engine_no.strip()
-            if chassis_no and chassis_no.strip():
-                if isinstance(f.get("chassis_number"), dict):
-                    f["chassis_number"] = {**f["chassis_number"], "value": chassis_no.strip()}
-                else:
-                    f["chassis_number"] = chassis_no.strip()
-            if vehicle_model and vehicle_model.strip():
-                if isinstance(f.get("car_model"), dict):
-                    f["car_model"] = {**f["car_model"], "value": vehicle_model.strip()}
-                else:
-                    f["car_model"] = vehicle_model.strip()
-            if vehicle_type and vehicle_type.strip():
-                if isinstance(f.get("vehicle_type"), dict):
-                    f["vehicle_type"] = {**f["vehicle_type"], "value": vehicle_type.strip()}
-                else:
-                    f["vehicle_type"] = vehicle_type.strip()
-
-            eff_road_tax = road_tax if (tenure.include_road_tax is not False) else 0.0
-            eff_runner_fee = float(tenure.runner_fee) if (tenure.include_runner_fee is not False) else 0.0
-
-            rt_str = f"{eff_road_tax:.2f}"
-            if isinstance(f.get("roadtax"), dict):
-                f["roadtax"] = {**f["roadtax"], "value": rt_str}
-            else:
-                f["roadtax"] = rt_str
-
-            sf_str = f"{eff_runner_fee:.2f}"
-            if isinstance(f.get("service_fee"), dict):
-                f["service_fee"] = {**f["service_fee"], "value": sf_str}
-            else:
-                f["service_fee"] = sf_str
-
-            raw_p = f.get("premium")
-            val_p = raw_p.get("value") if isinstance(raw_p, dict) else raw_p
-            try:
-                p_num = float(str(val_p).replace(",", "")) if val_p else 0.0
-            except (ValueError, TypeError):
-                p_num = 0.0
-            tot_num = p_num + eff_road_tax + eff_runner_fee
-            tot_str = f"{tot_num:.2f}"
-            if isinstance(f.get("total_amount"), dict):
-                f["total_amount"] = {**f["total_amount"], "value": tot_str}
-            else:
-                f["total_amount"] = tot_str
-
-            s.draft.fields = f
-
-    eff_road_tax = road_tax if (tenure.include_road_tax is not False) else 0.0
-    eff_runner_fee = float(tenure.runner_fee) if (tenure.include_runner_fee is not False) else 0.0
-
-    # Update all comparison entries under this tenure
-    entries = list(
-        db.scalars(
-            select(TenureComparisonEntry).where(TenureComparisonEntry.tenure_id == tenure_id)
-        ).all()
-    )
-    for e in entries:
-        e.road_tax = eff_road_tax
-        e.runner_fee = eff_runner_fee
-        e.include_road_tax = (tenure.include_road_tax is not False)
-        e.include_runner_fee = (tenure.include_runner_fee is not False)
-        e.total_payable = float(e.motor_premium) + eff_road_tax + eff_runner_fee
-
     db.commit()
     return get_marketing_comparison(db, tenure_id)
 
@@ -1904,15 +1639,24 @@ def save_comparison_entry(
     entry_id = payload.get("id")
     entry = db.get(TenureComparisonEntry, entry_id) if entry_id else None
 
+    # Optimistic concurrency check
+    expected_rev = payload.get("expected_revision") or payload.get("expected_version")
+    if entry and expected_rev is not None:
+        curr_rev = entry.version or 1
+        if curr_rev != expected_rev:
+            raise ValueError(f"Concurrent modification conflict: entry has revision {curr_rev}, expected {expected_rev}. Please refresh.")
+
     if not entry:
         entry = TenureComparisonEntry(
             tenure_id=tenure_id,
             company_name=_safe_str(payload.get("company_name") or "New Insurer"),
             is_manual=bool(payload.get("is_manual", True)),
+            version=1,
         )
         db.add(entry)
     else:
         entry.is_manual = True
+        entry.version = (entry.version or 1) + 1
 
     if "is_manual" in payload:
         entry.is_manual = bool(payload["is_manual"])
@@ -1991,27 +1735,6 @@ def save_comparison_entry(
     if "is_recommended" in payload:
         entry.is_recommended = bool(payload["is_recommended"])
 
-    if entry.session_id:
-        s_obj = db.get(SessionModel, entry.session_id)
-        if s_obj and s_obj.draft:
-            d_fields = dict(s_obj.draft.fields or {})
-            if "company_name" in payload: d_fields["insurer_name"] = {"value": _safe_str(payload["company_name"]), "status": "manual_override"}
-            if "sum_insured" in payload: d_fields["sum_insured"] = {"value": str(_to_float(payload["sum_insured"])), "status": "manual_override"}
-            if "agreed_value" in payload: d_fields["valuation_type"] = {"value": "Agreed Value" if payload["agreed_value"] else "Market Value", "status": "manual_override"}
-            elif "valuation_type" in payload: d_fields["valuation_type"] = {"value": "Agreed Value" if payload["valuation_type"] == "agreed_value" else "Market Value", "status": "manual_override"}
-            if "motor_premium" in payload: d_fields["premium_due"] = {"value": str(_to_float(payload["motor_premium"])), "status": "manual_override"}
-            if "towing_limit" in payload: d_fields["towing"] = {"value": _safe_str(payload["towing_limit"]), "status": "manual_override"}
-            if "waiver_betterment" in payload: d_fields["waiver_of_betterment"] = {"value": "Included" if payload["waiver_betterment"] else "Not Included", "status": "manual_override"}
-            if "excess" in payload: d_fields["excess"] = {"value": str(_to_float(payload["excess"])), "status": "manual_override"}
-            if "windscreen_sum_insured" in payload:
-                ws_val = _to_float(payload["windscreen_sum_insured"])
-                d_fields["windscreen"] = {"value": str(ws_val) if ws_val > 0 else "", "status": "manual_override"}
-            if "special_perils" in payload: d_fields["special_perils"] = {"value": _safe_str(payload["special_perils"]), "status": "manual_override"}
-            if "llp_llop" in payload: d_fields["llp_llop"] = {"value": _safe_str(payload["llp_llop"]), "status": "manual_override"}
-            
-            s_obj.draft.fields = d_fields
-            flag_modified(s_obj.draft, "fields")
-
     # Recompute fixed costs and total payable
     eff_rt = float(tenure.road_tax) if (tenure.include_road_tax is not False) else 0.0
     eff_rf = float(tenure.runner_fee) if (tenure.include_runner_fee is not False) else 0.0
@@ -2024,6 +1747,53 @@ def save_comparison_entry(
     if float(entry.sum_insured) > 0:
         if not entry.is_manual or entry.rate_percentage is None or float(entry.rate_percentage) == 0.0 or ("basic_figure_amount" not in payload and "basic_premium" not in payload and "motor_premium" in payload):
             entry.rate_percentage = round((float(entry.motor_premium) / float(entry.sum_insured)) * 100, 4)
+
+    # Sync to linked QuotationDraft (Task 1.1: Canonical Key Alignment)
+    if entry.session_id:
+        s_obj = db.get(SessionModel, entry.session_id)
+        if s_obj and s_obj.draft:
+            d_fields = dict(s_obj.draft.fields or {})
+            if "company_name" in payload:
+                comp_val = _safe_str(payload["company_name"])
+                d_fields["insurance_company"] = {"value": comp_val, "status": "manual_override"}
+                d_fields["insurer_name"] = {"value": comp_val, "status": "manual_override"}
+                s_obj.detected_company = comp_val
+            if "sum_insured" in payload:
+                d_fields["sum_insured"] = {"value": f"{_to_float(payload['sum_insured']):.2f}", "status": "manual_override"}
+            if "agreed_value" in payload or "valuation_type" in payload:
+                val_type_str = "Agreed Value" if entry.agreed_value else "Market Value"
+                d_fields["valuation_type"] = {"value": val_type_str, "status": "manual_override"}
+            if "motor_premium" in payload:
+                prem_str = f"{_to_float(payload['motor_premium']):.2f}"
+                d_fields["premium"] = {"value": prem_str, "status": "manual_override"}
+                d_fields["premium_due"] = {"value": prem_str, "status": "manual_override"}
+            if "towing_limit" in payload:
+                tow_str = _safe_str(payload["towing_limit"])
+                d_fields["towing"] = {"value": tow_str, "status": "manual_override"}
+                d_fields["towing_limit"] = {"value": tow_str, "status": "manual_override"}
+            if "waiver_betterment" in payload:
+                d_fields["waiver_of_betterment"] = {"value": "Included" if payload["waiver_betterment"] else "Not Included", "status": "manual_override"}
+            if "excess" in payload:
+                ex_str = f"{_to_float(payload['excess']):.2f}"
+                d_fields["excess_amount"] = {"value": ex_str, "status": "manual_override"}
+                d_fields["excess"] = {"value": ex_str, "status": "manual_override"}
+            if "windscreen_sum_insured" in payload:
+                ws_val = _to_float(payload["windscreen_sum_insured"])
+                ws_str = f"{ws_val:.2f}" if ws_val > 0 else ""
+                d_fields["windscreen_sum_insured"] = {"value": ws_str, "status": "manual_override"}
+                d_fields["windscreen"] = {"value": ws_str, "status": "manual_override"}
+            if "special_perils" in payload:
+                d_fields["special_perils"] = {"value": _safe_str(payload["special_perils"]), "status": "manual_override"}
+            if "llp_llop" in payload:
+                d_fields["llp_llop"] = {"value": _safe_str(payload["llp_llop"]), "status": "manual_override"}
+
+            # Recompute draft fees and total payable
+            d_fields["roadtax"] = {"value": f"{eff_rt:.2f}", "status": "manual_override"}
+            d_fields["service_fee"] = {"value": f"{eff_rf:.2f}", "status": "manual_override"}
+            d_fields["total_amount"] = {"value": f"{entry.total_payable:.2f}", "status": "manual_override"}
+
+            s_obj.draft.fields = d_fields
+            flag_modified(s_obj.draft, "fields")
 
     db.commit()
     return get_marketing_comparison(db, tenure_id)
@@ -2555,6 +2325,7 @@ def rescan_comparison_tenure(db: Session, tenure_id: str) -> dict[str, Any]:
             raw_w = _extract_val(f.get("waiver_of_betterment"))
             has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
             reg_date = _extract_val(f.get("registration_date")) or _extract_val(f.get("reg_date"))
+            cov_type_val = _extract_val(f.get("coverage_type")) or getattr(entry.session, "coverage_type", None)
             live_waiver, live_bet_rate, live_bet_disp = evaluate_betterment_rules(
                 yom=veh_yom,
                 quote_year=quote_year,
@@ -2563,6 +2334,7 @@ def rescan_comparison_tenure(db: Session, tenure_id: str) -> dict[str, Any]:
                 is_comprehensive_private=is_rescan_comp_private,
                 registration_date=reg_date,
                 coverage_start_date=tenure.coverage_start_date,
+                coverage_type=cov_type_val,
             )
             entry.betterment_rate = live_bet_rate
             entry.betterment_display = live_bet_disp

@@ -283,13 +283,7 @@ def generation_blockers(
                 "message": "Set this benefit as included, paid, or FOC.",
             })
         value = selection.typed_value_override
-        if selection.item_kind == "custom" and value is None:
-            blockers.append({
-                "code": "missing_benefit_value",
-                "path": f"benefits.{selection.id}.typed_value",
-                "message": "Enter a valid quotation-specific value.",
-            })
-        elif value is not None:
+        if value is not None:
             try:
                 BenefitValue.model_validate(value)
             except ValidationError:

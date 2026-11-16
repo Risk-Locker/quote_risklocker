@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 export interface AddCustomBenefitModalProps {
   open: boolean;
   onClose: () => void;
+  initialPlacement?: "foc" | "addon";
   onAdd: (data: {
     label: string;
     value: string;
@@ -24,6 +25,8 @@ export interface AddCustomBenefitModalProps {
     description: string;
     icon_hint: string;
     isSelected: boolean;
+    cost_status?: "included" | "paid";
+    placement?: "foc" | "addon";
   }) => void;
 }
 
@@ -39,13 +42,20 @@ const ICON_OPTIONS = [
   { hint: "generic", label: "Standard" },
 ];
 
-export function AddCustomBenefitModal({ open, onClose, onAdd }: AddCustomBenefitModalProps) {
+export function AddCustomBenefitModal({ open, onClose, onAdd, initialPlacement = "foc" }: AddCustomBenefitModalProps) {
+  const [placement, setPlacement] = useState<"foc" | "addon">(initialPlacement);
   const [label, setLabel] = useState("");
   const [value, setValue] = useState("");
   const [priceStr, setPriceStr] = useState("");
   const [description, setDescription] = useState("");
   const [iconHint, setIconHint] = useState("generic");
   const [isSelected, setIsSelected] = useState(true);
+
+  React.useEffect(() => {
+    if (open) {
+      setPlacement(initialPlacement);
+    }
+  }, [open, initialPlacement]);
 
   if (!open) return null;
 
@@ -55,7 +65,7 @@ export function AddCustomBenefitModal({ open, onClose, onAdd }: AddCustomBenefit
     if (!cleanLabel) return;
 
     let cleanPrice: number | null = null;
-    if (priceStr.trim()) {
+    if (placement === "addon" && priceStr.trim()) {
       const num = parseFloat(priceStr.replace(/[^0-9.]/g, ""));
       if (!isNaN(num) && num > 0) {
         cleanPrice = num;
@@ -68,7 +78,9 @@ export function AddCustomBenefitModal({ open, onClose, onAdd }: AddCustomBenefit
       price: cleanPrice,
       description: description.trim(),
       icon_hint: iconHint,
-      isSelected,
+      isSelected: true,
+      cost_status: placement === "foc" ? "included" : (cleanPrice ? "paid" : "included"),
+      placement,
     });
 
     setLabel("");
@@ -106,13 +118,55 @@ export function AddCustomBenefitModal({ open, onClose, onAdd }: AddCustomBenefit
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
           <div>
+            <label className="block text-xs font-bold text-[var(--rl-text-strong)] mb-1.5">
+              Placement Section <span className="text-[var(--rl-red)]">*</span>
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPlacement("foc");
+                  setPriceStr("");
+                }}
+                className={`p-2.5 rounded-lg border text-left flex items-start gap-2 cursor-pointer transition-all ${
+                  placement === "foc"
+                    ? "border-emerald-500 bg-emerald-50/70 text-emerald-900 ring-1 ring-emerald-500"
+                    : "border-gray-200 hover:border-gray-300 text-[var(--rl-text-muted)]"
+                }`}
+              >
+                <ShieldCheck size={18} className="text-emerald-600 mt-0.5 shrink-0" weight="fill" />
+                <div>
+                  <div className="text-xs font-bold text-emerald-950">Free Added Coverage (Box 1)</div>
+                  <div className="text-[10px] text-gray-500 leading-tight">Top-Right Card · Complimentary Inclusions</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPlacement("addon")}
+                className={`p-2.5 rounded-lg border text-left flex items-start gap-2 cursor-pointer transition-all ${
+                  placement === "addon"
+                    ? "border-amber-500 bg-amber-50/70 text-amber-900 ring-1 ring-amber-500"
+                    : "border-gray-200 hover:border-gray-300 text-[var(--rl-text-muted)]"
+                }`}
+              >
+                <Lightning size={18} className="text-amber-600 mt-0.5 shrink-0" weight="fill" />
+                <div>
+                  <div className="text-xs font-bold text-amber-950">Add-On Upgrades (Box 2)</div>
+                  <div className="text-[10px] text-gray-500 leading-tight">Bottom 24-Card Matrix · Paid / Optional</div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <div>
             <label className="block text-xs font-bold text-[var(--rl-text-strong)] mb-1">
               Benefit Name <span className="text-[var(--rl-red)]">*</span>
             </label>
             <Input
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder="e.g. Tyre & Rim Replacement, Child Car Seat Cover"
+              placeholder="e.g. Special Perils (Flood & Storm), Emergency Towing, Tyre & Rim"
               autoFocus
               required
               className="text-xs"
@@ -122,12 +176,12 @@ export function AddCustomBenefitModal({ open, onClose, onAdd }: AddCustomBenefit
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-[var(--rl-text-strong)] mb-1">
-                Coverage Limit
+                Coverage Limit / Sum
               </label>
               <Input
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
-                placeholder="e.g. RM 2,000, 50 km, Full"
+                placeholder="e.g. RM 2,000, 50 km, Full Coverage"
                 className="text-xs"
               />
             </div>
@@ -136,10 +190,11 @@ export function AddCustomBenefitModal({ open, onClose, onAdd }: AddCustomBenefit
                 Price (RM)
               </label>
               <Input
-                value={priceStr}
+                value={placement === "foc" ? "FOC (Included)" : priceStr}
+                disabled={placement === "foc"}
                 onChange={(e) => setPriceStr(e.target.value)}
-                placeholder="e.g. 150.00 (or 0 / clear for FOC)"
-                className="text-xs font-mono"
+                placeholder="e.g. 150.00 (or 0 for FOC)"
+                className={`text-xs font-mono ${placement === "foc" ? "bg-emerald-50 text-emerald-800 font-bold cursor-not-allowed" : ""}`}
               />
             </div>
           </div>

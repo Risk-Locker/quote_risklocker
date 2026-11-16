@@ -200,8 +200,22 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
 
     # 2. Resolve product
     products = [item for item in _rows(db, InsuranceProduct) if item.company_id == draft.company_id and item.status == "active"]
-    if draft.product_id and all(item.id != draft.product_id for item in products):
-        draft.product_id = None
+    if draft.product_id:
+        curr_prod = next((p for p in products if p.id == draft.product_id), None)
+        if not curr_prod:
+            draft.product_id = None
+        elif resolved_coverage_id:
+            cov_row = db.get(CoverageType, resolved_coverage_id) if resolved_coverage_id else None
+            cov_key = str(cov_row.coverage_key).lower() if cov_row else ""
+            if cov_key == "comprehensive":
+                if any(w in curr_prod.name.lower() for w in ("tpft", "third party", "tpo", "fire and theft", "fire & theft")):
+                    draft.product_id = None
+            elif cov_key == "third_party_fire_theft":
+                if not any(w in curr_prod.name.lower() for w in ("tpft", "fire and theft", "fire & theft", "third party fire")):
+                    draft.product_id = None
+            elif cov_key == "third_party":
+                if not any(w in curr_prod.name.lower() for w in ("third party", "tpo")) or any(w in curr_prod.name.lower() for w in ("tpft", "fire")):
+                    draft.product_id = None
     product_name = _field_value(draft.fields or {}, "product_name", "product")
     if not draft.product_id and product_name:
         exact = _single_exact(products, product_name)
@@ -210,25 +224,45 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
             fuzzy_matches = [p for p in products if p_norm in _norm(p.name) or _norm(p.name) in p_norm]
             if len(fuzzy_matches) == 1:
                 exact = fuzzy_matches[0]
-            elif len(fuzzy_matches) > 1 and resolved_coverage_id:
-                cov_matches = [p for p in fuzzy_matches if any(w in _norm(p.name) for w in ("comprehensive", "tpft", "third party") if (resolved_coverage_id and w in p.name.lower()))]
+            elif len(fuzzy_matches) > 1 and len({_norm(p.name) for p in fuzzy_matches}) > 1:
+                # 1. Filter by vehicle category if vehicle is known
+                v_filtered = fuzzy_matches
+                raw_v_text = (raw_vehicle or "").lower()
+                is_car = not any(w in raw_v_text for w in ("motorcycle", "bike", "motosikal", "lorry", "truck", "commercial", "haulage"))
+                if is_car:
+                    v_filtered = [p for p in v_filtered if not any(w in p.name.lower() for w in ("motorcycle", "bike", "lorry", "commercial", "haulage"))]
+                elif any(w in raw_v_text for w in ("motorcycle", "bike", "motosikal")):
+                    v_filtered = [p for p in v_filtered if any(w in p.name.lower() for w in ("motorcycle", "bike", "motosikal"))]
+                elif any(w in raw_v_text for w in ("lorry", "truck", "commercial", "haulage")):
+                    v_filtered = [p for p in v_filtered if any(w in p.name.lower() for w in ("lorry", "truck", "commercial", "haulage"))]
+
+                if not v_filtered:
+                    v_filtered = fuzzy_matches
+
+                # 2. Filter by coverage type (Comprehensive vs TPFT vs Third Party)
+                cov_row = db.get(CoverageType, resolved_coverage_id) if resolved_coverage_id else None
+                cov_key = str(cov_row.coverage_key).lower() if cov_row else ""
+
+                cov_matches = []
+                if cov_key == "third_party_fire_theft":
+                    cov_matches = [p for p in v_filtered if any(w in p.name.lower() for w in ("tpft", "fire and theft", "fire & theft", "third party fire"))]
+                elif cov_key == "third_party":
+                    cov_matches = [p for p in v_filtered if any(w in p.name.lower() for w in ("third party", "tpo")) and not any(w in p.name.lower() for w in ("tpft", "fire"))]
+                else:  # Comprehensive or default
+                    # In Malaysian motor insurance, a product without (TPFT) or (Third Party) is Comprehensive (e.g. 'SOMPO Motor (Private Car)')
+                    comp_explicit = [p for p in v_filtered if "comprehensive" in p.name.lower()]
+                    comp_implicit = [p for p in v_filtered if not any(w in p.name.lower() for w in ("tpft", "third party", "tpo", "fire and theft", "fire & theft"))]
+                    cov_matches = comp_explicit if comp_explicit else comp_implicit
+
+                target_candidates = cov_matches if cov_matches else v_filtered
+
+                # 3. EV vs ICE powertrain matching
                 if is_ev:
-                    ev_cov = [p for p in cov_matches if "(ev)" in p.name.lower() or " ev" in p.name.lower()]
-                    if ev_cov:
-                        cov_matches = ev_cov
+                    ev_cov = [p for p in target_candidates if "(ev)" in p.name.lower() or " ev" in p.name.lower()]
+                    exact = ev_cov[0] if ev_cov else target_candidates[0]
                 else:
-                    ice_cov = [p for p in cov_matches if "(ev)" not in p.name.lower() and " ev" not in p.name.lower()]
-                    if ice_cov:
-                        cov_matches = ice_cov
-                if cov_matches:
-                    exact = cov_matches[0]
-                else:
-                    if is_ev:
-                        ev_f = [p for p in fuzzy_matches if "(ev)" in p.name.lower() or " ev" in p.name.lower()]
-                        exact = ev_f[0] if ev_f else fuzzy_matches[0]
-                    else:
-                        ice_f = [p for p in fuzzy_matches if "(ev)" not in p.name.lower() and " ev" not in p.name.lower()]
-                        exact = ice_f[0] if ice_f else fuzzy_matches[0]
+                    ice_cov = [p for p in target_candidates if "(ev)" not in p.name.lower() and " ev" not in p.name.lower()]
+                    exact = ice_cov[0] if ice_cov else target_candidates[0]
         if exact:
             draft.product_id = exact.id
     if not draft.product_id:

@@ -182,6 +182,65 @@ CANONICAL_24_CATALOG: list[dict[str, Any]] = [
     },
 ]
 
+FALLBACK_ICE_PERKS_CATALOG: list[dict[str, Any]] = [
+    {
+        "id": "child_seat",
+        "title": "Child Car Safety Seat",
+        "description": "Reimburses replacement of damaged child car safety seat up to RM500.",
+        "default_value": "RM 500.00",
+        "icon_hint": "child_seat",
+    },
+    {
+        "id": "inconvenience_allowance",
+        "title": "Inconvenience Allowance",
+        "description": "Lump sum cash payout for travel inconvenience during vehicle repairs.",
+        "default_value": "RM 500.00",
+        "icon_hint": "allowance",
+    },
+    {
+        "id": "car_replacement",
+        "title": "Courtesy Car Replacement",
+        "description": "Temporary courtesy car replacement while vehicle is under workshop repair.",
+        "default_value": "Up to 14 Days",
+        "icon_hint": "car_replacement",
+    },
+    {
+        "id": "rim_tyre",
+        "title": "Rim & Tyre Protection",
+        "description": "Covers accidental tyre puncture or alloy wheel rim kerb damage.",
+        "default_value": "RM 1,000.00",
+        "icon_hint": "rim_tyre",
+    },
+    {
+        "id": "flood_allowance",
+        "title": "Flood Relief Allowance",
+        "description": "Immediate cash relief payout upon flood damage claims.",
+        "default_value": "RM 1,000.00",
+        "icon_hint": "flood",
+    },
+    {
+        "id": "airbag_replacement",
+        "title": "Airbag Replacement Cover",
+        "description": "Reimburses genuine OEM airbag modules following collision deployment.",
+        "default_value": "Up to Sum Insured",
+        "icon_hint": "airbag",
+    },
+    {
+        "id": "ambulance_fees",
+        "title": "Emergency Ambulance Service",
+        "description": "Reimbursement of emergency ambulance transport charges up to RM500.",
+        "default_value": "RM 500.00",
+        "icon_hint": "pa",
+    },
+    {
+        "id": "legal_defense",
+        "title": "Legal Representation & Defense",
+        "description": "Covers court legal defense counsel costs up to RM2,000.",
+        "default_value": "RM 2,000.00",
+        "icon_hint": "legal_defense",
+    },
+]
+
 CANONICAL_BY_ID: dict[str, dict[str, Any]] = {c["id"]: c for c in CANONICAL_24_CATALOG}
 
 _SUPPRESSED_VALUES = {
@@ -714,7 +773,18 @@ COMMERCIAL_EXCLUDED_MATRIX_IDS = frozenset({
     "child_seat",
 })
 
-PRIVATE_CAR_EXCLUDED_MATRIX_IDS = frozenset()
+PRIVATE_CAR_EXCLUDED_MATRIX_IDS = frozenset({
+    "non_fare_passenger",
+    "third_party_working",
+    "boom_damage",
+    "overturning",
+})
+
+ICE_EXCLUDED_MATRIX_IDS = frozenset({
+    "ev_wall_charger",
+    "ev_out_of_charge",
+    "ev_charger_liability",
+})
 
 COMMERCIAL_KEYWORDS = (
     "lorry", "truck", "hino", "fuso", "canter", "rigid", "trailer", "tipper",
@@ -734,6 +804,18 @@ def is_commercial_vehicle(
     if fields:
         raw += f" {fields.get('vehicle_type', '')} {fields.get('car_model', '')} {fields.get('capacity', '')}".lower()
     return any(k in raw for k in COMMERCIAL_KEYWORDS) or "kg" in raw or "bdm" in raw
+
+
+def is_ev_vehicle(
+    vehicle_type: str = "",
+    car_model: str = "",
+    fields: dict[str, Any] | None = None,
+) -> bool:
+    """Returns True if the vehicle is classified as an Electric Vehicle (EV / BEV / ZEV)."""
+    raw = f"{vehicle_type or ''} {car_model or ''}".lower()
+    if fields:
+        raw += f" {fields.get('vehicle_type', '')} {fields.get('powertrain', '')} {fields.get('engine_cc', '')}".lower()
+    return "ev" in raw or "electric" in raw or "zev" in raw or "bev" in raw or "kw" in raw
 
 
 def extract_free_coverage_items(
@@ -777,13 +859,15 @@ def extract_free_coverage_items(
     for raw in active_benefits or []:
         if raw.get("is_extra") or raw.get("cost_status") == "paid" or _positive_price(raw):
             continue
-        matched_cat = _match_catalog_item(raw)
-        if matched_cat is not None:
-            continue
         title = str(raw.get("title") or raw.get("label") or "").strip()
         if not title:
             continue
         norm_title = _normalize_benefit_code(title)
+        matched_cat = _match_catalog_item(raw)
+        if matched_cat is not None:
+            is_special_perils = any(k in norm_title for k in ("special_perils", "convulsion", "flood")) or raw.get("concept_key") == "special-perils"
+            if not is_special_perils:
+                continue
         # Suppress any towing for commercial lorries, or duplicate towing for cars
         if is_comm and any(k in norm_title for k in ("towing", "roadside", "assist")):
             continue
@@ -820,15 +904,28 @@ def extract_free_coverage_items(
     else:
         fallbacks = [
             {"title": "Legal Defense Costs", "description": "Reimburses court legal representation and defense fees up to RM2,000."},
-            {"title": "Drive-Less Save-More", "description": "Cash rebate up to 30% of base premium for low annual mileage."},
-            {"title": "Child Car Safety Seat", "description": "Reimburses replacement or repair of child safety seats in a crash."},
         ]
+        ins_lower = (insurer_name or "").lower()
+        if "takaful" in ins_lower or "stmb" in ins_lower:
+            fallbacks.append({
+                "title": "No Claim Cashback",
+                "description": "Distributable surplus profit-sharing distribution via Hibah if no claims.",
+            })
+        elif any(k in ins_lower for k in ("sompo", "allianz", "kurnia", "amassurance", "liberty", "etiqa")):
+            fallbacks.append({
+                "title": "Panel Repair Workmanship Warranty",
+                "description": "12-month repair quality warranty from approved repairers.",
+            })
 
     for fb in fallbacks:
         if len(items) >= limit:
             break
         fb_norm = _normalize_benefit_code(fb["title"])
         if fb_norm not in seen_titles:
+            if "warranty" in fb_norm and any("warranty" in s for s in seen_titles):
+                continue
+            if "legal" in fb_norm and any("legal" in s for s in seen_titles):
+                continue
             seen_titles.add(fb_norm)
             items.append(fb)
 
@@ -892,7 +989,13 @@ def build_unified_matrix_cards(
     4. Floats selected cards to the front while preserving canonical ordering.
     """
     is_comm = is_commercial_vehicle(vehicle_type, car_model, fields)
-    excluded_ids = COMMERCIAL_EXCLUDED_MATRIX_IDS if is_comm else PRIVATE_CAR_EXCLUDED_MATRIX_IDS
+    is_ev = is_ev_vehicle(vehicle_type, car_model, fields)
+    if is_comm:
+        excluded_ids = set(COMMERCIAL_EXCLUDED_MATRIX_IDS)
+    elif not is_ev:
+        excluded_ids = set(PRIVATE_CAR_EXCLUDED_MATRIX_IDS | ICE_EXCLUDED_MATRIX_IDS)
+    else:
+        excluded_ids = set(PRIVATE_CAR_EXCLUDED_MATRIX_IDS)
 
     canonical_overrides: dict[str, dict[str, Any]] = {}
     custom_cards: list[dict[str, Any]] = []
@@ -1048,9 +1151,9 @@ def build_unified_matrix_cards(
             seen_in_output.add(c_id)
             processed_cards.append(custom)
 
-    # 4. Fill remaining slots up to fill_to_slots from CANONICAL_24_CATALOG
+    # 4. Fill remaining slots up to fill_to_slots from CANONICAL_24_CATALOG and FALLBACK_ICE_PERKS_CATALOG
     if fill_to_slots and fill_to_slots > 0:
-        for cat in CANONICAL_24_CATALOG:
+        for cat in [*CANONICAL_24_CATALOG, *FALLBACK_ICE_PERKS_CATALOG]:
             if len(processed_cards) >= fill_to_slots:
                 break
             cat_id = cat["id"]

@@ -111,6 +111,7 @@ class ComparisonEntryUpsertRequest(BaseModel):
     notes: str | None = None
     basic_figure_amount: float | None = None
     source_quotation_no: str | None = None
+    expected_version: int | None = None
 
     @field_validator("sum_insured", "motor_premium", "excess", "windscreen_sum_insured", "basic_figure_amount", "discount", mode="before")
     def parse_floats(cls, v):
@@ -285,7 +286,10 @@ def upsert_entry(
     try:
         return save_comparison_entry(db, tenure_id, payload.model_dump())
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        err_msg = str(e)
+        if "Concurrent modification conflict" in err_msg:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=err_msg)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=err_msg)
     except Exception as e:
         logger.exception("Failed to upsert comparison entry for tenure %s: %s", tenure_id, e)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save entry")

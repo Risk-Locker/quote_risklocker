@@ -1197,7 +1197,7 @@ def _build_preview_profile_data(
                 {"id": "a2", "label": "Vehicle Accessories Protection", "price": {"amount": 120.0}, "short_description": "In-car dashcam and audio system."},
                 {"id": "a3", "label": "Car Spray Repainting", "price": {"amount": 250.0}, "short_description": "Full body repainting benefit."},
                 {"id": "a4", "label": "Personal Accident Extended", "price": {"amount": 180.0}, "short_description": "Extended family passenger cover."},
-                {"id": "a5", "label": "Child Seat Replacement", "price": {"amount": 100.0}, "short_description": "Child safety restraint replacement."},
+                {"id": "a5", "label": "E-Hailing Cover", "price": {"amount": 100.0}, "short_description": "Coverage extension for e-hailing operations."},
                 {"id": "a6", "label": "Tire Replacement Cover", "price": {"amount": 90.0}, "short_description": "Puncture and blowout road hazard."},
                 {"id": "a7", "label": "Rim Damage Protection", "price": {"amount": 110.0}, "short_description": "Alloy wheel rim impact protection."},
                 {"id": "a8", "label": "Medical Expenses Allowance", "price": {"amount": 130.0}, "short_description": "Accident hospitalization daily cash."},

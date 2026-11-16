@@ -39,6 +39,8 @@ export interface AddCustomBenefitPayload {
   icon_hint?: string;
   isSelected?: boolean;
   targetState?: "current" | "available_addon";
+  cost_status?: "included" | "paid";
+  placement?: "foc" | "addon";
 }
 
 export interface UseBenefitOperationsOptions {
@@ -77,14 +79,11 @@ export function useBenefitOperations({
   }, [formValues?.vehicle_type, workspace?.fields?.vehicle_type]);
 
   const isExcludedForVehicle = useCallback(
-    (item: { label?: string; title?: string; concept_key?: string } | null | undefined) => {
-      if (!item) return false;
-      const text = `${item.label || ""} ${item.title || ""} ${item.concept_key || ""}`.toLowerCase();
-      if (currentVehicleCategory === "Motorcycle" && text.includes("windscreen")) return true;
-      if (currentVehicleCategory === "Lorry" && (text.includes("towing") || text.includes("breakdown"))) return true;
+    (_item: { label?: string; title?: string; concept_key?: string } | null | undefined) => {
+      // User retains full control to view, add, or remove any benefit card without arbitrary suppression
       return false;
     },
-    [currentVehicleCategory]
+    []
   );
 
   const currentCards = useMemo(() => {
@@ -161,6 +160,7 @@ export function useBenefitOperations({
     let label = "";
     let displayVal = "";
     let targetState: "current" | "available_addon" = "current";
+    let costStatus: "included" | "paid" = "paid";
     let priceObj: { amount: string; currency: string } | undefined = undefined;
     let descriptionText = "";
     let iconHintText = "";
@@ -169,7 +169,17 @@ export function useBenefitOperations({
       label = payloadOrTarget.label.trim();
       displayVal = payloadOrTarget.value?.trim() || "";
       targetState = payloadOrTarget.targetState || (payloadOrTarget.isSelected === false ? "available_addon" : "current");
-      if (payloadOrTarget.price != null && payloadOrTarget.price !== "") {
+      if (payloadOrTarget.cost_status) {
+        costStatus = payloadOrTarget.cost_status;
+      } else if (payloadOrTarget.placement === "foc") {
+        costStatus = "included";
+      } else if (payloadOrTarget.price != null && payloadOrTarget.price !== "") {
+        costStatus = "paid";
+      } else {
+        costStatus = "included";
+      }
+
+      if (costStatus === "paid" && payloadOrTarget.price != null && payloadOrTarget.price !== "") {
         priceObj = { amount: String(payloadOrTarget.price).replace(/,/g, ""), currency: "MYR" };
       }
       descriptionText = payloadOrTarget.description?.trim() || "";
@@ -181,6 +191,9 @@ export function useBenefitOperations({
       const priceText = customPrice.trim();
       if (priceText) {
         priceObj = { amount: priceText.replace(/,/g, ""), currency: "MYR" };
+        costStatus = "paid";
+      } else {
+        costStatus = "included";
       }
     }
 
@@ -191,9 +204,9 @@ export function useBenefitOperations({
       selection_key: key,
       label,
       typed_value: displayVal ? { type: "custom", display_text: displayVal } : { type: "custom", display_text: label },
-      cost_status: "paid",
+      cost_status: costStatus,
       state: targetState,
-      ...(priceObj ? { price: priceObj } : {}),
+      ...(costStatus === "paid" && priceObj ? { price: priceObj } : {}),
       ...(descriptionText ? { description: descriptionText } : {}),
       ...(iconHintText ? { icon_hint: iconHintText } : {}),
     };

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   ArrowArcLeft,
   ArrowArcRight,
@@ -9,11 +9,15 @@ import {
   CaretUp,
   Check,
   CheckCircle,
+  Columns,
   Lightning,
+  MagnifyingGlass,
   Package as PackageIcon,
   Plus,
+  Rows,
   ShieldCheck,
   Sparkle,
+  X,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import type { BenefitCardSummary, WorkspaceSnapshot } from "../types";
@@ -84,6 +88,24 @@ export function BenefitsManagerPanel({
   addCustomBenefit,
 }: BenefitsManagerPanelProps) {
   const [showAddCustomModal, setShowAddCustomModal] = useState(false);
+  const [customModalPlacement, setCustomModalPlacement] = useState<"foc" | "addon">("addon");
+  const [layoutMode, setLayoutMode] = useState<"stacked" | "side_by_side">("stacked");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const q = searchQuery.trim().toLowerCase();
+  const filterCard = (c: BenefitCardSummary) => {
+    if (!q) return true;
+    return (
+      (c.label || "").toLowerCase().includes(q) ||
+      (c.description || "").toLowerCase().includes(q) ||
+      (c.value || "").toLowerCase().includes(q) ||
+      (c.concept_key || "").toLowerCase().includes(q)
+    );
+  };
+
+  const filteredFocCards = useMemo(() => focCards.filter(filterCard), [focCards, q]);
+  const filteredPurchasedAddons = useMemo(() => purchasedAddonCards.filter(filterCard), [purchasedAddonCards, q]);
+  const filteredAddonCards = useMemo(() => addonCards.filter(filterCard), [addonCards, q]);
 
   const resolveAssetUrl = (card: BenefitCardSummary) => {
     const concept = globalConcepts.find(
@@ -137,18 +159,18 @@ export function BenefitsManagerPanel({
     } else {
       if (selectionId && !pending) {
         onQueue(
-          { op: "benefit_update", selection_id: selectionId, state: "available_addon", cost_status: "optional", is_extra: false },
+          { op: "benefit_update", selection_id: selectionId, state: "available_addon", cost_status: "paid", is_extra: false },
           `benefits.${selectionId}.state`
         );
       } else if (card.offering_id) {
         onQueue(
-          { op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "optional", is_extra: false },
+          { op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid", is_extra: false },
           `benefits.offer.${card.offering_id}`
         );
       } else if (selectionId || card.concept_key) {
         const targetId = selectionId || card.concept_key!;
         onQueue(
-          { op: "benefit_update", selection_id: targetId, state: "available_addon", cost_status: "optional", is_extra: false },
+          { op: "benefit_update", selection_id: targetId, state: "available_addon", cost_status: "paid", is_extra: false },
           `benefits.${targetId}.state`
         );
       }
@@ -179,7 +201,65 @@ export function BenefitsManagerPanel({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Layout Mode Selector (Side-by-Side vs Stacked) */}
+          <div className="flex items-center rounded-md border border-[var(--rl-border)] bg-gray-100 p-0.5 text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => setLayoutMode("stacked")}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded transition-colors ${
+                layoutMode === "stacked"
+                  ? "bg-white text-[var(--rl-text-strong)] shadow-2xs font-bold"
+                  : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+              }`}
+              title="Stacked View: Box 1 on top, Box 2 below"
+            >
+              <Rows size={13} weight="bold" />
+              <span>Stacked</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setLayoutMode("side_by_side")}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded transition-colors ${
+                layoutMode === "side_by_side"
+                  ? "bg-white text-[var(--rl-text-strong)] shadow-2xs font-bold"
+                  : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+              }`}
+              title="Side-by-Side View: Box 1 (left) and Box 2 (right)"
+            >
+              <Columns size={13} weight="bold" />
+              <span>Side-by-Side</span>
+            </button>
+          </div>
+
+          {/* Unified Add Buttons (Single Source of Truth) */}
+          <Button
+            size="sm"
+            variant="primary"
+            icon={<Plus size={14} weight="bold" />}
+            onClick={() => {
+              setCustomModalPlacement("addon");
+              setShowAddCustomModal(true);
+            }}
+            className="text-xs font-bold bg-[var(--rl-red)] hover:bg-red-700 text-white shadow-xs"
+            title="Add a custom benefit or add-on"
+          >
+            + Add Custom Benefit
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<Sparkle size={14} weight="bold" className="text-[var(--rl-red)]" />}
+            onClick={() => {
+              setModalTarget("available_addon");
+              setShowGlobalModal(true);
+            }}
+            className="text-xs"
+            title="Browse global library of benefits and add-ons"
+          >
+            + Global Library
+          </Button>
+
           <Button
             size="sm"
             variant="secondary"
@@ -221,6 +301,28 @@ export function BenefitsManagerPanel({
         </div>
       </div>
 
+      {/* Search and Quick Filters */}
+      <div className="relative flex items-center">
+        <MagnifyingGlass size={16} className="absolute left-3 text-[var(--rl-text-muted)] pointer-events-none" />
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search benefits by name, description, or coverage limit (e.g. 'flood', 'towing', 'betterment', 'RM 5,000')..."
+          className="h-9 w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white pl-9 pr-24 text-xs text-[var(--rl-text-strong)] placeholder:text-[var(--rl-text-muted)] focus:border-[var(--rl-red)] focus:ring-1 focus:ring-[var(--rl-red)] focus:outline-none transition-all shadow-xs"
+        />
+        {searchQuery ? (
+          <button
+            type="button"
+            onClick={() => setSearchQuery("")}
+            className="absolute right-2 flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] cursor-pointer"
+          >
+            Clear
+            <X size={12} weight="bold" />
+          </button>
+        ) : null}
+      </div>
+
       {benefitsCollapsed ? (
         <div className="flex flex-wrap items-center justify-between text-xs text-[var(--rl-text-muted)] pt-2 border-t border-[var(--rl-border)]">
           <span>
@@ -233,7 +335,7 @@ export function BenefitsManagerPanel({
           </span>
         </div>
       ) : (
-        <div className="grid gap-5">
+        <div className={layoutMode === "side_by_side" ? "grid grid-cols-1 xl:grid-cols-2 gap-4 items-start" : "grid gap-5"}>
           {/* ========================================================================= */}
           {/* BOX 1: Default / FOC Benefits (Maps to Top-Right Card in Design 2)        */}
           {/* ========================================================================= */}
@@ -253,23 +355,29 @@ export function BenefitsManagerPanel({
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <span className="rounded-md bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
-                  {focCards.length} standard covers (constant)
+                <span className="rounded-md bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 text-xs font-bold text-emerald-800 font-mono">
+                  {filteredFocCards.length}{q ? ` / ${focCards.length}` : ""} standard covers (constant)
                 </span>
               </div>
             </div>
 
-            {/* Inclusions List - Clean cards without wrapping action buttons */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-[340px] overflow-y-auto pr-1">
-              {focCards.length === 0 ? (
+            {/* Inclusions List - Clean cards with 1-click movement */}
+            <div className={`grid ${layoutMode === "side_by_side" ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3"} gap-2.5 max-h-[460px] overflow-y-auto pr-1`}>
+              {filteredFocCards.length === 0 ? (
                 <div className="col-span-full flex flex-col items-center justify-center p-6 text-center text-xs text-[var(--rl-text-muted)]">
-                  <p>No included benefits active.</p>
-                  <Button size="sm" variant="secondary" onClick={handleReset} className="mt-2 text-xs">
-                    Reset to insurance defaults
-                  </Button>
+                  {searchQuery ? (
+                    <p>No free inclusions match &ldquo;{searchQuery}&rdquo;.</p>
+                  ) : (
+                    <>
+                      <p>No included benefits active.</p>
+                      <Button size="sm" variant="secondary" onClick={handleReset} className="mt-2 text-xs">
+                        Reset to insurance defaults
+                      </Button>
+                    </>
+                  )}
                 </div>
               ) : (
-                focCards.map((card, idx) => {
+                filteredFocCards.map((card, idx) => {
                   const selection = workspace.benefits.find(
                     (item) => item.catalog_offering_id === card.offering_id || item.selection_key === card.card_key
                   );
@@ -283,7 +391,7 @@ export function BenefitsManagerPanel({
                       selection={selection}
                       canUndo={Boolean(card.branch_key)}
                       onQueue={onQueue}
-                      hideColumnButtons={true}
+                      hideColumnButtons={false}
                       companyName={companyName}
                     />
                   );
@@ -312,33 +420,12 @@ export function BenefitsManagerPanel({
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="rounded-md bg-emerald-50 border border-emerald-300 px-2 py-0.5 text-xs font-bold text-emerald-800">
-                  ✔ {purchasedAddonCards.length} Ticked on Quote
+                <span className="rounded-md bg-emerald-50 border border-emerald-300 px-2 py-0.5 text-xs font-bold text-emerald-800 font-mono">
+                  ✔ {filteredPurchasedAddons.length}{q ? ` / ${purchasedAddonCards.length}` : ""} Ticked on Quote
                 </span>
-                <span className="rounded-md bg-blue-50 border border-blue-200 px-2 py-0.5 text-xs font-bold text-blue-800">
-                  {addonCards.length} Optional Available
+                <span className="rounded-md bg-blue-50 border border-blue-200 px-2 py-0.5 text-xs font-bold text-blue-800 font-mono">
+                  {filteredAddonCards.length}{q ? ` / ${addonCards.length}` : ""} Optional Available
                 </span>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  icon={<Plus size={14} weight="bold" />}
-                  onClick={() => setShowAddCustomModal(true)}
-                  className="text-xs font-bold bg-[var(--rl-red)] hover:bg-red-700 text-white shadow-xs"
-                >
-                  + Add Custom Add-on
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  icon={<Sparkle size={14} weight="bold" className="text-[var(--rl-red)]" />}
-                  onClick={() => {
-                    setModalTarget("available_addon");
-                    setShowGlobalModal(true);
-                  }}
-                  className="text-xs"
-                >
-                  + Global Library
-                </Button>
               </div>
             </div>
 
@@ -435,36 +522,45 @@ export function BenefitsManagerPanel({
             )}
 
             {/* Matrix Addons Grid - Both Selected (Floated to Top) and Optional */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[460px] overflow-y-auto pr-1">
-              {purchasedAddonCards.length === 0 && addonCards.length === 0 ? (
+            <div className={`grid ${layoutMode === "side_by_side" ? "grid-cols-1 2xl:grid-cols-2" : "grid-cols-1 md:grid-cols-2"} gap-3 max-h-[460px] overflow-y-auto pr-1`}>
+              {filteredPurchasedAddons.length === 0 && filteredAddonCards.length === 0 ? (
                 <div className="col-span-full flex flex-col items-center justify-center p-8 text-center text-xs text-[var(--rl-text-muted)]">
-                  <p>No add-on covers available for this quotation.</p>
-                  <div className="mt-3 flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      onClick={() => setShowAddCustomModal(true)}
-                      className="text-xs bg-[var(--rl-red)] text-white font-bold"
-                    >
-                      + Add Custom Add-on
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => {
-                        setModalTarget("available_addon");
-                        setShowGlobalModal(true);
-                      }}
-                      className="text-xs"
-                    >
-                      Browse Global Library
-                    </Button>
-                  </div>
+                  {searchQuery ? (
+                    <p>No add-on covers match &ldquo;{searchQuery}&rdquo;.</p>
+                  ) : (
+                    <>
+                      <p>No add-on covers available for this quotation.</p>
+                      <div className="mt-3 flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={() => {
+                            setCustomModalPlacement("addon");
+                            setShowAddCustomModal(true);
+                          }}
+                          className="text-xs bg-[var(--rl-red)] text-white font-bold"
+                        >
+                          + Add Custom Add-on
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => {
+                            setModalTarget("available_addon");
+                            setShowGlobalModal(true);
+                          }}
+                          className="text-xs"
+                        >
+                          Browse Global Library
+                        </Button>
+                      </div>
+                    </>
+                  )}
                 </div>
               ) : (
                 <>
                   {/* 1. Ticked / Purchased Add-ons (Floated to top, index #01, #02...) */}
-                  {purchasedAddonCards.map((card, idx) => {
+                  {filteredPurchasedAddons.map((card, idx) => {
                     const selection = workspace.benefits.find(
                       (item) => item.catalog_offering_id === card.offering_id || item.selection_key === card.card_key
                     );
@@ -485,12 +581,12 @@ export function BenefitsManagerPanel({
                   })}
 
                   {/* 2. Optional Available Add-ons (Unticked, index continues from purchased) */}
-                  {addonCards.map((card, idx) => {
+                  {filteredAddonCards.map((card, idx) => {
                     const selection = workspace.benefits.find(
                       (item) => item.catalog_offering_id === card.offering_id || item.selection_key === card.card_key
                     );
                     const assetUrl = resolveAssetUrl(card);
-                    const effectiveIndex = purchasedAddonCards.length + idx;
+                    const effectiveIndex = filteredPurchasedAddons.length + idx;
                     return (
                       <MatrixAddonCard
                         key={card.offering_id || card.card_key || `addon-${idx}`}
@@ -515,6 +611,7 @@ export function BenefitsManagerPanel({
       {/* Add Custom Benefit Modal */}
       <AddCustomBenefitModal
         open={showAddCustomModal}
+        initialPlacement={customModalPlacement}
         onClose={() => setShowAddCustomModal(false)}
         onAdd={handleAddCustomSubmit}
       />

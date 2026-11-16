@@ -309,14 +309,21 @@ export function ReviewHeaderCard({
             {redetecting ? "Re-detecting..." : "Re-detect"}
           </Button>
 
-          <Button
-            variant={mutation.dirty ? "primary" : "secondary"}
-            loading={mutation.saving}
-            icon={<FloppyDisk weight="bold" />}
-            onClick={() => saveAndCheckLearning()}
-          >
-            {mutation.dirty ? "Save Changes" : "Saved"}
-          </Button>
+          <div className="flex items-center gap-2">
+            {mutation.lastSavedAt && !mutation.dirty && !mutation.saving && (
+              <span className="hidden sm:inline-block text-[11px] text-[var(--rl-text-muted)] font-medium">
+                Saved {new Date(mutation.lastSavedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              </span>
+            )}
+            <Button
+              variant={mutation.dirty ? "primary" : "secondary"}
+              loading={mutation.saving}
+              icon={<FloppyDisk weight="bold" />}
+              onClick={() => saveAndCheckLearning()}
+            >
+              {mutation.saving ? "Saving..." : mutation.dirty ? "Save Changes" : "Saved"}
+            </Button>
+          </div>
 
           {/* Modular Export Actions Bar */}
           <ExportActionsBar

@@ -42,19 +42,31 @@ export function useQuotationExports({
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pendingExportAction, setPendingExportAction] = useState<"copy_png" | "download_png" | "download_pdf" | null>(null);
 
-  async function generateCanvasBlob(): Promise<Blob | null> {
+  function dataUrlToBlob(dataUrl: string): Blob {
+    const parts = dataUrl.split(",");
+    const mime = parts[0].match(/:(.*?);/)?.[1] || "image/png";
+    const bstr = atob(parts[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type: mime });
+  }
+
+  async function generateCanvasPngDataUrl(): Promise<string | null> {
     const live = document.getElementById("rl-live-canvas-inner");
     if (!live || !previewTemplate) return null;
 
     const width = previewTemplate.config.canvas?.width || 794;
     const height = canvasH;
 
-    return await toBlob(live, {
-      cacheBust: false,
+    return await toPng(live, {
+      cacheBust: true,
       backgroundColor: "#ffffff",
       width,
       height,
-      pixelRatio: 4,
+      pixelRatio: 4, // Ultra-high-definition 4K rendering (~3176px wide)
       skipFonts: false,
       style: {
         transform: "none",
@@ -95,23 +107,22 @@ export function useQuotationExports({
     setCopyingPng(true);
     setActionError(null);
     try {
-      const blob = await generateCanvasBlob();
-      if (!blob) throw new Error("Could not capture quotation template canvas.");
+      const dataUrl = await generateCanvasPngDataUrl();
+      if (!dataUrl) throw new Error("Could not capture quotation template canvas.");
+      const blob = dataUrlToBlob(dataUrl);
 
       if (typeof ClipboardItem !== "undefined" && navigator.clipboard && typeof navigator.clipboard.write === "function") {
         await navigator.clipboard.write([
           new ClipboardItem({ "image/png": blob }),
         ]);
         setCopiedPng(true);
-        setToastMessage("High-definition quotation PNG copied to clipboard!");
+        setToastMessage("Ultra-HD 4K quotation PNG copied to clipboard!");
         setTimeout(() => setCopiedPng(false), 2500);
         return;
       }
 
-      const url = URL.createObjectURL(blob);
-      triggerDownload(url, `quotation_${formValues.vehicle_no || id}.png`);
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
-      setToastMessage("Quotation PNG downloaded (clipboard was restricted by browser).");
+      triggerDownload(dataUrl, `quotation_${formValues.vehicle_no || id}.png`);
+      setToastMessage("4K quotation PNG downloaded (clipboard was restricted by browser).");
     } catch (err: unknown) {
       console.error("[handleCopyPng error]", err);
       setActionError("Could not export quotation PNG: " + (err instanceof Error ? err.message : String(err)));
@@ -132,17 +143,10 @@ export function useQuotationExports({
     setDownloadingPng(true);
     setActionError(null);
     try {
-      const blob = await generateCanvasBlob();
-      if (!blob) throw new Error("Could not generate quotation image blob");
-      const url = URL.createObjectURL(blob);
-      try {
-        window.open(url, "_blank");
-      } catch {
-        // Best effort
-      }
-      triggerDownload(url, `quotation_${formValues.vehicle_no || id}.png`);
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
-      setToastMessage("High-definition quotation PNG opened in new tab and downloaded!");
+      const dataUrl = await generateCanvasPngDataUrl();
+      if (!dataUrl) throw new Error("Could not generate quotation image");
+      triggerDownload(dataUrl, `quotation_${formValues.vehicle_no || id}.png`);
+      setToastMessage("Ultra-HD 4K quotation PNG downloaded successfully!");
     } catch (err: unknown) {
       console.error("[handleDownloadPng error]", err);
       setActionError("Could not generate PNG for download: " + (err instanceof Error ? err.message : String(err)));

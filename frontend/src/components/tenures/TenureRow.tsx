@@ -14,7 +14,7 @@ import {
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { fileUrl } from "@/lib/api";
-import { getVehicleDisplayName } from "@/lib/vehicle-utils";
+import { getVehicleDisplayName, shouldDisplayBrand } from "@/lib/vehicle-utils";
 import type { VehicleGroup, TenureRow, PicItem } from "./types";
 import {
   STAGE_CONFIGS,
@@ -187,7 +187,7 @@ export function TenureRowComponent({
               </button>
             </div>
             <div className="text-[10px] text-neutral-500 font-medium truncate max-w-[240px]">
-              {group.car_brand ? <><HighlightText text={group.car_brand} query={search} /> </> : ""}
+              {shouldDisplayBrand(group.car_brand, group.car_model) ? <><HighlightText text={group.car_brand!} query={search} /> </> : ""}
               {group.car_model ? <HighlightText text={group.car_model} query={search} /> : ""}
               {group.engine_cc ? ` · ${group.engine_cc}cc` : ""}
               {group.manufacture_year ? ` · ${group.manufacture_year}` : ""}
@@ -243,7 +243,7 @@ export function TenureRowComponent({
             )}
             {(group.car_brand || group.car_model || group.engine_cc || group.manufacture_year) && (
               <div className="text-[10px] text-neutral-500 font-medium mt-0.5 truncate max-w-[210px]">
-                {group.car_brand ? <><HighlightText text={group.car_brand} query={search} /> </> : ""}
+                {shouldDisplayBrand(group.car_brand, group.car_model) ? <><HighlightText text={group.car_brand!} query={search} /> </> : ""}
                 {group.car_model ? <HighlightText text={group.car_model} query={search} /> : ""}
                 {group.engine_cc ? ` · ${group.engine_cc}cc` : ""}
                 {group.manufacture_year ? ` · YOM ${group.manufacture_year}` : ""}

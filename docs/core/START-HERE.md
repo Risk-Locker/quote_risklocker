@@ -126,6 +126,15 @@ External chat tools without workspace access should be given this file plus the 
 | `docs/plans/milestone-4-assets-library-ux-and-cleanup.md` | Assets library sticky toolbar, inspection details modal & dummy logo database cleanup | Milestone 4 execution |
 | `docs/plans/milestone-5-marketing-comparison-state-hardening.md` | Marketing comparison stuck status timeout fallback & action footer cleanup | Milestone 5 execution |
 | `docs/plans/milestone-6-design2-typography-and-fonts.md` | Design 2 typography & font pairing hierarchy (Helvetica, Calibri, Source Han Sans) | Milestone 6 execution |
+| `docs/plans/2026-11-16-quotation-workspace-stabilization.md` | Quotation workspace stabilization, CostStatus normalization, vehicle model deduplication & fee toggle sync | Active sprint tasks change or complete |
+| `docs/plans/ENTERPRISE-LEVEL-Extraction-2026-11-16-1830.md` | Master field rationalization, workspace schema unification & 3-Tier Multi-Level AI loop vision | Master enterprise architecture reference |
+| `docs/plans/PLAN-1-DATABASE-CORE-AND-SYNC-ENGINE.md` | Immutable database core, key alignment, concurrency protection & real-time synchronization engine | Plan 1 execution |
+| `docs/plans/PLAN-2-WORKSPACE-UI-AND-3-TIER-AI-LOOP.md` | Streamlined workspace UI, field pruning, Eye 2 auditor & Eye 3 pre-flight referee loop | Plan 2 execution |
+| `docs/plans/milestone-1-db-core-and-decimal-math-cleanup.md` | Clean code remediation M1: PostgreSQL schema parity, pure Decimal math & sync service slicing | Milestone 1 execution |
+| `docs/plans/milestone-2-frontend-deslop-and-component-deduplication.md` | Clean code remediation M2: Dead code purge, benefit card deduplication & zero client-side math | Milestone 2 execution |
+| `docs/plans/milestone-3-patch-engine-slicing-and-3eye-wiring.md` | Clean code remediation M3: Workspace patch engine flattening & live 3-Eye referee wiring | Milestone 3 execution |
+| `docs/plans/2026-11-17-principal-fintech-audit-and-master-roadmap.md` | Principal Fintech 7-pillar architectural audit & 6-milestone zero-touch master roadmap | Active sprint tasks change or complete |
+| `docs/plans/milestone-1-sandbox-isolation-and-sessions-redesign.md` | Milestone 1: Test/Sandbox ledger isolation, N+1 session fix & `/sessions` activity command center | Milestone 1 execution |
 
 ### History & Generated Tooling
 | Document | Purpose | Update when |

@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { CheckCircle, Trash, DownloadSimple } from "@phosphor-icons/react";
 import type { TenureRow } from "./types";
 import { formatDateSafe } from "./types";
+import { formatBrandAndModel } from "@/lib/vehicle-utils";
 
 export interface TenureBulkActionsProps {
   selectedTenureIds: string[];
@@ -63,7 +64,7 @@ export function TenureBulkActions({
 
       const rows = targetTenures.map((t) => {
         const vehicleDisplay = t.vehicle_no || t.chassis_no || t.engine_no || "—";
-        const brandModel = [t.car_brand, t.car_model].filter(Boolean).join(" ") || "—";
+        const brandModel = formatBrandAndModel(t.car_brand, t.car_model) || "—";
         const policyNo = t.policy_number || t.covernote_policy?.policy_number || "—";
         const winningInsurer =
           t.winning_company_name || t.covernote_policy?.company || "—";

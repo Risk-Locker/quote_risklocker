@@ -39,7 +39,7 @@ export function IncludedCard({
   const displayLimitVal = isBetterment && (/^\s*rm\b/i.test(card.value || "") || !card.value)
     ? defaultBetterment
     : card.value;
-  const isLimitHidden = !isWindscreen && Boolean(
+  const isLimitHidden = Boolean(
     (selection as any)?.typed_value_override?.hide_limit ??
     (card as any).typed_value?.hide_limit ??
     (card as any).hide_coverage
@@ -63,7 +63,6 @@ export function IncludedCard({
   };
 
   const handleToggleCoverageVisibility = () => {
-    if (isWindscreen) return;
     const nextHidden = !isLimitHidden;
     flashSaved("coverage");
     const currentTyped = (selection as any)?.typed_value_override || (card as any).typed_value || {};
@@ -392,21 +391,14 @@ export function IncludedCard({
             >
               <PencilSimple size={10} />
             </button>
-            {isWindscreen ? (
-              <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-1 py-0.2" title="Windscreen coverage limit is mandatory and cannot be hidden">
-                <Lock size={9} />
-                Mandatory
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={handleToggleCoverageVisibility}
-                className={`p-0.5 rounded transition-colors cursor-pointer ${isLimitHidden ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "opacity-0 group-hover/limit:opacity-100 text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60"}`}
-                title={isLimitHidden ? "Coverage is hidden on quotation (click to show)" : "Hide coverage on quotation"}
-              >
-                {isLimitHidden ? <EyeSlash size={11} weight="bold" /> : <Eye size={11} />}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={handleToggleCoverageVisibility}
+              className={`p-0.5 rounded transition-colors cursor-pointer ${isLimitHidden ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "opacity-0 group-hover/limit:opacity-100 text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60"}`}
+              title={isLimitHidden ? "Coverage is hidden on quotation (click to show)" : "Hide coverage on quotation"}
+            >
+              {isLimitHidden ? <EyeSlash size={11} weight="bold" /> : <Eye size={11} />}
+            </button>
           </div>
         ) : (
           <div className="group/limit flex items-center gap-1 mt-0.5">
@@ -512,51 +504,14 @@ export function IncludedCard({
       </div>
       {/* Actions */}
       <div className="flex items-center gap-1 shrink-0 mt-0.5">
-        {!hideColumnButtons && (
-          isPurchasedAddon ? (
-            <>
-              <Button
-                variant="secondary"
-                size="sm"
-                title="Move left to Free / Included cover"
-                onClick={handleMakeFoc}
-                className="text-[11px] h-7 px-2 font-semibold text-emerald-800 hover:bg-emerald-100"
-              >
-                ← Make FOC
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                title="Move right to Optional Add-ons"
-                onClick={handleMoveToOptional}
-                className="text-[11px] h-7 px-2 font-semibold text-blue-700 hover:bg-blue-100"
-              >
-                → Optional
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button
-                variant="secondary"
-                size="sm"
-                title="Move right to Purchased Extras (Paid Add-on on Quote)"
-                onClick={handleMakePaid}
-                className="text-[11px] h-7 px-2 font-semibold text-amber-800 hover:bg-amber-100"
-              >
-                → Extras
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                title="Move right to Optional Add-ons"
-                onClick={handleMoveToOptional}
-                className="text-[11px] h-7 px-2 font-semibold text-blue-700 hover:bg-blue-100"
-              >
-                → Optional
-              </Button>
-            </>
-          )
-        )}
+        <button
+          type="button"
+          onClick={handleMakePaid}
+          className="flex items-center gap-0.5 rounded bg-amber-50 hover:bg-amber-100 border border-amber-300 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 transition-colors cursor-pointer"
+          title="Move this benefit to Box 2: Add-On Upgrades (Bottom Matrix)"
+        >
+          <span>➔ Matrix Add-on</span>
+        </button>
         <button
           type="button"
           aria-label={`Remove ${card.label} from this quotation`}
@@ -956,21 +911,14 @@ export function AddonCard({
             >
               <PencilSimple size={10} />
             </button>
-            {isWindscreen ? (
-              <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-1 py-0.2" title="Windscreen coverage limit is mandatory and cannot be hidden">
-                <Lock size={9} />
-                Mandatory
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={handleToggleCoverageVisibility}
-                className={`p-0.5 rounded transition-colors cursor-pointer ${isLimitHidden ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "opacity-0 group-hover/limit:opacity-100 text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60"}`}
-                title={isLimitHidden ? "Coverage is hidden on quotation (click to show)" : "Hide coverage on quotation"}
-              >
-                {isLimitHidden ? <EyeSlash size={11} weight="bold" /> : <Eye size={11} />}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={handleToggleCoverageVisibility}
+              className={`p-0.5 rounded transition-colors cursor-pointer ${isLimitHidden ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "opacity-0 group-hover/limit:opacity-100 text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60"}`}
+              title={isLimitHidden ? "Coverage is hidden on quotation (click to show)" : "Hide coverage on quotation"}
+            >
+              {isLimitHidden ? <EyeSlash size={11} weight="bold" /> : <Eye size={11} />}
+            </button>
           </div>
         ) : (
           <div className="group/limit flex items-center gap-1 mt-0.5">
@@ -1137,7 +1085,7 @@ export function MatrixAddonCard({
   const displayLimitVal = isBetterment && (/^\s*rm\b/i.test(card.value || "") || !card.value)
     ? defaultBetterment
     : card.value;
-  const isLimitHidden = !isWindscreen && Boolean(
+  const isLimitHidden = Boolean(
     (selection as any)?.typed_value_override?.hide_limit ??
     (card as any).typed_value?.hide_limit ??
     (card as any).hide_coverage
@@ -1161,7 +1109,6 @@ export function MatrixAddonCard({
   };
 
   const handleToggleCoverageVisibility = () => {
-    if (isWindscreen) return;
     const nextHidden = !isLimitHidden;
     flashSaved("coverage");
     const currentTyped = (selection as any)?.typed_value_override || (card as any).typed_value || {};
@@ -1246,12 +1193,12 @@ export function MatrixAddonCard({
     flashSaved("price");
     if (!trimmed) {
       if (selectionId && !pending) {
-        onQueue({ op: "benefit_update", selection_id: selectionId, price: null, cost_status: isSelected ? "paid" : "optional" }, `benefits.${selectionId}.price`);
+        onQueue({ op: "benefit_update", selection_id: selectionId, price: null, cost_status: "paid" }, `benefits.${selectionId}.price`);
       } else if (card.offering_id) {
-        onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: isSelected ? "current" : "available_addon", cost_status: isSelected ? "paid" : "optional", price: null }, `benefits.offer.${card.offering_id}`);
+        onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: isSelected ? "current" : "available_addon", cost_status: "paid", price: null }, `benefits.offer.${card.offering_id}`);
       } else if (selectionId || card.concept_key) {
         const targetId = selectionId || card.concept_key!;
-        onQueue({ op: "benefit_update", selection_id: targetId, price: null, cost_status: isSelected ? "paid" : "optional" }, `benefits.${targetId}.price`);
+        onQueue({ op: "benefit_update", selection_id: targetId, price: null, cost_status: "paid" }, `benefits.${targetId}.price`);
       }
       return;
     }
@@ -1286,6 +1233,29 @@ export function MatrixAddonCard({
   };
 
   const hasPriceDiff = initialPriceNum !== null && (currentPriceNum === null || Math.abs(initialPriceNum - currentPriceNum) > 0.01);
+
+  const handleMakeFoc = () => {
+    if (selectionId && !pending) {
+      onQueue(
+        { op: "benefit_update", selection_id: selectionId, state: "current", cost_status: "included", is_extra: false, price: null },
+        `benefits.${selectionId}.cost_status`,
+        { op: "benefit_update", selection_id: selectionId, state: isSelected ? "current" : "available_addon", cost_status: "paid", is_extra: true, ...(currentPriceNum ? { price: { amount: currentPriceNum, currency: "MYR" } } : {}) }
+      );
+    } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
+      onQueue(
+        { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "included", is_extra: false, price: null },
+        `benefits.offer.${card.offering_id}`,
+        { op: "select_catalog_offering", offering_id: card.offering_id, state: isSelected ? "current" : "available_addon", cost_status: "paid", is_extra: true }
+      );
+    } else if (card.concept_key || selectionId) {
+      const targetId = selectionId || card.concept_key!;
+      onQueue(
+        { op: "benefit_update", selection_id: targetId, state: "current", cost_status: "included", is_extra: false, price: null },
+        `benefits.${targetId}.cost_status`,
+        { op: "benefit_update", selection_id: targetId, state: isSelected ? "current" : "available_addon", cost_status: "paid", is_extra: true }
+      );
+    }
+  };
 
   const handleRemove = () => {
     if (!window.confirm(`Are you sure you want to remove "${card.label}" from this quotation?`)) return;
@@ -1438,21 +1408,14 @@ export function MatrixAddonCard({
                 >
                   <PencilSimple size={10} />
                 </button>
-                {isWindscreen ? (
-                  <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-1 py-0.2" title="Windscreen coverage limit is mandatory and cannot be hidden">
-                    <Lock size={9} />
-                    Mandatory
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleToggleCoverageVisibility}
-                    className={`p-0.5 rounded transition-colors cursor-pointer ${isLimitHidden ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "opacity-0 group-hover/limit:opacity-100 text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60"}`}
-                    title={isLimitHidden ? "Coverage is hidden on quotation (click to show)" : "Hide coverage on quotation"}
-                  >
-                    {isLimitHidden ? <EyeSlash size={11} weight="bold" /> : <Eye size={11} />}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={handleToggleCoverageVisibility}
+                  className={`p-0.5 rounded transition-colors cursor-pointer ${isLimitHidden ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "opacity-0 group-hover/limit:opacity-100 text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60"}`}
+                  title={isLimitHidden ? "Coverage is hidden on quotation (click to show)" : "Hide coverage on quotation"}
+                >
+                  {isLimitHidden ? <EyeSlash size={11} weight="bold" /> : <Eye size={11} />}
+                </button>
               </div>
             )}
           </div>
@@ -1558,16 +1521,26 @@ export function MatrixAddonCard({
         )}
       </div>
 
-      {/* 4. Delete Action */}
-      <button
-        type="button"
-        aria-label={`Remove ${card.label}`}
-        onClick={handleRemove}
-        className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] transition-colors cursor-pointer shrink-0"
-        title="Remove add-on completely"
-      >
-        <X size={15} weight="bold" />
-      </button>
+      {/* 4. Action Buttons: Move to Free Coverage + Delete */}
+      <div className="flex items-center gap-1 shrink-0 self-start">
+        <button
+          type="button"
+          onClick={handleMakeFoc}
+          className="flex items-center gap-0.5 rounded bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800 transition-colors cursor-pointer"
+          title="Move this benefit to Box 1: Complimentary & Default Inclusions (Free Added Coverage)"
+        >
+          <span>⬅ Free Coverage</span>
+        </button>
+        <button
+          type="button"
+          aria-label={`Remove ${card.label}`}
+          onClick={handleRemove}
+          className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] transition-colors cursor-pointer"
+          title="Remove add-on completely"
+        >
+          <X size={15} weight="bold" />
+        </button>
+      </div>
     </article>
   );
 }

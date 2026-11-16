@@ -374,6 +374,21 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
       total_premium_adjusted: nextAdjusted || snapshot.total_premium_adjusted,
     };
   }
+  if (operation.op === "update_display_options") {
+    const nextOptions = {
+      ...(snapshot.display_options || {}),
+      ...(operation.options || {}),
+    };
+    const nextSnapshot = {
+      ...snapshot,
+      display_options: nextOptions,
+    };
+    const nextAdjusted = _recalcAdjustedTotal(nextSnapshot, snapshot.extras);
+    return {
+      ...nextSnapshot,
+      total_premium_adjusted: nextAdjusted || snapshot.total_premium_adjusted,
+    };
+  }
   if (operation.op === "layout_override") {
     return {
       ...snapshot,
@@ -553,6 +568,15 @@ export function SessionWorkspaceProvider({ sessionId, children }: { sessionId: s
     } catch (error) {
       const message = apiErrorMessage(error);
       setSaveError(message);
+      // Unjam the queue if the operations failed with an unrecoverable validation error
+      // so the workspace queue is never permanently blocked from saving future edits
+      for (const [path, version] of sentVersions) {
+        if (operationVersionsRef.current.get(path) === version) {
+          operationsRef.current.delete(path);
+          operationVersionsRef.current.delete(path);
+        }
+      }
+      setDirtyPaths([...operationsRef.current.keys()]);
       throw error;
     } finally {
       setSaving(false);

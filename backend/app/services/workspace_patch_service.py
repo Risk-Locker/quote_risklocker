@@ -20,6 +20,7 @@ from app.domain.benefits import (
     MoneyAmount,
     ReviewedBenefitState,
     SourceLineDisposition,
+    normalize_cost_status,
 )
 from app.models.enums import RecordStatus, Role
 from app.models.tables import (
@@ -50,6 +51,7 @@ from app.models.tables import (
     Session,
     TemplateRevision,
     TenureComparisonEntry,
+    TrackedVehicle,
     UploadedFile,
     new_id,
 )
@@ -204,36 +206,40 @@ def _normalize_edited_value(field_name: str, raw) -> str | None:
 
 
 
-def _recompute_total(fields: dict, decisions: dict, user, draft: QuotationDraft | None = None, db=None) -> None:
-    # 1. Base premium
-    prem_aliases = ("premium", "coverage_premium", "basic_premium_vehicle")
-    base_prem: Decimal | None = None
-    for name in prem_aliases:
+def _extract_decimal_field(fields: dict, *names: str) -> Decimal | None:
+    for name in names:
         field = fields.get(name)
         value = field.get("value") if isinstance(field, dict) else field
         if value is not None and str(value).strip():
             try:
-                base_prem = Decimal(str(value).replace(",", "").strip())
-                break
+                return Decimal(str(value).replace(",", "").strip())
             except (InvalidOperation, TypeError, ValueError):
-                pass
+                continue
+    return None
 
+
+def _is_fee_included(fields: dict, draft: QuotationDraft | None, key: str) -> bool:
+    raw = fields.get(key)
+    val = raw.get("value") if isinstance(raw, dict) else raw
+    if val is None and draft and draft.display_options:
+        val = draft.display_options.get(key)
+    if val is None:
+        return True
+    return str(val).strip().lower() not in {"false", "0", "no"}
+
+
+def _recompute_total(fields: dict, decisions: dict, user, draft: QuotationDraft | None = None, db=None) -> None:
+    base_prem = _extract_decimal_field(fields, "premium", "coverage_premium", "basic_premium_vehicle")
     if base_prem is None:
-        # Check if user manually entered total_amount directly
-        tot_field = fields.get("total_amount")
-        tot_val = tot_field.get("value") if isinstance(tot_field, dict) else tot_field
-        if tot_val is not None and str(tot_val).strip():
-            try:
-                manual_tot = Decimal(str(tot_val).replace(",", "").strip())
-                fields["total_amount"] = {"value": f"{manual_tot:.2f}", "status": "ready", "message": ""}
-                decisions["total_amount"] = {
-                    "decision": "edit",
-                    "decided_by": user.id,
-                    "decided_at": _utcnow().isoformat(),
-                }
-                return
-            except (InvalidOperation, TypeError, ValueError):
-                pass
+        manual_tot = _extract_decimal_field(fields, "total_amount")
+        if manual_tot is not None:
+            fields["total_amount"] = {"value": f"{manual_tot:.2f}", "status": "ready", "message": ""}
+            decisions["total_amount"] = {
+                "decision": "edit",
+                "decided_by": user.id,
+                "decided_at": _utcnow().isoformat(),
+            }
+            return
 
         fields["total_amount"] = {
             "value": None,
@@ -247,56 +253,18 @@ def _recompute_total(fields: dict, decisions: dict, user, draft: QuotationDraft 
         }
         return
 
-    # 2. Add-on extras (priced benefits)
-    extras_total = Decimal("0")
-    if draft and db:
-        try:
-            selections = _draft_selections_with_pending(db, draft.id)
-            concepts = list(db.scalars(select(BenefitConcept)).all())
-            offerings = list(
-                db.scalars(
-                    select(CatalogOffering).where(CatalogOffering.catalog_revision_id == draft.catalog_revision_id)
-                ).all()
-            ) if draft.catalog_revision_id else []
-            extras = build_extras(selections, concepts, offerings)
-            for extra in extras:
-                raw_price = extra.get("price") or {}
-                amt = raw_price.get("amount") if raw_price.get("amount") is not None else raw_price.get("value")
-                if amt is not None:
-                    try:
-                        extras_total += Decimal(re.sub(r"[^\d.]", "", str(amt)))
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+    rt_val = (
+        (_extract_decimal_field(fields, "roadtax", "road_tax_amount") or Decimal("0.00"))
+        if _is_fee_included(fields, draft, "include_road_tax")
+        else Decimal("0.00")
+    )
+    sf_val = (
+        (_extract_decimal_field(fields, "service_fee", "runner_fee") or Decimal("0.00"))
+        if _is_fee_included(fields, draft, "include_runner_fee")
+        else Decimal("0.00")
+    )
 
-    # 3. Road tax (optional, defaults to 0)
-    rt_aliases = ("roadtax", "road_tax_amount")
-    rt_val: Decimal = Decimal("0")
-    for name in rt_aliases:
-        field = fields.get(name)
-        value = field.get("value") if isinstance(field, dict) else field
-        if value is not None and str(value).strip():
-            try:
-                rt_val = Decimal(str(value).replace(",", "").strip())
-                break
-            except (InvalidOperation, TypeError, ValueError):
-                pass
-
-    # 4. Runner / service fee (optional, defaults to 0)
-    sf_aliases = ("service_fee", "runner_fee")
-    sf_val: Decimal = Decimal("0")
-    for name in sf_aliases:
-        field = fields.get(name)
-        value = field.get("value") if isinstance(field, dict) else field
-        if value is not None and str(value).strip():
-            try:
-                sf_val = Decimal(str(value).replace(",", "").strip())
-                break
-            except (InvalidOperation, TypeError, ValueError):
-                pass
-
-    total = base_prem + extras_total + rt_val + sf_val
+    total = base_prem + rt_val + sf_val
     fields["total_amount"] = {"value": f"{total:.2f}", "status": "ready", "message": ""}
     decisions["total_amount"] = {
         "decision": "confirm",
@@ -577,9 +545,9 @@ def _apply_custom_benefit(db, draft: QuotationDraft, user, operation: dict) -> t
         raw_typed = operation.get("typed_value")
         typed_value = BenefitValue.model_validate(raw_typed).model_dump(mode="json", exclude_none=True) if raw_typed else None
         state = ReviewedBenefitState(str(operation.get("state") or "current")).value
-        cost_status = CostStatus(str(operation.get("cost_status") or "unknown")).value
+        cost_status = normalize_cost_status(operation.get("cost_status"), default=CostStatus.UNKNOWN).value
     except (ValidationError, ValueError) as exc:
-        raise AppError("Custom benefit state, cost, or typed value is invalid.", 422) from exc
+        raise AppError("Custom benefit state or typed value is invalid.", 422) from exc
     price = operation.get("price")
     if price is not None:
         try:
@@ -705,10 +673,8 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
         elif not current and offering.offering_kind not in {"optional", "base"} and getattr(offering, "role", None) not in {"addon_option", "bundle_component", "included"}:
             raise AppError("An upgrade requires its explicit current benefit.", 422)
 
-    try:
-        cost_status = CostStatus(str(operation.get("cost_status") or ("included" if desired_state == "current" else "paid"))).value
-    except ValueError as exc:
-        raise AppError("Benefit cost must be included, paid, FOC, or unknown.", 422) from exc
+    default_cost = CostStatus.INCLUDED if desired_state == "current" else CostStatus.PAID
+    cost_status = normalize_cost_status(operation.get("cost_status"), default=default_cost).value
     typed_override = None
     if "typed_value" in operation and operation.get("typed_value") is not None:
         try:
@@ -791,10 +757,7 @@ def _apply_benefit_update(db, draft: QuotationDraft, user, operation: dict) -> s
         if state != ReviewedBenefitState.SUPERSEDED.value:
             selection.superseded_by_id = None
     if "cost_status" in operation:
-        try:
-            selection.cost_status = CostStatus(str(operation.get("cost_status"))).value
-        except ValueError as exc:
-            raise AppError("Benefit cost must be included, paid, FOC, or unknown.", 422) from exc
+        selection.cost_status = normalize_cost_status(operation.get("cost_status"), default=CostStatus.PAID).value
     if "price" in operation:
         raw_price = operation.get("price")
         if raw_price is None:
@@ -909,10 +872,7 @@ def _apply_select_package_plan(db, draft: QuotationDraft, user, operation: dict)
     package = db.get(BenefitPackage, plan.package_id)
     if package is None or package.catalog_revision_id != draft.catalog_revision_id or package.package_kind != "addon_bundle":
         raise AppError("Choose an add-on bundle plan from this quotation's pinned catalog.", 422)
-    try:
-        cost_status = CostStatus(str(operation.get("cost_status") or "paid")).value
-    except ValueError as exc:
-        raise AppError("Benefit cost must be included, paid, FOC, or unknown.", 422) from exc
+    cost_status = normalize_cost_status(operation.get("cost_status"), default=CostStatus.PAID).value
     items = list(
         db.scalars(
             select(BenefitPackagePlanItem)
@@ -1265,51 +1225,71 @@ def apply_workspace_patch(
             tenure = db.get(InsuranceTenure, session.tenure_id)
             if tenure:
                 f = draft.fields or {}
-                # 1. Road tax sync
-                if any("roadtax" in p for p in changed_paths):
-                    raw_rt = f.get("roadtax")
-                    val_rt = raw_rt.get("value") if isinstance(raw_rt, dict) else raw_rt
-                    try:
-                        if val_rt is not None and str(val_rt).strip() != "":
-                            parsed_rt = float(str(val_rt).replace(",", ""))
-                            tenure.road_tax = parsed_rt
-                    except (ValueError, TypeError):
-                        pass
 
-                # 2. Service/Runner fee sync
-                if any("service_fee" in p for p in changed_paths):
-                    raw_sf = f.get("service_fee")
-                    val_sf = raw_sf.get("value") if isinstance(raw_sf, dict) else raw_sf
-                    try:
-                        if val_sf is not None and str(val_sf).strip() != "":
-                            parsed_sf = float(str(val_sf).replace(",", ""))
-                            tenure.runner_fee = parsed_sf
-                    except (ValueError, TypeError):
-                        pass
+                identity_keys = (
+                    "roadtax", "service_fee", "customer_name", "insured_name", "policyholder_name",
+                    "ic_or_brn", "ic_no", "nric_no", "vehicle_no", "car_model", "vehicle_model",
+                    "car_brand", "make", "engine_cc", "vehicle_year", "vehicle_type", "powertrain",
+                    "chassis_no", "engine_no", "include_road_tax", "include_runner_fee"
+                )
+                if any(any(k in p for k in identity_keys) for p in changed_paths) or "include_road_tax" in (draft.display_options or {}) or "include_runner_fee" in (draft.display_options or {}):
+                    def _get_v(field_k: str) -> Any:
+                        raw = f.get(field_k)
+                        return raw.get("value") if isinstance(raw, dict) else raw
 
-                # 3. Customer name sync
-                if any("customer_name" in p or "insured_name" in p or "policyholder_name" in p for p in changed_paths):
-                    raw_name = f.get("customer_name") or f.get("insured_name") or f.get("policyholder_name")
-                    val_name = raw_name.get("value") if isinstance(raw_name, dict) else raw_name
-                    if val_name and str(val_name).strip():
-                        tenure.customer_name = str(val_name).strip()
+                    raw_rt = _get_v("roadtax")
+                    val_rt = float(str(raw_rt).replace(",", "")) if (raw_rt is not None and str(raw_rt).strip() != "") else tenure.road_tax
+                    raw_sf = _get_v("service_fee")
+                    val_sf = float(str(raw_sf).replace(",", "")) if (raw_sf is not None and str(raw_sf).strip() != "") else tenure.runner_fee
 
-                # 4. Vehicle specs sync
-                if any("vehicle_no" in p for p in changed_paths):
-                    raw_vno = f.get("vehicle_no")
-                    val_vno = raw_vno.get("value") if isinstance(raw_vno, dict) else raw_vno
-                    if val_vno and str(val_vno).strip():
-                        from app.services.vehicle_tracking_service import normalize_plate
-                        norm_plate = normalize_plate(str(val_vno).strip())
-                        if norm_plate:
-                            tenure.vehicle_no = norm_plate
-                            if tenure.tracked_vehicle:
-                                tenure.tracked_vehicle.vehicle_no = norm_plate
+                    raw_inc_rt = _get_v("include_road_tax")
+                    if raw_inc_rt is None and draft.display_options:
+                        raw_inc_rt = draft.display_options.get("include_road_tax")
+                    inc_rt = (str(raw_inc_rt).lower() not in ("false", "0", "no")) if raw_inc_rt is not None else tenure.include_road_tax
 
+                    raw_inc_rf = _get_v("include_runner_fee")
+                    if raw_inc_rf is None and draft.display_options:
+                        raw_inc_rf = draft.display_options.get("include_runner_fee")
+                    inc_rf = (str(raw_inc_rf).lower() not in ("false", "0", "no")) if raw_inc_rf is not None else tenure.include_runner_fee
+
+                    c_name = _get_v("customer_name") or _get_v("insured_name") or _get_v("policyholder_name")
+                    c_ic = _get_v("ic_or_brn") or _get_v("ic_no") or _get_v("nric_no")
+                    v_no = _get_v("vehicle_no")
+                    v_brand = _get_v("car_brand") or _get_v("make")
+                    v_model = _get_v("car_model") or _get_v("vehicle_model")
+                    v_cc = _get_v("engine_cc")
+                    v_year_raw = _get_v("vehicle_year")
+                    v_year = int(v_year_raw) if (v_year_raw and str(v_year_raw).isdigit()) else None
+                    v_type = _get_v("vehicle_type")
+                    v_pt = _get_v("powertrain")
+                    v_chassis = _get_v("chassis_no")
+                    v_engine = _get_v("engine_no")
+
+                    from app.services.tenure_identity_sync_service import sync_tenure_identity_transaction
+                    sync_tenure_identity_transaction(
+                        db,
+                        tenure.id,
+                        customer_name=str(c_name).strip() if c_name else None,
+                        ic_or_brn=str(c_ic).strip() if c_ic else None,
+                        vehicle_no=str(v_no).strip() if v_no else None,
+                        car_brand=str(v_brand).strip() if v_brand else None,
+                        car_model=str(v_model).strip() if v_model else None,
+                        engine_cc=str(v_cc).strip() if v_cc else None,
+                        manufacture_year=v_year,
+                        vehicle_type=str(v_type).strip() if v_type else None,
+                        powertrain=str(v_pt).strip() if v_pt else None,
+                        chassis_no=str(v_chassis).strip() if v_chassis else None,
+                        engine_no=str(v_engine).strip() if v_engine else None,
+                        road_tax=val_rt,
+                        runner_fee=val_sf,
+                        include_road_tax=inc_rt,
+                        include_runner_fee=inc_rf,
+                    )
+
+                # Sync comparison entries under this tenure (Invariant 2: Two-way quotation sync)
                 eff_rt = float(tenure.road_tax) if (tenure.include_road_tax is not False) else 0.0
                 eff_rf = float(tenure.runner_fee) if (tenure.include_runner_fee is not False) else 0.0
 
-                # 5. Sync comparison entries under this tenure
                 all_tenure_entries = list(
                     db.scalars(
                         select(TenureComparisonEntry).where(
@@ -1319,13 +1299,53 @@ def apply_workspace_patch(
                 )
                 for ce in all_tenure_entries:
                     if ce.session_id == session.id:
-                        raw_prem = f.get("premium")
-                        val_prem = raw_prem.get("value") if isinstance(raw_prem, dict) else raw_prem
+                        def _extract_f_val(field_key: str) -> Any:
+                            raw = f.get(field_key)
+                            return raw.get("value") if isinstance(raw, dict) else raw
+
+                        raw_prem = _extract_f_val("premium") or _extract_f_val("premium_due")
                         try:
-                            if val_prem is not None and str(val_prem).strip() != "":
-                                ce.motor_premium = float(str(val_prem).replace(",", ""))
+                            if raw_prem is not None and str(raw_prem).strip() != "":
+                                ce.motor_premium = float(str(raw_prem).replace(",", ""))
                         except (ValueError, TypeError):
                             pass
+
+                        raw_si = _extract_f_val("sum_insured")
+                        try:
+                            if raw_si is not None and str(raw_si).strip() != "":
+                                ce.sum_insured = float(str(raw_si).replace(",", ""))
+                        except (ValueError, TypeError):
+                            pass
+
+                        raw_vt = _extract_f_val("valuation_type")
+                        if raw_vt:
+                            is_agreed = str(raw_vt).strip().lower() in ("agreed value", "agreed_value")
+                            ce.valuation_type = "agreed_value" if is_agreed else "market_value"
+                            ce.agreed_value = is_agreed
+
+                        raw_ex = _extract_f_val("excess_amount") or _extract_f_val("excess")
+                        try:
+                            if raw_ex is not None and str(raw_ex).strip() != "":
+                                ce.excess = float(str(raw_ex).replace(",", ""))
+                        except (ValueError, TypeError):
+                            pass
+
+                        raw_tow = _extract_f_val("towing") or _extract_f_val("towing_limit")
+                        if raw_tow and str(raw_tow).strip():
+                            ce.towing_limit = str(raw_tow).strip()
+
+                        raw_ws = _extract_f_val("windscreen_sum_insured") or _extract_f_val("windscreen")
+                        try:
+                            if raw_ws is not None and str(raw_ws).strip() != "":
+                                ce.windscreen_sum_insured = float(str(raw_ws).replace(",", ""))
+                        except (ValueError, TypeError):
+                            pass
+
+                        if float(ce.sum_insured) > 0 and float(ce.motor_premium) > 0:
+                            ce.rate_percentage = round((float(ce.motor_premium) / float(ce.sum_insured)) * 100, 4)
+
+                        ce.version = (ce.version or 1) + 1
+
                     ce.road_tax = eff_rt
                     ce.runner_fee = eff_rf
                     ce.include_road_tax = (tenure.include_road_tax is not False)

@@ -300,6 +300,10 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
                 pinPackageTier={catalog.pinPackageTier}
                 globalConcepts={globalConcepts}
                 addConceptAsBenefit={benefits.addConceptAsBenefit}
+                onQueue={benefits.onQueue}
+                queueOperation={queueOperation}
+                scheduleSave={state.scheduleSave}
+                setToastMessage={state.setToastMessage}
               />
             </section>
           </div>

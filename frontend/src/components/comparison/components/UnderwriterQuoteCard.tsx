@@ -120,6 +120,19 @@ export function UnderwriterQuoteCard({
               )}
               <button
                 type="button"
+                disabled={rescanningQuoteId === entry.id || isRescanning}
+                onClick={() => onRescanQuote(entry)}
+                className="p-1 rounded text-neutral-400 hover:text-[#1b1717] hover:bg-neutral-100 transition-colors cursor-pointer disabled:opacity-40"
+                title={rescanningQuoteId === entry.id ? "Re-analyzing quotation..." : "Re-extract & re-analyze quote from source PDF"}
+              >
+                <ArrowsClockwise
+                  size={15}
+                  weight="bold"
+                  className={rescanningQuoteId === entry.id ? "animate-spin text-[#ed1c24]" : ""}
+                />
+              </button>
+              <button
+                type="button"
                 onClick={() => onToggleHideEntry(entry)}
                 className={`p-1 rounded text-neutral-400 hover:text-[#1b1717] hover:bg-neutral-100 transition-colors cursor-pointer ${
                   entry.is_hidden ? "text-neutral-400 bg-neutral-100" : ""
@@ -533,22 +546,6 @@ export function UnderwriterQuoteCard({
             <span>{isViewingPdf ? "Viewing PDF ★" : "View Source PDF"}</span>
           </button>
         ) : null}
-
-        {/* Re-Analyze Single Quote Button */}
-        <button
-          type="button"
-          disabled={rescanningQuoteId === entry.id || isRescanning}
-          onClick={() => onRescanQuote(entry)}
-          className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all shadow-2xs bg-white hover:bg-neutral-100 text-[#1b1717] border border-[#e5e5ea] cursor-pointer disabled:opacity-50"
-          title="Re-extract and re-calculate betterment, basic figures, and windscreen for this quote from the source PDF"
-        >
-          <ArrowsClockwise
-            size={15}
-            weight="bold"
-            className={rescanningQuoteId === entry.id ? "animate-spin text-[#1b1717]" : "text-[#1b1717]"}
-          />
-          <span>{rescanningQuoteId === entry.id ? "Re-Analyzing..." : "Re-Analyze Quote"}</span>
-        </button>
 
         {/* Winner Selection Button */}
         <Button

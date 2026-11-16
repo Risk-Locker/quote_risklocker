@@ -24,6 +24,27 @@ class CostStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
+def normalize_cost_status(val: object, default: CostStatus = CostStatus.UNKNOWN) -> CostStatus:
+    """Safely normalizes cost status strings including client aliases (optional, free, etc.)."""
+    if val is None:
+        return default
+    clean = str(val).strip().lower()
+    if not clean:
+        return default
+    if clean in ("optional", "extra", "add_on", "addon", "paid", "chargeable"):
+        return CostStatus.PAID
+    if clean in ("free", "foc", "waived", "complimentary"):
+        return CostStatus.FOC
+    if clean in ("included", "built_in", "standard"):
+        return CostStatus.INCLUDED
+    if clean == "unknown":
+        return CostStatus.UNKNOWN
+    try:
+        return CostStatus(clean)
+    except ValueError:
+        return default
+
+
 class SourceLineDisposition(StrEnum):
     UNRESOLVED = "unresolved"
     MAPPED = "mapped"

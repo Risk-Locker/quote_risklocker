@@ -21,46 +21,45 @@ export type FieldKind = "text" | "date" | "percent" | "money" | "total" | "vehic
 
 export type FormField = { name: string; label: string; kind: FieldKind };
 
-export const PRIMARY_POLICY_FIELDS: FormField[] = [
-  { name: "vehicle_no", label: "Vehicle no. / Car plate", kind: "text" },
-  { name: "customer_name", label: "Insured name", kind: "text" },
-  { name: "ic_or_brn", label: "NRIC / Business Reg. No.", kind: "text" },
-  { name: "car_model", label: "Car model", kind: "text" },
+export const HEADER_IDENTITY_FIELDS: FormField[] = [
+  { name: "quotation_reference", label: "Quotation Ref", kind: "text" },
+  { name: "vehicle_no", label: "Vehicle No. / Plate", kind: "text" },
+  { name: "insurance_company", label: "Insurer Name", kind: "text" },
+];
+
+export const VEHICLE_INFO_FIELDS: FormField[] = [
+  { name: "customer_name", label: "Customer / 客户姓名", kind: "text" },
+  { name: "cover_period", label: "Period Of Insurance / 保障期限", kind: "text" },
+  { name: "coverage_type", label: "Coverage Type / 保障种类", kind: "text" },
+  { name: "car_model", label: "Car Model / 车型", kind: "text" },
+  { name: "ncd_percent", label: "NCD / 无索偿折扣", kind: "percent" },
+  { name: "valuation_type", label: "Valuation Type / 估价方式", kind: "valuation_type" },
+  { name: "excess_amount", label: "Policy Excess / 自负额", kind: "money" },
+  { name: "sum_insured", label: "Vehicle Sum Insured / 车辆保额", kind: "money" },
+];
+
+export const AUXILIARY_VEHICLE_FIELDS: FormField[] = [
+  { name: "vehicle_type", label: "Vehicle Scope & Category", kind: "vehicle_type" },
   { name: "engine_cc", label: "Engine CC / Capacity", kind: "text" },
-  { name: "vehicle_year", label: "Year of make", kind: "text" },
-  { name: "vehicle_type", label: "Vehicle type", kind: "vehicle_type" },
-  { name: "insurance_company", label: "Insurance name", kind: "text" },
-  { name: "coverage_type", label: "Coverage type", kind: "text" },
-  { name: "cover_period", label: "Cover period", kind: "text" },
-  { name: "sum_insured", label: "Sum insured / Market value", kind: "money" },
-  { name: "valuation_type", label: "Valuation Type", kind: "valuation_type" },
-  { name: "ncd_percent", label: "NCD", kind: "percent" },
-  { name: "excess_amount", label: "Excess amount", kind: "money" },
+  { name: "ic_or_brn", label: "NRIC / Business Reg. No.", kind: "text" },
+  { name: "vehicle_year", label: "Year of Make", kind: "text" },
 ];
 
 export const PRICING_FIELDS: FormField[] = [
-  { name: "premium", label: "Insurance Premium (After NCD)", kind: "money" },
-  { name: "roadtax", label: "Road tax", kind: "money" },
-  { name: "service_fee", label: "Runner fee", kind: "money" },
-  { name: "total_amount", label: "Total Payable", kind: "total" },
+  { name: "premium", label: "Insurance Premium / 保费", kind: "money" },
+  { name: "roadtax", label: "Road Tax / 路税", kind: "money" },
+  { name: "service_fee", label: "Runner Fee / 服务费", kind: "money" },
+  { name: "total_amount", label: "TOTAL PAYABLE / 应付总额", kind: "total" },
 ];
 
-export const ADVANCED_POLICY_FIELDS: FormField[] = [
-  { name: "chassis_no", label: "Chassis / VIN No.", kind: "text" },
-  { name: "engine_no", label: "Engine No.", kind: "text" },
-  { name: "quotation_reference", label: "Quotation ref", kind: "text" },
-  { name: "authorized_driver", label: "Authorized Driver", kind: "text" },
-  { name: "valid_until", label: "Quotation validity", kind: "text" },
-  { name: "compulsory_excess", label: "Compulsory excess", kind: "money" },
-  { name: "loading_amount", label: "Loading amount", kind: "money" },
-  { name: "gross_premium", label: "Gross premium", kind: "money" },
-  { name: "service_tax", label: "Service tax (SST)", kind: "money" },
-  { name: "stamp_duty", label: "Stamp duty", kind: "money" },
+export const PRIMARY_POLICY_FIELDS: FormField[] = [
+  ...HEADER_IDENTITY_FIELDS,
+  ...VEHICLE_INFO_FIELDS,
+  ...AUXILIARY_VEHICLE_FIELDS,
 ];
 
 export const FORM_FIELDS: FormField[] = [
   ...PRIMARY_POLICY_FIELDS,
-  ...ADVANCED_POLICY_FIELDS,
   ...PRICING_FIELDS,
 ];
 
@@ -236,17 +235,7 @@ export function PolicyFieldsCard({
   categorizedProducts,
   pinCatalog,
 }: PolicyFieldsCardProps) {
-  const [advancedCollapsed, setAdvancedCollapsed] = React.useState(true);
-
-  const extraExtractedFields = Object.entries(workspace.fields || {}).filter(
-    ([k, v]) =>
-      !FORM_FIELDS.some((f) => f.name === k) &&
-      !k.startsWith("_") &&
-      v &&
-      typeof v === "object" &&
-      "value" in v &&
-      (v as WorkspaceField).value
-  );
+  // Streamlined Canonical Layout: 3 focused sections without technical clutter
 
   const renderField = (field: FormField, isPricing: boolean = false) => {
     let stored = workspace.fields[field.name] as WorkspaceField | undefined;
@@ -788,17 +777,33 @@ export function PolicyFieldsCard({
         </div>
       ) : (
         <>
-          {/* Section 1: Core Policy & Vehicle Details */}
-          <div className="grid gap-3 sm:grid-cols-2">
-            {PRIMARY_POLICY_FIELDS.map((field) => renderField(field, false))}
+          {/* Section 1: Top Header & Identity */}
+          <div className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-gray-50/70 p-3 grid gap-3 sm:grid-cols-3">
+            {HEADER_IDENTITY_FIELDS.map((field) => renderField(field, false))}
           </div>
 
-          {/* Section 2: Quotation Pricing & Fees (Directly Editable) */}
+          {/* Section 2: Vehicle Information (车辆资料) */}
+          <div className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white p-3.5 grid gap-3">
+            <div className="flex items-center justify-between border-b border-gray-200 pb-1.5">
+              <span className="font-bold text-xs text-[var(--rl-text-strong)] uppercase tracking-wider">
+                Vehicle Information (车辆资料)
+              </span>
+              <span className="text-[10px] text-gray-500 font-medium">8 Canonical Fields</span>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {VEHICLE_INFO_FIELDS.map((field) => renderField(field, false))}
+            </div>
+            <div className="pt-2 border-t border-gray-100 grid gap-3 sm:grid-cols-2">
+              {AUXILIARY_VEHICLE_FIELDS.map((field) => renderField(field, false))}
+            </div>
+          </div>
+
+          {/* Section 3: Premium Summary (保费) */}
           <div className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-gray-50/80 p-3.5 grid gap-3">
             <div className="flex flex-wrap items-center justify-between border-b border-gray-200/80 pb-2 gap-2">
               <div className="flex items-center gap-2">
                 <span className="font-bold text-xs text-[var(--rl-text-strong)] uppercase tracking-wider">
-                  Quotation Pricing & Summary
+                  Premium Summary (保费)
                 </span>
                 <span className="text-[10px] text-emerald-800 bg-emerald-50 border border-emerald-200 font-semibold px-2 py-0.5 rounded-md">
                   Active in Quotation
@@ -812,85 +817,6 @@ export function PolicyFieldsCard({
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {PRICING_FIELDS.map((field) => renderField(field, true))}
             </div>
-          </div>
-
-          {/* Section 3: Additional Policy & Breakdown Details (Collapsible) */}
-          <div className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white overflow-hidden transition-all">
-            <button
-              type="button"
-              onClick={() => setAdvancedCollapsed((v) => !v)}
-              className="w-full flex items-center justify-between p-2.5 text-xs font-semibold text-[var(--rl-text-strong)] hover:bg-gray-50 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                {advancedCollapsed ? <CaretDown size={14} weight="bold" /> : <CaretUp size={14} weight="bold" />}
-                <span>Additional Policy & Technical Details</span>
-                <span className="text-[10px] text-gray-600 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded-md font-medium">
-                  {ADVANCED_POLICY_FIELDS.length + extraExtractedFields.length} secondary fields
-                </span>
-              </div>
-              <span className="text-[11px] text-[var(--rl-text-muted)] font-normal">
-                {advancedCollapsed ? "Show Chassis, Engine No, SST breakdown..." : "Hide secondary details"}
-              </span>
-            </button>
-
-            {!advancedCollapsed ? (
-              <div className="border-t border-[var(--rl-border)] p-3 grid gap-3 sm:grid-cols-2 bg-gray-50/40">
-                {ADVANCED_POLICY_FIELDS.map((field) => renderField(field, false))}
-                {extraExtractedFields.map(([extraKey, extraField]) => {
-                  const wf = extraField as WorkspaceField;
-                  const label = extraKey.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-                  const fieldModified = isFieldModified(extraKey);
-                  return (
-                    <label key={extraKey} className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
-                      <span className="flex items-center justify-between gap-1">
-                        <span className="truncate">{label}</span>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {wf.status === "check_needed" ? (
-                            <span className="text-[10px] text-amber-700 font-bold">Check value</span>
-                          ) : null}
-                          {fieldModified ? (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                handleResetField({ name: extraKey, label, kind: "text" });
-                              }}
-                              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-300 hover:bg-amber-100 hover:text-amber-950 transition-colors shadow-2xs"
-                              title={`Reset to detected: "${getDetectedValue(extraKey)}"`}
-                            >
-                              <ArrowCounterClockwise size={11} weight="bold" />
-                              <span>Reset</span>
-                            </button>
-                          ) : null}
-                        </div>
-                      </span>
-                      <span className="relative">
-                        <Input
-                          value={formValues[extraKey] ?? (wf.value || "")}
-                          placeholder="Missing"
-                          className={`text-xs font-medium ${
-                            wf.status === "check_needed" ? "border-amber-400 bg-amber-50/50 ring-1 ring-amber-300" : ""
-                          }`}
-                          onChange={(event) => {
-                            const newVal = event.target.value;
-                            if (previousValuesRef.current[extraKey] === undefined) {
-                              previousValuesRef.current[extraKey] = formValues[extraKey] || wf.value || "";
-                            }
-                            setFormValues((values) => ({ ...values, [extraKey]: newVal }));
-                          }}
-                          onBlur={() => {
-                            commitFieldDirectly(extraKey, formValues[extraKey] ?? (wf.value || ""));
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") (event.target as HTMLInputElement).blur();
-                          }}
-                        />
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-            ) : null}
           </div>
 <datalist id="company-suggestions">
             {companies.map((c) => (

@@ -176,9 +176,12 @@ def render_design2_html(
             free_items = [
                 {"title": "Legal Defense Costs", "description": "Reimburses court legal representation and defense fees up to RM2,000."},
                 {"title": "Emergency Towing Assistance", "description": "24/7 accidental towing service to nearest approved repairer up to RM 200."},
-                {"title": "Drive-Less Save-More", "description": "Cash rebate up to 30% of base premium for low annual mileage."},
-                {"title": "Child Car Safety Seat", "description": "Reimburses replacement or repair of child safety seats in a crash."},
             ]
+            ins_l = (insurer or "").lower()
+            if "takaful" in ins_l or "stmb" in ins_l:
+                free_items.append({"title": "No Claim Cashback", "description": "Distributable surplus profit-sharing distribution via Hibah if no claims."})
+            elif any(k in ins_l for k in ("sompo", "allianz", "kurnia", "amassurance", "liberty", "etiqa")):
+                free_items.append({"title": "Panel Repair Workmanship Warranty", "description": "12-month repair quality warranty from approved repairers."})
 
     free_items_html = ""
     for fi in free_items[:6]:
@@ -190,8 +193,8 @@ def render_design2_html(
                 <svg width="15" height="15" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#5ABA00"/><path d="m8.2 12.2 2.5 2.5 5-5.2" stroke="#FFF" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </div>
             <div style="min-width: 0;">
-                <div style="font-size: 8.5px; font-weight: 700; color: #0F172A; line-height: 1.15;">{ftitle}</div>
-                {f'<div style="font-size: 7.2px; color: #52525B; line-height: 1.24; margin-top: 2px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;">{fdesc}</div>' if fdesc else ''}
+                <div style="font-size: 9.8px; font-weight: 800; color: #0F172A; line-height: 1.18;">{ftitle}</div>
+                {f'<div style="font-size: 8.2px; color: #1E293B; line-height: 1.25; margin-top: 2px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;">{fdesc}</div>' if fdesc else ''}
             </div>
         </div>
         """
@@ -238,7 +241,7 @@ def render_design2_html(
             else '<div style="width: 10px; height: 10px; border: 1.6px solid #677184; border-radius: 1.5px; background: #FFFFFF;"></div>'
         )
 
-        desc_clamp = 1 if val else 2
+        desc_clamp = 2
 
         addon_grid_html += f"""
         <div class="d2-card">
@@ -248,11 +251,11 @@ def render_design2_html(
             <div style="flex: 1; min-width: 0; padding: 4px 5px 3px 2px; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;">
                 <div style="min-height: 0; overflow: hidden;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 2px;">
-                        <div style="font-size: 7.1px; font-weight: 700; color: #0F172A; line-height: 1.14; word-break: break-word; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">{title}</div>
-                        <div style="font-size: 6px; font-weight: 600; color: #94A3B8; flex-shrink: 0; line-height: 1; padding-top: 1px;">{escape(serial)}</div>
+                        <div style="font-size: 8.2px; font-weight: 750; color: #0F172A; line-height: 1.15; word-break: break-word; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">{title}</div>
+                        <div style="font-size: 6.8px; font-weight: 700; color: #334155; flex-shrink: 0; line-height: 1; padding-top: 1px;">{escape(serial)}</div>
                     </div>
-                    {f'<div style="font-size: 6.8px; font-weight: 800; color: #5ABA00; margin-top: 1px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{val}</div>' if val else ''}
-                    {f'<div style="font-size: 5.9px; color: #475569; line-height: 1.14; margin-top: 1px; word-break: break-word; overflow: hidden; display: -webkit-box; -webkit-line-clamp: {desc_clamp}; -webkit-box-orient: vertical;">{desc}</div>' if desc else ''}
+                    {f'<div style="font-size: 7.6px; font-weight: 800; color: #15803D; margin-top: 1px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{val}</div>' if val else ''}
+                    {f'<div style="font-size: 7.0px; color: #0F172A; line-height: 1.18; margin-top: 1px; word-break: break-word; overflow: hidden; display: -webkit-box; -webkit-line-clamp: {desc_clamp}; -webkit-box-orient: vertical;">{desc}</div>' if desc else ''}
                 </div>
                 <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: auto; padding-top: 1px; flex-shrink: 0;">
                     {indicator_html}

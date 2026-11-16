@@ -132,12 +132,22 @@ def evaluate_betterment_rules(
     is_comprehensive_private: bool = True,
     registration_date: Any = None,
     coverage_start_date: Any = None,
+    coverage_type: str | None = None,
 ) -> tuple[bool, float, str]:
     """Evaluate Waiver of Betterment and Betterment Co-Payment Rate based on underwriting rules.
     
     Uses exact completed calendar years via calculate_exact_vehicle_age when registration_date is available.
+    Third Party / TPO motor policies do not cover Own Damage repair, so betterment is strictly N/A.
     """
     from app.domain.betterment_engine import calculate_exact_vehicle_age
+
+    cov_str = str(coverage_type or "").strip().lower()
+    is_third_party = (
+        cov_str in ("third party", "tpo", "third_party", "third party only")
+        or ("third" in cov_str and "fire" not in cov_str and "theft" not in cov_str)
+    )
+    if is_third_party:
+        return False, 0.0, "N/A (Third Party)"
 
     quote_y = quote_year or datetime.now().year
     veh_yom = yom if (yom and yom > 1900) else None

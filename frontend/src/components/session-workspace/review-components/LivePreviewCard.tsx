@@ -91,9 +91,9 @@ export function LivePreviewCard({
           </span>
           <button
             type="button"
-            onClick={() => setPreviewZoom(0.48)}
+            onClick={() => setPreviewZoom(0.80)}
             className="hidden sm:inline-flex items-center gap-1 text-[10px] font-mono text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] bg-gray-100 hover:bg-gray-200 px-1.5 py-0.5 rounded border border-gray-200 cursor-pointer transition-colors"
-            title="Click to reset zoom (Default 48%). Or hold Ctrl and scroll mouse wheel inside canvas to zoom in/out"
+            title="Click to reset zoom (Default 80%). Or hold Ctrl and scroll mouse wheel inside canvas to zoom in/out"
           >
             <span>{Math.round(previewZoom * 100)}%</span>
             <ArrowCounterClockwise size={10} className="text-gray-400" />
@@ -119,7 +119,7 @@ export function LivePreviewCard({
                   step="0.05"
                   value={previewZoom}
                   onChange={(e) => setPreviewZoom(parseFloat(e.target.value))}
-                  className="w-16 h-1 cursor-pointer accent-[var(--rl-red)]"
+                  className="w-14 h-1 cursor-pointer accent-[var(--rl-red)]"
                   title="Zoom slider (25% - 250%)"
                 />
                 <button
@@ -130,6 +130,38 @@ export function LivePreviewCard({
                 >
                   <MagnifyingGlassPlus size={13} weight="bold" />
                 </button>
+                <div className="hidden md:flex items-center gap-0.5 ml-0.5 border-l border-gray-300 pl-1">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewZoom(0.50)}
+                    className={`px-1 py-0.2 rounded text-[9px] font-semibold transition-colors cursor-pointer ${
+                      Math.abs(previewZoom - 0.50) < 0.03 ? "bg-white shadow-2xs text-[var(--rl-red)] font-bold" : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                    }`}
+                    title="Fit (50%)"
+                  >
+                    50%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewZoom(0.80)}
+                    className={`px-1 py-0.2 rounded text-[9px] font-semibold transition-colors cursor-pointer ${
+                      Math.abs(previewZoom - 0.80) < 0.03 ? "bg-white shadow-2xs text-[var(--rl-red)] font-bold" : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                    }`}
+                    title="Readable (80%)"
+                  >
+                    80%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewZoom(1.00)}
+                    className={`px-1 py-0.2 rounded text-[9px] font-semibold transition-colors cursor-pointer ${
+                      Math.abs(previewZoom - 1.00) < 0.03 ? "bg-white shadow-2xs text-[var(--rl-red)] font-bold" : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                    }`}
+                    title="1:1 Full Scale (100%)"
+                  >
+                    100%
+                  </button>
+                </div>
               </div>
               {isDesign2 ? (
                 <button
@@ -226,6 +258,9 @@ export function LivePreviewCard({
                     transform: `scale(${previewZoom})`,
                     transformOrigin: "top left",
                     position: "relative",
+                    textRendering: "geometricPrecision",
+                    WebkitFontSmoothing: "antialiased",
+                    imageRendering: "auto",
                   }}
                 >
                   {isDesign2 ? (

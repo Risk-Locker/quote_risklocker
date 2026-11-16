@@ -236,12 +236,16 @@ PURE_PERCENTAGE_OR_FEE_RE = re.compile(
 
 
 def is_spurious_benefit_line(raw: str) -> bool:
-    """Strictly identify and reject non-benefit noise (contacts, taxes, disclaimers, vehicle specs)."""
+    """Strictly identify and reject non-benefit noise (contacts, taxes, disclaimers, vehicle specs, math formulas)."""
     if not raw or not raw.strip():
         return True
     s = raw.strip()
     norm = re.sub(r"\s+", " ", s).lower()
     norm = re.sub(r"[’‘`´\u2018\u2019\u201b\ufffd]", "'", norm)
+    # Reject strings with no alphabetic letters (e.g. pure numbers, dates, math subtotals like '750.00 + 1,049.35 +')
+    cleaned_alpha = re.sub(r"\b(?:rm|myr)\b", "", norm, flags=re.IGNORECASE)
+    if not re.search(r"[a-z]", cleaned_alpha):
+        return True
     if PHONE_RE.search(s):
         return True
     if EMAIL_RE.search(s):

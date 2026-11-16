@@ -156,24 +156,9 @@ def _extract_ncd_from_draft(f: dict[str, Any], s_obj: Any = None) -> float | Non
     return None
 
 
-def detect_runner_fee_from_id(ic_or_passport: str | None) -> float:
-    """Auto-detect runner fee based on Malaysian IC vs International Passport.
-
-    Rules:
-    - Customer ID starts with letters (e.g. K1584766Z, A12345678) -> International Passport -> RM 20.00.
-    - Customer ID starts with digits (YYMMDD...) -> Malaysian National ID (MyKad) -> RM 10.00.
-    - Missing / PENDING-* / undetectable -> Default = RM 10.00.
-    """
-    if not ic_or_passport:
-        return 10.0
-    cleaned = ic_or_passport.strip().upper()
-    if not cleaned or cleaned.startswith("PENDING-") or "PENDING-" in cleaned:
-        return 10.0
-    from app.services.identity_normalization_service import normalize_government_id
-    _, id_type = normalize_government_id(cleaned)
-    if id_type == "passport":
-        return 20.0
-    return 10.0
+def detect_runner_fee_from_id(ic_or_passport: str | None = None) -> float:
+    """Universal flat runner fee: strictly RM 20.00 across the entire platform."""
+    return 20.0
 
 
 def _extract_exact_basic_figure(f: dict[str, Any], company_name: str = "", s_obj: Any = None) -> tuple[float, str]:
@@ -461,14 +446,30 @@ def _extract_vehicle_basic_premium(f: dict[str, Any], company_name: str = "", s_
 
 def _extract_vehicle_sum_insured(f: dict[str, Any], s_obj: Any = None) -> float:
     """Disambiguate vehicle sum insured from accessory endorsement limits (e.g. windscreen RM 4,000, PA RM 25,000)."""
+    # 1. Malaysian Motor Tariff Invariant: Third Party / TPO policies have ZERO vehicle sum insured
+    cov_val = str(_extract_val(f.get("coverage_type")) or "").strip().lower()
+    if any(k in cov_val for k in ("third party", "third_party", "tpo")) and not any(k in cov_val for k in ("fire", "tpft")):
+        return 0.0
+
     c_cov = _to_float(f.get("coverage_amount"))
     c_sum = _to_float(f.get("sum_insured"))
     c_mkt = _to_float(f.get("market_value"))
     c_agr = _to_float(f.get("agreed_value"))
 
-    major_candidates = [c for c in [c_cov, c_mkt, c_agr, c_sum] if c >= 10000.0]
+    chassis_digits = re.sub(r"\D", "", str(_extract_val(f.get("chassis_no")) or ""))
+    engine_digits = re.sub(r"\D", "", str(_extract_val(f.get("engine_no")) or ""))
+
+    def _is_suspicious_chassis_or_engine(num: float) -> bool:
+        n_str = str(int(num))
+        if chassis_digits and len(chassis_digits) >= 5 and (n_str in chassis_digits or chassis_digits in n_str):
+            return True
+        if engine_digits and len(engine_digits) >= 5 and (n_str in engine_digits or engine_digits in n_str):
+            return True
+        return False
+
+    major_candidates = [c for c in [c_cov, c_mkt, c_agr, c_sum] if c >= 10000.0 and not _is_suspicious_chassis_or_engine(c)]
     if major_candidates:
-        if c_cov >= 10000.0:
+        if c_cov >= 10000.0 and not _is_suspicious_chassis_or_engine(c_cov):
             return c_cov
         return max(major_candidates)
 
@@ -484,17 +485,18 @@ def _extract_vehicle_sum_insured(f: dict[str, Any], s_obj: Any = None) -> float:
                 if any(k in b_text.lower() for k in ("agreed value", "sum insured", "sum covered", "nilai yang dipersetujui")):
                     m_b = re.findall(r"(?:RM|MYR)?\s*([\d,]{5,}(?:\.\d{2})?)", b_text, re.IGNORECASE)
                     if m_b:
-                        nums = [_to_float(x) for x in m_b if _to_float(x) >= 10000.0]
+                        nums = [_to_float(x) for x in m_b if _to_float(x) >= 10000.0 and not _is_suspicious_chassis_or_engine(_to_float(x))]
                         if nums:
                             return max(nums)
             combined_txt = (getattr(ext_rec, "ocr_text", "") or "") + "\n" + (getattr(ext_rec, "raw_text", "") or "")
-            m_txt = re.findall(r"(?i)(?:vehicle\s*agreed\s*value|vehicle\s*sum\s*insured|sum\s*insured\s*\(agreed\s*value\)|sum\s*covered)[\s\S]{0,60}?(?:RM|MYR)?\s*([\d,]{5,}(?:\.\d{2})?)", combined_txt)
+            # Strict regex: must immediately follow the label with colon/dash, avoiding cross-label jumping into chassis number
+            m_txt = re.findall(r"(?i)(?:vehicle\s*agreed\s*value|vehicle\s*sum\s*insured|sum\s*insured\s*\(agreed\s*value\)|sum\s*covered)\s*[:=\-]?\s*(?:RM|MYR)?\s*([\d,]{4,}(?:\.\d{2})?)", combined_txt)
             if m_txt:
-                nums = [_to_float(x) for x in m_txt if _to_float(x) >= 10000.0]
+                nums = [_to_float(x) for x in m_txt if _to_float(x) >= 10000.0 and not _is_suspicious_chassis_or_engine(_to_float(x))]
                 if nums:
                     return max(nums)
 
-    all_candidates = [c for c in [c_sum, c_cov, c_mkt, c_agr] if c > 0.0]
+    all_candidates = [c for c in [c_sum, c_cov, c_mkt, c_agr] if c > 0.0 and not _is_suspicious_chassis_or_engine(c)]
     return max(all_candidates) if all_candidates else 0.0
 
 

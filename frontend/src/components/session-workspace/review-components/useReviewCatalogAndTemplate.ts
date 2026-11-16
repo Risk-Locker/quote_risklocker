@@ -66,7 +66,7 @@ export function useReviewCatalogAndTemplate({
   const [templateImpact, setTemplateImpact] = useState<TemplateSelectionImpact | null>(null);
 
   const [previewTemplate, setPreviewTemplate] = useState<any | null>(null);
-  const [previewZoom, setPreviewZoom] = useState(0.48);
+  const [previewZoom, setPreviewZoom] = useState(0.80);
   const [previewLoading, setPreviewLoading] = useState(false);
   const previewScrollRef = useRef<HTMLDivElement | null>(null);
   const userPickedRevisionRef = useRef(false);
@@ -100,16 +100,19 @@ export function useReviewCatalogAndTemplate({
 
   const productOptions = useMemo(() => {
     const raw = companyWorkspace?.products || [];
-    const catalogs = companyWorkspace?.catalogs || [];
-    const validProductIds = new Set(
-      catalogs.filter((c: any) => c.status !== "archived" && c.status !== "retired").map((c: any) => c.product_id).filter(Boolean)
-    );
     const valid = raw.filter((p: any) => {
       if (p.status === "archived" || p.status === "retired" || (p.name && /^product-/i.test(p.name))) return false;
-      if (validProductIds.size > 0 && !validProductIds.has(p.id)) return false;
       const isEvProduct = /\(ev\)|(\bev\b)|electric/i.test(p.name || "");
       return isCurrentEV ? isEvProduct : !isEvProduct;
     });
+
+    // Ensure currently pinned product is never dropped from dropdown options
+    const pinnedId = workspace?.pinned.product_id;
+    if (pinnedId && !valid.some((p: any) => p.id === pinnedId)) {
+      const pinnedName = workspace?.pinned_names.product_name || "Current Package";
+      valid.push({ id: pinnedId, name: pinnedName, status: "active" });
+    }
+
     const seen = new Set<string>();
     return valid.filter((p: any) => {
       const key = (p.name || "").trim().toLowerCase();
@@ -117,7 +120,7 @@ export function useReviewCatalogAndTemplate({
       seen.add(key);
       return true;
     });
-  }, [companyWorkspace, isCurrentEV]);
+  }, [companyWorkspace, isCurrentEV, workspace?.pinned.product_id, workspace?.pinned_names.product_name]);
 
   const categorizedProducts = useMemo(() => {
     const cars: typeof productOptions = [];

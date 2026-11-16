@@ -30,3 +30,36 @@ export function getVehicleDisplayName(
   }
   return "No Plate (Blank)";
 }
+
+/**
+ * Deduplicate brand and model when formatting full vehicle name.
+ * e.g., brand: "HONDA", model: "HONDA CRF250" -> "HONDA CRF250"
+ * e.g., brand: "HONDA", model: "CRF250" -> "HONDA CRF250"
+ */
+export function formatBrandAndModel(
+  brand?: string | null,
+  model?: string | null
+): string {
+  const b = (brand || "").trim();
+  const m = (model || "").trim();
+  if (!b) return m;
+  if (!m) return b;
+  if (m.toLowerCase().startsWith(b.toLowerCase())) {
+    return m;
+  }
+  return `${b} ${m}`;
+}
+
+/**
+ * Helper to determine if brand should be rendered alongside model in separated JSX blocks.
+ */
+export function shouldDisplayBrand(
+  brand?: string | null,
+  model?: string | null
+): boolean {
+  const b = (brand || "").trim();
+  const m = (model || "").trim();
+  if (!b) return false;
+  if (!m) return true;
+  return !m.toLowerCase().startsWith(b.toLowerCase());
+}

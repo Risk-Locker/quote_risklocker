@@ -542,6 +542,12 @@ def _workspace_extracted_benefits_section(
         if is_spurious_benefit_line(norm_label):
             continue
 
+        # Check if user explicitly dismissed this detected line
+        dismissed_lines = (draft.display_options or {}).get("dismissed_extracted_lines", [])
+        line_id = line.get("line_id") or ""
+        if (line_id and line_id in dismissed_lines) or norm_label in dismissed_lines or norm_label.lower() in [d.lower() for d in dismissed_lines if isinstance(d, str)]:
+            continue
+
         seen_labels.add(norm_label.lower())
 
         raw_cov_limit = line.get("coverage_limit")
