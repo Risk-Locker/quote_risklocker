@@ -143,7 +143,6 @@
 - **SRCC**: Strike, riot and civil commotion coverage for RM100,000 lorry for 6 months (0.30% rate / 2). **Cost**: 150 RM
 - **LLP**: Legal liability to 1 cabin attendant/passenger for 6 months. **Cost**: 3.75 RM
 - **LLOP**: Legal liability of passengers for third-party negligence for 6 months. **Cost**: 3.75 RM
-- **Heavy Towing**: Commercial heavy vehicle towing and winching recovery package for 6 months. **Cost**: 180 RM
 - **Cargo Protection**: Loss or damage protection to own enterprise goods in transit for 6 months. **Cost**: 250 RM
 - **Increased TPPD**: Upgrades third party property damage limit from RM3M to RM5M for 6 months. **Cost**: 45 RM
 
@@ -170,7 +169,6 @@
 - **SRCC**: Strike, riot and civil commotion coverage for RM100,000 lorry for 6 months (0.30% rate / 2). **Cost**: 150 RM
 - **LLP**: Legal liability to 1 cabin co-driver/passenger for 6 months. **Cost**: 3.75 RM
 - **LLOP**: Legal liability of passengers for third-party negligence for 6 months. **Cost**: 3.75 RM
-- **Heavy Towing**: Heavy prime mover towing, winching, and accident recovery rider for 6 months. **Cost**: 220 RM
 - **Cargo Liability**: Carrier legal liability for third-party freight damage in transit for 6 months. **Cost**: 350 RM
 - **Increased TPPD**: Upgrades third party property damage limit from RM3M to RM5M for 6 months. **Cost**: 45 RM
 

@@ -140,7 +140,6 @@ Baseline: SI RM 100,000 | 2 Cabin Seats | 6 Months (50% Rate)
 - **Own Damage**: Accidental collision, fire, theft, hijacking, transit of company's own trade goods. **Cost**: 0 RM
 - **Third Party BI**: Unlimited coverage for third-party bodily injury and accidental death. **Cost**: 0 RM
 - **Third Party Property**: Third-party property damage coverage up to RM3,000,000. **Cost**: 0 RM
-- **Basic Towing**: Accidental towing assistance to nearest approved repairer up to RM200. **Cost**: 0 RM
 - **Betterment Scale**: Standard commercial vehicle tariff betterment scale (0% under 5 yrs up to 40% for 10+ yrs). **Cost**: 0 RM
 - **Legal Defense**: Court legal defense costs coverage up to RM2,000. **Cost**: 0 RM
 
@@ -169,7 +168,6 @@ Baseline: SI RM 100,000 | 2 Cabin Seats | 6 Months (50% Rate)
 - **Own Damage**: Accidental collision, fire, theft, transit carrying third-party goods. **Cost**: 0 RM
 - **Third Party BI**: Unlimited coverage for third-party bodily injury and accidental death. **Cost**: 0 RM
 - **Third Party Property**: Third-party property damage coverage up to RM3,000,000. **Cost**: 0 RM
-- **Basic Towing**: Accidental towing assistance to nearest approved repairer up to RM200. **Cost**: 0 RM
 - **Betterment Scale**: Standard commercial vehicle tariff betterment scale. **Cost**: 0 RM
 - **Legal Defense**: Court legal defense costs coverage up to RM2,000. **Cost**: 0 RM
 

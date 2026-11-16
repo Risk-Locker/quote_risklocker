@@ -127,8 +127,6 @@ Overview: This document establishes a standardized, database-ready benefit catal
 - **Third Party Bodily Injury & Death Liability**: (Statutory unlimited legal liability coverage for death or bodily injury sustained by third parties). **Cost**: 0 RM
 - **Third Party Property Damage (TPPD) Liability**: (Legal liability indemnity for third-party property damage up to RM 3,000,000). **Cost**: 0 RM
 - **Loading & Unloading Third Party Liability**: (Covers third party bodily injury and property damage occurring within carriageway during loading/unloading operations). **Cost**: 0 RM
-- **Towing Disabled Vehicle Extension**: (Covers third party liability while towing any one disabled motor vehicle without reward). **Cost**: 0 RM
-- **Transportation of Damaged Lorry (Towing Base)**: (Reimbursement of reasonable towing expenses to the nearest repairer or owner depot up to RM 200). **Cost**: 0 RM
 - **Legal Defense Costs**: (Reimbursement of approved legal defense fees incurred under Road Transport Act up to RM 2,000). **Cost**: 0 RM
 - **Commercial Fleet / Vehicle NCD**: (Commercial vehicle NCD scale: 15% after Year 1, 20% after Year 2, 25% max after Year 3+). **Cost**: 0 RM
 
@@ -152,8 +150,6 @@ Overview: This document establishes a standardized, database-ready benefit catal
 - **Third Party Bodily Injury & Death Liability**: (Statutory unlimited legal liability coverage for death or bodily injury sustained by third parties). **Cost**: 0 RM
 - **Third Party Property Damage (TPPD) Liability**: (Legal liability indemnity for third-party property damage up to RM 3,000,000). **Cost**: 0 RM
 - **Loading & Unloading Third Party Liability**: (Covers third party bodily injury and property damage occurring within carriageway limits during haulage operations). **Cost**: 0 RM
-- **Towing Disabled Vehicle Extension**: (Covers third party liability while towing any one disabled motor vehicle without reward). **Cost**: 0 RM
-- **Transportation of Damaged Vehicle (Towing Base)**: (Reimbursement of reasonable towing expenses to nearest repairer or company yard up to RM 200). **Cost**: 0 RM
 - **Legal Defense Costs**: (Reimbursement of approved legal defense fees incurred under Road Transport Act up to RM 2,000). **Cost**: 0 RM
 - **Commercial NCD Entitlement**: (Commercial vehicle NCD scale: 15% after Year 1, 20% after Year 2, 25% max after Year 3+). **Cost**: 0 RM
 

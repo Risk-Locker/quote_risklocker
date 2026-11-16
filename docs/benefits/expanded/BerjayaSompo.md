@@ -121,7 +121,6 @@
 - **Own Damage Accidental Overturning**: (Accidental damage, crash, and collision coverage up to Sum Insured). **Cost**: 0 RM
 - **Fire, Explosion & Lightning**: (Direct coverage against fire outbreaks, explosions, and lightning). **Cost**: 0 RM
 - **Theft & Hijacking Cover**: (Indemnifies lorry theft, break-in, and robbery losses up to Sum Insured). **Cost**: 0 RM
-- **Commercial Standard Towing Allowance**: (Emergency towing reimbursement to nearest repairer up to RM 200). **Cost**: 0 RM
 
 ### Optional Individual Add-ons & Bundles
 - **Enhanced Windscreen Cover (End. 89A)**: (RM1,000 lorry cabin windscreen/window glass replacement). **Cost**: 75.00 RM
@@ -129,7 +128,6 @@
 - **Passenger Risk / LLP (End. 19)**: (Covers legal liability for 2 authorized cabin attendants/passengers). **Cost**: 15.00 RM
 - **Strike, Riot & Civil Commotion (End. 25)**: (Protects against damage from strikes, riots, and public unrest). **Cost**: 150.00 RM
 - **Commercial CART - 7 Days @ RM100/day (End. 112)**: (Daily downtime compensation for commercial lorry repairs). **Cost**: 60.00 RM
-- **Unlimited Towing BDM <= 7.5T (End. A05)**: (Unlimited distance breakdown and accident towing to panel repairers). **Cost**: 60.00 RM
 - **Attached Trailers Cover (End. 54)**: (Indemnity extension for unspecified attached trailer units). **Cost**: 75.00 RM
 
 ---
@@ -146,14 +144,12 @@
 - **Own Damage Accidental Collision**: (Comprehensive crash, overturn, and transit impact damage indemnity). **Cost**: 0 RM
 - **Fire, Explosion & Lightning**: (Direct coverage against accidental fire and explosion). **Cost**: 0 RM
 - **Theft & Hijacking Indemnity**: (Loss compensation for haulage vehicle theft or hijacking). **Cost**: 0 RM
-- **Commercial Standard Towing Allowance**: (Emergency towing reimbursement to nearest repairer up to RM 200). **Cost**: 0 RM
 
 ### Optional Individual Add-ons & Bundles
 - **Enhanced Windscreen Cover (End. 89A)**: (RM1,000 haulage windscreen/window glass replacement). **Cost**: 75.00 RM
 - **Inclusion of Special Perils (End. 57)**: (Covers flood, flash floods, storms, and landslides). **Cost**: 100.00 RM
 - **Passenger Risk / LLP (End. 19)**: (Passenger liability cover for 2 haulage attendants). **Cost**: 15.00 RM
 - **Strike, Riot & Civil Commotion (End. 25)**: (Damage protection caused by strikers, rioters, or civil unrest). **Cost**: 150.00 RM
-- **Unlimited Heavy Towing BDM > 7.5T (End. A05A)**: (Heavy-duty towing nationwide to approved repairer). **Cost**: 90.00 RM
 - **Accidental Boom Damage (End. 38A)**: (Accidental damage cover for crane boom while used as a tool of trade). **Cost**: 120.00 RM
 - **Mobile Plant Working Risks (End. 42)**: (Third-party working risk extension for mobile plant operations). **Cost**: 85.00 RM
 - **Attached Trailers Cover (End. 54)**: (Own damage and third-party extension for haulage trailers). **Cost**: 75.00 RM

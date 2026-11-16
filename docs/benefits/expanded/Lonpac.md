@@ -122,7 +122,6 @@
 - **Own Damage**: Accidental collision, fire, theft, transit of company's own trade goods. **Cost**: 0 RM
 - **Third Party BI**: Unlimited coverage for third-party bodily injury and accidental death. **Cost**: 0 RM
 - **Third Party Property**: Third-party property damage coverage up to RM3,000,000. **Cost**: 0 RM
-- **Towing Reimbursement**: Accidental towing charge allowance up to RM200 to nearest repairer (Roadside assistance excluded). **Cost**: 0 RM
 - **Betterment Scale**: Commercial tariff betterment contribution scale (0% under 5 yrs up to 40% for 10+ yrs). **Cost**: 0 RM
 - **Legal Defense**: Court legal defense costs coverage up to RM2,000. **Cost**: 0 RM
 
@@ -146,7 +145,6 @@
 - **Own Damage**: Accidental collision, fire, theft, transit carrying third-party goods for hire/reward. **Cost**: 0 RM
 - **Third Party BI**: Unlimited coverage for third-party bodily injury and accidental death. **Cost**: 0 RM
 - **Third Party Property**: Third-party property damage coverage up to RM3,000,000. **Cost**: 0 RM
-- **Towing Reimbursement**: Accidental towing charge allowance up to RM200 to nearest repairer (Roadside assistance excluded). **Cost**: 0 RM
 - **Betterment Scale**: Standard commercial vehicle tariff betterment scale. **Cost**: 0 RM
 - **Legal Defense**: Court legal defense costs coverage up to RM2,000. **Cost**: 0 RM
 
