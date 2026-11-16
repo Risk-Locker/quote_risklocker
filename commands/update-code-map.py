@@ -96,9 +96,12 @@ def generate() -> str:
     for scan_root in SCAN_ROOTS:
         if not scan_root.exists():
             continue
-        for path in sorted(scan_root.rglob("*")):
-            if not path.is_file() or path.suffix.lower() not in EXTENSIONS or "__pycache__" in path.parts:
-                continue
+        candidates = [
+            p for p in scan_root.rglob("*")
+            if p.is_file() and p.suffix.lower() in EXTENSIONS and "__pycache__" not in p.parts
+        ]
+        candidates.sort(key=lambda p: p.relative_to(ROOT).as_posix())
+        for path in candidates:
             relative = path.relative_to(ROOT).as_posix()
             if relative.startswith("backend/"):
                 group = "Backend"
@@ -134,6 +137,7 @@ def generate() -> str:
 
 def rendered_document(body: str) -> str:
     existing = TARGET.read_text(encoding="utf-8") if TARGET.exists() else "# Codebase Map\n\n"
+    existing = existing.replace("\r\n", "\n")
     if START in existing and END in existing:
         prefix = existing.split(START, 1)[0]
         suffix = existing.split(END, 1)[1]
@@ -150,11 +154,11 @@ def main() -> int:
     expected = rendered_document(generate())
     if args.write:
         TARGET.parent.mkdir(parents=True, exist_ok=True)
-        TARGET.write_text(expected, encoding="utf-8")
+        TARGET.write_text(expected.replace("\r\n", "\n"), encoding="utf-8", newline="\n")
         print(f"Updated {TARGET.relative_to(ROOT)}")
         return 0
     current = TARGET.read_text(encoding="utf-8") if TARGET.exists() else ""
-    if current != expected:
+    if current.replace("\r\n", "\n") != expected.replace("\r\n", "\n"):
         print("Code map is stale. Run: python commands/update-code-map.py --write")
         return 1
     print("Code map is current.")

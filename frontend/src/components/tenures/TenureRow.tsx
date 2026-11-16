@@ -23,6 +23,7 @@ import {
   formatRelativeTime,
 } from "./types";
 import { TenureStageSelector } from "./TenureStageSelector";
+import { HighlightText } from "./HighlightText";
 
 export interface TenureRowProps {
   group: VehicleGroup;
@@ -33,6 +34,7 @@ export interface TenureRowProps {
   pics: PicItem[];
   density?: "comfortable" | "compact";
   hiddenColumns?: string[];
+  search?: string;
   onPatchField: (tenureId: string, updates: Partial<TenureRow>) => Promise<void>;
   onOpenCovernoteUpload: (tenure: TenureRow) => void;
   onOpenHitModal: (tenure: TenureRow) => void;
@@ -50,6 +52,7 @@ export function TenureRowComponent({
   pics,
   density = "comfortable",
   hiddenColumns = [],
+  search = "",
   onPatchField,
   onOpenCovernoteUpload,
   onOpenHitModal,
@@ -163,12 +166,16 @@ export function TenureRowComponent({
               <div className="font-bold text-neutral-900 font-mono text-xs flex items-center gap-1">
                 <Car className="w-3.5 h-3.5 text-neutral-600 shrink-0" />
                 <span className="truncate max-w-[110px]" title={displayName}>
-                  {displayName}
+                  <HighlightText text={displayName} query={search} />
                 </span>
               </div>
               <span className="text-neutral-300">·</span>
               <span className="font-semibold text-neutral-800 text-xs truncate max-w-[130px]" title={group.customer_name}>
-                {group.customer_name || <span className="text-neutral-400 italic">No name</span>}
+                {group.customer_name ? (
+                  <HighlightText text={group.customer_name} query={search} />
+                ) : (
+                  <span className="text-neutral-400 italic">No name</span>
+                )}
               </span>
               <button
                 type="button"
@@ -180,11 +187,11 @@ export function TenureRowComponent({
               </button>
             </div>
             <div className="text-[10px] text-neutral-500 font-medium truncate max-w-[240px]">
-              {group.car_brand ? `${group.car_brand} ` : ""}
-              {group.car_model || ""}
+              {group.car_brand ? <><HighlightText text={group.car_brand} query={search} /> </> : ""}
+              {group.car_model ? <HighlightText text={group.car_model} query={search} /> : ""}
               {group.engine_cc ? ` · ${group.engine_cc}cc` : ""}
               {group.manufacture_year ? ` · ${group.manufacture_year}` : ""}
-              {group.customer_ic_no ? ` · IC: ${group.customer_ic_no}` : ""}
+              {group.customer_ic_no ? <> · IC: <HighlightText text={group.customer_ic_no} query={search} /></> : ""}
             </div>
           </div>
         ) : (
@@ -193,7 +200,7 @@ export function TenureRowComponent({
               <div className="font-bold text-neutral-900 font-mono text-sm flex items-center gap-1.5">
                 <Car className="w-3.5 h-3.5 text-neutral-600 shrink-0" />
                 <span className="truncate max-w-[150px]" title={displayName}>
-                  {displayName}
+                  <HighlightText text={displayName} query={search} />
                 </span>
               </div>
 
@@ -223,17 +230,21 @@ export function TenureRowComponent({
             </div>
 
             <div className="text-xs font-semibold text-neutral-800 mt-1 truncate max-w-[210px]">
-              {group.customer_name || <span className="text-neutral-400 italic">No customer name</span>}
+              {group.customer_name ? (
+                <HighlightText text={group.customer_name} query={search} />
+              ) : (
+                <span className="text-neutral-400 italic">No customer name</span>
+              )}
             </div>
             {group.customer_ic_no && (
               <div className="text-[10px] text-neutral-400 font-mono mt-0.5 truncate max-w-[210px]">
-                IC: {group.customer_ic_no}
+                IC: <HighlightText text={group.customer_ic_no} query={search} />
               </div>
             )}
             {(group.car_brand || group.car_model || group.engine_cc || group.manufacture_year) && (
               <div className="text-[10px] text-neutral-500 font-medium mt-0.5 truncate max-w-[210px]">
-                {group.car_brand ? `${group.car_brand} ` : ""}
-                {group.car_model || ""}
+                {group.car_brand ? <><HighlightText text={group.car_brand} query={search} /> </> : ""}
+                {group.car_model ? <HighlightText text={group.car_model} query={search} /> : ""}
                 {group.engine_cc ? ` · ${group.engine_cc}cc` : ""}
                 {group.manufacture_year ? ` · YOM ${group.manufacture_year}` : ""}
               </div>
@@ -415,7 +426,7 @@ export function TenureRowComponent({
               <div className="flex items-center justify-between gap-1 flex-wrap">
                 <div className="flex items-center gap-1 flex-wrap">
                   <span className="font-bold text-xs text-neutral-900 truncate">
-                    {mainTenure.covernote_policy.company}
+                    <HighlightText text={mainTenure.covernote_policy.company} query={search} />
                   </span>
                   <span
                     className={`inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold border ${mainTenure.covernote_policy.is_previous_year_policy
@@ -478,7 +489,10 @@ export function TenureRowComponent({
                   >
                     <FilePdf size={11} weight="fill" />
                     <span className="truncate max-w-[120px]">
-                      {mainTenure.covernote_policy.file_name || "Cover Note PDF"}
+                      <HighlightText
+                        text={mainTenure.covernote_policy.file_name || "Cover Note PDF"}
+                        query={search}
+                      />
                     </span>
                   </a>
                 ) : (

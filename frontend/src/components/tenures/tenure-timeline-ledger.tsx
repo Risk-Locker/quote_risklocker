@@ -186,6 +186,7 @@ export function TenureTimelineLedger() {
           pics={state.pics}
           density={state.density}
           hiddenColumns={state.hiddenColumns}
+          search={state.search}
           onSort={state.handleSort}
           onToggleSelectAll={state.handleToggleSelectAll}
           onToggleSelectGroup={state.handleToggleSelectGroup}

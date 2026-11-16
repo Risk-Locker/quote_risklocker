@@ -43,9 +43,18 @@ export function useLedgerState() {
   // Tenures Data & Filters
   const [tenures, setTenures] = useState<TenureRow[]>([]);
   const [loadingTenures, setLoadingTenures] = useState(false);
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [policyFilter, setPolicyFilter] = useState<"all" | "issued" | "pending">("all");
+
+  // Debounce search input by 300ms to eliminate server pressure and race conditions
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchInput);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   // Sorting state (default: last_activity desc)
   const [sortBy, setSortBy] = useState<LedgerSortColumn>("last_activity");
@@ -227,8 +236,8 @@ export function useLedgerState() {
       if (stageFilter && stageFilter !== "all") {
         params.set("stage", stageFilter);
       }
-      if (search.trim()) {
-        params.set("q", search.trim());
+      if (debouncedSearch.trim()) {
+        params.set("q", debouncedSearch.trim());
       }
       if (statusFilter && statusFilter !== "all") {
         params.set("status", statusFilter);
@@ -247,7 +256,7 @@ export function useLedgerState() {
     } finally {
       setLoadingTenures(false);
     }
-  }, [selectedYear, selectedMonth, category, stageFilter, search, statusFilter, showHidden]);
+  }, [selectedYear, selectedMonth, category, stageFilter, debouncedSearch, statusFilter, showHidden]);
 
   // Load Calendar Quotation Sessions
   const loadCalendarSessions = useCallback(async () => {
@@ -591,7 +600,47 @@ export function useLedgerState() {
       });
     });
 
-    const filtered = groups.filter((g) => {
+    // 1. Instant client-side search filtering (0ms latency while typing, before debounced network query)
+    const query = searchInput.trim().toLowerCase();
+    const searched = query
+      ? groups.filter((g) => {
+          const matchVehicle = (g.vehicle_no || "").toLowerCase().includes(query);
+          const matchCustomer = (g.customer_name || "").toLowerCase().includes(query);
+          const matchIc = (g.customer_ic_no || "").toLowerCase().includes(query);
+          const matchChassis = (g.chassis_no || "").toLowerCase().includes(query);
+          const matchEngine = (g.engine_no || "").toLowerCase().includes(query);
+          const matchBrand = (g.car_brand || "").toLowerCase().includes(query);
+          const matchModel = (g.car_model || "").toLowerCase().includes(query);
+          const matchPolicy =
+            (g.mainTenure?.policy_number || "").toLowerCase().includes(query) ||
+            (g.mainTenure?.covernote_policy?.policy_number || "").toLowerCase().includes(query);
+          const matchSubagent = (g.mainTenure?.sub_agent_name || "").toLowerCase().includes(query);
+          const matchNotes =
+            (g.mainTenure?.notes || "").toLowerCase().includes(query) ||
+            (g.mainTenure?.comment || "").toLowerCase().includes(query) ||
+            (g.mainTenure?.client_preference_notes || "").toLowerCase().includes(query);
+          const matchQuotes = g.tenures.some((t) =>
+            (t.policy_number || "").toLowerCase().includes(query) ||
+            (t.covernote_policy?.policy_number || "").toLowerCase().includes(query) ||
+            t.sourced_quotes?.some((q) => (q.company || "").toLowerCase().includes(query))
+          );
+          return (
+            matchVehicle ||
+            matchCustomer ||
+            matchIc ||
+            matchChassis ||
+            matchEngine ||
+            matchBrand ||
+            matchModel ||
+            matchPolicy ||
+            matchSubagent ||
+            matchNotes ||
+            matchQuotes
+          );
+        })
+      : groups;
+
+    const filtered = searched.filter((g) => {
       if (policyFilter === "all") return true;
       const t = g.mainTenure;
       const hasPolicy = Boolean(
@@ -687,7 +736,7 @@ export function useLedgerState() {
 
       return sortDir === "asc" ? cmp : -cmp;
     });
-  }, [tenures, policyFilter, sortBy, sortDir]);
+  }, [tenures, policyFilter, sortBy, sortDir, searchInput]);
 
   // Initial loads
   useEffect(() => {
@@ -728,8 +777,9 @@ export function useLedgerState() {
     setCalendarDisplay,
     tenures,
     loadingTenures,
-    search,
-    setSearch,
+    search: searchInput,
+    setSearch: setSearchInput,
+    debouncedSearch,
     statusFilter,
     setStatusFilter,
     policyFilter,

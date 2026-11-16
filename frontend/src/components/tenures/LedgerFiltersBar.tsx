@@ -15,6 +15,7 @@ import {
 } from "@phosphor-icons/react";
 import type { YoYStatItem, TenureRow } from "./types";
 import { TenureBulkActions } from "./TenureBulkActions";
+import { LedgerSearchInput } from "./LedgerSearchInput";
 
 export interface MonthDisplayItem {
   month: string;
@@ -353,164 +354,163 @@ export function LedgerFiltersBar({
         </div>
       </div>
 
-      {/* 3. ACTIVE RENEWALS VS LOST CLIENTS PANEL & SEARCH CONTROLS */}
-      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
-        {/* Category Switcher: Active Renewals vs Issued vs Pending vs Lost Clients */}
-        <div className="flex items-center gap-1 bg-[#f5f5f7] p-1 rounded-[var(--rl-radius-sm)] border border-[#e5e5ea] w-fit flex-wrap">
-          <button
-            type="button"
-            onClick={() => {
-              onSelectCategory("active");
-              onSelectPolicyFilter("all");
-              if (stageFilter === "Close - Lose" || stageFilter === "Others") {
-                onClearStageFilter();
-              }
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
-              category === "active" && policyFilter === "all"
-                ? "bg-white text-neutral-900 shadow-2xs"
-                : "text-neutral-500 hover:text-neutral-800"
-            }`}
-          >
-            <span>All Renewals ({tenuresCount})</span>
-          </button>
+      {/* 3. ACTIVE RENEWALS VS LOST CLIENTS PANEL & SEARCH CONTROLS (STICKY HEADER) */}
+      <div className="sticky top-[56px] z-30 bg-[#f5f5f7]/95 backdrop-blur-md py-2.5 px-3 rounded-[var(--rl-radius)] border border-[#e5e5ea] shadow-xs space-y-2.5 transition-all">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+          {/* Category Switcher: Active Renewals vs Issued vs Pending vs Lost Clients */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1 bg-white p-1 rounded-[var(--rl-radius-sm)] border border-[#e5e5ea] shadow-2xs w-fit flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectCategory("active");
+                  onSelectPolicyFilter("all");
+                  if (stageFilter === "Close - Lose" || stageFilter === "Others") {
+                    onClearStageFilter();
+                  }
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
+                  category === "active" && policyFilter === "all"
+                    ? "bg-[#1b1717] text-white shadow-2xs font-bold"
+                    : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50"
+                }`}
+              >
+                <span>All Renewals ({tenuresCount})</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              onSelectCategory("active");
-              onSelectPolicyFilter("issued");
-              if (stageFilter === "Close - Lose" || stageFilter === "Others") {
-                onClearStageFilter();
-              }
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
-              category === "active" && policyFilter === "issued"
-                ? "bg-emerald-600 text-white shadow-2xs"
-                : "text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50"
-            }`}
-            title="Filter to vehicles with an issued policy / cover note bound"
-          >
-            <CheckCircle size={13} weight="bold" />
-            <span>Issued Policies ({issuedCount})</span>
-          </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectCategory("active");
+                  onSelectPolicyFilter("issued");
+                  if (stageFilter === "Close - Lose" || stageFilter === "Others") {
+                    onClearStageFilter();
+                  }
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
+                  category === "active" && policyFilter === "issued"
+                    ? "bg-emerald-600 text-white shadow-2xs"
+                    : "text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50"
+                }`}
+                title="Filter to vehicles with an issued policy / cover note bound"
+              >
+                <CheckCircle size={13} weight="bold" />
+                <span>Issued Policies ({issuedCount})</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              onSelectCategory("active");
-              onSelectPolicyFilter("pending");
-              if (stageFilter === "Close - Lose" || stageFilter === "Others") {
-                onClearStageFilter();
-              }
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
-              category === "active" && policyFilter === "pending"
-                ? "bg-amber-600 text-white shadow-2xs"
-                : "text-amber-700 hover:text-amber-900 hover:bg-amber-50"
-            }`}
-            title="Filter to vehicles awaiting cover note upload / policy issue"
-          >
-            <span>Awaiting Cover Note ({pendingCount})</span>
-          </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectCategory("active");
+                  onSelectPolicyFilter("pending");
+                  if (stageFilter === "Close - Lose" || stageFilter === "Others") {
+                    onClearStageFilter();
+                  }
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
+                  category === "active" && policyFilter === "pending"
+                    ? "bg-amber-600 text-white shadow-2xs"
+                    : "text-amber-700 hover:text-amber-900 hover:bg-amber-50"
+                }`}
+                title="Filter to vehicles awaiting cover note upload / policy issue"
+              >
+                <span>Awaiting Cover Note ({pendingCount})</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              onSelectCategory("lost");
-              onSelectPolicyFilter("all");
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
-              category === "lost"
-                ? "bg-rose-50 text-rose-900 border border-rose-200 shadow-2xs"
-                : "text-neutral-500 hover:text-neutral-800"
-            }`}
-          >
-            <Archive size={14} weight={category === "lost" ? "bold" : "regular"} />
-            <span>Lost Clients &amp; Win-Backs</span>
-          </button>
-        </div>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectCategory("lost");
+                  onSelectPolicyFilter("all");
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
+                  category === "lost"
+                    ? "bg-rose-50 text-rose-900 border border-rose-200 shadow-2xs"
+                    : "text-neutral-500 hover:text-neutral-800"
+                }`}
+              >
+                <Archive size={14} weight={category === "lost" ? "bold" : "regular"} />
+                <span>Lost Clients &amp; Win-Backs</span>
+              </button>
+            </div>
 
-        {/* Bulk Actions Pill */}
-        <TenureBulkActions
-          selectedTenureIds={selectedTenureIds}
-          tenures={tenures}
-          onBulkConfirmHit={onBulkConfirmHit}
-          onBulkDelete={onBulkDelete}
-          onClearSelection={onClearSelection}
-          confirmingBulk={confirmingBulk}
-          deletingBulk={deletingBulk}
-        />
-
-        {/* Search & View Mode Switcher */}
-        <div className="flex items-center gap-2 flex-1 max-w-xl justify-end flex-wrap sm:flex-nowrap">
-          <div className="relative flex-1 min-w-[260px] sm:min-w-[340px]">
-            <MagnifyingGlass className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Search plate (e.g. JRC 3838), client, subagent, comment..."
-              value={search}
-              onChange={(e) => onSearchChange(e.target.value)}
-              className="w-full h-9 pl-9 pr-3 rounded-[var(--rl-radius-sm)] border border-neutral-200 bg-white text-xs font-medium focus:ring-1 focus:ring-neutral-900 outline-none shadow-2xs"
+            {/* Bulk Actions Pill */}
+            <TenureBulkActions
+              selectedTenureIds={selectedTenureIds}
+              tenures={tenures}
+              onBulkConfirmHit={onBulkConfirmHit}
+              onBulkDelete={onBulkDelete}
+              onClearSelection={onClearSelection}
+              confirmingBulk={confirmingBulk}
+              deletingBulk={deletingBulk}
             />
           </div>
 
-          <div className="flex items-center gap-1 bg-[#f5f5f7] p-1 rounded-[var(--rl-radius-sm)] border border-[#e5e5ea]">
-            <button
-              type="button"
-              onClick={() => onSelectViewMode("ledger")}
-              className={`p-1.5 rounded-[var(--rl-radius-sm)] text-xs transition-all cursor-pointer ${
-                viewMode === "ledger"
-                  ? "bg-white text-neutral-900 shadow-2xs"
-                  : "text-neutral-500 hover:text-neutral-800"
-              }`}
-              title="Table Ledger View"
-            >
-              <Table size={16} weight={viewMode === "ledger" ? "bold" : "regular"} />
-            </button>
-            <button
-              type="button"
-              onClick={() => onSelectViewMode("calendar")}
-              className={`p-1.5 rounded-[var(--rl-radius-sm)] text-xs transition-all cursor-pointer ${
-                viewMode === "calendar"
-                  ? "bg-white text-neutral-900 shadow-2xs"
-                  : "text-neutral-500 hover:text-neutral-800"
-              }`}
-              title="Calendar Expiry View"
-            >
-              <CalendarBlank size={16} weight={viewMode === "calendar" ? "bold" : "regular"} />
-            </button>
-          </div>
+          {/* Search & View Mode Switcher */}
+          <div className="flex items-center gap-2 justify-between lg:justify-end flex-wrap sm:flex-nowrap shrink-0">
+            {/* Interactive Expanding Search Capsule */}
+            <LedgerSearchInput
+              value={search}
+              onChange={onSearchChange}
+              placeholder="Search plate (e.g. JRC 3838), client, IC..."
+            />
 
-          {/* Density Toggle (Comfortable vs Compact) */}
-          {viewMode === "ledger" && onSelectDensity && (
-            <div className="flex items-center gap-0.5 bg-[#f5f5f7] p-0.5 rounded-[var(--rl-radius-sm)] border border-[#e5e5ea]" title="Row density & compression">
+            <div className="flex items-center gap-1 bg-white p-1 rounded-[var(--rl-radius-sm)] border border-[#e5e5ea] shadow-2xs shrink-0">
               <button
                 type="button"
-                onClick={() => onSelectDensity("comfortable")}
-                className={`px-2 py-1 rounded-[var(--rl-radius-sm)] text-[11px] font-semibold transition-all cursor-pointer ${
-                  density === "comfortable"
-                    ? "bg-white text-neutral-900 shadow-2xs font-bold"
+                onClick={() => onSelectViewMode("ledger")}
+                className={`p-1.5 rounded-[var(--rl-radius-sm)] text-xs transition-all cursor-pointer ${
+                  viewMode === "ledger"
+                    ? "bg-[#1b1717] text-white shadow-2xs"
                     : "text-neutral-500 hover:text-neutral-800"
                 }`}
-                title="Normal row spacing"
+                title="Table Ledger View"
               >
-                Normal
+                <Table size={16} weight={viewMode === "ledger" ? "bold" : "regular"} />
               </button>
               <button
                 type="button"
-                onClick={() => onSelectDensity("compact")}
-                className={`px-2 py-1 rounded-[var(--rl-radius-sm)] text-[11px] font-semibold transition-all cursor-pointer ${
-                  density === "compact"
-                    ? "bg-white text-neutral-900 shadow-2xs font-bold"
+                onClick={() => onSelectViewMode("calendar")}
+                className={`p-1.5 rounded-[var(--rl-radius-sm)] text-xs transition-all cursor-pointer ${
+                  viewMode === "calendar"
+                    ? "bg-[#1b1717] text-white shadow-2xs"
                     : "text-neutral-500 hover:text-neutral-800"
                 }`}
-                title="Compact / Compressed mode (ideal for high zoom and smaller screens)"
+                title="Calendar Expiry View"
               >
-                Compact
+                <CalendarBlank size={16} weight={viewMode === "calendar" ? "bold" : "regular"} />
               </button>
             </div>
-          )}
+
+            {/* Density Toggle (Comfortable vs Compact) */}
+            {viewMode === "ledger" && onSelectDensity && (
+              <div className="flex items-center gap-0.5 bg-white p-0.5 rounded-[var(--rl-radius-sm)] border border-[#e5e5ea] shadow-2xs shrink-0" title="Row density & compression">
+                <button
+                  type="button"
+                  onClick={() => onSelectDensity("comfortable")}
+                  className={`px-2 py-1 rounded-[var(--rl-radius-sm)] text-[11px] font-semibold transition-all cursor-pointer ${
+                    density === "comfortable"
+                      ? "bg-[#1b1717] text-white shadow-2xs font-bold"
+                      : "text-neutral-500 hover:text-neutral-800"
+                  }`}
+                  title="Normal row spacing"
+                >
+                  Normal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSelectDensity("compact")}
+                  className={`px-2 py-1 rounded-[var(--rl-radius-sm)] text-[11px] font-semibold transition-all cursor-pointer ${
+                    density === "compact"
+                      ? "bg-[#1b1717] text-white shadow-2xs font-bold"
+                      : "text-neutral-500 hover:text-neutral-800"
+                  }`}
+                  title="Compact / Compressed mode (ideal for high zoom and smaller screens)"
+                >
+                  Compact
+                </button>
+              </div>
+            )}
 
           {/* Column Visibility Menu */}
           {viewMode === "ledger" && onToggleColumnVisibility && (
@@ -591,6 +591,7 @@ export function LedgerFiltersBar({
           </button>
         </div>
       </div>
+    </div>
 
       {/* Advisory Banner for Lost Clients Panel */}
       {category === "lost" && (

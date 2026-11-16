@@ -19,6 +19,7 @@ export interface LedgerTableProps {
   pics: PicItem[];
   density?: "comfortable" | "compact";
   hiddenColumns?: string[];
+  search?: string;
   onSort: (column: LedgerSortColumn) => void;
   onToggleSelectAll: () => void;
   onToggleSelectGroup: (ids: string[], isSelected: boolean) => void;
@@ -45,6 +46,7 @@ export function LedgerTable({
   pics,
   density = "comfortable",
   hiddenColumns = [],
+  search = "",
   onSort,
   onToggleSelectAll,
   onToggleSelectGroup,
@@ -315,6 +317,7 @@ export function LedgerTable({
                   pics={pics}
                   density={density}
                   hiddenColumns={hiddenColumns}
+                  search={search}
                   onPatchField={onPatchField}
                   onOpenCovernoteUpload={onOpenCovernoteUpload}
                   onOpenHitModal={onOpenHitModal}
