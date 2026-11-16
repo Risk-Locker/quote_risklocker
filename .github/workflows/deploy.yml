@@ -117,7 +117,7 @@ jobs:
       - name: Run frontend Playwright CI suite
         working-directory: frontend
         run: |
-          npx playwright install --with-deps chromium
+          npx playwright install chromium
           npx playwright test e2e/a11y-and-responsive.spec.ts --project=chromium
 
   deploy:
@@ -222,6 +222,13 @@ jobs:
           ssh -i ~/.ssh/quote_deploy_key -o ServerAliveInterval=30 -o ServerAliveCountMax=8 -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" <<'EOF'
             set -euo pipefail
             export DEBIAN_FRONTEND=noninteractive
+
+            # Fast check: If ClamAV daemon is already active with signature db, skip re-install and signature waiting
+            if systemctl is-active --quiet clamav-daemon 2>/dev/null && [ -f /var/lib/clamav/daily.cvd -o -f /var/lib/clamav/daily.cld ]; then
+              echo "ClamAV daemon and signature database already active and running."
+              exit 0
+            fi
+
             echo "== dpkg check"
             if dpkg -s clamav clamav-daemon >/dev/null 2>&1; then
               echo "clamav + clamav-daemon already installed"
@@ -247,12 +254,10 @@ jobs:
               exit 1
             fi
             echo "== smoke scan"
-            if command -v clamscan >/dev/null 2>&1; then
-              clamscan --version || true
-              clamscan --no-summary /etc/hosts
-            else
-              echo "clamscan not found; falling back to clamdscan"
+            if command -v clamdscan >/dev/null 2>&1; then
               clamdscan /etc/hosts
+            elif command -v clamscan >/dev/null 2>&1; then
+              clamscan --no-summary /etc/hosts
             fi
           EOF
 
@@ -279,17 +284,40 @@ jobs:
             if [ ! -d .venv ]; then
               python3.12 -m venv .venv
             fi
-            .venv/bin/pip install -r requirements.txt
+
+            # Fast requirements caching: only run pip install when requirements.txt changes
+            REQ_HASH=$(sha256sum requirements.txt | awk '{print $1}')
+            if [ ! -f .venv/.req-hash ] || [ "$(<.venv/.req-hash)" != "$REQ_HASH" ]; then
+              echo "== Updating Python dependencies..."
+              .venv/bin/pip install --no-cache-dir -r requirements.txt
+              echo "$REQ_HASH" > .venv/.req-hash
+            else
+              echo "== Python dependencies up to date (hash matches; skipping pip install)."
+            fi
 
             # Chromium for extraction + deterministic PDF rendering.
-            # --with-deps self-heals a fresh box; no-op-ish when present.
-            .venv/bin/playwright install --with-deps chromium
+            # Only install if Playwright Chromium browser binary is missing
+            if ! .venv/bin/python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); p.chromium.executable_path; p.stop()" 2>/dev/null; then
+              echo "== Installing Playwright Chromium..."
+              .venv/bin/playwright install --with-deps chromium
+            else
+              echo "== Playwright Chromium already verified and operational."
+            fi
 
-            # Frontend
+            # Frontend: fast dependency caching & incremental build
             cd frontend
-            npm ci
+            LOCK_HASH=$(sha256sum package-lock.json | awk '{print $1}')
+            if [ ! -d node_modules ] || [ ! -f .lock-hash ] || [ "$(<.lock-hash)" != "$LOCK_HASH" ]; then
+              echo "== Dependencies changed; running npm ci..."
+              npm ci
+              echo "$LOCK_HASH" > .lock-hash
+            else
+              echo "== Node dependencies up to date (lockfile matches; skipping npm ci)."
+            fi
+
             # Heap cap: the VPS has 3.7GB RAM with clamd resident; without a
             # cap the Next build can trip the OOM killer mid-deploy.
+            echo "== Building frontend..."
             NODE_OPTIONS="--max-old-space-size=1536" npm run build
 
             # Stop worker during migration/pre-flight to release pool connections cleanly
