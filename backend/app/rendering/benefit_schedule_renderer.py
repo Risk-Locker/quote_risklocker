@@ -308,15 +308,29 @@ def render_design2_schedule_pages(
     current_benefits = list(render_context.get("current_benefits") or [])
     available_addons = list(render_context.get("available_addons") or [])
 
+    v_type = _extract_field(draft_fields, ("vehicle_type",), "Car")
+    car_model = _extract_field(draft_fields, ("car_model",), "")
+
     if addon_cards is None:
         addon_cards = build_unified_matrix_cards(
             active_benefits=current_benefits,
             available_addons=available_addons,
             fill_to_slots=0,
+            insurer_name=insurer,
+            vehicle_type=v_type,
+            car_model=car_model,
+            fields=draft_fields,
         )
 
     overflow_cards = addon_cards[overflow_start_index:] if len(addon_cards) > overflow_start_index else []
-    free_items = extract_free_coverage_items(current_benefits, limit=12)
+    free_items = extract_free_coverage_items(
+        current_benefits,
+        insurer_name=insurer,
+        limit=12,
+        vehicle_type=v_type,
+        car_model=car_model,
+        fields=draft_fields,
+    )
     selected_cards = [c for c in addon_cards if c.get("is_selected")]
     optional_cards = [c for c in addon_cards if not c.get("is_selected")]
 

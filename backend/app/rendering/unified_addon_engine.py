@@ -703,34 +703,76 @@ def detect_towing_upgrade(
     return None
 
 
+COMMERCIAL_EXCLUDED_MATRIX_IDS = frozenset({
+    "towing",
+    "international_towing",
+    "ev_wall_charger",
+    "ev_out_of_charge",
+    "ev_charger_liability",
+    "ehailing",
+    "key_care",
+    "child_seat",
+})
+
+PRIVATE_CAR_EXCLUDED_MATRIX_IDS = frozenset()
+
+COMMERCIAL_KEYWORDS = (
+    "lorry", "truck", "hino", "fuso", "canter", "rigid", "trailer", "tipper",
+    "prime mover", "c permit", "a permit", "haulage", "commercial", "isuzu npr",
+    "isuzu nqr", "isuzu elf", "ud trucks", "scania", "sinotruk", "daihatsu delta",
+    "toyota dyna", "goods vehicle",
+)
+
+
+def is_commercial_vehicle(
+    vehicle_type: str = "",
+    car_model: str = "",
+    fields: dict[str, Any] | None = None,
+) -> bool:
+    """Returns True if the vehicle is classified as a commercial vehicle, lorry, truck, trailer, or haulage."""
+    raw = f"{vehicle_type or ''} {car_model or ''}".lower()
+    if fields:
+        raw += f" {fields.get('vehicle_type', '')} {fields.get('car_model', '')} {fields.get('capacity', '')}".lower()
+    return any(k in raw for k in COMMERCIAL_KEYWORDS) or "kg" in raw or "bdm" in raw
+
+
 def extract_free_coverage_items(
     active_benefits: list[dict[str, Any]] | None,
     insurer_name: str = "",
     *,
     limit: int = 6,
+    vehicle_type: str = "",
+    car_model: str = "",
+    fields: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
-    """Extracts insurer FOC perks for the top-right 'Free Added Coverage' card with in-place dynamic Towing upgrade."""
+    """Extracts insurer FOC perks for the top-right 'Free Added Coverage' card.
+    For Commercial Vehicles (lorries/trucks), towing and passenger car perks are strictly excluded.
+    For Private Cars, dynamic in-place Towing upgrade is applied.
+    """
     seen_titles: set[str] = set()
     items: list[dict[str, str]] = []
 
-    # 1. Towing Dynamic In-Place Upgrade
-    towing_upgrade = detect_towing_upgrade(active_benefits, insurer_name)
-    if towing_upgrade:
-        items.append({
-            "title": towing_upgrade["title"],
-            "description": towing_upgrade["description"],
-        })
-        seen_titles.add(_normalize_benefit_code(towing_upgrade["title"]))
-        seen_titles.add("emergency_towing_assistance")
-        seen_titles.add("unlimited_towing_assistance")
-    else:
-        std_towing = {
-            "title": "Emergency Towing Assistance (RM 200.00)",
-            "description": "24/7 accidental towing service to nearest panel workshop or approved repairer.",
-        }
-        items.append(std_towing)
-        seen_titles.add("emergency_towing_assistance")
-        seen_titles.add(_normalize_benefit_code(std_towing["title"]))
+    is_comm = is_commercial_vehicle(vehicle_type, car_model, fields)
+
+    # 1. Towing Dynamic In-Place Upgrade (PRIVATE CARS ONLY - NEVER COMMERCIAL VEHICLES)
+    if not is_comm:
+        towing_upgrade = detect_towing_upgrade(active_benefits, insurer_name)
+        if towing_upgrade:
+            items.append({
+                "title": towing_upgrade["title"],
+                "description": towing_upgrade["description"],
+            })
+            seen_titles.add(_normalize_benefit_code(towing_upgrade["title"]))
+            seen_titles.add("emergency_towing_assistance")
+            seen_titles.add("unlimited_towing_assistance")
+        else:
+            std_towing = {
+                "title": "Emergency Towing Assistance (RM 200.00)",
+                "description": "24/7 accidental towing service to nearest panel workshop or approved repairer.",
+            }
+            items.append(std_towing)
+            seen_titles.add("emergency_towing_assistance")
+            seen_titles.add(_normalize_benefit_code(std_towing["title"]))
 
     for raw in active_benefits or []:
         if raw.get("is_extra") or raw.get("cost_status") == "paid" or _positive_price(raw):
@@ -742,6 +784,9 @@ def extract_free_coverage_items(
         if not title:
             continue
         norm_title = _normalize_benefit_code(title)
+        # Suppress any towing for commercial lorries, or duplicate towing for cars
+        if is_comm and any(k in norm_title for k in ("towing", "roadside", "assist")):
+            continue
         if "towing" in norm_title or norm_title in seen_titles:
             continue
         seen_titles.add(norm_title)
@@ -756,12 +801,29 @@ def extract_free_coverage_items(
         if len(items) >= limit:
             break
 
-    # If fewer than 4 items, supplement with standard non-monetary insurer perks
-    fallbacks = [
-        {"title": "Legal Defense Costs", "description": "Reimburses court legal representation and defense fees up to RM2,000."},
-        {"title": "Drive-Less Save-More", "description": "Cash rebate up to 30% of base premium for low annual mileage."},
-        {"title": "Child Car Safety Seat", "description": "Reimburses replacement or repair of child safety seats in a crash."},
-    ]
+    # If fewer items, supplement with authentic insurer perks
+    if is_comm:
+        fallbacks = [
+            {"title": "Legal Defense Costs", "description": "Reimburses court legal representation and defense fees up to RM2,000."},
+        ]
+        ins_lower = (insurer_name or "").lower()
+        if "takaful" in ins_lower or "stmb" in ins_lower:
+            fallbacks.append({
+                "title": "No Claim Cashback",
+                "description": "Distributable surplus profit-sharing distribution via Hibah if no claims.",
+            })
+        elif any(k in ins_lower for k in ("sompo", "amassurance", "liberty")):
+            fallbacks.append({
+                "title": "Panel Repair Workmanship Warranty",
+                "description": "12-month repair quality warranty from approved commercial repairers.",
+            })
+    else:
+        fallbacks = [
+            {"title": "Legal Defense Costs", "description": "Reimburses court legal representation and defense fees up to RM2,000."},
+            {"title": "Drive-Less Save-More", "description": "Cash rebate up to 30% of base premium for low annual mileage."},
+            {"title": "Child Car Safety Seat", "description": "Reimburses replacement or repair of child safety seats in a crash."},
+        ]
+
     for fb in fallbacks:
         if len(items) >= limit:
             break
@@ -813,6 +875,9 @@ def build_unified_matrix_cards(
     fill_to_slots: int = 0,
     max_slots: int = 24,
     insurer_name: str = "",
+    vehicle_type: str = "",
+    car_model: str = "",
+    fields: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Builds the unified Add-On Upgrades ++ card matrix for Design 2.
 
@@ -821,11 +886,14 @@ def build_unified_matrix_cards(
        stay in the Free Added Coverage box and are not injected into Add-On Upgrades ++.
     2. Evaluates `available_addons` as UNSELECTED catalog choices (ignoring formula price metadata
        unless explicitly selected / in `selected_ids`).
-    3. Preserves exact `CANONICAL_24_CATALOG` initial positions for unselected canonical benefits
-       and appends any unmatched custom add-ons afterwards (keeping overflow slots 25+ intact
-       when >24 items exist).
-    4. Floats selected items to top ('01', '02'..), preserving unselected order afterwards.
+    3. Fills up to `fill_to_slots` from CANONICAL_24_CATALOG, filtering out irrelevant items:
+       - For Commercial Vehicles (lorries/trucks): towing and consumer EV/e-hailing are strictly excluded.
+       - For Private Cars: heavy equipment crane/boom working risks are excluded.
+    4. Floats selected cards to the front while preserving canonical ordering.
     """
+    is_comm = is_commercial_vehicle(vehicle_type, car_model, fields)
+    excluded_ids = COMMERCIAL_EXCLUDED_MATRIX_IDS if is_comm else PRIVATE_CAR_EXCLUDED_MATRIX_IDS
+
     canonical_overrides: dict[str, dict[str, Any]] = {}
     custom_cards: list[dict[str, Any]] = []
     seen_custom_ids: set[str] = set()
@@ -951,9 +1019,11 @@ def build_unified_matrix_cards(
     # 1. Add provided canonical overrides (in canonical catalog sequence)
     for cat in CANONICAL_24_CATALOG:
         cat_id = cat["id"]
+        if is_comm and cat_id in excluded_ids and not (cat_id in canonical_overrides and canonical_overrides[cat_id].get("is_selected")):
+            continue
         if (
             cat_id == "towing"
-            and towing_upgraded
+            and (is_comm or towing_upgraded)
             and not (cat_id in canonical_overrides and canonical_overrides[cat_id].get("is_selected"))
         ):
             continue
@@ -964,6 +1034,8 @@ def build_unified_matrix_cards(
     # 2. Add active draft benefits matching other canonical slots
     for cat_id in ordered_active_ids:
         if cat_id not in seen_in_output and cat_id in canonical_overrides:
+            if is_comm and cat_id in excluded_ids and not canonical_overrides[cat_id].get("is_selected"):
+                continue
             seen_in_output.add(cat_id)
             processed_cards.append(canonical_overrides[cat_id])
 
@@ -971,6 +1043,8 @@ def build_unified_matrix_cards(
     for custom in custom_cards:
         c_id = custom.get("id") or custom.get("concept_key")
         if c_id and c_id not in seen_in_output:
+            if is_comm and any(k in str(c_id).lower() for k in ("towing", "roadside")):
+                continue
             seen_in_output.add(c_id)
             processed_cards.append(custom)
 
@@ -980,10 +1054,11 @@ def build_unified_matrix_cards(
             if len(processed_cards) >= fill_to_slots:
                 break
             cat_id = cat["id"]
+            if cat_id in excluded_ids:
+                continue
             if (
                 cat_id == "towing"
-                and towing_upgraded
-                and not (cat_id in canonical_overrides and canonical_overrides[cat_id].get("is_selected"))
+                and (is_comm or (towing_upgraded and not (cat_id in canonical_overrides and canonical_overrides[cat_id].get("is_selected"))))
             ):
                 continue
             if cat_id not in seen_in_output:

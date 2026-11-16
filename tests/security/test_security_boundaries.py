@@ -30,7 +30,7 @@ def test_filename_sanitization_blocks_path_traversal():
         "test\x00malicious.pdf",
     ]
     for bad_name in traversal_inputs:
-        safe_name = Path(bad_name).name.replace("\x00", "")
+        safe_name = Path(bad_name.replace("\\", "/")).name.replace("\x00", "")
         assert "/" not in safe_name
         assert "\\" not in safe_name
         assert ".." not in safe_name

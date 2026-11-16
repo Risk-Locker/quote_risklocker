@@ -26,6 +26,7 @@ from app.rendering.benefit_schedule_renderer import (
 from app.rendering.unified_addon_engine import (
     build_unified_matrix_cards,
     extract_free_coverage_items,
+    is_commercial_vehicle,
 )
 
 
@@ -149,15 +150,35 @@ def render_design2_html(
     current_benefits = list(render_context.get("current_benefits") or [])
     available_addons = list(render_context.get("available_addons") or [])
 
+    v_type = _get_val(draft_fields, "vehicle_type", "Car")
+    is_comm = is_commercial_vehicle(v_type, car_model, draft_fields)
+
     # Extract deduplicated insurer FOC perks with dynamic in-place Towing upgrade
-    free_items = extract_free_coverage_items(current_benefits, insurer_name=insurer, limit=6)
+    free_items = extract_free_coverage_items(
+        current_benefits,
+        insurer_name=insurer,
+        limit=6,
+        vehicle_type=v_type,
+        car_model=car_model,
+        fields=draft_fields,
+    )
     if not free_items and not current_benefits:
-        free_items = [
-            {"title": "Legal Defense Costs", "description": "Reimburses court legal representation and defense fees up to RM2,000."},
-            {"title": "Emergency Towing Assistance", "description": "24/7 accidental towing service to nearest approved repairer up to RM 200."},
-            {"title": "Drive-Less Save-More", "description": "Cash rebate up to 30% of base premium for low annual mileage."},
-            {"title": "Child Car Safety Seat", "description": "Reimburses replacement or repair of child safety seats in a crash."},
-        ]
+        if is_comm:
+            free_items = [
+                {"title": "Legal Defense Costs", "description": "Reimburses court legal representation and defense fees up to RM2,000."},
+            ]
+            ins_l = (insurer or "").lower()
+            if "takaful" in ins_l or "stmb" in ins_l:
+                free_items.append({"title": "No Claim Cashback", "description": "Distributable surplus profit-sharing distribution via Hibah if no claims."})
+            elif any(k in ins_l for k in ("sompo", "amassurance", "liberty")):
+                free_items.append({"title": "Panel Repair Workmanship Warranty", "description": "12-month repair quality warranty from approved commercial repairers."})
+        else:
+            free_items = [
+                {"title": "Legal Defense Costs", "description": "Reimburses court legal representation and defense fees up to RM2,000."},
+                {"title": "Emergency Towing Assistance", "description": "24/7 accidental towing service to nearest approved repairer up to RM 200."},
+                {"title": "Drive-Less Save-More", "description": "Cash rebate up to 30% of base premium for low annual mileage."},
+                {"title": "Child Car Safety Seat", "description": "Reimburses replacement or repair of child safety seats in a crash."},
+            ]
 
     free_items_html = ""
     for fi in free_items[:6]:
@@ -193,6 +214,9 @@ def render_design2_html(
         selected_ids=selected_ids,
         fill_to_slots=fill_to_slots,
         insurer_name=insurer,
+        vehicle_type=v_type,
+        car_model=car_model,
+        fields=draft_fields,
     )
 
     page1_cards = addon_cards[:24]

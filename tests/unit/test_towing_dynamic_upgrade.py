@@ -110,3 +110,62 @@ def test_towing_standard_without_rider():
     assert towing_item["title"] == "Emergency Towing Assistance (RM 200.00)"
     assert "Upgraded via" not in towing_item["description"]
 
+
+def test_commercial_lorry_has_zero_towing_in_free_coverage():
+    """For Commercial Vehicles (lorry, truck, rigid, commercial), towing DOES NOT exist.
+    Free Added Coverage must strictly exclude Emergency Towing Assistance, Unlimited Towing,
+    Child Car Safety Seat, and Drive-Less Save-More.
+    """
+    active_benefits = [
+        {
+            "title": "Commercial Windscreen Protection",
+            "is_extra": True,
+            "cost_status": "paid",
+            "price": "RM 300.00",
+            "is_selected": True,
+        }
+    ]
+    # 1. Commercial Lorry vehicle_type
+    free_items_lorry = extract_free_coverage_items(
+        active_benefits,
+        insurer_name="Etiqa",
+        vehicle_type="Lorry",
+        car_model="Hino 300 Rigid Truck",
+    )
+    towing_in_lorry = [
+        item for item in free_items_lorry if "towing" in item["title"].lower()
+    ]
+    assert len(towing_in_lorry) == 0, "Commercial lorry must NEVER have towing in free coverage"
+
+    # Must also not have child car seat or drive-less save-more
+    titles_lower = [item["title"].lower() for item in free_items_lorry]
+    assert not any("child" in t for t in titles_lower), "No child seats for commercial lorries"
+    assert not any("drive-less" in t for t in titles_lower), "No drive-less save-more for commercial lorries"
+
+    # Legal Defense Costs should be present
+    assert any("legal defense" in t for t in titles_lower), "Legal defense costs must be present"
+
+
+def test_commercial_lorry_matrix_excludes_towing_and_ev():
+    """Commercial vehicle 24-card matrix must exclude Towing, EV Wall Charger, EV Battery,
+    E-Hailing, and Key Care, while preserving valid commercial endorsements.
+    """
+    matrix_cards = build_unified_matrix_cards(
+        active_benefits=[],
+        available_addons=[],
+        fill_to_slots=24,
+        vehicle_type="Lorry",
+        car_model="Isuzu NPR 66",
+        insurer_name="AmAssurance",
+    )
+    card_ids = [c["id"] for c in matrix_cards]
+
+    assert "towing" not in card_ids, "Commercial lorry matrix must NOT contain towing"
+    assert "international_towing" not in card_ids, "Commercial lorry matrix must NOT contain international towing"
+    assert "ev_wall_charger" not in card_ids, "Commercial lorry matrix must NOT contain EV wall charger"
+    assert "ev_out_of_charge" not in card_ids, "Commercial lorry matrix must NOT contain EV out of charge towing"
+    assert "ehailing" not in card_ids, "Commercial lorry matrix must NOT contain e-hailing"
+    assert "key_care" not in card_ids, "Commercial lorry matrix must NOT contain key care"
+    assert len(matrix_cards) > 0
+
+

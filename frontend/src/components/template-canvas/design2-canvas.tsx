@@ -300,6 +300,7 @@ export function Design2CanvasView({
   const custName = getVal(fields, "customer_name", "Valued Customer");
   const period = getVal(fields, "cover_period", "04-06-2026 TO 03-06-2027");
   const covType = getVal(fields, "coverage_type", "Comprehensive");
+  const vehicleType = getVal(fields, "vehicle_type", "Car");
   const carModel = getVal(fields, "car_model", "Tesla Model 3 Performance");
   const ncd = getVal(fields, "ncd_percent", "25.00%");
   const valType = getVal(fields, "valuation_type", "Market Value");
@@ -335,12 +336,12 @@ export function Design2CanvasView({
   const logoSrc = useTrimmedLogoSrc(rawLogoSrc);
 
   const addonCards = useMemo(() => {
-    return buildUnifiedMatrixCards(currentBenefits, availableAddons, selSet, 0, 24, insurer);
-  }, [currentBenefits, availableAddons, selSet, insurer]);
+    return buildUnifiedMatrixCards(currentBenefits, availableAddons, selSet, 0, 24, insurer, vehicleType, carModel, fields);
+  }, [currentBenefits, availableAddons, selSet, insurer, vehicleType, carModel, fields]);
 
   const freeItems = useMemo(() => {
-    return extractFreeCoverageItems(currentBenefits, 6);
-  }, [currentBenefits]);
+    return extractFreeCoverageItems(currentBenefits, insurer, 6, vehicleType, carModel, fields);
+  }, [currentBenefits, insurer, vehicleType, carModel, fields]);
 
   const ncdDisplay = ncd.includes("%") ? ncd : `${ncd}%`;
   const page1Cards = addonCards.slice(0, 24);

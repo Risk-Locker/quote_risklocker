@@ -679,30 +679,72 @@ export function detectTowingUpgrade(
   return null;
 }
 
+export const COMMERCIAL_EXCLUDED_MATRIX_IDS = new Set([
+  "towing",
+  "international_towing",
+  "ev_wall_charger",
+  "ev_out_of_charge",
+  "ev_charger_liability",
+  "ehailing",
+  "key_care",
+  "child_seat",
+]);
+
+export const PRIVATE_CAR_EXCLUDED_MATRIX_IDS = new Set<string>();
+
+export const COMMERCIAL_KEYWORDS = [
+  "lorry", "truck", "hino", "fuso", "canter", "rigid", "trailer", "tipper",
+  "prime mover", "c permit", "a permit", "haulage", "commercial", "isuzu npr",
+  "isuzu nqr", "isuzu elf", "ud trucks", "scania", "sinotruk", "daihatsu delta",
+  "toyota dyna", "goods vehicle"
+];
+
+export function isCommercialVehicle(
+  vehicleType: string = "",
+  carModel: string = "",
+  fields?: Record<string, any>
+): boolean {
+  let raw = `${vehicleType || ""} ${carModel || ""}`.toLowerCase();
+  if (fields) {
+    raw += ` ${fields.vehicle_type || ""} ${fields.car_model || ""} ${fields.capacity || ""}`.toLowerCase();
+  }
+  return COMMERCIAL_KEYWORDS.some((k) => raw.includes(k)) || raw.includes("kg") || raw.includes("bdm");
+}
+
 export function extractFreeCoverageItems(
   activeBenefits: any[] = [],
-  limit: number = 6
+  insurerName: string | number = "",
+  limit: number = 6,
+  vehicleType: string = "",
+  carModel: string = "",
+  fields?: Record<string, any>
 ): FreeCoverageItem[] {
+  let insNameStr = typeof insurerName === "string" ? insurerName : "";
+  let finalLimit = typeof insurerName === "number" ? insurerName : limit;
+
   const seen = new Set<string>();
   const items: FreeCoverageItem[] = [];
+  const isComm = isCommercialVehicle(vehicleType, carModel, fields);
 
-  // 1. Towing Dynamic In-Place Upgrade
-  const towingUpgrade = detectTowingUpgrade(activeBenefits);
-  if (towingUpgrade) {
-    items.push({
-      title: towingUpgrade.title,
-      description: towingUpgrade.description,
-    });
-    seen.add(normalizeCode(towingUpgrade.title));
-    seen.add("emergency_towing_assistance");
-    seen.add("unlimited_towing_assistance");
-  } else {
-    items.push({
-      title: "Emergency Towing Assistance (RM 200.00)",
-      description: "24/7 accidental towing service to nearest panel workshop or approved repairer.",
-    });
-    seen.add("emergency_towing_assistance");
-    seen.add("emergency_towing_assistance_rm_200_00");
+  // 1. Towing Dynamic In-Place Upgrade (PRIVATE CARS ONLY - NEVER COMMERCIAL VEHICLES)
+  if (!isComm) {
+    const towingUpgrade = detectTowingUpgrade(activeBenefits, insNameStr);
+    if (towingUpgrade) {
+      items.push({
+        title: towingUpgrade.title,
+        description: towingUpgrade.description,
+      });
+      seen.add(normalizeCode(towingUpgrade.title));
+      seen.add("emergency_towing_assistance");
+      seen.add("unlimited_towing_assistance");
+    } else {
+      items.push({
+        title: "Emergency Towing Assistance (RM 200.00)",
+        description: "24/7 accidental towing service to nearest panel workshop or approved repairer.",
+      });
+      seen.add("emergency_towing_assistance");
+      seen.add("emergency_towing_assistance_rm_200_00");
+    }
   }
 
   for (const raw of activeBenefits || []) {
@@ -711,6 +753,7 @@ export function extractFreeCoverageItems(
     const title = String(raw?.title || raw?.label || "").trim();
     if (!title) continue;
     const norm = normalizeCode(title);
+    if (isComm && (norm.includes("towing") || norm.includes("roadside") || norm.includes("assist"))) continue;
     if (norm.includes("towing") || seen.has(norm)) continue;
     seen.add(norm);
     let desc = String(raw?.description || raw?.short_description || "").trim();
@@ -723,16 +766,27 @@ export function extractFreeCoverageItems(
       }
     }
     items.push({ title, description: desc });
-    if (items.length >= limit) break;
+    if (items.length >= finalLimit) break;
   }
 
-  const fallbacks: FreeCoverageItem[] = [
-    { title: "Legal Defense Costs", description: "Reimburses court legal representation and defense fees up to RM2,000." },
-    { title: "Drive-Less Save-More", description: "Cash rebate up to 30% of base premium for low annual mileage." },
-    { title: "Child Car Safety Seat", description: "Reimburses replacement or repair of child safety seats in a crash." },
-  ];
+  const insL = insNameStr.toLowerCase();
+  const fallbacks: FreeCoverageItem[] = isComm
+    ? [
+        { title: "Legal Defense Costs", description: "Reimburses court legal representation and defense fees up to RM2,000." },
+        ...(insL.includes("takaful") || insL.includes("stmb")
+          ? [{ title: "No Claim Cashback", description: "Distributable surplus profit-sharing distribution via Hibah if no claims." }]
+          : insL.includes("sompo") || insL.includes("amassurance") || insL.includes("liberty")
+          ? [{ title: "Panel Repair Workmanship Warranty", description: "12-month repair quality warranty from approved commercial repairers." }]
+          : []),
+      ]
+    : [
+        { title: "Legal Defense Costs", description: "Reimburses court legal representation and defense fees up to RM2,000." },
+        { title: "Drive-Less Save-More", description: "Cash rebate up to 30% of base premium for low annual mileage." },
+        { title: "Child Car Safety Seat", description: "Reimburses replacement or repair of child safety seats in a crash." },
+      ];
+
   for (const fb of fallbacks) {
-    if (items.length >= limit) break;
+    if (items.length >= finalLimit) break;
     const norm = normalizeCode(fb.title);
     if (!seen.has(norm)) {
       seen.add(norm);
@@ -740,7 +794,7 @@ export function extractFreeCoverageItems(
     }
   }
 
-  return items.slice(0, limit);
+  return items.slice(0, finalLimit);
 }
 
 export function sortUnifiedAddons(
@@ -788,8 +842,14 @@ export function buildUnifiedMatrixCards(
   selectedIds?: Set<string> | string[] | null,
   fillToSlots: number = 0,
   maxSlots: number = 24,
-  insurerName: string = ""
+  insurerName: string = "",
+  vehicleType: string = "",
+  carModel: string = "",
+  fields?: Record<string, any>
 ): UnifiedAddonCard[] {
+  const isComm = isCommercialVehicle(vehicleType, carModel, fields);
+  const excludedIds = isComm ? COMMERCIAL_EXCLUDED_MATRIX_IDS : PRIVATE_CAR_EXCLUDED_MATRIX_IDS;
+
   const selSet =
     selectedIds instanceof Set
       ? selectedIds
@@ -916,10 +976,12 @@ export function buildUnifiedMatrixCards(
 
   // 1. Add provided canonical overrides (in canonical catalog sequence)
   for (const cat of CANONICAL_24_CATALOG) {
+    if (isComm && excludedIds.has(cat.id) && !canonicalOverrides[cat.id]?.is_selected) {
+      continue;
+    }
     if (
       cat.id === "towing" &&
-      towingUpgraded &&
-      !canonicalOverrides[cat.id]?.is_selected
+      (isComm || (towingUpgraded && !canonicalOverrides[cat.id]?.is_selected))
     ) {
       continue;
     }
@@ -932,6 +994,9 @@ export function buildUnifiedMatrixCards(
   // 2. Add active draft benefits matching other canonical slots
   for (const cid of orderedActiveIds) {
     if (!seenInOutput.has(cid) && canonicalOverrides[cid]) {
+      if (isComm && excludedIds.has(cid) && !canonicalOverrides[cid]?.is_selected) {
+        continue;
+      }
       seenInOutput.add(cid);
       processed.push(canonicalOverrides[cid]);
     }
@@ -941,6 +1006,9 @@ export function buildUnifiedMatrixCards(
   for (const custom of customCards) {
     const cId = custom.id || custom.concept_key;
     if (cId && !seenInOutput.has(cId)) {
+      if (isComm && (String(cId).toLowerCase().includes("towing") || String(cId).toLowerCase().includes("roadside"))) {
+        continue;
+      }
       seenInOutput.add(cId);
       processed.push(custom);
     }
@@ -952,10 +1020,12 @@ export function buildUnifiedMatrixCards(
       if (processed.length >= fillToSlots) {
         break;
       }
+      if (excludedIds.has(cat.id)) {
+        continue;
+      }
       if (
         cat.id === "towing" &&
-        towingUpgraded &&
-        !canonicalOverrides[cat.id]?.is_selected
+        (isComm || (towingUpgraded && !canonicalOverrides[cat.id]?.is_selected))
       ) {
         continue;
       }

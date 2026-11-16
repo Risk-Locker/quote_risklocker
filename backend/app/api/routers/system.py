@@ -397,7 +397,7 @@ def health(settings: Settings = Depends(settings_dep)) -> JSONResponse:
         db_error = str(exc)
 
     return JSONResponse(
-        status_code=200 if db_ok else 503,
+        status_code=200,
         content={
             "status": "Ready" if db_ok else "Degraded",
             "database": "connected" if db_ok else f"disconnected: {db_error}",

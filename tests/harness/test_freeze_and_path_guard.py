@@ -47,10 +47,11 @@ def test_write_to_allowed_prefix_is_allowed(monkeypatch):
 
 
 def test_write_outside_repo_is_denied():
+    outside_path = "C:/Windows/System32/drivers/etc/hosts" if sys.platform == "win32" else "/etc/hosts"
     payload = {
         "toolCall": {
             "name": "write_file",
-            "args": {"Path": "C:/Windows/System32/drivers/etc/hosts", "Content": "malicious"},
+            "args": {"Path": outside_path, "Content": "malicious"},
         }
     }
     res = guard.evaluate_payload(payload)
