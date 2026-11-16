@@ -76,7 +76,7 @@ jobs:
       - name: Run backend tests
         env:
           APP_ENV: production
-          DATABASE_URL: postgresql://postgres:ci@db.ci.supabase.co:5432/postgres?sslmode=require
+          DATABASE_URL: postgresql://postgres:ci@127.0.0.1:5432/risklocker_ci
           RL_TEST_POSTGRES_URL: postgresql://postgres:ci@127.0.0.1:5432/risklocker_ci
         run: python -m pytest -q
 

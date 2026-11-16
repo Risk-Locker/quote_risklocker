@@ -62,7 +62,7 @@ def test_all_migrations_apply_cleanly_on_fresh_postgres():
     assert len(plan) in {0, len(migrations)}, f"Expected 0 or {len(migrations)} migrations to apply on DB"
 
     # Schema version verify
-    verify_schema_version()
+    verify_schema_version(engine)
 
     # Idempotent re-run
     second_plan = apply_migrations(engine, migrations)

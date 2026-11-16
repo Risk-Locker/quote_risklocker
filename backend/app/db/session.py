@@ -7,7 +7,7 @@ from collections.abc import Generator
 
 from pathlib import Path
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool
@@ -48,11 +48,12 @@ engine = create_engine(
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 
-def verify_database_connection() -> None:
+def verify_database_connection(target_engine: Engine | None = None) -> None:
     from app.db.migrations import connect_with_retry
 
+    eng = target_engine or engine
     try:
-        with connect_with_retry(engine, max_attempts=8, initial_delay=1.5, max_delay=6.0) as connection:
+        with connect_with_retry(eng, max_attempts=8, initial_delay=1.5, max_delay=6.0) as connection:
             connection.execute(text("select 1"))
     except SQLAlchemyError as exc:
         message = str(exc).lower()
@@ -66,7 +67,7 @@ def verify_database_connection() -> None:
         ) from exc
 
 
-def verify_schema_version() -> None:
+def verify_schema_version(target_engine: Engine | None = None) -> None:
     from app.db.migrations import (
         AppliedMigration,
         MigrationError,
@@ -77,7 +78,8 @@ def verify_schema_version() -> None:
 
     migration_root = Path(__file__).resolve().parents[3] / "migrations"
     migrations = discover_migrations(migration_root)
-    with connect_with_retry(engine, max_attempts=8, initial_delay=1.5, max_delay=6.0) as connection:
+    eng = target_engine or engine
+    with connect_with_retry(eng, max_attempts=8, initial_delay=1.5, max_delay=6.0) as connection:
         if not inspect(connection).has_table("schema_migrations", schema="public"):
             raise RuntimeError("Database schema migration ledger is missing. Run the migration command before startup.")
         rows = connection.execute(
