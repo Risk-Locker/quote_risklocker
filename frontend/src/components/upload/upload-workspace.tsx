@@ -656,6 +656,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
   }
 
   async function cancelAllBulk() {
+    cancelRequested.current = true;
     const activeItems = bulkFiles.filter(
       (i) => (i.status === "uploading" || i.status === "processing") && i.sessionId
     );
@@ -676,6 +677,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
       setBulkNotice("Gemini AI is required for accurate 100% quotation extraction. Please configure an active Gemini key in Settings before uploading.");
       return;
     }
+    cancelRequested.current = false;
     setBulkProcessing(true);
     setBulkNotice("");
 
@@ -696,9 +698,22 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
       )
     );
 
-    const CHUNK_SIZE = Math.max(1, Math.min(4, gemini?.fleet_summary?.total_parallel_endpoints || 4));
+    const endpointCount = Math.max(1, gemini?.fleet_summary?.total_parallel_endpoints || 4);
+    const CHUNK_SIZE = Math.max(1, Math.min(4, endpointCount));
+    const FILES_PER_ENDPOINT_PER_WINDOW = 9; // 9-10 PDFs per endpoint per min window (< 200k TPM)
+    const BATCH_WINDOW_CAPACITY = endpointCount * FILES_PER_ENDPOINT_PER_WINDOW;
+    const TOKEN_CAPACITY_PER_WINDOW = endpointCount * 180_000;
+
+    let windowDispatchedCount = 0;
+    let windowEstimatedTokens = 0;
+
     for (let c = 0; c < stagedItems.length; c += CHUNK_SIZE) {
+      if (!mounted.current || cancelRequested.current) break;
       const currentChunk = stagedItems.slice(c, c + CHUNK_SIZE);
+      windowDispatchedCount += currentChunk.length;
+      for (const item of currentChunk) {
+        windowEstimatedTokens += item.estimatedTokens || 15_000;
+      }
       await Promise.all(
         currentChunk.map(async (item) => {
           let result: UploadResult | null = null;
@@ -782,9 +797,31 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
         })
       );
 
-      // Stagger 1200ms between micro-chunks to prevent burst concurrency spikes
-      if (c + CHUNK_SIZE < stagedItems.length) {
-        await new Promise((resolve) => setTimeout(resolve, 1200));
+      if (!mounted.current || cancelRequested.current) break;
+
+      const hasMore = c + CHUNK_SIZE < stagedItems.length;
+      if (hasMore) {
+        if (
+          windowDispatchedCount >= BATCH_WINDOW_CAPACITY ||
+          windowEstimatedTokens >= TOKEN_CAPACITY_PER_WINDOW
+        ) {
+          const COOLING_SECONDS = 70;
+          for (let sec = COOLING_SECONDS; sec > 0; sec--) {
+            if (!mounted.current || cancelRequested.current) break;
+            setBulkNotice(
+              `Safe 1-minute quota capacity reached (${c + currentChunk.length}/${stagedItems.length} dispatched). Waiting ${sec}s for Google AI Studio TPM window refresh before next batch...`
+            );
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+          }
+          if (mounted.current && !cancelRequested.current) {
+            setBulkNotice("");
+          }
+          windowDispatchedCount = 0;
+          windowEstimatedTokens = 0;
+        } else {
+          // Stagger 1200ms between micro-chunks to prevent burst concurrency spikes
+          await new Promise((resolve) => setTimeout(resolve, 1200));
+        }
       }
     }
 

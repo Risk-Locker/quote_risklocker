@@ -14,6 +14,8 @@ import threading
 from collections import defaultdict
 from typing import Any
 
+from app.services.gemini_account_service import get_current_pt_cycle_date
+
 logger = logging.getLogger(__name__)
 
 SAFE_RPM_CEILING: int = 13
@@ -31,6 +33,14 @@ class PacerSentinel:
         self._slot_request_times: dict[int, list[float]] = defaultdict(list)
         self._slot_token_times: dict[int, list[tuple[float, int]]] = defaultdict(list)
         self._slot_daily_counts: dict[int, int] = defaultdict(int)
+        self._last_reset_date: str = get_current_pt_cycle_date()
+
+    def _check_pt_cycle_reset(self) -> None:
+        """Reset daily slot counts when Google AI Studio Pacific Time midnight cycle passes."""
+        cycle = get_current_pt_cycle_date()
+        if cycle != self._last_reset_date:
+            self._last_reset_date = cycle
+            self._slot_daily_counts.clear()
 
     def set_slot_count(self, count: int) -> None:
         with self._lock:
@@ -66,6 +76,7 @@ class PacerSentinel:
     ) -> tuple[bool, str | None]:
         """Check if target slot can safely accept request without violating RPM, TPM, or RPD."""
         with self._lock:
+            self._check_pt_cycle_reset()
             # Clean expired timestamps older than 60 seconds
             self._slot_request_times[slot_idx] = [
                 t for t in self._slot_request_times[slot_idx] if t >= now - 60.0
@@ -99,6 +110,7 @@ class PacerSentinel:
     ) -> None:
         """Record dispatched request timestamp and token consumption against slot quotas."""
         with self._lock:
+            self._check_pt_cycle_reset()
             self._slot_request_times[slot_idx].append(now)
             self._slot_token_times[slot_idx].append((now, tokens))
             self._slot_daily_counts[slot_idx] += 1

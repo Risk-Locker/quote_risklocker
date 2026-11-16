@@ -119,6 +119,13 @@ External chat tools without workspace access should be given this file plus the 
 | `docs/plans/2026-11-15-design2-precision-and-builder-consolidation-plan.md` | Design 2 precision, "Template as Builder" view/unview toggles, ghost template cleanup & studio modernization | Active sprint tasks change or complete |
 | `docs/plans/2026-11-16-pre-commit-hygiene-and-gate-readiness-plan.md` | Pre-commit repository hygiene, agency bank details harmonization & 10/10 gate readiness | Active sprint tasks change or complete |
 | `docs/plans/2026-11-16-ci-cd-pipeline-hardening-and-deploy-monitoring-plan.md` | CI/CD deployment pipeline hardening, runner environment variables & mandatory deploy monitoring | Active sprint tasks change or complete |
+| `docs/plans/2026-11-16-system-precision-fleet-and-assets-remediation.md` | Master plan for extraction referee gate, Google PT fleet quota window, assets library UX & Design 2 typography | Active sprint tasks change or complete |
+| `docs/plans/milestone-1-extraction-referee-and-naming.md` | Extraction referee gate, commercial lorry classification & alphanumeric vehicle model formatting | Milestone 1 execution |
+| `docs/plans/milestone-2-ai-fleet-pt-calendar-and-pacing.md` | Google AI Studio PT midnight quota cycle, account reset & batch assigner 70s pacing stagger | Milestone 2 execution |
+| `docs/plans/milestone-3-ai-fleet-monitoring-dashboard.md` | AI fleet monitoring dashboard, Google PT cycle countdown, animated minute-bucket charts & timeline | Milestone 3 execution |
+| `docs/plans/milestone-4-assets-library-ux-and-cleanup.md` | Assets library sticky toolbar, inspection details modal & dummy logo database cleanup | Milestone 4 execution |
+| `docs/plans/milestone-5-marketing-comparison-state-hardening.md` | Marketing comparison stuck status timeout fallback & action footer cleanup | Milestone 5 execution |
+| `docs/plans/milestone-6-design2-typography-and-fonts.md` | Design 2 typography & font pairing hierarchy (Helvetica, Calibri, Source Han Sans) | Milestone 6 execution |
 
 ### History & Generated Tooling
 | Document | Purpose | Update when |

@@ -18,13 +18,30 @@ logger = logging.getLogger(__name__)
 try:
     from zoneinfo import ZoneInfo
     LOCAL_TZ = ZoneInfo("Asia/Kuala_Lumpur")
+    PT_TZ = ZoneInfo("America/Los_Angeles")
 except Exception:
     LOCAL_TZ = timezone.utc
+    PT_TZ = timezone.utc
 
 
 def get_current_local_date() -> str:
     """Return calendar date YYYY-MM-DD in Asia/Kuala_Lumpur (UTC+8)."""
     return datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
+
+
+def get_pt_cycle_date_for_time(dt: datetime) -> str:
+    """Return Google AI Studio quota cycle calendar date YYYY-MM-DD in Pacific Time.
+
+    Google AI Studio resets daily quota at 12:00 AM Pacific Time (4:00 PM MYT in winter / 3:00 PM MYT in summer).
+    """
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(PT_TZ).strftime("%Y-%m-%d")
+
+
+def get_current_pt_cycle_date() -> str:
+    """Return current active Google AI Studio quota cycle date YYYY-MM-DD."""
+    return datetime.now(PT_TZ).strftime("%Y-%m-%d")
 
 
 def persist_call_log(
@@ -46,7 +63,7 @@ def persist_call_log(
     if os.getenv("APP_ENV") == "test" or "pytest" in sys.modules:
         return
 
-    today_str = get_current_local_date()
+    today_str = get_current_pt_cycle_date()
 
     def _do_insert(session: Any):
         from app.models.tables import GeminiApiCallLog
@@ -141,7 +158,7 @@ class GeminiAccountManager:
 
         self._accounts: list[GeminiAccount] = []
         self._active_index: int = 0
-        self._last_reset_date: str = get_current_local_date()
+        self._last_reset_date: str = get_current_pt_cycle_date()
         self._last_probe_cached_time: float = 0.0
         self._pool_cutoff_active: bool = False
         self._parallel_slots: dict[str, dict[str, Any]] = {}
@@ -168,10 +185,10 @@ class GeminiAccountManager:
         self._init_parallel_slots()
 
     def _check_daily_reset(self) -> None:
-        """Reset daily quotas and quarantines when passing 00:00 local time."""
-        today_date = get_current_local_date()
-        if today_date != self._last_reset_date:
-            self._last_reset_date = today_date
+        """Reset daily quotas and quarantines when passing 12:00 AM Pacific Time (4 PM MYT winter / 3 PM MYT summer)."""
+        current_cycle = get_current_pt_cycle_date()
+        if current_cycle != self._last_reset_date:
+            self._last_reset_date = current_cycle
             for acc in self._accounts:
                 acc.request_count_today = 0
                 acc.tokens_today = 0
@@ -287,7 +304,7 @@ class GeminiAccountManager:
             import os, sys
             usage_by_slot: dict[str, int] = {}
             if os.getenv("APP_ENV") != "test" and "pytest" not in sys.modules:
-                today_str = get_current_local_date()
+                today_str = get_current_pt_cycle_date()
                 usage_by_account: dict[str, int] = {}
                 try:
                     from sqlalchemy import text
@@ -909,7 +926,7 @@ class GeminiAccountManager:
             settings = get_settings()
             target_model = resolve_active_gemini_model(getattr(settings, "gemini_model", None))
 
-            today_str = get_current_local_date()
+            today_str = get_current_pt_cycle_date()
             db_counts_by_account: dict[str, int] = {}
             db_pool_rpd_used = None
             import os, sys
@@ -1041,6 +1058,8 @@ class GeminiAccountManager:
                 "status_label": overall_label,
                 "status_color": overall_color,
                 "local_date": today_str,
+                "pt_cycle_date": today_str,
+                "quota_cycle_window": "Pacific Time (Resets 12:00 AM PT / 4:00 PM MYT)",
                 "model": getattr(self, "_primary_model", target_model),
                 "models": list(getattr(self, "_parallel_models", PARALLEL_MODELS) or PARALLEL_MODELS),
                 "available_models": list(PARALLEL_MODELS),
@@ -1155,7 +1174,7 @@ def get_historical_analytics(db: Any, time_range: str = "today") -> dict[str, An
 
     now = datetime.now(timezone.utc)
     if time_range == "today":
-        today_str = now.strftime("%Y-%m-%d")
+        today_str = get_current_pt_cycle_date()
         base_filter = GeminiApiCallLog.local_date == today_str
     elif time_range == "last-1-day":
         cutoff = now - timedelta(days=1)
@@ -1167,7 +1186,7 @@ def get_historical_analytics(db: Any, time_range: str = "today") -> dict[str, An
         cutoff = now - timedelta(days=28)
         base_filter = GeminiApiCallLog.created_at >= cutoff
     else:
-        today_str = now.strftime("%Y-%m-%d")
+        today_str = get_current_pt_cycle_date()
         base_filter = GeminiApiCallLog.local_date == today_str
 
     # 1. Overall totals via single aggregation query
@@ -1317,7 +1336,7 @@ def get_ai_quota_radar_snapshot(*, probe_live: bool = False, db: Any = None) -> 
     stats = pool.get_quota_stats()
     accounts = stats.get("accounts", [])
     endpoints = stats.get("endpoints", [])
-    today_str = get_current_local_date()
+    today_str = get_current_pt_cycle_date()
 
     report: dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
