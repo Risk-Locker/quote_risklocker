@@ -47,6 +47,11 @@ SKIP_BACKTICK_TOKENS = (
     "file_b",
     ".agents/logs/",
     ".freeze.lock",
+    "node_modules",
+    ".qc-tmp",
+    ".pytest_cache",
+    ".next",
+    ".venv",
 )
 
 
