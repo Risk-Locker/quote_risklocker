@@ -126,13 +126,12 @@ DEFAULT_VEHICLE_MODELS = ("SAGA BLM", "SAGA", "BLM", "WAJA", "MYVI", "AXIA", "AT
 CANONICAL_COVERAGE_TYPES = [
     "THIRD PARTY FIRE AND THEFT",
     "THIRD PARTY FIRE & THEFT",
+    "TPFT",
+    "COMPREHENSIVE",
     "THIRD PARTY ONLY",
-    "THIRD PARTY",
     "MMIP",
     "MALAYSIAN MOTOR INSURANCE POOL",
-    "COMPREHENSIVE",
-    "PRIVATE CAR",
-    "MOTOR TAKAFUL",
+    "THIRD PARTY",
 ]
 DATE_RE = r"\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b"
 MONEY_RE = r"(?:RM\s*)?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})?"
@@ -293,25 +292,14 @@ def _add(results: dict[str, list[CandidateValue]], field: str, value: str | None
     if field == "coverage_type":
         cleaned = cleaned.replace("Cover Type", "").replace("Jenis Perlindungan", "").strip(" :/-")
         upper_c = cleaned.upper()
-        if any(k in upper_c for k in ["MMIP", "MALAYSIAN MOTOR INSURANCE POOL", "COVER NOTE", "COVERNOTE", "THIRD PARTY ONLY", "THIRD PARTY"]):
-            if "FIRE" in upper_c or "THEFT" in upper_c:
-                cleaned = "Third Party Fire & Theft"
-            else:
-                cleaned = "Third Party"
+        if any(k in upper_c for k in ["THIRD PARTY FIRE", "FIRE AND THEFT", "FIRE & THEFT", "TPFT"]):
+            cleaned = "Third Party Fire & Theft"
+        elif any(k in upper_c for k in ["COMPREHENSIVE", "KOMPREHENSIF"]):
+            cleaned = "Comprehensive"
+        elif any(k in upper_c for k in ["MMIP", "MALAYSIAN MOTOR INSURANCE POOL", "COVER NOTE", "COVERNOTE", "THIRD PARTY ONLY", "THIRD PARTY"]):
+            cleaned = "Third Party"
         else:
-            matched_cov = None
-            for item in CANONICAL_COVERAGE_TYPES:
-                if item in upper_c:
-                    if item in {"THIRD PARTY ONLY", "THIRD PARTY", "MMIP", "MALAYSIAN MOTOR INSURANCE POOL", "COVER NOTE", "COVERNOTE"}:
-                        matched_cov = "Third Party"
-                    elif item in {"THIRD PARTY FIRE AND THEFT", "THIRD PARTY FIRE & THEFT"}:
-                        matched_cov = "Third Party Fire & Theft"
-                    elif item == "COMPREHENSIVE":
-                        matched_cov = "Comprehensive"
-                    else:
-                        matched_cov = item.title()
-                    break
-            cleaned = matched_cov or ("Comprehensive" if not cleaned or "PERLINDUNGAN" in upper_c else cleaned)
+            cleaned = "Comprehensive" if not cleaned or "PERLINDUNGAN" in upper_c else cleaned
     if field == "engine_cc":
         weight_match = re.search(r"\b\d{1,6}(?:\.\d+)?\s*(?:KG|KILOGRAMS?|TON(?:S|NES?)?|MT)\b", cleaned, re.IGNORECASE)
         kw_match = re.search(
@@ -928,17 +916,20 @@ def _add_messy_compact_text(
             normalized = "SAGA BLM" if model in {"SAGA BLM", "BLM"} else model
             _add_static(results, "car_model", normalized, "messy_compact_window", 0.82, model, text, page_text)
             break
-    for coverage in CANONICAL_COVERAGE_TYPES:
+    compact_coverage_priority = (
+        ("THIRD PARTY FIRE AND THEFT", "Third Party Fire & Theft"),
+        ("THIRD PARTY FIRE & THEFT", "Third Party Fire & Theft"),
+        ("TPFT", "Third Party Fire & Theft"),
+        ("COMPREHENSIVE", "Comprehensive"),
+        ("KOMPREHENSIF", "Comprehensive"),
+        ("THIRD PARTY ONLY", "Third Party"),
+        ("MMIP", "Third Party"),
+        ("MALAYSIAN MOTOR INSURANCE POOL", "Third Party"),
+        ("THIRD PARTY", "Third Party"),
+    )
+    for coverage, cov_val in compact_coverage_priority:
         token = re.sub(r"[^A-Z0-9]", "", coverage)
         if token and token in compact:
-            if coverage in {"THIRD PARTY ONLY", "THIRD PARTY", "MMIP", "MALAYSIAN MOTOR INSURANCE POOL"}:
-                cov_val = "Third Party"
-            elif coverage in {"THIRD PARTY FIRE AND THEFT", "THIRD PARTY FIRE & THEFT"}:
-                cov_val = "Third Party Fire & Theft"
-            elif coverage == "COMPREHENSIVE":
-                cov_val = "Comprehensive"
-            else:
-                cov_val = coverage.title()
             _add_static(results, "coverage_type", cov_val, "messy_compact_window", 0.82, coverage, text, page_text)
             break
     cc_match = re.search(r"(?P<cc>\d{3,5}(?:\.\d+)?)\s*(?P<unit>KG|TON|CC|C\.C|KW|W|L)(?![A-Z])", compact)

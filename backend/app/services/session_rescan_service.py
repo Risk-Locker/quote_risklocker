@@ -113,7 +113,6 @@ def apply_gemini_result(
 ) -> None:
     """Apply Gemini AI extraction results to draft, extraction record, tracked vehicle, and catalog."""
     from app.extraction.draft_mapper import reconcile_vehicle_capacity_and_fees
-    from app.extraction.referee import audit_and_reconcile_draft
     from app.models.tables import TrackedVehicle
 
     _SKIP_KEYS = {
@@ -220,7 +219,16 @@ def apply_gemini_result(
 
     fields["quotation_reference"] = {"value": quotation_ref, "status": "ready", "message": ""}
 
-    fields, referee_notices = audit_and_reconcile_draft(fields, raw_text=evidence_text)
+    from app.extraction.vehicle_grounding_service import (
+        finalize_catalog_and_3eye_gate,
+        run_level2_grounding_gate,
+    )
+
+    fields, level2_grounding, referee_notices = run_level2_grounding_gate(
+        db=db,
+        fields=fields,
+        raw_text=evidence_text,
+    )
     if referee_notices:
         existing_w = list(draft.warnings or [])
         for note in referee_notices:
@@ -345,7 +353,14 @@ def apply_gemini_result(
             disposition="unresolved",
         ))
 
-    initialize_catalog_review(db, draft)
+    finalize_catalog_and_3eye_gate(
+        db=db,
+        draft=draft,
+        grounding=level2_grounding,
+        raw_text=evidence_text,
+        record=extraction,
+        pin_catalog_fn=initialize_catalog_review,
+    )
     auto_apply_extracted_benefits(db, draft)
 
 
@@ -616,7 +631,10 @@ def rescan_session(
                 field["status"] = "ready"
 
         from app.extraction.draft_mapper import reconcile_vehicle_capacity_and_fees
-        from app.extraction.referee import audit_and_reconcile_draft
+        from app.extraction.vehicle_grounding_service import (
+            finalize_catalog_and_3eye_gate,
+            run_level2_grounding_gate,
+        )
 
         _ent, _vtype, inc_rt, inc_rf = reconcile_vehicle_capacity_and_fees(
             draft_fields,
@@ -626,7 +644,11 @@ def rescan_session(
         _apply_service_fee_if_included(db, draft_fields, inc_rf=inc_rf)
 
         draft_fields["quotation_reference"] = {"value": quotation_ref, "status": "ready", "message": ""}
-        draft_fields, ref_notices = audit_and_reconcile_draft(draft_fields, raw_text=doc_text or "")
+        draft_fields, level2_grounding, ref_notices = run_level2_grounding_gate(
+            db=db,
+            fields=draft_fields,
+            raw_text=doc_text or "",
+        )
 
         opts = dict(target_draft.display_options or {})
         opts["include_road_tax"] = inc_rt and str((draft_fields.get("include_road_tax") or {}).get("value") or "true").lower() != "false"
@@ -657,7 +679,15 @@ def rescan_session(
         if company_id:
             target_draft.company_id = company_id
             target_uploaded.insurance_company_id = company_id
-            initialize_catalog_review(db, target_draft)
+        finalize_catalog_and_3eye_gate(
+            db=db,
+            draft=target_draft,
+            grounding=level2_grounding,
+            raw_text=doc_text or "",
+            record=record,
+            company_resolution=values.get("company_resolution"),
+            pin_catalog_fn=initialize_catalog_review,
+        )
 
         for source in values["benefit_lines"]:
             line_id = str(source.get("line_id") or "")

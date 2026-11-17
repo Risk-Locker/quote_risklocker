@@ -177,3 +177,84 @@ def verify_3_eye_consensus(
         "findings": all_findings if all_findings else ["All 3 Eyes verified: Green light for instant dispatch."],
         "discrepancies": all_discrepancies,
     }
+
+
+def _field_val(fields: dict[str, Any], key: str) -> str:
+    node = fields.get(key)
+    if isinstance(node, dict):
+        return str(node.get("value") or "").strip()
+    return str(node or "").strip()
+
+
+def audit_extraction_3_eye_consensus(
+    *,
+    fields: dict[str, Any],
+    grounding: dict[str, Any] | None = None,
+    catalog_context: dict[str, Any] | None = None,
+    raw_text: str = "",
+) -> dict[str, Any]:
+    """Extraction-time 3-Eye Consensus Gate:
+    - Eye 1: Source OCR/Gemini extraction completeness & plate/coverage consistency.
+    - Eye 2: Level-2 Online Grounding vs Pinned Catalog alignment (ICE vs EV, Private vs Commercial, Tier, Coverage).
+    - Eye 3: Quotation readiness check (prevent EV catalog pollution or wrong tariff class before comparison/PDF).
+    """
+    findings: list[str] = []
+    discrepancies: list[dict[str, Any]] = []
+
+    v_type = _field_val(fields, "vehicle_type")
+    cov_type = _field_val(fields, "coverage_type")
+    prod_name = _field_val(fields, "product_name")
+    cat_name = str((catalog_context or {}).get("catalog_name") or "").strip()
+    grounded = grounding or {}
+
+    # Eye 1: Extraction completeness & coverage clarity
+    if not cov_type:
+        findings.append("Eye 1: Missing coverage_type (Comprehensive / TPFT / Third Party).")
+        discrepancies.append({"eye": 1, "field": "coverage_type", "issue": "missing"})
+
+    # Eye 2: Grounded vehicle class & powertrain coherence
+    g_vt = str(grounded.get("vehicle_type") or "").strip()
+    g_pt = str(grounded.get("powertrain") or "").upper()
+    if g_vt and v_type:
+        passenger_set = {"Car", "NonSaloonCar"}
+        if (g_vt in passenger_set) != (v_type in passenger_set) and not (g_vt == "Motorcycle" and v_type == "Motorcycle"):
+            msg = f"Eye 2: Vehicle category conflict (extracted='{v_type}', online_grounded='{g_vt}')."
+            findings.append(msg)
+            discrepancies.append({"eye": 2, "field": "vehicle_type", "extracted": v_type, "grounded": g_vt})
+
+    if g_pt and g_pt != "EV" and cat_name and re.search(r"\(\s*ev\s*\)|\bev\s+plan\b", cat_name, re.I):
+        msg = f"Eye 2: ICE/Hybrid vehicle pinned to EV catalog '{cat_name}'."
+        findings.append(msg)
+        discrepancies.append({"eye": 2, "field": "catalog_powertrain", "powertrain": g_pt, "catalog": cat_name})
+
+    # Eye 3: Product / Coverage parity against pinned catalog
+    cov_low = cov_type.lower()
+    cat_low = cat_name.lower()
+    if cov_low and cat_low:
+        if "third party fire" in cov_low or "tpft" in cov_low:
+            if "fire" not in cat_low and "tpft" not in cat_low and "comprehensive" in cat_low:
+                findings.append(f"Eye 3: TPFT quotation pinned to Comprehensive catalog '{cat_name}'.")
+                discrepancies.append({"eye": 3, "field": "coverage_catalog_parity", "coverage": cov_type, "catalog": cat_name})
+        elif cov_low == "third party":
+            if "third party" not in cat_low and "comprehensive" in cat_low:
+                findings.append(f"Eye 3: Third Party quotation pinned to Comprehensive catalog '{cat_name}'.")
+                discrepancies.append({"eye": 3, "field": "coverage_catalog_parity", "coverage": cov_type, "catalog": cat_name})
+
+    if prod_name and cat_name:
+        for tier in ("lite", "plus", "premier"):
+            if tier in prod_name.lower() and any(o in cat_low for o in ("lite", "plus", "premier")) and tier not in cat_low:
+                findings.append(f"Eye 3: Product tier '{prod_name}' does not match pinned catalog '{cat_name}'.")
+                discrepancies.append({"eye": 3, "field": "tier_parity", "product": prod_name, "catalog": cat_name})
+                break
+
+    passed = len(discrepancies) == 0
+    return {
+        "status": "PASS" if passed else "FLAGGED",
+        "audit_seal": "PASS" if passed else "REVIEW_NEEDED",
+        "is_consensus_reached": passed,
+        "findings": findings if findings else ["3-Eye Extraction Gate certified: vehicle, powertrain, coverage & catalog aligned."],
+        "discrepancies": discrepancies,
+        "eye2_source": grounded.get("source"),
+        "pinned_catalog": cat_name or None,
+    }
+

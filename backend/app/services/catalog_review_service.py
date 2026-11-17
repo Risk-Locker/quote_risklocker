@@ -142,19 +142,36 @@ def _resolve_vehicle_category(db, text_val: str, draft_fields: dict | None = Non
 
 
 def _resolve_segment(db, draft_fields: dict) -> str | None:
-    from app.extraction.entity_classifier import is_corporate_name
+    from app.extraction.entity_classifier import is_corporate_name, is_private_passenger_class
 
     cust_raw = (draft_fields or {}).get("customer_name")
     cust_val = cust_raw.get("value") if isinstance(cust_raw, dict) else cust_raw
     client_type_raw = (draft_fields or {}).get("client_type")
     client_type_val = client_type_raw.get("value") if isinstance(client_type_raw, dict) else client_type_raw
+    vclass_val = _field_value(draft_fields or {}, "vehicle_class")
+    cap_val = _field_value(draft_fields or {}, "engine_cc", "capacity", "cubic_capacity")
+    vtype_val = _field_value(draft_fields or {}, "vehicle_type", "vehicle_category")
+    prod_val = _field_value(draft_fields or {}, "product_name")
 
     segments = _rows(db, Segment)
+    comm_keys = {"company_commercial", "commercial", "corporate"}
+    priv_keys = {"private", "individual"}
 
-    # 1. High priority: Check if customer is a corporate entity or classified as Company
+    # Explicit Private Passenger class without Company Car / Lorry commercial policy wording -> Private segment
+    if (
+        is_private_passenger_class(vehicle_class=vclass_val, capacity_str=cap_val)
+        and "lorry" not in vtype_val.lower()
+        and "company car" not in prod_val.lower()
+        and "commercial" not in prod_val.lower()
+    ):
+        for seg in segments:
+            if seg.segment_key in priv_keys:
+                return seg.id
+
+    # High priority: Corporate entity or Company Car / Commercial Lorry
     if is_corporate_name(str(cust_val or "")) or str(client_type_val or "").lower() == "company":
         for seg in segments:
-            if seg.segment_key in {"commercial", "corporate"}:
+            if seg.segment_key in comm_keys:
                 return seg.id
 
     combined = []
@@ -165,14 +182,14 @@ def _resolve_segment(db, draft_fields: dict) -> str | None:
             combined.append(str(v))
     normalized = _norm(" ".join(combined))
 
-    if any(w in normalized for w in ("commercial", "perdagangan", "company car", "corporate", "fleet")):
+    if any(w in normalized for w in ("commercial", "perdagangan", "company car", "corporate", "fleet", "lorry")):
         for seg in segments:
-            if seg.segment_key in {"commercial", "corporate"}:
+            if seg.segment_key in comm_keys:
                 return seg.id
 
     if any(w in normalized for w in ("private", "persendirian", "individual", "personal")):
         for seg in segments:
-            if seg.segment_key in {"private", "individual"}:
+            if seg.segment_key in priv_keys:
                 return seg.id
 
     return None
@@ -216,10 +233,11 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
 
     # Powertrain classification (EV vs ICE)
     from app.extraction.entity_classifier import classify_vehicle_ev_status
-    cbrand = _field_value(draft.fields or {}, "vehicle_make", "make", "brand", "car_make")
-    cmodel = _field_value(draft.fields or {}, "vehicle_model", "model", "car_model", "vehicle_description", "make_model")
+    cbrand = _field_value(draft.fields or {}, "car_brand", "vehicle_make", "make", "brand", "car_make")
+    cmodel = _field_value(draft.fields or {}, "car_model", "vehicle_model", "model", "vehicle_description", "make_model")
     cc_val = _field_value(draft.fields or {}, "engine_cc", "engine_capacity", "cubic_capacity", "cc", "capacity")
-    is_ev, _ = classify_vehicle_ev_status(cbrand or "", cmodel or raw_vehicle or "", cc_val or "")
+    vtype_cur = _field_value(draft.fields or {}, "vehicle_type", "vehicle_category")
+    is_ev, _ = classify_vehicle_ev_status(cbrand or "", cmodel or raw_vehicle or "", cc_val or "", vtype_cur or None)
 
     # 2. Resolve product
     products = [item for item in _rows(db, InsuranceProduct) if item.company_id == draft.company_id and item.status == "active"]
@@ -309,25 +327,9 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
                 if car_prods:
                     candidate_products = car_prods
 
-        raw_cov_text = (raw_coverage or "").lower()
-        if "tpft" in raw_cov_text or "fire" in raw_cov_text:
-            tpft_prods = [p for p in candidate_products if "tpft" in p.name.lower()]
-            if tpft_prods:
-                candidate_products = tpft_prods
-        elif "third party" in raw_cov_text and "fire" not in raw_cov_text:
-            tp_prods = [p for p in candidate_products if "third party" in p.name.lower() and "tpft" not in p.name.lower()]
-            if tp_prods:
-                candidate_products = tp_prods
-        else:
-            comp_prods = [p for p in candidate_products if "comprehensive" in p.name.lower() and "tpft" not in p.name.lower() and "third party" not in p.name.lower()]
-            if comp_prods:
-                candidate_products = comp_prods
-
-        if resolved_segment_id:
-            matching_s = [p for p in candidate_products if getattr(p, "segment_id", None) == resolved_segment_id]
-            if matching_s:
-                candidate_products = matching_s
-
+        # Apply EV vs ICE powertrain filter BEFORE coverage name filter so ICE products without
+        # 'Comprehensive' in their product name (e.g. 'Takaful myMotor (Private Car)', 'SOMPO Motor')
+        # are never wiped out by 'Private Car Comprehensive (EV)' products!
         if len(candidate_products) > 1:
             if is_ev:
                 ev_prods = [p for p in candidate_products if "(ev)" in p.name.lower() or " ev" in p.name.lower()]
@@ -337,6 +339,37 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
                 ice_prods = [p for p in candidate_products if "(ev)" not in p.name.lower() and " ev" not in p.name.lower()]
                 if ice_prods:
                     candidate_products = ice_prods
+
+        raw_cov_text = (raw_coverage or "").lower()
+        if "tpft" in raw_cov_text or "fire" in raw_cov_text:
+            tpft_prods = [p for p in candidate_products if "tpft" in p.name.lower() or "fire" in p.name.lower()]
+            if tpft_prods:
+                candidate_products = tpft_prods
+        elif ("third party" in raw_cov_text or "tpo" in raw_cov_text) and "fire" not in raw_cov_text and "comprehensive" not in raw_cov_text:
+            tp_prods = [p for p in candidate_products if ("third party" in p.name.lower() or "tpo" in p.name.lower()) and "tpft" not in p.name.lower() and "fire" not in p.name.lower()]
+            if tp_prods:
+                candidate_products = tp_prods
+        else:
+            # In Malaysian motor insurance, any product not explicitly marked TPFT or Third Party is Comprehensive
+            non_tp_prods = [
+                p for p in candidate_products
+                if not any(tok in p.name.lower() for tok in ("tpft", "third party", "tpo", "fire and theft", "fire & theft"))
+            ]
+            if non_tp_prods:
+                candidate_products = non_tp_prods
+
+        if resolved_segment_id and len(candidate_products) > 1:
+            seg_product_ids = {
+                item.product_id
+                for item in _rows(db, BenefitCatalog)
+                if item.company_id == draft.company_id
+                and item.status in {"active", "published", "draft"}
+                and item.segment_id == resolved_segment_id
+                and item.product_id
+            }
+            matching_s = [p for p in candidate_products if getattr(p, "segment_id", None) == resolved_segment_id or p.id in seg_product_ids]
+            if matching_s:
+                candidate_products = matching_s
 
         if len(candidate_products) > 1:
             tier_val = _field_value(draft.fields or {}, "tier_name", "product_tier", "plan_name")
@@ -424,7 +457,7 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
         if matching_c:
             catalogs = matching_c
 
-    # Filter candidate catalogs by engine type (EV vs ICE)
+    # Filter candidate catalogs by engine type (EV vs ICE) BEFORE tier tie-break
     if len(catalogs) > 1:
         target_engine = "ev" if is_ev else "ice"
         matching_e = [item for item in catalogs if (item.engine_type or "ice") == target_engine]
@@ -433,8 +466,21 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
         elif not is_ev:
             catalogs = [item for item in catalogs if (item.engine_type or "ice") != "ev"]
 
+    # Match catalog name / tier hint (e.g. 'auto365 Comprehensive Plus' under shared 'Private Car Comprehensive' product)
+    if len(catalogs) > 1:
+        tier_hint = _field_value(draft.fields or {}, "tier_name", "product_tier", "plan_name", "product_name", "detected_package_name")
+        if tier_hint:
+            hint_norm = _norm(tier_hint)
+            exact_cat = [item for item in catalogs if _norm(item.name) == hint_norm]
+            if exact_cat:
+                catalogs = exact_cat
+            else:
+                fuzzy_cat = [item for item in catalogs if hint_norm and (hint_norm in _norm(item.name) or _norm(item.name) in hint_norm)]
+                if fuzzy_cat:
+                    catalogs = fuzzy_cat
+
     # If still multiple catalogs (e.g. multi-tier ladder catalogs for the same vehicle/coverage):
-    # Default to the lowest tier / base catalog
+    # Default to the lowest tier / base catalog (or 'auto365 Comprehensive Lite' before Plus/Premier if no hint matched)
     target_catalog = None
     if len(catalogs) == 1:
         target_catalog = catalogs[0]

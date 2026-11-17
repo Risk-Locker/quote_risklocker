@@ -194,6 +194,7 @@ class VehicleModel(Base, TimestampMixin):
     brand_id: Mapped[str | None] = mapped_column(ForeignKey("vehicle_brands.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     aliases: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    grounding_meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default=AccountStatus.ACTIVE.value)
 
 

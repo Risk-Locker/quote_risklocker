@@ -10,7 +10,16 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.extraction.entity_classifier import is_business_registration, is_corporate_name, is_malaysian_nric
+from app.extraction.entity_classifier import (
+    classify_vehicle_ev_status,
+    is_business_registration,
+    is_commercial_heavy_vehicle,
+    is_corporate_name,
+    is_malaysian_nric,
+    is_non_saloon_model,
+    is_private_passenger_class,
+    strip_commercial_form_boilerplate,
+)
 
 LORRY_INDICATORS = re.compile(
     r"\b("
@@ -18,6 +27,11 @@ LORRY_INDICATORS = re.compile(
     r"DAIHATSU\s*DELTA|HINO|ISUZU\s*NPR|ISUZU\s*NQR|ISUZU\s*ELF|FUSO|CANTER|"
     r"UD\s*TRUCKS|SCANIA|SINOTRUK|TOYOTA\s*DYNA|COMMERCIAL\s*VEHICLE"
     r")\b",
+    re.IGNORECASE,
+)
+
+_NONZERO_WEIGHT_RE = re.compile(
+    r"\b[1-9]\d{1,5}(?:\.\d+)?\s*(?:KG|KILOGRAMS?|TON|TONS|TONNE|TONNES|MT)\b|\b(?:BDM|BTM)\s*[:\-]?\s*[1-9]\d+",
     re.IGNORECASE,
 )
 
@@ -71,10 +85,12 @@ def audit_and_reconcile_draft(
     model = _get_val(reconciled.get("car_model"))
     capacity = _get_val(reconciled.get("engine_cc"))
     curr_vtype = _get_val(reconciled.get("vehicle_type"))
+    curr_vclass = _get_val(reconciled.get("vehicle_class"))
     curr_client_type = _get_val(reconciled.get("client_type"))
     curr_product = _get_val(reconciled.get("product_name"))
 
-    combined_evidence = f"{cust_name} {id_no} {brand} {model} {capacity} {curr_vtype} {raw_text}".upper()
+    cleaned_raw = strip_commercial_form_boilerplate(raw_text)
+    struct_evidence = f"{brand} {model} {capacity} {curr_vclass}".upper()
 
     # 1. Company vs Individual Check
     is_corp = is_corporate_name(cust_name) or is_business_registration(id_no)
@@ -104,20 +120,36 @@ def audit_and_reconcile_draft(
             else:
                 reconciled["client_type"] = {"value": "Private", "status": "ready"}
 
-    # 2. Commercial Vehicle / Lorry Check
-    from app.extraction.entity_classifier import is_commercial_heavy_vehicle
-    has_lorry_keyword = bool(LORRY_INDICATORS.search(combined_evidence))
-    has_weight_capacity = bool(re.search(r"\b(?:KG|TON(?:S|NES?)?|BDM|BTM)\b", combined_evidence, re.IGNORECASE))
+    # 2. Commercial Vehicle / Lorry Check (field-scoped, immune to 0.00 Trailer boilerplate headers)
+    is_explicit_private_car = is_private_passenger_class(
+        vehicle_class=curr_vclass,
+        capacity_str=capacity,
+        car_model=f"{brand} {model}".strip(),
+    )
+    has_struct_lorry = bool(LORRY_INDICATORS.search(struct_evidence))
+    has_nonzero_weight = bool(_NONZERO_WEIGHT_RE.search(f"{capacity} {cleaned_raw}".upper()))
     is_commercial_lorry = (
-        has_lorry_keyword
-        or has_weight_capacity
+        has_struct_lorry
+        or has_nonzero_weight
         or is_commercial_heavy_vehicle(
-            vehicle_type=curr_vtype,
+            vehicle_type="" if is_explicit_private_car else curr_vtype,
             car_model=f"{brand} {model}".strip(),
+            vehicle_class=curr_vclass,
             capacity_str=capacity,
-            raw_text=raw_text,
+            raw_text="" if is_explicit_private_car else cleaned_raw,
         )
     )
+
+    if is_explicit_private_car and not has_struct_lorry and not has_nonzero_weight and curr_vtype in {"Lorry", "Truck", "Commercial", "EVCommercial"}:
+        is_ev_car, ev_cat = classify_vehicle_ev_status(brand, model, capacity, curr_vtype)
+        restored_vtype = ev_cat if (is_ev_car and ev_cat) else ("NonSaloonCar" if is_non_saloon_model(f"{brand} {model}") else "Car")
+        _set_field(
+            reconciled,
+            "vehicle_type",
+            restored_vtype,
+            f"Referee Fact-Check: Vehicle class '{curr_vclass}' and capacity '{capacity}' confirm passenger car ({restored_vtype})",
+            notices,
+        )
 
     if is_commercial_lorry:
         if curr_vtype not in {"Lorry", "EVCommercial"}:
@@ -134,10 +166,19 @@ def audit_and_reconcile_draft(
         reconciled["roadtax"] = {"value": "0.00", "status": "ready"}
         reconciled["service_fee"] = {"value": "0.00", "status": "ready"}
 
-        # 3. Contradiction Resolution: A commercial lorry cannot be 'Private Car'
+        # 3. Contradiction Resolution: preserve Third Party / TPFT coverage while stripping false Private Car product
+        curr_cov = _get_val(reconciled.get("coverage_type"))
+        cov_l = curr_cov.lower()
+        if "tpft" in cov_l or ("fire" in cov_l and "theft" in cov_l):
+            cov_suffix = "Third Party Fire & Theft"
+        elif "third party" in cov_l or "tpo" in cov_l:
+            cov_suffix = "Third Party"
+        else:
+            cov_suffix = "Comprehensive"
+
         product_upper = curr_product.upper()
         if "PRIVATE CAR" in product_upper or product_upper in ("COMPREHENSIVE", ""):
-            new_product = "Commercial Vehicle - Comprehensive"
+            new_product = f"Commercial Vehicle - {cov_suffix}"
             _set_field(
                 reconciled,
                 "product_name",
@@ -146,12 +187,11 @@ def audit_and_reconcile_draft(
                 notices,
             )
 
-        curr_cov = _get_val(reconciled.get("coverage_type"))
         if "PRIVATE CAR" in curr_cov.upper():
             _set_field(
                 reconciled,
                 "coverage_type",
-                "Commercial Vehicle Comprehensive",
+                f"Commercial Vehicle {cov_suffix}",
                 "Referee Fact-Check: Coverage type corrected for commercial vehicle",
                 notices,
             )

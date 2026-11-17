@@ -104,6 +104,52 @@ from app.services.marketing_comparison.covernote_classifier import (
 )
 
 
+def _resolve_tenure_coverage_label(
+    entry_dicts: list[dict[str, Any]],
+    sessions: list[Any],
+    *,
+    is_commercial: bool,
+) -> str:
+    """Resolve human-readable Malaysian coverage label for a comparison tenure without erasing TP / TPFT."""
+    candidates: list[str] = []
+    ordered_entries = sorted(entry_dicts or [], key=lambda e: not bool(e.get("is_recommended")))
+    for entry in ordered_entries:
+        cov = str(entry.get("coverage_type") or "").strip()
+        if cov:
+            candidates.append(cov)
+    if not candidates:
+        for s in sessions or []:
+            draft = getattr(s, "draft", None)
+            fields = getattr(draft, "fields", None) if draft else None
+            if isinstance(fields, dict):
+                cov = _extract_val(fields.get("coverage_type"))
+                if cov:
+                    candidates.append(str(cov).strip())
+            elif getattr(s, "coverage_type", None):
+                candidates.append(str(s.coverage_type).strip())
+
+    # Prefer explicit non-empty coverage on winning/first entry; pick majority only when entries disagree.
+    primary = candidates[0] if candidates else ""
+    low = primary.lower()
+    if "fire" in low or "tpft" in low:
+        return (
+            "Commercial Vehicle TPFT (商用车辆第三方火灾盗窃险)"
+            if is_commercial
+            else "Third Party Fire & Theft (第三方火灾盗窃险)"
+        )
+    if "third party" in low:
+        return (
+            "Commercial Vehicle Third Party (商用车辆第三方险)"
+            if is_commercial
+            else "Third Party (第三方险)"
+        )
+    return (
+        "Commercial Vehicle Comprehensive (商用车辆综合险)"
+        if is_commercial
+        else "Comprehensive (综合险)"
+    )
+
+
 def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = False) -> dict[str, Any]:
     """Retrieve or auto-hydrate the full marketing comparison matrix for an insurance tenure.
     
@@ -1559,7 +1605,11 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "car_brand": (tenure.tracked_vehicle.car_brand if tenure.tracked_vehicle else None) or waterfall_brand,
             "vehicle_model": veh_model or "Motor Vehicle",
             "vehicle_type": resolved_vtype,
-            "coverage_type": "Commercial Vehicle Comprehensive (商用车辆综合险)" if (is_commercial_veh or resolved_vtype == "Lorry") else "Comprehensive (综合险)",
+            "coverage_type": _resolve_tenure_coverage_label(
+                entry_dicts,
+                sessions,
+                is_commercial=bool(is_commercial_veh or resolved_vtype == "Lorry"),
+            ),
         },
         "covernote_policy": covernote_policy,
         "unlinked_covernotes": unlinked_covernotes,

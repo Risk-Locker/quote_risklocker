@@ -673,3 +673,143 @@ def extract_with_gemini_sync(
     logger.error("All Gemini API keys and models in pool failed: %s", last_failure_reason or "Unknown")
     return None
 
+
+def _parse_grounded_json_response(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Parse structured JSON and attach Google Search grounding citations from Gemini response."""
+    candidates = data.get("candidates") or []
+    if not candidates:
+        return None
+    cand = candidates[0] or {}
+    parts = (cand.get("content") or {}).get("parts") or []
+    raw_text = "".join(str(p.get("text") or "") for p in parts).strip()
+    if not raw_text:
+        return None
+
+    # Strip accidental markdown code fences if tool mode returned fenced JSON.
+    if raw_text.startswith("```"):
+        lines = raw_text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        raw_text = "\n".join(lines).strip()
+
+    try:
+        parsed = json.loads(raw_text)
+    except Exception:
+        start_idx = raw_text.find("{")
+        end_idx = raw_text.rfind("}")
+        if start_idx == -1 or end_idx <= start_idx:
+            return None
+        parsed = json.loads(raw_text[start_idx : end_idx + 1])
+
+    if not isinstance(parsed, dict):
+        return None
+
+    grounding_meta = cand.get("groundingMetadata") or {}
+    chunks = grounding_meta.get("groundingChunks") or []
+    web_uris = [
+        str((chunk.get("web") or {}).get("uri") or "").strip()
+        for chunk in chunks
+        if isinstance(chunk, dict) and (chunk.get("web") or {}).get("uri")
+    ]
+    existing_citations = [str(c) for c in (parsed.get("citations") or []) if c]
+    for uri in web_uris:
+        if uri not in existing_citations:
+            existing_citations.append(uri)
+    if existing_citations:
+        parsed["citations"] = existing_citations
+    return parsed
+
+
+def call_gemini_grounded_search(
+    *,
+    query_prompt: str,
+    response_schema: dict[str, Any],
+    batch_item_index: int = 0,
+    timeout_seconds: float = 18.0,
+) -> dict[str, Any] | None:
+    """Execute Level-2 Gemini web search (`google_search` tool) using PacerSentinel pool."""
+    pool = get_key_pool()
+    slot_info = pool.acquire_parallel_slot(batch_item_index=batch_item_index)
+    if not slot_info:
+        api_key = pool.get_next_key()
+        if not api_key:
+            logger.info("Level-2 grounding skipped: no active Gemini key in pool.")
+            return None
+        from app.core.config import get_settings
+
+        settings = get_settings()
+        slot_key = api_key
+        slot_model = settings.gemini_model or "gemini-3.1-flash-lite"
+        slot_id = None
+    else:
+        slot_key, slot_model, slot_id = slot_info
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{slot_model}:generateContent?key={slot_key}"
+    base_payload: dict[str, Any] = {
+        "contents": [{"role": "user", "parts": [{"text": query_prompt}]}],
+        "tools": [{"google_search": {}}],
+        "generationConfig": {
+            "temperature": 0.0,
+            "response_mime_type": "application/json",
+            "response_schema": response_schema,
+        },
+    }
+
+    start_t = time.perf_counter()
+    try:
+        with httpx.Client(timeout=max(timeout_seconds, 12.0), http2=False) as client:
+            response = client.post(url, json=base_payload)
+            if response.status_code == 400:
+                # Some Gemini endpoints disallow response_schema alongside google_search; retry plain JSON prompt.
+                fallback_payload = {
+                    "contents": [
+                        {
+                            "role": "user",
+                            "parts": [
+                                {
+                                    "text": (
+                                        f"{query_prompt}\n\nReturn ONLY valid JSON matching keys: "
+                                        f"{list((response_schema.get('properties') or {}).keys())}."
+                                    )
+                                }
+                            ],
+                        }
+                    ],
+                    "tools": [{"google_search": {}}],
+                    "generationConfig": {"temperature": 0.0},
+                }
+                response = client.post(url, json=fallback_payload)
+
+            latency_ms = int((time.perf_counter() - start_t) * 1000)
+            if response.status_code != 200:
+                err_msg = response.text[:200]
+                if slot_id:
+                    pool.record_slot_failure(slot_id, response.status_code, err_msg, latency_ms=latency_ms)
+                else:
+                    pool.record_failure(response.status_code, err_msg, key=slot_key)
+                logger.warning("Level-2 grounded search failed (%d) on %s: %s", response.status_code, slot_model, err_msg)
+                return None
+
+            data = response.json()
+            parsed = _parse_grounded_json_response(data)
+            usage = data.get("usageMetadata", {})
+            p_tok = int(usage.get("promptTokenCount", 0) or 0)
+            c_tok = int(usage.get("candidatesTokenCount", 0) or 0)
+            t_tok = int(usage.get("totalTokenCount", p_tok + c_tok) or 0)
+            if slot_id:
+                pool.record_slot_success(slot_id, prompt_tokens=p_tok, candidate_tokens=c_tok, total_tokens=t_tok, latency_ms=latency_ms)
+            else:
+                pool.record_success(prompt_tokens=p_tok, candidate_tokens=c_tok, total_tokens=t_tok, key=slot_key)
+            return parsed
+    except Exception as exc:
+        latency_ms = int((time.perf_counter() - start_t) * 1000)
+        if slot_id:
+            pool.record_slot_failure(slot_id, 500, str(exc)[:200], latency_ms=latency_ms)
+        else:
+            pool.record_failure(500, str(exc)[:200], key=slot_key)
+        logger.warning("Level-2 grounded search exception on %s: %s", slot_model, exc)
+        return None
+
+

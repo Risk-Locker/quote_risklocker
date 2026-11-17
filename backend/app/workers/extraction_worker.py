@@ -42,7 +42,7 @@ from app.models.tables import (
     new_id,
 )
 from app.services.job_service import claim_next_job, complete_job, fail_job, heartbeat_job
-from app.services.catalog_review_service import auto_apply_extracted_benefits, initialize_catalog_review
+from app.services.catalog_review_service import auto_apply_extracted_benefits
 from app.storage.supabase import SupabaseStorage
 from app.workers.render_worker import JobProcessingError as RenderJobProcessingError, process_render_job
 
@@ -380,10 +380,17 @@ def process_extraction_job(
         session.quotation_ref = qref_val
     fields["quotation_reference"] = {"value": qref_val, "status": "ready", "message": ""}
 
-    # Referee Fact-Checking & Consistency Gate
-    from app.extraction.referee import audit_and_reconcile_draft
+    # Eye-1 Referee + Eye-2 Online Vehicle Grounding & Consistency Gate
+    from app.extraction.vehicle_grounding_service import (
+        finalize_catalog_and_3eye_gate,
+        run_level2_grounding_gate,
+    )
     raw_evidence = f"{values.get('raw_text', '')} {values.get('ocr_text', '')}"
-    fields, referee_notices = audit_and_reconcile_draft(fields, raw_text=raw_evidence)
+    fields, level2_grounding, referee_notices = run_level2_grounding_gate(
+        db=db,
+        fields=fields,
+        raw_text=raw_evidence,
+    )
 
     draft.fields = fields
     draft.warnings = list(draft_data.get("warnings") or []) + referee_notices
@@ -438,7 +445,14 @@ def process_extraction_job(
     if company_id:
         draft.company_id = company_id
         uploaded.insurance_company_id = company_id
-        initialize_catalog_review(db, draft)
+    finalize_catalog_and_3eye_gate(
+        db=db,
+        draft=draft,
+        grounding=level2_grounding,
+        raw_text=raw_evidence,
+        record=record,
+        company_resolution=values.get("company_resolution"),
+    )
 
     existing_line_ids = {
         item.line_id

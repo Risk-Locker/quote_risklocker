@@ -217,6 +217,42 @@ _COMMERCIAL_HEAVY_INDICATORS = re.compile(
     re.IGNORECASE,
 )
 
+_PRIVATE_PASSENGER_CLASS_RE = re.compile(
+    r"\b(?:PRIVATE\s*CAR(?:\s*EX\.?\s*GOODS)?|PERSENDIRIAN|SALOON|SEDAN|HATCHBACK|SUV|MPV)\b",
+    re.IGNORECASE,
+)
+
+_CC_OR_KW_CAPACITY_RE = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(?:CC|C\.?C\.?|KW|KILOWATT|W|WATTS?)\b",
+    re.IGNORECASE,
+)
+
+_BOILERPLATE_TRAILER_HEADER_RE = re.compile(
+    r"(?:basic\s+premium\s*\(?\s*trailer\s*\)?(?:\s*[:\-]?\s*(?:rm\s*)?0+(?:\.0+)?)?|"
+    r"trailer\s*(?:no|number|chassis(?:\s*no)?|sum\s*insured|premium|excess)(?:\s*[:\-]?\s*(?:rm\s*)?(?:0+(?:\.0+)?|nil|n/?a|-))?|"
+    r"no\.?\s*(?:casis\s*)?treler|premium\s*treler|jumlah\s*treler\s*diinsuranskan(?:\s*[:\-]?\s*0+(?:\.0+)?)?)",
+    re.IGNORECASE,
+)
+
+
+def strip_commercial_form_boilerplate(raw_text: str | None) -> str:
+    """Remove empty/zero-value PDF table headers (e.g. AmAssurance 'Trailer No' / 'Basic Premium (Trailer): 0.00')."""
+    if not raw_text:
+        return ""
+    return _BOILERPLATE_TRAILER_HEADER_RE.sub(" ", str(raw_text))
+
+
+def is_private_passenger_class(vehicle_class: str | None = None, capacity_str: str | None = None, car_model: str | None = None) -> bool:
+    """Return True when vehicle class and capacity explicitly identify a Malaysian private passenger car."""
+    vclass = (vehicle_class or "").strip()
+    cap = (capacity_str or "").strip()
+    model = (car_model or "").strip()
+    if cap and _WEIGHT_CAPACITY_RE.search(cap):
+        return False
+    if vclass and _PRIVATE_PASSENGER_CLASS_RE.search(vclass):
+        return not _COMMERCIAL_HEAVY_INDICATORS.search(f"{vclass} {model}")
+    return False
+
 
 def is_commercial_heavy_vehicle(
     vehicle_type: str | None = None,
@@ -227,13 +263,24 @@ def is_commercial_heavy_vehicle(
 ) -> bool:
     """Return True for commercial goods/heavy/permit vehicles (road tax & runner fee default OFF)."""
     vtype_clean = (vehicle_type or "").strip()
-    if vtype_clean in COMMERCIAL_FEE_EXEMPT_VEHICLE_TYPES or vtype_clean.lower() in {"lorry", "truck", "commercial", "evcommercial"}:
-        return True
     cap_clean = (capacity_str or "").strip()
     if cap_clean and _WEIGHT_CAPACITY_RE.search(cap_clean):
         return True
-    evidence = " ".join(str(p) for p in (car_model, vehicle_class, raw_text) if p).strip()
-    if evidence and _COMMERCIAL_HEAVY_INDICATORS.search(evidence):
+
+    # Check primary structured vehicle identity fields first
+    field_evidence = " ".join(str(p) for p in (car_model, vehicle_class) if p).strip()
+    if field_evidence and _COMMERCIAL_HEAVY_INDICATORS.search(field_evidence):
+        return True
+
+    # Explicit private passenger vehicle class + non-weight capacity guards against form boilerplate (e.g. 'Trailer No')
+    if is_private_passenger_class(vehicle_class=vehicle_class, capacity_str=cap_clean, car_model=car_model):
+        return False
+
+    if vtype_clean in COMMERCIAL_FEE_EXEMPT_VEHICLE_TYPES or vtype_clean.lower() in {"lorry", "truck", "commercial", "evcommercial"}:
+        return True
+
+    cleaned_raw = strip_commercial_form_boilerplate(raw_text)
+    if cleaned_raw and _COMMERCIAL_HEAVY_INDICATORS.search(cleaned_raw):
         return True
     return False
 
