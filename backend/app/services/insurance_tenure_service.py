@@ -238,7 +238,7 @@ def resolve_or_create_tenure(
     vehicle_match_clauses = [InsuranceTenure.tracked_vehicle_id == vehicle_id]
     if veh and is_valid_malaysian_plate(veh.vehicle_no):
         vehicle_match_clauses.append(InsuranceTenure.vehicle_no == veh.vehicle_no)
-    if norm_plate:
+    if norm_plate and not is_placeholder_plate:
         vehicle_match_clauses.append(InsuranceTenure.vehicle_no == norm_plate)
 
     existing_tenure = db.scalar(

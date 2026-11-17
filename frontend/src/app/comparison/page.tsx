@@ -8,7 +8,6 @@ import { ArrowLeft, CalendarBlank } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
 import { ComparisonMatrix } from "@/components/comparison/comparison-matrix";
 import { GuidedTour } from "@/components/guided-tour";
-import { api } from "@/lib/api";
 
 function ComparisonContent() {
   const searchParams = useSearchParams();
@@ -19,28 +18,7 @@ function ComparisonContent() {
   useEffect(() => {
     if (!tenureId && !initCalledRef.current) {
       initCalledRef.current = true;
-      const today = new Date().toISOString().split("T")[0];
-      const endDate = new Date(Date.now() + 364 * 86400000).toISOString().split("T")[0];
-      api<{ id?: string; tenure?: { id: string } }>("/tenures", {
-        method: "POST",
-        body: JSON.stringify({
-          customer_name: "New Quotation Intake",
-          vehicle_no: "UNPLATED",
-          coverage_start_date: today,
-          coverage_end_date: endDate,
-        }),
-      })
-        .then((res) => {
-          const targetId = res?.id || res?.tenure?.id;
-          if (targetId) {
-            router.replace(`/comparison?tenure_id=${targetId}` as Route);
-          } else {
-            router.replace("/upload/marketing-comparison" as Route);
-          }
-        })
-        .catch(() => {
-          router.replace("/upload/marketing-comparison" as Route);
-        });
+      router.replace("/upload/marketing-comparison" as Route);
     }
   }, [tenureId, router]);
 

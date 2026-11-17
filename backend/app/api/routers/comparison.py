@@ -905,19 +905,21 @@ def resolve_duplicate_session(
             if orig_s:
                 orig_s.is_tenure_active = False
                 orig_s.duplicate_resolution = "replaced_by_newer"
-        # Update comparison entry session_id if applicable
-        entry = db.scalar(
-            select(TenureComparisonEntry).where(
-                TenureComparisonEntry.tenure_id == tenure_id,
-                TenureComparisonEntry.company_name == session.detected_company,
-            )
-        )
-        if entry:
-            entry.session_id = session.id
+        # Re-sync and materialize all active comparison entries so replaced quote numbers/benefits update atomically
+        db.commit()
+        from app.services.marketing_comparison.materialize import materialize_comparison_entries
+
+        materialize_comparison_entries(db, tenure_id)
+        return {"status": "success", "session_id": session_id, "action": action}
     elif action == "keep":
         session.duplicate_resolution = "kept"
         session.is_tenure_active = True
         session.status = "active"
+        db.commit()
+        from app.services.marketing_comparison.materialize import materialize_comparison_entries
+
+        materialize_comparison_entries(db, tenure_id)
+        return {"status": "success", "session_id": session_id, "action": action}
     elif action == "remove":
         session.duplicate_resolution = "removed"
         session.is_tenure_active = False

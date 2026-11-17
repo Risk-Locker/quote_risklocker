@@ -535,7 +535,12 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
 
                 c_id_key = str(getattr(s, "company_id", "") or "").lower()
                 c_name_key = comp_name.strip().lower()
-                existing_match = existing_comp_entries.get(c_id_key) or existing_comp_entries.get(c_name_key)
+                dup_src_id = getattr(s, "duplicate_of_session_id", None)
+                existing_match = (
+                    (next((e for e in entries if dup_src_id and e.session_id == dup_src_id), None))
+                    or existing_comp_entries.get(c_id_key)
+                    or existing_comp_entries.get(c_name_key)
+                )
 
                 if existing_match:
                     # In-place update of existing company column with the latest quotation (respecting manual_overrides)

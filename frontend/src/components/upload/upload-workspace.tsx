@@ -993,12 +993,36 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
       if (targetId) {
         router.push(`/comparison?tenure_id=${targetId}` as Route);
       } else {
-        router.push("/comparison" as Route);
+        setError("Unable to initialize blank comparison workspace.");
       }
     } catch {
-      router.push("/comparison" as Route);
+      setError("Failed to initialize blank comparison workspace.");
     } finally {
       setCreatingBlank(false);
+    }
+  }
+
+  async function openComparisonForItem(item: BulkFileItem, openInNewTab = false) {
+    let targetTenureId = item.tenureId || existingTenureId || undefined;
+    if (!targetTenureId && item.sessionId) {
+      try {
+        const sRes = await api<{ session?: { tenure_id?: string } }>(`/sessions/${item.sessionId}`);
+        targetTenureId = sRes?.session?.tenure_id || undefined;
+        if (targetTenureId) {
+          setBulkFiles((prev) =>
+            prev.map((curr) => (curr.id === item.id ? { ...curr, tenureId: targetTenureId } : curr))
+          );
+        }
+      } catch {
+        // Keep guard below
+      }
+    }
+    if (!targetTenureId) return;
+    const url = `/comparison?tenure_id=${targetTenureId}`;
+    if (openInNewTab) {
+      window.open(url, "_blank");
+    } else {
+      router.push(url as Route);
     }
   }
 
@@ -1884,13 +1908,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                                 type="button"
                                 size="sm"
                                 variant="secondary"
-                                onClick={() => {
-                                  if (item.tenureId) {
-                                    router.push(`/comparison?tenure_id=${item.tenureId}` as Route);
-                                  } else {
-                                    router.push(`/comparison` as Route);
-                                  }
-                                }}
+                                onClick={() => void openComparisonForItem(item, false)}
                                 className="min-h-[34px] px-3 text-xs font-semibold cursor-pointer"
                               >
                                 Compare Matrix
@@ -1898,13 +1916,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                             )}
                             <button
                               type="button"
-                              onClick={() => {
-                                if (item.tenureId) {
-                                  window.open(`/comparison?tenure_id=${item.tenureId}`, "_blank");
-                                } else {
-                                  window.open(`/comparison`, "_blank");
-                                }
-                              }}
+                              onClick={() => void openComparisonForItem(item, true)}
                               className="flex size-8 items-center justify-center rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white text-[var(--rl-text-strong)] hover:border-black/40 hover:bg-[var(--rl-bg)] hover:text-black shadow-xs transition-all active:scale-95 cursor-pointer"
                               title="Open in new tab"
                               aria-label="Open in new tab"
@@ -1998,11 +2010,9 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                       <Button
                         type="button"
                         onClick={() => {
-                          const tId = bulkFiles.find((f) => f.tenureId)?.tenureId;
-                          if (tId) {
-                            router.push(`/comparison?tenure_id=${tId}` as Route);
-                          } else {
-                            router.push("/comparison" as Route);
+                          const targetItem = bulkFiles.find((f) => f.tenureId) || bulkFiles.find((f) => f.sessionId);
+                          if (targetItem) {
+                            void openComparisonForItem(targetItem, false);
                           }
                         }}
                         className="bg-[#1b1717] hover:bg-black text-white font-bold gap-2 text-xs shadow-xs min-h-[36px] px-5 cursor-pointer"

@@ -52,13 +52,24 @@ export function useUploadQueuePoller<T extends PollableBulkItem>({
   const filesRef = useRef<T[]>(bulkFiles);
   filesRef.current = bulkFiles;
   const hydratingSessionsRef = useRef<Set<string>>(new Set());
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const hasActiveJobs = bulkFiles.some(
     (item) => (item.status === "processing" || item.status === "uploading") && Boolean(item.jobId)
   );
+  const hasUnhydratedCompleted = bulkFiles.some(
+    (item) => item.status === "completed" && Boolean(item.sessionId) && !item.tenureId
+  );
 
   useEffect(() => {
-    if (!hasActiveJobs) return;
+    if (!hasActiveJobs && !hasUnhydratedCompleted) return;
     let cancelled = false;
     let inFlight = false;
 
@@ -77,7 +88,7 @@ export function useUploadQueuePoller<T extends PollableBulkItem>({
           };
         }>(`/sessions/${item.sessionId}`);
 
-        if (cancelled) return;
+        if (!isMountedRef.current) return;
         const resolvedTenureId = sRes?.session?.tenure_id || existingTenureId || undefined;
         const isCoverNote =
           sRes?.session?.document_type === "covernote" ||
@@ -124,23 +135,35 @@ export function useUploadQueuePoller<T extends PollableBulkItem>({
                   insurer: sRes?.session?.detected_company || curr.insurer,
                   premium: sRes?.session?.total_premium || curr.premium,
                   ref: sRes?.session?.quotation_ref || curr.ref,
+                  phase: undefined,
                   error: undefined,
                 }
               : curr
           )
         );
       } catch {
-        if (cancelled) return;
+        if (!isMountedRef.current) return;
         setBulkFiles((prev) =>
           prev.map((curr) =>
-            curr.id === item.id ? { ...curr, status: "completed", progress: 100 } : curr
+            curr.id === item.id
+              ? { ...curr, status: "completed", progress: 100, phase: undefined }
+              : curr
           )
         );
+      } finally {
+        hydratingSessionsRef.current.delete(item.id);
       }
     }
 
     async function pollBatch() {
       if (cancelled || inFlight) return;
+      const unhydratedDone = filesRef.current.filter(
+        (item) => item.status === "completed" && Boolean(item.sessionId) && !item.tenureId
+      );
+      if (unhydratedDone.length > 0) {
+        void Promise.all(unhydratedDone.map((it) => hydrateCompletedSession(it)));
+      }
+
       const activeItems = filesRef.current.filter(
         (item) => (item.status === "processing" || item.status === "uploading") && Boolean(item.jobId)
       );
@@ -163,7 +186,11 @@ export function useUploadQueuePoller<T extends PollableBulkItem>({
 
         if (cancelled) return;
 
-        const newlyCompleted: T[] = [];
+        // Compute completed items cleanly outside setBulkFiles updater so React 18 batching is deterministic
+        const newlyCompleted = activeItems.filter(
+          (item) => item.jobId && mergedJobs[item.jobId]?.state === "completed"
+        );
+
         setBulkFiles((prev) =>
           prev.map((item) => {
             if (!item.jobId || (item.status !== "processing" && item.status !== "uploading")) {
@@ -173,11 +200,22 @@ export function useUploadQueuePoller<T extends PollableBulkItem>({
             if (!jobInfo) return item;
 
             if (jobInfo.state === "completed") {
-              newlyCompleted.push(item);
+              // Keep 'processing' until hydrateCompletedSession resolves tenureId so Compare links are never blank
+              if (item.sessionId && !item.tenureId && !existingTenureId) {
+                return {
+                  ...item,
+                  status: "processing",
+                  progress: 98,
+                  phase: "Linking comparison workspace...",
+                  error: undefined,
+                };
+              }
               return {
                 ...item,
                 status: "completed",
                 progress: 100,
+                tenureId: item.tenureId || existingTenureId || undefined,
+                phase: undefined,
                 error: undefined,
               };
             }
@@ -199,8 +237,8 @@ export function useUploadQueuePoller<T extends PollableBulkItem>({
           })
         );
 
-        for (const completedItem of newlyCompleted) {
-          hydrateCompletedSession(completedItem);
+        if (newlyCompleted.length > 0) {
+          await Promise.all(newlyCompleted.map((item) => hydrateCompletedSession(item)));
         }
       } catch {
         // Network blip during batch poll; retry next tick
@@ -215,5 +253,5 @@ export function useUploadQueuePoller<T extends PollableBulkItem>({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [hasActiveJobs, existingTenureId, setBulkFiles]);
+  }, [hasActiveJobs, hasUnhydratedCompleted, existingTenureId, setBulkFiles]);
 }
