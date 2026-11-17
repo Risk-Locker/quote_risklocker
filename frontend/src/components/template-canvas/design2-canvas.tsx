@@ -202,8 +202,8 @@ function Design2CardIconMedia({
 
 function Design2Footer({
   whatsappQrSrc,
-  agencyName = "RiskLocker",
-  agencyRegNo = "1535879-U",
+  agencyName = "RISKLOCKER SDN. BHD.",
+  agencyRegNo = "202301041962(1535879-U)",
   agencyEmail = "admin@risklocker.com",
   agencyPhone = "011 1011 6880 ( Office )",
 }: {
@@ -757,7 +757,8 @@ export function Design2CanvasView({
 
         <Design2Footer
           whatsappQrSrc="/assets/whatsapp_qr.png"
-          agencyName={getVal(fields, "agency_name", "RiskLocker")}
+          agencyName={getVal(fields, "agency_name", "RISKLOCKER SDN. BHD.")}
+          agencyRegNo={getVal(fields, "agency_reg_no", "202301041962(1535879-U)")}
         />
       </div>
 
@@ -933,7 +934,8 @@ export function Design2CanvasView({
 
           <Design2Footer
           whatsappQrSrc="/assets/whatsapp_qr.png"
-          agencyName={getVal(fields, "agency_name", "RiskLocker")}
+          agencyName={getVal(fields, "agency_name", "RISKLOCKER SDN. BHD.")}
+          agencyRegNo={getVal(fields, "agency_reg_no", "202301041962(1535879-U)")}
         />
         </div>
       )}

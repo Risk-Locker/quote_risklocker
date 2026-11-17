@@ -357,7 +357,11 @@ class ExtractionOrchestrator:
                 ) from exc
             warnings.append(f"Gemini multimodal extraction note: {exc}")
 
-        fields, draft_warnings, draft_status = build_draft(candidates, benefit_lines=benefit_lines)
+        fields, draft_warnings, draft_status = build_draft(
+            candidates,
+            benefit_lines=benefit_lines,
+            raw_text=combined_text,
+        )
         warnings.extend(draft_warnings)
 
         candidate_payload = {

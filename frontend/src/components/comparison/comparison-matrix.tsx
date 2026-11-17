@@ -952,6 +952,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       );
       const updated = await api<any>(`/comparison/${tenureId}/rescan`, {
         method: "POST",
+        body: JSON.stringify({ deep: true }),
       });
       if (updated) setData(updated);
       await fetchComparison(true);
@@ -1408,6 +1409,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             );
             const updated = await api<any>(`/comparison/${tenureId}/rescan`, {
               method: "POST",
+              body: JSON.stringify({ session_id: quoteEntry.session_id || null, deep: true }),
             });
             if (updated) setData(updated);
             await fetchComparison(true);

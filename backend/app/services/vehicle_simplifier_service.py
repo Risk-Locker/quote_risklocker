@@ -37,9 +37,11 @@ TRANSMISSION_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-# CKD / CBU / Model year badges
+# CKD / CBU / Model year / PDF schedule placeholder badges
 REGISTRATION_PATTERNS = re.compile(
-    r"\((?:CKD|CBU|AT|MT|A|M)\)|\b(?:CKD|CBU)\b|\bMY\d{2,4}\b",
+    r"\((?:CKD|CBU|AT|MT|A|M|COMMERCIAL)\)|"
+    r"\b(?:OTHER\s+COMMERCIAL\s+MAKE|ALL\s+MODELS\s*\(?COMMERCIAL\)?|COMMERCIAL\s+MAKE|UNKNOWN\s+MODEL|NOT\s+SPECIFIED)\b|"
+    r"\b(?:CKD|CBU)\b|\bMY\d{2,4}\b",
     re.IGNORECASE,
 )
 
@@ -50,6 +52,7 @@ PRESERVE_UPPERCASE = {
     "TGDI", "TSI", "TDI", "VTEC", "M", "AMG", "S", "L", "TC-P", "TC", "VTI",
     "CX", "CR", "HR", "BR", "MX", "GLS", "GLX", "AT", "MT",
     "BLM", "FLX", "SV", "LE", "XLE", "CRF", "CBU", "TSI", "TFSI", "CRDI",
+    "SANY", "FAW", "UD", "DAF", "MAN",
 }
 
 # Proper brand name capitalizations
@@ -204,14 +207,23 @@ def simplify_vehicle_name_with_ai(
     raw_brand: str | None,
     raw_model: str | None,
     *,
+    gemini_clean_name: str | None = None,
+    allow_live_ai: bool = False,
     timeout_seconds: float = 4.0,
 ) -> tuple[str, str, str]:
-    """Run an AI job (Gemini) to distill vehicle brand and model, falling back to deterministic rules."""
+    """Distill vehicle brand and model cleanly without firing redundant un-paced AI calls.
+
+    When `gemini_clean_name` from Gemini Call 1 is provided (or `allow_live_ai=False`,
+    the safe default), returns deterministic/prefilled normalization with ZERO extra HTTP requests.
+    """
+    if gemini_clean_name and gemini_clean_name.strip():
+        return clean_vehicle_tokens_deterministic(raw_brand, gemini_clean_name.strip())
+
     # Deterministic fallback ready immediately
     det_brand, det_model, det_combined = clean_vehicle_tokens_deterministic(raw_brand, raw_model)
 
     raw_input = f"{raw_brand or ''} {raw_model or ''}".strip()
-    if not raw_input or len(raw_input) < 4:
+    if not allow_live_ai or not raw_input or len(raw_input) < 4:
         return det_brand, det_model, det_combined
 
     pool = get_key_pool()
@@ -230,7 +242,7 @@ def simplify_vehicle_name_with_ai(
         "1. Include ONLY Brand, Core Model series, and Key Trim/Engine/Hybrid badge.\n"
         "   Examples: 'Mercedes-Benz S 400 L Hybrid', 'Honda Civic 1.5 TC-P', 'BMW 330i M Sport', 'Perodua Myvi 1.5 AV', 'Toyota Hilux Double Cab 2.8'.\n"
         "2. Strip out all registration noise:\n"
-        "   - CKD, CBU\n"
+        "   - CKD, CBU, OTHER COMMERCIAL MAKE, ALL MODELS (COMMERCIAL)\n"
         "   - Internal chassis codes (W222, W205, G20, F30, FC1, etc.)\n"
         "   - Model year codes (MY14, MY20)\n"
         "   - Body style descriptors (4D SEDAN, 5D HATCHBACK, SALOON, SUV, etc.)\n"
@@ -247,6 +259,9 @@ def simplify_vehicle_name_with_ai(
             "responseMimeType": "application/json",
         },
     }
+
+    from app.services.pacer_sentinel import acquire_gemini_pacing_slot
+    acquire_gemini_pacing_slot(context="vehicle_simplifier")
 
     for api_key in all_keys[:2]:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{configured_model}:generateContent?key={api_key}"

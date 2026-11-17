@@ -488,16 +488,30 @@ def generate_all_deal_quotes(
         }
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+class ComparisonRescanRequest(BaseModel):
+    session_id: str | None = None
+    deep: bool = True
+
+
 @router.post("/{tenure_id}/rescan")
 def rescan_comparison(
     tenure_id: str,
+    payload: ComparisonRescanRequest | None = None,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Force re-extract and rescan all quotation sessions under this comparison tenure."""
+    """Force deep re-extract and rescan quotation session(s) under this comparison tenure."""
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
-        return rescan_comparison_tenure(db, tenure_id)
+        return rescan_comparison_tenure(
+            db,
+            tenure_id,
+            user=user,
+            settings=settings,
+            session_id=payload.session_id if payload else None,
+            deep=payload.deep if payload else True,
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:

@@ -256,13 +256,18 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                     if m_cc:
                         try:
                             val_cc = float(m_cc.group(1))
-                            if "kw" in raw_cc_lower or "watt" in raw_cc_lower or (val_cc <= 35.0 and ("." in m_cc.group(1) or val_cc <= 25.0)):
-                                detected_cc = val_cc
+                            has_weight = bool(re.search(r"\b(?:kg|kilograms?|ton(?:s|nes?)?|mt)\b", raw_cc_lower)) or "kg" in raw_cc_lower
+                            has_ev_unit = bool(re.search(r"(?<![a-z])(?:k?w|kilowatt|watt(?:s)?)(?![a-z])", raw_cc_lower)) and not has_weight
+                            if has_weight:
+                                detected_cc = val_cc * 1000.0 if ("ton" in raw_cc_lower and val_cc < 200.0) else val_cc
+                                raw_capacity_token = raw_cc
+                            elif has_ev_unit:
+                                detected_cc = (val_cc / 1000.0) if ("kw" not in raw_cc_lower and val_cc >= 1000.0) else val_cc
                                 is_detected_ev = True
-                                raw_capacity_token = f"{val_cc} kW"
+                                raw_capacity_token = f"{detected_cc} kW"
                             else:
                                 detected_cc = val_cc
-                                raw_capacity_token = f"{val_cc} CC"
+                                raw_capacity_token = raw_cc if "cc" in raw_cc_lower else f"{val_cc} CC"
                         except Exception:
                             pass
             if f.get("client_type") and not detected_client_type:
@@ -300,10 +305,29 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         capacity_str=raw_capacity_token,
     )
 
+    from app.extraction.entity_classifier import default_fee_inclusions, is_commercial_heavy_vehicle
+    is_comm_heavy = is_commercial_heavy_vehicle(
+        vehicle_type=resolved_vtype,
+        car_model=f"{detected_brand or ''} {detected_model or ''}".strip(),
+        capacity_str=raw_capacity_token,
+    )
+    if is_comm_heavy and float(tenure.road_tax or 0.0) == 0.0 and float(tenure.runner_fee or 0.0) == 0.0:
+        inc_rt_def, inc_rf_def = default_fee_inclusions(
+            vehicle_type=resolved_vtype,
+            car_model=detected_model,
+            capacity_str=raw_capacity_token,
+        )
+        if not inc_rt_def and tenure.include_road_tax is True:
+            tenure.include_road_tax = False
+            needs_commit = True
+        if not inc_rf_def and tenure.include_runner_fee is True:
+            tenure.include_runner_fee = False
+            needs_commit = True
+
     is_comp_private = (resolved_vtype in ("Car", "NonSaloonCar", "EVSaloonCar", "EVNonSaloonCar") and entity_type == "Private")
 
     calculated_jpj_road_tax = 0.0
-    if final_cc:
+    if final_cc and not is_comm_heavy:
         calculated_jpj_road_tax = calculate_road_tax(
             cc=f"{final_cc} kW" if is_detected_ev else final_cc,
             vehicle_type=resolved_vtype,
@@ -311,7 +335,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             jurisdiction="West Malaysia",
         )
 
-    if tenure.include_road_tax is False:
+    if tenure.include_road_tax is False or is_comm_heavy and float(tenure.road_tax or 0.0) == 0.0:
         road_tax_val = 0.0
     elif float(tenure.road_tax) > 0.0:
         road_tax_val = float(tenure.road_tax)
@@ -322,7 +346,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
     else:
         road_tax_val = 0.0
 
-    if tenure.include_runner_fee is False:
+    if tenure.include_runner_fee is False or is_comm_heavy and float(tenure.runner_fee or 0.0) == 0.0:
         runner_fee_val = 0.0
     elif float(tenure.runner_fee) > 0.0:
         runner_fee_val = float(tenure.runner_fee)
@@ -2288,8 +2312,15 @@ def generate_all_quotations(
     return results
 
 
-def rescan_comparison_tenure(db: Session, tenure_id: str) -> dict[str, Any]:
-    """Force re-extract and rescan all sessions and entries under a tenure."""
+def rescan_comparison_tenure(
+    db: Session,
+    tenure_id: str,
+    user: Any | None = None,
+    settings: Any | None = None,
+    session_id: str | None = None,
+    deep: bool = False,
+) -> dict[str, Any]:
+    """Force re-extract (when deep=True and source PDFs are available) and rescan sessions/entries under a tenure."""
     tenure = db.scalars(
         select(InsuranceTenure)
         .options(
@@ -2315,6 +2346,51 @@ def rescan_comparison_tenure(db: Session, tenure_id: str) -> dict[str, Any]:
         ).all()
     )
 
+    if deep and user is not None and settings is not None:
+        from app.core.errors import AppError
+        from app.services.session_rescan_service import rescan_session
+
+        target_sessions = [
+            s for s in sessions
+            if s.status != "trash"
+            and not is_covernote_document(s, db)
+            and s.is_tenure_active is not False
+            and (session_id is None or s.id == session_id)
+        ]
+        for s_item in target_sessions:
+            if not getattr(s_item, "uploaded_file_id", None):
+                continue
+            try:
+                rescan_session(db, s_item.id, user, settings, mode="in_place", engine="deep")
+            except AppError as exc:
+                if session_id is not None:
+                    raise ValueError(str(exc)) from exc
+                logger.warning("Skipping deep PDF rescan for session %s in comparison %s: %s", s_item.id, tenure_id, exc)
+            except Exception as exc:
+                logger.warning("Deep rescan fallback to cached draft for session %s: %s", s_item.id, exc)
+
+        db.expire_all()
+        tenure = db.scalars(
+            select(InsuranceTenure)
+            .options(
+                joinedload(InsuranceTenure.tracked_vehicle),
+                joinedload(InsuranceTenure.customer),
+                joinedload(InsuranceTenure.previous_tenure),
+            )
+            .where(InsuranceTenure.id == tenure_id)
+        ).first()
+        sessions = list(
+            db.scalars(
+                select(SessionModel)
+                .where(
+                    or_(
+                        SessionModel.tenure_id == tenure.id,
+                        SessionModel.tracked_vehicle_id == tenure.tracked_vehicle_id,
+                    )
+                )
+            ).all()
+        )
+
     entries = list(
         db.scalars(
             select(TenureComparisonEntry).where(TenureComparisonEntry.tenure_id == tenure.id)
@@ -2326,8 +2402,16 @@ def rescan_comparison_tenure(db: Session, tenure_id: str) -> dict[str, Any]:
     quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now().year
 
     tv_type = getattr(tenure.tracked_vehicle, "vehicle_type", "Car") if tenure.tracked_vehicle else "Car"
-    from app.extraction.entity_classifier import is_corporate_name
+    tv_model = getattr(tenure.tracked_vehicle, "car_model", None) if tenure.tracked_vehicle else None
+    tv_cap = getattr(tenure.tracked_vehicle, "engine_cc", None) if tenure.tracked_vehicle else None
+    from app.extraction.entity_classifier import is_commercial_heavy_vehicle, is_corporate_name
     is_rescan_comp_private = (tv_type in ("Car", "NonSaloonCar", "EVSaloonCar", "EVNonSaloonCar") and not is_corporate_name(tenure.customer_name))
+
+    if is_commercial_heavy_vehicle(vehicle_type=tv_type, car_model=tv_model, capacity_str=tv_cap):
+        tenure.include_road_tax = False
+        tenure.include_runner_fee = False
+        tenure.road_tax = 0.0
+        tenure.runner_fee = 0.0
 
     detected_ws = None
     for s in sessions:

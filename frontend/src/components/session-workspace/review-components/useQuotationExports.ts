@@ -91,20 +91,68 @@ export function useQuotationExports({
     return saved;
   }
 
+  async function ensureGeneratedPdfVersionId(activeWorkspace: WorkspaceSnapshot): Promise<string | undefined> {
+    const conflict = await api<{ has_conflict: boolean; resolved: boolean }>(`/sessions/${id}/ownership-conflict`).catch(() => null);
+    if (conflict?.has_conflict && !conflict?.resolved) {
+      throw new Error("Action Required: Vehicle ownership conflict detected. Please resolve it on the Review step before generating the PDF.");
+    }
+
+    const requested = await api<{ job?: { id: string }; version?: { id: string } }>(
+      `/sessions/${id}/versions`,
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ draft_revision: activeWorkspace.revision }),
+      }
+    );
+
+    const jobId = requested.job?.id;
+    let renderedVersionId = requested.version?.id;
+    if (jobId) {
+      let completed = false;
+      for (let attempt = 0; attempt < 90; attempt += 1) {
+        const status = await api<{
+          job: { state: string; result?: { version_id?: string }; error?: { message?: string } };
+        }>(`/jobs/${jobId}`);
+        if (status.job.state === "completed") {
+          renderedVersionId = status.job.result?.version_id || renderedVersionId;
+          completed = true;
+          break;
+        }
+        if (status.job.state === "failed" || status.job.state === "cancelled") {
+          throw new Error(status.job.error?.message || "PDF generation did not complete.");
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      }
+      if (!completed) throw new Error("PDF generation is taking longer than expected. Please check your quotations list.");
+    }
+
+    return renderedVersionId || (activeWorkspace.versions && activeWorkspace.versions[0]?.id);
+  }
+
   async function handleOpenNewQuotationTab() {
     setOpeningPreviewTab(true);
     setActionError(null);
+    // Open synchronously on user click so browsers never popup-block after async PDF rendering
+    const previewTab = window.open("", "_blank");
+    if (previewTab) {
+      previewTab.opener = null;
+      previewTab.document.write(
+        "<!doctype html><html><head><title>Generating Quotation PDF...</title></head><body style='margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:system-ui,sans-serif;background:#f5f5f7;color:#1b1717;'><div style='text-align:center'><div style='font-weight:700;font-size:15px'>Rendering RiskLocker Quotation PDF...</div><div style='font-size:12px;color:#64748b;margin-top:6px'>Opening in built-in PDF viewer momentarily.</div></div></body></html>"
+      );
+    }
     try {
-      const currentWorkspace = await ensureWorkspaceSavedBeforeExport();
-      const result = await api<{ preview_url: string }>(`/sessions/${id}/preview-render`, {
-        method: "POST",
-        body: JSON.stringify({ draft_revision: currentWorkspace.revision }),
-      });
-      if (result?.preview_url) {
-        window.open(fileUrl(result.preview_url), "_blank", "noopener,noreferrer");
+      const activeWorkspace = await ensureWorkspaceSavedBeforeExport();
+      const versionId = await ensureGeneratedPdfVersionId(activeWorkspace);
+      const inlinePdfUrl = fileUrl(versionId ? `/versions/${versionId}/pdf?download=false` : `/sessions/${id}/pdf?download=false`);
+      if (previewTab && !previewTab.closed) {
+        previewTab.location.replace(inlinePdfUrl);
+      } else {
+        window.open(inlinePdfUrl, "_blank", "noopener,noreferrer");
       }
     } catch (err: unknown) {
-      setActionError("Could not open new quotation preview: " + (err instanceof Error ? err.message : String(err)));
+      if (previewTab && !previewTab.closed) previewTab.close();
+      setActionError("Could not open quotation PDF: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setOpeningPreviewTab(false);
     }
@@ -235,38 +283,7 @@ export function useQuotationExports({
 
     try {
       const activeWorkspace = await ensureWorkspaceSavedBeforeExport();
-      const conflict = await api<{ has_conflict: boolean; resolved: boolean }>(`/sessions/${id}/ownership-conflict`).catch(() => null);
-      if (conflict?.has_conflict && !conflict?.resolved) {
-        throw new Error("Action Required: Vehicle ownership conflict detected. Please resolve it on the Review step before generating the PDF.");
-      }
-
-      const requested = await api<{ job?: { id: string }; version?: { id: string } }>(
-        `/sessions/${id}/versions`,
-        {
-          method: "POST",
-          headers: { "Idempotency-Key": crypto.randomUUID() },
-          body: JSON.stringify({ draft_revision: activeWorkspace.revision }),
-        }
-      );
-
-      const jobId = requested.job?.id;
-      if (jobId) {
-        let completed = false;
-        for (let attempt = 0; attempt < 90; attempt += 1) {
-          const status = await api<{ job: { state: string; error?: { message?: string } } }>(`/jobs/${jobId}`);
-          if (status.job.state === "completed") {
-            completed = true;
-            break;
-          }
-          if (status.job.state === "failed" || status.job.state === "cancelled") {
-            throw new Error(status.job.error?.message || "PDF generation did not complete.");
-          }
-          await new Promise((resolve) => window.setTimeout(resolve, 1000));
-        }
-        if (!completed) throw new Error("PDF generation is taking longer than expected. Please check your quotations list.");
-      }
-
-      const versionId = requested.version?.id || (workspace.versions && workspace.versions[0]?.id);
+      const versionId = await ensureGeneratedPdfVersionId(activeWorkspace);
       const downloadPath = versionId ? `/versions/${versionId}/pdf?download=true` : `/sessions/${id}/pdf?download=true`;
       const downloadUrl = fileUrl(downloadPath);
 

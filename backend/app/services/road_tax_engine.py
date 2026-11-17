@@ -416,6 +416,8 @@ def calculate_road_tax(
         norm_vtype = "EVNonSaloonCar"
     elif "evmotor" in low_vtype or ("ev" in low_vtype and ("bike" in low_vtype or "motor" in low_vtype)):
         norm_vtype = "EVMotorcycle"
+    elif "evcommercial" in low_vtype:
+        norm_vtype = "EVCommercial"
     elif "nonsaloon" in low_vtype or "non-saloon" in low_vtype or "suv" in low_vtype or "mpv" in low_vtype:
         norm_vtype = "NonSaloonCar"
     elif "motor" in low_vtype or "bike" in low_vtype:
@@ -427,19 +429,29 @@ def calculate_road_tax(
 
     norm_jur = _normalize_jurisdiction(jurisdiction)
 
-    # Auto-detect Commercial Vehicle if capacity denotes KG
-    if isinstance(cc, str) and "kg" in cc.lower():
-        if norm_vtype not in {"Lorry", "Truck", "Commercial"}:
-            norm_vtype = "Lorry"
+    # Auto-detect Commercial Vehicle if capacity denotes KG or TON/Tonne
+    cc_lower = cc.lower() if isinstance(cc, str) else ""
+    has_ton_token = bool(re.search(r"\b(?:ton(?:s|nes?)?|mt)\b", cc_lower))
+    has_kg_token = bool(re.search(r"\b(?:kg|kilograms?|kgm)\b", cc_lower)) or "kg" in cc_lower
+    has_weight_token = has_ton_token or has_kg_token
+    if has_weight_token and norm_vtype not in {"Lorry", "Truck", "Commercial", "EVCommercial"}:
+        norm_vtype = "Lorry"
+    if has_ton_token and numeric_cc < 200.0:
+        engine_cc = round(numeric_cc * 1000.0)
+    elif norm_vtype == "Lorry" and numeric_cc < 200.0:
+        # Commercial tonnage bare value (e.g. 11 for 11 TON) maps consistently to KG brackets
+        engine_cc = round(numeric_cc * 1000.0)
 
-    # Auto-detect Electric Vehicle if capacity denotes kW/Watts or is typical EV rating (e.g. 9.4 kW = 9400 Watts)
+    is_commercial_vtype = norm_vtype in {"Lorry", "Truck", "Commercial", "EVCommercial", "Others"}
+
+    # Auto-detect Electric Vehicle if capacity denotes kW/W/Watts; NEVER coerce Commercial Lorries to EVCar!
     is_ev_capacity = False
-    if isinstance(cc, str) and ("kw" in cc.lower() or "watt" in cc.lower()):
+    if isinstance(cc, str) and bool(re.search(r"(?<![a-z])(?:k?w|kilowatt|watt(?:s)?)(?![a-z])", cc.lower())) and not has_weight_token:
         is_ev_capacity = True
-    elif isinstance(cc, (int, float)) and 0 < float(cc) <= 35.0:
+    elif not is_commercial_vtype and isinstance(cc, (int, float)) and 0 < float(cc) <= 35.0:
         is_ev_capacity = True
 
-    if is_ev_capacity and norm_vtype not in {"EVSaloonCar", "EVNonSaloonCar", "EVMotorcycle"}:
+    if is_ev_capacity and not is_commercial_vtype and norm_vtype not in {"EVSaloonCar", "EVNonSaloonCar", "EVMotorcycle"}:
         if norm_vtype in {"Motorcycle", "Bike"}:
             norm_vtype = "EVMotorcycle"
         elif norm_vtype == "NonSaloonCar":
@@ -813,7 +825,10 @@ def compute_rate(rule: RoadTaxRule, cc: int) -> float:
     return float(str(rule.base_rate)) if rule.base_rate is not None else 0.0
 
 
-def parse_engine_capacity(capacity: str | int | float | None) -> tuple[float, str]:
+def parse_engine_capacity(
+    capacity: str | int | float | None,
+    vehicle_type: str | None = None,
+) -> tuple[float, str]:
     """Parse raw capacity input into (numeric_value, unit). Unit is 'cc', 'kw', or 'kg'."""
     if capacity is None:
         return 0.0, "cc"
@@ -825,13 +840,20 @@ def parse_engine_capacity(capacity: str | int | float | None) -> tuple[float, st
         num = float(m.group(0))
     except ValueError:
         return 0.0, "cc"
-    if "kg" in val_str:
+    if re.search(r"\b(?:ton(?:s|nes?)?|mt)\b", val_str):
+        return (num * 1000.0 if num < 200 else num), "kg"
+    if re.search(r"\b(?:kg|kilograms?|kgm)\b", val_str) or "kg" in val_str:
         return num, "kg"
-    if "kw" in val_str or "watt" in val_str:
-        return num, "kw"
+    if re.search(r"(?<![a-z])(?:k?w|kilowatt|watt(?:s)?)(?![a-z])", val_str):
+        if "kw" in val_str or "kilowatt" in val_str:
+            return num, "kw"
+        return (num / 1000.0 if num >= 1000.0 else num), "kw"
     if "cc" in val_str:
         return num, "cc"
-    if num <= 35.0:
+    vt_low = (vehicle_type or "").strip().lower()
+    if vt_low in {"lorry", "truck", "commercial", "evcommercial"}:
+        return (num * 1000.0 if num < 200 else num), "kg"
+    if 0 < num <= 35.0:
         return num, "kw"
     return num, "cc"
 
@@ -845,8 +867,14 @@ def calculate_road_tax_unified(
     db: Session | None = None,
 ) -> dict[str, Any]:
     """Calculate road tax and return structured result with unit and formatted display."""
-    raw_num, detected_unit = parse_engine_capacity(capacity)
+    raw_num, detected_unit = parse_engine_capacity(capacity, vehicle_type=vehicle_type)
     final_unit = (unit or detected_unit or "cc").lower().strip()
+    if final_unit == "ton":
+        raw_num = raw_num * 1000.0 if raw_num < 200 else raw_num
+        final_unit = "kg"
+
+    if vehicle_type and vehicle_type.lower() in {"lorry", "truck", "commercial", "evcommercial"} and final_unit == "kw":
+        final_unit = "kg"
 
     if final_unit == "kw":
         cc_token = f"{raw_num} kW"

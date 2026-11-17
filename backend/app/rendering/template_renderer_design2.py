@@ -17,6 +17,8 @@ from html import escape
 from typing import Any
 
 from app.rendering.benefit_schedule_renderer import (
+    DEFAULT_AGENCY_NAME,
+    DEFAULT_AGENCY_REG_NO,
     get_design2_asset_uris,
     render_design2_footer_html,
     render_design2_icon_svg,
@@ -46,7 +48,7 @@ def _get_val(fields: dict, key: str, fallback: str = "") -> str:
         "premium": ("premium", "coverage_premium", "basic_premium_vehicle"),
         "roadtax": ("roadtax", "road_tax_amount"),
         "runner_fee": ("runner_fee", "service_fee"),
-        "total_amount": ("total_amount", "total_premium_adjusted", "gross_premium"),
+        "total_amount": ("total_premium_adjusted", "total_amount", "gross_premium"),
     }
     candidates = aliases.get(key, (key,))
     for k in candidates:
@@ -128,17 +130,22 @@ def render_design2_html(
     excess = _get_val(draft_fields, "excess_amount", "RM 0.00")
     sum_insured = _get_val(draft_fields, "coverage_amount", "RM 198,000.00")
 
+    disp_opts = render_context.get("display_options") or {}
+    inc_rt = disp_opts.get("include_road_tax") is not False and _get_val(draft_fields, "include_road_tax", "true").lower() not in {"false", "0", "no"}
+    inc_rf = disp_opts.get("include_runner_fee") is not False and _get_val(draft_fields, "include_runner_fee", "true").lower() not in {"false", "0", "no"}
+
     premium = _get_val(draft_fields, "premium", "RM 5,328.10")
-    roadtax = _get_val(draft_fields, "roadtax", "RM 40.00")
-    runner = _get_val(draft_fields, "runner_fee", "RM 0.00")
-    total_payable = _get_val(draft_fields, "total_amount", "RM 5,447.30")
+    roadtax = _get_val(draft_fields, "roadtax", "RM 40.00") if inc_rt else "0.00"
+    runner = _get_val(draft_fields, "runner_fee", "RM 0.00") if inc_rf else "0.00"
+    ctx_adjusted_total = str(render_context.get("total_premium_adjusted") or "").strip()
+    total_payable = ctx_adjusted_total or _get_val(draft_fields, "total_amount", "RM 5,447.30")
 
     try:
-        rt_num = float(re.sub(r"[^0-9.]", "", roadtax or "0") or "0")
-        rf_num = float(re.sub(r"[^0-9.]", "", runner or "0") or "0")
+        rt_num = float(re.sub(r"[^0-9.]", "", roadtax or "0") or "0") if inc_rt else 0.0
+        rf_num = float(re.sub(r"[^0-9.]", "", runner or "0") or "0") if inc_rf else 0.0
         rt_combined = f"RM {rt_num + rf_num:,.2f}"
     except Exception:
-        rt_combined = _format_money(roadtax)
+        rt_combined = _format_money(roadtax) if inc_rt else "RM 0.00"
 
     assets = get_design2_asset_uris(insurer, template_config, resolved_assets, db)
     rl_logo_uri = assets["rl_logo_uri"]
@@ -264,7 +271,18 @@ def render_design2_html(
         </div>
         """
 
-    footer_html = render_design2_footer_html(whatsapp_qr_uri)
+    footer_agency_name = (
+        _get_val(draft_fields, "agency_name")
+        or _get_val(draft_fields, "agency_account_name")
+        or str(template_config.get("agency_name") or template_config.get("agency_account_name") or "").strip()
+        or DEFAULT_AGENCY_NAME
+    )
+    footer_reg_no = _get_val(draft_fields, "agency_reg_no") or template_config.get("agency_reg_no") or DEFAULT_AGENCY_REG_NO
+    footer_html = render_design2_footer_html(
+        whatsapp_qr_uri,
+        agency_name=footer_agency_name,
+        agency_reg_no=footer_reg_no,
+    )
     gift_svg = render_free_coverage_gift_svg(width=28, height=24)
 
     insurer_badge_html = (

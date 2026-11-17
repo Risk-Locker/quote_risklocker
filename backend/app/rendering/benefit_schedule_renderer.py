@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import base64
 from io import BytesIO
+import logging
 import math
 import mimetypes
 import re
 from html import escape
 from pathlib import Path
 from typing import Any
+
+from PIL import Image, ImageChops
 
 from app.rendering.design2_icons import (
     render_design2_icon_svg,
@@ -30,10 +33,26 @@ from app.rendering.unified_addon_engine import (
 from app.services.template_assets import asset_data_uri, find_asset_by_hint
 
 ROOT = Path(__file__).resolve().parents[3]
+logger = logging.getLogger(__name__)
+
+DEFAULT_AGENCY_NAME = "RISKLOCKER SDN. BHD."
+DEFAULT_AGENCY_REG_NO = "202301041962(1535879-U)"
+
+_COMPANY_ASSET_CANDIDATES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("etiqa", ("frontend/public/assets/companies/etiqa.png", "assets/Company logos/etiqa insurance logo.png")),
+    ("amassurance", ("frontend/public/assets/companies/amassurance.webp", "assets/Company logos/AmAssurance logo.webp")),
+    ("amgen", ("frontend/public/assets/companies/amassurance.webp", "assets/Company logos/AmAssurance logo.webp")),
+    ("sompo", ("frontend/public/assets/companies/sompo.jpeg", "assets/Company logos/berjaya sompo insurance logo.jpeg")),
+    ("liberty", ("frontend/public/assets/companies/liberty.png", "assets/Company logos/Liberty Insurance logo.png")),
+    ("lonpac", ("frontend/public/assets/companies/lonpac.png", "assets/Company logos/Lonpac Insurance logo.png")),
+    ("qbe", ("frontend/public/assets/companies/qbe.jpg", "assets/Company logos/QBE Insurance logo.jpg")),
+    ("takaful", ("frontend/public/assets/companies/takaful.png", "assets/Company logos/Takaful Malaysia logo.png")),
+    ("tune", ("frontend/public/assets/companies/tune.png", "assets/Company logos/tune portect logo.png")),
+)
 
 
 def _trim_image_padding_data_uri(data_uri: str, padding: int = 2) -> str:
-    """Non-destructively crops excessive transparent/white square padding from raster data URIs."""
+    """Crops excessive transparent/white padding from raster data URIs using pure Pillow."""
     if not data_uri or not data_uri.startswith("data:image/"):
         return data_uri
     header, _, b64_payload = data_uri.partition(",")
@@ -41,24 +60,22 @@ def _trim_image_padding_data_uri(data_uri: str, padding: int = 2) -> str:
         return data_uri
     try:
         raw = base64.b64decode(b64_payload)
-        from PIL import Image
-        import numpy as np
-
         with Image.open(BytesIO(raw)) as im:
             rgba = im.convert("RGBA")
-            arr = np.array(rgba)
-            non_bg = (arr[:, :, 3] > 20) & (
-                (arr[:, :, 0] < 245) | (arr[:, :, 1] < 245) | (arr[:, :, 2] < 245)
+            r, g, b, alpha = rgba.split()
+            alpha_mask = alpha.point(lambda p: 255 if p > 20 else 0)
+            non_white = ImageChops.lighter(
+                ImageChops.lighter(r.point(lambda p: 255 if p < 245 else 0), g.point(lambda p: 255 if p < 245 else 0)),
+                b.point(lambda p: 255 if p < 245 else 0),
             )
-            ys, xs = np.where(non_bg)
-            if len(xs) == 0:
+            bbox = ImageChops.darker(alpha_mask, non_white).getbbox()
+            if not bbox:
                 return data_uri
             h, w = rgba.height, rgba.width
-            x0 = max(0, int(xs.min()) - padding)
-            y0 = max(0, int(ys.min()) - padding)
-            x1 = min(w, int(xs.max()) + 1 + padding)
-            y1 = min(h, int(ys.max()) + 1 + padding)
-            # Skip re-encoding if already >=92% packed
+            x0 = max(0, bbox[0] - padding)
+            y0 = max(0, bbox[1] - padding)
+            x1 = min(w, bbox[2] + padding)
+            y1 = min(h, bbox[3] + padding)
             if (x1 - x0) >= 0.92 * w and (y1 - y0) >= 0.92 * h:
                 return data_uri
             cropped = rgba.crop((x0, y0, x1, y1))
@@ -66,7 +83,8 @@ def _trim_image_padding_data_uri(data_uri: str, padding: int = 2) -> str:
             cropped.save(out, format="PNG", optimize=True)
             encoded = base64.b64encode(out.getvalue()).decode("ascii")
             return f"data:image/png;base64,{encoded}"
-    except Exception:
+    except Exception as exc:
+        logger.debug("Skipping image padding trim due to unreadable image payload: %s", exc)
         return data_uri
 
 
@@ -80,29 +98,15 @@ def _local_file_data_uri(rel_path: str) -> str:
 
 
 def get_company_logo_data_uri(insurer_name: str) -> str:
-    """Resolve local insurer logo from `assets/Company logos/`."""
+    """Resolve curated horizontal insurer logo matching live UI canvas before legacy masters."""
     norm = (insurer_name or "").lower()
-    mapping = {
-        "etiqa": "assets/Company logos/etiqa insurance logo.png",
-        "amassurance": "assets/Company logos/AmAssurance logo.webp",
-        "amgen": "assets/Company logos/AmAssurance logo.webp",
-        "sompo": "assets/Company logos/berjaya sompo insurance logo.jpeg",
-        "liberty": "assets/Company logos/Liberty Insurance logo.png",
-        "lonpac": "assets/Company logos/Lonpac Insurance logo.png",
-        "qbe": "assets/Company logos/QBE Insurance logo.jpg",
-        "takaful": "assets/Company logos/Takaful Malaysia logo.png",
-        "tune": "assets/Company logos/tune portect logo.png",
-    }
-    for key, rel_path in mapping.items():
-        if key in norm:
+    for key, rel_paths in _COMPANY_ASSET_CANDIDATES:
+        if key not in norm:
+            continue
+        for rel_path in rel_paths:
             uri = _local_file_data_uri(rel_path)
-            if not uri:
-                for ext in [".png", ".webp", ".jpeg", ".jpg"]:
-                    uri = _local_file_data_uri(f"frontend/public/assets/companies/{key}{ext}")
-                    if uri:
-                        break
             if uri:
-                return uri
+                return _trim_image_padding_data_uri(uri)
     return ""
 
 
@@ -117,24 +121,25 @@ def get_design2_asset_uris(
     resolved_assets = resolved_assets or {}
     cfg_assets = template_config.get("assets") or {}
 
-    # 1. Risklocker Horizontal Black Logo (2765px ultra-HD master with auto-padding trim)
-    rl_logo_uri = _local_file_data_uri(
-        "assets/RL Logo/RISKLOCKER LOGO-02 horizontal square with black text good for white bg.png"
-    )
-    if rl_logo_uri:
-        rl_logo_uri = _trim_image_padding_data_uri(rl_logo_uri)
-    if not rl_logo_uri:
-        rl_logo_uri = _local_file_data_uri(
-            "assets/RL Logo/risklocker logo horizontal square with black text good for white bg.png"
-        )
-    if not rl_logo_uri:
-        rl_logo_uri = _local_file_data_uri("frontend/public/assets/brand/logo-horizontal-black.png")
+    # 1. Risklocker Horizontal Black Logo (prioritize pre-trimmed asset shared with frontend canvas)
+    rl_logo_uri = ""
+    for rl_rel_path in (
+        "frontend/public/assets/brand/logo-horizontal-black.png",
+        "assets/RL Logo/risklocker logo horizontal square with black text good for white bg.png",
+        "assets/RL Logo/RISKLOCKER LOGO-02 horizontal square with black text good for white bg.png",
+    ):
+        rl_logo_uri = _local_file_data_uri(rl_rel_path)
+        if rl_logo_uri:
+            rl_logo_uri = _trim_image_padding_data_uri(rl_logo_uri)
+            break
     if not rl_logo_uri:
         rl_id = cfg_assets.get("risklocker_logo") or "e9685e1f-ac95-410c-a2e9-eccb7ca35d5f"
         rl_logo_uri = resolved_assets.get("risklocker_logo") or resolved_assets.get(rl_id) or ""
         if not rl_logo_uri:
             rl_aid = find_asset_by_hint(db, ["horizontal", "risklocker"]) or rl_id
             rl_logo_uri = resolved_assets.get(rl_aid) or (asset_data_uri(db, rl_aid) if rl_aid else "")
+        if rl_logo_uri:
+            rl_logo_uri = _trim_image_padding_data_uri(rl_logo_uri)
 
     # 2. DuitNow Badge + Clean Pink DuitNow QR
     duitnow_badge_uri = _local_file_data_uri("assets/duitnow/Duit Now Logo Vector.svg .png")
@@ -186,8 +191,8 @@ def get_design2_asset_uris(
 
 def render_design2_footer_html(
     whatsapp_qr_uri: str,
-    agency_name: str = "RiskLocker",
-    agency_reg_no: str = "1535879-U",
+    agency_name: str = DEFAULT_AGENCY_NAME,
+    agency_reg_no: str = DEFAULT_AGENCY_REG_NO,
 ) -> str:
     """Shared full-width Risklocker red footer bar (108px, 3-column with vertical white dividers)."""
     qr_img = (
@@ -517,7 +522,22 @@ def render_design2_schedule_pages(
 
     total_pages = start_page_num + len(cont_chunks)
 
-    footer_html = render_design2_footer_html(assets["whatsapp_qr_uri"])
+    agency_name = (
+        _extract_field(draft_fields, ("agency_name", "agency_account_name"))
+        or template_config.get("agency_name")
+        or template_config.get("agency_account_name")
+        or DEFAULT_AGENCY_NAME
+    )
+    agency_reg_no = (
+        _extract_field(draft_fields, ("agency_reg_no",))
+        or template_config.get("agency_reg_no")
+        or DEFAULT_AGENCY_REG_NO
+    )
+    footer_html = render_design2_footer_html(
+        assets["whatsapp_qr_uri"],
+        agency_name=agency_name,
+        agency_reg_no=agency_reg_no,
+    )
     pages: list[str] = []
 
     page1_sched = f"""

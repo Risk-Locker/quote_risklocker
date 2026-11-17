@@ -542,7 +542,16 @@ def _card(
             else:
                 card_val = ""
 
-    is_detected = getattr(selection, "source_kind", None) == "extracted" or getattr(selection, "evidence_snapshot", None) is not None
+    ev_snap = getattr(selection, "evidence_snapshot", None)
+    ev_source = str(ev_snap.get("source") or "").strip().lower() if isinstance(ev_snap, dict) else ""
+    has_line_provenance = isinstance(ev_snap, dict) and bool(ev_snap.get("source_line_id"))
+    is_detected = (
+        getattr(selection, "source_kind", None) == "extracted"
+        or getattr(selection, "source", None) == "extracted"
+        or ev_source.startswith("extracted")
+        or ev_source == "gemini_multimodal"
+        or has_line_provenance
+    )
     is_purchased_extra = (cost_status == "paid" and price is not None) or is_detected
     is_pure_default = catalog_def.get("category") == "default" and not is_detected and not is_purchased_extra if catalog_def else False
     is_addon = bool(

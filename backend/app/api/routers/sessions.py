@@ -1011,224 +1011,48 @@ def session_extract_gemini(
         err = keys_pool.get_last_error_message() or "Empty result returned"
         raise AppError(f"Gemini AI extraction failed: {err}", 502)
 
-    # Apply extracted fields to draft
-    fields = dict(draft.fields or {})
-    for key, val in gemini_res.items():
-        if key in {"detected_benefits", "detected_package_name", "roadtax"} or val is None:
-            continue
-        clean_val = str(val).strip()
-        if clean_val:
-            fields[key] = {"value": clean_val, "status": "ready", "message": ""}
+    from app.services.session_rescan_service import apply_gemini_result
 
-    # Classify customer entity (Private Individual vs Company) and vehicle type
-    from app.extraction.entity_classifier import classify_client_entity
-    cust_name = fields.get("customer_name", {}).get("value")
-    doc_no = fields.get("ic_or_brn", {}).get("value")
-    ai_type = fields.get("client_type", {}).get("value")
-    curr_vtype = fields.get("vehicle_type", {}).get("value") or "Car"
-    car_model_val = fields.get("car_model", {}).get("value")
-
-    entity_type, resolved_vtype = classify_client_entity(
-        customer_name=cust_name,
-        ic_or_brn=doc_no,
-        ai_client_type=ai_type,
-        current_vehicle_type=curr_vtype,
-        car_model=car_model_val,
-    )
-    fields["client_type"] = {"value": entity_type, "status": "ready", "message": ""}
-    fields["vehicle_type"] = {"value": resolved_vtype, "status": "ready", "message": ""}
-
-    # Sum detected optional extras cost to net out from total_amount
-    gemini_benefits = gemini_res.get("detected_benefits") or []
-    extras_cost = Decimal("0")
-    for b_item in gemini_benefits:
-        if not isinstance(b_item, dict):
-            continue
-        cost = str(b_item.get("premium_cost") or "").strip()
-        if cost:
-            clean = re.sub(r"[^\d.]", "", cost)
-            if clean:
-                try:
-                    num = Decimal(clean)
-                    if num > 0:
-                        extras_cost += num
-                except Exception:
-                    pass
-
-    # Fallback to total_optional_cover_amount if individual items did not specify premium_cost
-    if extras_cost == 0 and gemini_res.get("total_optional_cover_amount"):
-        clean_tot_opt = re.sub(r"[^\d.]", "", str(gemini_res["total_optional_cover_amount"]))
-        if clean_tot_opt:
-            try:
-                extras_cost = Decimal(clean_tot_opt)
-            except Exception:
-                pass
-
-    t_val = gemini_res.get("total_amount")
-    if t_val:
-        clean_tot = re.sub(r"[^\d.]", "", str(t_val))
-        if clean_tot:
-            try:
-                tot_num = Decimal(clean_tot)
-                fields["total_amount"] = {"value": f"{tot_num:.2f}", "status": "ready", "message": ""}
-                # Insurance Premium = Final Price (Total Contribution) - Extras
-                if extras_cost > 0:
-                    base_p = tot_num - extras_cost
-                    if base_p > 0:
-                        fields["premium"] = {"value": f"{base_p:.2f}", "status": "ready", "message": ""}
-                    else:
-                        fields["premium"] = {"value": f"{tot_num:.2f}", "status": "ready", "message": ""}
-                else:
-                    fields["premium"] = {"value": f"{tot_num:.2f}", "status": "ready", "message": ""}
-            except Exception:
-                pass
-
-    # Road tax: strictly calculate dynamically
-    cc_val = fields.get("engine_cc", {}).get("value")
-    rt_calc = 0.0
-    if cc_val:
-        try:
-            from app.services.road_tax_service import calculate_road_tax
-            clean_cc = int(re.sub(r"[^\d]", "", str(cc_val)))
-            rt_calc = calculate_road_tax(
-                cc=clean_cc,
-                vehicle_type=resolved_vtype,
-                owner_type=entity_type,
-                jurisdiction="West Malaysia",
-                db=db,
-            )
-        except Exception:
-            rt_calc = 0.0
-    fields["roadtax"] = {"value": f"{rt_calc:.2f}" if rt_calc > 0 else "", "status": "ready", "message": ""}
-
-    if "service_fee" not in gemini_res or not gemini_res.get("service_fee"):
-        fields["service_fee"] = {"value": "", "status": "ready", "message": ""}
-
-    # Period
-    start_d = str(gemini_res.get("cover_start_date") or "").strip()
-    end_d = str(gemini_res.get("cover_end_date") or "").strip()
-    if start_d and end_d:
-        fields["cover_period"] = {"value": f"{start_d} to {end_d}", "status": "ready", "message": ""}
-
-    draft.fields = fields
-
-    from app.services.catalog_review_service import auto_apply_extracted_benefits, initialize_catalog_review
-    from app.models.tables import ExtractionBenefitLine, DraftSourceLineDecision, new_id
-
-    # Sync company if detected — alias-aware so Gemini variants like
-    # "AmGeneral" / "AmGen" / "AM General Insurance Berhad" map to AmAssurance.
-    comp_name = str(gemini_res.get("insurance_company") or "").strip()
-    resolved = resolve_company(comp_name, db_companies)
-    if resolved["status"] == "matched":
-        company = next((c for c in db_companies if c["company_id"] == resolved["company_id"]), None)
-        if company:
-            draft.company_id = company["company_id"]
-            draft.fields["insurance_company"] = {"value": company["name"], "status": "ready", "message": ""}
-            session.detected_company = company["name"]
-
-    # Process extraction benefit lines & candidate mappings
+    existing_ref = (draft.fields or {}).get("quotation_reference") or session.quotation_ref
+    qref = str(existing_ref.get("value") if isinstance(existing_ref, dict) else existing_ref or "") or session.quotation_ref or ""
     extraction = db.scalar(select(ExtractionRecord).where(ExtractionRecord.uploaded_file_id == draft.uploaded_file_id))
-    if extraction:
-        candidates = dict(extraction.candidates or {})
-        if gemini_res.get("detected_packs"):
-            candidates["detected_packs"] = gemini_res["detected_packs"]
-        extraction.candidates = candidates
+    if extraction is None:
+        extraction = ExtractionRecord(
+            id=new_id(),
+            uploaded_file_id=draft.uploaded_file_id,
+            method_summary=["gemini_multimodal"],
+            raw_text=doc_text or "",
+            ocr_text="",
+            page_text=[],
+            words=[],
+            blocks=[],
+            tables=[],
+            images=[],
+            regions=[],
+            candidates={},
+            benefit_lines=[],
+            company_resolution={},
+            warnings=[],
+            reading_quality="ready",
+        )
+        db.add(extraction)
+        db.flush()
 
-        gemini_benefits = gemini_res.get("detected_benefits") or []
-        for b_item in gemini_benefits:
-            if isinstance(b_item, dict):
-                b_label = str(b_item.get("label") or "").strip()
-                b_val = str(b_item.get("value") or "").strip()
-                b_key = str(b_item.get("concept_key") or "").strip()
-                cov_limit = str(b_item.get("coverage_limit") or "").strip()
-                cost = str(b_item.get("premium_cost") or "").strip()
-                is_optional = bool(b_item.get("is_optional_cover", False))
-                b_raw = str(b_item.get("raw_text") or f"{b_label}: {b_val}").strip()
-            elif isinstance(b_item, str):
-                b_label = b_item.strip()
-                b_val = ""
-                b_key = ""
-                cov_limit = ""
-                cost = ""
-                is_optional = False
-                b_raw = b_label
-            else:
-                continue
-            b_norm = b_label.lower().replace(" ", "-").replace("_", "-")
-            matched_concept = None
-            for c in (db_benefit_concepts or []):
-                c_k = (c.get("concept_key") or c.get("key") or "").lower().replace("_", "-")
-                c_lbl = (c.get("label") or c.get("name") or "").lower()
-                if b_key and c_k and (c_k == b_key.lower().replace("_", "-")):
-                    matched_concept = c
-                    break
-                if c_lbl and (c_lbl == b_label.lower() or c_lbl in b_label.lower() or b_label.lower() in c_lbl):
-                    matched_concept = c
-                    break
-                if b_norm and c_k and (c_k in b_norm or b_norm in c_k):
-                    matched_concept = c
-                    break
-
-            concept_id = (matched_concept.get("concept_id") or matched_concept.get("id")) if matched_concept else None
-            c_key = (matched_concept.get("concept_key") or matched_concept.get("key")) if matched_concept else (b_key or b_norm)
-            limit_val = cov_limit or (b_val if b_val.lower() not in {"included", "standard", "yes", "true", "optional"} else "")
-            typed_val = None
-            if limit_val and (re.search(r"\d", limit_val) or re.search(r"\bunlimited\b", limit_val, re.I)):
-                clean_limit = limit_val.upper().replace("RM", "").replace(",", "").strip()
-                is_pure_money = bool(re.match(r"^\s*(?:RM\s*)?[\d]+(?:,\d{3})*(?:\.\d{1,2})?\s*$", limit_val, re.IGNORECASE))
-                if is_pure_money:
-                    typed_val = {
-                        "type": "money",
-                        "value": clean_limit,
-                        "currency": "MYR",
-                        "display_text": limit_val if limit_val.startswith("RM") else f"RM {limit_val}",
-                    }
-                else:
-                    typed_val = {
-                        "type": "text",
-                        "value": limit_val,
-                        "display_text": limit_val,
-                    }
-
-            line = ExtractionBenefitLine(
-                id=new_id(),
-                extraction_record_id=extraction.id,
-                line_id=f"gemini_re_{new_id()[:8]}",
-                raw_label=b_label,
-                normalized_label=b_label.lower()[:500],
-                page_number=1,
-                section="Optional Covers" if is_optional else "Selected Benefits",
-                source_scope="selected",
-                line_kind="benefit_candidate",
-                inclusion_state="selected",
-                evidence={"value": b_val, "coverage_limit": cov_limit if (re.search(r"\d", cov_limit) or re.search(r"\bunlimited\b", cov_limit, re.I)) else "", "premium_cost": cost},
-                candidate_mappings=[{
-                    "concept_id": concept_id,
-                    "concept_key": c_key,
-                    "name": b_label,
-                    "matched_alias": b_label,
-                    "score": 100,
-                    "match_type": "gemini_multimodal",
-                    "evidence": b_val,
-                    "shaped_description": f"{b_label} ({limit_val})" if limit_val and (re.search(r"\d", limit_val) or re.search(r"\bunlimited\b", limit_val, re.I)) else b_label,
-                    "coverage_limit": limit_val if (re.search(r"\d", limit_val) or re.search(r"\bunlimited\b", limit_val, re.I)) else None,
-                    "premium_cost": cost,
-                    "is_detected": True,
-                }] if concept_id or c_key else [],
-                extracted_value=typed_val,
-            )
-            db.add(line)
-            db.flush()
-            db.add(DraftSourceLineDecision(
-                id=new_id(),
-                draft_id=draft.id,
-                source_line_id=line.id,
-                disposition="unresolved",
-            ))
-
-    initialize_catalog_review(db, draft)
-    auto_apply_extracted_benefits(db, draft)
+    apply_gemini_result(
+        db=db,
+        settings=settings,
+        draft=draft,
+        session=session,
+        uploaded=uploaded,
+        extraction=extraction,
+        gemini_res=gemini_res,
+        quotation_ref=qref,
+        db_companies=db_companies,
+        db_benefit_concepts=db_benefit_concepts,
+        raw_text=doc_text or "",
+    )
     db.commit()
+    fields = draft.fields or {}
 
     pool = get_key_pool()
     stats = pool.get_quota_stats()

@@ -302,12 +302,32 @@ def process_extraction_job(
     for field in fields.values():
         if isinstance(field, dict) and field.get("value") not in (None, ""):
             field["status"] = "ready"
-    fee_setting = db.get(AppSetting, "default_runner_fee")
-    if fee_setting is not None and str(fields.get("service_fee", {}).get("value") or "").strip() == "":
-        try:
-            fields["service_fee"] = {"value": f"{float((fee_setting.value or {}).get('amount', 0)):.2f}", "status": "ready", "message": ""}
-        except (TypeError, ValueError):
-            pass
+
+    from app.extraction.entity_classifier import is_commercial_heavy_vehicle
+    _vtype_w = str((fields.get("vehicle_type") or {}).get("value") or "")
+    _model_w = str((fields.get("car_model") or {}).get("value") or "")
+    _vclass_w = str((fields.get("vehicle_class") or {}).get("value") or "")
+    _cap_w = str((fields.get("engine_cc") or {}).get("value") or "")
+    _raw_w = f"{values.get('raw_text', '')} {values.get('ocr_text', '')}"
+    _is_comm_w = is_commercial_heavy_vehicle(
+        vehicle_type=_vtype_w,
+        car_model=_model_w,
+        vehicle_class=_vclass_w,
+        capacity_str=_cap_w,
+        raw_text=_raw_w,
+    )
+    if _is_comm_w:
+        fields["include_road_tax"] = {"value": "false", "status": "ready", "message": ""}
+        fields["include_runner_fee"] = {"value": "false", "status": "ready", "message": ""}
+        fields["roadtax"] = {"value": "0.00", "status": "ready", "message": ""}
+        fields["service_fee"] = {"value": "0.00", "status": "ready", "message": ""}
+    else:
+        fee_setting = db.get(AppSetting, "default_runner_fee")
+        if fee_setting is not None and str(fields.get("service_fee", {}).get("value") or "").strip() == "":
+            try:
+                fields["service_fee"] = {"value": f"{float((fee_setting.value or {}).get('amount', 0)):.2f}", "status": "ready", "message": ""}
+            except (TypeError, ValueError):
+                pass
 
     # Configurable Third Party Only (TPO) Extra Premium Surcharge
     cov_val = str((fields.get("coverage_type") or {}).get("value") or "").strip().lower()
@@ -522,9 +542,20 @@ def process_extraction_job(
     else:
         effective_veh_no = clean_plate or (f"CHASSIS: {clean_chassis}" if clean_chassis else "UNPLATED")
 
-    # AI Vehicle Brand & Model Simplification Job
+    # AI Vehicle Brand & Model Simplification Job (uses Call 1 clean name or deterministic clean — zero extra HTTP call)
     from app.services.vehicle_simplifier_service import simplify_vehicle_name_with_ai
-    simp_brand, simp_model, simp_combined = simplify_vehicle_name_with_ai(raw_brand, raw_model)
+    _cand_clean_list = (values.get("candidates") or {}).get("clean_vehicle_name") or []
+    _gemini_clean_name = (
+        str(_cand_clean_list[0].get("value") or "").strip()
+        if _cand_clean_list and isinstance(_cand_clean_list[0], dict)
+        else ""
+    )
+    simp_brand, simp_model, simp_combined = simplify_vehicle_name_with_ai(
+        raw_brand,
+        raw_model,
+        gemini_clean_name=_gemini_clean_name or None,
+        allow_live_ai=False,
+    )
     effective_brand = simp_brand or raw_brand or None
     effective_model = simp_model or raw_model or None
 
@@ -570,7 +601,15 @@ def process_extraction_job(
         page_count=doc_page_count,
     )
 
-    curr_opts = draft.display_options or {}
+    curr_opts = dict(draft.display_options or {})
+    if str((fields.get("include_road_tax") or {}).get("value") or "").lower() == "false" or is_commercial_heavy_vehicle(
+        vehicle_type=str((fields.get("vehicle_type") or {}).get("value") or ""),
+        car_model=effective_model,
+        capacity_str=str((fields.get("engine_cc") or {}).get("value") or ""),
+        raw_text=raw_doc_text,
+    ):
+        curr_opts.setdefault("include_road_tax", False)
+        curr_opts.setdefault("include_runner_fee", False)
     is_sandbox_test = bool(getattr(session, "is_test", False))
 
     if is_sandbox_test:

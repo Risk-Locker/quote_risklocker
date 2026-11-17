@@ -105,12 +105,22 @@ def audit_and_reconcile_draft(
                 reconciled["client_type"] = {"value": "Private", "status": "ready"}
 
     # 2. Commercial Vehicle / Lorry Check
+    from app.extraction.entity_classifier import is_commercial_heavy_vehicle
     has_lorry_keyword = bool(LORRY_INDICATORS.search(combined_evidence))
-    has_weight_capacity = "KG" in capacity.upper() or "BDM" in combined_evidence or "BTM" in combined_evidence
-    is_commercial_lorry = has_lorry_keyword or has_weight_capacity or curr_vtype.lower() in ("lorry", "commercialvehicle")
+    has_weight_capacity = bool(re.search(r"\b(?:KG|TON(?:S|NES?)?|BDM|BTM)\b", combined_evidence, re.IGNORECASE))
+    is_commercial_lorry = (
+        has_lorry_keyword
+        or has_weight_capacity
+        or is_commercial_heavy_vehicle(
+            vehicle_type=curr_vtype,
+            car_model=f"{brand} {model}".strip(),
+            capacity_str=capacity,
+            raw_text=raw_text,
+        )
+    )
 
     if is_commercial_lorry:
-        if curr_vtype != "Lorry":
+        if curr_vtype not in {"Lorry", "EVCommercial"}:
             _set_field(
                 reconciled,
                 "vehicle_type",
@@ -118,6 +128,11 @@ def audit_and_reconcile_draft(
                 "Referee Fact-Check: Vehicle model / specification indicates commercial goods vehicle / lorry",
                 notices,
             )
+
+        reconciled["include_road_tax"] = {"value": "false", "status": "ready"}
+        reconciled["include_runner_fee"] = {"value": "false", "status": "ready"}
+        reconciled["roadtax"] = {"value": "0.00", "status": "ready"}
+        reconciled["service_fee"] = {"value": "0.00", "status": "ready"}
 
         # 3. Contradiction Resolution: A commercial lorry cannot be 'Private Car'
         product_upper = curr_product.upper()

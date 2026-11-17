@@ -99,11 +99,34 @@ GEMINI_EXTRACTION_SCHEMA = {
         },
         "car_brand": {
             "type": "string",
-            "description": "Vehicle make/manufacturer (e.g. 'PERODUA', 'PROTON', 'HONDA', 'TOYOTA', 'MAZDA', 'MERCEDES-BENZ', 'BMW').",
+            "description": "Vehicle make/manufacturer (e.g. 'PERODUA', 'PROTON', 'HONDA', 'TOYOTA', 'MAZDA', 'MERCEDES-BENZ', 'BMW', 'BYD', 'SANY', 'SHACMAN', 'ISUZU', 'HINO').",
         },
         "car_model": {
             "type": "string",
-            "description": "Complete vehicle model including make/brand prefix in canonical format (e.g. 'TESLA MODEL 3 PREMIUM RWD (ENHANCED AUTOPILOT)', 'PERODUA ATIVA AV MY21 D55L 4D WAGON', 'BMW M3'). CAR MODEL SIMPLY MEANS: CAR BRAND + CAR MODEL. If Make is listed separately as 'BMW' and Model is 'BMW M3', do not duplicate Make (result is 'BMW M3'). If Make is 'TESLA' and Model is 'MODEL 3 ...', prepend Make to get 'TESLA MODEL 3 ...'. If text was truncated at table margins (such as 'AUTOPILO' or 'AUTOMATI'), reconstruct the full word ('AUTOPILOT', 'AUTOMATIC') and close any open parentheses.",
+            "description": "Complete vehicle model including make/brand prefix in canonical format (e.g. 'TESLA MODEL 3 PREMIUM RWD', 'PERODUA ATIVA AV', 'BMW M3', 'MERCEDES-BENZ S 400 L', 'SANY', 'BYD DOLPHIN STANDARD'). CAR MODEL SIMPLY MEANS: CAR BRAND + CAR MODEL. Strip PDF placeholder filler like 'OTHER COMMERCIAL MAKE' or 'ALL MODELS (COMMERCIAL)'. If Make is listed separately as 'BMW' and Model is 'BMW M3', do not duplicate Make. If text was truncated at table margins (such as 'AUTOPILO' or 'AUTOMATI'), reconstruct the full word.",
+        },
+        "clean_vehicle_name": {
+            "type": "string",
+            "description": "Concise, human-friendly canonical vehicle make and model name with registration filler removed ('OTHER COMMERCIAL MAKE', 'ALL MODELS (COMMERCIAL)', '(CKD)', '(CBU)', internal chassis codes like 'W222'/'F30', transmission noise). Preserve trims like 'S 400', 'G 350', '330i M Sport', 'H3000', 'NKR55UEEH' (e.g. 'SANY', 'Mercedes-Benz S 400 L Hybrid', 'BYD Dolphin Standard', 'Isuzu NKR55UEEH').",
+        },
+        "vehicle_type": {
+            "type": "string",
+            "enum": ["Car", "NonSaloonCar", "CompanyCar", "Lorry", "Motorcycle", "EVSaloonCar", "EVNonSaloonCar", "EVMotorcycle", "EVCommercial"],
+            "description": "Authoritative Malaysian motor classification. Use 'Lorry' (or 'EVCommercial' if electric) for ANY lorry, truck, prime mover, trailer, concrete mixer, crane, tipper, commercial van, bus, 'A'/'C' Permit Goods Vehicle, or commercial make (SANY, SHACMAN, HOHAN, SINOTRUK, FAW, ISUZU NKR/NPR/ELF, HINO, FUSO, SCANIA, UD TRUCKS). Use 'EVSaloonCar'/'EVNonSaloonCar'/'EVMotorcycle' for EVs. Use 'CompanyCar' ONLY for corporate passenger sedans.",
+        },
+        "vehicle_class": {
+            "type": "string",
+            "description": "Regulatory vehicle class / permit description from the quotation or real-world type (e.g. 'Private Car', \"'A' Permit Goods Vehicle\", \"'C' Permit Goods Vehicle\", 'Concrete Mixer Truck', 'Commercial Lorry', 'SUV / MPV', 'EV Passenger Car', 'Motorcycle').",
+        },
+        "powertrain": {
+            "type": "string",
+            "enum": ["ICE", "EV", "Hybrid"],
+            "description": "Propulsion type identified from make/model and motor output: 'EV' for pure electric vehicles (BYD, Tesla, Ora, Zeekr, Deepal, Volvo EX30, Neta, Proton e.MAS, or kW/W ratings), 'Hybrid' for hybrid trims, 'ICE' for petrol/diesel combustion engines or heavy lorries.",
+        },
+        "capacity_unit": {
+            "type": "string",
+            "enum": ["CC", "kW", "W", "KG", "TON"],
+            "description": "Exact unit for capacity/engine_cc: 'CC' for combustion engines (cars/motorcycles/light vans), 'kW' or 'W' for Electric Vehicles (NEVER CC!), 'KG' or 'TON' for Commercial Goods/Lorry weight capacities (BDM/BTM, e.g. '12000 KG', '11 TON' — NEVER CC and NEVER kW!).",
         },
         "vehicle_year": {
             "type": "string",
@@ -111,7 +134,7 @@ GEMINI_EXTRACTION_SCHEMA = {
         },
         "engine_cc": {
             "type": "string",
-            "description": "Engine capacity or electric motor power. For standard combustion engine cars, extract capacity in CC (e.g. '1495 CC' or '1500'). For electric vehicles (EV), extract motor power in kW or W (e.g. '150 kW' or '150000 W'). If given in kW or W, preserve the unit.",
+            "description": "Engine capacity, electric motor power, or commercial laden weight with unit preserved. Combustion cars/motorcycles: CC (e.g. '1495 CC'). EVs: kW or W (e.g. '150 kW' or '70000 W' — NEVER '70000 CC'). Commercial trucks/lorries: KG or TON (e.g. '12000 KG' or '11 TON' — NEVER '12000 CC' or '11 kW'). Never copy chassis, serial, or policy ID numbers here.",
         },
         "chassis_no": {
             "type": "string",
@@ -375,8 +398,11 @@ Extract accurate, grounded JSON data matching the provided schema from the quota
 2. **COVERAGE TYPE**:
    - MUST be normalized to 'Comprehensive', 'Third Party Fire & Theft', or 'Third Party'.
    - NEVER output 'Jenis Perlindungan' (which is simply the Malay translation of 'Cover Type').
-3. **VEHICLE MAKE & MODEL**:
-   - Extract the COMPLETE vehicle make, model, variant, and transmission (e.g. 'PERODUA ATIVA AV MY21 D55L 4D WAGON 1 SP AUTOMATIC (CVT)'). Do NOT truncate to a single word.
+3. **VEHICLE MAKE, MODEL, CLASS & COMMERCIAL/EV INTELLIGENCE**:
+   - Extract the COMPLETE vehicle make and model in `car_model`, and provide a clean human-readable `clean_vehicle_name` stripping PDF placeholder filler (`OTHER COMMERCIAL MAKE`, `ALL MODELS (COMMERCIAL)`, `(CKD)`, internal chassis codes like `W222`/`F30`). NEVER drop meaningful model trims (`S 400`, `G 350`, `320i M-Sport`, `H3000`, `NKR55UEEH`).
+   - Identify `vehicle_type`, `vehicle_class`, and `powertrain` from BOTH PDF schedule clues AND real-world automotive knowledge:
+     - **Commercial Goods / Heavy Vehicles (`Lorry` or `EVCommercial`)**: Any vehicle showing `'A' PERMIT`, `'C' PERMIT`, `GOODS VEHICLE`, `KENDERAAN PERDAGANGAN`, `BDM`/`BTM`, concrete mixer, tipper, crane, prime mover, trailer, commercial van, bus, OR commercial OEM makes (`SANY`, `SHACMAN`, `HOHAN`, `SINOTRUK`, `HOWO`, `FAW`, `CAMC`, `DONGFENG`, `ISUZU NKR/NPR/NHR/ELF/FVR`, `HINO`, `FUSO`, `CANTER`, `SCANIA`, `UD TRUCKS`, `DAF`, `MAN`) MUST be classified `vehicle_type: "Lorry"` (never `'Car'` or `'CompanyCar'`).
+     - **Electric Vehicles (`EVSaloonCar` / `EVNonSaloonCar` / `EVMotorcycle`)**: Pure EVs (BYD Dolphin/Atto 3/Seal/M6, Tesla Model 3/Y, Ora Good Cat, Volvo EX30, Zeekr, Deepal, Proton e.MAS 5/7, Neta V/X, Ioniq 5/6) MUST set `powertrain: "EV"`.
 4. **NCD / NCB**:
    - Look for 'NCD', 'NCB', 'No Claim Bonus', 'No Claim Discount', 'NCB (25.00%)'. Output the percentage value (e.g. '25.00').
 5. **INSURANCE COMPANY**:
@@ -409,9 +435,11 @@ Extract accurate, grounded JSON data matching the provided schema from the quota
    - DO NOT extract underwriter reference numbers, quote numbers, or ref numbers from the document. Quotation reference is strictly an internal Risklocker system sequence.
 13. **ROAD TAX**:
    - NEVER extract road tax from the quotation document under any circumstances. Road tax is an internal, dynamically computed government tariff.
-14. **ENGINE CAPACITY / MOTOR OUTPUT**:
-   - For petrol/diesel vehicles, extract capacity in CC (e.g. '1495 CC' or '1500').
-   - For Electric Vehicles (EV), extract the electric motor power in kW or W (e.g. '150 kW', '150000 W', '50 kW'). If quoted with kW or W, preserve the unit.
+14. **ENGINE CAPACITY, WEIGHT (KG/TON) & EV MOTOR OUTPUT (PRESERVE EXACT UNIT)**:
+   - Set `capacity_unit` strictly to `'CC'`, `'kW'`, `'W'`, `'KG'`, or `'TON'` matching the real physical quantity in `engine_cc`.
+   - **Commercial Trucks / Lorries**: ALWAYS preserve weight units (`KG` or `TON`, e.g. `'12000 KG'`, `'11 TON'`). NEVER rewrite `12000 KG` as `12000 CC`, and NEVER coerce commercial tonnage (`2 TON`, `11 TON`) into EV `kW`!
+   - **Electric Vehicles (EV)**: ALWAYS output motor power in `kW` or `W` (e.g. `'70 kW'`, `'70000 W'`, `'150 kW'`). NEVER classify `70000 W` as `'70000 CC'`.
+   - **Combustion Passenger Cars**: Typical engine displacement is `600 CC` to `7000 CC`. NEVER copy chassis numbers, policy numbers, or account IDs into `engine_cc`.
 
 {grounding_context}
 Return strictly structured JSON adhering to the provided schema.

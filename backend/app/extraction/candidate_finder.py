@@ -313,12 +313,25 @@ def _add(results: dict[str, list[CandidateValue]], field: str, value: str | None
                     break
             cleaned = matched_cov or ("Comprehensive" if not cleaned or "PERLINDUNGAN" in upper_c else cleaned)
     if field == "engine_cc":
-        kw_match = re.search(r"\b\d{1,4}(?:\.\d+)?\s*(?:KW|KILOWATT)\b|\b\d{4,6}\s*(?:W|WATT)\b", cleaned, re.IGNORECASE)
-        if kw_match:
-            cleaned = kw_match.group(0).strip()
+        weight_match = re.search(r"\b\d{1,6}(?:\.\d+)?\s*(?:KG|KILOGRAMS?|TON(?:S|NES?)?|MT)\b", cleaned, re.IGNORECASE)
+        kw_match = re.search(
+            r"\b\d{1,4}(?:\.\d+)?\s*(?:KW|KILOWATT)\b|\b\d{3,6}(?:\.\d+)?\s*(?:W|WATT(?:S)?)\b",
+            cleaned,
+            re.IGNORECASE,
+        )
+        if weight_match:
+            cleaned = re.sub(r"\s+", " ", weight_match.group(0).strip().upper())
+        elif kw_match:
+            cleaned = re.sub(r"\s+", " ", kw_match.group(0).strip())
         else:
-            cc_match = re.search(r"\b\d{2,5}(?:\.\d+)?\b", cleaned)
-            cleaned = cc_match.group(0) if cc_match else cleaned
+            cc_match = re.search(r"\b\d{2,5}(?:\.\d+)?(?:\s*CC)?\b", cleaned, re.IGNORECASE)
+            if cc_match:
+                num_check = re.search(r"\d+(?:\.\d+)?", cc_match.group(0))
+                if num_check and float(num_check.group(0)) > 16_000.0:
+                    return
+                cleaned = cc_match.group(0).strip()
+            else:
+                return
     if field in {"cover_start_date", "cover_end_date", "issue_date", "valid_until"}:
         norm_date = normalize_date(cleaned)
         if not norm_date:
@@ -928,9 +941,10 @@ def _add_messy_compact_text(
                 cov_val = coverage.title()
             _add_static(results, "coverage_type", cov_val, "messy_compact_window", 0.82, coverage, text, page_text)
             break
-    cc_match = re.search(r"(?P<cc>\d{3,5})(?:CC|C\.C|L)", compact)
+    cc_match = re.search(r"(?P<cc>\d{3,5}(?:\.\d+)?)\s*(?P<unit>KG|TON|CC|C\.C|KW|W|L)(?![A-Z])", compact)
     if cc_match:
-        _add_static(results, "engine_cc", cc_match.group("cc"), "messy_compact_window", 0.78, cc_match.group(0), text, page_text)
+        unit_tok = cc_match.group("unit").upper().replace("C.C", "CC")
+        _add_static(results, "engine_cc", f"{cc_match.group('cc')} {unit_tok}", "messy_compact_window", 0.78, cc_match.group(0), text, page_text)
 
 
 def _add_amgen_profile(text: str, page_text: list[dict], results: dict[str, list[CandidateValue]]) -> None:
@@ -945,7 +959,7 @@ def _add_amgen_profile(text: str, page_text: list[dict], results: dict[str, list
         r"(?P<name>[A-Z][A-Z ]{2,80}?)\s+"
         r"(?P<issue>\d{1,2}[/-]\d{1,2}[/-]\d{4})\s+"
         r"(?P<class>.+?)\s+"
-        r"(?P<cc>\d{3,5}\s*CC)\s+"
+        r"(?P<cc>\d{1,5}(?:\.\d+)?\s*(?:CC|KG|TON(?:S|NES?)?|KW|W))\s+"
         r"(?P<vehicle>[A-Z]{1,3}\d{1,4}[A-Z]?)\b",
         text,
         re.IGNORECASE | re.DOTALL,

@@ -126,11 +126,15 @@ export function ReviewHeaderCard({
     setRedetectDialogOpen(false);
     setRedetecting(true);
     try {
-      const res = await api<{ success: boolean; message?: string }>(`/sessions/${workspace.session_id}/rescan`, {
-        method: "POST",
-        body: JSON.stringify({ mode: "in_place", engine: "auto" }),
-      });
-      toast(res?.message || "Re-detection completed.", "success");
+      const res = await api<{ success: boolean; message?: string; changed_fields?: string[] }>(
+        `/sessions/${workspace.session_id}/rescan`,
+        {
+          method: "POST",
+          body: JSON.stringify({ mode: "in_place", engine: "deep" }),
+        }
+      );
+      const changedSuffix = res?.changed_fields?.length ? ` (${res.changed_fields.length} field(s) updated)` : "";
+      toast((res?.message || "Deep Re-detection completed.") + changedSuffix, "success");
       window.location.reload();
     } catch (err: any) {
       toast("Failed to re-detect: " + (err?.message || "Server error"), "error");
@@ -367,8 +371,8 @@ export function ReviewHeaderCard({
       <Dialog
         open={redetectDialogOpen}
         onOpenChange={setRedetectDialogOpen}
-        title="Re-detect Quotation from Source PDF?"
-        description="This will re-analyze the original PDF to refresh extracted fields and benefit lines."
+        title="Deep Re-detect Quotation from Source PDF?"
+        description="Runs multi-pass native PDF + Gemini Vision extraction and Malaysian domain verification (preserving KG/kW/CC units and commercial fee rules)."
         onConfirm={confirmRedetect}
         confirmLabel="Re-detect Now"
         confirmVariant="primary"

@@ -93,10 +93,30 @@ def validate_ncd(value: str | None) -> tuple[bool, str | None]:
 def validate_engine_cc(value: str | None) -> tuple[bool, str | None]:
     if value in (None, ""):
         return True, None
-    match = re.search(r"\d+", value)
+    s = str(value).strip()
+    lower = s.lower()
+    match = re.search(r"\d+(?:\.\d+)?", s)
     if not match:
         return False, "Please check this value."
-    return (int(match.group(0)) > 0, None)
+    try:
+        num = float(match.group(0))
+    except ValueError:
+        return False, "Please check this value."
+    if num <= 0:
+        return False, "Please check this value."
+    # Commercial weights (KG / TON): plausible up to 100,000 KG / 100 TON
+    if re.search(r"\b(?:kg|kilograms?|ton(?:s|nes?)?|mt)\b", lower):
+        cap_max = 100.0 if re.search(r"\b(?:ton(?:s|nes?)?|mt)\b", lower) else 100_000.0
+        return (num <= cap_max, None if num <= cap_max else "Please check commercial weight value.")
+    # Electric Vehicles (kW / W)
+    if re.search(r"(?<![a-z])(?:k?w|kilowatt|watt(?:s)?)(?![a-z])", lower):
+        if "kw" in lower or "kilowatt" in lower:
+            return (num <= 2_500.0, None if num <= 2_500.0 else "Please check EV power (kW).")
+        return (num <= 2_500_000.0, None if num <= 2_500_000.0 else "Please check EV power (W).")
+    # Standard combustion engine CC: plausible range <= 16,000 CC (lorries <= 16L, cars <= 8L)
+    if num > 16_000.0:
+        return False, "Implausible engine capacity (likely serial/ID number)."
+    return True, None
 
 
 def normalize_valuation_type(value: str | None) -> str:

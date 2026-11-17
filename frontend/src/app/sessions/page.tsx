@@ -197,13 +197,14 @@ export default function SessionsPage() {
   const handleRedetectSession = async (sessionId: string) => {
     setRedetectingId(sessionId);
     try {
-      const res = await api<{ success: boolean; fields_count?: number }>(`/sessions/${sessionId}/rescan`, {
+      const res = await api<{ success: boolean; fields_count?: number; changed_fields?: string[] }>(`/sessions/${sessionId}/rescan`, {
         method: "POST",
-        body: JSON.stringify({ mode: "in_place", engine: "auto" }),
+        body: JSON.stringify({ mode: "in_place", engine: "deep" }),
       });
+      const updatedNote = res?.changed_fields?.length ? `, ${res.changed_fields.length} changed` : "";
       toast(
         res?.success
-          ? `Re-detected quotation (${res.fields_count || 0} fields refreshed).`
+          ? `Deep re-detected quotation (${res.fields_count || 0} fields refreshed${updatedNote}).`
           : "Re-detection completed.",
         "success"
       );

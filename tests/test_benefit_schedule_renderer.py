@@ -56,7 +56,8 @@ def test_render_standalone_benefit_schedule_html():
     assert "Optional Add-On Upgrades Reference" in html
     assert "RM 8,000.00" in html
     assert "Sheet 1/" in html
-    assert "RiskLocker" in html
+    assert "RISKLOCKER SDN. BHD." in html
+    assert "202301041962(1535879-U)" in html
 
 
 def test_render_design2_combined_via_display_options():

@@ -556,7 +556,7 @@ class CompanyMatrixDiffRequest(BaseModel):
 class SessionRescanRequest(StrictRequest):
     model_config = ConfigDict(extra="ignore")
     mode: Literal["in_place", "new_session"] = "in_place"
-    engine: Literal["auto", "native", "ai"] = "auto"
+    engine: Literal["auto", "native", "ai", "deep"] = "auto"
 
 
 # --- Business: Benefit Card Presets ---

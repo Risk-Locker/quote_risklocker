@@ -46,6 +46,15 @@ def normalize_vehicle_model_text(car_model: str | None, car_brand: str | None = 
     # Clean leading/trailing punctuation like colons, hyphens
     text = re.sub(r"^[\s:\-]+", "", text).strip()
 
+    # Strip PDF schedule placeholder filler without damaging model trims (e.g. 'S 400', 'G 350')
+    text = re.sub(
+        r"\b(?:OTHER\s+COMMERCIAL\s+MAKE|ALL\s+MODELS\s*\(?COMMERCIAL\)?|COMMERCIAL\s+MAKE|UNKNOWN\s+MODEL|NOT\s+SPECIFIED)\b",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"\s+", " ", text).strip()
+
     # Repair known cell-boundary truncations
     for truncated, full in COMMON_TRUNCATIONS.items():
         pattern = r"\b" + re.escape(truncated) + r"(?=[^a-zA-Z]|$)"
@@ -57,12 +66,14 @@ def normalize_vehicle_model_text(car_model: str | None, car_brand: str | None = 
     if open_p > close_p:
         text = text + (")" * (open_p - close_p))
 
-    # Deduplicate adjacent duplicate words (e.g. 'BMW BMW M3' -> 'BMW M3')
-    parts = re.split(r"[\s]+", text)
+    # Deduplicate adjacent duplicate words and collapse repeated standalone trailing brand token
+    parts = [p for p in re.split(r"[\s]+", text) if p]
     deduped = []
     for p in parts:
-        if p and (not deduped or deduped[-1].upper() != p.upper()):
+        if not deduped or deduped[-1].upper() != p.upper():
             deduped.append(p)
+    if len(deduped) >= 2 and deduped[0].upper() == deduped[-1].upper():
+        deduped = deduped[:-1]
     text = " ".join(deduped)
 
     # Prepend brand if not already present
@@ -70,7 +81,7 @@ def normalize_vehicle_model_text(car_model: str | None, car_brand: str | None = 
     if brand:
         brand_tokens = [b for b in re.split(r"[\s\-]+", brand) if b]
         first_brand_token = brand_tokens[0].upper() if brand_tokens else ""
-        first_model_token = parts[0].upper() if parts else ""
+        first_model_token = deduped[0].upper() if deduped else ""
 
         text_upper = text.upper()
         brand_upper = brand.upper()
@@ -94,7 +105,197 @@ def normalize_vehicle_model_text(car_model: str | None, car_brand: str | None = 
     return text.strip()
 
 
-def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list[dict] | None = None) -> tuple[dict, list[str], str]:
+def _cand_first_value(candidates: dict[str, list[CandidateValue]], key: str) -> str:
+    items = candidates.get(key) or []
+    return str(items[0].value).strip() if items and getattr(items[0], "value", None) is not None else ""
+
+
+def reconcile_vehicle_capacity_and_fees(
+    fields: dict[str, Any],
+    *,
+    candidates: dict[str, list[CandidateValue]] | None = None,
+    gemini_hints: dict[str, Any] | None = None,
+    raw_text: str = "",
+    db: Any | None = None,
+) -> tuple[str, str, bool, bool]:
+    """Normalize vehicle model, classify entity/vehicle type, preserve KG/TON/kW/W/CC units, and apply commercial fee defaults.
+
+    Returns (entity_type, resolved_vehicle_type, include_road_tax, include_runner_fee).
+    """
+    from app.extraction.entity_classifier import (
+        classify_client_entity,
+        default_fee_inclusions,
+        is_commercial_heavy_vehicle,
+    )
+    from app.services.road_tax_service import calculate_road_tax
+    from app.services.vehicle_catalog_service import infer_vehicle_cc_and_type
+
+    cands = candidates or {}
+    hints = gemini_hints or {}
+
+    def _hint(key: str) -> str:
+        val = hints.get(key)
+        if val is not None and str(val).strip():
+            return str(val).strip()
+        return _cand_first_value(cands, key)
+
+    car_brand_val = (fields.get("car_brand") or {}).get("value")
+    clean_name_cand = _hint("clean_vehicle_name")
+    car_model_val = clean_name_cand or (fields.get("car_model") or {}).get("value")
+    if car_model_val:
+        car_model_val = normalize_vehicle_model_text(car_model_val, car_brand_val)
+        fields["car_model"] = {"value": car_model_val, "status": "ready", "warnings": [], "message": ""}
+
+    inferred_cc, inferred_type = infer_vehicle_cc_and_type(car_model_val)
+    cc_val = (fields.get("engine_cc") or {}).get("value")
+    cust_name = (fields.get("customer_name") or {}).get("value") or (fields.get("insured_name") or {}).get("value")
+    doc_no = (fields.get("ic_or_brn") or {}).get("value")
+    ai_type = (fields.get("client_type") or {}).get("value")
+    vclass_cand = _hint("vehicle_class") or str((fields.get("vehicle_class") or {}).get("value") or "").strip()
+    powertrain_cand = _hint("powertrain")
+    cap_unit_cand = _hint("capacity_unit").lower()
+    cand_vtype = _hint("vehicle_type")
+    curr_vtype = cand_vtype or (fields.get("vehicle_type") or {}).get("value") or inferred_type or "Car"
+
+    entity_type, resolved_vtype = classify_client_entity(
+        customer_name=cust_name,
+        ic_or_brn=doc_no,
+        ai_client_type=ai_type,
+        current_vehicle_type=curr_vtype,
+        car_model=car_model_val,
+        car_brand=car_brand_val,
+        capacity_str=cc_val,
+        vehicle_class=vclass_cand,
+        powertrain=powertrain_cand,
+        raw_text=raw_text,
+    )
+
+    fields["client_type"] = {"value": entity_type, "status": "ready", "warnings": [], "message": ""}
+    fields["vehicle_type"] = {"value": resolved_vtype, "status": "ready", "warnings": [], "message": ""}
+
+    effective_cc: float | int | str | None = None
+    raw_cc_str = str(cc_val or "").strip().lower()
+    has_kg_token = bool(re.search(r"\b(?:kg|kilograms?|kgm)\b", raw_cc_str)) or cap_unit_cand == "kg"
+    has_ton_token = bool(re.search(r"\b(?:ton(?:s|nes?)?|mt)\b", raw_cc_str)) or cap_unit_cand == "ton"
+    has_kw_token = bool(re.search(r"\b(?:kw|kilowatt)\b", raw_cc_str)) or cap_unit_cand == "kw"
+    has_watt_token = (bool(re.search(r"(?<![a-z])w(?:att(?:s)?)?(?![a-z])", raw_cc_str)) or cap_unit_cand == "w") and not has_kw_token
+    is_comm_heavy = is_commercial_heavy_vehicle(
+        vehicle_type=resolved_vtype,
+        car_model=f"{car_brand_val or ''} {car_model_val or ''}".strip(),
+        vehicle_class=vclass_cand,
+        capacity_str=str(cc_val or ""),
+        raw_text=raw_text,
+    )
+    is_ev_vehicle = (
+        not is_comm_heavy
+        and (
+            resolved_vtype in {"EVSaloonCar", "EVNonSaloonCar", "EVMotorcycle"}
+            or powertrain_cand.upper() == "EV"
+            or has_kw_token
+            or has_watt_token
+        )
+    ) or (resolved_vtype == "EVCommercial")
+
+    if cc_val:
+        cleaned_cc_str = re.sub(r"[^\d.]", "", str(cc_val)).strip()
+        if cleaned_cc_str:
+            try:
+                num_val = float(cleaned_cc_str)
+                if num_val > 0 and (has_kg_token or has_ton_token):
+                    if has_ton_token and num_val <= 150.0:
+                        disp_ton = f"{int(num_val)}" if num_val == int(num_val) else f"{num_val:.1f}"
+                        effective_cc = f"{disp_ton} TON"
+                        fields["engine_cc"] = {"value": f"{disp_ton} TON", "status": "ready", "warnings": [], "message": ""}
+                    elif num_val <= 100_000.0:
+                        weight_kg = round(num_val)
+                        effective_cc = f"{weight_kg} KG"
+                        fields["engine_cc"] = {"value": f"{weight_kg} KG", "status": "ready", "warnings": [], "message": ""}
+                    else:
+                        fields["engine_cc"] = {"value": "", "status": "check_needed", "warnings": [], "message": "Please check this value."}
+                    if not is_ev_vehicle:
+                        resolved_vtype = "Lorry"
+                        fields["vehicle_type"]["value"] = "Lorry"
+                elif num_val > 0 and (has_kw_token or has_watt_token or is_ev_vehicle):
+                    is_ev_vehicle = True
+                    kw = (num_val / 1000.0) if (has_watt_token or (not has_kw_token and num_val >= 1000.0)) else num_val
+                    if 0 < kw <= 2_500.0:
+                        effective_cc = f"{int(kw) if kw == int(kw) else round(kw, 1)} kW"
+                        disp_kw = f"{int(kw)}" if kw == int(kw) else f"{kw:.1f}"
+                        fields["engine_cc"] = {"value": f"{disp_kw} kW", "status": "ready", "warnings": [], "message": ""}
+                    if not str(fields["vehicle_type"].get("value", "")).lower().startswith("ev"):
+                        curr_vt = str(fields["vehicle_type"].get("value", "")).lower()
+                        if "motor" in curr_vt or "bike" in curr_vt:
+                            resolved_vtype = "EVMotorcycle"
+                        elif is_comm_heavy:
+                            resolved_vtype = "EVCommercial"
+                        else:
+                            resolved_vtype = "EVSaloonCar"
+                        fields["vehicle_type"]["value"] = resolved_vtype
+                elif is_comm_heavy:
+                    if num_val > 16_000.0:
+                        effective_cc = None
+                        fields["engine_cc"] = {"value": "", "status": "check_needed", "warnings": [], "message": "Please verify engine capacity or BDM weight."}
+                    elif 0.5 <= num_val < 100.0:
+                        disp_ton = f"{int(num_val)}" if num_val == int(num_val) else f"{num_val:.1f}"
+                        effective_cc = f"{disp_ton} TON"
+                        fields["engine_cc"] = {"value": f"{disp_ton} TON", "status": "ready", "warnings": [], "message": ""}
+                    elif num_val >= 100.0:
+                        effective_cc = round(num_val)
+                        fields["engine_cc"] = {"value": f"{effective_cc} CC", "status": "ready", "warnings": [], "message": ""}
+                else:
+                    if 0.5 <= num_val <= 8.0:
+                        inferred_from_litres = {1.0: 998, 1.2: 1197, 1.3: 1329, 1.5: 1496, 1.6: 1598, 1.8: 1798, 2.0: 1998, 2.5: 2494, 3.0: 2998}
+                        effective_cc = inferred_from_litres.get(round(num_val, 1), round(num_val * 1000))
+                    elif 8.0 < num_val <= 8_000.0:
+                        effective_cc = round(num_val)
+                    else:
+                        effective_cc = None
+                        fields["engine_cc"] = {"value": "", "status": "check_needed", "warnings": [], "message": "Please check this value."}
+                    if effective_cc:
+                        fields["engine_cc"] = {"value": f"{effective_cc} CC", "status": "ready", "warnings": [], "message": ""}
+            except (ValueError, TypeError):
+                pass
+
+    if not effective_cc and (fields.get("engine_cc") or {}).get("status") != "check_needed":
+        effective_cc = inferred_cc
+        if effective_cc and not (fields.get("engine_cc") or {}).get("value"):
+            fields["engine_cc"] = {"value": f"{effective_cc} CC", "status": "ready", "warnings": [], "message": ""}
+
+    inc_rt, inc_rf = default_fee_inclusions(
+        vehicle_type=resolved_vtype,
+        car_model=car_model_val,
+        vehicle_class=vclass_cand,
+        capacity_str=str((fields.get("engine_cc") or {}).get("value") or cc_val or ""),
+        raw_text=raw_text,
+    )
+    fields["include_road_tax"] = {"value": "true" if inc_rt else "false", "status": "ready", "warnings": [], "message": ""}
+    fields["include_runner_fee"] = {"value": "true" if inc_rf else "false", "status": "ready", "warnings": [], "message": ""}
+
+    if not inc_rf:
+        fields["service_fee"] = {"value": "0.00", "status": "ready", "warnings": [], "message": ""}
+    elif not (fields.get("service_fee") or {}).get("value"):
+        fields["service_fee"] = {"value": "", "status": "ready", "warnings": [], "message": ""}
+
+    auto_rt = 0.0
+    if inc_rt and effective_cc:
+        auto_rt = calculate_road_tax(
+            cc=effective_cc,
+            vehicle_type=resolved_vtype,
+            owner_type=entity_type,
+            jurisdiction="West Malaysia",
+            db=db,
+        )
+
+    roadtax_val_str = "0.00" if not inc_rt else (f"{auto_rt:.2f}" if auto_rt > 0 else ("0.00" if (fields.get("engine_cc") or {}).get("status") == "check_needed" else ""))
+    fields["roadtax"] = {"value": roadtax_val_str, "status": "ready", "warnings": [], "message": ""}
+    return entity_type, resolved_vtype, inc_rt, inc_rf
+
+
+def build_draft(
+    candidates: dict[str, list[CandidateValue]],
+    benefit_lines: list[dict] | None = None,
+    raw_text: str = "",
+) -> tuple[dict, list[str], str]:
     selections = select_all(candidates, DRAFT_FIELDS)
     fields = {field: selection.to_draft_field() for field, selection in selections.items()}
     fields["insurance_type"]["value"] = fields["insurance_type"]["value"] or "Motor"
@@ -318,119 +519,7 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
         fields["valuation_type"]["warnings"] = []
         fields["valuation_type"]["message"] = ""
 
-    # Infer vehicle CC and vehicle type
-    from app.services.vehicle_catalog_service import infer_vehicle_cc_and_type
-    from app.services.road_tax_service import calculate_road_tax
-
-    car_brand_val = fields.get("car_brand", {}).get("value")
-    car_model_val = fields.get("car_model", {}).get("value")
-    if car_model_val:
-        car_model_val = normalize_vehicle_model_text(car_model_val, car_brand_val)
-        fields["car_model"]["value"] = car_model_val
-    inferred_cc, inferred_type = infer_vehicle_cc_and_type(car_model_val)
-    # Classify customer entity (Private Individual vs Company) and vehicle type
-    from app.extraction.entity_classifier import classify_client_entity
-    cc_val = fields.get("engine_cc", {}).get("value")
-    cust_name = fields.get("customer_name", {}).get("value")
-    doc_no = fields.get("ic_or_brn", {}).get("value")
-    ai_type = fields.get("client_type", {}).get("value")
-    curr_vtype = fields.get("vehicle_type", {}).get("value") or inferred_type or "Car"
-
-    entity_type, resolved_vtype = classify_client_entity(
-        customer_name=cust_name,
-        ic_or_brn=doc_no,
-        ai_client_type=ai_type,
-        current_vehicle_type=curr_vtype,
-        car_model=car_model_val,
-        car_brand=car_brand_val,
-        capacity_str=cc_val,
-    )
-
-    if "client_type" not in fields:
-        fields["client_type"] = {"value": entity_type, "status": "ready", "warnings": [], "message": ""}
-    else:
-        fields["client_type"]["value"] = entity_type
-        fields["client_type"]["status"] = "ready"
-        fields["client_type"]["warnings"] = []
-        fields["client_type"]["message"] = ""
-
-    if "vehicle_type" not in fields:
-        fields["vehicle_type"] = {"value": resolved_vtype, "status": "ready", "warnings": [], "message": ""}
-    else:
-        fields["vehicle_type"]["value"] = resolved_vtype
-        fields["vehicle_type"]["status"] = "ready"
-        fields["vehicle_type"]["warnings"] = []
-        fields["vehicle_type"]["message"] = ""
-
-    # Extract numeric CC or kW safely from raw string
-    effective_cc = None
-    raw_cc_str = str(cc_val or "").strip().lower()
-    has_kw_token = "kw" in raw_cc_str or "watt" in raw_cc_str
-    is_ev_vehicle = resolved_vtype in {"EVSaloonCar", "EVNonSaloonCar", "EVMotorcycle"} or "ev" in resolved_vtype.lower() or has_kw_token
-    if cc_val:
-        cleaned_cc_str = re.sub(r"[^\d.]", "", str(cc_val)).strip()
-        if cleaned_cc_str:
-            try:
-                num_val = float(cleaned_cc_str)
-                # If explicit kW/Watt token, or numeric <= 35.0 with decimal (e.g. 9.4 kW = 9400 Watts), classify as EV
-                if num_val > 0 and (has_kw_token or (num_val <= 35.0 and ("." in cleaned_cc_str or num_val <= 25.0)) or is_ev_vehicle):
-                    is_ev_vehicle = True
-                    # EV: if >= 1000, value is in Watts -> convert to kW (e.g. 9400 W -> 9.4 kW)
-                    kw = (num_val / 1000.0) if num_val >= 1000.0 else num_val
-                    effective_cc = kw
-                    disp_kw = f"{int(kw)}" if kw == int(kw) else f"{kw:.1f}"
-                    if "engine_cc" in fields:
-                        fields["engine_cc"]["value"] = f"{disp_kw} kW"
-                        fields["engine_cc"]["status"] = "ready"
-                    if "vehicle_type" in fields and not str(fields["vehicle_type"].get("value", "")).lower().startswith("ev"):
-                        curr_vt = str(fields["vehicle_type"].get("value", "")).lower()
-                        if "motor" in curr_vt or "bike" in curr_vt:
-                            fields["vehicle_type"]["value"] = "EVMotorcycle"
-                        else:
-                            fields["vehicle_type"]["value"] = "EVSaloonCar"
-                else:
-                    if 0.5 <= num_val <= 8.0:
-                        # Litres format (e.g. 1.0 -> 998, 1.5 -> 1496)
-                        inferred_from_litres = {1.0: 998, 1.2: 1197, 1.3: 1329, 1.5: 1496, 1.6: 1598, 1.8: 1798, 2.0: 1998, 2.5: 2494, 3.0: 2998}
-                        effective_cc = inferred_from_litres.get(round(num_val, 1), round(num_val * 1000))
-                    elif num_val > 8.0:
-                        effective_cc = round(num_val)
-                    if effective_cc and "engine_cc" in fields:
-                        fields["engine_cc"]["value"] = f"{effective_cc} CC"
-                        fields["engine_cc"]["status"] = "ready"
-            except (ValueError, TypeError):
-                pass
-
-    if not effective_cc:
-        effective_cc = inferred_cc
-        if effective_cc and "engine_cc" in fields and not fields["engine_cc"].get("value"):
-            fields["engine_cc"]["value"] = f"{effective_cc} CC"
-            fields["engine_cc"]["status"] = "ready"
-
-    # Service fee / Runner fee: preserve if explicitly extracted from PDF
-    if "service_fee" in fields and not fields["service_fee"].get("value"):
-        fields["service_fee"]["value"] = ""
-        fields["service_fee"]["status"] = "ready"
-        fields["service_fee"]["warnings"] = []
-        fields["service_fee"]["message"] = ""
-
-    # Road tax: NEVER extract or trust raw roadtax from PDF; strictly calculate dynamically
-    auto_rt = 0.0
-    if effective_cc:
-        auto_rt = calculate_road_tax(
-            cc=effective_cc,
-            vehicle_type=resolved_vtype,
-            owner_type=entity_type,
-            jurisdiction="West Malaysia",
-        )
-
-    if "roadtax" not in fields:
-        fields["roadtax"] = {"value": f"{auto_rt:.2f}" if auto_rt > 0 else "", "status": "ready", "warnings": [], "message": ""}
-    else:
-        fields["roadtax"]["value"] = f"{auto_rt:.2f}" if auto_rt > 0 else ""
-        fields["roadtax"]["status"] = "ready"
-        fields["roadtax"]["warnings"] = []
-        fields["roadtax"]["message"] = ""
+    reconcile_vehicle_capacity_and_fees(fields, candidates=candidates, raw_text=raw_text)
 
     # Ensure premium is the net base insurance premium (excluding extras)
     try:
@@ -571,7 +660,7 @@ def build_draft(candidates: dict[str, list[CandidateValue]], benefit_lines: list
 
     # Referee Fact-Checking Pass
     from app.extraction.referee import audit_and_reconcile_draft
-    fields, ref_notices = audit_and_reconcile_draft(fields)
+    fields, ref_notices = audit_and_reconcile_draft(fields, raw_text=raw_text)
     warnings.extend(ref_notices)
 
     check_count = sum(1 for field in fields.values() if field.get("status") == "check_needed")

@@ -57,7 +57,7 @@ from app.storage.supabase import StorageError, SupabaseStorage
 from app.rendering.template_renderer import _balance_benefit_grid_elements, render_quotation_html
 
 
-RENDERER_VERSION = "risklocker-v7.1"
+RENDERER_VERSION = "risklocker-v7.2"
 
 
 def _utcnow() -> datetime:
@@ -448,6 +448,17 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
     round_tot = bool(disp_opts.get("round_total", True))
     inc_rt = disp_opts.get("include_road_tax") if "include_road_tax" in disp_opts else None
     inc_rf = disp_opts.get("include_runner_fee") if "include_runner_fee" in disp_opts else None
+
+    if inc_rt is False:
+        fields["roadtax"] = {"value": "0.00", "status": "ready", "message": ""}
+        fields["road_tax_amount"] = {"value": "0.00", "status": "ready", "message": ""}
+    if inc_rf is False:
+        fields["service_fee"] = {"value": "0.00", "status": "ready", "message": ""}
+        fields["runner_fee"] = {"value": "0.00", "status": "ready", "message": ""}
+
+    total_decision = ((draft.scalar_decisions or {}).get("total_amount") or {}).get("decision")
+    is_manual_total = total_decision == "edit" and bool(_field_text(fields, "total_amount"))
+
     adjusted_total = adjusted_total_text(
         fields,
         extras,
@@ -455,11 +466,22 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
         include_road_tax=inc_rt,
         include_runner_fee=inc_rf,
     )
+    resolved_total = (
+        _field_text(fields, "total_amount")
+        if is_manual_total
+        else (adjusted_total if adjusted_total else _field_text(fields, "total_amount"))
+    )
     fields["total_premium_adjusted"] = {
-        "value": adjusted_total if adjusted_total else _field_text(fields, "total_amount"),
+        "value": resolved_total,
         "status": "ready",
         "message": "",
     }
+    if resolved_total:
+        fields["total_amount"] = {
+            "value": resolved_total,
+            "status": "ready",
+            "message": "",
+        }
     canvas = config.get("canvas") or {}
     raw_elements = canvas.get("elements") or []
     render_ctx = {

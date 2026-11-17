@@ -138,6 +138,9 @@ External chat tools without workspace access should be given this file plus the 
 | `docs/plans/2026-11-17-ux-saving-ledger-and-sandbox-audit-plan.md` | Full UX/Saving/Ledger/Classifier audit, 5-milestone remediation roadmap & 36 verified test PDFs (`samples/`) | Active sprint tasks change or complete |
 | `docs/plans/milestone-1-save-sync-and-api-repairs.md` | Milestone 1: Cross-vehicle sync isolation (`F-01`), `/ledger` & `/comparison` 405 fixes (`F-02`, `F-03`), EV `kW` guard (`F-04a`), & staged save UX (`F-04b`) | Milestone 1 execution |
 | `docs/plans/milestone-2-ledger-ux-compact-and-dialogs.md` | Milestone 2: `/ledger` Compact <=960px layout, viewport-sticky `LedgerScrollRail`, `TenureRow` cell slicing, & `/ledger` native dialog purge (`F-06a`) | Milestone 2 execution |
+| `docs/plans/milestone-3a-design2-pdf-png-parity.md` | Milestone 3a: Design 2 pure-Pillow logo trim, horizontal asset parity, `RISKLOCKER SDN. BHD.` footer, total sync, & inline PDF viewer | Milestone 3a execution |
+| `docs/plans/milestone-3b-ai-vehicle-intelligence-and-deep-redetect.md` | Milestone 3b: Gemini `vehicle_type`/`capacity_unit` schema, `KG`/`W`/`CC` integrity, commercial fee defaults, real `★ Detected` provenance, & deep `Re-detect` | Milestone 3b execution |
+| `docs/plans/milestone-3c-box1-design2-parity-and-towing-conditions.md` | Milestone 3c: Commercial catalog pinning, Box 1 ↔ Design 2 WYSIWYG parity, DB `CompanyBenefitCondition` single source of truth & `/builder/benefits` deep link | Milestone 3c execution |
 
 ### History & Generated Tooling
 | Document | Purpose | Update when |

@@ -733,6 +733,12 @@ def create_next_year_renewal_tenure(
             db.flush()
         return vehicle_match
 
+    from app.extraction.entity_classifier import is_commercial_heavy_vehicle
+    _tv = getattr(tenure, "tracked_vehicle", None)
+    _is_comm_renew = is_commercial_heavy_vehicle(
+        car_model=getattr(_tv, "car_model", None) if _tv else None,
+        capacity_str=getattr(_tv, "engine_cc", None) if _tv else None,
+    )
     now = datetime.now(timezone.utc)
     next_tenure = InsuranceTenure(
         id=new_id(),
@@ -749,8 +755,10 @@ def create_next_year_renewal_tenure(
         business_type="Renewal",
         previous_tenure_id=tenure.id,
         tenure_chain_id=tenure.tenure_chain_id,
-        road_tax=float(tenure.road_tax or 0.0),
-        runner_fee=float(tenure.runner_fee or 0.0),
+        road_tax=0.0 if _is_comm_renew else float(tenure.road_tax or 0.0),
+        runner_fee=0.0 if _is_comm_renew else float(tenure.runner_fee or 0.0),
+        include_road_tax=False if _is_comm_renew else tenure.include_road_tax,
+        include_runner_fee=False if _is_comm_renew else tenure.include_runner_fee,
         pic_id=tenure.pic_id,
         sub_agent_name=tenure.sub_agent_name,
         created_by_id=user_id or tenure.created_by_id,

@@ -124,6 +124,7 @@ _SALOON_EV_PATTERNS = re.compile(
     r"MODEL\s*3\b|MODEL\s*S\b|"
     r"TAYCAN\b(?!(\s*CROSS|\s*SPORT\s*TURISMO))|"
     r"ID\.3\b|ID\.7\b|POLESTAR\s*2\b|ZEEKR\s*001\b|ZEEKR\s*007\b|"
+    r"DOLPHIN\b|BYD\s*DOLPHIN\b|SEALION\s*6\b|DEEPAL\s*L07\b|"
     r"EMEYA\b"
     r")\b",
     re.IGNORECASE,
@@ -134,7 +135,8 @@ _NON_SALOON_EV_PATTERNS = re.compile(
     r"\b("
     r"EQA\b|EQE\s*SUV|EQV\b|G-?CLASS\s*EV|MAYBACH\s*EQS\s*SUV|EQS\s*SUV|"
     r"IX1\s*L|IX1\b|IX2\b|IX3\b|IX\b|"
-    r"ATTO\s*2|M6\b|ATTO\s*3|SEALION\s*7|"
+    r"ATTO\s*2|ATTO\s*3|BYD\s*M6\b|\bM6\b|SEALION\s*7|DENZA\s*B5|"
+    r"DEEPAL\s*S07\b|DEEPAL\s*S05\b|YU7\b|"
     r"EX30\b|EC40\b|EX90\b|"
     r"DONGFENG\s*BOX|DONGFENG\s*VIGO|\bBOX\b|\bVIGO\b|"
     r"MG\s*4|MG\s*S5|\bS5\b|CYBERSTER\b|"
@@ -190,6 +192,70 @@ _GENERIC_EV_INDICATORS = re.compile(
     re.IGNORECASE,
 )
 
+COMMERCIAL_FEE_EXEMPT_VEHICLE_TYPES = {"Lorry", "Truck", "Commercial", "EVCommercial"}
+
+_WEIGHT_CAPACITY_RE = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(?:KG|KILOGRAMS?|TON|TONS|TONNE|TONNES|MT)\b|\b(?:BDM|BTM)\b",
+    re.IGNORECASE,
+)
+
+_COMMERCIAL_HEAVY_INDICATORS = re.compile(
+    r"\b("
+    r"LORRY|LORI|TRUCK|TRUCKS|GOODS\s*VEHICLE|KENDERAAN\s*(?:BARANG|PERDAGANGAN)|"
+    r"A\s*PERMIT|C\s*PERMIT|PERMIT\s*[AC]|'A'\s*PERMIT|'C'\s*PERMIT|"
+    r"CONCRETE\s*MIXER|TRANSIT\s*MIXER|MIXER|CRANE|TIPPER|TRAILER|PRIME\s*MOVER|"
+    r"HAULAGE|DUMP|GARBAGE\s*WAGON|REFUSE|CARGO|RIGID|PANEL\s*VAN|BOX\s*VAN|"
+    r"EXCAVATOR|LOADER|FORKLIFT|LOW\s*LOADER|TANKER|COMMERCIAL\s*VEHICLE|"
+    r"BUS|BAS|PSV|EXPRESS\s*BUS|TOUR\s*BUS|SCHOOL\s*BUS|"
+    r"SANY|SHACMAN|HOHAN|SINOTRUK|HOWO|CAMC|"
+    r"DONGFENG\s*(?:TRUCK|LORRY|KC|KR|KL|CAPTAIN|DUOLIKA)|"
+    r"ISUZU\s*(?:NKR\w*|NLR\w*|NPR\w*|NQR\w*|NHR\w*|NMR\w*|ELF\w*|FVR\w*|FRR\w*|FSR\w*|GIGA\w*)|"
+    r"HINO\w*|FUSO|CANTER|SCANIA|DAF|UD\s*TRUCKS|"
+    r"FAW\s*(?:J5|J6|JH6|TIGER)|NISSAN\s*(?:CD\d+|CW\d+|CABSTAR|UD)|"
+    r"DAIHATSU\s*(?:DELTA|GRAN\s*MAX)|TOYOTA\s*DYNA|MITSUBISHI\s*(?:CANTER|FUSO|FIGHTER)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def is_commercial_heavy_vehicle(
+    vehicle_type: str | None = None,
+    car_model: str | None = None,
+    vehicle_class: str | None = None,
+    capacity_str: str | None = None,
+    raw_text: str | None = None,
+) -> bool:
+    """Return True for commercial goods/heavy/permit vehicles (road tax & runner fee default OFF)."""
+    vtype_clean = (vehicle_type or "").strip()
+    if vtype_clean in COMMERCIAL_FEE_EXEMPT_VEHICLE_TYPES or vtype_clean.lower() in {"lorry", "truck", "commercial", "evcommercial"}:
+        return True
+    cap_clean = (capacity_str or "").strip()
+    if cap_clean and _WEIGHT_CAPACITY_RE.search(cap_clean):
+        return True
+    evidence = " ".join(str(p) for p in (car_model, vehicle_class, raw_text) if p).strip()
+    if evidence and _COMMERCIAL_HEAVY_INDICATORS.search(evidence):
+        return True
+    return False
+
+
+def default_fee_inclusions(
+    vehicle_type: str | None = None,
+    car_model: str | None = None,
+    vehicle_class: str | None = None,
+    capacity_str: str | None = None,
+    raw_text: str | None = None,
+) -> tuple[bool, bool]:
+    """Return (include_road_tax, include_runner_fee) defaults for a vehicle."""
+    if is_commercial_heavy_vehicle(
+        vehicle_type=vehicle_type,
+        car_model=car_model,
+        vehicle_class=vehicle_class,
+        capacity_str=capacity_str,
+        raw_text=raw_text,
+    ):
+        return False, False
+    return True, True
+
 
 def is_non_saloon_model(car_model_text: str | None) -> bool:
     """Check if a vehicle model is a Non-Saloon (MPV, SUV, 4x4, Pickup, Van)."""
@@ -209,7 +275,7 @@ def classify_vehicle_ev_status(
 
     Returns:
         (is_ev, ev_category)
-        ev_category: "EVSaloonCar" | "EVNonSaloonCar" | "EVMotorcycle" | None
+        ev_category: "EVSaloonCar" | "EVNonSaloonCar" | "EVMotorcycle" | "EVCommercial" | None
     """
     text_comb = f"{car_brand or ''} {car_model or ''}".strip().upper()
     cap_text = (capacity_str or "").strip().upper()
@@ -218,32 +284,53 @@ def classify_vehicle_ev_status(
     if not text_comb and not cap_text:
         return False, None
 
+    # 0. Commercial weight (KG/TON) or heavy lorry without explicit EV markers must NEVER be coerced to EV
+    has_weight_unit = bool(_WEIGHT_CAPACITY_RE.search(cap_text))
+    is_comm_heavy = bool(_COMMERCIAL_HEAVY_INDICATORS.search(text_comb)) or curr_vt in {"LORRY", "TRUCK", "COMMERCIAL"}
+    has_explicit_ev_cue = bool(_GENERIC_EV_INDICATORS.search(text_comb)) or "EV" in curr_vt or bool(
+        re.search(r"\b\d+(?:\.\d+)?\s*(?:KW|KILOWATT|WATT(?:S)?)\b", cap_text)
+        or re.search(r"\b\d+(?:\.\d+)?\s*W\b", cap_text)
+    )
+    if (has_weight_unit or is_comm_heavy) and not has_explicit_ev_cue:
+        return False, None
+    if curr_vt == "EVCOMMERCIAL" or (is_comm_heavy and has_explicit_ev_cue):
+        return True, "EVCommercial"
+
     # 1. Check Electric Motorcycle models first
     if _ELECTRIC_MOTO_PATTERNS.search(text_comb):
         return True, "EVMotorcycle"
 
-    # 2. Check canonical Saloon EV models (17 verified models)
+    # 2. Check canonical Saloon EV models
     if _SALOON_EV_PATTERNS.search(text_comb):
         return True, "EVSaloonCar"
 
-    # 3. Check canonical Non-Saloon EV models (70 verified models)
+    # 3. Check canonical Non-Saloon EV models
     if _NON_SALOON_EV_PATTERNS.search(text_comb):
         return True, "EVNonSaloonCar"
 
-    # 4. Check explicit EV indicators in model text or capacity text (e.g. "KW", "WATT")
+    # 4. Check explicit EV indicators in model text or capacity text (e.g. "kW", "Watt", "70000 W")
     has_ev_token = bool(_GENERIC_EV_INDICATORS.search(text_comb)) or "EV" in curr_vt
-    has_kw_token = "KW" in cap_text or "WATT" in cap_text or bool(re.search(r"\b\d+(?:\.\d+)?\s*KW\b", cap_text)) or bool(re.search(r"\b\d+(?:\.\d+)?\s*KW\b", text_comb))
-    if not has_kw_token and cap_text:
+    has_kw_token = bool(
+        re.search(r"\b\d+(?:\.\d+)?\s*(?:KW|KILOWATT|WATT(?:S)?)\b", cap_text)
+        or re.search(r"\b\d+(?:\.\d+)?\s*W\b", cap_text)
+        or re.search(r"\b\d+(?:\.\d+)?\s*KW\b", text_comb)
+    )
+    if not has_kw_token and cap_text and not is_comm_heavy and not has_weight_unit:
         m_num = re.search(r"^(\d+(?:\.\d+)?)$", cap_text)
         if m_num:
             try:
                 v_num = float(m_num.group(1))
-                if 0 < v_num <= 35.0:
+                # Only coerce pure EV decimals/ratings when NOT a commercial vehicle or displacement CC
+                if 0 < v_num <= 35.0 and "." not in cap_text and curr_vt not in {"LORRY", "TRUCK", "COMMERCIAL"}:
+                    pass
+                elif 0 < v_num <= 35.0 and ("." in cap_text and not (0.5 <= v_num <= 8.0)):
                     has_kw_token = True
             except ValueError:
                 pass
 
     if has_ev_token or has_kw_token:
+        if is_comm_heavy:
+            return True, "EVCommercial"
         # Determine body style: Non-Saloon vs Saloon vs Motorcycle
         if "MOTOR" in text_comb or "BIKE" in text_comb or "SCOOTER" in text_comb or "MOTOR" in curr_vt or "BIKE" in curr_vt:
             return True, "EVMotorcycle"
@@ -262,37 +349,40 @@ def classify_client_entity(
     car_model: str | None = None,
     car_brand: str | None = None,
     capacity_str: str | None = None,
+    vehicle_class: str | None = None,
+    powertrain: str | None = None,
+    raw_text: str | None = None,
 ) -> Tuple[str, str]:
     """
     Classify customer into 'Company' or 'Private' and resolve the appropriate vehicle type.
 
     Returns:
         (entity_type, resolved_vehicle_type)
-        e.g. ("Company", "NonSaloonCar"), ("Private", "NonSaloonCar"),
-             ("Company", "CompanyCar"), ("Private", "Car"),
-             ("Company", "EVSaloonCar"), ("Private", "EVSaloonCar"),
-             ("Company", "EVNonSaloonCar"), ("Private", "EVNonSaloonCar"),
-             ("Company", "EVMotorcycle"), ("Private", "EVMotorcycle"), etc.
     """
     name_str = (customer_name or "").strip()
     doc_str = (ic_or_brn or "").strip()
     ai_type = (ai_client_type or "").strip().capitalize()
     curr_vtype = (current_vehicle_type or "Car").strip()
+    powertrain_up = (powertrain or "").strip().upper()
 
-    # Check EV status first
-    is_ev, ev_category = classify_vehicle_ev_status(car_brand, car_model, capacity_str, current_vehicle_type)
+    is_lorry = is_commercial_heavy_vehicle(
+        vehicle_type=curr_vtype,
+        car_model=f"{car_brand or ''} {car_model or ''}".strip(),
+        vehicle_class=vehicle_class,
+        capacity_str=capacity_str,
+        raw_text=raw_text,
+    )
+
+    is_ev, ev_category = classify_vehicle_ev_status(car_brand, car_model, capacity_str, curr_vtype)
+    if powertrain_up == "EV" and not is_ev:
+        is_ev = True
+        ev_category = "EVCommercial" if is_lorry else ("EVNonSaloonCar" if is_non_saloon_model(car_model) else "EVSaloonCar")
+
     curr_vtype_lower = curr_vtype.lower()
-    combined_vehicle_text = f"{car_brand or ''} {car_model or ''} {curr_vtype_lower}".lower()
-
-    is_lorry = any(w in combined_vehicle_text for w in (
-        "lorry", "truck", "hino", "fuso", "canter", "rigid", "trailer", "tipper",
-        "prime mover", "c permit", "a permit", "haulage", "commercial vehicle",
-        "isuzu npr", "isuzu nqr", "isuzu elf", "ud trucks", "scania", "sinotruk",
-        "daihatsu delta", "toyota dyna"
-    ))
+    combined_vehicle_text = f"{car_brand or ''} {car_model or ''} {vehicle_class or ''} {curr_vtype_lower}".lower()
 
     if is_lorry:
-        base_category = "Lorry"
+        base_category = "EVCommercial" if (is_ev or powertrain_up == "EV" or curr_vtype_lower == "evcommercial") else "Lorry"
     elif is_ev and ev_category:
         base_category = ev_category
     elif "evsaloon" in curr_vtype_lower:
@@ -311,27 +401,19 @@ def classify_client_entity(
         base_category = "Car"
 
     is_company = False
-
-    # 1. Deterministic check on customer name (highest authority)
     if is_corporate_name(name_str):
         is_company = True
-
-    # 2. Check on IC or BRN string
     elif is_business_registration(doc_str):
         is_company = True
-
-    # 3. AI classification cross-confirmation
     elif ai_type == "Company":
         if not is_malaysian_nric(doc_str):
             is_company = True
-
-    # 4. Check if current_vehicle_type explicitly indicated Company
     elif "company" in curr_vtype_lower or "corp" in curr_vtype_lower:
         is_company = True
 
     if is_company:
         entity_type = "Company"
-        if base_category in {"EVSaloonCar", "EVNonSaloonCar", "EVMotorcycle"}:
+        if base_category in {"EVSaloonCar", "EVNonSaloonCar", "EVMotorcycle", "EVCommercial"}:
             resolved_vtype = base_category
         elif base_category == "NonSaloonCar":
             resolved_vtype = "NonSaloonCar"
@@ -345,7 +427,7 @@ def classify_client_entity(
             resolved_vtype = "CompanyCar"
     else:
         entity_type = "Private"
-        if base_category in {"EVSaloonCar", "EVNonSaloonCar", "EVMotorcycle"}:
+        if base_category in {"EVSaloonCar", "EVNonSaloonCar", "EVMotorcycle", "EVCommercial"}:
             resolved_vtype = base_category
         elif base_category == "NonSaloonCar":
             resolved_vtype = "NonSaloonCar"

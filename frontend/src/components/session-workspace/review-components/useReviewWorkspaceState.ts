@@ -307,13 +307,16 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
     if (hasStoredRT && !hasFormRT) {
       rtax = String(rawStoredRT);
     }
-    if (rtax !== undefined && rtax !== null && String(rtax).trim() !== "") {
-      fields["roadtax"] = rtax;
-      fields["road_tax_amount"] = rtax;
+    const includeRt = formValues["include_road_tax"] !== "false" && workspace?.display_options?.include_road_tax !== false;
+    const includeRf = formValues["include_runner_fee"] !== "false" && workspace?.display_options?.include_runner_fee !== false;
+    const effectiveRtax = includeRt ? rtax : "0.00";
+    if (effectiveRtax !== undefined && effectiveRtax !== null && String(effectiveRtax).trim() !== "") {
+      fields["roadtax"] = String(effectiveRtax);
+      fields["road_tax_amount"] = String(effectiveRtax);
     }
 
     // Runner / Service fee aliases
-    const sfee = formValues["service_fee"] || fields["service_fee"] || formValues["runner_fee"] || fields["runner_fee"] || "";
+    const sfee = includeRf ? (formValues["service_fee"] || fields["service_fee"] || formValues["runner_fee"] || fields["runner_fee"] || "") : "0.00";
     if (sfee) {
       fields["service_fee"] = sfee;
       fields["runner_fee"] = sfee;
