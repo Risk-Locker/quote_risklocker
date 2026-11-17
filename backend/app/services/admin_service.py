@@ -694,3 +694,39 @@ def set_bulk_upload_limit(db: Session | Any, user: Any, limit: int) -> int:
     db.refresh(setting)
     return limit
 
+
+def get_comparison_upload_limit(db: Session | Any) -> int | None:
+    """Return comparison upload limit (None means unlimited)."""
+    setting = db.get(AppSetting, "comparison_upload_limit")
+    if not setting or not isinstance(setting.value, dict):
+        return None
+    val = setting.value.get("max_files")
+    if val is None or val == "" or val is False:
+        return None
+    try:
+        val_int = int(val)
+        return val_int if val_int >= 1 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def set_comparison_upload_limit(db: Session | Any, user: Any, limit: int | None) -> int | None:
+    """Set comparison upload limit (None for unlimited, or integer >= 1)."""
+    require_admin(user)
+    if limit is not None:
+        try:
+            limit = int(limit)
+        except (ValueError, TypeError) as exc:
+            raise AppError("Comparison upload limit must be an integer or null.", 400) from exc
+        if limit < 1:
+            raise AppError("Comparison upload limit must be at least 1 PDF (or null for unlimited).", 400)
+    setting = db.get(AppSetting, "comparison_upload_limit")
+    if not setting:
+        setting = AppSetting(key="comparison_upload_limit", value={"max_files": limit})
+        db.add(setting)
+    else:
+        setting.value = {"max_files": limit}
+    db.commit()
+    db.refresh(setting)
+    return limit
+

@@ -34,6 +34,7 @@ type ActionsContextValue = {
   reload: () => Promise<void>;
   queueOperation: (operation: WorkspaceOperation, dirtyPath: string) => void;
   decideField: (field: string, decision: ScalarDecision, value?: string | null) => void;
+  revertOperation: (dirtyPath: string) => void;
   save: () => Promise<WorkspaceSnapshot>;
   discard: () => Promise<void>;
   navigate: (href: string) => void;
@@ -379,6 +380,78 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
   return snapshot;
 }
 
+function normalizeComparableScalar(raw: unknown): string {
+  if (raw === null || raw === undefined) return "";
+  const str = String(raw).trim();
+  if (!str) return "";
+  // Normalize numeric formatting (e.g. "1,200.00" vs "1200.00")
+  const cleanedNum = str.replace(/,/g, "");
+  if (/^-?\d+(?:\.\d+)?$/.test(cleanedNum)) {
+    const parsed = Number(cleanedNum);
+    if (Number.isFinite(parsed)) {
+      return cleanedNum.includes(".") ? parsed.toFixed(2) : String(parsed);
+    }
+  }
+  return str;
+}
+
+function isOperationNoOpAgainstBase(
+  base: WorkspaceSnapshot | null,
+  operation: WorkspaceOperation
+): boolean {
+  if (!base) return false;
+  if (operation.op === "scalar_decision") {
+    const fieldName = String(operation.field || "");
+    const baseField = base.fields?.[fieldName];
+    const baseVal = normalizeComparableScalar(baseField?.value);
+    const nextVal =
+      operation.decision === "clear"
+        ? ""
+        : normalizeComparableScalar(operation.value);
+    return baseVal === nextVal;
+  }
+  if (operation.op === "update_display_options") {
+    const opts = (operation.options || {}) as Record<string, unknown>;
+    const baseOpts = (base.display_options || {}) as Record<string, unknown>;
+    return Object.entries(opts).every(([k, v]) => {
+      const baseV =
+        baseOpts[k] !== undefined
+          ? baseOpts[k]
+          : k === "include_road_tax" || k === "include_runner_fee"
+          ? true
+          : k === "round_total"
+          ? false
+          : undefined;
+      return Boolean(v) === Boolean(baseV);
+    });
+  }
+  if (operation.op === "benefit_update") {
+    const selId = String(operation.selection_id || "");
+    const inBaseCurrent = base.benefit_cards.current_benefits.some(
+      (c) => c.selection_id === selId || c.card_key === selId
+    );
+    const inBaseAddon = base.benefit_cards.available_addons.some(
+      (c) => c.selection_id === selId || c.card_key === selId
+    );
+    const desiredState = operation.state ? String(operation.state) : null;
+    if (desiredState === "current" && inBaseCurrent && !("label" in operation) && !("price" in operation) && !("typed_value" in operation)) {
+      return true;
+    }
+    if (desiredState === "available_addon" && inBaseAddon && !("label" in operation) && !("price" in operation) && !("typed_value" in operation)) {
+      return true;
+    }
+  }
+  if (operation.op === "select_catalog_offering") {
+    const offeringId = String(operation.offering_id || "");
+    const inBaseCurrent = base.benefit_cards.current_benefits.some((c) => c.offering_id === offeringId);
+    const inBaseAddon = base.benefit_cards.available_addons.some((c) => c.offering_id === offeringId);
+    const desiredState = operation.state ? String(operation.state) : "current";
+    if (desiredState === "current" && inBaseCurrent) return true;
+    if (desiredState === "available_addon" && inBaseAddon) return true;
+  }
+  return false;
+}
+
 function applyPendingOperations(snapshot: WorkspaceSnapshot, operations: WorkspaceOperation[]) {
   return operations.reduce(applyWorkingOperation, snapshot);
 }
@@ -430,6 +503,16 @@ export function SessionWorkspaceProvider({ sessionId, children }: { sessionId: s
     reload().catch(() => undefined);
   }, [reload]);
 
+  const pruneAutoTotalClearIfClean = useCallback(() => {
+    if (operationsRef.current.size === 1 && operationsRef.current.has("fields.total_amount")) {
+      const totOp = operationsRef.current.get("fields.total_amount");
+      if (totOp && totOp.op === "scalar_decision" && totOp.decision === "clear") {
+        operationsRef.current.delete("fields.total_amount");
+        operationVersionsRef.current.delete("fields.total_amount");
+      }
+    }
+  }, []);
+
   const queueOperation = useCallback((operation: WorkspaceOperation, dirtyPath: string) => {
     operationSequenceRef.current += 1;
     if (operation.op === "benefit_update" && operation.state === "removed") {
@@ -442,20 +525,70 @@ export function SessionWorkspaceProvider({ sessionId, children }: { sessionId: s
             operationVersionsRef.current.delete(k);
           }
         }
+        pruneAutoTotalClearIfClean();
         setDirtyPaths([...operationsRef.current.keys()]);
-        const current = workingSnapshotRef.current;
-        if (current) updateWorkingSnapshot(applyWorkingOperation(current, operation));
+        const base = serverSnapshotRef.current;
+        if (base) updateWorkingSnapshot(applyPendingOperations(base, [...operationsRef.current.values()]));
         setSaveError(null);
         return;
       }
     }
+
+    const base = serverSnapshotRef.current;
+    if (dirtyPath !== "fields.total_amount" && isOperationNoOpAgainstBase(base, operation)) {
+      operationsRef.current.delete(dirtyPath);
+      operationVersionsRef.current.delete(dirtyPath);
+      pruneAutoTotalClearIfClean();
+      setDirtyPaths([...operationsRef.current.keys()]);
+      if (base) {
+        updateWorkingSnapshot(applyPendingOperations(base, [...operationsRef.current.values()]));
+      }
+      setSaveError(null);
+      return;
+    }
+
     operationsRef.current.set(dirtyPath, operation);
     operationVersionsRef.current.set(dirtyPath, operationSequenceRef.current);
+    pruneAutoTotalClearIfClean();
     setDirtyPaths([...operationsRef.current.keys()]);
-    const current = workingSnapshotRef.current;
-    if (current) updateWorkingSnapshot(applyWorkingOperation(current, operation));
+    if (base) {
+      updateWorkingSnapshot(applyPendingOperations(base, [...operationsRef.current.values()]));
+    } else {
+      const current = workingSnapshotRef.current;
+      if (current) updateWorkingSnapshot(applyWorkingOperation(current, operation));
+    }
     setSaveError(null);
-  }, [updateWorkingSnapshot]);
+  }, [pruneAutoTotalClearIfClean, updateWorkingSnapshot]);
+
+  const revertOperation = useCallback((dirtyPath: string) => {
+    operationsRef.current.delete(dirtyPath);
+    operationVersionsRef.current.delete(dirtyPath);
+    if (dirtyPath === "options.include_road_tax" || dirtyPath === "fields.include_road_tax") {
+      operationsRef.current.delete("options.include_road_tax");
+      operationsRef.current.delete("fields.include_road_tax");
+      operationVersionsRef.current.delete("options.include_road_tax");
+      operationVersionsRef.current.delete("fields.include_road_tax");
+    }
+    if (dirtyPath === "options.include_runner_fee" || dirtyPath === "fields.include_runner_fee") {
+      operationsRef.current.delete("options.include_runner_fee");
+      operationsRef.current.delete("fields.include_runner_fee");
+      operationVersionsRef.current.delete("options.include_runner_fee");
+      operationVersionsRef.current.delete("fields.include_runner_fee");
+    }
+    if (dirtyPath === "fields.sum_insured") {
+      for (const alias of ["fields.coverage_amount", "fields.market_value", "fields.agreed_value"]) {
+        operationsRef.current.delete(alias);
+        operationVersionsRef.current.delete(alias);
+      }
+    }
+    pruneAutoTotalClearIfClean();
+    setDirtyPaths([...operationsRef.current.keys()]);
+    const base = serverSnapshotRef.current;
+    if (base) {
+      updateWorkingSnapshot(applyPendingOperations(base, [...operationsRef.current.values()]));
+    }
+    setSaveError(null);
+  }, [pruneAutoTotalClearIfClean, updateWorkingSnapshot]);
 
   const decideField = useCallback((field: string, decision: ScalarDecision, value?: string | null) => {
     queueOperation(
@@ -577,7 +710,7 @@ export function SessionWorkspaceProvider({ sessionId, children }: { sessionId: s
   }, []);
 
   const data = useMemo<DataContextValue>(() => ({ workspace: workingSnapshot, loading, loadError }), [workingSnapshot, loading, loadError]);
-  const actions = useMemo<ActionsContextValue>(() => ({ reload, queueOperation, decideField, save, discard, navigate }), [reload, queueOperation, decideField, save, discard, navigate]);
+  const actions = useMemo<ActionsContextValue>(() => ({ reload, queueOperation, decideField, revertOperation, save, discard, navigate }), [reload, queueOperation, decideField, revertOperation, save, discard, navigate]);
   const mutation = useMemo<MutationState>(() => ({
     dirty: dirtyPaths.length > 0,
     dirtyPaths,

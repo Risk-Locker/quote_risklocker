@@ -29,6 +29,7 @@ const COMMON_INSURERS = [
   "AmAssurance",
   "Berjaya Sompo",
   "Etiqa Insurance",
+  "Kurnia",
   "Lonpac Insurance",
   "QBE Insurance",
   "STMB Insurance",

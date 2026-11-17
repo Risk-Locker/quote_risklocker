@@ -1,4 +1,4 @@
-# Milestone 1: Extraction Referee Gate & Vehicle Naming Fixes Implementation Plan
+﻿# Milestone 1: Extraction Referee Gate & Vehicle Naming Fixes Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `test-driven-development` and `systematic-debugging` to execute this plan cleanly. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -185,3 +185,4 @@ Expected: ALL PASS
 git add backend/app/extraction/referee.py backend/app/services/vehicle_simplifier_service.py backend/app/services/marketing_comparison_service.py frontend/src/components/comparison/components/CustomerVehicleLedgerPane.tsx tests/unit/test_extraction_referee.py
 git commit -m "feat(referee): enforce extraction consistency gate and vehicle naming parity"
 ```
+

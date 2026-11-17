@@ -20,6 +20,12 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload, joinedload, load_only
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.services.marketing_comparison.materialize import (
+    OVERRIDABLE_ENTRY_FIELDS,
+    get_entry_overrides,
+    is_field_overridden,
+    record_manual_overrides,
+)
 from app.models.tables import (
     AccountStatus,
     Batch,
@@ -317,10 +323,10 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             car_model=detected_model,
             capacity_str=raw_capacity_token,
         )
-        if not inc_rt_def and tenure.include_road_tax is True:
+        if not inc_rt_def and tenure.include_road_tax is None:
             tenure.include_road_tax = False
             needs_commit = True
-        if not inc_rf_def and tenure.include_runner_fee is True:
+        if not inc_rf_def and tenure.include_runner_fee is None:
             tenure.include_runner_fee = False
             needs_commit = True
 
@@ -406,8 +412,10 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             )
 
             entry = TenureComparisonEntry(
+                id=new_id(),
                 tenure_id=tenure_id,
                 session_id=s.id,
+                manual_overrides=[],
                 company_name=comp_name,
                 company_id=getattr(s, "company_id", None),
                 sum_insured=sum_ins,
@@ -484,28 +492,40 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 existing_match = existing_comp_entries.get(c_id_key) or existing_comp_entries.get(c_name_key)
 
                 if existing_match:
-                    # In-place update of existing company column with the latest quotation
+                    # In-place update of existing company column with the latest quotation (respecting manual_overrides)
                     existing_match.session_id = s.id
-                    existing_match.sum_insured = sum_ins
-                    existing_match.valuation_type = val_type
-                    existing_match.motor_premium = motor_prem
-                    existing_match.total_payable = tot_pay
-                    existing_match.towing_limit = b_res["towing_km"]
-                    existing_match.towing_km = b_res["towing_km"]
-                    existing_match.agreed_value = agreed
-                    existing_match.waiver_betterment = has_waiver
-                    existing_match.betterment_rate = bet_rate
-                    existing_match.betterment_display = bet_disp
-                    existing_match.excess = excess_val
-                    existing_match.rate_percentage = rate_val
-                    existing_match.windscreen_sum_insured = b_res["windscreen_sum_insured"]
-                    existing_match.special_perils = b_res["special_perils"]
-                    existing_match.llp_llop = b_res["llp_llop"]
-                    existing_match.version = s.tenure_version or (existing_match.version + 1)
+                    if not is_field_overridden(existing_match, "sum_insured"):
+                        existing_match.sum_insured = sum_ins
+                    if not is_field_overridden(existing_match, "valuation_type"):
+                        existing_match.valuation_type = val_type
+                        existing_match.agreed_value = agreed
+                    if not is_field_overridden(existing_match, "motor_premium"):
+                        existing_match.motor_premium = motor_prem
+                        existing_match.total_payable = tot_pay
+                        existing_match.rate_percentage = rate_val
+                    if not is_field_overridden(existing_match, "towing_limit"):
+                        existing_match.towing_limit = b_res["towing_km"]
+                        existing_match.towing_km = b_res["towing_km"]
+                    if not is_field_overridden(existing_match, "waiver_betterment"):
+                        existing_match.waiver_betterment = has_waiver
+                        existing_match.betterment_rate = bet_rate
+                        existing_match.betterment_display = bet_disp
+                    if not is_field_overridden(existing_match, "excess"):
+                        existing_match.excess = excess_val
+                    if not is_field_overridden(existing_match, "windscreen_sum_insured"):
+                        existing_match.windscreen_sum_insured = b_res["windscreen_sum_insured"]
+                    if not is_field_overridden(existing_match, "special_perils"):
+                        existing_match.special_perils = b_res["special_perils"]
+                    if not is_field_overridden(existing_match, "llp_llop"):
+                        existing_match.llp_llop = b_res["llp_llop"]
+                    if not existing_match.is_manual and not get_entry_overrides(existing_match):
+                        existing_match.version = s.tenure_version or (existing_match.version or 1)
                 else:
                     new_entry = TenureComparisonEntry(
+                        id=new_id(),
                         tenure_id=tenure_id,
                         session_id=s.id,
+                        manual_overrides=[],
                         company_name=comp_name,
                         company_id=getattr(s, "company_id", None),
                         sum_insured=sum_ins,
@@ -570,52 +590,70 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 e.betterment_display = fallback_bet_disp
                 needs_commit = True
 
-            # Auto-heal towing limit for RM-based vs KM-based underwriter rules
+            # Auto-heal towing limit for RM-based vs KM-based underwriter rules (never overwrite manual_overrides)
             c_name_lower = (e.company_name or "").lower().strip()
             is_rm_insurer = any(k in c_name_lower for k in ("qbe", "lonpac", "sompo", "berjaya sompo")) or ("tune" in c_name_lower and "easy" not in c_name_lower and "online" not in c_name_lower)
-            cur_tow = str(e.towing_km or e.towing_limit or "").strip()
+            cur_tow = str(e.towing_limit if is_field_overridden(e, "towing_limit") else (e.towing_km or e.towing_limit or "")).strip()
 
             tow_is_corrupt = (
                 not cur_tow
                 or (is_rm_insurer and ("km" in cur_tow.lower() or bool(re.match(r"^rm\s*(?:[1-9]|1\d|20|50)$", cur_tow, re.IGNORECASE))))
             )
 
-            if tow_is_corrupt and not e.is_manual and e.session_id:
-                s_cand = session_map.get(e.session_id)
-                if s_cand:
-                    s_cand_fields = s_cand.draft.fields if s_cand.draft and isinstance(s_cand.draft.fields, dict) else {}
-                    b_cand = _resolve_comparison_benefits(
+            if not is_field_overridden(e, "towing_limit"):
+                if tow_is_corrupt and e.session_id:
+                    s_cand = session_map.get(e.session_id)
+                    if s_cand:
+                        s_cand_fields = s_cand.draft.fields if s_cand.draft and isinstance(s_cand.draft.fields, dict) else {}
+                        b_cand = _resolve_comparison_benefits(
+                            db,
+                            s_cand,
+                            getattr(s_cand, "company_id", None) or e.company_id,
+                            s_cand_fields,
+                            float(tenure.windscreen_target) if tenure.windscreen_target else None,
+                            prefetched=benefit_prefetch,
+                        )
+                        cand_tow = b_cand.get("towing_km")
+                        if cand_tow:
+                            e.towing_km = cand_tow
+                            e.towing_limit = cand_tow
+                            needs_commit = True
+                elif tow_is_corrupt and is_rm_insurer:
+                    if "qbe" in c_name_lower:
+                        fallback_tow = "RM 500"
+                    elif "lonpac" in c_name_lower:
+                        fallback_tow = "RM 400"
+                    elif "sompo" in c_name_lower:
+                        fallback_tow = "Unlimited"
+                    else:
+                        fallback_tow = "RM 300"
+                    e.towing_km = fallback_tow
+                    e.towing_limit = fallback_tow
+                    needs_commit = True
+                elif not e.towing_km and not e.towing_limit:
+                    e.towing_km = "Unlimited"
+                    e.towing_limit = "Unlimited"
+                    needs_commit = True
+
+            # Self-heal legacy false Special Perils ('Basic Contribution' -> 'ribut' false positive) on non-overridden rows
+            if not is_field_overridden(e, "special_perils") and e.session_id and e.special_perils == "Included":
+                s_sp = session_map.get(e.session_id)
+                if s_sp:
+                    s_sp_fields = s_sp.draft.fields if s_sp.draft and isinstance(s_sp.draft.fields, dict) else {}
+                    b_sp = _resolve_comparison_benefits(
                         db,
-                        s_cand,
-                        getattr(s_cand, "company_id", None) or e.company_id,
-                        s_cand_fields,
+                        s_sp,
+                        getattr(s_sp, "company_id", None) or e.company_id,
+                        s_sp_fields,
                         float(tenure.windscreen_target) if tenure.windscreen_target else None,
                         prefetched=benefit_prefetch,
                     )
-                    cand_tow = b_cand.get("towing_km")
-                    if cand_tow:
-                        e.towing_km = cand_tow
-                        e.towing_limit = cand_tow
+                    if not b_sp.get("special_perils"):
+                        e.special_perils = None
                         needs_commit = True
-            elif tow_is_corrupt and is_rm_insurer:
-                if "qbe" in c_name_lower:
-                    fallback_tow = "RM 500"
-                elif "lonpac" in c_name_lower:
-                    fallback_tow = "RM 400"
-                elif "sompo" in c_name_lower:
-                    fallback_tow = "Unlimited"
-                else:
-                    fallback_tow = "RM 300"
-                e.towing_km = fallback_tow
-                e.towing_limit = fallback_tow
-                needs_commit = True
-            elif not e.towing_km and not e.towing_limit:
-                e.towing_km = "Unlimited"
-                e.towing_limit = "Unlimited"
-                needs_commit = True
 
             # If not manual override, heal uninitialized or corrupted values from draft
-            if not e.is_manual and e.session_id:
+            if e.session_id:
                 s = session_map.get(e.session_id)
                 if s and s.draft and s.draft.fields:
                     f = s.draft.fields
@@ -624,23 +662,25 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                     val_type, is_agr = _extract_valuation_type(f, s_obj=s)
                     excess_val = _extract_excess(f, s_obj=s)
 
-                    if float(e.sum_insured or 0.0) == 0.0:
+                    if float(e.sum_insured or 0.0) == 0.0 and not is_field_overridden(e, "sum_insured"):
                         if h_sum > 0.0:
                             e.sum_insured = h_sum
-                        if h_prem > 0.0:
+                        if h_prem > 0.0 and not is_field_overridden(e, "motor_premium"):
                             e.motor_premium = h_prem
-                        e.valuation_type = val_type
-                        e.agreed_value = is_agr
-                        e.excess = excess_val
+                        if not is_field_overridden(e, "valuation_type"):
+                            e.valuation_type = val_type
+                            e.agreed_value = is_agr
+                        if not is_field_overridden(e, "excess"):
+                            e.excess = excess_val
                         e.total_payable = float(e.motor_premium) + float(e.road_tax) + float(e.runner_fee)
                         ws_val = _extract_windscreen_from_draft(f)
-                        if ws_val and _is_valid_windscreen_amt(ws_val):
+                        if ws_val and _is_valid_windscreen_amt(ws_val) and not is_field_overridden(e, "windscreen_sum_insured"):
                             e.windscreen_sum_insured = ws_val
                         needs_commit = True
 
                     # Heal invalid windscreen (corrupt reference numbers like 283233.0)
                     ws_invalid = e.windscreen_sum_insured is not None and not _is_valid_windscreen_amt(float(e.windscreen_sum_insured))
-                    if ws_invalid:
+                    if ws_invalid and not is_field_overridden(e, "windscreen_sum_insured"):
                         b_cand = _resolve_comparison_benefits(
                             db, s, getattr(s, "company_id", None), f, float(tenure.windscreen_target) if tenure.windscreen_target else None, prefetched=benefit_prefetch
                         )
@@ -649,7 +689,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                             e.windscreen_sum_insured = cand_ws
                         else:
                             e.windscreen_sum_insured = None
-                        if b_cand.get("towing_km"):
+                        if b_cand.get("towing_km") and not is_field_overridden(e, "towing_limit"):
                             e.towing_km = b_cand["towing_km"]
                             e.towing_limit = b_cand["towing_km"]
                         needs_commit = True
@@ -670,25 +710,10 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             e, visible_for_reason, int(e.rank or 1)
         )
 
-    # 6. Assign stable version numbers for same-insurer revisions
-    company_counts: dict[str, int] = defaultdict(int)
-    def _entry_sort_key(x: Any) -> tuple[datetime, str]:
-        x_sid = getattr(x, "session_id", None)
-        s = session_map.get(str(x_sid)) if x_sid else None
-        dt = getattr(x, "uploaded_at", None) or (s.created_at if s else None) or getattr(x, "created_at", None)
-        if not dt:
-            return (datetime.min.replace(tzinfo=timezone.utc), getattr(x, "id", "") or "")
-        if getattr(dt, "tzinfo", None) is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return (dt, getattr(x, "id", "") or "")
-
-    for e in sorted(entries, key=_entry_sort_key):
-        key = (e.company_name or "Unknown").strip().lower()
-        company_counts[key] += 1
-        e.version = max(e.version or 1, company_counts[key])
-
-    if needs_commit and allow_commit:
-        db.commit()
+    # 6. Preserve persisted entry version (never drift in-memory on GET)
+    for e in entries:
+        if not e.version:
+            e.version = 1
 
 
     # 3. Retrieve Previous Policy (Strictly prior calendar year e.g. 2026 for 2027 tenure)
@@ -1044,9 +1069,6 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             )
         ) or 0
 
-    if needs_commit and allow_commit:
-        db.commit()
-
     # 7. Year reconciliation across multi-quote uploads: only flag if quotes belong to different calendar years
     session_years = [s.coverage_start_date.year for s in sessions if s.coverage_start_date]
     date_conflict = None
@@ -1187,7 +1209,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "bnm_5cent_net_total_payable": bnm_5c_net_tot,
             "whole_net_total_payable": whole_net_tot,
             "towing_limit": e.towing_limit,
-            "towing_km": e.towing_km or e.towing_limit,
+            "towing_km": (e.towing_limit if is_field_overridden(e, "towing_limit") else (e.towing_km or e.towing_limit)),
             "agreed_value": e.agreed_value,
             "waiver_betterment": e.waiver_betterment,
             "betterment_rate": float(e.betterment_rate) if e.betterment_rate is not None else 0.0,
@@ -1214,6 +1236,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "revision": getattr(e, "revision", 1) or 1,
             "uploaded_at": e.uploaded_at.isoformat() if e.uploaded_at else (e.created_at.isoformat() if e.created_at else None),
             "is_manual": e.is_manual,
+            "manual_overrides": get_entry_overrides(e),
             "sort_order": e.sort_order,
             "notes": e.notes,
             "ranking_explanation": (
@@ -1480,8 +1503,11 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
     else:
         current_ncd_period = f"{current_year - 1} to {current_year}"
 
-    resolved_vtype = "Car"
+    tv_vtype = getattr(tenure.tracked_vehicle, "vehicle_type", None) if tenure.tracked_vehicle else None
+    resolved_vtype = str(tv_vtype).strip() if (tv_vtype and str(tv_vtype).strip() and str(tv_vtype).strip() != "Car") else "Car"
     for s in sessions:
+        if resolved_vtype != "Car":
+            break
         if s.draft and isinstance(s.draft.fields, dict):
             vt_obj = s.draft.fields.get("vehicle_type")
             vt_val = vt_obj.get("value") if isinstance(vt_obj, dict) else vt_obj
@@ -1538,6 +1564,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         "covernote_policy": covernote_policy,
         "unlinked_covernotes": unlinked_covernotes,
         "entries": entry_dicts,
+        "needs_materialize": bool(needs_commit),
         "upload_sessions": upload_sessions,
         "duplicate_alerts": duplicate_alerts,
         "disqualified_documents": disqualified_documents,
@@ -1704,19 +1731,49 @@ def save_comparison_entry(
         if curr_rev != expected_rev:
             raise ValueError(f"Concurrent modification conflict: entry has revision {curr_rev}, expected {expected_rev}. Please refresh.")
 
+    from app.services.marketing_comparison.materialize import (
+        OVERRIDABLE_ENTRY_FIELDS,
+        record_manual_overrides,
+    )
+
+    is_new_entry = entry is None
     if not entry:
         entry = TenureComparisonEntry(
             tenure_id=tenure_id,
             company_name=_safe_str(payload.get("company_name") or "New Insurer"),
             is_manual=bool(payload.get("is_manual", True)),
+            manual_overrides=[],
             version=1,
         )
         db.add(entry)
     else:
-        entry.is_manual = True
         entry.version = (entry.version or 1) + 1
 
-    if "is_manual" in payload:
+    # Track which overridable fields were edited in this save call
+    if is_new_entry:
+        edited_override_fields = [
+            k for k in payload.keys() if k in OVERRIDABLE_ENTRY_FIELDS and payload.get(k) is not None
+        ]
+    else:
+        edited_override_fields = []
+        for k in payload.keys():
+            if k not in OVERRIDABLE_ENTRY_FIELDS or payload.get(k) is None:
+                continue
+            new_v = payload.get(k)
+            old_v = getattr(entry, k, None)
+            if isinstance(old_v, (int, float, Decimal)) or k in ("sum_insured", "motor_premium", "excess", "windscreen_sum_insured"):
+                if abs(_to_float(new_v) - _to_float(old_v)) > 0.005:
+                    edited_override_fields.append(k)
+            elif isinstance(old_v, bool) or k in ("agreed_value", "waiver_betterment", "is_recommended", "is_hidden"):
+                if bool(new_v) != bool(old_v):
+                    edited_override_fields.append(k)
+            else:
+                if _safe_str(new_v).strip() != _safe_str(old_v).strip():
+                    edited_override_fields.append(k)
+    clear_override_field = _safe_str(payload.get("clear_override_field")) or None
+    record_manual_overrides(entry, edited_fields=edited_override_fields, clear_field=clear_override_field)
+
+    if "is_manual" in payload and is_new_entry:
         entry.is_manual = bool(payload["is_manual"])
 
     # Update fields
@@ -2407,11 +2464,25 @@ def rescan_comparison_tenure(
     from app.extraction.entity_classifier import is_commercial_heavy_vehicle, is_corporate_name
     is_rescan_comp_private = (tv_type in ("Car", "NonSaloonCar", "EVSaloonCar", "EVNonSaloonCar") and not is_corporate_name(tenure.customer_name))
 
+    from app.services.marketing_comparison.materialize import is_field_overridden
+
     if is_commercial_heavy_vehicle(vehicle_type=tv_type, car_model=tv_model, capacity_str=tv_cap):
-        tenure.include_road_tax = False
-        tenure.include_runner_fee = False
-        tenure.road_tax = 0.0
-        tenure.runner_fee = 0.0
+        has_manual_rt = any(
+            isinstance((s.draft.fields if s.draft and isinstance(s.draft.fields, dict) else {}).get("include_road_tax"), dict)
+            and (s.draft.fields or {}).get("include_road_tax", {}).get("source") == "manual"
+            for s in sessions
+        )
+        has_manual_rf = any(
+            isinstance((s.draft.fields if s.draft and isinstance(s.draft.fields, dict) else {}).get("include_runner_fee"), dict)
+            and (s.draft.fields or {}).get("include_runner_fee", {}).get("source") == "manual"
+            for s in sessions
+        )
+        if not has_manual_rt:
+            tenure.include_road_tax = False
+            tenure.road_tax = 0.0
+        if not has_manual_rf:
+            tenure.include_runner_fee = False
+            tenure.runner_fee = 0.0
 
     detected_ws = None
     for s in sessions:
@@ -2427,40 +2498,51 @@ def rescan_comparison_tenure(
             sum_ins = _extract_vehicle_sum_insured(f, s_obj=s)
             motor_prem = _extract_vehicle_motor_premium(f)
             val_type, agreed = _extract_valuation_type(f, s_obj=s)
-            if sum_ins > 0:
+            if sum_ins > 0 and not is_field_overridden(entry, "sum_insured"):
                 entry.sum_insured = sum_ins
-            if motor_prem > 0:
+            if motor_prem > 0 and not is_field_overridden(entry, "motor_premium"):
                 entry.motor_premium = motor_prem
-            entry.valuation_type = val_type
-            entry.agreed_value = agreed
-            entry.excess = _extract_excess(f, s_obj=s)
-            entry.towing_limit = b_res["towing_km"]
-            entry.towing_km = b_res["towing_km"]
-            entry.windscreen_sum_insured = b_res["windscreen_sum_insured"]
-            entry.special_perils = b_res["special_perils"]
-            entry.llp_llop = b_res["llp_llop"]
+            if not is_field_overridden(entry, "valuation_type"):
+                entry.valuation_type = val_type
+                entry.agreed_value = agreed
+            if not is_field_overridden(entry, "excess"):
+                entry.excess = _extract_excess(f, s_obj=s)
+            if not is_field_overridden(entry, "towing_limit"):
+                entry.towing_limit = b_res["towing_km"]
+                entry.towing_km = b_res["towing_km"]
+            if not is_field_overridden(entry, "windscreen_sum_insured"):
+                entry.windscreen_sum_insured = b_res["windscreen_sum_insured"]
+            if not is_field_overridden(entry, "special_perils"):
+                entry.special_perils = b_res["special_perils"]
+            if not is_field_overridden(entry, "llp_llop"):
+                entry.llp_llop = b_res["llp_llop"]
 
-            raw_w = _extract_val(f.get("waiver_of_betterment"))
-            has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
-            reg_date = _extract_val(f.get("registration_date")) or _extract_val(f.get("reg_date"))
-            cov_type_val = _extract_val(f.get("coverage_type")) or getattr(entry.session, "coverage_type", None)
-            live_waiver, live_bet_rate, live_bet_disp = evaluate_betterment_rules(
-                yom=veh_yom,
-                quote_year=quote_year,
-                company_name=entry.company_name,
-                has_betterment_peril=has_peril,
-                is_comprehensive_private=is_rescan_comp_private,
-                registration_date=reg_date,
-                coverage_start_date=tenure.coverage_start_date,
-                coverage_type=cov_type_val,
-            )
-            entry.betterment_rate = live_bet_rate
-            entry.betterment_display = live_bet_disp
-            entry.waiver_betterment = live_waiver
+            if not is_field_overridden(entry, "waiver_betterment"):
+                raw_w = _extract_val(f.get("waiver_of_betterment"))
+                has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
+                reg_date = _extract_val(f.get("registration_date")) or _extract_val(f.get("reg_date"))
+                cov_type_val = _extract_val(f.get("coverage_type")) or getattr(entry.session, "coverage_type", None)
+                live_waiver, live_bet_rate, live_bet_disp = evaluate_betterment_rules(
+                    yom=veh_yom,
+                    quote_year=quote_year,
+                    company_name=entry.company_name,
+                    has_betterment_peril=has_peril,
+                    is_comprehensive_private=is_rescan_comp_private,
+                    registration_date=reg_date,
+                    coverage_start_date=tenure.coverage_start_date,
+                    coverage_type=cov_type_val,
+                )
+                entry.betterment_rate = live_bet_rate
+                entry.betterment_display = live_bet_disp
+                entry.waiver_betterment = live_waiver
 
-            entry.road_tax = float(tenure.road_tax)
-            entry.runner_fee = float(tenure.runner_fee)
-            entry.total_payable = float(entry.motor_premium) + entry.road_tax + entry.runner_fee
+            eff_rt = float(tenure.road_tax) if (tenure.include_road_tax is not False) else 0.0
+            eff_rf = float(tenure.runner_fee) if (tenure.include_runner_fee is not False) else 0.0
+            entry.road_tax = eff_rt
+            entry.runner_fee = eff_rf
+            entry.include_road_tax = (tenure.include_road_tax is not False)
+            entry.include_runner_fee = (tenure.include_runner_fee is not False)
+            entry.total_payable = float(entry.motor_premium) + eff_rt + eff_rf
             if entry.sum_insured > 0:
                 entry.rate_percentage = round((float(entry.motor_premium) / float(entry.sum_insured)) * 100, 4)
 

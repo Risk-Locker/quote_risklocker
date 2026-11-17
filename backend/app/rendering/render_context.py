@@ -712,16 +712,34 @@ def resolve_benefit_cards(
     concepts_by_id = {k: v for k, v in _index(concepts).items() if k not in retired_concept_ids}
     current = [item for item in selections if item.state == "current" and str(item.concept_id or "") not in retired_concept_ids]
 
-    # Dynamic conditional upgrades from company rules
+    offerings_by_id = _index(offerings)
+    plans_by_id = _index(plans or [])
+
+    # Dynamic conditional upgrades from company rules (sort wildcard rules first so specific plan filters win)
     active_concept_ids = {str(item.concept_id) for item in current if item.concept_id}
+    active_concept_keys = {
+        str(getattr(concepts_by_id.get(str(item.concept_id)), "concept_key", "") or "")
+        for item in current
+        if item.concept_id and str(item.concept_id) in concepts_by_id
+    }
+    concept_id_by_key = {
+        str(getattr(c, "concept_key", "")): str(c.id)
+        for c in concepts_by_id.values()
+        if getattr(c, "concept_key", None)
+    }
     active_conditional_descriptions: dict[str, str] = {}
     active_conditional_titles: dict[str, str] = {}
     hidden_concept_ids: set[str] = set()
-    for cond in (company_conditions or []):
+    sorted_conditions = sorted(
+        company_conditions or [],
+        key=lambda c: (1 if (getattr(c, "trigger_plan_filter", None) and str(getattr(c, "trigger_plan_filter", "")).strip()) else 0),
+    )
+    for cond in sorted_conditions:
         if not getattr(cond, "is_active", True):
             continue
-        trig_id = str(getattr(cond, "trigger_concept_id", "") or "")
-        if trig_id in active_concept_ids:
+        raw_trig = str(getattr(cond, "trigger_concept_id", "") or "")
+        trig_id = concept_id_by_key.get(raw_trig, raw_trig)
+        if trig_id in active_concept_ids or raw_trig in active_concept_keys:
             plan_filter = getattr(cond, "trigger_plan_filter", None)
             matched = False
             if not plan_filter or not str(plan_filter).strip():
@@ -730,24 +748,31 @@ def resolve_benefit_cards(
                 filter_term = str(plan_filter).strip().lower()
                 trig_sels = [s for s in current if str(s.concept_id) == trig_id]
                 for s in trig_sels:
+                    off_obj = offerings_by_id.get(str(getattr(s, "catalog_offering_id", "") or ""))
+                    plan_obj = plans_by_id.get(str(getattr(s, "package_plan_id", "") or ""))
                     cov = str(getattr(s, "coverage_limit", "") or "").lower()
-                    lbl = str(getattr(s, "label_override", "") or "").lower()
-                    plan = str(getattr(s, "package_plan_id", "") or "").lower()
-                    tv = getattr(s, "typed_value_override", {}) or {}
+                    lbl = str(getattr(s, "label_override", "") or getattr(off_obj, "label_override", "") or "").lower()
+                    off_k = str(getattr(off_obj, "offering_key", "") or getattr(s, "selection_key", "") or "").lower()
+                    plan = str(getattr(s, "package_plan_id", "") or getattr(plan_obj, "name", "") or getattr(plan_obj, "plan_key", "") or "").lower()
+                    tv = getattr(s, "typed_value_override", None) or getattr(off_obj, "typed_value", None) or {}
                     plan_k = str(tv.get("plan_key", "") if isinstance(tv, dict) else "").lower()
-                    disp = str(tv.get("display_text", "") if isinstance(tv, dict) else "").lower()
-                    if (filter_term in cov or filter_term in lbl or filter_term in plan or filter_term in plan_k or filter_term in disp):
+                    disp = str((tv.get("display_text") or tv.get("value") or "") if isinstance(tv, dict) else "").lower()
+                    combined_haystack = f"{cov} {lbl} {off_k} {plan} {plan_k} {disp}".replace("_", " ").replace("-", " ")
+                    norm_filter = filter_term.replace("_", " ").replace("-", " ")
+                    if filter_term in combined_haystack or norm_filter in combined_haystack:
                         matched = True
                         break
             if matched:
+                raw_target = str(getattr(cond, "target_concept_id", "") or "")
+                target_id = concept_id_by_key.get(raw_target, raw_target)
                 action = getattr(cond, "action_type", "replace_description") or "replace_description"
                 if action == "hide_target" or getattr(cond, "replacement_description", "") == "__HIDE__":
-                    hidden_concept_ids.add(str(cond.target_concept_id))
+                    hidden_concept_ids.add(target_id)
                 else:
-                    active_conditional_descriptions[str(cond.target_concept_id)] = cond.replacement_description
+                    active_conditional_descriptions[target_id] = cond.replacement_description
                     rep_title = getattr(cond, "replacement_title", None)
                     if rep_title and str(rep_title).strip():
-                        active_conditional_titles[str(cond.target_concept_id)] = str(rep_title).strip()
+                        active_conditional_titles[target_id] = str(rep_title).strip()
 
     company_baseline_descriptions: dict[str, str] = {
         str(cfg.concept_id): cfg.baseline_description

@@ -1,4 +1,4 @@
-# Milestone 2: Frontend De-Slop, Dead Code Purge & Zero Client-Side Math
+﻿# Milestone 2: Frontend De-Slop, Dead Code Purge & Zero Client-Side Math
 
 > [!WARNING]
 > **Status: `SUPERSEDED` (2026-11-17).** Items 2 and 4 were overtaken by `milestone-1-save-sync-and-api-repairs.md`: client total math was removed from `provider.tsx`/`useReviewWorkspaceState.ts`, and failed queue operations are now deliberately **retained** (do NOT re-introduce the "purge failed op" behaviour below). Items 1 and 3 (`benefit-cards.tsx` dead `AddonCard`, `policy-fields-card.tsx` helper extraction) remain open for a later de-slop slice. Active Milestone 2 is `milestone-2-ledger-ux-compact-and-dialogs.md`.
@@ -31,3 +31,4 @@
 ## 2. Verification Gate for Milestone 2
 - `cd frontend; npx tsc --noEmit`
 - `.\.venv\Scripts\python.exe commands/security-audit.py` (confirm `NATIVE_DIALOG` and `MONOLITH_TS` reductions)
+

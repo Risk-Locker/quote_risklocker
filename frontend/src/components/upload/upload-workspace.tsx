@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { GeminiQuotaInfoButton, type GeminiQuota } from "@/components/gemini-quota-meter";
 import { QueueProgressBanner } from "@/components/upload/queue-progress-banner";
+import { useUploadQueuePoller } from "@/components/upload/useUploadQueuePoller";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 import {
@@ -47,6 +48,7 @@ type UploadLimits = {
   max_source_pdf_bytes: number;
   max_upload_bytes?: number;
   max_bulk_upload_files?: number;
+  comparison_upload_limit?: number | null;
   gemini?: GeminiQuota;
 };
 
@@ -274,8 +276,22 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
   };
 
   const maximum = limits?.max_source_pdf_bytes || limits?.max_upload_bytes || 20 * 1024 * 1024;
-  const maxBulkLimit = mode === "comparison" ? 30 : (limits?.max_bulk_upload_files || 30);
+  const rawCompLimit = limits?.comparison_upload_limit;
+  const maxBulkLimit =
+    mode === "comparison"
+      ? typeof rawCompLimit === "number" && rawCompLimit >= 1
+        ? rawCompLimit
+        : Infinity
+      : limits?.max_bulk_upload_files || 30;
+  const isUnlimitedQueue = !Number.isFinite(maxBulkLimit);
   const gemini = limits?.gemini;
+  const enqueuingRef = useRef(false);
+
+  useUploadQueuePoller({
+    bulkFiles,
+    setBulkFiles,
+    existingTenureId,
+  });
 
   // Restore staged queue on mount so staged PDFs never vanish
   const hasRestoredQueue = useRef(false);
@@ -288,20 +304,42 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
         if (!mounted.current || !stored || stored.length === 0) return;
         setBulkFiles((current) => {
           if (current.length > 0) return current;
-          for (const item of stored) {
-            if (
-              (item.status === "processing" || item.status === "uploading") &&
-              item.sessionId &&
-              item.jobId
-            ) {
-              pollBulkJob(item.id, item.sessionId, item.jobId);
-            }
+          if (
+            stored.some(
+              (item) =>
+                (item.status === "processing" || item.status === "uploading") &&
+                Boolean(item.jobId)
+            )
+          ) {
+            setBulkProcessing(true);
           }
           return stored;
         });
       })
       .catch(() => {});
   }, []);
+
+  // Automatically clear bulkProcessing and handle comparison redirect once all jobs finish
+  useEffect(() => {
+    if (!bulkProcessing || enqueuingRef.current) return;
+    if (bulkFiles.length === 0) {
+      setBulkProcessing(false);
+      return;
+    }
+    const stillActive = bulkFiles.some(
+      (f) => f.status === "uploading" || f.status === "processing"
+    );
+    if (!stillActive) {
+      setBulkProcessing(false);
+      if (mode === "comparison" && !redirectedRef.current) {
+        const fallbackTenure = existingTenureId || bulkFiles.find((f) => f.tenureId)?.tenureId;
+        if (fallbackTenure) {
+          redirectedRef.current = true;
+          router.push(`/comparison?tenure_id=${fallbackTenure}&from_upload=true` as Route);
+        }
+      }
+    }
+  }, [bulkFiles, bulkProcessing, existingTenureId, mode, router]);
 
   // Persist staged queue across tab reloads/crashes
   useEffect(() => {
@@ -678,6 +716,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
       return;
     }
     cancelRequested.current = false;
+    enqueuingRef.current = true;
     setBulkProcessing(true);
     setBulkNotice("");
 
@@ -685,6 +724,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
       (f) => (f.status === "staged" || f.status === "failed") && f.isEligible !== false
     );
     if (stagedItems.length === 0) {
+      enqueuingRef.current = false;
       setBulkProcessing(false);
       if (bulkFiles.some((f) => f.isEligible === false)) {
         setBulkNotice("All remaining staged files exceed the 200k TPM safe ceiling and cannot be processed.");
@@ -698,141 +738,113 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
       )
     );
 
-    const endpointCount = Math.max(1, gemini?.fleet_summary?.total_parallel_endpoints || 4);
-    const CHUNK_SIZE = Math.max(1, Math.min(4, endpointCount));
-    const FILES_PER_ENDPOINT_PER_WINDOW = 9; // 9-10 PDFs per endpoint per min window (< 200k TPM)
-    const BATCH_WINDOW_CAPACITY = endpointCount * FILES_PER_ENDPOINT_PER_WINDOW;
-    const TOKEN_CAPACITY_PER_WINDOW = endpointCount * 180_000;
+    const CHUNK_SIZE = 3;
+    let queuedCount = 0;
 
-    let windowDispatchedCount = 0;
-    let windowEstimatedTokens = 0;
+    try {
+      for (let c = 0; c < stagedItems.length; c += CHUNK_SIZE) {
+        if (!mounted.current || cancelRequested.current) break;
+        const currentChunk = stagedItems.slice(c, c + CHUNK_SIZE);
 
-    for (let c = 0; c < stagedItems.length; c += CHUNK_SIZE) {
-      if (!mounted.current || cancelRequested.current) break;
-      const currentChunk = stagedItems.slice(c, c + CHUNK_SIZE);
-      windowDispatchedCount += currentChunk.length;
-      for (const item of currentChunk) {
-        windowEstimatedTokens += item.estimatedTokens || 15_000;
-      }
-      await Promise.all(
-        currentChunk.map(async (item) => {
-          let result: UploadResult | null = null;
-          let lastErr: any = null;
+        await Promise.all(
+          currentChunk.map(async (item) => {
+            let result: UploadResult | null = null;
+            let lastErr: any = null;
 
-          // Retry loop for rate limit backoff and network transient resilience
-          for (let attempt = 1; attempt <= 3; attempt++) {
-            try {
-              const form = new FormData();
-              form.append("file", item.file);
-              form.append("enhanced_reading", String(enhanced));
-              form.append("is_test", String(isTestUpload));
-              if (existingTenureId) {
-                form.append("tenure_id", existingTenureId);
-              }
+            // Retry loop for rate limit backoff (including 429 RATE_LIMIT_UPLOAD_ATTEMPTS) and transient errors
+            for (let attempt = 1; attempt <= 4; attempt++) {
+              if (!mounted.current || cancelRequested.current) break;
+              try {
+                const form = new FormData();
+                form.append("file", item.file);
+                form.append("enhanced_reading", String(enhanced));
+                form.append("is_test", String(isTestUpload));
+                if (existingTenureId) {
+                  form.append("tenure_id", existingTenureId);
+                }
 
-              result = await api<UploadResult>("/uploads", {
-                method: "POST",
-                headers: { "Idempotency-Key": crypto.randomUUID() },
-                body: form,
-              });
-              break;
-            } catch (err: any) {
-              lastErr = err;
-              const errMsg = (err?.message || "").toLowerCase();
-              const isRateLimit =
-                errMsg.includes("429") ||
-                errMsg.includes("too many requests") ||
-                errMsg.includes("busy") ||
-                errMsg.includes("capacity") ||
-                errMsg.includes("exhausted") ||
-                errMsg.includes("quota");
-
-              if (attempt < 3 && isRateLimit) {
-                setBulkFiles((prev) =>
-                  prev.map((i) =>
-                    i.id === item.id
-                      ? {
-                          ...i,
-                          status: "uploading",
-                          error: `Intake capacity busy. Retrying in ${attempt * 3}s (attempt ${attempt}/3)...`,
-                        }
-                      : i
-                  )
-                );
-                await new Promise((resolve) => setTimeout(resolve, attempt * 3000));
-              } else if (attempt < 3 && !errMsg.includes("exceeds") && !errMsg.includes("invalid")) {
-                await new Promise((resolve) => setTimeout(resolve, 1500));
-              } else {
+                result = await api<UploadResult>("/uploads", {
+                  method: "POST",
+                  headers: { "Idempotency-Key": crypto.randomUUID() },
+                  body: form,
+                });
                 break;
+              } catch (err: any) {
+                lastErr = err;
+                const errMsg = (err?.message || "").toLowerCase();
+                const isRateLimit =
+                  err?.status === 429 ||
+                  errMsg.includes("429") ||
+                  errMsg.includes("too many") ||
+                  errMsg.includes("rate") ||
+                  errMsg.includes("busy") ||
+                  errMsg.includes("capacity") ||
+                  errMsg.includes("exhausted") ||
+                  errMsg.includes("quota");
+
+                if (attempt < 4 && isRateLimit) {
+                  const waitSec = attempt * 5;
+                  setBulkNotice(
+                    `${queuedCount} of ${stagedItems.length} queued; continuing after rate-limit window (${waitSec}s)...`
+                  );
+                  setBulkFiles((prev) =>
+                    prev.map((i) =>
+                      i.id === item.id
+                        ? {
+                            ...i,
+                            status: "uploading",
+                            error: `Queue rate-limit window active. Resuming in ${waitSec}s (attempt ${attempt}/4)...`,
+                          }
+                        : i
+                    )
+                  );
+                  await new Promise((resolve) => setTimeout(resolve, waitSec * 1000));
+                } else if (attempt < 3 && !errMsg.includes("exceeds") && !errMsg.includes("invalid")) {
+                  await new Promise((resolve) => setTimeout(resolve, 1500));
+                } else {
+                  break;
+                }
               }
             }
-          }
 
-          if (result) {
-            setBulkFiles((prev) =>
-              prev.map((i) =>
-                i.id === item.id
-                  ? {
-                      ...i,
-                      sessionId: result!.session_id,
-                      jobId: result!.job_id,
-                      status: "processing",
-                      progress: 25,
-                      error: undefined,
-                    }
-                  : i
-              )
-            );
+            if (result) {
+              queuedCount += 1;
+              setBulkFiles((prev) =>
+                prev.map((i) =>
+                  i.id === item.id
+                    ? {
+                        ...i,
+                        sessionId: result!.session_id,
+                        jobId: result!.job_id,
+                        status: "processing",
+                        progress: 25,
+                        error: undefined,
+                      }
+                    : i
+                )
+              );
+            } else {
+              setBulkFiles((prev) =>
+                prev.map((i) =>
+                  i.id === item.id
+                    ? { ...i, status: "failed", error: apiErrorMessage(lastErr) }
+                    : i
+                )
+              );
+            }
+          })
+        );
 
-            await pollBulkJob(item.id, result.session_id, result.job_id);
-          } else {
-            setBulkFiles((prev) =>
-              prev.map((i) =>
-                i.id === item.id
-                  ? { ...i, status: "failed", error: apiErrorMessage(lastErr) }
-                  : i
-              )
-            );
-          }
-        })
-      );
+        if (!mounted.current || cancelRequested.current) break;
 
-      if (!mounted.current || cancelRequested.current) break;
-
-      const hasMore = c + CHUNK_SIZE < stagedItems.length;
-      if (hasMore) {
-        if (
-          windowDispatchedCount >= BATCH_WINDOW_CAPACITY ||
-          windowEstimatedTokens >= TOKEN_CAPACITY_PER_WINDOW
-        ) {
-          const COOLING_SECONDS = 70;
-          for (let sec = COOLING_SECONDS; sec > 0; sec--) {
-            if (!mounted.current || cancelRequested.current) break;
-            setBulkNotice(
-              `Safe 1-minute quota capacity reached (${c + currentChunk.length}/${stagedItems.length} dispatched). Waiting ${sec}s for Google AI Studio TPM window refresh before next batch...`
-            );
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-          }
-          if (mounted.current && !cancelRequested.current) {
-            setBulkNotice("");
-          }
-          windowDispatchedCount = 0;
-          windowEstimatedTokens = 0;
-        } else {
-          // Stagger 1200ms between micro-chunks to prevent burst concurrency spikes
-          await new Promise((resolve) => setTimeout(resolve, 1200));
+        if (c + CHUNK_SIZE < stagedItems.length) {
+          await new Promise((resolve) => setTimeout(resolve, 400));
         }
       }
-    }
-
-    setBulkProcessing(false);
-
-    // Fallback: If in comparison mode and not yet redirected, auto-navigate to comparison
-    if (mode === "comparison" && !redirectedRef.current) {
-      const fallbackTenure = existingTenureId || bulkFiles.find((f) => f.tenureId)?.tenureId;
-      if (fallbackTenure) {
-        redirectedRef.current = true;
-        router.push(`/comparison?tenure_id=${fallbackTenure}&from_upload=true` as Route);
+    } finally {
+      enqueuingRef.current = false;
+      if (mounted.current && !cancelRequested.current) {
+        setBulkNotice("");
       }
     }
   }
@@ -1022,7 +1034,9 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
             </h1>
             <p className="mt-1 text-[13px] text-[var(--rl-text-muted)] line-clamp-2">
               {mode === "comparison"
-                ? "Upload up to 30 insurer quotation PDFs for the same vehicle (e.g. Etiqa, Berjaya Sompo, AmAssurance) to compile your side-by-side marketing comparison matrix."
+                ? isUnlimitedQueue
+                  ? "Upload any number of insurer quotation PDFs for the same vehicle (e.g. Etiqa, Berjaya Sompo, Kurnia, AmAssurance) to compile your side-by-side marketing comparison matrix."
+                  : `Upload up to ${maxBulkLimit} insurer quotation PDFs for the same vehicle (e.g. Etiqa, Berjaya Sompo, Kurnia, AmAssurance) to compile your side-by-side marketing comparison matrix.`
                 : mode === "bulk"
                 ? "High-speed parallel batch intake across 10 concurrent processing slots for corporate fleet deals."
                 : "Single quote preview sandbox. Real client renewal quotes should be compiled in Marketing Comparison for multi-insurer comparisons and ledger tracking."}
@@ -1043,7 +1057,9 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
               <Columns size={15} weight={mode === "comparison" ? "bold" : "regular"} />
               <span>Marketing Comparison</span>
               <span className="rounded bg-amber-100 text-amber-900 border border-amber-200/60 px-1.5 py-0.2 text-[10px] font-bold">
-                Up to 30 Quotes
+                {typeof rawCompLimit === "number" && rawCompLimit >= 1
+                  ? `Up to ${rawCompLimit} Quotes`
+                  : "Unlimited Quotes"}
               </span>
             </button>
             <button
@@ -1593,12 +1609,16 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                   <div>
                     <span className="font-[var(--font-manrope)] text-[15px] font-semibold text-[var(--rl-text-strong)] block">
                       {mode === "comparison"
-                        ? `Drag and drop 1 to ${maxBulkLimit} quotation PDFs for this vehicle`
+                        ? isUnlimitedQueue
+                          ? "Drag and drop quotation PDFs for this vehicle (No file limit)"
+                          : `Drag and drop 1 to ${maxBulkLimit} quotation PDFs for this vehicle`
                         : "Drag and drop multiple quotation PDFs here"}
                     </span>
                     <span className="text-[13px] text-[var(--rl-text-muted)] block mt-0.5">
                       {mode === "comparison"
-                        ? `Upload quotes from different underwriters (Etiqa, Berjaya Sompo, Allianz, Zurich, etc.) · Up to ${maxBulkLimit} files`
+                        ? isUnlimitedQueue
+                          ? `Upload quotes from different underwriters (Etiqa, Berjaya Sompo, Kurnia, Allianz, Zurich, etc.) · Unlimited queue · Up to ${formatBytes(maximum)} each`
+                          : `Upload quotes from different underwriters (Etiqa, Berjaya Sompo, Kurnia, Allianz, Zurich, etc.) · Up to ${maxBulkLimit} files`
                         : `Upload up to ${maxBulkLimit} PDFs at once · Up to ${formatBytes(maximum)} each`}
                     </span>
                   </div>
@@ -1633,7 +1653,10 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--rl-border)] pb-3">
                 <div className="flex items-center gap-2">
                   <h2 className="text-sm font-bold text-[var(--rl-text-strong)]">
-                    {mode === "comparison" ? "Marketing Comparison Queue" : "Corporate Fleet Queue"} ({bulkFiles.length} of {maxBulkLimit} Max)
+                    {mode === "comparison" ? "Marketing Comparison Queue" : "Corporate Fleet Queue"}{" "}
+                    {isUnlimitedQueue
+                      ? `(${bulkFiles.length} Staged)`
+                      : `(${bulkFiles.length} of ${maxBulkLimit} Max)`}
                   </h2>
                   {isAllBulkDone ? (
                     <Badge variant="success">All Finished</Badge>

@@ -46,7 +46,7 @@ def _seed_tenure_with_sessions(db: Session):
         email="broker@risklocker.local",
         name="Eugene Lee",
         password_hash="mock",
-        role="agent",
+        role="staff",
     )
     db.add(owner)
 
@@ -351,7 +351,7 @@ def test_dict_wrapped_extraction_fields_and_auto_healing(db_session: Session):
         email="porsche@risklocker.local",
         name="Eugene Lee",
         password_hash="mock",
-        role="agent",
+        role="staff",
     )
     db_session.add(owner)
 

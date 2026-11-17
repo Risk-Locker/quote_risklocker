@@ -854,8 +854,10 @@ def runner_fee_set(payload: dict, db: Session = Depends(get_db), user: User = De
 @router.get("/admin/settings/upload-limits")
 def upload_limits_get(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    from app.services.admin_service import get_comparison_upload_limit
     return {
         "max_bulk_upload_files": get_bulk_upload_limit(db),
+        "comparison_upload_limit": get_comparison_upload_limit(db),
         "min_allowed": 3,
     }
 
@@ -864,15 +866,38 @@ def upload_limits_get(db: Session = Depends(get_db), user: User = Depends(curren
 @router.post("/admin/settings/upload-limits")
 def upload_limits_set(payload: dict, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    from app.services.admin_service import (
+        get_comparison_upload_limit,
+        set_comparison_upload_limit,
+    )
     raw_val = payload.get("max_bulk_upload_files")
-    if raw_val is None:
+    saved = get_bulk_upload_limit(db)
+    if raw_val is not None:
+        try:
+            limit = int(raw_val)
+        except (ValueError, TypeError):
+            raise AppError("max_bulk_upload_files must be an integer.", 400)
+        saved = set_bulk_upload_limit(db, user, limit)
+    elif "comparison_upload_limit" not in payload:
         raise AppError("max_bulk_upload_files is required.", 400)
-    try:
-        limit = int(raw_val)
-    except (ValueError, TypeError):
-        raise AppError("max_bulk_upload_files must be an integer.", 400)
-    saved = set_bulk_upload_limit(db, user, limit)
-    return {"max_bulk_upload_files": saved, "min_allowed": 3}
+
+    comp_saved = get_comparison_upload_limit(db)
+    if "comparison_upload_limit" in payload:
+        raw_comp = payload.get("comparison_upload_limit")
+        if raw_comp is None or raw_comp == "":
+            comp_saved = set_comparison_upload_limit(db, user, None)
+        else:
+            try:
+                comp_int = int(raw_comp)
+            except (ValueError, TypeError):
+                raise AppError("comparison_upload_limit must be an integer or null.", 400)
+            comp_saved = set_comparison_upload_limit(db, user, comp_int)
+
+    return {
+        "max_bulk_upload_files": saved,
+        "comparison_upload_limit": comp_saved,
+        "min_allowed": 3,
+    }
 
 
 
@@ -883,13 +908,16 @@ def settings_limits(
     user: User = Depends(current_user),
 ) -> dict:
     from app.extraction.gemini_extractor import get_key_pool
+    from app.services.admin_service import get_comparison_upload_limit
     pool = get_key_pool()
     pool.sync_accounts(db=db)
     stats = pool.get_quota_stats()
     bulk_limit = get_bulk_upload_limit(db)
+    comp_limit = get_comparison_upload_limit(db)
     return {
         "max_upload_files": 1,
         "max_bulk_upload_files": bulk_limit,
+        "comparison_upload_limit": comp_limit,
         "max_upload_bytes": settings.max_upload_bytes,
         "max_source_pdf_bytes": settings.max_source_pdf_bytes,
         "gemini": stats,

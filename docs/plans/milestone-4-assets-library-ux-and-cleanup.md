@@ -1,4 +1,4 @@
-# Milestone 4: Assets Library UX (Sticky Toolbar, Inspector Modal & Cleanup) Implementation Plan
+﻿# Milestone 4: Assets Library UX (Sticky Toolbar, Inspector Modal & Cleanup) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `test-driven-development` and `systematic-debugging` to execute this plan cleanly. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -28,7 +28,7 @@
 - [x] **Step 1: Create `AssetDetailsModal.tsx`**
 Build the inspection modal showing:
 1. Preview image with zoom-on-hover.
-2. Detailed metadata table: ID, Key, Uploaded At, File Size (`formatBytes`), Resolution (`W × H`), MIME Type, Transparency badge.
+2. Detailed metadata table: ID, Key, Uploaded At, File Size (`formatBytes`), Resolution (`W Ã— H`), MIME Type, Transparency badge.
 3. One-click "Copy Image URL" button with clipboard write.
 4. "Download" and "Delete" actions.
 
@@ -53,3 +53,4 @@ Expected: PASS with 0 errors
 git add frontend/src/app/builder/assets/ scripts/cleanup_dummy_test_assets.py
 git commit -m "feat(assets): add sticky toolbar, S3-style asset inspector modal, and clean test debris"
 ```
+

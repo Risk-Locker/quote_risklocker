@@ -1,4 +1,4 @@
-# Milestone 3: Flatten `workspace_patch_service.py` & Wire 3-Eye Consensus Gate
+﻿# Milestone 3: Flatten `workspace_patch_service.py` & Wire 3-Eye Consensus Gate
 
 > **Serialized Milestone 3 of 3 (`Rule 06`)**
 > **Net Change Budget:** ~-40 lines
@@ -23,3 +23,4 @@
 - `.\.venv\Scripts\pytest.exe tests/unit/ tests/test_workspace_service.py tests/test_marketing_comparison.py -q`
 - `cd frontend; npx tsc --noEmit`
 - `.\.venv\Scripts\python.exe commands/verify-brain.py`
+

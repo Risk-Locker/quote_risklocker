@@ -4,8 +4,8 @@
 
 ## Budget Snapshot
 
-- **Active Mounted Skills (`.agents/skills/`):** `21` / `50` soft budget (`~1221` estimated boot prompt tokens)
-- **Cold Vault Skills (`.agents/skills-vault/`):** `30` (`0` boot prompt tokens until mounted)
+- **Active Mounted Skills (`.agents/skills/`):** `14` / `50` soft budget (`~888` estimated boot prompt tokens)
+- **Cold Vault Skills (`.agents/skills-vault/`):** `37` (`0` boot prompt tokens until mounted)
 - **Universal Scope Skills (`init-ai-factory.py`):** `48`
 
 ## Active Mounted Skills
@@ -14,42 +14,39 @@
 | :--- | :--- | :--- | :--- | ---: |
 | `agent-browser` | `testing-browser` | `universal` | `risklocker-custom` | ~64 |
 | `baseline-ui` | `frontend` | `universal` | `local-repo` | ~67 |
-| `better-layout` | `frontend` | `universal` | `local-repo` | ~48 |
 | `clean-code-and-refactoring` | `architecture` | `universal` | `risklocker-custom` | ~72 |
-| `design-systems-frontend-architecture` | `frontend` | `universal` | `local-repo` | ~55 |
 | `design2-pdf-parity` | `domain` | `project` | `risklocker-custom` | ~70 |
 | `edge-case-and-scenario-matrix` | `testing-browser` | `universal` | `risklocker-custom` | ~75 |
-| `emil-design-eng` | `frontend` | `universal` | `local-repo` | ~48 |
-| `forms-inputs-checkout` | `frontend` | `universal` | `local-repo` | ~44 |
 | `malaysian-motor-insurance` | `domain` | `project` | `risklocker-custom` | ~80 |
 | `playwright` | `testing-browser` | `universal` | `curated-global+risklocker` | ~61 |
 | `postgres-ledger-migrations` | `backend-db` | `project` | `risklocker-custom` | ~66 |
 | `python-testing` | `testing-browser` | `universal` | `risklocker-custom` | ~62 |
-| `requesting-code-review` | `general` | `universal` | `obra/superpowers` | ~38 |
 | `security-best-practices` | `security` | `universal` | `curated-global` | ~68 |
 | `shadcn` | `frontend` | `universal` | `risklocker-custom+radix` | ~61 |
 | `system-design-and-architecture` | `architecture` | `universal` | `risklocker-custom` | ~76 |
 | `systematic-debugging` | `general` | `universal` | `obra/superpowers` | ~34 |
 | `test-driven-development` | `testing-browser` | `universal` | `obra/superpowers` | ~32 |
-| `verification-before-completion` | `general` | `universal` | `obra/superpowers` | ~70 |
-| `writing-plans` | `general` | `universal` | `obra/superpowers+risklocker` | ~30 |
 
 ## Cold Vault Skills
 
 | Skill | Category | Scope | Source | Location |
 | :--- | :--- | :--- | :--- | :--- |
 | `apple-design` | `design` | `universal` | `curated-global` | `.agents/skills-vault/design/apple-design` |
+| `better-layout` | `frontend` | `universal` | `local-repo` | `.agents/skills-vault/frontend/better-layout` |
 | `better-ui` | `frontend` | `universal` | `local-repo` | `.agents/skills-vault/frontend/better-ui` |
 | `brainstorming` | `general` | `universal` | `obra/superpowers+risklocker` | `.agents/skills-vault/general/brainstorming` |
 | `building-components` | `frontend` | `universal` | `local-repo` | `.agents/skills-vault/frontend/building-components` |
 | `company-dispatch` | `general` | `universal` | `risklocker-custom` | `.agents/skills-vault/general/company-dispatch` |
+| `design-systems-frontend-architecture` | `frontend` | `universal` | `local-repo` | `.agents/skills-vault/frontend/design-systems-frontend-architecture` |
 | `design-taste-frontend` | `frontend` | `universal` | `curated-global` | `.agents/skills-vault/frontend/design-taste-frontend` |
 | `deslopify` | `frontend` | `universal` | `local-repo` | `.agents/skills-vault/frontend/deslopify` |
 | `dispatching-parallel-agents` | `general` | `universal` | `obra/superpowers` | `.agents/skills-vault/general/dispatching-parallel-agents` |
 | `domain-interrogation-and-reality-gate` | `architecture` | `universal` | `risklocker-custom` | `.agents/skills-vault/architecture/domain-interrogation-and-reality-gate` |
+| `emil-design-eng` | `frontend` | `universal` | `local-repo` | `.agents/skills-vault/frontend/emil-design-eng` |
 | `enterprise-product-ui` | `design` | `universal` | `risklocker-custom` | `.agents/skills-vault/design/enterprise-product-ui` |
 | `executing-plans` | `general` | `universal` | `local-repo` | `.agents/skills-vault/general/executing-plans` |
 | `finishing-a-development-branch` | `general` | `universal` | `obra/superpowers` | `.agents/skills-vault/general/finishing-a-development-branch` |
+| `forms-inputs-checkout` | `frontend` | `universal` | `local-repo` | `.agents/skills-vault/frontend/forms-inputs-checkout` |
 | `frontend-design` | `frontend` | `universal` | `curated-global` | `.agents/skills-vault/frontend/frontend-design` |
 | `gsap-framer-scroll-animation` | `frontend` | `universal` | `curated-global` | `.agents/skills-vault/frontend/gsap-framer-scroll-animation` |
 | `kami` | `design` | `universal` | `local-repo` | `.agents/skills-vault/design/kami` |
@@ -62,9 +59,12 @@
 | `playwright-explore-website` | `testing-browser` | `universal` | `local-repo` | `.agents/skills-vault/testing-browser/playwright-explore-website` |
 | `react-doctor` | `frontend` | `universal` | `local-repo` | `.agents/skills-vault/frontend/react-doctor` |
 | `receiving-code-review` | `general` | `universal` | `obra/superpowers` | `.agents/skills-vault/general/receiving-code-review` |
+| `requesting-code-review` | `general` | `universal` | `obra/superpowers` | `.agents/skills-vault/general/requesting-code-review` |
 | `security-threat-model` | `security` | `universal` | `curated-global` | `.agents/skills-vault/security/security-threat-model` |
 | `subagent-driven-development` | `general` | `universal` | `local-repo` | `.agents/skills-vault/general/subagent-driven-development` |
 | `tailwindcss` | `frontend` | `universal` | `local-repo` | `.agents/skills-vault/frontend/tailwindcss` |
 | `using-superpowers` | `general` | `universal` | `obra/superpowers+risklocker` | `.agents/skills-vault/general/using-superpowers` |
+| `verification-before-completion` | `general` | `universal` | `obra/superpowers` | `.agents/skills-vault/general/verification-before-completion` |
 | `web-design-guidelines` | `design` | `universal` | `vercel+risklocker` | `.agents/skills-vault/design/web-design-guidelines` |
 | `webapp-testing` | `testing-browser` | `universal` | `curated-global+risklocker` | `.agents/skills-vault/testing-browser/webapp-testing` |
+| `writing-plans` | `general` | `universal` | `obra/superpowers+risklocker` | `.agents/skills-vault/general/writing-plans` |

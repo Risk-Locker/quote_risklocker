@@ -40,6 +40,15 @@ export function formatBenefitCoverage(
     }
   }
 
+  // Guard: Preserve percentage values (e.g. "0.20%", "15%") without prefixing RM
+  if (/^\s*-?\d+(?:\.\d+)?\s*%\s*$/.test(str)) {
+    return str.replace(/\s+/g, "");
+  }
+
+  // Guard: Preserve canonical Included / Not Included labels
+  if (/^included$/i.test(str)) return "Included";
+  if (/^(?:not\s+included|not\s+covered)$/i.test(str)) return "Not Included";
+
   // Guard: If value already contains RM / MYR, ALWAYS format as currency regardless of requested format
   if (/^(?:RM|MYR)\s*[\d,]+/i.test(str)) {
     const cleanStr = str.replace(/^(?:RM|MYR)\s*/i, "").trim();
@@ -114,7 +123,8 @@ export function formatShortInsurerName(name?: string | null): string {
   if (lower.includes("pacific")) return "PACIFIC";
   if (lower.includes("takaful malaysia") || lower.includes("syarikat takaful")) return "TAKAFUL MALAYSIA";
   if (lower.includes("takaful ikhlas") || lower.includes("ikhlas")) return "TAKAFUL IKHLAS";
-  if (lower.includes("amgeneral") || lower.includes("kurnia")) return "AMGENERAL / KURNIA";
+  if (lower.includes("kurnia")) return "KURNIA";
+  if (lower.includes("amgeneral") || lower.includes("amassurance") || lower.includes("amgen")) return "AMASSURANCE";
   if (lower.includes("chubb")) return "CHUBB";
   if (lower.includes("msig")) return "MSIG";
   if (lower.includes("rhb")) return "RHB";

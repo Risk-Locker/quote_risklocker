@@ -141,6 +141,15 @@ External chat tools without workspace access should be given this file plus the 
 | `docs/plans/milestone-3a-design2-pdf-png-parity.md` | Milestone 3a: Design 2 pure-Pillow logo trim, horizontal asset parity, `RISKLOCKER SDN. BHD.` footer, total sync, & inline PDF viewer | Milestone 3a execution |
 | `docs/plans/milestone-3b-ai-vehicle-intelligence-and-deep-redetect.md` | Milestone 3b: Gemini `vehicle_type`/`capacity_unit` schema, `KG`/`W`/`CC` integrity, commercial fee defaults, real `★ Detected` provenance, & deep `Re-detect` | Milestone 3b execution |
 | `docs/plans/milestone-3c-box1-design2-parity-and-towing-conditions.md` | Milestone 3c: Commercial catalog pinning, Box 1 ↔ Design 2 WYSIWYG parity, DB `CompanyBenefitCondition` single source of truth & `/builder/benefits` deep link | Milestone 3c execution |
+| `docs/plans/2026-11-17-combined-master-roadmap-edit-persistence-kurnia-3c-upload.md` | Combined master roadmap: comparison edit persistence, workspace save semantics, Kurnia, Milestone 3c, unlimited comparison uploads | Active sprint tasks change or complete |
+| `docs/plans/milestone-4a-comparison-edit-persistence-and-special-perils.md` | Milestone 4a: pure comparison GET, write-time materialize, field-level manual overrides, single Special Perils resolver, inline card editing | Milestone 4a execution |
+| `docs/plans/milestone-4b-workspace-save-semantics-and-fee-toggles.md` | Milestone 4b: true dirty state, per-edit undo, learn 422 fix, Road Tax and Runner Fee toggle root cause | Milestone 4b execution |
+| `docs/plans/milestone-4c-kurnia-company.md` | Milestone 4c: Kurnia as a separate insurance company row, no AmAssurance folding | Milestone 4c execution |
+| `docs/plans/milestone-4d-unlimited-comparison-upload-queue.md` | Milestone 4d: setting-driven unlimited comparison staging, enqueue-all, server-side batch progress | Milestone 4d execution |
+| `docs/plans/agent-system-reset/00-master-plan.md` | Multi-tier agent harness reset master plan (`deep` / `balanced` / `flash` profiles & task-size routing) | Agent harness updates |
+| `docs/plans/agent-system-reset/01-audit-findings.md` | Empirical token and rule audit of `.agents/` and `AGENTS.md` | Reference audit |
+| `docs/plans/agent-system-reset/02-core-contract-and-model-profiles.md` | Model-tier operating contract and profile specifications (`Argon`, `Hydrogen`, `Claude`, `3.8 Flash`) | Agent harness updates |
+| `docs/plans/agent-system-reset/03-prune-and-migration-spec.md` | Rule and skill vault pruning specification | Agent harness updates |
 
 ### History & Generated Tooling
 | Document | Purpose | Update when |

@@ -1,4 +1,4 @@
-# Milestone 3a: Design 2 PDF/PNG Parity, Logos, Footer & Inline PDF Viewer
+﻿# Milestone 3a: Design 2 PDF/PNG Parity, Logos, Footer & Inline PDF Viewer
 
 **Status:** Verified & Complete (`v30.4`)
 
@@ -18,3 +18,4 @@
 - `.\.venv\Scripts\pytest.exe tests/ -q`: `1,171 passed, 3 skipped` (`tests/security/test_postgres_schema_contracts.py`)
 - `cd frontend; npm run build`: exit 0 (`47/47` pages + ESLint)
 - Playwright Chromium PDF render `.qc-tmp/shots/verify_vrs7732_m3a.pdf` (visual check: full horizontal RL & AmAssurance banners, `RM 140,534.00`, `RISKLOCKER SDN. BHD.` / `202301041962(1535879-U)` footer)
+

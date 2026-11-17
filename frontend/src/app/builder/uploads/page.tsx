@@ -14,6 +14,8 @@ import { apiErrorMessage } from "@/lib/errors";
 
 export default function BuilderUploadsPage() {
   const [maxBulkFiles, setMaxBulkFiles] = useState("5");
+  const [comparisonUnlimited, setComparisonUnlimited] = useState(true);
+  const [comparisonLimit, setComparisonLimit] = useState("30");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -23,9 +25,19 @@ export default function BuilderUploadsPage() {
     setLoading(true);
     setError("");
     try {
-      const data = await api<{ max_bulk_upload_files: number; min_allowed: number }>("/admin/settings/upload-limits");
+      const data = await api<{
+        max_bulk_upload_files: number;
+        comparison_upload_limit?: number | null;
+        min_allowed: number;
+      }>("/admin/settings/upload-limits");
       if (data && typeof data.max_bulk_upload_files === "number") {
         setMaxBulkFiles(String(data.max_bulk_upload_files));
+      }
+      if (data && typeof data.comparison_upload_limit === "number" && data.comparison_upload_limit >= 1) {
+        setComparisonUnlimited(false);
+        setComparisonLimit(String(data.comparison_upload_limit));
+      } else {
+        setComparisonUnlimited(true);
       }
     } catch (err) {
       setError(apiErrorMessage(err));
@@ -46,15 +58,37 @@ export default function BuilderUploadsPage() {
       return;
     }
 
+    let compVal: number | null = null;
+    if (!comparisonUnlimited) {
+      const parsedComp = parseInt(comparisonLimit, 10);
+      if (isNaN(parsedComp) || parsedComp < 1) {
+        setError("Marketing Comparison upload limit must be at least 1 PDF, or set to Unlimited.");
+        return;
+      }
+      compVal = parsedComp;
+    }
+
     setSaving(true);
     setError("");
     try {
-      const res = await api<{ max_bulk_upload_files: number }>("/admin/settings/upload-limits", {
+      const res = await api<{
+        max_bulk_upload_files: number;
+        comparison_upload_limit?: number | null;
+      }>("/admin/settings/upload-limits", {
         method: "POST",
-        body: JSON.stringify({ max_bulk_upload_files: val }),
+        body: JSON.stringify({
+          max_bulk_upload_files: val,
+          comparison_upload_limit: compVal,
+        }),
       });
       setMaxBulkFiles(String(res.max_bulk_upload_files));
-      toast("Bulk upload limit updated successfully.", "success");
+      if (typeof res.comparison_upload_limit === "number" && res.comparison_upload_limit >= 1) {
+        setComparisonUnlimited(false);
+        setComparisonLimit(String(res.comparison_upload_limit));
+      } else {
+        setComparisonUnlimited(true);
+      }
+      toast("Upload limits updated successfully.", "success");
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
@@ -119,7 +153,41 @@ export default function BuilderUploadsPage() {
                   <span className="text-xs font-medium text-[var(--rl-text-muted)]">PDFs</span>
                 </div>
                 <p className="text-[12px] text-[var(--rl-text-muted)]">
-                  Agency staff can drag and drop up to this number of quotation PDFs simultaneously on the Upload page. Minimum allowed limit is <strong>3</strong>.
+                  Agency staff can drag and drop up to this number of quotation PDFs simultaneously on the Corporate Fleet Upload page. Minimum allowed limit is <strong>3</strong>.
+                </p>
+              </div>
+
+              <div className="grid gap-2 border-t border-[var(--rl-border)] pt-4">
+                <label className="text-xs font-semibold text-[var(--rl-text-strong)]">
+                  Marketing Comparison Queue Limit
+                </label>
+                <label className="inline-flex items-center gap-2 text-xs font-medium text-[var(--rl-text-strong)] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={comparisonUnlimited}
+                    disabled={loading || saving}
+                    onChange={(e) => setComparisonUnlimited(e.target.checked)}
+                    className="h-4 w-4 rounded border-[var(--rl-border)] accent-[#1b1717]"
+                  />
+                  <span>Unlimited Marketing Comparison Queue (Default — processed via server fair-share queue)</span>
+                </label>
+                {!comparisonUnlimited && (
+                  <div className="flex max-w-xs items-center gap-2 mt-1">
+                    <Input
+                      id="comparisonLimit"
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={comparisonLimit}
+                      disabled={loading || saving}
+                      onChange={(e) => setComparisonLimit(e.target.value)}
+                      className="font-mono text-sm"
+                    />
+                    <span className="text-xs font-medium text-[var(--rl-text-muted)]">PDFs Max</span>
+                  </div>
+                )}
+                <p className="text-[12px] text-[var(--rl-text-muted)]">
+                  When set to <strong>Unlimited</strong>, staff can stage any number of insurer quotation PDFs for a vehicle without a 30-PDF cap; the server fair-share queue paces extraction automatically.
                 </p>
               </div>
 

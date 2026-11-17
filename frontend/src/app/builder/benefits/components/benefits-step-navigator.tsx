@@ -341,8 +341,9 @@ export function BenefitsStepNavigator({
         <div className="flex items-center gap-2 border-t border-[var(--rl-border)] pt-3 text-xs text-[var(--rl-text-muted)]">
           <Lightning size={16} className="text-amber-500 shrink-0" weight="fill" />
           <span>
-            <strong>Dynamic Condition Rules:</strong> Cross-benefit conditional upgrades for this insurer.
-            Evaluates in realtime during quote calculations and PDF generation.
+            <strong>Global Insurer Conditional Rules:</strong> Cross-benefit conditional upgrades (e.g.{" "}
+            <span className="font-semibold text-[var(--rl-text-strong)]">Motor PA Plus — Plan 4 → Unlimited Towing</span>)
+            applied across all product catalogs for this insurer during workspace review, Design 2 PDF rendering, and comparison.
           </span>
         </div>
       ) : screenTab === "matrix" ? (

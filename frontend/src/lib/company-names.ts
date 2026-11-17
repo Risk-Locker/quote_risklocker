@@ -17,7 +17,8 @@ export const OFFICIAL_INSURER_NAMES: Record<string, string> = {
   AMASSURANCE: "AmGeneral Insurance Berhad",
   AMGEN: "AmGeneral Insurance Berhad",
   AMGENERAL: "AmGeneral Insurance Berhad",
-  KURNIA: "AmGeneral Insurance Berhad",
+  KURNIA: "Kurnia Insurans (Malaysia) Berhad",
+  KURNIA_INSURANS: "Kurnia Insurans (Malaysia) Berhad",
   ALLIANZ: "Allianz General Insurance Company (Malaysia) Berhad",
   ZURICH: "Zurich General Insurance Malaysia Berhad",
   AIG: "AIG Malaysia Insurance Berhad",
@@ -65,7 +66,8 @@ export function getInsurerShortName(rawName?: string | null): string {
   if (upper.includes("LONPAC")) return "Lonpac";
   if (upper.includes("SOMPO")) return "Berjaya Sompo";
   if (upper.includes("TUNE")) return "Tune Protect";
-  if (upper.includes("AMASSURANCE") || upper.includes("AMGEN") || upper.includes("KURNIA")) return "AmAssurance";
+  if (upper.includes("KURNIA")) return "Kurnia";
+  if (upper.includes("AMASSURANCE") || upper.includes("AMGEN")) return "AmAssurance";
   if (upper.includes("ALLIANZ")) return "Allianz";
   if (upper.includes("ZURICH")) return "Zurich";
   if (upper.includes("LIBERTY")) return "Liberty";

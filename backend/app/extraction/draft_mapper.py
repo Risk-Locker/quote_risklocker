@@ -658,6 +658,20 @@ def build_draft(
         if isinstance(f_data, dict) and ("detected_value" not in f_data or f_data.get("detected_value") is None):
             f_data["detected_value"] = f_data.get("value")
 
+    if "special_perils" not in fields:
+        try:
+            from app.services.marketing_comparison.special_perils import resolve_special_perils
+            sp_status = resolve_special_perils(text=raw_text or "", benefit_lines=benefit_lines or (), fields=fields)
+            fields["special_perils"] = {
+                "value": sp_status,
+                "detected_value": sp_status,
+                "status": "ready",
+                "warnings": [],
+                "message": "",
+            }
+        except Exception:
+            pass
+
     # Referee Fact-Checking Pass
     from app.extraction.referee import audit_and_reconcile_draft
     fields, ref_notices = audit_and_reconcile_draft(fields, raw_text=raw_text)

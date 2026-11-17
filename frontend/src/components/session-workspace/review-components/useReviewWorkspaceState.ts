@@ -19,12 +19,8 @@ import {
 } from "./policy-fields-card";
 
 export const LEARNABLE = new Map<string, string>([
-  ["car_brand", "car_brands"],
-  ["car_model", "car_models"],
-  ["client_type", "client_types"],
-  ["vehicle_type", "vehicle_types"],
-  ["region", "regions"],
-  ["coverage_type", "coverage_types"],
+  ["car_brand", "car_brand"],
+  ["car_model", "car_model"],
 ]);
 
 export function formatMoney(raw: string | null | undefined): string {
@@ -553,6 +549,26 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
       values.insurance_premium_total = values.premium;
     }
 
+    const storedIncRt = (workspace.fields?.include_road_tax as WorkspaceField | undefined)?.value;
+    const dispIncRt = workspace.display_options?.include_road_tax;
+    if (storedIncRt !== undefined && storedIncRt !== null && String(storedIncRt).trim() !== "") {
+      values.include_road_tax = String(storedIncRt).toLowerCase() === "false" ? "false" : "true";
+    } else if (dispIncRt !== undefined) {
+      values.include_road_tax = dispIncRt === false ? "false" : "true";
+    } else {
+      values.include_road_tax = "true";
+    }
+
+    const storedIncRf = (workspace.fields?.include_runner_fee as WorkspaceField | undefined)?.value;
+    const dispIncRf = workspace.display_options?.include_runner_fee;
+    if (storedIncRf !== undefined && storedIncRf !== null && String(storedIncRf).trim() !== "") {
+      values.include_runner_fee = String(storedIncRf).toLowerCase() === "false" ? "false" : "true";
+    } else if (dispIncRf !== undefined) {
+      values.include_runner_fee = dispIncRf === false ? "false" : "true";
+    } else {
+      values.include_runner_fee = "true";
+    }
+
     setFormValues(values);
   }, [workspace]);
 
@@ -592,8 +608,8 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
         method: "POST",
         body: JSON.stringify({ field: learnPrompt.field, value: learnPrompt.value }),
       });
-    } catch {
-      // Best effort
+    } catch (error) {
+      setToastMessage(apiErrorMessage(error));
     }
     setLearnPrompt(null);
   }

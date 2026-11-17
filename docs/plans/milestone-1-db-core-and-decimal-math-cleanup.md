@@ -1,4 +1,4 @@
-# Milestone 1: Database Schema Parity, Pure Decimal Math & Sync Service Slicing
+﻿# Milestone 1: Database Schema Parity, Pure Decimal Math & Sync Service Slicing
 
 > **Serialized Milestone 1 of 3 (`Rule 06`)**
 > **Net Change Budget:** ~-60 lines (refactoring & bugfixes)
@@ -28,3 +28,4 @@
 ## 2. Verification Gate for Milestone 1
 - `.\.venv\Scripts\pytest.exe tests/unit/test_plan1_database_core_and_sync.py tests/test_workspace_service.py tests/test_marketing_comparison.py tests/test_extraction_regression.py tests/test_package_plans.py tests/test_render_context.py -q`
 - Live PostgreSQL ORM query check on `TenureComparisonEntry` and `DraftBenefitSelection`.
+

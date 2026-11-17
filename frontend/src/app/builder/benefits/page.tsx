@@ -1645,7 +1645,9 @@ ${aiMarkdownTable}`;
         const rawCatParam = params.get("catalog") || saved?.catalogId || "";
         const rawProdParam = params.get("product") || saved?.productId || "";
 
-        if (saved?.screenTab && !rawCompParam) {
+        if (params.get("catalog") || params.get("product")) {
+          setScreenTab("catalogs");
+        } else if (saved?.screenTab && !rawCompParam) {
           setScreenTab(saved.screenTab);
         }
 
@@ -1667,6 +1669,9 @@ ${aiMarkdownTable}`;
       const catParam = sp.get("catalog");
       const prodParam = sp.get("product");
 
+      if (catParam || prodParam) {
+        setScreenTab("catalogs");
+      }
       if (compParam) {
         const resolvedComp = resolveBySlugOrId(companies, compParam);
         if (resolvedComp) {

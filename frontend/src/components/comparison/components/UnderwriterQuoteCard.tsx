@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { formatShortInsurerName, formatBenefitCoverage } from "@/lib/benefit-utils";
 import { formatLlpLlop, isLlpLlopIncluded, formatMoneyWithRounding } from "../types";
 import type { ComparisonEntry, TenureSpec, RoundingMode } from "../types";
+import { InlineComparisonFieldEditor } from "./InlineComparisonFieldEditor";
 
 export interface UnderwriterQuoteCardProps {
   entry: ComparisonEntry;
@@ -47,6 +48,7 @@ export interface UnderwriterQuoteCardProps {
   onEditEntry: (entry: ComparisonEntry) => void;
   onPromoteToCovernote: (entry: ComparisonEntry) => void;
   onDeleteEntry: (id: string, deleteCompany: boolean) => void;
+  onPatchEntryField?: (entry: ComparisonEntry, patch: Record<string, any>) => Promise<void>;
   roundingMode?: RoundingMode;
 }
 
@@ -73,9 +75,19 @@ export function UnderwriterQuoteCard({
   onEditEntry,
   onPromoteToCovernote,
   onDeleteEntry,
+  onPatchEntryField,
   roundingMode = "exact",
 }: UnderwriterQuoteCardProps) {
   const isWinner = entry.is_recommended;
+  const overrides = entry.manual_overrides || [];
+  const isFieldOverridden = (field: string) =>
+    overrides.includes(field) || (field === "towing_limit" && overrides.includes("towing_km"));
+  const isSpecialPerilsIncluded = Boolean(
+    entry.special_perils &&
+      !["not included", "not covered", "none", "nil", "no", "-", "—", "tiada", "tidak termasuk"].includes(
+        entry.special_perils.trim().toLowerCase()
+      )
+  );
 
   return (
     <div
@@ -428,7 +440,27 @@ export function UnderwriterQuoteCard({
           {/* Towing Limit */}
           <div className="h-8 flex items-center justify-between pt-1">
             <span className="text-[#6e6e73]">Towing:</span>
-            <span className="font-bold text-[#1b1717]">{formatBenefitCoverage(entry.towing_km || entry.towing_limit || "Unlimited", undefined, entry.company_name)}</span>
+            {onPatchEntryField ? (
+              <InlineComparisonFieldEditor
+                field="towing_limit"
+                label="Towing Limit"
+                currentValue={entry.towing_limit || entry.towing_km || "Unlimited"}
+                isOverridden={isFieldOverridden("towing_limit")}
+                onSave={(patch) => onPatchEntryField(entry, patch)}
+              >
+                <span className="font-bold text-[#1b1717]">
+                  {formatBenefitCoverage(
+                    entry.towing_limit || entry.towing_km || "Unlimited",
+                    undefined,
+                    isFieldOverridden("towing_limit") ? undefined : entry.company_name
+                  )}
+                </span>
+              </InlineComparisonFieldEditor>
+            ) : (
+              <span className="font-bold text-[#1b1717]">
+                {formatBenefitCoverage(entry.towing_limit || entry.towing_km || "Unlimited", undefined, entry.company_name)}
+              </span>
+            )}
           </div>
 
           {/* Agreed Value */}
@@ -459,9 +491,21 @@ export function UnderwriterQuoteCard({
           {/* Excess */}
           <div className="h-8 flex items-center justify-between pt-2">
             <span className="text-[#6e6e73]">Excess:</span>
-            <span className="font-mono font-bold text-[#1b1717]">
-              RM {entry.excess.toFixed(2)}
-            </span>
+            {onPatchEntryField ? (
+              <InlineComparisonFieldEditor
+                field="excess"
+                label="Excess (RM)"
+                currentValue={entry.excess}
+                isOverridden={isFieldOverridden("excess")}
+                onSave={(patch) => onPatchEntryField(entry, patch)}
+              >
+                <span className="font-mono font-bold text-[#1b1717]">RM {entry.excess.toFixed(2)}</span>
+              </InlineComparisonFieldEditor>
+            ) : (
+              <span className="font-mono font-bold text-[#1b1717]">
+                RM {entry.excess.toFixed(2)}
+              </span>
+            )}
           </div>
 
           {/* Rate */}
@@ -485,11 +529,27 @@ export function UnderwriterQuoteCard({
           <div className="min-h-[38px] flex items-center justify-between pt-2">
             <span className="text-[#6e6e73]">Windscreen:</span>
             <div className="text-right">
-              <span className="font-mono font-bold text-[#1b1717]">
-                {entry.windscreen_sum_insured
-                  ? `RM ${entry.windscreen_sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
-                  : "Not Included"}
-              </span>
+              {onPatchEntryField ? (
+                <InlineComparisonFieldEditor
+                  field="windscreen_sum_insured"
+                  label="Windscreen (RM)"
+                  currentValue={entry.windscreen_sum_insured ?? ""}
+                  isOverridden={isFieldOverridden("windscreen_sum_insured")}
+                  onSave={(patch) => onPatchEntryField(entry, patch)}
+                >
+                  <span className="font-mono font-bold text-[#1b1717]">
+                    {entry.windscreen_sum_insured
+                      ? `RM ${entry.windscreen_sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
+                      : "Not Included"}
+                  </span>
+                </InlineComparisonFieldEditor>
+              ) : (
+                <span className="font-mono font-bold text-[#1b1717]">
+                  {entry.windscreen_sum_insured
+                    ? `RM ${entry.windscreen_sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
+                    : "Not Included"}
+                </span>
+              )}
               {entry.windscreen_sum_insured && tenure.windscreen_target ? (
                 <span
                   className={`block text-[10px] font-bold ${
@@ -509,31 +569,74 @@ export function UnderwriterQuoteCard({
           {/* Special Perils / Flood */}
           <div className="h-8 flex items-center justify-between pt-2">
             <span className="text-[#6e6e73]">Special Perils:</span>
-            <span className={`font-bold ${entry.special_perils ? "text-emerald-700" : "text-[#6e6e73]"}`}>
-              {entry.special_perils ? formatBenefitCoverage(entry.special_perils, "RM") : "Not Included"}
-            </span>
+            {onPatchEntryField ? (
+              <InlineComparisonFieldEditor
+                field="special_perils"
+                label="Special Perils"
+                currentValue={entry.special_perils || "Not Included"}
+                isOverridden={isFieldOverridden("special_perils")}
+                onSave={(patch) => onPatchEntryField(entry, patch)}
+              >
+                <span className={`font-bold ${isSpecialPerilsIncluded ? "text-emerald-700" : "text-[#6e6e73]"}`}>
+                  {isSpecialPerilsIncluded ? formatBenefitCoverage(entry.special_perils, "RM") : "Not Included"}
+                </span>
+              </InlineComparisonFieldEditor>
+            ) : (
+              <span className={`font-bold ${isSpecialPerilsIncluded ? "text-emerald-700" : "text-[#6e6e73]"}`}>
+                {isSpecialPerilsIncluded ? formatBenefitCoverage(entry.special_perils, "RM") : "Not Included"}
+              </span>
+            )}
           </div>
 
           {/* LLP / LLOP (Passenger Liability) */}
           <div className="h-8 flex items-center justify-between pt-2">
             <span className="text-[#6e6e73]">LLP / LLOP:</span>
-            <span className={`font-bold ${isLlpLlopIncluded(entry.llp_llop) ? "text-[#1b1717]" : "text-[#6e6e73]"}`}>
-              {formatLlpLlop(entry.llp_llop)}
-            </span>
+            {onPatchEntryField ? (
+              <InlineComparisonFieldEditor
+                field="llp_llop"
+                label="LLP / LLOP"
+                currentValue={entry.llp_llop || "Not Included"}
+                isOverridden={isFieldOverridden("llp_llop")}
+                onSave={(patch) => onPatchEntryField(entry, patch)}
+              >
+                <span className={`font-bold ${isLlpLlopIncluded(entry.llp_llop) ? "text-[#1b1717]" : "text-[#6e6e73]"}`}>
+                  {formatLlpLlop(entry.llp_llop)}
+                </span>
+              </InlineComparisonFieldEditor>
+            ) : (
+              <span className={`font-bold ${isLlpLlopIncluded(entry.llp_llop) ? "text-[#1b1717]" : "text-[#6e6e73]"}`}>
+                {formatLlpLlop(entry.llp_llop)}
+              </span>
+            )}
           </div>
 
           {/* Notes / Endorsements */}
-          {entry.notes && (
-            <div className="pt-2">
-              <span className="text-[10px] text-[#6e6e73] block mb-0.5 font-semibold">Notes:</span>
+          <div className="pt-2">
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-[10px] text-[#6e6e73] font-semibold">Notes:</span>
+              {onPatchEntryField && (
+                <InlineComparisonFieldEditor
+                  field="notes"
+                  label="Card Notes"
+                  currentValue={entry.notes || ""}
+                  isOverridden={isFieldOverridden("notes")}
+                  onSave={(patch) => onPatchEntryField(entry, patch)}
+                >
+                  <span className="text-[10px] font-semibold text-[#6e6e73] hover:text-[#1b1717]">
+                    {entry.notes ? "Edit" : "+ Add note"}
+                  </span>
+                </InlineComparisonFieldEditor>
+              )}
+            </div>
+            {entry.notes ? (
               <p
                 className="text-[11px] text-[#454545] bg-[#f5f5f7] p-2 rounded border border-[#e5e5ea] leading-tight line-clamp-2"
                 title={entry.notes}
               >
                 {entry.notes}
               </p>
-            </div>
-          )}
+            ) : null}
+          </div>
         </div>
       </div>
 

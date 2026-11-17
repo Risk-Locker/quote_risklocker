@@ -1,4 +1,4 @@
-# Milestone 3: AI Fleet Monitoring Dashboard (Calendar & Timeline) Implementation Plan
+﻿# Milestone 3: AI Fleet Monitoring Dashboard (Calendar & Timeline) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `test-driven-development` and `systematic-debugging` to execute this plan cleanly. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -86,3 +86,4 @@ Expected: PASS with 0 errors
 git add backend/app/services/gemini_account_service.py backend/app/api/routers/system.py frontend/src/components/gemini-timeline-calendar.tsx frontend/src/app/settings/ai-engine/page.tsx tests/integration/test_gemini_timeline_api.py
 git commit -m "feat(monitoring): add AI fleet timeline, Google PT cycle countdown and calendar"
 ```
+

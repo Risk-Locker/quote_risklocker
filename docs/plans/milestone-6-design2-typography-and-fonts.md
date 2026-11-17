@@ -1,4 +1,4 @@
-# Milestone 6: Design 2 Quotation Typography & Exact Font Pairing Implementation Plan
+﻿# Milestone 6: Design 2 Quotation Typography & Exact Font Pairing Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `test-driven-development` and `systematic-debugging` to execute this plan cleanly. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -49,3 +49,4 @@
 - [x] **Step 5: Update canvas typography styles**
 - [x] **Step 6: Verify TypeScript compilation (`npx tsc --noEmit`)**
 - [x] **Step 7: Commit Milestone 6 changes**
+

@@ -1,4 +1,4 @@
-# Milestone 1: Save, Sync & API Repairs (`F-01`, `F-02`, `F-03`, `F-04a`, `F-04b`)
+﻿# Milestone 1: Save, Sync & API Repairs (`F-01`, `F-02`, `F-03`, `F-04a`, `F-04b`)
 
 - **Status:** `VERIFIED`
 - **Parent Plan:** `docs/plans/2026-11-17-ux-saving-ledger-and-sandbox-audit-plan.md`
@@ -8,7 +8,7 @@
 ## 1. Scope & Allowed Blast Radius
 
 ### Included Fixes
-1. **`F-01` (CRITICAL — Cross-Vehicle / Sandbox Overwrite in Tenure Identity Sync):**
+1. **`F-01` (CRITICAL â€” Cross-Vehicle / Sandbox Overwrite in Tenure Identity Sync):**
    - File: `backend/app/services/tenure_identity_sync_service.py` (`_propagate_to_session_drafts`, `_update_single_draft_fields`)
    - Fix: Restrict vehicle specs propagation (`vehicle_no`, `car_brand`, `car_model`, `engine_cc`, `chassis_no`, `engine_no`, `manufacture_year`, `vehicle_type`, `powertrain`) strictly to sessions linked by `tenure_id == tenure.id` or `tracked_vehicle_id == tv.id`. Restrict coverage dates, road tax, runner fee, NCD, and payable totals strictly to `session.tenure_id == tenure.id`. Sibling sessions sharing ONLY `customer_id == cust.id` receive ONLY customer identity updates (`customer_name`, `ic_or_brn`). Exclude `is_test=True` sandbox sessions from production propagation.
 2. **`F-02` (Ledger Row Inline / Stage Save `405`):**
@@ -36,10 +36,11 @@
 5. **RBAC / IDOR / CSRF / Sandbox Isolation:** Sandbox (`is_test=True`) sessions never overwrite or inherit updates from production `CustomerAccount`/`InsuranceTenure` propagation, and all state-changing routes use `PATCH`/`POST` with CSRF headers cleanly.
 6. **Malformed Inputs / Units:** EV `"150 kW"` / `"150"` on EV powertrain or Commercial `"7500 KG"` never turns into `"150 CC"` / `"7500 CC"`.
 7. **Timeout / Partial Failure Rollback:** Save failure leaves local staged draft intact, displays explicit error status/message, and blocks stale quotation export until save succeeds.
-8. **Responsive Zoom & Accessible Navigation Guard:** Sticky Unsaved Changes Bar wraps cleanly at `1024px–1920px` (`80%–120%` zoom), uses `--rl-*` tokens, and route-leave guard uses keyboard-accessible Dialog (`Esc`, focus trap) instead of native `window.confirm()`.
+8. **Responsive Zoom & Accessible Navigation Guard:** Sticky Unsaved Changes Bar wraps cleanly at `1024pxâ€“1920px` (`80%â€“120%` zoom), uses `--rl-*` tokens, and route-leave guard uses keyboard-accessible Dialog (`Esc`, focus trap) instead of native `window.confirm()`.
 9. **Legacy Unmigrated Rows:** Sessions where `tracked_vehicle_id` is `None` still fall back to `tenure_id == tenure.id` without leaking into sibling vehicles sharing `customer_id`.
 10. **Indexed SQL Scaling:** `_propagate_to_session_drafts` queries strictly indexed `tenure_id` / `tracked_vehicle_id` / `customer_id` columns without full-table scans.
 
 ## 3. Permanent Verification & Regression Plan
 - **Hermetic Pytest:** Add tests in `tests/unit/test_milestone1_save_sync_repairs.py` covering multi-vehicle same-customer sync isolation, sandbox (`is_test=True`) isolation, multi-year same-vehicle date isolation, `PATCH /tenures/{id}/ledger-fields` full payload coverage, and `POST /comparison/{id}/fixed-costs`.
 - **Checks:** Full `.\.venv\Scripts\pytest.exe tests/`, `cd frontend && npx tsc --noEmit`, `.\.venv\Scripts\python.exe commands/verify-brain.py`, plus live API & browser UI checks against running dev servers if available.
+

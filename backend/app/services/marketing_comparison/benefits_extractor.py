@@ -386,7 +386,8 @@ def format_canonical_perils(combined_text: str, tokens: list[str] | None = None)
         add("LOSS & THEFT")
 
     # 9. Flood / Special Perils / Endorsement 57
-    if any(k in text for k in ("flood", "banjir", "special perils", "peril khas", "natural disaster", "storm", "ribut", "typhoon", "landslide", "tanah runtuh", "convulsion of nature", "water damage", "act of god")) or re.search(r"\b(?:endorsement|end|end\.)\s*57(?:[a-z]|\b)", text) or bool({"57", "57a", "57b"}.intersection(end_tokens)):
+    from app.services.marketing_comparison.special_perils import has_special_perils_evidence
+    if has_special_perils_evidence(text=text, endorsements=end_tokens):
         add("FLOOD")
 
     # 10. Windscreen / Endorsement 97 / Endorsement 89
@@ -704,11 +705,29 @@ def prefetch_comparison_benefit_context(
         comp_id_list = list(comp_ids)
         for comp in db.scalars(select(InsuranceCompany).where(InsuranceCompany.id.in_(comp_id_list))).all():
             companies_by_id[comp.id] = comp
+        from sqlalchemy import or_
+        from app.models.tables import CompanyBenefitProfile
+
+        active_prof_ids = list(
+            db.scalars(
+                select(CompanyBenefitProfile.id).where(
+                    CompanyBenefitProfile.is_active == True,
+                )
+            ).all()
+        )
+        cond_filter = (
+            or_(
+                CompanyBenefitCondition.profile_id.in_(active_prof_ids),
+                CompanyBenefitCondition.profile_id.is_(None),
+            )
+            if active_prof_ids
+            else CompanyBenefitCondition.profile_id.is_(None)
+        )
         for cond in db.scalars(
             select(CompanyBenefitCondition).where(
                 CompanyBenefitCondition.company_id.in_(comp_id_list),
                 CompanyBenefitCondition.is_active == True,
-                CompanyBenefitCondition.profile_id.is_(None),
+                cond_filter,
             )
         ).all():
             conditions_by_company.setdefault(cond.company_id, []).append(cond)
@@ -869,26 +888,17 @@ def _resolve_comparison_benefits(
                 end_tokens.add(t_clean)
 
     # --- SPECIAL PERILS ---
-    # Genuine perils: flood, typhoon, storm, landslide, peril khas, special perils, or Endorsement 57
-    has_special_perils = any(
-        kw in combined_text
-        for kw in (
-            "special perils",
-            "special peril",
-            "peril khas",
-            "perils khas",
-            "banjir",
-            "flood",
-            "storm",
-            "ribut",
-            "typhoon",
-            "landslide",
-            "tanah runtuh",
-            "convulsion of nature",
-            "natural disaster",
-            "act of god",
-        )
-    ) or bool(re.search(r"\b(?:endorsement|end|end\.)\s*57(?:[a-z]|\b)", combined_text)) or bool({"57", "57a", "57b"}.intersection(end_tokens))
+    # Genuine perils: flood, typhoon, storm, landslide, peril khas, special perils, or Endorsement 57 (word-boundary, never matching 'contribution')
+    from app.services.marketing_comparison.special_perils import (
+        has_special_perils_evidence,
+        is_special_perils_value_included,
+    )
+    has_special_perils = has_special_perils_evidence(
+        text=combined_text,
+        endorsements=end_tokens,
+        benefit_lines=ext_lines,
+        fields=f,
+    )
     special_perils_val = "Included" if has_special_perils else None
 
     # --- WINDSCREEN ---
@@ -1044,9 +1054,12 @@ def _resolve_comparison_benefits(
             if tow_offering.display_value and any(c.isdigit() for c in tow_offering.display_value):
                 towing_limit_val = tow_offering.display_value
             elif isinstance(tow_offering.typed_value, dict) and tow_offering.typed_value.get("value"):
-                t_val = tow_offering.typed_value.get("value")
+                t_val = str(tow_offering.typed_value.get("value")).strip()
                 t_unit = tow_offering.typed_value.get("unit") or "KM"
-                towing_limit_val = f"{t_val} {t_unit}"
+                if re.match(r"^\d[\d,]*(?:\.\d+)?$", t_val):
+                    towing_limit_val = f"{t_val} {t_unit}"
+                else:
+                    towing_limit_val = t_val
 
     raw_towing = _safe_str(f.get("towing_limit") or f.get("towing"))
 
@@ -1136,7 +1149,7 @@ def _resolve_comparison_benefits(
             "is_included": False,
         })
 
-    if (special_perils_val or "FLOOD" in canonical_perils_list) and not _is_peril_already_represented(("special peril", "flood", "banjir", "peril khas", "storm", "natural disaster")):
+    if (is_special_perils_value_included(special_perils_val) or "FLOOD" in canonical_perils_list) and not _is_peril_already_represented(("special peril", "flood", "banjir", "peril khas", "storm", "natural disaster")):
         seen_peril_names.add("special perils (flood & storm)")
         detailed_perils.append({
             "name": "Special Perils (Flood & Storm)",
@@ -1256,12 +1269,25 @@ def _resolve_comparison_benefits(
     base_benefits = []
     if windscreen_amount:
         base_benefits.append(EvaluatedBenefit(concept_id="windscreen", display_title="Windscreen Protection", display_description=f"RM {windscreen_amount:,.2f}"))
-    if special_perils_val:
+    if is_special_perils_value_included(special_perils_val):
         base_benefits.append(EvaluatedBenefit(concept_id="special_perils", display_title="Special Perils (Flood & Storm)", display_description=special_perils_val))
     if llp_val:
         base_benefits.append(EvaluatedBenefit(concept_id="llp", display_title="Legal Liability to Passengers (LLP)", display_description=llp_val))
     if clean_towing:
         base_benefits.append(EvaluatedBenefit(concept_id="towing", display_title="Roadside Towing", display_description=clean_towing))
+    for sel in selections:
+        if sel.state in ("current", "included", "selected") and sel.concept_id:
+            sel_cid = str(sel.concept_id)
+            if not any(b.concept_id == sel_cid for b in base_benefits):
+                tv_o = sel.typed_value_override if isinstance(sel.typed_value_override, dict) else {}
+                sel_desc = str(tv_o.get("display_text") or tv_o.get("value") or sel.label_override or "")
+                base_benefits.append(
+                    EvaluatedBenefit(
+                        concept_id=sel_cid,
+                        display_title=str(sel.label_override or sel.selection_key or sel_cid)[:50],
+                        display_description=sel_desc[:120],
+                    )
+                )
         
     target_comp_id = company_id or getattr(session, "company_id", None)
     

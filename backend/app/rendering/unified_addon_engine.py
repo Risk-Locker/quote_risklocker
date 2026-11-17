@@ -673,7 +673,16 @@ def detect_towing_upgrade(
             continue
         title = str(raw.get("title") or raw.get("label") or "").lower()
         concept = str(raw.get("concept_key") or "").lower()
-        combined = f"{title} {concept}"
+        val_str = str(raw.get("value") or "").lower()
+        desc_str = str(raw.get("description") or "").lower()
+        off_key = str(raw.get("offering_key") or raw.get("card_key") or "").lower()
+        tv = raw.get("typed_value")
+        tv_str = ""
+        if isinstance(tv, dict):
+            tv_str = f"{tv.get('display_text') or ''} {tv.get('value') or ''} {tv.get('plan_key') or ''} {tv.get('enum_key') or ''}".lower()
+        elif tv is not None:
+            tv_str = str(tv).lower()
+        combined = f"{title} {concept} {val_str} {desc_str} {off_key} {tv_str}"
 
         # 1. Etiqa + OTO 360
         if "oto 360" in combined or "oto_360" in combined or "oto360" in combined:

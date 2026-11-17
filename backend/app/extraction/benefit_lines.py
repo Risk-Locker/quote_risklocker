@@ -619,6 +619,8 @@ def _looks_like_benefit(raw: str, concepts: list[dict], in_section: bool) -> boo
     lower = raw.lower()
     if len(normalized) > 85 or any(ind in lower for ind in NARRATIVE_INDICATORS):
         return False
+    if re.search(r"\b(?:not\s+covered|not\s+included|tidak\s+termasuk|tiada\s+perlindungan|excluded)\b", lower):
+        return False
 
     # Reject date lines (e.g. 29-12-2021, 18/02/2023)
     if re.match(r"^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}", normalized):

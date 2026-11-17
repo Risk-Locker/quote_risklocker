@@ -211,6 +211,7 @@ interface ComparisonEntry {
   canonical_perils_formatted?: string;
   is_recommended: boolean;
   is_manual: boolean;
+  manual_overrides?: string[];
   is_hidden?: boolean;
   manual_rank?: number | null;
   sort_order: number;
@@ -758,9 +759,19 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       try {
         if (!silent) setLoading(true);
         setError(null);
-        const json = await api<any>(`/comparison/${tenureId}`, {
+        let json = await api<any>(`/comparison/${tenureId}`, {
           signal: AbortSignal.timeout(25000),
         });
+        if (json?.needs_materialize || (Array.isArray(json?.entries) && json.entries.some((e: any) => !e?.id))) {
+          try {
+            json = await api<any>(`/comparison/${tenureId}/materialize`, {
+              method: "POST",
+              signal: AbortSignal.timeout(25000),
+            });
+          } catch {
+            // Fall back to read-only projection if materialize call fails
+          }
+        }
         setData(json);
         populateEditInputs(json.tenure);
       } catch (err: any) {
@@ -1363,6 +1374,49 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const winnerEntries = entries.filter((e) => e.is_recommended);
   const hasWinners = winnerEntries.length > 0;
 
+  const handleInlinePatchEntry = async (entry: ComparisonEntry, patch: Record<string, any>) => {
+    try {
+      const res = await api<any>(`/comparison/${tenureId}/entries/${entry.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          ...patch,
+          expected_version: entry.version ?? 1,
+        }),
+      });
+      setData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          entries: prev.entries.map((e) =>
+            e.id === entry.id
+              ? {
+                  ...e,
+                  towing_limit: res.towing_limit ?? e.towing_limit,
+                  towing_km: res.towing_km ?? e.towing_km,
+                  special_perils: res.special_perils !== undefined ? res.special_perils : e.special_perils,
+                  llp_llop: res.llp_llop !== undefined ? res.llp_llop : e.llp_llop,
+                  excess: res.excess !== undefined ? res.excess : e.excess,
+                  windscreen_sum_insured:
+                    res.windscreen_sum_insured !== undefined ? res.windscreen_sum_insured : e.windscreen_sum_insured,
+                  notes: res.notes !== undefined ? res.notes : e.notes,
+                  is_manual: res.is_manual ?? e.is_manual,
+                  manual_overrides: res.manual_overrides ?? e.manual_overrides,
+                  version: res.version ?? (e.version || 1) + 1,
+                  rank: res.rank ?? e.rank,
+                }
+              : e
+          ),
+        };
+      });
+    } catch (err: any) {
+      if (String(err?.message || "").includes("409") || String(err?.message || "").toLowerCase().includes("conflict")) {
+        triggerStatus("error", "Version Conflict", "This card was updated in another tab. Refreshing latest data...");
+        await fetchComparison(true);
+      }
+      throw err;
+    }
+  };
+
   const renderUnderwriterCard = (
     entry: ComparisonEntry,
     group: {
@@ -1429,6 +1483,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           setEditingEntry(quoteEntry);
           setIsManualModalOpen(true);
         }}
+        onPatchEntryField={handleInlinePatchEntry}
         onPromoteToCovernote={handlePromoteToCovernote}
         onDeleteEntry={handleDeleteEntry}
         roundingMode={roundingMode}

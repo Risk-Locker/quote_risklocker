@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { FloppyDisk, ArrowCounterClockwise, WarningCircle } from "@phosphor-icons/react";
+import { FloppyDisk, ArrowCounterClockwise, WarningCircle, X } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useWorkspaceActions } from "@/components/session-workspace/provider";
 import type { MutationState } from "../types";
 
 const PRICING_PATHS = new Set([
@@ -37,14 +38,18 @@ export interface UnsavedChangesBarProps {
   mutation: MutationState;
   onSave: () => void | Promise<unknown>;
   onDiscard: () => void | Promise<unknown>;
+  onRevertPath?: (path: string) => void;
 }
 
-export function UnsavedChangesBar({ mutation, onSave, onDiscard }: UnsavedChangesBarProps) {
+export function UnsavedChangesBar({ mutation, onSave, onDiscard, onRevertPath }: UnsavedChangesBarProps) {
+  const workspaceActions = useWorkspaceActions();
+  const revertSinglePath = onRevertPath || workspaceActions?.revertOperation;
   const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
   const [discarding, setDiscarding] = useState(false);
 
   const summary = useMemo(() => {
     const labels: string[] = [];
+    const items: Array<{ path: string; label: string }> = [];
     const seen = new Set<string>();
     let affectsTotals = false;
     let userEditCount = 0;
@@ -56,15 +61,24 @@ export function UnsavedChangesBar({ mutation, onSave, onDiscard }: UnsavedChange
       if (path === "fields.total_amount" && mutation.dirtyPaths.length > 1) {
         continue;
       }
+      if (
+        (path === "options.include_road_tax" && mutation.dirtyPaths.includes("fields.include_road_tax")) ||
+        (path === "options.include_runner_fee" && mutation.dirtyPaths.includes("fields.include_runner_fee")) ||
+        (["fields.coverage_amount", "fields.market_value", "fields.agreed_value"].includes(path) &&
+          mutation.dirtyPaths.includes("fields.sum_insured"))
+      ) {
+        continue;
+      }
       userEditCount += 1;
       const label = humanizeDirtyPath(path);
+      items.push({ path, label });
       if (!seen.has(label)) {
         seen.add(label);
         labels.push(label);
       }
     }
 
-    return { labels, affectsTotals, userEditCount: userEditCount || mutation.dirtyPaths.length };
+    return { labels, items, affectsTotals, userEditCount: userEditCount || mutation.dirtyPaths.length };
   }, [mutation.dirtyPaths]);
 
   if (!mutation.dirty && !mutation.saveError) return null;
@@ -119,6 +133,23 @@ export function UnsavedChangesBar({ mutation, onSave, onDiscard }: UnsavedChange
                   ? mutation.saveError
                   : `Modified: ${shownLabels}${extraCount > 0 ? ` +${extraCount} more` : ""}. Changes will sync to Ledger & Comparison when saved.`}
               </p>
+              {!hasError && summary.items.length > 0 ? (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  {summary.items.slice(0, 6).map((item) => (
+                    <button
+                      key={item.path}
+                      type="button"
+                      disabled={mutation.saving || discarding}
+                      onClick={() => revertSinglePath(item.path)}
+                      title={`Undo change to ${item.label}`}
+                      className="inline-flex items-center gap-1 rounded-[var(--rl-radius-sm)] border border-amber-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-[#1b1717] hover:bg-amber-100/70 transition-colors cursor-pointer"
+                    >
+                      <span>{item.label}</span>
+                      <X size={10} weight="bold" className="text-[#6e6e73]" />
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
           </div>
 

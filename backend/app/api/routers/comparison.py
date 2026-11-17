@@ -181,6 +181,25 @@ def get_comparison(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to load comparison")
 
 
+@router.post("/{tenure_id}/materialize")
+def materialize_comparison(
+    tenure_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Idempotently materialize comparison entries for a tenure at write time."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
+    from app.services.marketing_comparison.materialize import materialize_comparison_entries
+
+    try:
+        return materialize_comparison_entries(db, tenure_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.exception("Failed to materialize comparison for tenure %s: %s", tenure_id, e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to materialize comparison")
+
+
 @router.post("/{tenure_id}/refresh-ledger")
 def refresh_ledger(
     tenure_id: str,
@@ -606,6 +625,14 @@ class UpdateComparisonEntryPatch(BaseModel):
     is_hidden: bool | None = None
     manual_rank: int | None = None
     basic_figure_amount: float | None = None
+    towing_limit: str | None = None
+    special_perils: str | None = None
+    llp_llop: str | None = None
+    excess: float | None = None
+    windscreen_sum_insured: float | None = None
+    notes: str | None = None
+    expected_version: int | None = None
+    clear_override_field: str | None = None
 
 
 @router.patch("/{tenure_id}/entries/{entry_id}")
@@ -616,17 +643,98 @@ def patch_comparison_entry(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Toggle card visibility (is_hidden), manual rank override, or inline basic figure amount."""
+    """Inline-edit comparison card fields, visibility, manual rank, or revert a single manual override."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.services.marketing_comparison.materialize import (
+        get_entry_overrides,
+        record_manual_overrides,
+    )
+    from app.services.marketing_comparison_service import (
+        _extract_excess,
+        _resolve_comparison_benefits,
+    )
+
     entry = db.get(TenureComparisonEntry, entry_id)
     if not entry or entry.tenure_id != tenure_id:
         raise HTTPException(status_code=404, detail="Comparison entry not found")
+
+    if payload.expected_version is not None:
+        curr_ver = entry.version or 1
+        if curr_ver != payload.expected_version:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Concurrent modification conflict: entry has version {curr_ver}, expected {payload.expected_version}.",
+            )
+
+    # Validate string & numeric bounds
+    if payload.towing_limit is not None and len(payload.towing_limit.strip()) > 100:
+        raise HTTPException(status_code=422, detail="Towing limit must be 100 characters or fewer.")
+    if payload.special_perils is not None and len(payload.special_perils.strip()) > 50:
+        raise HTTPException(status_code=422, detail="Special Perils value must be 50 characters or fewer.")
+    if payload.llp_llop is not None and len(payload.llp_llop.strip()) > 50:
+        raise HTTPException(status_code=422, detail="LLP / LLOP value must be 50 characters or fewer.")
+    if payload.notes is not None and len(payload.notes.strip()) > 160:
+        raise HTTPException(status_code=422, detail="Notes must be 160 characters or fewer.")
+    if payload.excess is not None and payload.excess < 0:
+        raise HTTPException(status_code=422, detail="Excess cannot be negative.")
+    if payload.windscreen_sum_insured is not None and payload.windscreen_sum_insured < 0:
+        raise HTTPException(status_code=422, detail="Windscreen sum insured cannot be negative.")
+
+    edited_fields: list[str] = []
+    clear_field: str | None = payload.clear_override_field.strip() if payload.clear_override_field else None
+
     if payload.is_hidden is not None:
         entry.is_hidden = payload.is_hidden
     if payload.manual_rank is not None:
         entry.manual_rank = payload.manual_rank if payload.manual_rank > 0 else None
+
+    if payload.towing_limit is not None:
+        clean_tow = payload.towing_limit.strip()
+        if clean_tow:
+            entry.towing_limit = clean_tow
+            entry.towing_km = clean_tow
+            edited_fields.append("towing_limit")
+        else:
+            clear_field = "towing_limit"
+
+    if payload.special_perils is not None:
+        clean_sp = payload.special_perils.strip()
+        if clean_sp:
+            entry.special_perils = clean_sp
+            edited_fields.append("special_perils")
+        else:
+            entry.special_perils = None
+            clear_field = "special_perils"
+
+    if payload.llp_llop is not None:
+        clean_llp = payload.llp_llop.strip()
+        if clean_llp:
+            entry.llp_llop = clean_llp
+            edited_fields.append("llp_llop")
+        else:
+            entry.llp_llop = None
+            clear_field = "llp_llop"
+
+    if payload.excess is not None:
+        entry.excess = float(payload.excess)
+        edited_fields.append("excess")
+
+    if payload.windscreen_sum_insured is not None:
+        entry.windscreen_sum_insured = float(payload.windscreen_sum_insured) if payload.windscreen_sum_insured > 0 else None
+        edited_fields.append("windscreen_sum_insured")
+
+    if payload.notes is not None:
+        clean_notes = payload.notes.strip()
+        entry.notes = clean_notes or None
+        if clean_notes:
+            edited_fields.append("notes")
+        else:
+            clear_field = "notes"
+
     if payload.basic_figure_amount is not None:
+        edited_fields.append("basic_figure_amount")
         if entry.session_id:
-            from sqlalchemy.orm.attributes import flag_modified
             s = db.get(SessionModel, entry.session_id)
             if s and s.draft:
                 f = dict(s.draft.fields or {})
@@ -636,11 +744,86 @@ def patch_comparison_entry(
                 f[target_key] = {"value": payload.basic_figure_amount}
                 s.draft.fields = f
                 flag_modified(s.draft, "fields")
+
+    tenure = db.get(InsuranceTenure, tenure_id)
+
+    # If a field override is cleared, restore its extracted value from the linked session if available
+    if clear_field and entry.session_id:
+        s_rev = db.get(SessionModel, entry.session_id)
+        if s_rev:
+            f_rev = dict(s_rev.draft.fields or {}) if s_rev.draft and isinstance(s_rev.draft.fields, dict) else {}
+            # Clear manual_override status in draft.fields for the reverted field
+            draft_keys_map = {
+                "towing_limit": ("towing", "towing_limit"),
+                "special_perils": ("special_perils",),
+                "llp_llop": ("llp_llop",),
+                "excess": ("excess", "excess_amount"),
+                "windscreen_sum_insured": ("windscreen_sum_insured", "windscreen"),
+            }
+            for dk in draft_keys_map.get(clear_field, ()):
+                if isinstance(f_rev.get(dk), dict) and f_rev[dk].get("status") == "manual_override":
+                    f_rev.pop(dk, None)
+            if s_rev.draft:
+                s_rev.draft.fields = f_rev
+                flag_modified(s_rev.draft, "fields")
+            b_rev = _resolve_comparison_benefits(
+                db,
+                s_rev,
+                getattr(s_rev, "company_id", None) or entry.company_id,
+                f_rev,
+                float(tenure.windscreen_target) if (tenure and tenure.windscreen_target) else None,
+            )
+            if clear_field in ("towing_limit", "towing_km"):
+                entry.towing_limit = b_rev.get("towing_km") or "Unlimited"
+                entry.towing_km = entry.towing_limit
+            elif clear_field == "special_perils":
+                entry.special_perils = b_rev.get("special_perils")
+            elif clear_field == "llp_llop":
+                entry.llp_llop = b_rev.get("llp_llop")
+            elif clear_field == "windscreen_sum_insured":
+                entry.windscreen_sum_insured = b_rev.get("windscreen_sum_insured")
+            elif clear_field == "excess":
+                entry.excess = _extract_excess(f_rev, s_obj=s_rev)
+            elif clear_field == "notes":
+                entry.notes = None
+    elif clear_field:
+        if clear_field == "special_perils":
+            entry.special_perils = None
+        elif clear_field == "llp_llop":
+            entry.llp_llop = None
+        elif clear_field == "notes":
+            entry.notes = None
+
+    if edited_fields or clear_field:
+        record_manual_overrides(entry, edited_fields=edited_fields, clear_field=clear_field)
+        entry.version = (entry.version or 1) + 1
+
+    # Sync edited fields to linked QuotationDraft
+    if edited_fields and entry.session_id:
+        s_sync = db.get(SessionModel, entry.session_id)
+        if s_sync and s_sync.draft:
+            d_fields = dict(s_sync.draft.fields or {})
+            if "towing_limit" in edited_fields:
+                d_fields["towing"] = {"value": entry.towing_limit, "status": "manual_override"}
+                d_fields["towing_limit"] = {"value": entry.towing_limit, "status": "manual_override"}
+            if "special_perils" in edited_fields:
+                d_fields["special_perils"] = {"value": entry.special_perils or "Not Included", "status": "manual_override"}
+            if "llp_llop" in edited_fields:
+                d_fields["llp_llop"] = {"value": entry.llp_llop or "Not Included", "status": "manual_override"}
+            if "excess" in edited_fields:
+                d_fields["excess"] = {"value": f"{float(entry.excess):.2f}", "status": "manual_override"}
+                d_fields["excess_amount"] = {"value": f"{float(entry.excess):.2f}", "status": "manual_override"}
+            if "windscreen_sum_insured" in edited_fields:
+                ws_s = f"{float(entry.windscreen_sum_insured):.2f}" if entry.windscreen_sum_insured else ""
+                d_fields["windscreen_sum_insured"] = {"value": ws_s, "status": "manual_override"}
+                d_fields["windscreen"] = {"value": ws_s, "status": "manual_override"}
+            s_sync.draft.fields = d_fields
+            flag_modified(s_sync.draft, "fields")
+
     db.commit()
 
     # Re-rank after modification
     entries = list(db.scalars(select(TenureComparisonEntry).where(TenureComparisonEntry.tenure_id == tenure_id)).all())
-    tenure = db.get(InsuranceTenure, tenure_id)
     if tenure:
         if tenure.stage in ("Prospecting", "draft", None):
             tenure.stage = "Quotations"
@@ -658,6 +841,16 @@ def patch_comparison_entry(
         "is_hidden": entry.is_hidden,
         "manual_rank": entry.manual_rank,
         "rank": entry.rank,
+        "version": entry.version or 1,
+        "towing_limit": entry.towing_limit,
+        "towing_km": entry.towing_limit if "towing_limit" in get_entry_overrides(entry) else (entry.towing_km or entry.towing_limit),
+        "special_perils": entry.special_perils,
+        "llp_llop": entry.llp_llop,
+        "excess": float(entry.excess or 0.0),
+        "windscreen_sum_insured": float(entry.windscreen_sum_insured) if entry.windscreen_sum_insured else None,
+        "notes": entry.notes,
+        "is_manual": entry.is_manual,
+        "manual_overrides": get_entry_overrides(entry),
     }
 
 
@@ -696,6 +889,7 @@ def resolve_duplicate_session(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Resolve duplicate quote ingestion banner: replace existing, keep as new version, or remove."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     session = db.get(SessionModel, session_id)
     if not session or session.tenure_id != tenure_id:
         raise HTTPException(status_code=404, detail="Duplicate session not found")
@@ -748,6 +942,7 @@ def convert_session_document_type(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Toggle a session between Cover Note (Issued Policy) and Quotation."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     tenure = db.get(InsuranceTenure, tenure_id)
     if not tenure:
         raise HTTPException(status_code=404, detail="Tenure not found")
@@ -830,6 +1025,7 @@ def unlink_tenure_covernote(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Unlink the active Cover Note from the tenure without deleting the session/file."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     tenure = db.get(InsuranceTenure, tenure_id)
     if not tenure:
         raise HTTPException(status_code=404, detail="Tenure not found")
@@ -876,6 +1072,7 @@ def link_tenure_covernote(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Link a previously unlinked or available Cover Note session to the tenure."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     tenure = db.get(InsuranceTenure, tenure_id)
     if not tenure:
         raise HTTPException(status_code=404, detail="Tenure not found")

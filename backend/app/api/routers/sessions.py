@@ -446,6 +446,58 @@ async def upload_one(
 
 
 
+@router.get("/jobs/status")
+@router.get("/uploads/jobs/status")
+def jobs_batch_status(
+    ids: str = Query(..., description="Comma-separated job IDs (max 200)"),
+    db: Session = Depends(get_db),
+    _user: User = Depends(current_user),
+) -> dict:
+    """Durable batch job status endpoint scoped to the current user (max 200 IDs)."""
+    raw_ids = [item.strip() for item in (ids or "").split(",") if item.strip()]
+    if len(raw_ids) > 200:
+        raise AppError("Batch job status accepts at most 200 job IDs per request.", 422)
+    if not raw_ids:
+        return {"jobs": {}, "items": []}
+
+    rows = list(
+        db.scalars(
+            select(Job).where(
+                Job.id.in_(raw_ids),
+                Job.owner_id == _user.id,
+            )
+        ).all()
+    )
+
+    queue = None
+    try:
+        from app.workers.fair_queue_worker import get_fair_share_queue
+        queue = get_fair_share_queue()
+    except Exception:
+        queue = None
+
+    jobs_map: dict[str, dict] = {}
+    items_list: list[dict] = []
+    for job in rows:
+        serialized = serialize_job(job)
+        serialized["status"] = serialized.get("state")
+        if queue is not None:
+            try:
+                q_pos = queue.get_queue_position(_user.id, job.id)
+                if q_pos.get("position", -1) != -1:
+                    serialized["queue_position"] = q_pos["position"]
+                    serialized["active_users_count"] = q_pos["active_users_count"]
+                    serialized["other_users_count"] = q_pos["other_users_count"]
+                    serialized["total_pending_jobs"] = q_pos["total_pending_jobs"]
+                    serialized["items_ahead_for_user"] = q_pos["items_ahead_for_user"]
+            except Exception:
+                pass
+        jobs_map[job.id] = serialized
+        items_list.append(serialized)
+
+    return {"jobs": jobs_map, "items": items_list}
+
+
 @router.get("/jobs/{job_id}")
 @router.get("/uploads/jobs/{job_id}")
 def job_detail(job_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> dict:

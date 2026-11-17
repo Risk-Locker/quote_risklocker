@@ -1,4 +1,4 @@
-# Milestone 5: Marketing Comparison State Hardening Implementation Plan
+﻿# Milestone 5: Marketing Comparison State Hardening Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `test-driven-development` and `systematic-debugging` to execute this plan cleanly. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -52,3 +52,4 @@ Expected: PASS with 0 errors
 git add frontend/src/components/comparison/
 git commit -m "fix(comparison): harden toast timeouts and eliminate stuck analyzing/ranking state"
 ```
+

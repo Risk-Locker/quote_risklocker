@@ -92,6 +92,7 @@ export interface ComparisonEntry {
   canonical_perils_formatted?: string;
   is_recommended: boolean;
   is_manual: boolean;
+  manual_overrides?: string[];
   is_hidden?: boolean;
   manual_rank?: number | null;
   sort_order: number;
@@ -130,6 +131,7 @@ export interface ComparisonEntry {
 export interface ComparisonMatrixData {
   tenure: TenureSpec;
   entries: ComparisonEntry[];
+  needs_materialize?: boolean;
   previous_policy: any;
   recommended_sum_insured: Record<string, number>;
   ncd: {

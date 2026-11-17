@@ -151,6 +151,7 @@ def _apply_scalar_decision(db, draft: QuotationDraft, user, operation: dict) -> 
         field["value"] = _normalize_edited_value(field_name, operation.get("value"))
         field["status"] = "ready"
         field["message"] = ""
+        field["source"] = "manual"
     elif decision == "clear":
         field["value"] = None
         field["status"] = "ready"
@@ -1107,9 +1108,20 @@ def apply_workspace_patch(
                 if isinstance(options, dict):
                     draft.display_options = {**(draft.display_options or {}), **options}
                     changed_paths.append("display_options")
-                    if "round_total" in options:
+                    for fee_flag in ("include_road_tax", "include_runner_fee"):
+                        if fee_flag in options:
+                            f_dict = dict(draft.fields or {})
+                            f_dict[fee_flag] = {
+                                "value": "true" if bool(options[fee_flag]) else "false",
+                                "status": "ready",
+                                "message": "",
+                                "source": "manual",
+                            }
+                            draft.fields = f_dict
+                    if any(k in options for k in ("round_total", "include_road_tax", "include_runner_fee")):
                         _recompute_total(draft.fields or {}, draft.scalar_decisions or {}, user, draft=draft, db=db)
-                        changed_paths.append("fields.total_amount")
+                        if "fields.total_amount" not in changed_paths:
+                            changed_paths.append("fields.total_amount")
             elif operation_name == "source_disposition":
                 changed_paths.append(_apply_source_disposition(db, draft, user, operation))
             elif operation_name == "select_catalog_offering":

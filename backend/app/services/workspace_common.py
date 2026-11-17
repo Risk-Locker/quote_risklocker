@@ -76,7 +76,16 @@ MONEY_FIELDS = frozenset({
     "service_tax", "stamp_duty", "gross_premium", "roadtax", "road_tax_amount", "service_fee", "runner_fee", "total_amount",
 })
 DATE_FIELDS = frozenset({"issue_date", "valid_until", "cover_start_date", "cover_end_date"})
-TOTAL_SOURCES = frozenset({"premium", "coverage_premium", "roadtax", "road_tax_amount", "service_fee", "runner_fee"})
+TOTAL_SOURCES = frozenset({
+    "premium",
+    "coverage_premium",
+    "roadtax",
+    "road_tax_amount",
+    "service_fee",
+    "runner_fee",
+    "include_road_tax",
+    "include_runner_fee",
+})
 
 
 __all__ = ['_utcnow', '_require_business_user', '_session_and_draft', '_rows_for_draft', '_template_for_draft', '_field_summary', 'generation_blockers', 'SCALAR_DECISIONS', 'SELECTION_KEY_RE', '_UUID_RE', '_is_valid_uuid_for_db', 'BUSINESS_ROLES', 'PIN_SENSITIVE_FIELDS', 'MONEY_FIELDS', 'DATE_FIELDS', 'TOTAL_SOURCES']

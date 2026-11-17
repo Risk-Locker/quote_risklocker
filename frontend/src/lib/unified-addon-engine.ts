@@ -654,7 +654,15 @@ export function detectTowingUpgrade(
     }
     const title = String(raw?.title || raw?.label || "").toLowerCase();
     const concept = String(raw?.concept_key || "").toLowerCase();
-    const combined = `${title} ${concept}`;
+    const valStr = String(raw?.value || "").toLowerCase();
+    const descStr = String(raw?.description || "").toLowerCase();
+    const offKey = String(raw?.offering_key || raw?.card_key || "").toLowerCase();
+    const tv = raw?.typed_value;
+    const tvStr =
+      tv && typeof tv === "object"
+        ? `${tv.display_text || ""} ${tv.value || ""} ${tv.plan_key || ""} ${tv.enum_key || ""}`.toLowerCase()
+        : String(tv || "").toLowerCase();
+    const combined = `${title} ${concept} ${valStr} ${descStr} ${offKey} ${tvStr}`;
 
     if (combined.includes("oto 360") || combined.includes("oto_360") || combined.includes("oto360")) {
       return {

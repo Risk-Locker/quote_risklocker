@@ -59,11 +59,25 @@ def _single_exact(rows: list[Any], name: str) -> Any | None:
 
 
 def _resolve_vehicle_category(db, text_val: str, draft_fields: dict | None = None) -> str | None:
+    from app.extraction.entity_classifier import is_commercial_heavy_vehicle
+
     combined = []
     if text_val:
         combined.append(text_val)
     if draft_fields:
-        for k in ("vehicle_class", "vehicle_type", "vehicle_category", "car_model", "car_brand", "make_model", "vehicle_description", "product_name"):
+        for k in (
+            "vehicle_class",
+            "vehicle_type",
+            "vehicle_category",
+            "car_model",
+            "car_brand",
+            "make_model",
+            "vehicle_description",
+            "product_name",
+            "engine_cc",
+            "capacity",
+            "cubic_capacity",
+        ):
             raw = draft_fields.get(k)
             v = raw.get("value") if isinstance(raw, dict) else raw
             if v:
@@ -74,13 +88,21 @@ def _resolve_vehicle_category(db, text_val: str, draft_fields: dict | None = Non
     normalized = _norm(all_text)
     categories = _rows(db, VehicleCategory)
 
-    # 1. Commercial Vehicle / Lorry (highest priority to prevent brand names like Mitsubishi/Hino/Volvo/Toyota from triggering car)
+    vtype_val = _field_value(draft_fields or {}, "vehicle_type", "vehicle_class", "vehicle_category")
+    cmodel_val = f"{_field_value(draft_fields or {}, 'car_brand', 'make')} {_field_value(draft_fields or {}, 'car_model', 'model', 'make_model')}".strip()
+    cap_val = _field_value(draft_fields or {}, "engine_cc", "capacity", "cubic_capacity")
+
+    # 1. Commercial Vehicle / Lorry (highest priority to prevent brand names like Mitsubishi/Hino/Volvo/Toyota/Sany from triggering car)
     lorry_words = (
         "lorry", "truck", "commercial", "rigid", "trailer", "tipper", "van", "bus", "prime mover",
         "c permit", "a permit", "general haulage", "own goods", "isuzu npr", "isuzu nqr", "isuzu elf",
-        "hino", "fuso", "canter", "ud trucks", "scania", "sinotruk", "daihatsu delta", "toyota dyna"
+        "hino", "fuso", "canter", "ud trucks", "scania", "sinotruk", "sany", "daihatsu delta", "toyota dyna",
+        "goods vehicle",
     )
-    if any(w in normalized for w in lorry_words):
+    if (
+        is_commercial_heavy_vehicle(vehicle_type=vtype_val or text_val, car_model=cmodel_val, capacity_str=cap_val)
+        or any(w in normalized for w in lorry_words)
+    ):
         for cat in categories:
             if cat.category_key in {"commercial_vehicle", "lorry"}:
                 return cat.id

@@ -22,16 +22,6 @@
       "est_boot_tokens": 67,
       "updated_at": "2026-11-13T21:45:55+08:00"
     },
-    "better-layout": {
-      "location": "active",
-      "path": ".agents/skills/better-layout",
-      "category": "frontend",
-      "scope": "universal",
-      "source": "local-repo",
-      "description_chars": 156,
-      "est_boot_tokens": 48,
-      "updated_at": "2026-11-13T21:45:55+08:00"
-    },
     "clean-code-and-refactoring": {
       "location": "active",
       "path": ".agents/skills/clean-code-and-refactoring",
@@ -41,16 +31,6 @@
       "description_chars": 237,
       "est_boot_tokens": 72,
       "updated_at": "2026-11-11T16:02:03+08:00"
-    },
-    "design-systems-frontend-architecture": {
-      "location": "active",
-      "path": ".agents/skills/design-systems-frontend-architecture",
-      "category": "frontend",
-      "scope": "universal",
-      "source": "local-repo",
-      "description_chars": 161,
-      "est_boot_tokens": 55,
-      "updated_at": "2026-11-13T21:45:55+08:00"
     },
     "design2-pdf-parity": {
       "location": "active",
@@ -71,26 +51,6 @@
       "description_chars": 248,
       "est_boot_tokens": 75,
       "updated_at": "2026-11-13T21:43:47+08:00"
-    },
-    "emil-design-eng": {
-      "location": "active",
-      "path": ".agents/skills/emil-design-eng",
-      "category": "frontend",
-      "scope": "universal",
-      "source": "local-repo",
-      "description_chars": 155,
-      "est_boot_tokens": 48,
-      "updated_at": "2026-11-13T21:45:55+08:00"
-    },
-    "forms-inputs-checkout": {
-      "location": "active",
-      "path": ".agents/skills/forms-inputs-checkout",
-      "category": "frontend",
-      "scope": "universal",
-      "source": "local-repo",
-      "description_chars": 131,
-      "est_boot_tokens": 44,
-      "updated_at": "2026-11-13T21:45:55+08:00"
     },
     "malaysian-motor-insurance": {
       "location": "active",
@@ -131,16 +91,6 @@
       "description_chars": 208,
       "est_boot_tokens": 62,
       "updated_at": "2026-11-11T16:02:03+08:00"
-    },
-    "requesting-code-review": {
-      "location": "active",
-      "path": ".agents/skills/requesting-code-review",
-      "category": "general",
-      "scope": "universal",
-      "source": "obra/superpowers",
-      "description_chars": 107,
-      "est_boot_tokens": 38,
-      "updated_at": "2026-11-13T21:43:52+08:00"
     },
     "security-best-practices": {
       "location": "active",
@@ -191,26 +141,6 @@
       "description_chars": 79,
       "est_boot_tokens": 32,
       "updated_at": "2026-11-11T16:02:03+08:00"
-    },
-    "verification-before-completion": {
-      "location": "active",
-      "path": ".agents/skills/verification-before-completion",
-      "category": "general",
-      "scope": "universal",
-      "source": "obra/superpowers",
-      "description_chars": 225,
-      "est_boot_tokens": 70,
-      "updated_at": "2026-11-11T16:02:03+08:00"
-    },
-    "writing-plans": {
-      "location": "active",
-      "path": ".agents/skills/writing-plans",
-      "category": "general",
-      "scope": "universal",
-      "source": "obra/superpowers+risklocker",
-      "description_chars": 84,
-      "est_boot_tokens": 30,
-      "updated_at": "2026-11-13T21:43:47+08:00"
     },
     "domain-interrogation-and-reality-gate": {
       "location": "vault/architecture",
@@ -282,6 +212,16 @@
       "est_boot_tokens": 0,
       "updated_at": "2026-11-12T18:11:31+08:00"
     },
+    "better-layout": {
+      "location": "vault/frontend",
+      "path": ".agents/skills-vault/frontend/better-layout",
+      "category": "frontend",
+      "scope": "universal",
+      "source": "local-repo",
+      "description_chars": 156,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-17T16:16:22+08:00"
+    },
     "better-ui": {
       "location": "vault/frontend",
       "path": ".agents/skills-vault/frontend/better-ui",
@@ -302,6 +242,16 @@
       "est_boot_tokens": 0,
       "updated_at": "2026-11-13T21:44:51+08:00"
     },
+    "design-systems-frontend-architecture": {
+      "location": "vault/frontend",
+      "path": ".agents/skills-vault/frontend/design-systems-frontend-architecture",
+      "category": "frontend",
+      "scope": "universal",
+      "source": "local-repo",
+      "description_chars": 161,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-17T16:16:22+08:00"
+    },
     "design-taste-frontend": {
       "location": "vault/frontend",
       "path": ".agents/skills-vault/frontend/design-taste-frontend",
@@ -321,6 +271,26 @@
       "description_chars": 145,
       "est_boot_tokens": 0,
       "updated_at": "2026-11-13T21:45:43+08:00"
+    },
+    "emil-design-eng": {
+      "location": "vault/frontend",
+      "path": ".agents/skills-vault/frontend/emil-design-eng",
+      "category": "frontend",
+      "scope": "universal",
+      "source": "local-repo",
+      "description_chars": 155,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-17T16:16:22+08:00"
+    },
+    "forms-inputs-checkout": {
+      "location": "vault/frontend",
+      "path": ".agents/skills-vault/frontend/forms-inputs-checkout",
+      "category": "frontend",
+      "scope": "universal",
+      "source": "local-repo",
+      "description_chars": 131,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-17T16:16:22+08:00"
     },
     "frontend-design": {
       "location": "vault/frontend",
@@ -432,6 +402,16 @@
       "est_boot_tokens": 0,
       "updated_at": "2026-11-12T18:11:27+08:00"
     },
+    "requesting-code-review": {
+      "location": "vault/general",
+      "path": ".agents/skills-vault/general/requesting-code-review",
+      "category": "general",
+      "scope": "universal",
+      "source": "obra/superpowers",
+      "description_chars": 107,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-17T16:16:22+08:00"
+    },
     "subagent-driven-development": {
       "location": "vault/general",
       "path": ".agents/skills-vault/general/subagent-driven-development",
@@ -451,6 +431,26 @@
       "description_chars": 171,
       "est_boot_tokens": 0,
       "updated_at": "2026-11-12T18:11:27+08:00"
+    },
+    "verification-before-completion": {
+      "location": "vault/general",
+      "path": ".agents/skills-vault/general/verification-before-completion",
+      "category": "general",
+      "scope": "universal",
+      "source": "obra/superpowers",
+      "description_chars": 225,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-17T16:16:22+08:00"
+    },
+    "writing-plans": {
+      "location": "vault/general",
+      "path": ".agents/skills-vault/general/writing-plans",
+      "category": "general",
+      "scope": "universal",
+      "source": "obra/superpowers+risklocker",
+      "description_chars": 84,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-17T16:16:22+08:00"
     },
     "security-threat-model": {
       "location": "vault/security",

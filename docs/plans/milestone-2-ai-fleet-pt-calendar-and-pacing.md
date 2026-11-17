@@ -1,8 +1,8 @@
-# Milestone 2: AI Fleet Google PT Quota Window & Batch Assigner Implementation Plan
+﻿# Milestone 2: AI Fleet Google PT Quota Window & Batch Assigner Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `test-driven-development` and `systematic-debugging` to execute this plan cleanly. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Align Gemini API fleet management strictly with Google AI Studio's 24-hour calendar quota window (midnight Pacific Time = 4:00 PM MYT winter / 3:00 PM MYT summer), track project-wide RPD/RPM/TPM per cycle, and implement a smart batch task assigner that sizes batches to ~9–10 PDFs per model (capping <= 200k TPM) with a 70s stagger interval.
+**Goal:** Align Gemini API fleet management strictly with Google AI Studio's 24-hour calendar quota window (midnight Pacific Time = 4:00 PM MYT winter / 3:00 PM MYT summer), track project-wide RPD/RPM/TPM per cycle, and implement a smart batch task assigner that sizes batches to ~9â€“10 PDFs per model (capping <= 200k TPM) with a 70s stagger interval.
 
 **Architecture:**
 1. **PT Quota Cycle Window (`gemini_account_service.py`):**
@@ -13,7 +13,7 @@
    - Multi-account fleet aggregates RPD against the project pool ceiling (480 RPD safe ceiling / 500 hard cap).
 3. **Batch Task Assigner & Staggering (`upload-workspace.tsx` & `token_preflight_service.py`):**
    - Staging assigns models evenly across active slots.
-   - Batch size per model is capped at 9–10 PDFs per minute (~150k–180k tokens), avoiding the 200k TPM limit.
+   - Batch size per model is capped at 9â€“10 PDFs per minute (~150kâ€“180k tokens), avoiding the 200k TPM limit.
    - If a batch exceeds the 1-minute capacity, a 70-second countdown stagger is enforced between chunks.
 
 **Tech Stack:** Python 3.12, `zoneinfo`, FastAPI, SQLAlchemy, Next.js 15, TypeScript.
@@ -121,7 +121,7 @@ Expected: PASS
 - [x] **Step 6: Update batch sizing and 70-second stagger**
 
 In `upload-workspace.tsx`:
-1. Limit micro-chunk dispatch to 9–10 files per active model (e.g. 18–20 files across 2 models) per minute.
+1. Limit micro-chunk dispatch to 9â€“10 files per active model (e.g. 18â€“20 files across 2 models) per minute.
 2. If remaining staged files exist and estimated tokens for the batch exceed 180k, display a countdown banner ("Waiting 70s for Google AI Studio TPM quota window to refresh...") before dispatching the next chunk.
 
 - [x] **Step 7: Run frontend type check and verify**
@@ -135,3 +135,4 @@ Expected: PASS with 0 errors
 git add backend/app/services/gemini_account_service.py backend/app/extraction/pacer_sentinel.py frontend/src/components/upload/upload-workspace.tsx tests/unit/test_gemini_pt_cycle.py
 git commit -m "feat(fleet): implement Google PT midnight quota cycle and 70s batch stagger"
 ```
+

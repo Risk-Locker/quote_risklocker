@@ -407,6 +407,7 @@ class TenureComparisonEntry(Base, TimestampMixin):
     uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=utcnow)
     is_recommended: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
     is_manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    manual_overrides: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, server_default=text("'[]'"))
     is_hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"), index=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
