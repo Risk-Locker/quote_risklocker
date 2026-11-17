@@ -30,7 +30,7 @@ def db_session():
 
 def test_historical_analytics_grouping_and_metrics(db_session: Session):
     """Verify get_historical_analytics groups by (account_id, model) and aggregates peak RPM/TPM matching Google AI Studio."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(second=30, microsecond=0)
     local_date = get_current_pt_cycle_date()
 
     # Insert 3 calls for (acc_1, gemini-3.1-flash-lite) within 10 seconds of each other

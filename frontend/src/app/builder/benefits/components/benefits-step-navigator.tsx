@@ -343,7 +343,7 @@ export function BenefitsStepNavigator({
           <span>
             <strong>Global Insurer Conditional Rules:</strong> Cross-benefit conditional upgrades (e.g.{" "}
             <span className="font-semibold text-[var(--rl-text-strong)]">Motor PA Plus — Plan 4 → Unlimited Towing</span>)
-            applied across all product catalogs for this insurer during workspace review, Design 2 PDF rendering, and comparison.
+            applied across all products and scenarios for this insurer during workspace review, Design 2 PDF rendering, and comparison.
           </span>
         </div>
       ) : screenTab === "matrix" ? (

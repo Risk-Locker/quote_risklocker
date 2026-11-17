@@ -47,13 +47,23 @@ class BenefitEvaluationEngine:
                     )
                 )
             else:
-                active_prof_ids = list(
-                    db.scalars(
+                active_prof_ids = []
+                if hasattr(db, "execute"):
+                    res = db.execute(
                         select(CompanyBenefitProfile.id).where(
                             CompanyBenefitProfile.is_active == True,
                         )
-                    ).all()
-                )
+                    )
+                    if hasattr(res, "scalars"):
+                        active_prof_ids = list(res.scalars().all())
+                elif hasattr(db, "scalars"):
+                    active_prof_ids = list(
+                        db.scalars(
+                            select(CompanyBenefitProfile.id).where(
+                                CompanyBenefitProfile.is_active == True,
+                            )
+                        ).all()
+                    )
                 if active_prof_ids:
                     query = query.where(
                         or_(
@@ -64,7 +74,13 @@ class BenefitEvaluationEngine:
                 else:
                     query = query.where(CompanyBenefitCondition.profile_id.is_(None))
 
-            conditions = list(db.execute(query).scalars().all())
+            if hasattr(db, "execute"):
+                res = db.execute(query)
+                conditions = list(res.scalars().all() if hasattr(res, "scalars") else res.fetchall())
+            elif hasattr(db, "scalars"):
+                conditions = list(db.scalars(query).all())
+            else:
+                conditions = []
 
         if not conditions:
             for b in base_benefits:
